@@ -4,20 +4,15 @@
   <rect x="8" y="8" width="112" height="112" rx="26" fill="#262320"/>
   <rect x="8" y="8" width="112" height="112" rx="26" fill="none" stroke="#4a443c" stroke-width="2" opacity="0.6"/>
 
-  <!-- Claude asterisk -->
-  <g stroke="#D97757" stroke-width="9" stroke-linecap="round">
-    <line x1="64" y1="38" x2="64" y2="22"/>
-    <line x1="64" y1="38" x2="64" y2="22" transform="rotate(45 64 50)"/>
-    <line x1="64" y1="38" x2="64" y2="22" transform="rotate(90 64 50)"/>
-    <line x1="64" y1="38" x2="64" y2="22" transform="rotate(135 64 50)"/>
-    <line x1="64" y1="38" x2="64" y2="22" transform="rotate(180 64 50)"/>
-    <line x1="64" y1="38" x2="64" y2="22" transform="rotate(225 64 50)"/>
-    <line x1="64" y1="38" x2="64" y2="22" transform="rotate(270 64 50)"/>
-    <line x1="64" y1="38" x2="64" y2="22" transform="rotate(315 64 50)"/>
-  </g>
+  <!-- agent mark: chat bubble + AI spark (generic, no vendor logo) -->
+  <path d="M36 26 h56 a12 12 0 0 1 12 12 v26 a12 12 0 0 1 -12 12 H58 l-14 13 v-13 h-8
+           a12 12 0 0 1 -12 -12 V38 a12 12 0 0 1 12 -12 Z" fill="#D97757"/>
+  <!-- four-point spark inside the bubble -->
+  <path d="M64 36 C66 47 69 50 80 52 C69 54 66 57 64 68 C62 57 59 54 48 52 C59 50 62 47 64 36 Z"
+        fill="#FAF7F2"/>
 
   <!-- prompt line: chevron + cursor -->
-  <polyline points="38,88 50,96 38,104" fill="none" stroke="#EDE9E1" stroke-width="8"
+  <polyline points="40,92 52,100 40,108" fill="none" stroke="#EDE9E1" stroke-width="8"
             stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="62" y="90" width="24" height="12" rx="3" fill="#EDE9E1" opacity="0.85"/>
+  <rect x="64" y="94" width="24" height="12" rx="3" fill="#EDE9E1" opacity="0.85"/>
 </svg>

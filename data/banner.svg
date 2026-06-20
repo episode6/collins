@@ -8,21 +8,15 @@
   </defs>
   <rect width="1000" height="420" fill="url(#bg)"/>
 
-  <!-- coral asterisk mark -->
-  <g stroke="#D97757" stroke-width="10" stroke-linecap="round">
-    <line x1="100" y1="78" x2="100" y2="52" transform="rotate(0 100 95)"/>
-    <line x1="100" y1="78" x2="100" y2="52" transform="rotate(45 100 95)"/>
-    <line x1="100" y1="78" x2="100" y2="52" transform="rotate(90 100 95)"/>
-    <line x1="100" y1="78" x2="100" y2="52" transform="rotate(135 100 95)"/>
-    <line x1="100" y1="78" x2="100" y2="52" transform="rotate(180 100 95)"/>
-    <line x1="100" y1="78" x2="100" y2="52" transform="rotate(225 100 95)"/>
-    <line x1="100" y1="78" x2="100" y2="52" transform="rotate(270 100 95)"/>
-    <line x1="100" y1="78" x2="100" y2="52" transform="rotate(315 100 95)"/>
-  </g>
+  <!-- agent mark: chat bubble + AI spark (generic, no vendor logo) -->
+  <path d="M70 64 h60 a12 12 0 0 1 12 12 v26 a12 12 0 0 1 -12 12 H92 l-14 12 v-12 h-8
+           a12 12 0 0 1 -12 -12 V76 a12 12 0 0 1 12 -12 Z" fill="#D97757"/>
+  <path d="M100 74 C102 84 105 87 115 89 C105 91 102 94 100 104 C98 94 95 91 85 89 C95 87 98 84 100 74 Z"
+        fill="#FAF7F2"/>
 
   <!-- title + subtitle -->
-  <text x="60" y="205" font-family="Cantarell, sans-serif" font-size="40" font-weight="bold" fill="#EDE9E1">Claude Session Manager</text>
-  <text x="60" y="245" font-family="Cantarell, sans-serif" font-size="21" fill="#A89F93">A native Linux home for your Claude Code sessions</text>
+  <text x="60" y="205" font-family="Cantarell, sans-serif" font-size="40" font-weight="bold" fill="#EDE9E1">Agent Session Manager</text>
+  <text x="60" y="245" font-family="Cantarell, sans-serif" font-size="21" fill="#A89F93">A native Linux home for your AI coding-agent sessions</text>
 
   <!-- prompt chip -->
   <rect x="60" y="278" width="300" height="44" rx="10" fill="#15130F" stroke="#3b362f" stroke-width="1"/>
@@ -90,17 +84,9 @@
     <rect x="754" y="178" width="130" height="7" rx="3.5" fill="#4f483f"/>
     <rect x="754" y="192" width="108" height="7" rx="3.5" fill="#4f483f"/>
     <rect x="754" y="206" width="142" height="7" rx="3.5" fill="#4f483f"/>
-    <!-- coral mini asterisk as claude's spinner -->
-    <g stroke="#D97757" stroke-width="3" stroke-linecap="round">
-      <line x1="762" y1="238" x2="762" y2="230" transform="rotate(0 762 244)"/>
-      <line x1="762" y1="238" x2="762" y2="230" transform="rotate(90 762 244)"/>
-      <line x1="762" y1="238" x2="762" y2="230" transform="rotate(180 762 244)"/>
-      <line x1="762" y1="238" x2="762" y2="230" transform="rotate(270 762 244)"/>
-      <line x1="762" y1="238" x2="762" y2="230" transform="rotate(45 762 244)"/>
-      <line x1="762" y1="238" x2="762" y2="230" transform="rotate(135 762 244)"/>
-      <line x1="762" y1="238" x2="762" y2="230" transform="rotate(225 762 244)"/>
-      <line x1="762" y1="238" x2="762" y2="230" transform="rotate(315 762 244)"/>
-    </g>
+    <!-- coral mini spark (agent working) -->
+    <path d="M762 230 C763 240 765 242 772 243 C765 244 763 246 762 256 C761 246 759 244 752 243 C759 242 761 240 762 230 Z"
+          fill="#D97757"/>
     <rect x="780" y="240" width="86" height="8" rx="4" fill="#7a7268"/>
     <rect x="754" y="262" width="120" height="7" rx="3.5" fill="#4f483f"/>
     <rect x="754" y="276" width="98" height="7" rx="3.5" fill="#4f483f"/>
