@@ -16,6 +16,78 @@ msgstr "Egyéni név"
 msgid "Cancel"
 msgstr "Mégse"
 
+msgid "Session list"
+msgstr "Munkamenet-lista"
+
+msgid "Show folder path"
+msgstr "Mappa elérési útjának megjelenítése"
+
+msgid "Show each session's project folder path in the sidebar"
+msgstr "Az egyes munkamenetek projektmappájának elérési útja az oldalsávon"
+
+msgid "Open session file…"
+msgstr "Munkamenetfájl megnyitása…"
+
+msgid "Open session transcript"
+msgstr "Munkamenet-átirat megnyitása"
+
+msgid "Session transcripts (*.jsonl)"
+msgstr "Munkamenet-átiratok (*.jsonl)"
+
+msgid "Could not open transcript"
+msgstr "Az átirat nem nyitható meg"
+
+msgid "The file couldn't be read as a session transcript."
+msgstr "A fájl nem olvasható be munkamenet-átiratként."
+
+msgid "Delete permanently…"
+msgstr "Végleges törlés…"
+
+msgid "Could not delete transcript"
+msgstr "Az átirat nem törölhető"
+
+msgid "Delete session permanently?"
+msgstr "Véglegesen törlöd a munkamenetet?"
+
+msgid "“{name}” and its transcript file will be permanently deleted. This cannot be undone."
+msgstr "A(z) „{name}” és az átiratfájlja véglegesen törlődik. Ez nem vonható vissza."
+
+msgid "Delete permanently"
+msgstr "Végleges törlés"
+
+msgid "New {name} session (advanced)…"
+msgstr "Új {name} munkamenet (haladó)…"
+
+msgid "Continue last {name} session…"
+msgstr "Utolsó {name} munkamenet folytatása…"
+
+msgid "New {name} session"
+msgstr "Új {name} munkamenet"
+
+msgid "Optional flags for this session."
+msgstr "Választható kapcsolók ehhez a munkamenethez."
+
+msgid "Model"
+msgstr "Modell"
+
+msgid "Default"
+msgstr "Alapértelmezett"
+
+msgid "Permission mode"
+msgstr "Engedélyezési mód"
+
+msgid "Extra directory"
+msgstr "További könyvtár"
+
+msgid "Choose…"
+msgstr "Választás…"
+
+msgid "Choose a directory"
+msgstr "Válassz egy könyvtárat"
+
+msgid "Start"
+msgstr "Indítás"
+
 msgid "Save"
 msgstr "Mentés"
 
@@ -300,6 +372,117 @@ msgstr "Új munkamenet (Ctrl+Shift+T)"
 
 msgid "Agent"
 msgstr "Ügynök"
+
+msgid "Question"
+msgstr "Kérdés"
+
+msgid "{n} questions"
+msgstr "{n} kérdés"
+
+msgid "This prompt needs the terminal to answer."
+msgstr "Ezt a kérdést a terminálban kell megválaszolni."
+
+msgid "Answer in terminal"
+msgstr "Válasz a terminálban"
+
+msgid "New {name} chat…"
+msgstr "Új {name} csevegés…"
+
+msgid "Chat with {name} — every file edit and command asks your permission first."
+msgstr "Csevegés a {name}-tal — minden fájlmódosítás és parancs előbb az engedélyedet kéri."
+
+msgid "New {name} chat ({mode})"
+msgstr "Új {name} csevegés ({mode})"
+
+msgid "ask, read-only"
+msgstr "kérdés, csak olvasható"
+
+msgid "trusted, auto-run"
+msgstr "megbízható, automatikus"
+
+msgid "Read-only chat with {name} — analyses and answers, never edits."
+msgstr "Csak olvasható csevegés a {name}-tal — elemez és válaszol, soha nem szerkeszt."
+
+msgid "Chat with {name} — ⚠ runs edits and commands automatically, without asking."
+msgstr "Csevegés a {name}-tal — ⚠ a módosításokat és parancsokat automatikusan, kérdés nélkül futtatja."
+
+msgid "{name} wants to use {tool}"
+msgstr "A {name} a(z) {tool} eszközt szeretné használni"
+
+msgid "Allow once"
+msgstr "Egyszeri engedélyezés"
+
+msgid "Always allow {tool}"
+msgstr "{tool} mindig engedélyezve"
+
+msgid "Deny"
+msgstr "Elutasítás"
+
+msgid "Allowed {tool}."
+msgstr "{tool} engedélyezve."
+
+msgid "Always allowing {tool}."
+msgstr "{tool} mostantól mindig engedélyezve."
+
+msgid "Denied {tool}."
+msgstr "{tool} elutasítva."
+
+msgid "Auto-allowed {tool}"
+msgstr "{tool} automatikusan engedélyezve"
+
+msgid "Ask {name}…"
+msgstr "Kérdezd a {name}-t…"
+
+msgid "Stop"
+msgstr "Leállítás"
+
+msgid "{name} is thinking…"
+msgstr "A {name} gondolkodik…"
+
+msgid "Rate limited — try again later."
+msgstr "Korlátozva — próbáld újra később."
+
+msgid "Error: {msg}"
+msgstr "Hiba: {msg}"
+
+msgid "Session ended."
+msgstr "A munkamenet véget ért."
+
+msgid "Replay…"
+msgstr "Visszajátszás…"
+
+msgid "Replay — {name}"
+msgstr "Visszajátszás — {name}"
+
+msgid "Previous"
+msgstr "Előző"
+
+msgid "Play"
+msgstr "Lejátszás"
+
+msgid "Next"
+msgstr "Következő"
+
+msgid "Show all"
+msgstr "Összes megjelenítése"
+
+msgid "Nothing to replay yet."
+msgstr "Még nincs mit visszajátszani."
+
+msgid "Chat — {dir}"
+msgstr "Csevegés — {dir}"
+
+msgid "Chat — {name}"
+msgstr "Csevegés — {name}"
+
+msgid "Continue in chat"
+msgstr "Folytatás csevegésben"
+
+msgid "Continue in chat ({mode})"
+msgstr "Folytatás csevegésben ({mode})"
+
+msgid "Continuing the previous session — earlier messages aren't shown here."
+msgstr "A korábbi munkamenet folytatása — a régebbi üzenetek itt nem jelennek meg."
 
 msgid "Close all tabs"
 msgstr "Összes lap bezárása"

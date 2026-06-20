@@ -16,6 +16,78 @@ msgstr "Eigener Name"
 msgid "Cancel"
 msgstr "Abbrechen"
 
+msgid "Session list"
+msgstr "Sitzungsliste"
+
+msgid "Show folder path"
+msgstr "Ordnerpfad anzeigen"
+
+msgid "Show each session's project folder path in the sidebar"
+msgstr "Den Projektordnerpfad jeder Sitzung in der Seitenleiste anzeigen"
+
+msgid "Open session file…"
+msgstr "Sitzungsdatei öffnen…"
+
+msgid "Open session transcript"
+msgstr "Sitzungsprotokoll öffnen"
+
+msgid "Session transcripts (*.jsonl)"
+msgstr "Sitzungsprotokolle (*.jsonl)"
+
+msgid "Could not open transcript"
+msgstr "Protokoll konnte nicht geöffnet werden"
+
+msgid "The file couldn't be read as a session transcript."
+msgstr "Die Datei konnte nicht als Sitzungsprotokoll gelesen werden."
+
+msgid "Delete permanently…"
+msgstr "Endgültig löschen…"
+
+msgid "Could not delete transcript"
+msgstr "Protokoll konnte nicht gelöscht werden"
+
+msgid "Delete session permanently?"
+msgstr "Sitzung endgültig löschen?"
+
+msgid "“{name}” and its transcript file will be permanently deleted. This cannot be undone."
+msgstr "„{name}“ und die zugehörige Protokolldatei werden endgültig gelöscht. Dies kann nicht rückgängig gemacht werden."
+
+msgid "Delete permanently"
+msgstr "Endgültig löschen"
+
+msgid "New {name} session (advanced)…"
+msgstr "Neue {name}-Sitzung (erweitert)…"
+
+msgid "Continue last {name} session…"
+msgstr "Letzte {name}-Sitzung fortsetzen…"
+
+msgid "New {name} session"
+msgstr "Neue {name}-Sitzung"
+
+msgid "Optional flags for this session."
+msgstr "Optionale Flags für diese Sitzung."
+
+msgid "Model"
+msgstr "Modell"
+
+msgid "Default"
+msgstr "Standard"
+
+msgid "Permission mode"
+msgstr "Berechtigungsmodus"
+
+msgid "Extra directory"
+msgstr "Zusätzliches Verzeichnis"
+
+msgid "Choose…"
+msgstr "Auswählen…"
+
+msgid "Choose a directory"
+msgstr "Verzeichnis auswählen"
+
+msgid "Start"
+msgstr "Starten"
+
 msgid "Save"
 msgstr "Speichern"
 
@@ -300,6 +372,117 @@ msgstr "Neue Sitzung (Strg+Umschalt+T)"
 
 msgid "Agent"
 msgstr "Agent"
+
+msgid "Question"
+msgstr "Frage"
+
+msgid "{n} questions"
+msgstr "{n} Fragen"
+
+msgid "This prompt needs the terminal to answer."
+msgstr "Diese Eingabe muss im Terminal beantwortet werden."
+
+msgid "Answer in terminal"
+msgstr "Im Terminal antworten"
+
+msgid "New {name} chat…"
+msgstr "Neuer {name}-Chat…"
+
+msgid "Chat with {name} — every file edit and command asks your permission first."
+msgstr "Chat mit {name} — jede Dateiänderung und jeder Befehl fragt zuerst um Erlaubnis."
+
+msgid "New {name} chat ({mode})"
+msgstr "Neuer {name}-Chat ({mode})"
+
+msgid "ask, read-only"
+msgstr "fragen, schreibgeschützt"
+
+msgid "trusted, auto-run"
+msgstr "vertraut, automatisch"
+
+msgid "Read-only chat with {name} — analyses and answers, never edits."
+msgstr "Schreibgeschützter Chat mit {name} — analysiert und antwortet, bearbeitet nie."
+
+msgid "Chat with {name} — ⚠ runs edits and commands automatically, without asking."
+msgstr "Chat mit {name} — ⚠ führt Änderungen und Befehle automatisch ohne Nachfrage aus."
+
+msgid "{name} wants to use {tool}"
+msgstr "{name} möchte {tool} verwenden"
+
+msgid "Allow once"
+msgstr "Einmal erlauben"
+
+msgid "Always allow {tool}"
+msgstr "{tool} immer erlauben"
+
+msgid "Deny"
+msgstr "Ablehnen"
+
+msgid "Allowed {tool}."
+msgstr "{tool} erlaubt."
+
+msgid "Always allowing {tool}."
+msgstr "{tool} wird ab jetzt immer erlaubt."
+
+msgid "Denied {tool}."
+msgstr "{tool} abgelehnt."
+
+msgid "Auto-allowed {tool}"
+msgstr "{tool} automatisch erlaubt"
+
+msgid "Ask {name}…"
+msgstr "{name} fragen…"
+
+msgid "Stop"
+msgstr "Stopp"
+
+msgid "{name} is thinking…"
+msgstr "{name} denkt nach…"
+
+msgid "Rate limited — try again later."
+msgstr "Ratenlimit erreicht — später erneut versuchen."
+
+msgid "Error: {msg}"
+msgstr "Fehler: {msg}"
+
+msgid "Session ended."
+msgstr "Sitzung beendet."
+
+msgid "Replay…"
+msgstr "Wiedergabe…"
+
+msgid "Replay — {name}"
+msgstr "Wiedergabe — {name}"
+
+msgid "Previous"
+msgstr "Zurück"
+
+msgid "Play"
+msgstr "Abspielen"
+
+msgid "Next"
+msgstr "Weiter"
+
+msgid "Show all"
+msgstr "Alle anzeigen"
+
+msgid "Nothing to replay yet."
+msgstr "Noch nichts abzuspielen."
+
+msgid "Chat — {dir}"
+msgstr "Chat — {dir}"
+
+msgid "Chat — {name}"
+msgstr "Chat — {name}"
+
+msgid "Continue in chat"
+msgstr "Im Chat fortsetzen"
+
+msgid "Continue in chat ({mode})"
+msgstr "Im Chat fortsetzen ({mode})"
+
+msgid "Continuing the previous session — earlier messages aren't shown here."
+msgstr "Frühere Sitzung wird fortgesetzt — ältere Nachrichten werden hier nicht angezeigt."
 
 msgid "Close all tabs"
 msgstr "Alle Tabs schließen"

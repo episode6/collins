@@ -102,6 +102,78 @@ def test_commands_none_when_cli_missing(monkeypatch):
     assert ClaudeProvider().new_command() is None
 
 
+def test_chat_variants(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    claude = [v for v in ClaudeProvider().chat_variants()]
+    assert [(v.key, v.transport, v.writeable, v.gated) for v in claude] == [
+        ("default", "stdin_stream", True, True)
+    ]
+    cursor = CursorProvider().chat_variants()
+    assert [(v.key, v.transport, v.writeable, v.gated) for v in cursor] == [
+        ("ask", "spawn_resume", False, False),
+        ("trusted", "spawn_resume", True, False),
+    ]
+
+
+def test_chat_variants_empty_when_cli_missing(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cli: None)
+    assert ClaudeProvider().chat_variants() == []
+    assert CursorProvider().chat_variants() == []
+
+
+def test_cursor_chat_turn_command(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    cur = CursorProvider()
+    # first turn (no session id), read-only ask mode
+    assert cur.chat_turn_command("ask", "hello", "") == [
+        "/usr/bin/cursor-agent", "-p", "--output-format", "stream-json",
+        "--stream-partial-output", "--trust", "--mode", "ask", "hello",
+    ]
+    # follow-up turn resumes the session; trusted mode uses --force
+    assert cur.chat_turn_command("trusted", "go", "sid-9") == [
+        "/usr/bin/cursor-agent", "-p", "--output-format", "stream-json",
+        "--stream-partial-output", "--trust", "--resume", "sid-9", "--force", "go",
+    ]
+
+
+def test_cursor_chat_turn_command_none_when_missing(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cli: None)
+    assert CursorProvider().chat_turn_command("ask", "hi", "") is None
+
+
+def test_new_command_options(monkeypatch):
+    from claude_session_manager.providers import SessionOptions
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    claude = ClaudeProvider()
+    opts = SessionOptions(model="opus", permission_mode="plan", add_dirs=("/extra",))
+    assert claude.new_command(opts) == (
+        "/usr/bin/claude --model opus --permission-mode plan --add-dir /extra"
+    )
+    assert claude.new_command() == "/usr/bin/claude"  # no options → bare command
+    assert claude.continue_command() == "/usr/bin/claude --continue"
+    # Cursor maps permission mode to --mode and has no --add-dir.
+    cursor = CursorProvider()
+    copts = SessionOptions(model="gpt-5", permission_mode="ask", add_dirs=("/x",))
+    assert cursor.new_command(copts) == "/usr/bin/cursor-agent --model gpt-5 --mode ask"
+    assert cursor.continue_command() == "/usr/bin/cursor-agent --continue"
+
+
+def test_provider_option_lists():
+    assert ClaudeProvider().supports_add_dir is True
+    assert CursorProvider().supports_add_dir is False
+    assert ("opus", "Opus") in ClaudeProvider().session_models()
+    assert any(v == "plan" for v, _l in ClaudeProvider().permission_modes())
+    assert any(v == "ask" for v, _l in CursorProvider().permission_modes())
+
+
+def test_claude_chat_command_resume(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    cmd = ClaudeProvider().chat_command("sess-42")
+    assert cmd[-2:] == ["--resume", "sess-42"]
+    # no resume id → no --resume flag
+    assert "--resume" not in ClaudeProvider().chat_command()
+
+
 def test_get_provider_default():
     assert get_provider("cursor").id == "cursor"
     assert get_provider("unknown-agent").id == "claude"  # legacy/unknown -> Claude
@@ -110,3 +182,23 @@ def test_get_provider_default():
 def test_graceful_exit_text():
     assert ClaudeProvider().graceful_exit() == "/exit\r"
     assert CursorProvider().graceful_exit() is None
+
+
+def test_claude_answer_keystrokes_single_select():
+    q = [{"question": "Which DB?", "multiSelect": False,
+          "options": [{"label": "Postgres"}, {"label": "SQLite"}, {"label": "Mongo"}]}]
+    claude = ClaudeProvider()
+    assert claude.answer_keystrokes(q, 0) == "\r"               # first option: just submit
+    assert claude.answer_keystrokes(q, 2) == "\x1b[B\x1b[B\r"   # down twice, submit
+    assert claude.answer_keystrokes(q, 9) is None               # out of range
+
+
+def test_answer_keystrokes_fallback_cases():
+    claude = ClaudeProvider()
+    multi = [{"question": "Pick", "multiSelect": True, "options": [{"label": "a"}]}]
+    two = [{"question": "1", "options": [{"label": "a"}]}, {"question": "2", "options": [{"label": "b"}]}]
+    assert claude.answer_keystrokes(multi, 0) is None  # multi-select → terminal
+    assert claude.answer_keystrokes(two, 0) is None    # multiple questions → terminal
+    # Cursor can't auto-answer at all
+    assert CursorProvider().answer_keystrokes(
+        [{"question": "x", "options": [{"label": "a"}]}], 0) is None

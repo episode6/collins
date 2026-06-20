@@ -14,11 +14,13 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import __version__, dialogs
+from .chatsessionview import ChatSessionTab
 from .i18n import _
 from .models import SessionItem
 from .prefs import PreferencesDialog
 from .providers import available_providers, get_provider
-from .sessions import Session, export_markdown
+from .replayview import ReplayTab
+from .sessions import Session, export_markdown, session_from_file
 from .sidebar import SessionSidebar
 from .state import AppState
 from .store import SessionStore
@@ -96,6 +98,24 @@ class MainWindow(Adw.ApplicationWindow):
                 _("New {name} session…").format(name=provider.name),
                 f"win.new-session-provider::{provider.id}",
             )
+        for provider in available_providers():
+            new_menu.append(
+                _("New {name} session (advanced)…").format(name=provider.name),
+                f"win.new-session-advanced::{provider.id}",
+            )
+            new_menu.append(
+                _("Continue last {name} session…").format(name=provider.name),
+                f"win.continue-session::{provider.id}",
+            )
+        for provider in available_providers():
+            for variant in provider.chat_variants():  # native streaming chat
+                if variant.label:
+                    text = _("New {name} chat ({mode})").format(
+                        name=provider.name, mode=_(variant.label)
+                    )
+                else:
+                    text = _("New {name} chat…").format(name=provider.name)
+                new_menu.append(text, f"win.new-chat-provider::{provider.id}:{variant.key}")
         new_menu.append(_("New window"), "app.new-window")
         new_btn = Adw.SplitButton(icon_name="tab-new-symbolic")
         new_btn.set_tooltip_text(_("New session (Ctrl+Shift+T)"))
@@ -187,6 +207,8 @@ class MainWindow(Adw.ApplicationWindow):
             "quick-switch": lambda *_: self._quick_switch(),
             "rename-tab": lambda *_: self._rename_tab(),
             "set-tab-emoji": lambda *_: self._set_tab_emoji(),
+            "toggle-tab-emoji": lambda *_: self._toggle_tab_emoji(),
+            "open-session-file": lambda *_: self._open_session_file(),
             "copy-tab-session-id": lambda *_: self._copy_tab_session_id(),
             "close-menu-tab": lambda *_: self._close_menu_tab(),
             "toggle-sidebar": lambda *_: self.sidebar.set_visible(
@@ -202,8 +224,14 @@ class MainWindow(Adw.ApplicationWindow):
             "new-session-provider": lambda _a, p: self._choose_new_session_folder(
                 get_provider(p.get_string())
             ),
+            "new-chat-provider": lambda _a, p: self._new_chat_session_target(p.get_string()),
+            "new-session-advanced": lambda _a, p: self._new_session_advanced(get_provider(p.get_string())),
+            "continue-session": lambda _a, p: self._continue_session(get_provider(p.get_string())),
             "open-session": self._on_open_action,
             "fork-session": self._on_fork_action,
+            "replay-session": self._on_replay_action,
+            "resume-chat": self._on_resume_chat_action,
+            "delete-session": self._on_delete_session,
             "open-ghostty": self._on_open_ghostty,
             "rename-session": self._on_rename_action,
             "toggle-favorite": lambda _a, p: self.store.toggle_favorite(p.get_string()),
@@ -236,6 +264,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control>Page_Up", "win.prev-tab"),
             ("<Control>comma", "win.preferences"),
             ("<Control><Shift>k", "win.quick-switch"),
+            ("<Control><Shift>e", "win.toggle-tab-emoji"),
             ("F9", "win.toggle-sidebar"),
         ):
             controller.add_shortcut(
@@ -293,6 +322,7 @@ class MainWindow(Adw.ApplicationWindow):
             fork=fork,
             settings=self.state.settings,
             provider=provider,
+            jsonl_path=session.jsonl_path,
         )
         title = f"{self.store.display_name(session)} (fork)" if fork else self._tab_title(session)
         page = self._add_tab(tab, title,
@@ -338,16 +368,61 @@ class MainWindow(Adw.ApplicationWindow):
         self.state.set_setting("new_session_dir", cwd)  # remember for next time
         self._start_new_session(cwd, getattr(self, "_new_session_provider", None))
 
-    def _start_new_session(self, cwd: str, provider=None) -> None:
+    def _start_new_session(self, cwd: str, provider=None, options=None) -> None:
         provider = provider or self._default_provider()
         tab = TerminalTab(
-            cwd=cwd, session_id=None, settings=self.state.settings, provider=provider
+            cwd=cwd, session_id=None, settings=self.state.settings, provider=provider,
+            options=options,
         )
         self._add_tab(
             tab,
             GLib.path_get_basename(cwd),
             f"new {provider.name} session — {cwd}",
         )
+
+    # -- advanced new session / continue -----------------------------------
+
+    def _new_session_advanced(self, provider) -> None:
+        self._adv_provider = provider or self._default_provider()
+        dialog = Gtk.FileDialog(title=_("Choose project directory"))
+        default = self.state.get_setting("new_session_dir")
+        if default and Path(default).is_dir():
+            dialog.set_initial_folder(Gio.File.new_for_path(default))
+        dialog.select_folder(self, None, self._on_advanced_folder)
+
+    def _on_advanced_folder(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            folder = dialog.select_folder_finish(result)
+        except GLib.Error:
+            return
+        cwd = folder.get_path()
+        self.state.set_setting("new_session_dir", cwd)
+        provider = getattr(self, "_adv_provider", None) or self._default_provider()
+        dialogs.new_session_options_dialog(
+            self, provider, lambda opts: self._start_new_session(cwd, provider, opts)
+        )
+
+    def _continue_session(self, provider) -> None:
+        self._cont_provider = provider or self._default_provider()
+        dialog = Gtk.FileDialog(title=_("Choose project directory"))
+        default = self.state.get_setting("new_session_dir")
+        if default and Path(default).is_dir():
+            dialog.set_initial_folder(Gio.File.new_for_path(default))
+        dialog.select_folder(self, None, self._on_continue_folder)
+
+    def _on_continue_folder(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            folder = dialog.select_folder_finish(result)
+        except GLib.Error:
+            return
+        cwd = folder.get_path()
+        self.state.set_setting("new_session_dir", cwd)
+        provider = getattr(self, "_cont_provider", None) or self._default_provider()
+        tab = TerminalTab(
+            cwd=cwd, settings=self.state.settings, provider=provider,
+            command_override=provider.continue_command(),
+        )
+        self._add_tab(tab, GLib.path_get_basename(cwd), f"continue {provider.name} — {cwd}")
 
     def _add_tab(self, tab: TerminalTab, title: str, tooltip: str) -> Adw.TabPage:
         page = self.tab_view.append(tab)
@@ -360,6 +435,84 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_tab_status(page)
         GLib.idle_add(tab.grab_terminal_focus)
         return page
+
+    # -- chat sessions (headless streaming) --------------------------------
+
+    def _new_chat_session_target(self, target: str) -> None:
+        provider_id, _, variant_key = target.partition(":")
+        self._new_chat_session(get_provider(provider_id), variant_key)
+
+    def _new_chat_session(self, provider, variant_key: str = "") -> None:
+        self._new_chat_provider = provider
+        self._new_chat_variant_key = variant_key
+        dialog = Gtk.FileDialog(title=_("Choose project directory"))
+        default = self.state.get_setting("new_session_dir")
+        if default and Path(default).is_dir():
+            dialog.set_initial_folder(Gio.File.new_for_path(default))
+        dialog.select_folder(self, None, self._on_new_chat_folder)
+
+    def _on_new_chat_folder(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            folder = dialog.select_folder_finish(result)
+        except GLib.Error:
+            return  # cancelled
+        cwd = folder.get_path()
+        self.state.set_setting("new_session_dir", cwd)
+        self._start_new_chat_session(
+            cwd,
+            getattr(self, "_new_chat_provider", None),
+            getattr(self, "_new_chat_variant_key", ""),
+        )
+
+    def _start_new_chat_session(self, cwd: str, provider=None, variant_key: str = "") -> None:
+        provider = provider or self._default_provider()
+        variants = provider.chat_variants()
+        variant = provider.chat_variant(variant_key) or (variants[0] if variants else None)
+        if variant is None:
+            return
+        tab = ChatSessionTab(cwd=cwd, provider=provider, variant=variant)
+        page = self.tab_view.append(tab)
+        page.set_title(_("Chat — {dir}").format(dir=GLib.path_get_basename(cwd)))
+        page.set_tooltip(f"{provider.name} chat — {cwd}")
+        page.set_icon(_status_icon("open"))
+        self.tab_view.set_selected_page(page)
+        self.content_stack.set_visible_child_name("tabs")
+
+    def _on_resume_chat_action(self, _action, param: GLib.Variant) -> None:
+        variant_key, _, session_id = param.get_string().partition(":")
+        session = self.store.get_session(session_id)
+        if session is None:
+            return
+        provider = get_provider(session.provider)
+        variants = provider.chat_variants()
+        variant = provider.chat_variant(variant_key) or (variants[0] if variants else None)
+        if variant is None:
+            return
+        tab = ChatSessionTab(
+            cwd=session.cwd, provider=provider, variant=variant, resume_session_id=session_id
+        )
+        page = self.tab_view.append(tab)
+        page.set_title(_("Chat — {name}").format(name=self.store.display_name(session)))
+        page.set_tooltip(f"{provider.name} chat — {session.session_id}")
+        page.set_icon(_status_icon("open"))
+        self.tab_view.set_selected_page(page)
+        self.content_stack.set_visible_child_name("tabs")
+
+    # -- session replay ----------------------------------------------------
+
+    def _on_replay_action(self, _action, param: GLib.Variant) -> None:
+        session = self._session_for(param)
+        if session is not None:
+            self._open_replay(session)
+
+    def _open_replay(self, session: Session) -> None:
+        tab = ReplayTab(session, session.provider)
+        page = self.tab_view.append(tab)
+        page.set_title(_("Replay — {name}").format(name=self.store.display_name(session)))
+        page.set_tooltip(f"replay — {session.project_name} — {session.session_id}")
+        page.set_icon(_status_icon("open"))
+        self.tab_view.set_selected_page(page)
+        self.content_stack.set_visible_child_name("tabs")
 
     def _apply_tab_status(self, page: Adw.TabPage) -> None:
         """Mirror the sidebar status dot onto the tab itself."""
@@ -533,6 +686,24 @@ class MainWindow(Adw.ApplicationWindow):
 
             dialogs.emoji_dialog(self, "", save)
 
+    def _toggle_tab_emoji(self) -> None:
+        """Ctrl+Shift+E: toggle a 😊 marker on the current tab — no menu."""
+        page = self.tab_view.get_selected_page()
+        if page is None:
+            return
+        smile = "😊"
+        session_id = self._session_id_of(page)
+        if session_id:
+            current = self.state.get_emoji(session_id) or ""
+            self.state.set_emoji(session_id, "" if current == smile else smile)
+            session = self.store.get_session(session_id)
+            if session is not None:
+                page.set_title(self._tab_title(session))
+        else:  # fork / new tab: toggle a local title prefix
+            base = self._base_titles.get(page, page.get_title())
+            self._base_titles[page] = base
+            page.set_title(base if page.get_title() != base else f"{smile} {base}")
+
     def _copy_tab_session_id(self) -> None:
         page = self._menu_page or self.tab_view.get_selected_page()
         if page is None:
@@ -695,6 +866,60 @@ class MainWindow(Adw.ApplicationWindow):
             do_trash,
         )
 
+    def _on_delete_session(self, _action, param: GLib.Variant) -> None:
+        session = self._session_for(param)
+        if session is None:
+            return
+
+        def do_delete() -> None:
+            error = self.store.delete(session.session_id)
+            if error:
+                dialogs.error_dialog(self, _("Could not delete transcript"), error)
+                return
+            page = self._pages.get(session.session_id)
+            if page is not None:
+                self.tab_view.close_page(page)
+
+        dialogs.confirm_dialog(
+            self,
+            _("Delete session permanently?"),
+            _("“{name}” and its transcript file will be permanently deleted. "
+              "This cannot be undone.").format(name=self.store.display_name(session)),
+            _("Delete permanently"),
+            do_delete,
+        )
+
+    # -- open transcript from file -----------------------------------------
+
+    def _open_session_file(self) -> None:
+        dialog = Gtk.FileDialog(title=_("Open session transcript"))
+        jsonl_filter = Gtk.FileFilter()
+        jsonl_filter.set_name(_("Session transcripts (*.jsonl)"))
+        jsonl_filter.add_pattern("*.jsonl")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(jsonl_filter)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(jsonl_filter)
+        claude_dir = Path.home() / ".claude"
+        if claude_dir.is_dir():
+            dialog.set_initial_folder(Gio.File.new_for_path(str(claude_dir)))
+        dialog.open(self, None, self._on_session_file_chosen)
+
+    def _on_session_file_chosen(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            gfile = dialog.open_finish(result)
+        except GLib.Error:
+            return  # cancelled
+        session = session_from_file(Path(gfile.get_path()))
+        if session is None:
+            dialogs.error_dialog(
+                self,
+                _("Could not open transcript"),
+                _("The file couldn't be read as a session transcript."),
+            )
+            return
+        self._open_replay(session)
+
     # -- preferences / about -------------------------------------------------
 
     def _show_about(self) -> None:
@@ -721,7 +946,11 @@ class MainWindow(Adw.ApplicationWindow):
         self._switcher.present(self)
 
     def _show_preferences(self) -> None:
-        PreferencesDialog(self.state, self._apply_settings_to_tabs).present(self)
+        PreferencesDialog(self.state, self._apply_preferences).present(self)
+
+    def _apply_preferences(self) -> None:
+        self._apply_settings_to_tabs()
+        self.sidebar.refresh_folder_path()
 
     def _apply_settings_to_tabs(self) -> None:
         for i in range(self.tab_view.get_n_pages()):

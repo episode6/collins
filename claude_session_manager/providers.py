@@ -15,6 +15,7 @@ import re
 import shlex
 import shutil
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import sessions
@@ -38,6 +39,35 @@ CURSOR_PROJECTS_DIR = Path(
 
 _CURSOR_TAIL_BYTES = 64 * 1024
 _USER_QUERY_RE = re.compile(r"</?user_query>")
+
+
+@dataclass(frozen=True)
+class SessionOptions:
+    """Optional CLI flags chosen in the advanced new-session dialog. Each provider
+    translates these into the flags it actually supports (unknowns are dropped)."""
+
+    model: str = ""
+    permission_mode: str = ""
+    add_dirs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ChatVariant:
+    """One way to start a native chat with an agent.
+
+    `transport` picks the driver: "stdin_stream" = one long-lived process fed
+    user turns over stdin (Claude); "spawn_resume" = a fresh process per turn,
+    resuming the same session id (Cursor). `writeable` is whether tools may edit;
+    `gated` is whether each tool use can be individually approved (Claude only —
+    Cursor's headless mode auto-runs tools, so its variants are ungated).
+    `label` is a short mode descriptor for the menu ("" for a sole variant).
+    """
+
+    key: str
+    transport: str
+    writeable: bool = False
+    gated: bool = False
+    label: str = ""
 
 
 class Provider:
@@ -70,6 +100,12 @@ class Provider:
             pass
         return dirs
 
+    def latest_transcript_for_cwd(self, cwd: str) -> Path | None:
+        """Newest transcript for a cwd — used to attach a freshly-started
+        session's prompt detection once the agent writes its transcript. None if
+        unsupported."""
+        return None
+
     def discover(self) -> list[Session]:
         raise NotImplementedError
 
@@ -83,13 +119,62 @@ class Provider:
             cmd += " --fork-session"
         return cmd
 
-    def new_command(self) -> str | None:
-        """Shell command to start a fresh session."""
+    def new_command(self, options=None) -> str | None:
+        """Shell command to start a fresh session, optionally with advanced
+        CLI flags (model / permission-mode / extra dirs)."""
         cli = shutil.which(self.cli)
-        return shlex.quote(cli) if cli else None
+        if cli is None:
+            return None
+        return " ".join([shlex.quote(cli), *self._option_flags(options)])
+
+    def _option_flags(self, options) -> list[str]:
+        """Translate SessionOptions into this agent's CLI flags. Base: none."""
+        return []
+
+    def continue_command(self) -> str | None:
+        """Shell command to continue the most recent session in the cwd."""
+        cli = shutil.which(self.cli)
+        return f"{shlex.quote(cli)} --continue" if cli else None
+
+    def session_models(self) -> list[tuple[str, str]]:
+        """(flag value, label) model choices for the advanced dialog; the first
+        entry's empty value means 'don't pass --model'. Empty list = no picker."""
+        return []
+
+    def permission_modes(self) -> list[tuple[str, str]]:
+        """(flag value, label) permission-mode choices; first empty = default."""
+        return []
+
+    supports_add_dir: bool = False
+
+    def chat_variants(self) -> list[ChatVariant]:
+        """The native-chat options this agent offers (empty = no chat)."""
+        return []
+
+    def chat_variant(self, key: str) -> ChatVariant | None:
+        return next((v for v in self.chat_variants() if v.key == key), None)
+
+    def chat_command(self, session_id: str = "") -> list[str] | None:
+        """argv for a long-lived ("stdin_stream") chat process, or None. Used by
+        agents whose chat is a single process fed user turns over stdin. A
+        non-empty `session_id` resumes that existing session."""
+        return None
+
+    def chat_turn_command(
+        self, variant_key: str, prompt: str, session_id: str
+    ) -> list[str] | None:
+        """argv for ONE turn of a "spawn_resume" chat (a fresh process per turn,
+        resuming `session_id` if set). None for agents that don't use it."""
+        return None
 
     def graceful_exit(self) -> str | None:
         """Text to feed the agent to make it exit cleanly, or None to force-close."""
+        return None
+
+    def answer_keystrokes(self, questions: list, option_index: int) -> str | None:
+        """Keystrokes that select option `option_index` of a structured prompt,
+        or None if this agent/shape can't be auto-answered (→ fall back to the
+        terminal). Base agents can't auto-answer."""
         return None
 
     def parse_details(self, path: Path) -> SessionDetails:
@@ -110,6 +195,88 @@ class ClaudeProvider(Provider):
 
     def graceful_exit(self) -> str | None:
         return "/exit\r"
+
+    supports_add_dir = True
+
+    def session_models(self) -> list[tuple[str, str]]:
+        # CLI aliases (version-agnostic; resolve to the current model of each tier).
+        return [("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku")]
+
+    def permission_modes(self) -> list[tuple[str, str]]:
+        return [
+            ("plan", "Plan (read-only)"),
+            ("acceptEdits", "Accept edits"),
+            ("bypassPermissions", "Bypass permissions"),
+        ]
+
+    def _option_flags(self, options) -> list[str]:
+        if not options:
+            return []
+        out: list[str] = []
+        if options.model:
+            out += ["--model", shlex.quote(options.model)]
+        if options.permission_mode:
+            out += ["--permission-mode", shlex.quote(options.permission_mode)]
+        for d in options.add_dirs:
+            out += ["--add-dir", shlex.quote(d)]
+        return out
+
+    def chat_variants(self) -> list[ChatVariant]:
+        if shutil.which(self.cli) is None:
+            return []
+        # One variant: writeable, with per-tool approval cards (the control
+        # protocol gates every Edit/Write/Bash).
+        return [ChatVariant(key="default", transport="stdin_stream", writeable=True, gated=True)]
+
+    def chat_command(self, session_id: str = "") -> list[str] | None:
+        # Headless stream-json chat over stdio. --verbose is required by the CLI
+        # alongside --output-format stream-json. `--permission-prompt-tool stdio`
+        # routes every tool-use permission through the stdio control channel
+        # (control_request / control_response) so the GUI can show approve/deny
+        # cards — without it `default` mode silently auto-denies all tool use.
+        cli = shutil.which(self.cli)
+        if cli is None:
+            return None
+        argv = [
+            cli, "-p",
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--include-partial-messages",
+            "--verbose",
+            "--permission-mode", "default",
+            "--permission-prompt-tool", "stdio",
+        ]
+        if session_id:
+            argv += ["--resume", session_id]
+        return argv
+
+    def latest_transcript_for_cwd(self, cwd: str) -> Path | None:
+        if not cwd:
+            return None
+        # Claude encodes the cwd into the project dir by replacing every
+        # non-alphanumeric char with '-' (e.g. /a/b_c -> -a-b-c).
+        directory = self.projects_dir / re.sub(r"[^A-Za-z0-9]", "-", cwd)
+        if not directory.is_dir():
+            return None
+        cands = [p for p in directory.glob("*.jsonl") if _UUID_RE.match(p.stem)]
+        try:
+            return max(cands, key=lambda p: p.stat().st_mtime, default=None)
+        except OSError:
+            return None
+
+    def answer_keystrokes(self, questions: list, option_index: int) -> str | None:
+        # Reliable only for a single-question, single-select prompt: the first
+        # option starts highlighted in Claude's TUI, so arrow-down to the target
+        # and submit. Multi-select / multi-question fall back to the terminal.
+        if not questions or len(questions) != 1:
+            return None
+        q = questions[0]
+        if q.get("multiSelect"):
+            return None
+        options = q.get("options") or []
+        if not 0 <= option_index < len(options):
+            return None
+        return "\x1b[B" * option_index + "\r"
 
     def discover(self) -> list[Session]:
         found: list[Session] = []
@@ -158,6 +325,58 @@ class CursorProvider(Provider):
     def projects_dir(self) -> Path:
         return CURSOR_PROJECTS_DIR
 
+    def session_models(self) -> list[tuple[str, str]]:
+        return [
+            ("sonnet-4", "Sonnet 4"),
+            ("sonnet-4-thinking", "Sonnet 4 (thinking)"),
+            ("gpt-5", "GPT-5"),
+        ]
+
+    def permission_modes(self) -> list[tuple[str, str]]:
+        # Cursor exposes read-only execution modes via --mode.
+        return [("plan", "Plan (read-only)"), ("ask", "Ask (read-only)")]
+
+    def _option_flags(self, options) -> list[str]:
+        if not options:
+            return []
+        out: list[str] = []
+        if options.model:
+            out += ["--model", shlex.quote(options.model)]
+        if options.permission_mode in ("plan", "ask"):
+            out += ["--mode", options.permission_mode]
+        return out
+
+    def chat_variants(self) -> list[ChatVariant]:
+        if shutil.which(self.cli) is None:
+            return []
+        # cursor-agent's headless mode can't gate tools (it auto-runs them), so
+        # offer two explicit levels: a read-only Q&A chat, and a trusted chat
+        # that runs edits/commands automatically.
+        return [
+            ChatVariant(key="ask", transport="spawn_resume", label="ask, read-only"),
+            ChatVariant(
+                key="trusted", transport="spawn_resume", writeable=True, label="trusted, auto-run"
+            ),
+        ]
+
+    def chat_turn_command(
+        self, variant_key: str, prompt: str, session_id: str
+    ) -> list[str] | None:
+        # cursor-agent takes the prompt as an arg; multi-turn = --resume the same
+        # session id. --trust skips the workspace-trust prompt (required headless).
+        cli = shutil.which(self.cli)
+        if cli is None:
+            return None
+        argv = [cli, "-p", "--output-format", "stream-json", "--stream-partial-output", "--trust"]
+        if session_id:
+            argv += ["--resume", session_id]
+        if variant_key == "trusted":
+            argv.append("--force")  # auto-run edits/commands (no per-tool approval exists)
+        else:
+            argv += ["--mode", "ask"]  # read-only Q&A
+        argv.append(prompt)
+        return argv
+
     def watch_dirs(self) -> list[Path]:
         # Cursor nests transcripts one level deeper, under agent-transcripts/,
         # so watch each project's agent-transcripts dir too.
@@ -174,6 +393,20 @@ class CursorProvider(Provider):
         except OSError:
             pass
         return dirs
+
+    def latest_transcript_for_cwd(self, cwd: str) -> Path | None:
+        if not cwd:
+            return None
+        directory = (
+            self.projects_dir / re.sub(r"[^A-Za-z0-9]", "-", cwd).lstrip("-") / "agent-transcripts"
+        )
+        if not directory.is_dir():
+            return None
+        cands = list(directory.glob("*/*.jsonl"))
+        try:
+            return max(cands, key=lambda p: p.stat().st_mtime, default=None)
+        except OSError:
+            return None
 
     def discover(self) -> list[Session]:
         found: list[Session] = []

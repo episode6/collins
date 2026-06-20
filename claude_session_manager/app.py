@@ -64,6 +64,44 @@ row.session-child:hover {
   background-color: alpha(currentColor, 0.1);
   border-left-color: alpha(currentColor, 0.3);
 }
+
+/* interactive prompt card overlaid on the terminal */
+.chat-card {
+  background-color: @window_bg_color;
+  border: 1px solid alpha(#D97757, 0.6);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 2px 12px alpha(black, 0.35);
+}
+.chat-card-header {
+  color: #D97757;
+  font-weight: bold;
+  font-size: 0.85em;
+}
+.chat-option {
+  padding: 8px 12px;
+}
+.chat-option-static {
+  padding: 4px 8px;
+}
+
+/* chat-session tab: streaming bubbles + tool chips */
+.chat-bubble {
+  padding: 8px 12px;
+  border-radius: 14px;
+}
+.chat-user {
+  background-color: #D97757;
+  color: white;
+}
+.chat-assistant {
+  background-color: alpha(currentColor, 0.08);
+}
+.chat-tool {
+  font-size: 0.85em;
+  opacity: 0.6;
+  padding: 2px 4px;
+}
 """
 
 

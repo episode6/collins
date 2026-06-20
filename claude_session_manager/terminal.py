@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Vte", "3.91")
-from gi.repository import Gdk, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import themes  # noqa: E402
 from .i18n import _  # noqa: E402
+from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
+from .transcript import TranscriptModel  # noqa: E402
+
+_TRANSCRIPT_DEBOUNCE_MS = 400
+_PROMPT_POLL_MS = 1000  # backstop poll for detecting the agent's prompts
 
 # PCRE2 flags for the find bar: multiline, case-insensitive.
 _PCRE2_CASELESS = 0x00000008
@@ -36,12 +43,26 @@ class TerminalTab(Gtk.Box):
         fork: bool = False,
         settings: dict | None = None,
         provider: Provider | None = None,
+        jsonl_path: str | Path | None = None,
+        options=None,
+        command_override: str | None = None,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.session_id = session_id
         self.fork = fork
         self.provider = provider or get_provider("claude")
+        self._options = options
+        self._command_override = command_override
         self._child_pid: int | None = None
+        self._transcript_monitor: Gio.FileMonitor | None = None
+        self._transcript_refresh_source: int | None = None
+        self._poll_source: int | None = None
+        self._resolver_source: int | None = None
+        self._resolver_attempts = 0
+        self._updating = False  # an off-thread transcript parse is in flight
+        self._current_question_id: str | None = None  # question the card is showing
+        self._handled_question_id: str | None = None  # answered/dismissed; don't reshow
+        self._card: Gtk.Widget | None = None
 
         self.terminal = Vte.Terminal()
         self.terminal.set_scrollback_lines(10_000)
@@ -55,7 +76,15 @@ class TerminalTab(Gtk.Box):
 
         scrolled = Gtk.ScrolledWindow(child=self.terminal, vexpand=True)
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        self.append(scrolled)
+
+        # The terminal is the single live view. When the agent asks a structured
+        # question (detected from the transcript), a native card overlays it.
+        self._overlay = Gtk.Overlay()
+        self._overlay.set_vexpand(True)
+        self._overlay.set_child(scrolled)
+        self.append(self._overlay)
+
+        self._transcript = TranscriptModel(jsonl_path, self.provider.id)
 
         # Ctrl+Shift+C / Ctrl+Shift+V / Ctrl+Shift+G, terminal-style
         keys = Gtk.EventControllerKey()
@@ -64,7 +93,10 @@ class TerminalTab(Gtk.Box):
 
         if settings:
             self.apply_settings(settings)
+        self.set_transcript_path(jsonl_path)
         self._spawn(cwd, session_id)
+        if jsonl_path is None and session_id is None:
+            self._start_transcript_resolver(cwd)  # find the new session's transcript
 
     # -- spawning ----------------------------------------------------------
 
@@ -80,10 +112,12 @@ class TerminalTab(Gtk.Box):
         # so aliases/env apply and the tab drops to a prompt when the agent exits.
         # The tab closes when the *shell* exits.
         self._initial_command: str | None = None
-        if session_id is not None:
+        if self._command_override is not None:
+            command = self._command_override
+        elif session_id is not None:
             command = self.provider.resume_command(session_id, fork=self.fork)
         else:
-            command = self.provider.new_command()
+            command = self.provider.new_command(self._options)
         if command is None:
             self.feed_message(
                 _("warning: `{cli}` not found in PATH — starting a plain shell").format(
@@ -186,6 +220,131 @@ class TerminalTab(Gtk.Box):
 
     def feed_child_text(self, text: str) -> None:
         self.terminal.feed_child(text.encode())
+
+    # -- prompt card -------------------------------------------------------
+
+    def set_transcript_path(self, jsonl_path: str | Path | None) -> None:
+        """Tail a transcript to detect the agent's structured prompts. Used on
+        resume, and again once a brand-new session's file appears on disk."""
+        self._transcript.set_path(jsonl_path)
+        self._current_question_id = None
+        self._handled_question_id = None
+        self._hide_card()
+        if self._transcript_monitor is not None:
+            self._transcript_monitor.cancel()
+            self._transcript_monitor = None
+        if jsonl_path:
+            try:
+                gfile = Gio.File.new_for_path(str(jsonl_path))
+                self._transcript_monitor = gfile.monitor_file(Gio.FileMonitorFlags.NONE, None)
+                self._transcript_monitor.connect("changed", self._on_transcript_event)
+            except GLib.Error:
+                self._transcript_monitor = None
+            self._ensure_poll()
+            self._request_update()
+
+    def _ensure_poll(self) -> None:
+        if self._poll_source is None:
+            self._poll_source = GLib.timeout_add(_PROMPT_POLL_MS, self._poll)
+
+    def _poll(self) -> bool:
+        if self.get_root() is None:  # tab closed/detached → stop ticking
+            self._poll_source = None
+            return GLib.SOURCE_REMOVE
+        self._request_update()
+        return GLib.SOURCE_CONTINUE
+
+    def _on_transcript_event(self, *_args) -> None:
+        if self._transcript_refresh_source is not None:
+            return
+        self._transcript_refresh_source = GLib.timeout_add(
+            _TRANSCRIPT_DEBOUNCE_MS, self._debounced_update
+        )
+
+    def _debounced_update(self) -> bool:
+        self._transcript_refresh_source = None
+        self._request_update()
+        return GLib.SOURCE_REMOVE
+
+    def _request_update(self) -> None:
+        """Parse newly-appended transcript bytes off the main thread (big
+        tool-result lines would otherwise freeze the UI), then check on idle."""
+        if self._updating:
+            return
+        self._updating = True
+
+        def work() -> None:
+            try:
+                self._transcript.update()
+            except Exception:
+                pass
+            GLib.idle_add(self._apply_update)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_update(self) -> bool:
+        self._updating = False
+        self._check_prompt()
+        return GLib.SOURCE_REMOVE
+
+    def _check_prompt(self) -> None:
+        pending = self._transcript.pending_question()
+        if pending is None:
+            self._hide_card()
+            self._current_question_id = None
+            self._handled_question_id = None
+            return
+        qid = pending.tool_use_id
+        if qid in (self._current_question_id, self._handled_question_id):
+            return
+        self._hide_card()
+        self._current_question_id = qid
+        self._card = build_question_card(
+            pending.questions, self.provider, self._answer, self._dismiss_card
+        )
+        self._overlay.add_overlay(self._card)
+
+    def _hide_card(self) -> None:
+        if self._card is not None:
+            self._overlay.remove_overlay(self._card)
+            self._card = None
+
+    def _answer(self, questions: list, option_index: int) -> None:
+        self._handled_question_id = self._current_question_id
+        self._current_question_id = None
+        self._hide_card()
+        keys = self.provider.answer_keystrokes(questions, option_index)
+        if keys:
+            self.feed_child_text(keys)
+        else:
+            self.grab_terminal_focus()
+
+    def _dismiss_card(self) -> None:
+        self._handled_question_id = self._current_question_id
+        self._current_question_id = None
+        self._hide_card()
+        self.grab_terminal_focus()
+
+    def _start_transcript_resolver(self, cwd: str | None) -> None:
+        if not cwd:
+            return
+        self._resolver_attempts = 0
+        self._resolver_source = GLib.timeout_add(1500, lambda: self._resolve_transcript(cwd))
+
+    def _resolve_transcript(self, cwd: str) -> bool:
+        if self.get_root() is None:
+            self._resolver_source = None
+            return GLib.SOURCE_REMOVE
+        self._resolver_attempts += 1
+        path = self.provider.latest_transcript_for_cwd(cwd)
+        if path is not None:
+            self.set_transcript_path(str(path))
+            self._resolver_source = None
+            return GLib.SOURCE_REMOVE
+        if self._resolver_attempts > 120:  # ~3 min, give up
+            self._resolver_source = None
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
 
     # -- helpers -----------------------------------------------------------
 

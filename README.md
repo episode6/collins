@@ -28,8 +28,16 @@ Features:
 - **New session** (tab icon in the header) asks for a project folder and starts a fresh agent session (`claude`) there.
 - **Quick switcher** (`Ctrl+Shift+K`) jumps to any session by type-ahead; the **New Session** button remembers your last folder; the sidebar is **resizable** and its width is remembered.
 - **MCP servers browser** (menu → MCP servers): a read-only view of every MCP server configured in `~/.claude.json`, global and per-project.
-- **Preferences** (menu → Preferences, or `Ctrl+,`): terminal font, scrollback, color scheme.
+- **Preferences** (menu → Preferences, or `Ctrl+,`): terminal font, scrollback, color scheme, and a **Show folder path** toggle for the sidebar.
 - A status footer shows session, project, transcript-size, and open-tab counts.
+
+### Native chat & replay
+
+- **Native chat** (New Session → *New … chat*): a token-streaming conversation driven over the agent's headless stream-json channel — no transcript scraping. For Claude, every tool use (Edit / Write / Bash) pauses for an **interactive permission card** — *Allow once* / *Always allow* / *Deny* — so nothing touches your project without a click. Cursor offers a read-only **ask** chat and a **trusted** (auto-run) chat. **Continue in chat** (right-click a session) reopens it as a live chat.
+- **Session replay** (right-click → Replay…): step through any transcript as native chat bubbles, or play it back.
+- **Prompt cards**: when the agent asks a structured question in the terminal, a native option card overlays it — answer with a click.
+- **Advanced new session** (New Session menu): choose a **model**, **permission mode**, **extra directories** (`--add-dir`), or **continue** the last session in a folder.
+- **Open session from file** (menu → Open session file…) opens any `.jsonl` transcript directly; **permanent delete** sits alongside *Move to trash*; `Ctrl+Shift+E` toggles a 😊 marker on the current tab.
 
 ### Keyboard shortcuts
 
@@ -43,6 +51,7 @@ Features:
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in terminal |
 | `Ctrl+Shift+G` | Find in terminal |
 | `Ctrl+Shift+K` | Quick switcher (jump to any session) |
+| `Ctrl+Shift+E` | Toggle 😊 marker on the current tab |
 | `F9` | Toggle sidebar |
 | `Ctrl+,` | Preferences |
 
@@ -142,4 +151,5 @@ repo `agent-session-manager`). The AUR and PPA are updated separately
 ## Roadmap
 
 - Distribution: AUR, Ubuntu PPA, Flathub
-- Optional: terminal color themes, "watch a project", i18n
+- Chat polish: per-message copy, code syntax highlighting, model picker in the compose bar
+- More provider adapters beyond Claude Code and Cursor

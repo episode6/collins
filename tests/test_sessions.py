@@ -8,7 +8,36 @@ from claude_session_manager.sessions import (
     export_markdown,
     parse_details,
     read_mcp_config,
+    session_from_file,
 )
+
+
+def test_session_from_file_claude(tmp_path):
+    p = tmp_path / "abc.jsonl"
+    p.write_text(
+        json.dumps({"type": "user", "message": {"role": "user", "content": "hi"}, "cwd": "/proj"})
+        + "\n",
+        encoding="utf-8",
+    )
+    session = session_from_file(p)
+    assert session is not None
+    assert session.session_id == "abc"
+    assert session.provider == "claude"  # detected from top-level "type"
+    assert session.cwd == "/proj"
+
+
+def test_session_from_file_cursor(tmp_path):
+    p = tmp_path / "xyz.jsonl"
+    p.write_text(
+        json.dumps({"role": "user", "message": {"content": [{"type": "text", "text": "hi"}]}}) + "\n",
+        encoding="utf-8",
+    )
+    session = session_from_file(p)
+    assert session is not None and session.provider == "cursor"  # from top-level "role"
+
+
+def test_session_from_file_missing(tmp_path):
+    assert session_from_file(tmp_path / "nope.jsonl") is None
 
 
 @pytest.fixture(autouse=True)

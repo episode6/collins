@@ -1,3 +1,19 @@
+agent-session-manager (1.0.0) noble; urgency=medium
+
+  * Native streaming chat (Claude) with token-by-token output and interactive
+    permission cards (Allow / Always allow / Deny) for every tool use.
+  * Cursor chat in read-only ("ask") and trusted (auto-run) modes; resume any
+    session into a chat tab.
+  * Session replay: step through a transcript as native chat bubbles.
+  * Interactive prompt cards over the terminal answer the agent's questions.
+  * Advanced new-session options: model, permission mode, extra directories,
+    and continue-last-session; open a session from a transcript file.
+  * Folder path in the sidebar (toggle), permanent delete, and a quick tab
+    emoji shortcut (Ctrl+Shift+E).
+  * New generic agent icon and banner.
+
+ -- Máté Molnár <matemiller992@gmail.com>  Sat, 21 Jun 2026 12:00:00 +0200
+
 agent-session-manager (0.10.0) noble; urgency=medium
 
   * Multi-agent support: a provider framework now manages Cursor sessions

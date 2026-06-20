@@ -3,7 +3,7 @@
 # tool). The installed command is "agent-session-manager"; the import package
 # stays "claude_session_manager".
 name = "agent-session-manager-gtk"
-version = "0.10.0"
+version = "1.0.0"
 description = "Native GTK4 GUI to manage and resume AI coding agent sessions (Claude Code, Cursor)"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }

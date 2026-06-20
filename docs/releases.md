@@ -16,16 +16,34 @@ downloads of each version, see the
 - ✅ **Localization** — English, Hungarian, German, Spanish, French
 - ✅ **Multi-window**
 - ✅ **Multi-agent** — a provider framework managing Claude Code and Cursor side by side
+- ✅ **Native chat** — token-streaming chat with interactive permission cards (Claude) and read-only / trusted Cursor chat; resume any session into a chat
+- ✅ **Session replay** — step through a transcript as native chat bubbles
+- ✅ **Prompt cards** — answer the agent's questions with native option cards over the terminal
 - ✅ **Distribution** — PyPI, AUR, Ubuntu PPA, `.deb`, one-step tag-driven releases
 
 ### Exploring next
 
 - 🔭 **More agents** — additional provider adapters beyond Claude Code and Cursor
-- 🔭 **Chat-style UI** — a sugar layer over the terminal that turns the agent's
-  prompts into native cards, bubbles, and modals
+- 🔭 **Chat polish** — per-message copy, code syntax highlighting, model picker in the compose bar
 - 🔭 **Flathub** distribution
 
 ## Changelog
+
+### v1.0.0 — Native chat, replay & richer sessions
+
+- **Native streaming chat** (Claude): token-by-token output with **interactive
+  permission cards** — Allow / Always allow / Deny every Edit, Write, and Bash.
+- **Cursor chat** in read-only (`ask`) and trusted (auto-run) modes.
+- **Resume into chat**: reopen any session from the sidebar as a live chat tab.
+- **Session replay**: step through any transcript as native chat bubbles.
+- **Interactive prompt cards** over the terminal answer the agent's questions
+  with a click.
+- **Advanced new-session options**: pick a model, permission mode, extra
+  directories, or continue the last session in a folder.
+- **Open session from file**, **permanent delete** (alongside trash), a
+  **folder-path** toggle in the sidebar, and a quick **tab emoji** shortcut
+  (`Ctrl+Shift+E`).
+- A new **generic agent icon and banner**, replacing the Claude-specific logo.
 
 ### v0.10.0 — Multi-agent (Cursor)
 

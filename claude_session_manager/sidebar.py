@@ -12,6 +12,7 @@ Emits:
 from __future__ import annotations
 
 import shutil
+from pathlib import Path
 
 import gi
 
@@ -27,6 +28,22 @@ from .store import SessionStore
 
 _GHOSTTY = shutil.which("ghostty")
 _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
+_ELLIPSIZE_START = 1  # Pango.EllipsizeMode.START
+
+
+def _abbreviate_path(path: str | None) -> str:
+    """Show the folder path with $HOME collapsed to ~ for compactness."""
+    if not path:
+        return ""
+    try:
+        home = str(Path.home())
+    except OSError:
+        return path
+    if path == home:
+        return "~"
+    if path.startswith(home + "/"):
+        return "~" + path[len(home):]
+    return path
 
 
 class GroupHeaderRow(Gtk.ListBoxRow):
@@ -130,6 +147,15 @@ class SessionRow(Gtk.ListBoxRow):
         subtitle_label.add_css_class("caption")
         box.append(subtitle_label)
 
+        path_label = Gtk.Label(xalign=0.0)
+        path_label.set_ellipsize(_ELLIPSIZE_START)  # keep the tail (the leaf dir) visible
+        path_label.add_css_class("dim-label")
+        path_label.add_css_class("caption")
+        path_label.set_label(_abbreviate_path(item.session.cwd))
+        path_label.set_visible(sidebar.show_folder_path and bool(item.session.cwd))
+        self._path_label = path_label
+        box.append(path_label)
+
         preview_label = Gtk.Label(xalign=0.0)
         preview_label.set_ellipsize(_ELLIPSIZE_END)
         preview_label.add_css_class("dim-label")
@@ -165,6 +191,9 @@ class SessionRow(Gtk.ListBoxRow):
         right_click = Gtk.GestureClick(button=3)
         right_click.connect("pressed", self._on_right_click)
         self.add_controller(right_click)
+
+    def update_folder_path(self, show: bool) -> None:
+        self._path_label.set_visible(show and bool(self.item.session.cwd))
 
     def do_unroot(self) -> None:
         if self._status_handler is not None:
@@ -222,6 +251,7 @@ class SessionSidebar(Gtk.Box):
         self._selected: set[str] = set()
         self._rows: dict[str, SessionRow] = {}
         self._header_rows: dict[tuple, GroupHeaderRow] = {}
+        self.show_folder_path = bool(store.state.get_setting("show_folder_path"))
 
         store.connect("refreshed", self._on_store_refreshed)
 
@@ -239,6 +269,7 @@ class SessionSidebar(Gtk.Box):
         header.pack_start(self.select_btn)
 
         menu = Gio.Menu()
+        menu.append(_("Open session file…"), "win.open-session-file")
         menu.append(_("Show hidden sessions"), "win.show-hidden")
         menu.append(_("MCP servers"), "win.mcp-servers")
         menu.append(_("Preferences"), "win.preferences")
@@ -338,6 +369,12 @@ class SessionSidebar(Gtk.Box):
         if open_tabs:
             parts.append(_("{n} open").format(n=open_tabs))
         self.footer.set_label(" · ".join(parts))
+
+    def refresh_folder_path(self) -> None:
+        """Re-read the 'show folder path' setting and update existing rows."""
+        self.show_folder_path = bool(self.store.state.get_setting("show_folder_path"))
+        for row in self._rows.values():
+            row.update_folder_path(self.show_folder_path)
 
     def _rebuild_rows(self) -> None:
         self.list.remove_all()
@@ -441,12 +478,24 @@ class SessionSidebar(Gtk.Box):
             menu_item.set_action_and_target_value(f"win.{action}", variant)
             return menu_item
 
+        provider = get_provider(row.item.session.provider)
+
         open_section = Gio.Menu()
         open_section.append_item(item(_("Open"), "open-session"))
         if _GHOSTTY:
             open_section.append_item(item(_("Open in Ghostty"), "open-ghostty"))
-        if get_provider(row.item.session.provider).supports_fork:
+        if provider.supports_fork:
             open_section.append_item(item(_("Fork session"), "fork-session"))
+        for cv in provider.chat_variants():
+            if cv.label:
+                label = _("Continue in chat ({mode})").format(mode=_(cv.label))
+            else:
+                label = _("Continue in chat")
+            chat_item = Gio.MenuItem.new(label, None)
+            chat_item.set_action_and_target_value(
+                "win.resume-chat", GLib.Variant("s", f"{cv.key}:{session_id}")
+            )
+            open_section.append_item(chat_item)
 
         edit_section = Gio.Menu()
         edit_section.append_item(item(_("Rename…"), "rename-session"))
@@ -455,6 +504,7 @@ class SessionSidebar(Gtk.Box):
         )
         edit_section.append_item(item(fav_label, "toggle-favorite"))
         edit_section.append_item(item(_("Details…"), "session-details"))
+        edit_section.append_item(item(_("Replay…"), "replay-session"))
         edit_section.append_item(item(_("Copy session ID"), "copy-session-id"))
         edit_section.append_item(item(_("Export as Markdown…"), "export-session"))
         edit_section.append_item(item(_("Reveal transcript"), "reveal-transcript"))
@@ -463,6 +513,7 @@ class SessionSidebar(Gtk.Box):
         hide_label = _("Unhide session") if self.store.state.is_hidden(session_id) else _("Hide session")
         danger_section.append_item(item(hide_label, "hide-session"))
         danger_section.append_item(item(_("Move transcript to trash…"), "trash-session"))
+        danger_section.append_item(item(_("Delete permanently…"), "delete-session"))
 
         menu = Gio.Menu()
         menu.append_section(None, open_section)

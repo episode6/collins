@@ -136,6 +136,16 @@ class PreferencesDialog(Adw.PreferencesDialog):
         appearance_group.add(scheme_row)
         page.add(appearance_group)
 
+        sidebar_group = Adw.PreferencesGroup(title=_("Session list"))
+        self._folder_path_row = Adw.SwitchRow(
+            title=_("Show folder path"),
+            subtitle=_("Show each session's project folder path in the sidebar"),
+        )
+        self._folder_path_row.set_active(bool(state.get_setting("show_folder_path")))
+        self._folder_path_row.connect("notify::active", self._on_folder_path_changed)
+        sidebar_group.add(self._folder_path_row)
+        page.add(sidebar_group)
+
         current_lang = state.get_setting("language") or ""
         self._initial_lang = current_lang
         current_label = next(
@@ -205,6 +215,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_notify_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("notify_idle", row.get_active())
+        self._on_change()
+
+    def _on_folder_path_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("show_folder_path", row.get_active())
         self._on_change()
 
     def _on_language_radio(self, radio: Gtk.CheckButton, code: str, label: str) -> None:

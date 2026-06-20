@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import threading
 from datetime import datetime
+from pathlib import Path
 
 import gi
 
@@ -227,6 +228,20 @@ class SessionStore(GObject.Object):
             Gio.File.new_for_path(str(session.jsonl_path)).trash(None)
         except GLib.Error as err:
             return err.message
+        self._last_sessions = [s for s in self._last_sessions if s.session_id != session_id]
+        self._apply()
+        return None
+
+    def delete(self, session_id: str) -> str | None:
+        """Permanently delete the transcript file (irreversible). Returns an
+        error message or None."""
+        session = self.sessions.get(session_id)
+        if session is None:
+            return "session not found"
+        try:
+            Path(session.jsonl_path).unlink(missing_ok=True)
+        except OSError as err:
+            return str(err)
         self._last_sessions = [s for s in self._last_sessions if s.session_id != session_id]
         self._apply()
         return None
