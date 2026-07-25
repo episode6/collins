@@ -224,6 +224,7 @@ class MainWindow(Adw.ApplicationWindow):
             "new-session-provider": lambda _a, p: self._choose_new_session_folder(
                 get_provider(p.get_string())
             ),
+            "new-session-in": lambda _a, p: self._start_new_session(p.get_string()),
             "new-chat-provider": lambda _a, p: self._new_chat_session_target(p.get_string()),
             "new-session-advanced": lambda _a, p: self._new_session_advanced(get_provider(p.get_string())),
             "continue-session": lambda _a, p: self._continue_session(get_provider(p.get_string())),
