@@ -367,6 +367,7 @@ class MainWindow(Adw.ApplicationWindow):
             "export-session": self._on_export_session,
             "session-details": self._on_session_details,
             "hide-session": self._on_hide_session,
+            "hide-project": self._on_hide_project,
             "trash-session": self._on_trash_session,
         }
         for name, callback in per_session.items():
@@ -1072,6 +1073,10 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_hide_session(self, _action, param: GLib.Variant) -> None:
         session_id = param.get_string()
         self.store.set_hidden(session_id, not self.state.is_hidden(session_id))
+
+    def _on_hide_project(self, _action, param: GLib.Variant) -> None:
+        name = param.get_string()
+        self.store.set_project_hidden(name, not self.state.is_project_hidden(name))
 
     def _on_show_hidden(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
         action.set_state(value)

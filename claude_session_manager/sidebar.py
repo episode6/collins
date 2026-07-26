@@ -57,10 +57,19 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         count: int,
         collapsed: bool,
         cwd: str | None = None,
+        sidebar: SessionSidebar | None = None,
     ) -> None:
         super().__init__()
         self.group_key = group_key
+        self.cwd = cwd
         self.set_selectable(False)
+
+        if sidebar is not None and group_key != FAV_GROUP:
+            right_click = Gtk.GestureClick(button=3)
+            right_click.connect(
+                "pressed", lambda _g, _n, x, y: sidebar.show_group_menu(self, x, y)
+            )
+            self.add_controller(right_click)
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         box.add_css_class("group-header")
@@ -397,10 +406,10 @@ class SessionSidebar(Gtk.Box):
                 groups.append(key)
             if key != FAV_GROUP and key not in group_cwds and item.session.cwd:
                 group_cwds[key] = item.session.cwd
-        for key in groups:
+        for key in groups + [key for key, _label, _cwd in self.store.empty_groups]:
             if key not in self._known_groups:
                 self._collapsed.add(key)
-        self._known_groups = set(groups)
+        self._known_groups = set(groups) | {key for key, _label, _cwd in self.store.empty_groups}
 
         previous_group: tuple | None = None
         for i in range(self.store.model.get_n_items()):
@@ -412,6 +421,7 @@ class SessionSidebar(Gtk.Box):
                     self.store.group_counts.get(item.group_key, 0),
                     item.group_key in self._collapsed,
                     cwd=group_cwds.get(item.group_key),
+                    sidebar=self,
                 )
                 self._header_rows[item.group_key] = header
                 self.list.append(header)
@@ -419,6 +429,12 @@ class SessionSidebar(Gtk.Box):
             row = SessionRow(item, self)
             self._rows[item.session_id] = row
             self.list.append(row)
+        # Projects with no visible session rows still get a header, so their
+        # "new session" button stays reachable.
+        for key, label, cwd in self.store.empty_groups:
+            header = GroupHeaderRow(key, label, 0, key in self._collapsed, cwd=cwd, sidebar=self)
+            self._header_rows[key] = header
+            self.list.append(header)
         self._apply_selection_to_rows()
 
     def _apply_selection_to_rows(self) -> None:
@@ -529,7 +545,37 @@ class SessionSidebar(Gtk.Box):
         menu.append_section(None, open_section)
         menu.append_section(None, edit_section)
         menu.append_section(None, danger_section)
+        self._popup_menu(menu, row, x, y)
 
+    def show_group_menu(self, row: GroupHeaderRow, x: float, y: float) -> None:
+        project_name = row.group_key[1]
+
+        open_section = Gio.Menu()
+        if row.cwd:
+            new_item = Gio.MenuItem.new(_("New session here"), None)
+            new_item.set_action_and_target_value(
+                "win.new-session-in", GLib.Variant("s", row.cwd)
+            )
+            open_section.append_item(new_item)
+
+        danger_section = Gio.Menu()
+        hide_label = (
+            _("Unhide project")
+            if self.store.state.is_project_hidden(project_name)
+            else _("Hide project")
+        )
+        hide_item = Gio.MenuItem.new(hide_label, None)
+        hide_item.set_action_and_target_value(
+            "win.hide-project", GLib.Variant("s", project_name)
+        )
+        danger_section.append_item(hide_item)
+
+        menu = Gio.Menu()
+        menu.append_section(None, open_section)
+        menu.append_section(None, danger_section)
+        self._popup_menu(menu, row, x, y)
+
+    def _popup_menu(self, menu: Gio.Menu, row: Gtk.ListBoxRow, x: float, y: float) -> None:
         popover = Gtk.PopoverMenu.new_from_model(menu)
         popover.set_parent(row)
         popover.set_has_arrow(False)

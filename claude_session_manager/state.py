@@ -68,6 +68,7 @@ class AppState:
         self.emojis: dict[str, str] = {}
         self.favorites: set[str] = set()
         self.hidden: set[str] = set()
+        self.hidden_projects: set[str] = set()  # by project name (the group identity)
         self.settings: dict = dict(DEFAULT_SETTINGS)
         self._load()
 
@@ -88,6 +89,7 @@ class AppState:
         self.emojis = dict(data.get("emojis") or {})
         self.favorites = set(data.get("favorites") or [])
         self.hidden = set(data.get("hidden") or [])
+        self.hidden_projects = set(data.get("hidden_projects") or [])
         self.settings = {**DEFAULT_SETTINGS, **(data.get("settings") or {})}
 
     def save(self) -> None:
@@ -97,6 +99,7 @@ class AppState:
             "emojis": self.emojis,
             "favorites": sorted(self.favorites),
             "hidden": sorted(self.hidden),
+            "hidden_projects": sorted(self.hidden_projects),
             "settings": self.settings,
         }
         tmp = _STATE_FILE.with_suffix(".json.tmp")
@@ -152,6 +155,16 @@ class AppState:
             self.hidden.add(session_id)
         else:
             self.hidden.discard(session_id)
+        self.save()
+
+    def is_project_hidden(self, project_name: str) -> bool:
+        return project_name in self.hidden_projects
+
+    def set_project_hidden(self, project_name: str, hidden: bool) -> None:
+        if hidden:
+            self.hidden_projects.add(project_name)
+        else:
+            self.hidden_projects.discard(project_name)
         self.save()
 
     # -- settings ------------------------------------------------------------

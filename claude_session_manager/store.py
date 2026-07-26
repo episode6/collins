@@ -52,6 +52,9 @@ class SessionStore(GObject.Object):
         self.model = Gio.ListStore(item_type=SessionItem)
         self.sessions: dict[str, Session] = {}
         self.group_counts: dict[tuple, int] = {}
+        # Projects with no rows under their group (all sessions hidden or
+        # favorited): (group_key, label, cwd), newest first.
+        self.empty_groups: list[tuple[tuple, str, str | None]] = []
         self.show_hidden = False
 
         self._items: dict[str, SessionItem] = {}
@@ -91,7 +94,13 @@ class SessionStore(GObject.Object):
         self.sessions = {s.session_id: s for s in sessions}
 
         visible = [
-            s for s in sessions if self.show_hidden or not self.state.is_hidden(s.session_id)
+            s
+            for s in sessions
+            if self.show_hidden
+            or not (
+                self.state.is_hidden(s.session_id)
+                or self.state.is_project_hidden(s.project_name)
+            )
         ]
         favorites = [s for s in visible if self.state.is_favorite(s.session_id)]
         rest = [s for s in visible if not self.state.is_favorite(s.session_id)]
@@ -118,13 +127,31 @@ class SessionStore(GObject.Object):
             items.append(item)
             self.group_counts[group_key] = self.group_counts.get(group_key, 0) + 1
 
+        # Projects whose sessions are all hidden (or all favorited) get no
+        # rows above, but should still show an empty header in the sidebar so
+        # their "new session" button stays reachable.
+        empty_groups: list[tuple[tuple, str, str | None]] = []
+        for session in sessions:
+            key = ("proj", session.project_name)
+            if key in grouped or any(g[0] == key for g in empty_groups):
+                continue
+            if not self.show_hidden and self.state.is_project_hidden(session.project_name):
+                continue
+            cwd = next(
+                (s.cwd for s in sessions if s.project_name == session.project_name and s.cwd),
+                None,
+            )
+            empty_groups.append((key, session.project_name, cwd))
+        empty_changed = empty_groups != self.empty_groups
+        self.empty_groups = empty_groups
+
         wanted_ids = {item.session_id for item in items}
         for session_id in list(self._items):
             if session_id not in wanted_ids:
                 del self._items[session_id]
 
         current_ids = [self.model.get_item(i).session_id for i in range(self.model.get_n_items())]
-        order_changed = current_ids != [item.session_id for item in items]
+        order_changed = current_ids != [item.session_id for item in items] or empty_changed
         if order_changed:
             self.model.splice(0, self.model.get_n_items(), items)
         self.emit("refreshed", order_changed)
@@ -208,6 +235,10 @@ class SessionStore(GObject.Object):
     def hide_many(self, session_ids: list[str]) -> None:
         for session_id in session_ids:
             self.state.set_hidden(session_id, True)
+        self._apply()
+
+    def set_project_hidden(self, project_name: str, hidden: bool) -> None:
+        self.state.set_project_hidden(project_name, hidden)
         self._apply()
 
     def set_show_hidden(self, show: bool) -> None:
