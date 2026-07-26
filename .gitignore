@@ -19,7 +19,7 @@ docs/.vitepress/cache/
 # Debian build artifacts
 .pybuild/
 debian/.debhelper/
-debian/claude-session-manager/
+debian/collins/
 debian/files
 debian/debhelper-build-stamp
 debian/*.substvars

@@ -3,15 +3,15 @@
 # fork. Last modified: 2026-07-26. Full change history: git log for this file.
 
 [project]
-# PyPI distribution name ("agent-session-manager" is taken by an unrelated CLI
-# tool). The installed command is "agent-session-manager"; the import package
-# stays "claude_session_manager".
-name = "agent-session-manager-gtk"
-version = "1.0.0"
-description = "Native GTK4 GUI to manage and resume Claude Code sessions"
+# PyPI distribution name (suffixed to stay unambiguous on PyPI). The
+# installed command and the import package are both "collins".
+name = "collins-gtk"
+version = "2.0.0"
+description = "Collins — native GTK4 GUI to manage and resume Claude Code sessions"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
 authors = [{ name = "Máté Molnár", email = "molnar.mate@zengo.eu" }]
+maintainers = [{ name = "Geoff Hackett", email = "ghackett@gmail.com" }]
 requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -26,21 +26,21 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/r4nd3l/agent-session-manager"
-Issues = "https://github.com/r4nd3l/agent-session-manager/issues"
+Homepage = "https://github.com/ghackett/agent-session-manager"
+Issues = "https://github.com/ghackett/agent-session-manager/issues"
 
 [project.scripts]
-agent-session-manager = "claude_session_manager.app:main"
+collins = "collins.app:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["claude_session_manager*"]
+include = ["collins*"]
 
 [tool.setuptools.package-data]
-claude_session_manager = ["locale/*/LC_MESSAGES/*.mo"]
+collins = ["locale/*/LC_MESSAGES/*.mo"]
 
 [tool.ruff]
 line-length = 110

@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install --quiet ruff
-      - run: ruff check claude_session_manager/ tests/
+      - run: ruff check collins/ tests/
 
   test:
     runs-on: ubuntu-latest

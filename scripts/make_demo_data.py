@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
+# Modified from the original agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+# fork. Last modified: 2026-07-26. Full change history: git log for this file.
 """Generate fake Claude Code sessions for screenshots and demos.
 
 Usage:
     python3 scripts/make_demo_data.py
-    XDG_CONFIG_HOME=/tmp/csm-demo/config \\
-        CSM_PROJECTS_DIR=/tmp/csm-demo/projects \\
-        CSM_CLAUDE_CONFIG=/tmp/csm-demo/claude.json \\
-        python3 -m claude_session_manager
+    XDG_CONFIG_HOME=/tmp/collins-demo/config \\
+        COLLINS_PROJECTS_DIR=/tmp/collins-demo/projects \\
+        COLLINS_CLAUDE_CONFIG=/tmp/collins-demo/claude.json \\
+        python3 -m collins
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ import time
 import uuid
 from pathlib import Path
 
-ROOT = Path("/tmp/csm-demo")
+ROOT = Path("/tmp/collins-demo")
 
 # (project, preview prompt, age, custom name|None, favorite, emoji|None, mcp server used|None)
 SESSIONS = [
@@ -84,7 +87,7 @@ def make_transcript(cwd: str, prompt: str, timestamp: float, mcp_server: str | N
 
 def main() -> None:
     projects_dir = ROOT / "projects"
-    config_dir = ROOT / "config" / "claude-session-manager"
+    config_dir = ROOT / "config" / "collins"
     projects_dir.mkdir(parents=True, exist_ok=True)
     config_dir.mkdir(parents=True, exist_ok=True)
 
@@ -125,8 +128,8 @@ def main() -> None:
     print(f"Demo data written to {ROOT}")
     print("Launch with:")
     print(
-        f"  XDG_CONFIG_HOME={ROOT}/config CSM_PROJECTS_DIR={ROOT}/projects "
-        f"CSM_CLAUDE_CONFIG={ROOT}/claude.json python3 -m claude_session_manager"
+        f"  XDG_CONFIG_HOME={ROOT}/config COLLINS_PROJECTS_DIR={ROOT}/projects "
+        f"COLLINS_CLAUDE_CONFIG={ROOT}/claude.json python3 -m collins"
     )
 
 

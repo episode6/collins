@@ -1,3 +1,6 @@
+# Modified from the original agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+# fork. Last modified: 2026-07-26. Full change history: git log for this file.
 """Translation setup. Call init() once at startup, then use _() everywhere."""
 
 from __future__ import annotations
@@ -5,7 +8,7 @@ from __future__ import annotations
 import gettext
 from pathlib import Path
 
-DOMAIN = "claude-session-manager"
+DOMAIN = "collins"
 LOCALEDIR = Path(__file__).resolve().parent / "locale"
 
 # Languages offered in Preferences: code -> native display name.

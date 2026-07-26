@@ -4,7 +4,7 @@
 
 import json
 
-from claude_session_manager.transcript import TranscriptModel
+from collins.transcript import TranscriptModel
 
 
 def _write(path, lines):

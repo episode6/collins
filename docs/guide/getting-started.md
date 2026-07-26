@@ -8,7 +8,7 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
 
 ## Requirements
 
-Agent Session Manager is a GTK4 app. You'll need:
+Collins is a GTK4 app. You'll need:
 
 - **Python ≥ 3.10**
 - **GTK 4**, **libadwaita ≥ 1.5**, **VTE** (the GTK 4 build), and **PyGObject**
@@ -34,54 +34,27 @@ sudo pacman -S python-gobject gtk4 libadwaita vte4
 
 ## Install
 
-### Arch Linux — AUR
-
-Available on the [AUR](https://aur.archlinux.org/packages/agent-session-manager)
-as `agent-session-manager`:
-
-```bash
-yay -S agent-session-manager   # or: paru -S agent-session-manager
-```
-
-### Ubuntu — PPA
-
-```bash
-sudo add-apt-repository ppa:matemiller992/agent-session-manager
-sudo apt update
-sudo apt install agent-session-manager
-```
-
 ### Debian / Ubuntu — `.deb`
 
-Or grab the latest `.deb` from the
-[releases page](https://github.com/r4nd3l/agent-session-manager/releases/latest)
-and install it — dependencies are pulled in automatically:
+Build the package with `./scripts/build_deb.sh`, or grab the latest `.deb`
+from the
+[releases page](https://github.com/ghackett/agent-session-manager/releases/latest)
+if one is published, then install it — dependencies are pulled in
+automatically:
 
 ```bash
-sudo apt install ./agent-session-manager_*_all.deb
+sudo apt install ./collins_*_all.deb
 ```
 
-Either way it appears in your app grid as **Agent Session Manager**.
-
-### PyPI — `pipx`
-
-Published as
-[`agent-session-manager-gtk`](https://pypi.org/project/agent-session-manager-gtk/).
-The GTK/VTE bindings come from your system, so install with system site
-packages (and make sure the [requirements](#requirements) above are present):
-
-```bash
-pipx install --system-site-packages agent-session-manager-gtk
-```
-
-The installed command is `agent-session-manager`.
+It appears in your app grid as **Collins**, and the installed command is
+`collins`.
 
 ### From source
 
 ```bash
-git clone https://github.com/r4nd3l/agent-session-manager.git
-cd agent-session-manager
-python3 -m claude_session_manager
+git clone https://github.com/ghackett/agent-session-manager.git collins
+cd collins
+python3 -m collins
 ```
 
 To add a desktop launcher and icon for your user:

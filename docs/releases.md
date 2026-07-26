@@ -8,7 +8,7 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
 
 A running overview of what's shipped and what's planned. For the full notes and
 downloads of each version, see the
-[GitHub releases](https://github.com/r4nd3l/agent-session-manager/releases).
+[GitHub releases](https://github.com/ghackett/agent-session-manager/releases).
 
 ## Roadmap
 
@@ -24,7 +24,7 @@ downloads of each version, see the
 - ✅ **Native chat** — token-streaming chat with interactive permission cards; resume any session into a chat
 - ✅ **Session replay** — step through a transcript as native chat bubbles
 - ✅ **Prompt cards** — answer the agent's questions with native option cards over the terminal
-- ✅ **Distribution** — PyPI, AUR, Ubuntu PPA, `.deb`, one-step tag-driven releases
+- ✅ **Distribution** — `.deb`, one-step tag-driven releases
 
 ### Exploring next
 
@@ -32,6 +32,16 @@ downloads of each version, see the
 - 🔭 **Flathub** distribution
 
 ## Changelog
+
+### v2.0.0 — Rebrand to Collins
+
+- Renamed the fork from **Agent Session Manager** to **Collins** — app name,
+  command (`collins`), Python package, app id (`com.episode6.Collins`),
+  and docs. Forked from
+  [agent-session-manager](https://github.com/r4nd3l/agent-session-manager).
+- Existing settings, names, and favorites migrate automatically from the old
+  `~/.config/agent-session-manager/` (or older `~/.config/claude-session-manager/`)
+  location on first run.
 
 ### v1.0.0 — Native chat, replay & richer sessions
 
@@ -67,7 +77,7 @@ downloads of each version, see the
   more AI coding agents beyond Claude Code.
 - Existing settings, names, and favorites migrate automatically from the old
   `~/.config/claude-session-manager/` location on first run.
-- Installed command is now `agent-session-manager`; PyPI package
+- Installed command became `agent-session-manager`; PyPI package
   `agent-session-manager-gtk`; AUR/PPA package `agent-session-manager`.
 
 ### v0.8.0 — Distribution & localization

@@ -1,17 +1,25 @@
+<!--
+Modified from the original agent-session-manager
+(https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+fork. Last modified: 2026-07-26. Full change history: git log for this file.
+-->
 # Packaging
 
-How Claude Session Manager is packaged for each channel.
+How Collins is packaged for each channel. (The upstream project this fork is
+based on publishes its own AUR/PPA/PyPI packages under the old
+agent-session-manager name; the channels below are for this fork and only
+exist once set up for it.)
 
 | Channel | Files | Notes |
 | --- | --- | --- |
 | **`.deb`** (GitHub releases) | `scripts/build_deb.sh` | Hand-rolled binary deb attached to each release. |
 | **AUR** | `packaging/aur/` | `PKGBUILD` + `.SRCINFO`; see `packaging/aur/README.md`. |
-| **PyPI** | `pyproject.toml` + `.github/workflows/publish-pypi.yml` | Auto-published on GitHub Release via trusted publishing. |
+| **PyPI** | `pyproject.toml` + `.github/workflows/release.yml` | Auto-published on tag via trusted publishing (once configured). |
 | **Ubuntu PPA** | `debian/` + `packaging/build-ppa-source.sh` | Source upload to Launchpad; see below. |
 
 ## Ubuntu PPA
 
-PPA: [`ppa:matemiller992/claude-session-manager`](https://launchpad.net/~matemiller992/+archive/ubuntu/claude-session-manager)
+PPA: `ppa:<your-launchpad-user>/collins` (create it on Launchpad first)
 
 The `debian/` directory uses the **native** source format and builds with
 `dh` + `pybuild`, installing the desktop entry, icons, and metainfo on top of
@@ -33,8 +41,8 @@ the wheel.
    signing GPG key in the keyring.)
 3. Upload:
    ```bash
-   dput ppa:matemiller992/claude-session-manager \
-     /tmp/csm-ppa/claude-session-manager_<VER>_source.changes
+   dput ppa:<your-launchpad-user>/collins \
+     /tmp/collins-ppa/collins_<VER>_source.changes
    ```
 
 Launchpad emails an acceptance notice, then builds and publishes the `.deb`.

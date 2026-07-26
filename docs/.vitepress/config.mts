@@ -1,10 +1,14 @@
+// Modified from the original agent-session-manager
+// (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+// fork. Last modified: 2026-07-26. Full change history: git log for this file.
 import { defineConfig } from 'vitepress'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
-  title: 'Agent Session Manager',
+  title: 'Collins',
   description: 'A native Linux home for your AI coding-agent sessions.',
   lang: 'en-US',
+  // Must match the GitHub repo name (GitHub Pages project path).
   base: '/agent-session-manager/',
   lastUpdated: true,
   cleanUrls: true,
@@ -12,10 +16,10 @@ export default defineConfig({
   head: [
     ['meta', { name: 'theme-color', content: '#D97757' }],
     ['meta', { property: 'og:type', content: 'website' }],
-    ['meta', { property: 'og:title', content: 'Agent Session Manager' }],
+    ['meta', { property: 'og:title', content: 'Collins' }],
     ['meta', {
       property: 'og:image',
-      content: 'https://raw.githubusercontent.com/r4nd3l/agent-session-manager/main/data/banner.png',
+      content: 'https://raw.githubusercontent.com/ghackett/agent-session-manager/main/data/banner.png',
     }],
   ],
 
@@ -31,7 +35,7 @@ export default defineConfig({
         {
           text: 'Introduction',
           items: [
-            { text: 'What is Agent Session Manager?', link: '/guide/introduction' },
+            { text: 'What is Collins?', link: '/guide/introduction' },
             { text: 'Getting Started', link: '/guide/getting-started' },
           ],
         },
@@ -47,17 +51,17 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/r4nd3l/agent-session-manager' },
+      { icon: 'github', link: 'https://github.com/ghackett/agent-session-manager' },
     ],
 
     editLink: {
-      pattern: 'https://github.com/r4nd3l/agent-session-manager/edit/main/docs/:path',
+      pattern: 'https://github.com/ghackett/agent-session-manager/edit/main/docs/:path',
       text: 'Edit this page on GitHub',
     },
 
     footer: {
-      message: 'Unofficial community tool — not affiliated with or endorsed by Anthropic. Released under GPL-3.0.',
-      copyright: 'Copyright © 2026 Máté Molnár',
+      message: 'Unofficial community tool — not affiliated with or endorsed by Anthropic. Released under GPL-3.0. Forked from agent-session-manager by Máté Molnár.',
+      copyright: 'Copyright © 2026 Máté Molnár (original), Geoff Hackett (fork)',
     },
 
     search: { provider: 'local' },

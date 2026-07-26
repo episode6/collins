@@ -21,11 +21,11 @@ from pathlib import Path
 # How many recent messages the details dialog peeks at.
 PEEK_MESSAGES = 12
 
-# Override with CSM_PROJECTS_DIR for demos and development.
+# Override with COLLINS_PROJECTS_DIR for demos and development.
 CLAUDE_PROJECTS_DIR = Path(
-    os.environ.get("CSM_PROJECTS_DIR") or Path.home() / ".claude" / "projects"
+    os.environ.get("COLLINS_PROJECTS_DIR") or Path.home() / ".claude" / "projects"
 )
-CLAUDE_CONFIG = Path(os.environ.get("CSM_CLAUDE_CONFIG") or Path.home() / ".claude.json")
+CLAUDE_CONFIG = Path(os.environ.get("COLLINS_CLAUDE_CONFIG") or Path.home() / ".claude.json")
 
 # Session transcripts are named <uuid>.jsonl; skip anything else (agent files, etc.)
 _UUID_RE = re.compile(

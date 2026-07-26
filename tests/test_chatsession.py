@@ -5,12 +5,12 @@
 import io
 import json
 
-from claude_session_manager.chatsession import (
+from collins.chatsession import (
     ChatSession,
     StreamParser,
     make_chat_session,
 )
-from claude_session_manager.providers import ChatVariant
+from collins.providers import ChatVariant
 
 
 def _feed(parser, *entries):

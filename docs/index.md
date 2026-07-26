@@ -6,12 +6,12 @@
 layout: home
 
 hero:
-  name: "Agent Session Manager"
+  name: "Collins"
   text: "A native home for your AI coding-agent sessions"
   tagline: Browse, name, and resume every Claude Code session on your machine — in embedded terminal tabs.
   image:
-    src: https://raw.githubusercontent.com/r4nd3l/agent-session-manager/main/data/screenshot.png
-    alt: Agent Session Manager
+    src: https://raw.githubusercontent.com/ghackett/agent-session-manager/main/data/screenshot.png
+    alt: Collins
   actions:
     - theme: brand
       text: What is it?
@@ -21,7 +21,7 @@ hero:
       link: /guide/getting-started
     - theme: alt
       text: View on GitHub
-      link: https://github.com/r4nd3l/agent-session-manager
+      link: https://github.com/ghackett/agent-session-manager
 
 features:
   - icon: 🗂️
@@ -48,25 +48,18 @@ features:
 
 ::: code-group
 
-```bash [Arch (AUR)]
-yay -S agent-session-manager
-```
-
-```bash [Ubuntu (PPA)]
-sudo add-apt-repository ppa:matemiller992/agent-session-manager
-sudo apt update && sudo apt install agent-session-manager
-```
-
 ```bash [Debian / Ubuntu (.deb)]
-# from the latest GitHub release
-sudo apt install ./agent-session-manager_*_all.deb
+# built with ./scripts/build_deb.sh, or from a GitHub release
+sudo apt install ./collins_*_all.deb
 ```
 
-```bash [pipx (any distro)]
-pipx install --system-site-packages agent-session-manager-gtk
+```bash [From source]
+git clone https://github.com/ghackett/agent-session-manager.git collins
+cd collins
+python3 -m collins
 ```
 
 :::
 
 See [Getting Started](/guide/getting-started) for system requirements and
-from-source instructions. The installed command is `agent-session-manager`.
+from-source instructions. The installed command is `collins`.

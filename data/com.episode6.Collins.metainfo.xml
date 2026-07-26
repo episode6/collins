@@ -5,11 +5,11 @@ Modified from the original agent-session-manager
 fork. Last modified: 2026-07-26. Full change history: git log for this file.
 -->
 <component type="desktop-application">
-  <id>io.github.r4nd3l.AgentSessionManager</id>
+  <id>com.episode6.Collins</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
 
-  <name>Agent Session Manager</name>
+  <name>Collins</name>
   <summary>Manage and resume your AI coding agent sessions</summary>
 
   <description>
@@ -30,21 +30,33 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
       Unofficial community tool — not affiliated with or endorsed by Anthropic.
       The agents' own session data is never modified.
     </p>
+    <p>
+      Collins is a fork of agent-session-manager by Máté Molnár.
+    </p>
   </description>
 
-  <launchable type="desktop-id">io.github.r4nd3l.AgentSessionManager.desktop</launchable>
+  <launchable type="desktop-id">com.episode6.Collins.desktop</launchable>
 
-  <developer id="io.github.r4nd3l">
-    <name>Máté Molnár</name>
+  <developer id="com.episode6">
+    <name>Geoff Hackett</name>
   </developer>
 
-  <url type="homepage">https://github.com/r4nd3l/claude-session-manager</url>
-  <url type="bugtracker">https://github.com/r4nd3l/claude-session-manager/issues</url>
-  <url type="vcs-browser">https://github.com/r4nd3l/claude-session-manager</url>
+  <url type="homepage">https://github.com/ghackett/agent-session-manager</url>
+  <url type="bugtracker">https://github.com/ghackett/agent-session-manager/issues</url>
+  <url type="vcs-browser">https://github.com/ghackett/agent-session-manager</url>
 
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="2.0.0" date="2026-07-26">
+      <description>
+        <p>Rebranded as Collins.</p>
+        <ul>
+          <li>New name, command (collins), and app id (com.episode6.Collins)</li>
+          <li>Config moves to ~/.config/collins, migrated automatically</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.0" date="2026-06-21">
       <description>
         <p>Native chat, session replay, and richer session management.</p>
@@ -79,7 +91,7 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
         <ul>
           <li>Waiting badge for sessions where Claude asked a question</li>
           <li>Export a session transcript as Markdown</li>
-          <li>Now on PyPI: pipx install claude-session-manager-gtk</li>
+          <li>Now on PyPI: pipx install agent-session-manager-gtk</li>
         </ul>
       </description>
     </release>

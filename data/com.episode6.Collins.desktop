@@ -4,14 +4,14 @@
 
 [Desktop Entry]
 Type=Application
-Name=Agent Session Manager
+Name=Collins
 GenericName=Session Manager
 Comment=Manage and resume your AI coding agent sessions
-Exec=python3 -m claude_session_manager
-Path=/home/matt/Documents/Git/Project__Zengo/ClaudeSessionManager
-Icon=io.github.r4nd3l.AgentSessionManager
+Exec=python3 -m collins
+Path=/opt/collins
+Icon=com.episode6.Collins
 Terminal=false
 Categories=Development;
 Keywords=claude;ai;agent;terminal;session;code;
 StartupNotify=true
-StartupWMClass=io.github.r4nd3l.AgentSessionManager
+StartupWMClass=com.episode6.Collins
