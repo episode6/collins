@@ -62,6 +62,7 @@ Features:
 | `Ctrl+Shift+K` | Quick switcher (jump to any session) |
 | `Ctrl+Shift+E` | Toggle 😊 marker on the current tab |
 | `Ctrl+J` | Show/hide the terminal panel |
+| `Ctrl+K` | Clear the terminal panel (screen and saved history) |
 | `F9` | Toggle sidebar |
 | `Ctrl+,` | Preferences |
 
