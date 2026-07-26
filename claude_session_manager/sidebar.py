@@ -50,7 +50,14 @@ class GroupHeaderRow(Gtk.ListBoxRow):
     """A real row acting as a group header, so it stays visible when the
     group's session rows are filtered out (collapsed)."""
 
-    def __init__(self, group_key: tuple, group_label: str, count: int, collapsed: bool) -> None:
+    def __init__(
+        self,
+        group_key: tuple,
+        group_label: str,
+        count: int,
+        collapsed: bool,
+        cwd: str | None = None,
+    ) -> None:
         super().__init__()
         self.group_key = group_key
         self.set_selectable(False)
@@ -78,6 +85,18 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         count_label.add_css_class("count-badge")
         count_label.add_css_class("dim-label")
         box.append(count_label)
+
+        if cwd:
+            new_btn = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
+            new_btn.add_css_class("flat")
+            new_btn.set_tooltip_text(
+                _("New session in {path}").format(path=_abbreviate_path(cwd))
+            )
+            new_btn.connect(
+                "clicked",
+                lambda *_: self.activate_action("win.new-session-in", GLib.Variant("s", cwd)),
+            )
+            box.append(new_btn)
 
         self.set_child(box)
         self.set_collapsed(collapsed)
@@ -384,10 +403,17 @@ class SessionSidebar(Gtk.Box):
         # Collapse project groups by default — but only the first time each is
         # seen, so manual expand/collapse choices survive live refreshes.
         groups = []
+        # Directory per project group (from its most recent session with a
+        # cwd), so headers can offer a "new session here" button. Favorites
+        # mixes projects, so it never gets one.
+        group_cwds: dict[tuple, str] = {}
         for i in range(self.store.model.get_n_items()):
-            key = self.store.model.get_item(i).group_key
+            item = self.store.model.get_item(i)
+            key = item.group_key
             if key not in groups:
                 groups.append(key)
+            if key != FAV_GROUP and key not in group_cwds and item.session.cwd:
+                group_cwds[key] = item.session.cwd
         for key in groups:
             if key not in self._known_groups:
                 self._collapsed.add(key)
@@ -402,6 +428,7 @@ class SessionSidebar(Gtk.Box):
                     _("Favorites") if item.group_key == FAV_GROUP else item.group_label,
                     self.store.group_counts.get(item.group_key, 0),
                     item.group_key in self._collapsed,
+                    cwd=group_cwds.get(item.group_key),
                 )
                 self._header_rows[item.group_key] = header
                 self.list.append(header)
