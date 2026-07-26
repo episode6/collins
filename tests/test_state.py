@@ -21,6 +21,14 @@ def test_roundtrip(app_state):
     assert fresh.get_setting("scrollback") == 5000
 
 
+def test_generated_names_roundtrip(app_state):
+    state = app_state.AppState()
+    state.set_generated_name("sid", "Fix login bug")
+    assert app_state.AppState().get_generated_name("sid") == "Fix login bug"
+    state.set_generated_name("sid", "  ")
+    assert app_state.AppState().get_generated_name("sid") is None
+
+
 def test_clearing_name_removes_entry(app_state):
     state = app_state.AppState()
     state.set_name("sid-1", "Name")

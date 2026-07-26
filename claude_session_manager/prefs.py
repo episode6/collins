@@ -162,6 +162,17 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._folder_path_row.set_active(bool(state.get_setting("show_folder_path")))
         self._folder_path_row.connect("notify::active", self._on_folder_path_changed)
         sidebar_group.add(self._folder_path_row)
+        self._auto_title_row = Adw.SwitchRow(
+            title=_("Auto-generate session titles"),
+            subtitle=_(
+                "Summarize each new session's first prompt into a short title "
+                "with a small Claude model (needs the anthropic package and "
+                "API credentials)"
+            ),
+        )
+        self._auto_title_row.set_active(bool(state.get_setting("auto_title_sessions")))
+        self._auto_title_row.connect("notify::active", self._on_auto_title_changed)
+        sidebar_group.add(self._auto_title_row)
         page.add(sidebar_group)
 
         current_lang = state.get_setting("language") or ""
@@ -241,6 +252,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_folder_path_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("show_folder_path", row.get_active())
+        self._on_change()
+
+    def _on_auto_title_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("auto_title_sessions", row.get_active())
         self._on_change()
 
     def _on_language_radio(self, radio: Gtk.CheckButton, code: str, label: str) -> None:

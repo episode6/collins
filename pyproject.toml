@@ -25,6 +25,10 @@ classifiers = [
 #   sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91
 dependencies = []
 
+[project.optional-dependencies]
+# Auto-generated session titles (summarize first prompts via the Claude API).
+titles = ["anthropic"]
+
 [project.urls]
 Homepage = "https://github.com/r4nd3l/agent-session-manager"
 Issues = "https://github.com/r4nd3l/agent-session-manager/issues"

@@ -26,6 +26,7 @@ from .models import FAV_GROUP, SessionItem
 from .providers import available_providers
 from .sessions import Session, discover_sessions
 from .state import AppState, merge_project_order, move_in_order
+from .titles import TitleGenerator
 
 _DEBOUNCE_MS = 2000
 
@@ -64,6 +65,10 @@ class SessionStore(GObject.Object):
         self.resolved_project_order: list[str] = []
         self.show_hidden = False
 
+        # Delivers on the worker thread; hop to the main loop before mutating.
+        self._titles = TitleGenerator(
+            lambda session_id, title: GLib.idle_add(self._on_title_generated, session_id, title)
+        )
         self._items: dict[str, SessionItem] = {}
         self._last_sessions: list[Session] = []
         self._monitors: list[Gio.FileMonitor] = []
@@ -93,6 +98,27 @@ class SessionStore(GObject.Object):
         self._last_sessions = sessions
         self._apply()
         self._setup_monitors()  # pick up new project dirs
+        self._request_titles(sessions)
+        return GLib.SOURCE_REMOVE
+
+    def _request_titles(self, sessions: list[Session]) -> None:
+        """Queue background title generation for sessions that have no name
+        yet. A session whose transcript has no real user prompt yet is picked
+        up on a later refresh, once its preview appears."""
+        if not self.state.get_setting("auto_title_sessions"):
+            return
+        for session in sessions:
+            session_id = session.session_id
+            if (
+                session.preview
+                and not self.state.get_name(session_id)
+                and not self.state.get_generated_name(session_id)
+            ):
+                self._titles.submit(session_id, session.preview)
+
+    def _on_title_generated(self, session_id: str, title: str) -> bool:
+        self.state.set_generated_name(session_id, title)
+        self._apply()
         return GLib.SOURCE_REMOVE
 
     def _apply(self) -> None:
@@ -195,7 +221,12 @@ class SessionStore(GObject.Object):
                 item.set_property(prop, value)
 
     def display_name(self, session: Session) -> str:
-        return self.state.get_name(session.session_id) or session.preview or session.session_id[:8]
+        return (
+            self.state.get_name(session.session_id)
+            or self.state.get_generated_name(session.session_id)
+            or session.preview
+            or session.session_id[:8]
+        )
 
     # -- file monitoring -------------------------------------------------------
 
