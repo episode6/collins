@@ -239,7 +239,7 @@ def details_dialog(parent: Gtk.Widget, session: Session, title: str) -> None:
         add(_("Agent"), provider.name)
         add(_("Session ID"), session.session_id)
         add(_("Directory"), session.cwd or _("unknown"))
-        # Rows that some agents don't record (e.g. Cursor) are hidden when empty.
+        # Rows the transcript doesn't record are hidden when empty.
         if details.first_timestamp:
             add(_("Created"), format_timestamp(details.first_timestamp))
         if details.last_timestamp:

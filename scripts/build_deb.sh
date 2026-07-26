@@ -61,10 +61,10 @@ Installed-Size: $INSTALLED_SIZE
 Maintainer: Máté Molnár <molnar.mate@zengo.eu>
 Homepage: https://github.com/r4nd3l/agent-session-manager
 Description: Manage and resume AI coding agent sessions (GTK4 GUI)
- Native GTK4/libadwaita desktop app for AI coding-agent CLIs such as Claude
- Code and Cursor: browse all sessions grouped by project, name and star them,
- and resume any session in embedded terminal tabs. Unofficial community tool;
- the agents' own session data is never modified.
+ Native GTK4/libadwaita desktop app for the Claude Code CLI: browse all
+ sessions grouped by project, name and star them, and resume any session in
+ embedded terminal tabs. Unofficial community tool; the agent's own session
+ data is never modified.
 EOF
 
 dpkg-deb --build --root-owner-group "$BUILD" "$ROOT/dist/${PKG}_${VERSION}_all.deb"

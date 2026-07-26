@@ -1,8 +1,7 @@
 """Detect an agent's pending structured prompt by tailing its JSONL transcript.
 
 Backs the question card: an ``AskUserQuestion`` tool_use whose id has no matching
-``tool_result`` yet is a live, unanswered prompt. Only Claude Code emits these,
-so the model is a no-op for other providers. Tailing is incremental (byte
+``tool_result`` yet is a live, unanswered prompt. Tailing is incremental (byte
 offset) so it stays cheap on large, actively-written transcripts.
 """
 
@@ -20,9 +19,8 @@ class Question:
 
 
 class TranscriptModel:
-    def __init__(self, jsonl_path: str | Path | None, provider_id: str = "claude") -> None:
+    def __init__(self, jsonl_path: str | Path | None) -> None:
         self.path = Path(jsonl_path) if jsonl_path else None
-        self.provider_id = provider_id
         self._questions: dict[str, list] = {}  # tool_use_id -> questions payload
         self._order: list[str] = []  # question ids, arrival order
         self._resolved: set[str] = set()  # tool_use_ids that have a tool_result
@@ -40,7 +38,7 @@ class TranscriptModel:
 
     def update(self) -> bool:
         """Read newly-appended bytes and ingest them. Returns True if changed."""
-        if self.provider_id != "claude" or not self.path or not self.path.exists():
+        if not self.path or not self.path.exists():
             return False
         try:
             size = self.path.stat().st_size

@@ -418,12 +418,6 @@ msgstr "Csevegés a {name}-tal — minden fájlmódosítás és parancs előbb a
 msgid "New {name} chat ({mode})"
 msgstr "Új {name} csevegés ({mode})"
 
-msgid "ask, read-only"
-msgstr "kérdés, csak olvasható"
-
-msgid "trusted, auto-run"
-msgstr "megbízható, automatikus"
-
 msgid "Read-only chat with {name} — analyses and answers, never edits."
 msgstr "Csak olvasható csevegés a {name}-tal — elemez és válaszol, soha nem szerkeszt."
 

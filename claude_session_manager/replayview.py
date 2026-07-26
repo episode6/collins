@@ -23,9 +23,9 @@ _PLAY_INTERVAL_MS = 800
 class ReplayTab(Gtk.Box):
     """Steps through a recorded session's turns as chat bubbles."""
 
-    def __init__(self, session: Session, provider_id: str = "claude") -> None:
+    def __init__(self, session: Session) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
-        self._turns: list[Turn] = read_session_turns(session.jsonl_path, provider_id)
+        self._turns: list[Turn] = read_session_turns(session.jsonl_path)
         self._shown = 0
         self._play_source: int | None = None
 

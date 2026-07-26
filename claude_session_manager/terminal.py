@@ -268,7 +268,7 @@ class TerminalTab(Gtk.Box):
         self._paned.set_shrink_end_child(False)
         self.append(self._paned)
 
-        self._transcript = TranscriptModel(jsonl_path, self.provider.id)
+        self._transcript = TranscriptModel(jsonl_path)
 
         # Ctrl+Shift+C / Ctrl+Shift+V / Ctrl+Shift+G, terminal-style
         keys = Gtk.EventControllerKey()

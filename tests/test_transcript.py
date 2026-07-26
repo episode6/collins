@@ -35,7 +35,7 @@ def _answer_line(qid):
 def test_detects_pending_question(tmp_path):
     p = tmp_path / "s.jsonl"
     _write(p, [_question_line("q1")])
-    m = TranscriptModel(p, "claude")
+    m = TranscriptModel(p)
     assert m.update() is True
     pending = m.pending_question()
     assert pending is not None
@@ -46,7 +46,7 @@ def test_detects_pending_question(tmp_path):
 def test_resolved_question_is_not_pending(tmp_path):
     p = tmp_path / "s.jsonl"
     _write(p, [_question_line("q1"), _answer_line("q1")])
-    m = TranscriptModel(p, "claude")
+    m = TranscriptModel(p)
     m.update()
     assert m.pending_question() is None
 
@@ -54,7 +54,7 @@ def test_resolved_question_is_not_pending(tmp_path):
 def test_latest_unanswered_wins(tmp_path):
     p = tmp_path / "s.jsonl"
     _write(p, [_question_line("q1"), _answer_line("q1"), _question_line("q2")])
-    m = TranscriptModel(p, "claude")
+    m = TranscriptModel(p)
     m.update()
     assert m.pending_question().tool_use_id == "q2"
 
@@ -62,7 +62,7 @@ def test_latest_unanswered_wins(tmp_path):
 def test_incremental_resolution(tmp_path):
     p = tmp_path / "s.jsonl"
     _write(p, [_question_line("q1")])
-    m = TranscriptModel(p, "claude")
+    m = TranscriptModel(p)
     m.update()
     assert m.pending_question() is not None
     with p.open("a", encoding="utf-8") as fh:
@@ -71,24 +71,15 @@ def test_incremental_resolution(tmp_path):
     assert m.pending_question() is None
 
 
-def test_non_claude_provider_has_no_questions(tmp_path):
-    # Cursor transcripts have no AskUserQuestion; the model stays empty.
-    p = tmp_path / "c.jsonl"
-    _write(p, [{"role": "assistant", "message": {"content": [{"type": "text", "text": "hi"}]}}])
-    m = TranscriptModel(p, "cursor")
-    assert m.update() is False
-    assert m.pending_question() is None
-
-
 def test_no_change_when_nothing_new(tmp_path):
     p = tmp_path / "s.jsonl"
     _write(p, [_question_line("q1")])
-    m = TranscriptModel(p, "claude")
+    m = TranscriptModel(p)
     assert m.update() is True
     assert m.update() is False  # no new bytes
 
 
 def test_missing_file(tmp_path):
-    m = TranscriptModel(tmp_path / "nope.jsonl", "claude")
+    m = TranscriptModel(tmp_path / "nope.jsonl")
     assert m.update() is False
     assert m.pending_question() is None

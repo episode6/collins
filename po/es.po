@@ -418,12 +418,6 @@ msgstr "Chat con {name}: cada edición de archivo y comando pide tu permiso prim
 msgid "New {name} chat ({mode})"
 msgstr "Nuevo chat de {name} ({mode})"
 
-msgid "ask, read-only"
-msgstr "preguntar, solo lectura"
-
-msgid "trusted, auto-run"
-msgstr "de confianza, automático"
-
 msgid "Read-only chat with {name} — analyses and answers, never edits."
 msgstr "Chat de solo lectura con {name}: analiza y responde, nunca edita."
 

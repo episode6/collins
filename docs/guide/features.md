@@ -92,17 +92,6 @@ agents' own session files are never modified.
 - **Open in [Ghostty](https://ghostty.org)** to resume a session in an external
   Ghostty window instead of an embedded tab.
 
-## Multiple agents
-
-Agent Session Manager discovers sessions from every supported agent installed on
-your machine — currently **Claude Code** and **Cursor** — and lists them in one
-sidebar, each row badged with a small **agent icon**. Resuming a session always
-uses its own agent (`claude --resume` or `cursor-agent --resume`), and the **New
-Session** button's menu offers one entry per installed agent. Per-agent
-differences are handled automatically: closing a Claude tab asks it to `/exit`
-cleanly, Cursor tabs close directly, and forking is offered only where the agent
-supports it.
-
 ## Multiple windows
 
 Open additional windows from the New Session button's menu or with

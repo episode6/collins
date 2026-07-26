@@ -15,15 +15,13 @@ downloads of each version, see the
 - ✅ **Theming** — light/dark plus selectable terminal color palettes
 - ✅ **Localization** — English, Hungarian, German, Spanish, French
 - ✅ **Multi-window**
-- ✅ **Multi-agent** — a provider framework managing Claude Code and Cursor side by side
-- ✅ **Native chat** — token-streaming chat with interactive permission cards (Claude) and read-only / trusted Cursor chat; resume any session into a chat
+- ✅ **Native chat** — token-streaming chat with interactive permission cards; resume any session into a chat
 - ✅ **Session replay** — step through a transcript as native chat bubbles
 - ✅ **Prompt cards** — answer the agent's questions with native option cards over the terminal
 - ✅ **Distribution** — PyPI, AUR, Ubuntu PPA, `.deb`, one-step tag-driven releases
 
 ### Exploring next
 
-- 🔭 **More agents** — additional provider adapters beyond Claude Code and Cursor
 - 🔭 **Chat polish** — per-message copy, code syntax highlighting, model picker in the compose bar
 - 🔭 **Flathub** distribution
 

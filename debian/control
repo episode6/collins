@@ -19,10 +19,10 @@ Depends: ${python3:Depends},
          gir1.2-gtk-4.0,
          gir1.2-adw-1,
          gir1.2-vte-3.91
-Description: native GTK4 desktop app to manage AI coding agent sessions
- Agent Session Manager browses every AI coding-agent session (Claude Code,
- Cursor, …) on your machine in a sidebar grouped by project, lets you name and
- star them, and resumes any of them in embedded terminal tabs.
+Description: native GTK4 desktop app to manage Claude Code sessions
+ Agent Session Manager browses every Claude Code session on your machine in a
+ sidebar grouped by project, lets you name and star them, and resumes any of
+ them in embedded terminal tabs.
  .
  It is an unofficial community tool, not affiliated with Anthropic, and never
  modifies the agents' own session data.

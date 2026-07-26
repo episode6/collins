@@ -3,7 +3,7 @@
 Unlike `transcript.py` (which tails a *live* session only to detect a pending
 prompt), this does a one-shot full read and normalizes every conversational turn
 — text messages, tool-call chips, and AskUserQuestion prompts — into a list the
-replay view renders. Provider-aware and GTK-free (unit-tested).
+replay view renders. GTK-free (unit-tested).
 """
 
 from __future__ import annotations
@@ -11,9 +11,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-
-from .providers import _strip_user_query
-from .sessions import _extract_text
 
 _NOISE_TEXTS = {"No response requested.", "(no content)"}
 
@@ -94,27 +91,13 @@ def _parse_claude(entry: dict) -> list[Turn]:
     return turns
 
 
-def _parse_cursor(entry: dict) -> list[Turn]:
-    role = entry.get("role")
-    if role not in ("user", "assistant"):
-        return []
-    text = _extract_text((entry.get("message") or {}).get("content"))
-    if role == "user":
-        text = _strip_user_query(text)
-    text = _clean(text)
-    if text and not text.startswith("<"):
-        return [Turn(role, "message", text=text)]
-    return []
-
-
-def read_session_turns(jsonl_path: str | Path | None, provider_id: str = "claude") -> list[Turn]:
+def read_session_turns(jsonl_path: str | Path | None) -> list[Turn]:
     """Parse a whole transcript into ordered renderable turns."""
     if not jsonl_path:
         return []
     path = Path(jsonl_path)
     if not path.exists():
         return []
-    parse = _parse_cursor if provider_id == "cursor" else _parse_claude
     turns: list[Turn] = []
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
@@ -127,7 +110,7 @@ def read_session_turns(jsonl_path: str | Path | None, provider_id: str = "claude
                 except (json.JSONDecodeError, ValueError):
                     continue
                 if isinstance(entry, dict):
-                    turns.extend(parse(entry))
+                    turns.extend(_parse_claude(entry))
     except OSError:
         pass
     return turns

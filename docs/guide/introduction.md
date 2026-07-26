@@ -1,9 +1,7 @@
 # What is Agent Session Manager?
 
-Agent Session Manager is a native Linux desktop app that gives your AI
-coding-agent sessions a proper home. It supports
-[Claude Code](https://claude.com/claude-code) and
-[Cursor](https://cursor.com), side by side.
+Agent Session Manager is a native Linux desktop app that gives your
+[Claude Code](https://claude.com/claude-code) sessions a proper home.
 
 ![Agent Session Manager](https://raw.githubusercontent.com/r4nd3l/agent-session-manager/main/data/screenshot.png)
 

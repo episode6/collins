@@ -26,28 +26,16 @@ def test_session_from_file_claude(tmp_path):
     assert session.cwd == "/proj"
 
 
-def test_session_from_file_cursor(tmp_path):
-    p = tmp_path / "xyz.jsonl"
-    p.write_text(
-        json.dumps({"role": "user", "message": {"content": [{"type": "text", "text": "hi"}]}}) + "\n",
-        encoding="utf-8",
-    )
-    session = session_from_file(p)
-    assert session is not None and session.provider == "cursor"  # from top-level "role"
-
-
 def test_session_from_file_missing(tmp_path):
     assert session_from_file(tmp_path / "nope.jsonl") is None
 
 
 @pytest.fixture(autouse=True)
 def _isolate_claude(monkeypatch):
-    """These are Claude-discovery tests: force Claude available regardless of
-    PATH, and keep Cursor from scanning the real ~/.cursor."""
+    """These are Claude-discovery tests: force Claude available regardless of PATH."""
     import claude_session_manager.providers as providers_mod
 
     monkeypatch.setattr(providers_mod.ClaudeProvider, "available", lambda self: True)
-    monkeypatch.setattr(providers_mod.CursorProvider, "available", lambda self: False)
 
 
 def test_discover_finds_only_real_sessions(projects_dir):

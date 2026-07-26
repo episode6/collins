@@ -164,8 +164,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Chat with {name} — every file edit and command asks your permission first.":
             "Csevegés a {name}-tal — minden fájlmódosítás és parancs előbb az engedélyedet kéri.",
         "New {name} chat ({mode})": "Új {name} csevegés ({mode})",
-        "ask, read-only": "kérdés, csak olvasható",
-        "trusted, auto-run": "megbízható, automatikus",
         "Read-only chat with {name} — analyses and answers, never edits.":
             "Csak olvasható csevegés a {name}-tal — elemez és válaszol, soha nem szerkeszt.",
         "Chat with {name} — ⚠ runs edits and commands automatically, without asking.":
@@ -370,8 +368,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Chat with {name} — every file edit and command asks your permission first.":
             "Chat mit {name} — jede Dateiänderung und jeder Befehl fragt zuerst um Erlaubnis.",
         "New {name} chat ({mode})": "Neuer {name}-Chat ({mode})",
-        "ask, read-only": "fragen, schreibgeschützt",
-        "trusted, auto-run": "vertraut, automatisch",
         "Read-only chat with {name} — analyses and answers, never edits.":
             "Schreibgeschützter Chat mit {name} — analysiert und antwortet, bearbeitet nie.",
         "Chat with {name} — ⚠ runs edits and commands automatically, without asking.":
@@ -578,8 +574,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Chat with {name} — every file edit and command asks your permission first.":
             "Chat con {name}: cada edición de archivo y comando pide tu permiso primero.",
         "New {name} chat ({mode})": "Nuevo chat de {name} ({mode})",
-        "ask, read-only": "preguntar, solo lectura",
-        "trusted, auto-run": "de confianza, automático",
         "Read-only chat with {name} — analyses and answers, never edits.":
             "Chat de solo lectura con {name}: analiza y responde, nunca edita.",
         "Chat with {name} — ⚠ runs edits and commands automatically, without asking.":
@@ -786,8 +780,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Discussion avec {name} — chaque modification de fichier et commande "
             "demande d'abord votre permission.",
         "New {name} chat ({mode})": "Nouvelle discussion {name} ({mode})",
-        "ask, read-only": "questions, lecture seule",
-        "trusted, auto-run": "de confiance, automatique",
         "Read-only chat with {name} — analyses and answers, never edits.":
             "Discussion en lecture seule avec {name} — analyse et répond, ne modifie jamais.",
         "Chat with {name} — ⚠ runs edits and commands automatically, without asking.":
