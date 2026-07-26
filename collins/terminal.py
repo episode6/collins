@@ -247,6 +247,7 @@ class TerminalTab(Gtk.Box):
         self._poll_source: int | None = None
         self._resolver_source: int | None = None
         self._resolver_attempts = 0
+        self._resolver_cwd: str | None = None  # set iff this tab resolves its own transcript
         self._known_transcripts: set[Path] = set()  # transcripts predating this tab
         self._updating = False  # an off-thread transcript parse is in flight
         self._current_question_id: str | None = None  # question the card is showing
@@ -646,25 +647,41 @@ class TerminalTab(Gtk.Box):
     def _start_transcript_resolver(self, cwd: str | None) -> None:
         if not cwd:
             return
-        # A brand-new session must attach to a transcript that didn't exist
-        # when the tab started — the newest *existing* one belongs to some other
-        # session. `--continue` (command_override) reuses the newest existing
+        self._resolver_cwd = cwd
+        # The transcript only appears once the first prompt is sent, which can
+        # be arbitrarily long after the tab opens. Poll for as long as the tab
+        # is in the foreground; in the background allow ~3 min before pausing,
+        # and resume whenever the tab is brought back.
+        self.connect("map", lambda *_: self._arm_transcript_resolver())
+        self._arm_transcript_resolver()
+
+    def _arm_transcript_resolver(self) -> None:
+        if self._resolver_cwd is None or self.session_id is not None:
+            return  # never started for this tab, or already resolved
+        self._resolver_attempts = 0
+        if self._resolver_source is not None:
+            return  # already polling; just refresh the background budget
+        # A brand-new session must attach to a transcript that appeared while
+        # polling: the newest one *existing* at (re)start belongs to some other
+        # session — a submitted prompt creates the file well within the ~3 min
+        # background budget, so anything from a pause can't be ours either.
+        # `--continue` (command_override) reuses the newest existing
         # transcript, which is exactly the session it resumes.
         self._known_transcripts = (
-            set(self.provider.transcripts_for_cwd(cwd))
+            set(self.provider.transcripts_for_cwd(self._resolver_cwd))
             if self._command_override is None
             else set()
         )
-        self._resolver_attempts = 0
-        self._resolver_source = GLib.timeout_add(1500, lambda: self._resolve_transcript(cwd))
+        self._resolver_source = GLib.timeout_add(1500, self._resolve_transcript)
 
-    def _resolve_transcript(self, cwd: str) -> bool:
+    def _resolve_transcript(self) -> bool:
         if self.get_root() is None:
             self._resolver_source = None
             return GLib.SOURCE_REMOVE
-        self._resolver_attempts += 1
         cands = [
-            p for p in self.provider.transcripts_for_cwd(cwd) if p not in self._known_transcripts
+            p
+            for p in self.provider.transcripts_for_cwd(self._resolver_cwd)
+            if p not in self._known_transcripts
         ]
         try:
             path = max(cands, key=lambda p: p.stat().st_mtime, default=None)
@@ -677,9 +694,13 @@ class TerminalTab(Gtk.Box):
                 self.emit("session-resolved", self.session_id)
             self._resolver_source = None
             return GLib.SOURCE_REMOVE
-        if self._resolver_attempts > 120:  # ~3 min, give up
-            self._resolver_source = None
-            return GLib.SOURCE_REMOVE
+        if self.get_mapped():
+            self._resolver_attempts = 0  # foreground tab: keep polling indefinitely
+        else:
+            self._resolver_attempts += 1
+            if self._resolver_attempts > 120:  # ~3 min in the background: pause until next map
+                self._resolver_source = None
+                return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
 
     # -- secondary terminal panel ------------------------------------------
