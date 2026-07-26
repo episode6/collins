@@ -73,6 +73,48 @@ def test_discover_skips_title_scratch_project(projects_dir, app_state):
     assert {s.session_id for s in discover_sessions()} == set(ids.values())
 
 
+def test_discover_skips_metadata_only_stubs(projects_dir):
+    # Claude's worktree agent runs leave transcripts holding only ai-title /
+    # agent-name lines: no cwd, no user message. They can't be resumed and
+    # would otherwise surface phantom projects named after the worktree path.
+    import json as _json
+    import uuid as _uuid
+
+    root, ids = projects_dir
+    stub_project = root / "-home-user-alpha--claude-worktrees-some-branch"
+    stub_project.mkdir()
+    sid = str(_uuid.uuid4())
+    lines = [
+        {"type": "ai-title", "aiTitle": "Some title", "sessionId": sid},
+        {"type": "agent-name", "agentName": "Some title", "sessionId": sid},
+    ]
+    (stub_project / f"{sid}.jsonl").write_text(
+        "\n".join(_json.dumps(line) for line in lines), encoding="utf-8"
+    )
+    assert {s.session_id for s in discover_sessions()} == set(ids.values())
+
+
+def test_discover_keeps_session_with_preview_but_no_cwd(projects_dir):
+    # Only fully-metadata stubs are dropped: a transcript with a real user
+    # message still surfaces even if no line carries a cwd.
+    import json as _json
+    import uuid as _uuid
+
+    root, ids = projects_dir
+    sid = str(_uuid.uuid4())
+    lines = [
+        {
+            "type": "user",
+            "timestamp": "2026-06-01T10:00:00.000Z",
+            "message": {"role": "user", "content": "Do the thing"},
+        },
+    ]
+    (root / "-home-user-alpha" / f"{sid}.jsonl").write_text(
+        "\n".join(_json.dumps(line) for line in lines), encoding="utf-8"
+    )
+    assert sid in {s.session_id for s in discover_sessions()}
+
+
 def test_discover_extracts_cwd_and_preview(projects_dir):
     _root, ids = projects_dir
     by_id = {s.session_id: s for s in discover_sessions()}
