@@ -86,6 +86,10 @@ class MainWindow(Adw.ApplicationWindow):
         # Tabs whose session id was just resolved, waiting for the store to
         # discover the session: page -> (session id, title at resolution).
         self._pending_resolved: dict[Adw.TabPage, tuple[str, str]] = {}
+        # New-session tabs shown as "New Thread" placeholder rows in the
+        # sidebar until the store discovers their session: page -> placeholder id.
+        self._placeholder_pages: dict[Adw.TabPage, str] = {}
+        self._placeholder_seq = 0
         # Tabs renamed locally before their session was bound: never auto-sync
         # their titles from the store.
         self._local_titles: set[Adw.TabPage] = set()
@@ -186,6 +190,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("open-many", self._on_sidebar_open_many)
         self.sidebar.connect("trash-many", self._on_sidebar_trash_many)
         self.sidebar.connect("hide-many", self._on_sidebar_hide_many)
+        self.sidebar.connect("open-placeholder", self._on_sidebar_open_placeholder)
+        self.sidebar.connect("close-placeholder", self._on_sidebar_close_placeholder)
         self.store.connect("refreshed", self._on_store_refreshed)
 
         self.sidebar.set_size_request(220, -1)  # minimum drag width
@@ -533,11 +539,44 @@ class MainWindow(Adw.ApplicationWindow):
             cwd=cwd, session_id=None, settings=self.state.settings, provider=provider,
             options=options,
         )
-        self._add_tab(
+        page = self._add_tab(
             tab,
             GLib.path_get_basename(cwd),
             f"new {provider.name} session — {cwd}",
         )
+        self._add_placeholder(page, cwd)
+
+    # -- sidebar placeholders for unresolved new-session tabs ----------------
+
+    def _add_placeholder(self, page: Adw.TabPage, cwd: str) -> None:
+        """Give a fresh new-session tab a transient "New Thread" sidebar row
+        until the store discovers the real session."""
+        self._placeholder_seq += 1
+        placeholder_id = f"placeholder-{self._placeholder_seq}"
+        self._placeholder_pages[page] = placeholder_id
+        self.sidebar.add_placeholder(placeholder_id, cwd)
+        self._update_active_row()
+
+    def _remove_placeholder(self, page: Adw.TabPage) -> None:
+        placeholder_id = self._placeholder_pages.pop(page, None)
+        if placeholder_id is not None:
+            self.sidebar.remove_placeholder(placeholder_id)
+
+    def _placeholder_page(self, placeholder_id: str) -> Adw.TabPage | None:
+        for page, pid in self._placeholder_pages.items():
+            if pid == placeholder_id:
+                return page
+        return None
+
+    def _on_sidebar_open_placeholder(self, _sidebar, placeholder_id: str) -> None:
+        page = self._placeholder_page(placeholder_id)
+        if page is not None:
+            self.tab_view.set_selected_page(page)
+
+    def _on_sidebar_close_placeholder(self, _sidebar, placeholder_id: str) -> None:
+        page = self._placeholder_page(placeholder_id)
+        if page is not None:  # usual close flow: busy tabs confirm first
+            self.tab_view.close_page(page)
 
     # -- advanced new session / continue -----------------------------------
 
@@ -631,12 +670,14 @@ class MainWindow(Adw.ApplicationWindow):
             if session is None:
                 continue  # not scanned yet; retried on the next store refresh
             del self._pending_resolved[page]
+            self._remove_placeholder(page)  # the real sidebar row exists now
             if page.get_title() == title:  # keep any manual rename/emoji
                 page.set_title(self._tab_title(session))
             else:
                 self._local_titles.add(page)
             page.set_tooltip(f"{session.project_name} — {session.session_id}")
             self._sync_status(session_id)
+        self._update_active_row()  # hand the highlight from placeholder to real row
 
     def _refresh_tab_titles(self) -> None:
         """Keep tab titles in sync with the store: auto-generated titles arrive
@@ -840,10 +881,14 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.update_footer()
 
     def _update_active_row(self) -> None:
-        """Tell the sidebar which session the selected tab is showing."""
+        """Tell the sidebar which session (or new-session placeholder) the
+        selected tab is showing. A tab keeps its placeholder highlighted even
+        after resolving, until the store discovers the session's real row."""
         page = self.tab_view.get_selected_page()
-        session_id = self._session_id_of(page) if page is not None else None
-        self.sidebar.set_active_session(session_id)
+        row_id = None
+        if page is not None:
+            row_id = self._placeholder_pages.get(page) or self._session_id_of(page)
+        self.sidebar.set_active_session(row_id)
 
     def _session_id_of(self, page: Adw.TabPage) -> str | None:
         tab = page.get_child()
@@ -1041,6 +1086,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._close_ok.discard(page)
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
+        self._remove_placeholder(page)
         self._local_titles.discard(page)
         self._cancel_idle(page)
         if isinstance(tab, TerminalTab):

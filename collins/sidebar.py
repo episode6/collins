@@ -8,10 +8,12 @@ Rows bind to SessionItem properties, so renames/stars/status changes update
 in place; the list is only rebuilt when the store reports an order change.
 
 Emits:
-  open-session   (SessionItem, bool fork)
-  open-many      (list[SessionItem])
-  trash-many     (list[SessionItem])
-  hide-many      (list[SessionItem])
+  open-session     (SessionItem, bool fork)
+  open-many        (list[SessionItem])
+  trash-many       (list[SessionItem])
+  hide-many        (list[SessionItem])
+  open-placeholder  (str placeholder id)
+  close-placeholder (str placeholder id)
 """
 
 from __future__ import annotations
@@ -137,6 +139,45 @@ class GroupHeaderRow(Gtk.ListBoxRow):
 
     def _on_drag_begin(self, source: Gtk.DragSource, _drag: Gdk.Drag) -> None:
         source.set_icon(Gtk.WidgetPaintable.new(self), 0, 0)
+
+
+class PlaceholderRow(Gtk.ListBoxRow):
+    """Transient stand-in for a just-opened tab whose session id is still
+    unknown (no transcript on disk yet). Swapped for a real SessionRow once
+    the store discovers the session."""
+
+    def __init__(self, placeholder_id: str, group_key: tuple, sidebar: SessionSidebar) -> None:
+        super().__init__()
+        self.placeholder_id = placeholder_id
+        self.group_key = group_key
+        self.add_css_class("session-child")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        box.set_margin_top(4)  # match SessionRow: the flat button fills the row
+        box.set_margin_bottom(4)
+
+        dot = Gtk.Box(valign=Gtk.Align.CENTER)
+        dot.add_css_class("status-dot")
+        dot.add_css_class("open")
+        box.append(dot)
+
+        label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
+        label.set_margin_start(8)  # match SessionRow's name label
+        label.add_css_class("dim-label")
+        label.set_ellipsize(_ELLIPSIZE_END)
+        box.append(label)
+
+        # There is no session to hide yet, so the hide button closes the tab
+        # instead (through the usual busy-tab confirmation flow).
+        close_btn = Gtk.Button(icon_name="view-conceal-symbolic", valign=Gtk.Align.CENTER)
+        close_btn.add_css_class("flat")
+        close_btn.set_tooltip_text(_("Close tab"))
+        close_btn.connect(
+            "clicked", lambda *_: sidebar.emit("close-placeholder", placeholder_id)
+        )
+        box.append(close_btn)
+
+        self.set_child(box)
 
 
 class SessionRow(Gtk.ListBoxRow):
@@ -266,6 +307,8 @@ class SessionSidebar(Gtk.Box):
         "open-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "trash-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "hide-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
+        "open-placeholder": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        "close-placeholder": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(self, store: SessionStore) -> None:
@@ -278,6 +321,8 @@ class SessionSidebar(Gtk.Box):
         self._selected: set[str] = set()
         self._rows: dict[str, SessionRow] = {}
         self._header_rows: dict[tuple, GroupHeaderRow] = {}
+        self._placeholders: dict[str, str] = {}  # placeholder id -> cwd
+        self._placeholder_rows: dict[str, PlaceholderRow] = {}
         self._active_session_id: str | None = None
         self.show_folder_path = bool(store.state.get_setting("show_folder_path"))
 
@@ -388,7 +433,9 @@ class SessionSidebar(Gtk.Box):
             self._rebuild_rows()
         self._update_selection_label()
         self._invalidate()
-        self._content_stack.set_visible_child_name("empty" if not store.sessions else "list")
+        self._content_stack.set_visible_child_name(
+            "empty" if not (store.sessions or self._placeholders) else "list"
+        )
         self.update_footer()
 
     def update_footer(self) -> None:
@@ -416,6 +463,7 @@ class SessionSidebar(Gtk.Box):
         self.list.remove_all()
         self._rows = {}
         self._header_rows = {}
+        self._placeholder_rows = {}
 
         # Directory per project group (from its most recent session with a
         # cwd), so headers can offer a "new session here" button. Favorites
@@ -443,24 +491,43 @@ class SessionSidebar(Gtk.Box):
             elif key in empty_by_key:
                 headers.append((key, *empty_by_key[key]))
 
+        # Transient "New Thread" rows for tabs whose session isn't resolved
+        # yet, grouped under the project of their working directory. A project
+        # with no sessions on disk still needs a header to hang them from.
+        placeholders_by_group: dict[tuple, list[str]] = {}
+        for pid, cwd in self._placeholders.items():
+            placeholders_by_group.setdefault(self._placeholder_group_key(cwd), []).append(pid)
+        known_keys = {key for key, _label, _cwd in headers}
+        for key, pids in placeholders_by_group.items():
+            if key not in known_keys:
+                headers.append((key, key[1], self._placeholders[pids[0]]))
+
         # Expansion is persisted per group; unknown groups start collapsed.
         self._collapsed = {
             key
             for key, _label, _cwd in headers
             if not self.store.state.is_group_expanded(_group_state_key(key))
         }
+        # Keep just-opened tabs visible: their groups ignore a collapsed state.
+        self._collapsed -= set(placeholders_by_group)
 
         for key, label, cwd in headers:
             header = GroupHeaderRow(
                 key,
                 label,
-                self.store.group_counts.get(key, 0),
+                self.store.group_counts.get(key, 0) + len(placeholders_by_group.get(key, ())),
                 key in self._collapsed,
                 cwd=cwd,
                 sidebar=self,
             )
             self._header_rows[key] = header
             self.list.append(header)
+            for pid in placeholders_by_group.get(key, ()):
+                prow = PlaceholderRow(pid, key, self)
+                if pid == self._active_session_id:
+                    prow.add_css_class("active-tab")
+                self._placeholder_rows[pid] = prow
+                self.list.append(prow)
             for item in items_by_group.get(key, []):
                 row = SessionRow(item, self)
                 if item.session_id == self._active_session_id:
@@ -475,16 +542,42 @@ class SessionSidebar(Gtk.Box):
             row.check.set_active(row.item.session_id in self._selected)
 
     def set_active_session(self, session_id: str | None) -> None:
-        """Highlight the row of the session shown in the currently selected tab."""
+        """Highlight the row of the session (or new-session placeholder)
+        shown in the currently selected tab."""
         if session_id == self._active_session_id:
             return
-        previous = self._rows.get(self._active_session_id)
+        previous = self._row_for(self._active_session_id)
         if previous is not None:
             previous.remove_css_class("active-tab")
         self._active_session_id = session_id
-        row = self._rows.get(session_id)
+        row = self._row_for(session_id)
         if row is not None:
             row.add_css_class("active-tab")
+
+    def _row_for(self, row_id: str | None) -> Gtk.ListBoxRow | None:
+        return self._rows.get(row_id) or self._placeholder_rows.get(row_id)
+
+    # -- new-session placeholders ---------------------------------------------
+
+    @staticmethod
+    def _placeholder_group_key(cwd: str) -> tuple:
+        """Group a placeholder the way Session.project_name groups sessions."""
+        return ("proj", Path(cwd).name or cwd)
+
+    def add_placeholder(self, placeholder_id: str, cwd: str) -> None:
+        """Show a transient "New Thread" row for a tab with no session yet."""
+        self._placeholders[placeholder_id] = cwd
+        self._rebuild_rows()
+        self._invalidate()
+        self._content_stack.set_visible_child_name("list")
+
+    def remove_placeholder(self, placeholder_id: str) -> None:
+        if self._placeholders.pop(placeholder_id, None) is None:
+            return
+        self._rebuild_rows()
+        self._invalidate()
+        if not self.store.sessions and not self._placeholders:
+            self._content_stack.set_visible_child_name("empty")
 
     def focus_search(self) -> None:
         self.search_entry.grab_focus()
@@ -506,6 +599,10 @@ class SessionSidebar(Gtk.Box):
         if isinstance(row, GroupHeaderRow):
             # Headers stay visible when collapsed; during search, only for groups with matches.
             return self._group_has_match(row.group_key, query) if query else True
+        if isinstance(row, PlaceholderRow):
+            # Nothing to search yet; the group itself is never collapsed while
+            # it holds a placeholder, but respect a collapse made afterwards.
+            return not query and row.group_key not in self._collapsed
         if query:
             return query in row.item.search_text  # search ignores collapsed state
         return row.item.group_key not in self._collapsed
@@ -557,7 +654,7 @@ class SessionSidebar(Gtk.Box):
         row = self.list.get_row_at_y(int(y))
         if row is None:  # pointer below the last row
             return None, self._last_visible_row(), False
-        key = row.group_key if isinstance(row, GroupHeaderRow) else row.item.group_key
+        key = row.item.group_key if isinstance(row, SessionRow) else row.group_key
         if key == FAV_GROUP:  # favorites stays pinned first
             return names[0], self._header_rows.get(("proj", names[0])), True
         name = key[1]
@@ -601,6 +698,10 @@ class SessionSidebar(Gtk.Box):
     def _on_row_activated(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         if isinstance(row, GroupHeaderRow):
             self._toggle_group(row.group_key)
+            return
+        if isinstance(row, PlaceholderRow):
+            if not self._selection_mode:  # focus the still-unbound tab
+                self.emit("open-placeholder", row.placeholder_id)
             return
         if self._selection_mode:
             row.check.set_active(not row.check.get_active())
