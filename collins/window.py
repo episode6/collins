@@ -108,8 +108,9 @@ class MainWindow(Adw.ApplicationWindow):
         tab_menu.append(_("Close"), "win.close-menu-tab")
         self.tab_view.set_menu_model(tab_menu)
 
-        tab_bar = Adw.TabBar(view=self.tab_view)
-        tab_bar.set_autohide(False)
+        self.tab_bar = Adw.TabBar(view=self.tab_view)
+        self.tab_bar.set_autohide(False)
+        self.tab_bar.set_visible(bool(self.state.get_setting("show_tab_bar")))
 
         content_header = Adw.HeaderBar()
         self.sidebar_toggle = Gtk.ToggleButton(icon_name="sidebar-show-symbolic", active=True)
@@ -144,6 +145,14 @@ class MainWindow(Adw.ApplicationWindow):
         new_btn = Adw.SplitButton(icon_name="tab-new-symbolic")
         new_btn.set_tooltip_text(_("New session (Ctrl+Shift+T)"))
         new_btn.set_menu_model(new_menu)
+        self.tab_bar_toggle = Gtk.ToggleButton(
+            icon_name="view-paged-symbolic",
+            active=self.tab_bar.get_visible(),
+        )
+        self.tab_bar_toggle.set_tooltip_text(_("Show or hide the tab bar"))
+        self.tab_bar_toggle.connect("toggled", self._on_tab_bar_toggled)
+        content_header.pack_start(self.tab_bar_toggle)
+
         new_btn.connect("clicked", lambda *_: self._new_session())
         content_header.pack_start(new_btn)
 
@@ -168,7 +177,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         content_view = Adw.ToolbarView()
         content_view.add_top_bar(content_header)
-        content_view.add_top_bar(tab_bar)
+        content_view.add_top_bar(self.tab_bar)
         content_view.set_content(self.content_stack)
 
         # --- sidebar ---
@@ -697,6 +706,12 @@ class MainWindow(Adw.ApplicationWindow):
         """Mirror the sidebar status dot onto the tab itself."""
         status = "attention" if page.get_needs_attention() else "open"
         page.set_icon(_status_icon(status))
+
+    def _on_tab_bar_toggled(self, button: Gtk.ToggleButton) -> None:
+        """Purely visual: the tabs (and their sessions) keep running underneath."""
+        show = button.get_active()
+        self.tab_bar.set_visible(show)
+        self.state.set_setting("show_tab_bar", show)
 
     def _close_current_tab(self) -> None:
         page = self.tab_view.get_selected_page()

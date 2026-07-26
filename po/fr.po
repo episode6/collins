@@ -392,6 +392,9 @@ msgstr "Fermer"
 msgid "Toggle sidebar (F9)"
 msgstr "Afficher/masquer la barre latérale (F9)"
 
+msgid "Show or hide the tab bar"
+msgstr "Afficher ou masquer la barre d’onglets"
+
 msgid "New {name} session…"
 msgstr "Nouvelle session {name}…"
 

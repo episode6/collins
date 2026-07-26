@@ -392,6 +392,9 @@ msgstr "Cerrar"
 msgid "Toggle sidebar (F9)"
 msgstr "Mostrar u ocultar la barra lateral (F9)"
 
+msgid "Show or hide the tab bar"
+msgstr "Mostrar u ocultar la barra de pestañas"
+
 msgid "New {name} session…"
 msgstr "Nueva sesión de {name}…"
 

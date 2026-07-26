@@ -392,6 +392,9 @@ msgstr "Bezárás"
 msgid "Toggle sidebar (F9)"
 msgstr "Oldalsáv ki/be (F9)"
 
+msgid "Show or hide the tab bar"
+msgstr "Lapsáv megjelenítése vagy elrejtése"
+
 msgid "New {name} session…"
 msgstr "Új {name} munkamenet…"
 
