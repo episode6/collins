@@ -12,6 +12,7 @@ from claude_session_manager.sessions import (
     export_markdown,
     parse_details,
     read_mcp_config,
+    resume_cwd,
     session_from_file,
 )
 
@@ -245,6 +246,39 @@ def test_tail_state_user_replied_after_question(monkeypatch, tmp_path):
     )
     state = next(s.state for s in sessions_mod.discover_sessions() if s.session_id == sid)
     assert state == ""  # user already replied → not waiting
+
+
+def _write_transcript(path, cwds):
+    lines = [
+        json.dumps({"type": "user", "message": {"content": f"msg {i}"}, "cwd": cwd})
+        for i, cwd in enumerate(cwds)
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_resume_cwd_prefers_last_transcript_cwd(tmp_path):
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    p = tmp_path / "abc.jsonl"
+    _write_transcript(p, ["/proj", str(worktree)])
+    session = session_from_file(p)
+    assert session.cwd == "/proj"  # sidebar grouping keeps the starting dir
+    assert resume_cwd(session) == str(worktree)
+
+
+def test_resume_cwd_falls_back_when_last_dir_gone(tmp_path):
+    p = tmp_path / "abc.jsonl"
+    _write_transcript(p, ["/proj", str(tmp_path / "removed-worktree")])
+    session = session_from_file(p)
+    assert resume_cwd(session) == "/proj"
+
+
+def test_resume_cwd_without_cwd_entries(tmp_path):
+    p = tmp_path / "abc.jsonl"
+    p.write_text(json.dumps({"type": "user", "message": {"content": "hi"}}) + "\n",
+                 encoding="utf-8")
+    session = session_from_file(p)
+    assert resume_cwd(session) is None  # nothing recorded anywhere -> None
 
 
 def test_export_markdown(projects_dir):
