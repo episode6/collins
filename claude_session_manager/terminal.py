@@ -75,6 +75,9 @@ class TerminalTab(Gtk.Box):
         self.terminal.set_mouse_autohide(True)
         self.terminal.connect("child-exited", self._on_child_exited)
 
+        self._easy_copy_paste = False
+        self._setup_context_menu()
+
         self._search_bar = self._build_search_bar()
         self.append(self._search_bar)
 
@@ -157,6 +160,50 @@ class TerminalTab(Gtk.Box):
 
     def _on_child_exited(self, terminal: Vte.Terminal, status: int) -> None:
         self.emit("process-exited", status)
+
+    # -- copy & paste ------------------------------------------------------
+
+    def _setup_context_menu(self) -> None:
+        actions = Gio.SimpleActionGroup()
+        self._copy_action = Gio.SimpleAction.new("copy", None)
+        self._copy_action.connect(
+            "activate", lambda *_: self.terminal.copy_clipboard_format(Vte.Format.TEXT)
+        )
+        actions.add_action(self._copy_action)
+        paste = Gio.SimpleAction.new("paste", None)
+        paste.connect("activate", lambda *_: self.terminal.paste_clipboard())
+        actions.add_action(paste)
+        select_all = Gio.SimpleAction.new("select-all", None)
+        select_all.connect("activate", lambda *_: self.terminal.select_all())
+        actions.add_action(select_all)
+        self.terminal.insert_action_group("term", actions)
+
+        # Capture phase, so the menu wins over apps that request mouse events
+        # (matching GNOME Terminal's right-click behaviour).
+        right_click = Gtk.GestureClick(button=3)
+        right_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        right_click.connect("pressed", self._on_right_click)
+        self.terminal.add_controller(right_click)
+
+    def _on_right_click(self, gesture: Gtk.GestureClick, _n_press, x: float, y: float) -> None:
+        if not self._easy_copy_paste:  # leave the click to VTE / the running app
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self._copy_action.set_enabled(self.terminal.get_has_selection())
+
+        menu = Gio.Menu()
+        menu.append(_("Copy"), "term.copy")
+        menu.append(_("Paste"), "term.paste")
+        menu.append(_("Select All"), "term.select-all")
+
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(self.terminal)
+        popover.set_has_arrow(False)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        popover.popup()
 
     # -- search bar --------------------------------------------------------
 
@@ -393,6 +440,7 @@ class TerminalTab(Gtk.Box):
         except (TypeError, ValueError):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
+        self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
 
     def feed_message(self, text: str) -> None:
         self.terminal.feed(f"\r\n\x1b[1;33m[session manager]\x1b[0m {text}\r\n".encode())
@@ -414,6 +462,16 @@ class TerminalTab(Gtk.Box):
         ):
             self.terminal.feed_child(b"\x1b\r")
             return True
+
+        # Easy copy & paste (Black Box-style): Ctrl+C copies when text is
+        # selected — otherwise it falls through as SIGINT — and Ctrl+V pastes.
+        if self._easy_copy_paste and ctrl and not shift:
+            if keyval == Gdk.KEY_c and self.terminal.get_has_selection():
+                self.terminal.copy_clipboard_format(Vte.Format.TEXT)
+                return True
+            if keyval == Gdk.KEY_v:
+                self.terminal.paste_clipboard()
+                return True
 
         if ctrl and shift:
             if keyval == Gdk.KEY_C:

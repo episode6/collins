@@ -53,6 +53,10 @@ agents' own session files are never modified.
   (`--fork-session`) from the right-click menu.
 - **Shift+Enter** inserts a newline in the agent's prompt.
 - **In-terminal search** (`Ctrl+Shift+G`) over the scrollback.
+- **Copy & paste**: `Ctrl+Shift+C` / `Ctrl+Shift+V`, plus an optional
+  **easy copy & paste** mode (Preferences): `Ctrl+C` copies when text is
+  selected — otherwise interrupts as usual — `Ctrl+V` pastes, and
+  right-click opens a Copy / Paste / Select All menu.
 - Closing a tab asks the agent to **exit cleanly** (Claude Code's `/exit`) in
   the background first, rather than terminating it.
 - A **close-all-tabs** button appears when more than one tab is open.
@@ -107,10 +111,11 @@ and live updates stay consistent across them.
 
 ## Preferences
 
-Terminal **font**, **scrollback** size, **color scheme** (system / light /
-dark), a **terminal color theme** (Dracula, Solarized, Gruvbox, Nord,
-Catppuccin, Tokyo Night, Monokai, One Dark…), the **language** (English,
-Magyar, Deutsch, Español, Français), and the idle-notification toggle —
-reachable from the menu or `Ctrl+,`.
+Terminal **font**, **scrollback** size, **easy copy & paste**, **color
+scheme**
+(system / light / dark), a **terminal color theme** (Dracula, Solarized,
+Gruvbox, Nord, Catppuccin, Tokyo Night, Monokai, One Dark…), the **language**
+(English, Magyar, Deutsch, Español, Français), and the idle-notification
+toggle — reachable from the menu or `Ctrl+,`.
 
 ![Preferences dialog](/img/preferences.png)

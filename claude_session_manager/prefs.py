@@ -104,6 +104,20 @@ class PreferencesDialog(Adw.PreferencesDialog):
         scroll_row.connect("notify::value", self._on_scrollback_changed)
         terminal_group.add(scroll_row)
 
+        # use_markup off, and set before the title: the bare "&" in the title
+        # is not valid Pango markup.
+        self._easy_copy_row = Adw.SwitchRow(use_markup=False)
+        self._easy_copy_row.set_title(_("Easy copy & paste"))
+        self._easy_copy_row.set_subtitle(
+            _(
+                "Ctrl+C copies selected text (otherwise interrupts as usual), "
+                "Ctrl+V pastes, and right-click opens a copy/paste menu"
+            )
+        )
+        self._easy_copy_row.set_active(bool(state.get_setting("easy_copy_paste")))
+        self._easy_copy_row.connect("notify::active", self._on_easy_copy_changed)
+        terminal_group.add(self._easy_copy_row)
+
         current_theme = state.get_setting("terminal_theme") or DEFAULT_THEME
         if current_theme not in THEME_NAMES:
             current_theme = DEFAULT_THEME
@@ -211,6 +225,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
         key = _SCHEMES[row.get_selected()][0]
         self._state.set_setting("color_scheme", key)
         apply_color_scheme(key)
+        self._on_change()
+
+    def _on_easy_copy_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("easy_copy_paste", row.get_active())
         self._on_change()
 
     def _on_notify_changed(self, row: Adw.SwitchRow, _pspec) -> None:

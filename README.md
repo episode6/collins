@@ -20,6 +20,7 @@ Features:
 - Sessions can be given **custom names** (pencil icon). Names, favorites, and hidden sessions persist in `~/.config/agent-session-manager/state.json` — your agents' own session files are never modified.
 - **Clicking a session** opens a tab in the main area; each tab is an embedded **VTE terminal** running your `$SHELL` with the agent's resume command (`claude --resume <session-id>` for Claude Code) typed into it, in the session's original project directory. When the agent exits you drop to a shell prompt; the tab closes when the shell exits. Closing a tab asks the agent to exit cleanly (Claude Code's `/exit`) in the background first.
 - **In-terminal search** with a find bar (`Ctrl+Shift+G`) over the tab's scrollback.
+- **Copy & paste**: `Ctrl+Shift+C` / `Ctrl+Shift+V`, plus an optional **easy copy & paste** mode (Preferences): `Ctrl+C` copies when text is selected — otherwise interrupts as usual — `Ctrl+V` pastes, and right-click opens a Copy / Paste / Select All menu.
 - **Status dots** in both the sidebar and on each open tab: green = open, blue = output arrived in a background tab. A **waiting badge** (amber ?) marks sessions where the agent's last message was a question awaiting your reply.
 - **Tabs** can be renamed, given an emoji prefix, or have their session ID copied (right-click → Rename… / Set emoji… / Copy session ID); renaming a session's tab updates its name everywhere. A **close-all button** appears when more than one tab is open, and the **sidebar toggles** with the header button or `F9`. **Shift+Enter** inserts a newline in the agent's prompt.
 - **Right-click a session** for the full action set: open, open in [Ghostty](https://ghostty.org) (external window — Ghostty can't be embedded), fork (`--fork-session`), rename, favorite, **details** (messages/models/tokens, a peek at recent messages, and MCP servers/usage), copy session id, reveal transcript, hide, or move the transcript to trash.
@@ -28,7 +29,7 @@ Features:
 - **New session** (tab icon in the header) asks for a project folder and starts a fresh agent session (`claude`) there.
 - **Quick switcher** (`Ctrl+Shift+K`) jumps to any session by type-ahead; the **New Session** button remembers your last folder; the sidebar is **resizable** and its width is remembered.
 - **MCP servers browser** (menu → MCP servers): a read-only view of every MCP server configured in `~/.claude.json`, global and per-project.
-- **Preferences** (menu → Preferences, or `Ctrl+,`): terminal font, scrollback, color scheme, and a **Show folder path** toggle for the sidebar.
+- **Preferences** (menu → Preferences, or `Ctrl+,`): terminal font, scrollback, color scheme, **easy copy & paste**, and a **Show folder path** toggle for the sidebar.
 - A status footer shows session, project, transcript-size, and open-tab counts.
 
 ### Native chat & replay

@@ -202,6 +202,21 @@ msgstr "Visszaállítás az alapértelmezett betűtípusra"
 msgid "Scrollback lines"
 msgstr "Visszagörgetési sorok"
 
+msgid "Easy copy & paste"
+msgstr "Egyszerű másolás és beillesztés"
+
+msgid "Ctrl+C copies selected text (otherwise interrupts as usual), Ctrl+V pastes, and right-click opens a copy/paste menu"
+msgstr "A Ctrl+C másolja a kijelölt szöveget (különben szokás szerint megszakít), a Ctrl+V beilleszt, a jobb kattintás pedig másolás/beillesztés menüt nyit"
+
+msgid "Copy"
+msgstr "Másolás"
+
+msgid "Paste"
+msgstr "Beillesztés"
+
+msgid "Select All"
+msgstr "Összes kijelölése"
+
 msgid "Color theme"
 msgstr "Színtéma"
 

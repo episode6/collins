@@ -202,6 +202,21 @@ msgstr "Auf Standardschriftart zurücksetzen"
 msgid "Scrollback lines"
 msgstr "Scrollback-Zeilen"
 
+msgid "Easy copy & paste"
+msgstr "Einfaches Kopieren & Einfügen"
+
+msgid "Ctrl+C copies selected text (otherwise interrupts as usual), Ctrl+V pastes, and right-click opens a copy/paste menu"
+msgstr "Strg+C kopiert markierten Text (unterbricht sonst wie üblich), Strg+V fügt ein, und Rechtsklick öffnet ein Kopieren/Einfügen-Menü"
+
+msgid "Copy"
+msgstr "Kopieren"
+
+msgid "Paste"
+msgstr "Einfügen"
+
+msgid "Select All"
+msgstr "Alles auswählen"
+
 msgid "Color theme"
 msgstr "Farbthema"
 
