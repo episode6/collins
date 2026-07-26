@@ -180,9 +180,10 @@ class TerminalTab(Gtk.Box):
         # Emitted when a tab started without a session id (new / continue)
         # discovers which session it is running (str = session id).
         "session-resolved": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
-        # Emitted (debounced) when the panel divider is moved, so the window
-        # can persist the tab's per-layout positions.
-        "panel-layout-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # Emitted (debounced) when the panel divider is moved: (mode, size)
+        # where mode is "bottom" | "right" and size the new panel px size,
+        # so the window can persist it as the app-wide default.
+        "panel-size-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, int)),
     }
 
     def __init__(
@@ -249,11 +250,13 @@ class TerminalTab(Gtk.Box):
         )
         # The hairline divider is hard to grab; use the wide handle throughout.
         self._paned.set_wide_handle(True)
-        self._panel_positions: dict[str, int] = {}  # divider px per mode (bottom/right)
-        self._panel_position_pending = False  # a programmatic apply is queued
-        self._layout_emit_source: int | None = None  # debounce for panel-layout-changed
-        # Dragging the divider records the new spot for the current mode.
-        self._paned.connect("notify::position", lambda *_: self._remember_panel_position())
+        self._panel_sizes: dict[str, int] = {}  # this tab's panel px size per mode
+        self._panel_apply_pending = False  # a programmatic divider set is queued
+        self._panel_size_lookup = None  # mode -> app-wide last-set size (set by the window)
+        self._size_emit_source: int | None = None  # debounce for panel-size-changed
+        self._size_emit_mode: str | None = None  # mode whose size changed last
+        # Dragging the divider records the new panel size for the current mode.
+        self._paned.connect("notify::position", lambda *_: self._remember_panel_size())
         self._paned.set_start_child(self._overlay)
         self._paned.set_end_child(self._panel)
         self._paned.set_resize_start_child(True)
@@ -608,13 +611,13 @@ class TerminalTab(Gtk.Box):
         self._panel.open_shell(self.current_agent_cwd())
         if not self.panel_visible:
             self._panel.set_visible(True)
-            self._apply_panel_position()
+            self._apply_panel_size()
         GLib.idle_add(self._panel.grab_terminal_focus)
 
     def hide_panel(self) -> None:
         if not self.panel_visible:
             return
-        self._remember_panel_position()
+        self._remember_panel_size()
         refocus = self._panel.terminal.has_focus()
         self._panel.set_visible(False)
         if refocus:
@@ -628,13 +631,13 @@ class TerminalTab(Gtk.Box):
     def swap_panel(self) -> str:
         """Move the panel bottom↔right (the shell keeps running) and return
         the new position: "bottom" or "right"."""
-        self._remember_panel_position()  # capture the outgoing mode's divider
+        self._remember_panel_size()  # capture the outgoing mode's panel size
         to_bottom = self._paned.get_orientation() == Gtk.Orientation.HORIZONTAL
         self._paned.set_orientation(
             Gtk.Orientation.VERTICAL if to_bottom else Gtk.Orientation.HORIZONTAL
         )
         if self.panel_visible:
-            self._apply_panel_position()
+            self._apply_panel_size()
         return "bottom" if to_bottom else "right"
 
     def _set_panel_mode(self, mode: str) -> None:
@@ -652,54 +655,54 @@ class TerminalTab(Gtk.Box):
         vertical = self._paned.get_orientation() == Gtk.Orientation.VERTICAL
         return self._paned.get_height() if vertical else self._paned.get_width()
 
-    def _remember_panel_position(self) -> None:
-        """Record the divider's spot for the current mode. Skipped while an
-        apply is still queued — the position it would read is the previous
-        mode's, and saving it would corrupt this mode's remembered value."""
-        if not self.panel_visible or self._panel_position_pending:
+    def set_panel_size_lookup(self, lookup) -> None:
+        """`lookup(mode) -> px` supplies the app-wide last-set panel size,
+        used for modes this tab hasn't sized itself yet."""
+        self._panel_size_lookup = lookup
+
+    def _remember_panel_size(self) -> None:
+        """Record the panel's size for the current mode. Skipped while an
+        apply is still queued — the value it would read is the previous
+        mode's, and saving it would corrupt this mode's remembered size."""
+        if not self.panel_visible or self._panel_apply_pending:
             return
-        if self._paned_total() <= 0:
+        total = self._paned_total()
+        if total <= 0:
             return
         mode = self._panel_mode()
-        position = self._paned.get_position()
-        if position > 0 and self._panel_positions.get(mode) != position:
-            self._panel_positions[mode] = position
-            self._schedule_layout_emit()
+        size = total - self._paned.get_position()
+        if size > 0 and self._panel_sizes.get(mode) != size:
+            self._panel_sizes[mode] = size
+            self._size_emit_mode = mode
+            if self._size_emit_source is not None:
+                GLib.source_remove(self._size_emit_source)
+            self._size_emit_source = GLib.timeout_add(500, self._emit_size_changed)
 
-    def _schedule_layout_emit(self) -> None:
-        if self._layout_emit_source is not None:
-            GLib.source_remove(self._layout_emit_source)
-        self._layout_emit_source = GLib.timeout_add(500, self._emit_layout_changed)
-
-    def _emit_layout_changed(self) -> bool:
-        self._layout_emit_source = None
-        self.emit("panel-layout-changed")
+    def _emit_size_changed(self) -> bool:
+        self._size_emit_source = None
+        mode = self._size_emit_mode
+        if mode in self._panel_sizes:
+            self.emit("panel-size-changed", mode, self._panel_sizes[mode])
         return GLib.SOURCE_REMOVE
 
-    @property
-    def panel_positions(self) -> dict[str, int]:
-        """Copy of the per-mode divider positions, for persisting."""
-        return dict(self._panel_positions)
-
-    def set_panel_positions(self, positions: dict) -> None:
-        """Seed remembered divider positions (e.g. persisted from a previous
-        run). Positions already recorded in this tab win."""
-        for mode in ("bottom", "right"):
-            value = positions.get(mode)
-            if isinstance(value, int) and value > 0 and mode not in self._panel_positions:
-                self._panel_positions[mode] = value
-
-    def _apply_panel_position(self) -> None:
-        """Restore this mode's remembered divider — or, first time, give the
-        panel roughly a third of the paned — once sizes are known."""
-        self._panel_position_pending = True
+    def _apply_panel_size(self) -> None:
+        """Size the panel once the paned's own size is known: this tab's
+        remembered size for the mode, else the app-wide last-set size, else
+        roughly a third of the paned."""
+        self._panel_apply_pending = True
 
         def position() -> bool:
-            self._panel_position_pending = False
+            self._panel_apply_pending = False
             total = self._paned_total()
-            if total > 0:
-                saved = self._panel_positions.get(self._panel_mode())
-                self._paned.set_position(saved if saved is not None else int(total * 0.62))
+            if total <= 0:
+                return GLib.SOURCE_REMOVE
+            size = self._panel_sizes.get(self._panel_mode()) or 0
+            if size <= 0 and self._panel_size_lookup is not None:
+                size = self._panel_size_lookup(self._panel_mode()) or 0
+            if 0 < size < total:
+                self._paned.set_position(total - size)
+            else:  # nothing sensible remembered anywhere yet
+                self._paned.set_position(int(total * 0.62))
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(position)

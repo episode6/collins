@@ -254,7 +254,6 @@ class MainWindow(Adw.ApplicationWindow):
         if self._geometry_save_source is not None:
             GLib.source_remove(self._geometry_save_source)
         self._save_window_geometry()
-        self._flush_panel_layouts()
         if self._quitting:
             return False  # tabs drained (or the user insisted) — really close
         busy = self._busy_tab_count()
@@ -263,15 +262,6 @@ class MainWindow(Adw.ApplicationWindow):
         if not self._quit_asking:  # one dialog for however many sessions are busy
             self._confirm_quit(busy)
         return True
-
-    def _flush_panel_layouts(self) -> None:
-        """Persist divider positions the 500ms debounce hasn't saved yet."""
-        for i in range(self.tab_view.get_n_pages()):
-            page = self.tab_view.get_nth_page(i)
-            tab = page.get_child()
-            session_id = self._session_id_of(page)
-            if session_id and isinstance(tab, TerminalTab):
-                self.state.set_panel_positions(session_id, tab.panel_positions)
 
     def _busy_tab_count(self) -> int:
         count = 0
@@ -460,7 +450,6 @@ class MainWindow(Adw.ApplicationWindow):
             provider=provider,
             jsonl_path=session.jsonl_path,
         )
-        tab.set_panel_positions(self.state.get_panel_positions(session.session_id))
         title = f"{self.store.display_name(session)} (fork)" if fork else self._tab_title(session)
         page = self._add_tab(tab, title,
                              f"{session.project_name} — {session.session_id}")
@@ -567,7 +556,8 @@ class MainWindow(Adw.ApplicationWindow):
         page.set_tooltip(tooltip)
         tab.connect("process-exited", self._on_process_exited, page)
         tab.connect("session-resolved", self._on_session_resolved, page)
-        tab.connect("panel-layout-changed", self._on_panel_layout_changed, page)
+        tab.connect("panel-size-changed", self._on_panel_size_changed)
+        tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
         self.tab_view.set_selected_page(page)
         self.content_stack.set_visible_child_name("tabs")
@@ -581,16 +571,17 @@ class MainWindow(Adw.ApplicationWindow):
         work exactly like a tab opened from the sidebar."""
         if self._pages.get(session_id) not in (None, page):
             return  # another tab already owns this session
-        _tab.set_panel_positions(self.state.get_panel_positions(session_id))
         self._pages[session_id] = page
         self._pending_resolved[page] = (session_id, page.get_title())
         self._sync_status(session_id)
         self._apply_resolved_sessions()
 
-    def _on_panel_layout_changed(self, tab: TerminalTab, page: Adw.TabPage) -> None:
-        session_id = self._session_id_of(page)
-        if session_id:
-            self.state.set_panel_positions(session_id, tab.panel_positions)
+    def _on_panel_size_changed(self, _tab: TerminalTab, mode: str, size: int) -> None:
+        """A divider was dragged: remember the size app-wide, so every panel
+        opened from now on (in any tab) defaults to it."""
+        key = f"panel_size_{mode}"
+        if self.state.get_setting(key) != size:
+            self.state.set_setting(key, size)
 
     def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
         if self._pending_resolved:
@@ -972,8 +963,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._cancel_idle(page)
         session_id = self._session_id_of(page)
         if session_id:
-            if isinstance(tab, TerminalTab):  # catch a drag the debounce missed
-                self.state.set_panel_positions(session_id, tab.panel_positions)
             self._pages.pop(session_id, None)
             self._sync_status(session_id)
         view.close_page_finish(page, True)
