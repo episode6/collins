@@ -244,8 +244,9 @@ class TerminalTab(Gtk.Box):
             orientation=Gtk.Orientation.HORIZONTAL if panel_right else Gtk.Orientation.VERTICAL,
             vexpand=True,
         )
-        # A hairline vertical divider is hard to grab; widen it side-by-side.
-        self._paned.set_wide_handle(panel_right)
+        # The hairline divider under the agent terminal is hard to grab; widen
+        # it when the panel sits at the bottom.
+        self._paned.set_wide_handle(not panel_right)
         self._paned.set_start_child(self._overlay)
         self._paned.set_end_child(self._panel)
         self._paned.set_resize_start_child(True)
@@ -620,7 +621,7 @@ class TerminalTab(Gtk.Box):
         self._paned.set_orientation(
             Gtk.Orientation.VERTICAL if to_bottom else Gtk.Orientation.HORIZONTAL
         )
-        self._paned.set_wide_handle(not to_bottom)
+        self._paned.set_wide_handle(to_bottom)
         if self.panel_visible:
             self._reset_panel_position()
         return "bottom" if to_bottom else "right"
