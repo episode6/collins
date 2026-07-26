@@ -180,6 +180,9 @@ class TerminalTab(Gtk.Box):
         # Emitted when a tab started without a session id (new / continue)
         # discovers which session it is running (str = session id).
         "session-resolved": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # Emitted (debounced) when the panel divider is moved, so the window
+        # can persist the tab's per-layout positions.
+        "panel-layout-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(
@@ -248,6 +251,9 @@ class TerminalTab(Gtk.Box):
         self._paned.set_wide_handle(True)
         self._panel_positions: dict[str, int] = {}  # divider px per mode (bottom/right)
         self._panel_position_pending = False  # a programmatic apply is queued
+        self._layout_emit_source: int | None = None  # debounce for panel-layout-changed
+        # Dragging the divider records the new spot for the current mode.
+        self._paned.connect("notify::position", lambda *_: self._remember_panel_position())
         self._paned.set_start_child(self._overlay)
         self._paned.set_end_child(self._panel)
         self._paned.set_resize_start_child(True)
@@ -642,8 +648,36 @@ class TerminalTab(Gtk.Box):
         mode's, and saving it would corrupt this mode's remembered value."""
         if not self.panel_visible or self._panel_position_pending:
             return
-        if self._paned_total() > 0:
-            self._panel_positions[self._panel_mode()] = self._paned.get_position()
+        if self._paned_total() <= 0:
+            return
+        mode = self._panel_mode()
+        position = self._paned.get_position()
+        if position > 0 and self._panel_positions.get(mode) != position:
+            self._panel_positions[mode] = position
+            self._schedule_layout_emit()
+
+    def _schedule_layout_emit(self) -> None:
+        if self._layout_emit_source is not None:
+            GLib.source_remove(self._layout_emit_source)
+        self._layout_emit_source = GLib.timeout_add(500, self._emit_layout_changed)
+
+    def _emit_layout_changed(self) -> bool:
+        self._layout_emit_source = None
+        self.emit("panel-layout-changed")
+        return GLib.SOURCE_REMOVE
+
+    @property
+    def panel_positions(self) -> dict[str, int]:
+        """Copy of the per-mode divider positions, for persisting."""
+        return dict(self._panel_positions)
+
+    def set_panel_positions(self, positions: dict) -> None:
+        """Seed remembered divider positions (e.g. persisted from a previous
+        run). Positions already recorded in this tab win."""
+        for mode in ("bottom", "right"):
+            value = positions.get(mode)
+            if isinstance(value, int) and value > 0 and mode not in self._panel_positions:
+                self._panel_positions[mode] = value
 
     def _apply_panel_position(self) -> None:
         """Restore this mode's remembered divider — or, first time, give the

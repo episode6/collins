@@ -57,6 +57,22 @@ def test_migrates_old_config_dir(app_state):
     assert app_state._STATE_FILE.exists()  # copied into the new location
 
 
+def test_panel_positions_roundtrip(app_state):
+    state = app_state.AppState()
+    state.set_panel_positions("sid-1", {"bottom": 480, "right": 720})
+    fresh = app_state.AppState()
+    assert fresh.get_panel_positions("sid-1") == {"bottom": 480, "right": 720}
+    assert fresh.get_panel_positions("sid-unknown") == {}
+
+
+def test_panel_positions_ignores_junk(app_state):
+    state = app_state.AppState()
+    state.set_panel_positions("sid-1", {"bottom": 0, "right": "x", "diagonal": 5})
+    assert app_state.AppState().get_panel_positions("sid-1") == {}
+    state.set_panel_positions("sid-1", {"bottom": 300, "diagonal": 5})
+    assert app_state.AppState().get_panel_positions("sid-1") == {"bottom": 300}
+
+
 def test_window_geometry_roundtrip(app_state):
     state = app_state.AppState()
     state.update_settings({"window_width": 1600, "window_height": 900, "window_maximized": True})

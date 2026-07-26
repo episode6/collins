@@ -66,6 +66,8 @@ class AppState:
         self.emojis: dict[str, str] = {}
         self.favorites: set[str] = set()
         self.hidden: set[str] = set()
+        # session id -> {"bottom": px, "right": px} terminal-panel divider spots
+        self.panel_positions: dict[str, dict[str, int]] = {}
         self.settings: dict = dict(DEFAULT_SETTINGS)
         self._load()
 
@@ -86,6 +88,7 @@ class AppState:
         self.emojis = dict(data.get("emojis") or {})
         self.favorites = set(data.get("favorites") or [])
         self.hidden = set(data.get("hidden") or [])
+        self.panel_positions = dict(data.get("panel_positions") or {})
         self.settings = {**DEFAULT_SETTINGS, **(data.get("settings") or {})}
 
     def save(self) -> None:
@@ -95,6 +98,7 @@ class AppState:
             "emojis": self.emojis,
             "favorites": sorted(self.favorites),
             "hidden": sorted(self.hidden),
+            "panel_positions": self.panel_positions,
             "settings": self.settings,
         }
         tmp = _STATE_FILE.with_suffix(".json.tmp")
@@ -151,6 +155,21 @@ class AppState:
         else:
             self.hidden.discard(session_id)
         self.save()
+
+    # -- terminal-panel divider positions ------------------------------------
+
+    def get_panel_positions(self, session_id: str) -> dict[str, int]:
+        return dict(self.panel_positions.get(session_id) or {})
+
+    def set_panel_positions(self, session_id: str, positions: dict) -> None:
+        clean = {
+            mode: int(pos)
+            for mode, pos in positions.items()
+            if mode in ("bottom", "right") and isinstance(pos, int) and pos > 0
+        }
+        if clean and clean != self.panel_positions.get(session_id):
+            self.panel_positions[session_id] = clean
+            self.save()
 
     # -- settings ------------------------------------------------------------
 
