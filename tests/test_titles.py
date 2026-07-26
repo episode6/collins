@@ -1,7 +1,7 @@
 import threading
 import time
 
-from claude_session_manager.titles import TITLE_MODEL, TitleGenerator, sanitize_title
+from claude_session_manager.titles import TITLE_MODEL, TitleGenerator, fallback_title, sanitize_title
 
 
 class FakeBlock:
@@ -58,6 +58,15 @@ def test_sanitize_title():
     assert sanitize_title("   ") == ""
 
 
+def test_fallback_title():
+    assert fallback_title("fix the login bug") == "fix the login bug"
+    assert (
+        fallback_title("one two three four five six seven eight nine ten eleven twelve")
+        == "one two three four five six seven eight nine ten"
+    )
+    assert fallback_title('"quoted prompt."') == "quoted prompt"
+
+
 def test_generates_and_delivers_title():
     client = FakeClient(["Fix login bug"])
     collector = Collector()
@@ -80,6 +89,22 @@ def test_duplicate_and_empty_submits_are_ignored():
     assert collector.wait()
     assert client.messages.calls == client.messages.calls[:1]
     assert collector.results == {"sid-1": "Title one"}
+
+
+def test_force_resubmits_an_already_titled_session():
+    client = FakeClient(["First title", "Second title"])
+    collector = Collector()
+    generator = TitleGenerator(collector, client_factory=lambda: client)
+    generator.submit("sid-1", "do the thing")
+    assert collector.wait()
+    generator.submit("sid-1", "do the thing")  # deduped
+    generator.submit("sid-1", "do the thing", force=True)
+    for _ in range(50):
+        if collector.results.get("sid-1") == "Second title":
+            break
+        time.sleep(0.1)
+    assert collector.results == {"sid-1": "Second title"}
+    assert len(client.messages.calls) == 2
 
 
 def test_client_factory_failure_disables_generator():

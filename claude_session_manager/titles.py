@@ -1,9 +1,11 @@
 """Auto-generated session titles.
 
-When a session is first discovered without a user-assigned name, its first
-prompt is summarized to five words or fewer by a cheap Claude model
-(claude-haiku-4-5) and persisted by the store, so each title is generated
-exactly once per session.
+Sessions that already exist when the app launches get a cheap local title
+(the first words of their prompt, via ``fallback_title``). Sessions created
+while the app runs get their first prompt summarized to five words or fewer
+by a cheap Claude model (claude-haiku-4-5); the store persists the result so
+each title is generated exactly once per session. "Regenerate name" in the
+sidebar re-runs the model for a single session on demand.
 
 The ``anthropic`` SDK is an optional dependency (``pip install
 agent-session-manager-gtk[titles]``); when it is missing, or no API
@@ -34,11 +36,22 @@ _SYSTEM_PROMPT = (
 )
 
 
+_FALLBACK_WORDS = 10
+
+
 def sanitize_title(text: str) -> str:
     """Normalize a model reply into a short single-line title."""
     title = " ".join(text.split())
     title = title.strip("\"'` ").rstrip(".")
     return title[:_MAX_TITLE_CHARS].strip()
+
+
+def fallback_title(prompt: str) -> str:
+    """A no-API title: the first few words of the prompt, tidied up. Used to
+    backfill pre-existing sessions on launch so only sessions created while
+    the app runs are ever sent to the API."""
+    words = prompt.split()[:_FALLBACK_WORDS]
+    return " ".join(words).strip("\"'` ").rstrip(".,;:")
 
 
 def _default_client():
@@ -70,11 +83,14 @@ class TitleGenerator:
         self._disabled = False
         self._thread: threading.Thread | None = None
 
-    def submit(self, session_id: str, prompt: str) -> None:
+    def submit(self, session_id: str, prompt: str, force: bool = False) -> None:
         """Queue a session's first prompt for titling. Duplicate ids are
-        ignored, so this is safe to call on every refresh."""
+        ignored (so this is safe to call on every refresh) unless ``force``
+        re-queues an id that already ran — used by "Regenerate name"."""
         prompt = prompt.strip()
-        if self._disabled or not prompt or session_id in self._seen:
+        if self._disabled or not prompt:
+            return
+        if not force and session_id in self._seen:
             return
         self._seen.add(session_id)
         self._queue.put((session_id, prompt))

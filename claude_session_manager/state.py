@@ -169,6 +169,14 @@ class AppState:
             self.generated_names.pop(session_id, None)
         self.save()
 
+    def set_generated_names(self, names: dict[str, str]) -> None:
+        """Set several generated names with a single write to disk."""
+        for session_id, name in names.items():
+            name = name.strip()
+            if name:
+                self.generated_names[session_id] = name
+        self.save()
+
     # -- emojis ------------------------------------------------------------
 
     def get_emoji(self, session_id: str) -> str | None:

@@ -364,6 +364,7 @@ class MainWindow(Adw.ApplicationWindow):
             "delete-session": self._on_delete_session,
             "open-ghostty": self._on_open_ghostty,
             "rename-session": self._on_rename_action,
+            "regenerate-name": lambda _a, p: self.store.regenerate_name(p.get_string()),
             "toggle-favorite": lambda _a, p: self.store.toggle_favorite(p.get_string()),
             "copy-session-id": lambda _a, p: self.get_clipboard().set(p.get_string()),
             "reveal-transcript": self._on_reveal_transcript,

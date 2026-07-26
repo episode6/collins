@@ -26,7 +26,7 @@ from .models import FAV_GROUP, SessionItem
 from .providers import available_providers
 from .sessions import Session, discover_sessions
 from .state import AppState, merge_project_order, move_in_order
-from .titles import TitleGenerator
+from .titles import TitleGenerator, fallback_title
 
 _DEBOUNCE_MS = 2000
 
@@ -71,6 +71,8 @@ class SessionStore(GObject.Object):
         )
         self._items: dict[str, SessionItem] = {}
         self._last_sessions: list[Session] = []
+        self._first_scan = True
+        self._regen_pending: set[str] = set()  # ids whose regen should replace a manual name
         self._monitors: list[Gio.FileMonitor] = []
         self._refresh_queued = False
         self._scanning = False
@@ -96,15 +98,38 @@ class SessionStore(GObject.Object):
     def _on_scanned(self, sessions: list[Session]) -> bool:
         self._scanning = False
         self._last_sessions = sessions
+        if self._first_scan:
+            self._first_scan = False
+            self._backfill_names(sessions)
         self._apply()
         self._setup_monitors()  # pick up new project dirs
         self._request_titles(sessions)
         return GLib.SOURCE_REMOVE
 
+    def _backfill_names(self, sessions: list[Session]) -> None:
+        """On the first scan of a run, give every unnamed pre-existing session
+        a cheap local title (the first words of its prompt) — persisted, so
+        the API titling below only ever sees sessions created while the app
+        runs, not a user's entire backlog."""
+        if not self.state.get_setting("auto_title_sessions"):
+            return
+        names: dict[str, str] = {}
+        for session in sessions:
+            session_id = session.session_id
+            if (
+                session.preview
+                and not self.state.get_name(session_id)
+                and not self.state.get_generated_name(session_id)
+            ):
+                names[session_id] = fallback_title(session.preview)
+        if names:
+            self.state.set_generated_names(names)
+
     def _request_titles(self, sessions: list[Session]) -> None:
-        """Queue background title generation for sessions that have no name
-        yet. A session whose transcript has no real user prompt yet is picked
-        up on a later refresh, once its preview appears."""
+        """Queue background API titling for sessions that have no name after
+        the launch backfill — i.e. sessions that appeared while the app is
+        running. A session whose transcript has no real user prompt yet is
+        picked up on a later refresh, once its preview appears."""
         if not self.state.get_setting("auto_title_sessions"):
             return
         for session in sessions:
@@ -116,8 +141,22 @@ class SessionStore(GObject.Object):
             ):
                 self._titles.submit(session_id, session.preview)
 
+    def regenerate_name(self, session_id: str) -> None:
+        """Right-click → Regenerate name: re-title one session via the API,
+        replacing any existing generated or manual name once it arrives."""
+        session = self.sessions.get(session_id)
+        if session is None or not session.preview:
+            return
+        self._regen_pending.add(session_id)
+        self._titles.submit(session_id, session.preview, force=True)
+
     def _on_title_generated(self, session_id: str, title: str) -> bool:
         self.state.set_generated_name(session_id, title)
+        if session_id in self._regen_pending:
+            self._regen_pending.discard(session_id)
+            # An explicit regeneration replaces a manual rename too; the
+            # automatic path never touches manually named sessions.
+            self.state.set_name(session_id, "")
         self._apply()
         return GLib.SOURCE_REMOVE
 

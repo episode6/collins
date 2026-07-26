@@ -645,6 +645,7 @@ class SessionSidebar(Gtk.Box):
 
         edit_section = Gio.Menu()
         edit_section.append_item(item(_("Rename…"), "rename-session"))
+        edit_section.append_item(item(_("Regenerate name"), "regenerate-name"))
         fav_label = (
             _("Remove from favorites") if self.store.state.is_favorite(session_id) else _("Add to favorites")
         )

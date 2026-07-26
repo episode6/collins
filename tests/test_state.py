@@ -29,6 +29,15 @@ def test_generated_names_roundtrip(app_state):
     assert app_state.AppState().get_generated_name("sid") is None
 
 
+def test_set_generated_names_bulk(app_state):
+    state = app_state.AppState()
+    state.set_generated_names({"sid-1": "One", "sid-2": "Two", "sid-3": "  "})
+    fresh = app_state.AppState()
+    assert fresh.get_generated_name("sid-1") == "One"
+    assert fresh.get_generated_name("sid-2") == "Two"
+    assert fresh.get_generated_name("sid-3") is None
+
+
 def test_clearing_name_removes_entry(app_state):
     state = app_state.AppState()
     state.set_name("sid-1", "Name")
