@@ -512,8 +512,11 @@ msgstr "Folytatás csevegésben ({mode})"
 msgid "Continuing the previous session — earlier messages aren't shown here."
 msgstr "A korábbi munkamenet folytatása — a régebbi üzenetek itt nem jelennek meg."
 
-msgid "Close all tabs"
-msgstr "Összes lap bezárása"
+msgid "Exit session and close tab"
+msgstr "Kilépés a munkamenetből és a lap bezárása"
+
+msgid "Background session and close tab"
+msgstr "Munkamenet a háttérbe és a lap bezárása"
 
 msgid "Exit Session"
 msgstr "Kilépés a munkamenetből"

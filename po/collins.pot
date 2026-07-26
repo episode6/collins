@@ -12,7 +12,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: collins\n"
 "Report-Msgid-Bugs-To: matemiller992@gmail.com\n"
-"POT-Creation-Date: 2026-07-26 17:12-0400\n"
+"POT-Creation-Date: 2026-07-26 17:30-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -181,7 +181,7 @@ msgstr ""
 msgid "Extra directory"
 msgstr ""
 
-#: collins/dialogs.py:131 collins/sidebar.py:719
+#: collins/dialogs.py:131 collins/sidebar.py:820
 msgid "None"
 msgstr ""
 
@@ -301,7 +301,7 @@ msgstr ""
 msgid "Dark"
 msgstr ""
 
-#: collins/prefs.py:82 collins/sidebar.py:303
+#: collins/prefs.py:82 collins/sidebar.py:348
 msgid "Preferences"
 msgstr ""
 
@@ -435,202 +435,210 @@ msgstr ""
 msgid "Nothing to replay yet."
 msgstr ""
 
-#: collins/sidebar.py:120
+#: collins/sidebar.py:122
 #, python-brace-format
 msgid "New session in {path}"
 msgstr ""
 
-#: collins/sidebar.py:187 collins/sidebar.py:654
+#: collins/sidebar.py:164
+msgid "New Thread"
+msgstr ""
+
+#: collins/sidebar.py:174
+msgid "Close tab"
+msgstr ""
+
+#: collins/sidebar.py:228 collins/sidebar.py:755
 msgid "Unhide session"
 msgstr ""
 
-#: collins/sidebar.py:187 collins/sidebar.py:654
+#: collins/sidebar.py:228 collins/sidebar.py:755
 msgid "Hide session"
 msgstr ""
 
-#: collins/sidebar.py:247
+#: collins/sidebar.py:288
 msgid "Claude is waiting for your reply"
 msgstr ""
 
-#: collins/sidebar.py:252
+#: collins/sidebar.py:293
 msgid "You interrupted Claude here"
 msgstr ""
 
-#: collins/sidebar.py:292
+#: collins/sidebar.py:337
 msgid "Sessions"
 msgstr ""
 
-#: collins/sidebar.py:295
+#: collins/sidebar.py:340
 msgid "Select sessions"
 msgstr ""
 
-#: collins/sidebar.py:300
+#: collins/sidebar.py:345
 msgid "Open session file…"
 msgstr ""
 
-#: collins/sidebar.py:301
+#: collins/sidebar.py:346
 msgid "Show hidden sessions"
 msgstr ""
 
-#: collins/sidebar.py:302
+#: collins/sidebar.py:347
 msgid "MCP servers"
 msgstr ""
 
-#: collins/sidebar.py:304
+#: collins/sidebar.py:349
 msgid "About Collins"
 msgstr ""
 
-#: collins/sidebar.py:308
+#: collins/sidebar.py:353
 msgid "Refresh session list"
 msgstr ""
 
-#: collins/sidebar.py:314
+#: collins/sidebar.py:359
 msgid "Search sessions…"
 msgstr ""
 
-#: collins/sidebar.py:319
+#: collins/sidebar.py:364
 msgid "Collapse all groups"
 msgstr ""
 
-#: collins/sidebar.py:324
+#: collins/sidebar.py:369
 msgid "Expand all groups"
 msgstr ""
 
-#: collins/sidebar.py:356
+#: collins/sidebar.py:401
 msgid "No sessions found"
 msgstr ""
 
-#: collins/sidebar.py:357
+#: collins/sidebar.py:402
 msgid ""
 "Run claude in a project directory first — sessions will appear here "
 "automatically."
 msgstr ""
 
-#: collins/sidebar.py:401
+#: collins/sidebar.py:448
 #, python-brace-format
 msgid "{n} sessions"
 msgstr ""
 
-#: collins/sidebar.py:402
+#: collins/sidebar.py:449
 #, python-brace-format
 msgid "{n} projects"
 msgstr ""
 
-#: collins/sidebar.py:406
+#: collins/sidebar.py:453
 #, python-brace-format
 msgid "{n} open"
 msgstr ""
 
-#: collins/sidebar.py:437
+#: collins/sidebar.py:485
 msgid "Favorites"
 msgstr ""
 
-#: collins/sidebar.py:624
+#: collins/sidebar.py:725
 msgid "Open"
 msgstr ""
 
-#: collins/sidebar.py:626
+#: collins/sidebar.py:727
 msgid "Open in Ghostty"
 msgstr ""
 
-#: collins/sidebar.py:628
+#: collins/sidebar.py:729
 msgid "Fork session"
 msgstr ""
 
-#: collins/sidebar.py:631
+#: collins/sidebar.py:732
 #, python-brace-format
 msgid "Continue in chat ({mode})"
 msgstr ""
 
-#: collins/sidebar.py:633
+#: collins/sidebar.py:734
 msgid "Continue in chat"
 msgstr ""
 
-#: collins/sidebar.py:641 collins/window.py:106
+#: collins/sidebar.py:742 collins/window.py:113
 msgid "Rename…"
 msgstr ""
 
-#: collins/sidebar.py:642
+#: collins/sidebar.py:743
 msgid "Regenerate name"
 msgstr ""
 
-#: collins/sidebar.py:644
+#: collins/sidebar.py:745
 msgid "Remove from favorites"
 msgstr ""
 
-#: collins/sidebar.py:644
+#: collins/sidebar.py:745
 msgid "Add to favorites"
 msgstr ""
 
-#: collins/sidebar.py:647
+#: collins/sidebar.py:748
 msgid "Details…"
 msgstr ""
 
-#: collins/sidebar.py:648
+#: collins/sidebar.py:749
 msgid "Replay…"
 msgstr ""
 
-#: collins/sidebar.py:649 collins/window.py:108
+#: collins/sidebar.py:750 collins/window.py:115
 msgid "Copy session ID"
 msgstr ""
 
-#: collins/sidebar.py:650
+#: collins/sidebar.py:751
 msgid "Export as Markdown…"
 msgstr ""
 
-#: collins/sidebar.py:651
+#: collins/sidebar.py:752
 msgid "Reveal transcript"
 msgstr ""
 
-#: collins/sidebar.py:656
+#: collins/sidebar.py:757
 msgid "Move transcript to trash…"
 msgstr ""
 
-#: collins/sidebar.py:657
+#: collins/sidebar.py:758
 msgid "Delete permanently…"
 msgstr ""
 
-#: collins/sidebar.py:670
+#: collins/sidebar.py:771
 msgid "New session here"
 msgstr ""
 
-#: collins/sidebar.py:678
+#: collins/sidebar.py:779
 msgid "Unhide project"
 msgstr ""
 
-#: collins/sidebar.py:680
+#: collins/sidebar.py:781
 msgid "Hide project"
 msgstr ""
 
-#: collins/sidebar.py:713
+#: collins/sidebar.py:814
 msgid "All"
 msgstr ""
 
-#: collins/sidebar.py:715
+#: collins/sidebar.py:816
 msgid "Select all (filtered) sessions"
 msgstr ""
 
-#: collins/sidebar.py:721
+#: collins/sidebar.py:822
 msgid "Clear selection"
 msgstr ""
 
-#: collins/sidebar.py:726
+#: collins/sidebar.py:827
 msgid "Move selected transcripts to trash…"
 msgstr ""
 
-#: collins/sidebar.py:727
+#: collins/sidebar.py:828
 msgid "Hide selected"
 msgstr ""
 
-#: collins/sidebar.py:728
+#: collins/sidebar.py:829
 msgid "Remove selected from favorites"
 msgstr ""
 
-#: collins/sidebar.py:729
+#: collins/sidebar.py:830
 msgid "Add selected to favorites"
 msgstr ""
 
-#: collins/sidebar.py:730
+#: collins/sidebar.py:831
 msgid "Open selected in tabs"
 msgstr ""
 
@@ -685,237 +693,241 @@ msgstr ""
 msgid "Move terminal panel bottom/right"
 msgstr ""
 
-#: collins/window.py:107
+#: collins/window.py:114
 msgid "Set emoji…"
 msgstr ""
 
-#: collins/window.py:109
+#: collins/window.py:116
 msgid "Close"
 msgstr ""
 
-#: collins/window.py:118
+#: collins/window.py:125
 msgid "Toggle sidebar (F9)"
 msgstr ""
 
-#: collins/window.py:124
+#: collins/window.py:131
 #, python-brace-format
 msgid "New {name} session…"
 msgstr ""
 
-#: collins/window.py:129
+#: collins/window.py:136
 #, python-brace-format
 msgid "New {name} session (advanced)…"
 msgstr ""
 
-#: collins/window.py:133
+#: collins/window.py:140
 #, python-brace-format
 msgid "Continue last {name} session…"
 msgstr ""
 
-#: collins/window.py:139
+#: collins/window.py:146
 #, python-brace-format
 msgid "New {name} chat ({mode})"
 msgstr ""
 
-#: collins/window.py:143
+#: collins/window.py:150
 #, python-brace-format
 msgid "New {name} chat…"
 msgstr ""
 
-#: collins/window.py:145
+#: collins/window.py:152
 msgid "New window"
 msgstr ""
 
-#: collins/window.py:147
+#: collins/window.py:154
 msgid "New session (Ctrl+Shift+T)"
 msgstr ""
 
-#: collins/window.py:153
+#: collins/window.py:160
 msgid "Show or hide the tab bar"
 msgstr ""
 
-#: collins/window.py:161
-msgid "Close all tabs"
-msgstr ""
-
-#: collins/window.py:171
-msgid "No session open"
+#: collins/window.py:168
+msgid "Exit session and close tab"
 msgstr ""
 
 #: collins/window.py:172
+msgid "Background session and close tab"
+msgstr ""
+
+#: collins/window.py:178
+msgid "No session open"
+msgstr ""
+
+#: collins/window.py:179
 msgid "Pick a session from the sidebar, or start a new one."
 msgstr ""
 
-#: collins/window.py:319
+#: collins/window.py:328
 msgid ""
 "Agents are asked to exit cleanly first; other running commands will be "
 "terminated."
 msgstr ""
 
-#: collins/window.py:322
+#: collins/window.py:331
 msgid ""
 "Agents are asked to exit cleanly first; other running commands will be "
 "terminated. Backgrounding instead keeps the agents running detached — reopen "
 "a session later to re-attach."
 msgstr ""
 
-#: collins/window.py:328
+#: collins/window.py:337
 #, python-brace-format
 msgid "Close window with {n} active session(s)?"
 msgstr ""
 
-#: collins/window.py:330
+#: collins/window.py:339
 msgid "Exit Sessions"
 msgstr ""
 
-#: collins/window.py:334
+#: collins/window.py:343
 msgid "Background Sessions"
 msgstr ""
 
-#: collins/window.py:468
+#: collins/window.py:477
 msgid "Some transcripts could not be trashed"
 msgstr ""
 
-#: collins/window.py:472
+#: collins/window.py:481
 #, python-brace-format
 msgid "Move {n} transcript(s) to trash?"
 msgstr ""
 
-#: collins/window.py:473
+#: collins/window.py:482
 msgid "The files are moved to the trash and can be restored."
 msgstr ""
 
-#: collins/window.py:474 collins/window.py:1228
+#: collins/window.py:483 collins/window.py:1313
 msgid "Move to Trash"
 msgstr ""
 
-#: collins/window.py:534 collins/window.py:565 collins/window.py:585
-#: collins/window.py:684
+#: collins/window.py:543 collins/window.py:607 collins/window.py:627
+#: collins/window.py:728
 msgid "Choose project directory"
 msgstr ""
 
-#: collins/window.py:711
+#: collins/window.py:755
 #, python-brace-format
 msgid "Chat — {dir}"
 msgstr ""
 
-#: collins/window.py:732
+#: collins/window.py:776
 #, python-brace-format
 msgid "Chat — {name}"
 msgstr ""
 
-#: collins/window.py:748
+#: collins/window.py:792
 #, python-brace-format
 msgid "Replay — {name}"
 msgstr ""
 
-#: collins/window.py:804 collins/window.py:808
+#: collins/window.py:865 collins/window.py:869
 msgid "Close tab with an active session?"
 msgstr ""
 
-#: collins/window.py:805
+#: collins/window.py:866
 msgid ""
 "The agent is asked to exit cleanly first; the command running in this tab's "
 "terminal panel will be terminated."
 msgstr ""
 
-#: collins/window.py:809
+#: collins/window.py:870
 msgid "The agent is asked to exit cleanly first."
 msgstr ""
 
-#: collins/window.py:811
+#: collins/window.py:872
 msgid "Close tab with a running command?"
 msgstr ""
 
-#: collins/window.py:812
+#: collins/window.py:873
 msgid ""
 "A command is still running in this tab's terminal panel and will be "
 "terminated."
 msgstr ""
 
-#: collins/window.py:815
+#: collins/window.py:876
 msgid ""
 "Backgrounding instead keeps the agent running detached — reopen the session "
 "later to re-attach."
 msgstr ""
 
-#: collins/window.py:818
+#: collins/window.py:879
 msgid "Exit Session"
 msgstr ""
 
-#: collins/window.py:818
+#: collins/window.py:879
 msgid "Close Tab"
 msgstr ""
 
-#: collins/window.py:827
+#: collins/window.py:892
 msgid "Background Session"
 msgstr ""
 
-#: collins/window.py:985
+#: collins/window.py:1066
 msgid "Tab name"
 msgstr ""
 
-#: collins/window.py:1155
+#: collins/window.py:1240
 msgid "Export session as Markdown"
 msgstr ""
 
-#: collins/window.py:1173
+#: collins/window.py:1258
 msgid "Export failed"
 msgstr ""
 
-#: collins/window.py:1212
+#: collins/window.py:1297
 msgid "Could not trash transcript"
 msgstr ""
 
-#: collins/window.py:1222
+#: collins/window.py:1307
 msgid "Move transcript to trash?"
 msgstr ""
 
-#: collins/window.py:1223
+#: collins/window.py:1308
 #, python-brace-format
 msgid "“{name}” will be removed from Claude's history."
 msgstr ""
 
-#: collins/window.py:1227
+#: collins/window.py:1312
 msgid "The file is moved to the trash and can be restored."
 msgstr ""
 
-#: collins/window.py:1240
+#: collins/window.py:1325
 msgid "Could not delete transcript"
 msgstr ""
 
-#: collins/window.py:1250
+#: collins/window.py:1335
 msgid "Delete session permanently?"
 msgstr ""
 
-#: collins/window.py:1251
+#: collins/window.py:1336
 #, python-brace-format
 msgid ""
 "“{name}” and its transcript file will be permanently deleted. This cannot be "
 "undone."
 msgstr ""
 
-#: collins/window.py:1253
+#: collins/window.py:1338
 msgid "Delete permanently"
 msgstr ""
 
-#: collins/window.py:1260
+#: collins/window.py:1345
 msgid "Open session transcript"
 msgstr ""
 
-#: collins/window.py:1262
+#: collins/window.py:1347
 msgid "Session transcripts (*.jsonl)"
 msgstr ""
 
-#: collins/window.py:1282
+#: collins/window.py:1367
 msgid "Could not open transcript"
 msgstr ""
 
-#: collins/window.py:1283
+#: collins/window.py:1368
 msgid "The file couldn't be read as a session transcript."
 msgstr ""
 
-#: collins/window.py:1298
+#: collins/window.py:1383
 msgid ""
 "Manage and resume your AI coding agent sessions.\n"
 "\n"

@@ -170,14 +170,14 @@ class MainWindow(Adw.ApplicationWindow):
         new_btn.connect("clicked", lambda *_: self._new_session())
         content_header.pack_start(new_btn)
 
-        self.close_all_btn = Gtk.Button(icon_name="tab-close-symbolic", visible=False)
-        self.close_all_btn.set_tooltip_text(_("Close all tabs"))
-        self.close_all_btn.connect("clicked", lambda *_: self._close_all_tabs())
-        content_header.pack_start(self.close_all_btn)
-        self.tab_view.connect(
-            "notify::n-pages",
-            lambda *_: self.close_all_btn.set_visible(self.tab_view.get_n_pages() > 1),
-        )
+        self.exit_btn = Gtk.Button(icon_name="tab-close-symbolic", visible=False)
+        self.exit_btn.set_tooltip_text(_("Exit session and close tab"))
+        self.exit_btn.connect("clicked", lambda *_: self._exit_current_tab())
+        content_header.pack_start(self.exit_btn)
+        self.background_btn = Gtk.Button(icon_name="document-save-symbolic", visible=False)
+        self.background_btn.set_tooltip_text(_("Background session and close tab"))
+        self.background_btn.connect("clicked", lambda *_: self._background_current_tab())
+        content_header.pack_start(self.background_btn)
 
         placeholder = Adw.StatusPage(
             icon_name="utilities-terminal-symbolic",
@@ -866,6 +866,23 @@ class MainWindow(Adw.ApplicationWindow):
         for page in pages:
             self.tab_view.close_page(page)
 
+    def _exit_current_tab(self) -> None:
+        """Header button: exit the focused session and close its tab without
+        the confirmation dialog — the click itself is the confirmation."""
+        page = self.tab_view.get_selected_page()
+        if page is not None:
+            self._close_ok.add(page)
+            self.tab_view.close_page(page)
+
+    def _background_current_tab(self) -> None:
+        """Header button: background (detach) the focused session and close
+        its tab without the confirmation dialog."""
+        page = self.tab_view.get_selected_page()
+        if page is not None:
+            self._close_ok.add(page)
+            self._bg_ok.add(page)
+            self.tab_view.close_page(page)
+
     def _close_confirmed(self, page: Adw.TabPage) -> None:
         """Force-close (terminate the child) — the graceful-close fallback."""
         self._confirmed_closes.add(page)
@@ -999,6 +1016,17 @@ class MainWindow(Adw.ApplicationWindow):
 
     # -- terminal panel ------------------------------------------------------
 
+    def _update_close_buttons(self, page: Adw.TabPage | None) -> None:
+        """The header exit/background buttons act on the focused session, so
+        they show only while a session tab is selected — and backgrounding
+        only for providers that support detaching."""
+        tab = page.get_child() if page is not None else None
+        is_session = isinstance(tab, TerminalTab)
+        self.exit_btn.set_visible(is_session)
+        self.background_btn.set_visible(
+            is_session and tab.provider.background_exit() is not None
+        )
+
     def _current_terminal_tab(self) -> TerminalTab | None:
         page = self.tab_view.get_selected_page()
         tab = page.get_child() if page is not None else None
@@ -1022,6 +1050,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_selected_page_changed(self, view: Adw.TabView, _pspec) -> None:
         page = view.get_selected_page()
         self._update_active_row()
+        self._update_close_buttons(page)
         if page is None:
             return
         self._cancel_idle(page)  # foreground now; no "finished" notification

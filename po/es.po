@@ -512,8 +512,11 @@ msgstr "Continuar en el chat ({mode})"
 msgid "Continuing the previous session — earlier messages aren't shown here."
 msgstr "Continuando la sesión anterior: los mensajes anteriores no se muestran aquí."
 
-msgid "Close all tabs"
-msgstr "Cerrar todas las pestañas"
+msgid "Exit session and close tab"
+msgstr "Salir de la sesión y cerrar la pestaña"
+
+msgid "Background session and close tab"
+msgstr "Sesión a segundo plano y cerrar la pestaña"
 
 msgid "Exit Session"
 msgstr "Salir de la sesión"

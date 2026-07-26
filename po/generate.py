@@ -200,7 +200,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Continue in chat ({mode})": "Folytatás csevegésben ({mode})",
         "Continuing the previous session — earlier messages aren't shown here.":
             "A korábbi munkamenet folytatása — a régebbi üzenetek itt nem jelennek meg.",
-        "Close all tabs": "Összes lap bezárása",
+        "Exit session and close tab": "Kilépés a munkamenetből és a lap bezárása",
+        "Background session and close tab": "Munkamenet a háttérbe és a lap bezárása",
         "Exit Session": "Kilépés a munkamenetből",
         "Exit Sessions": "Kilépés a munkamenetekből",
         "Background Session": "Munkamenet a háttérbe",
@@ -420,7 +421,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Continue in chat ({mode})": "Im Chat fortsetzen ({mode})",
         "Continuing the previous session — earlier messages aren't shown here.":
             "Frühere Sitzung wird fortgesetzt — ältere Nachrichten werden hier nicht angezeigt.",
-        "Close all tabs": "Alle Tabs schließen",
+        "Exit session and close tab": "Sitzung beenden und Tab schließen",
+        "Background session and close tab": "Sitzung in den Hintergrund und Tab schließen",
         "Exit Session": "Sitzung beenden",
         "Exit Sessions": "Sitzungen beenden",
         "Background Session": "Sitzung in den Hintergrund",
@@ -643,7 +645,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Continue in chat ({mode})": "Continuar en el chat ({mode})",
         "Continuing the previous session — earlier messages aren't shown here.":
             "Continuando la sesión anterior: los mensajes anteriores no se muestran aquí.",
-        "Close all tabs": "Cerrar todas las pestañas",
+        "Exit session and close tab": "Salir de la sesión y cerrar la pestaña",
+        "Background session and close tab": "Sesión a segundo plano y cerrar la pestaña",
         "Exit Session": "Salir de la sesión",
         "Exit Sessions": "Salir de las sesiones",
         "Background Session": "Sesión a segundo plano",
@@ -867,7 +870,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Continue in chat ({mode})": "Continuer dans la discussion ({mode})",
         "Continuing the previous session — earlier messages aren't shown here.":
             "Reprise de la session précédente — les messages antérieurs ne sont pas affichés ici.",
-        "Close all tabs": "Fermer tous les onglets",
+        "Exit session and close tab": "Quitter la session et fermer l’onglet",
+        "Background session and close tab": "Session en arrière-plan et fermer l’onglet",
         "Exit Session": "Quitter la session",
         "Exit Sessions": "Quitter les sessions",
         "Background Session": "Session en arrière-plan",
