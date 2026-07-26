@@ -1034,7 +1034,7 @@ class MainWindow(Adw.ApplicationWindow):
             return bool(cwd and agent.cwd and agent.cwd == cwd)
 
         def work() -> None:
-            for _ in range(30):  # the fork appears within seconds of the /bg
+            for _attempt in range(30):  # the fork appears within seconds of the /bg
                 for agent in provider.background_agents():
                     if agent.session_id == old_id:
                         # Already detached in place (this tab was attached to
