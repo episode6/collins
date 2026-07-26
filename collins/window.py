@@ -8,6 +8,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import gi
@@ -23,7 +24,13 @@ from .models import SessionItem
 from .prefs import PreferencesDialog
 from .providers import available_providers, get_provider
 from .replayview import ReplayTab
-from .sessions import Session, export_markdown, resume_cwd, session_from_file
+from .sessions import (
+    Session,
+    export_markdown,
+    first_message_uuid,
+    resume_cwd,
+    session_from_file,
+)
 from .sidebar import SessionSidebar
 from .state import AppState, clamp_window_size
 from .store import SessionStore
@@ -543,6 +550,22 @@ class MainWindow(Adw.ApplicationWindow):
         provider = get_provider(session.provider)
         fork = fork and provider.supports_fork
         if not fork:
+            # A backgrounded session may have continued under a new id (/bg
+            # forks the conversation): open the live end of the chain instead
+            # of the stale original. Forks stay on the id the user picked.
+            forwarded = self.state.resolve_forward(session.session_id)
+            if forwarded != session.session_id:
+                target = self.store.get_session(forwarded)
+                if target is not None:
+                    session = target
+                elif (session.jsonl_path.parent / f"{forwarded}.jsonl").is_file():
+                    # The fork exists but the store hasn't scanned it yet.
+                    # Its sidebar row is disabled during this window; guard
+                    # the other entry paths (switcher, session restore) too
+                    # rather than open the stale original.
+                    return
+                # Fork transcript gone (e.g. trashed): stale forward — fall
+                # through and open the original normally.
             page = self._pages.get(session.session_id)
             if page is not None:
                 self.tab_view.set_selected_page(page)
@@ -953,7 +976,9 @@ class MainWindow(Adw.ApplicationWindow):
             self._close_confirmed(page)
             return
         exit_text = tab.provider.background_exit() if page in self._bg_ok else None
-        if not exit_text:
+        if exit_text:
+            self._watch_background_fork(tab)
+        else:
             exit_text = tab.provider.graceful_exit()
         if not exit_text:
             self._close_confirmed(page)
@@ -963,6 +988,88 @@ class MainWindow(Adw.ApplicationWindow):
         tab.feed_child_text(exit_text)
         GLib.timeout_add(300, self._poll_graceful, page, tab)
 
+    def _watch_background_fork(self, tab: TerminalTab) -> None:
+        """/bg doesn't detach the session in place: Claude spawns a background
+        agent under a *new* session id whose transcript is a copy of the
+        conversation, leaving the original behind as a stale duplicate. Watch
+        the agent list (off the main thread) for that successor and record
+        old -> new, so the stale row is hidden, the user's name/emoji/favorite
+        carry over, and opening the old session redirects to the live one.
+
+        A tab that was *attached* to an already-detached session is different:
+        /bg spawns no fork there — the CLI just drops back to its agent-list
+        screen and keeps the terminal, so the close would hang until the
+        force-close safety net. Its own session id showing up as a background
+        agent is the tell; either way, once the session is confirmed running
+        detached, the CLI gets an /exit nudge if it still holds the terminal."""
+        old_id = tab.session_id
+        provider = tab.provider
+        if not old_id or tab.fork:
+            return
+        cwd = tab.current_agent_cwd()
+        old_session = self.store.get_session(old_id)
+        old_uuid = (
+            first_message_uuid(old_session.jsonl_path) if old_session is not None else None
+        )
+        known = {a.session_id for a in provider.background_agents()}
+
+        def matches(agent) -> bool:
+            if agent.session_id in known or agent.session_id == old_id:
+                return False
+            # Same conversation = same copied first-message uuid. That
+            # disambiguates several same-project tabs backgrounded at once
+            # (e.g. the quit flow); fall back to cwd when uuids are
+            # unavailable (transcript not yet written / no messages).
+            path = next(
+                (
+                    p
+                    for p in provider.transcripts_for_cwd(agent.cwd)
+                    if p.stem == agent.session_id
+                ),
+                None,
+            )
+            new_uuid = first_message_uuid(path) if path is not None else None
+            if old_uuid and new_uuid:
+                return old_uuid == new_uuid
+            return bool(cwd and agent.cwd and agent.cwd == cwd)
+
+        def work() -> None:
+            for _attempt in range(30):  # the fork appears within seconds of the /bg
+                for agent in provider.background_agents():
+                    if agent.session_id == old_id:
+                        # Already detached in place (this tab was attached to
+                        # a running background agent): no fork to record.
+                        GLib.idle_add(self._on_backgrounded, tab, old_id, "")
+                        return
+                    if matches(agent):
+                        GLib.idle_add(self._on_backgrounded, tab, old_id, agent.session_id)
+                        return
+                time.sleep(1)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_backgrounded(self, tab: TerminalTab, old_id: str, new_id: str) -> bool:
+        """The tab's session is confirmed running detached (new_id is its
+        fork's session id, or "" when it detached in place)."""
+        if new_id:
+            self.store.record_forward(old_id, new_id)
+        # Give the CLI a moment to exit on its own before nudging it off any
+        # screen it parked on (see _watch_background_fork).
+        GLib.timeout_add(700, self._nudge_cli_exit, tab)
+        return GLib.SOURCE_REMOVE
+
+    def _nudge_cli_exit(self, tab: TerminalTab) -> bool:
+        """The CLI was asked to leave (via /exit or /bg) yet still owns the
+        tab's terminal — typically parked on its session-list screen. Feed
+        /exit to dismiss it so the pending close can finish. A no-op when
+        the CLI already exited (then the text would only reach the shell,
+        which the close is about to end anyway)."""
+        if tab.get_root() is not None and tab.has_running_command():
+            exit_text = tab.provider.graceful_exit()
+            if exit_text:
+                tab.feed_child_text(exit_text)
+        return GLib.SOURCE_REMOVE
+
     def _poll_graceful(self, page: Adw.TabPage, tab: TerminalTab) -> bool:
         if page not in self._closing_pages:
             return GLib.SOURCE_REMOVE  # already closed
@@ -970,6 +1077,15 @@ class MainWindow(Adw.ApplicationWindow):
             tab.feed_child_text("exit\r")  # close the shell → child-exited closes the tab
             return GLib.SOURCE_REMOVE
         self._closing_pages[page] += 1
+        # /exit and /bg sometimes drop the CLI to its session-list screen
+        # instead of exiting (seen with tabs attached to a detached session),
+        # which would hang the close until the force-close below. A CLI still
+        # owning the terminal this long after being asked to leave is the
+        # tell: nudge it with /exit again. Safe for a merely-slow exit too —
+        # the extra input queues behind the pending command and is discarded
+        # when the CLI exits.
+        if self._closing_pages[page] in (8, 24):  # ~2.4s / ~7.2s
+            self._nudge_cli_exit(tab)
         if self._closing_pages[page] >= 40:  # ~12s safety net
             self._close_confirmed(page)
             return GLib.SOURCE_REMOVE

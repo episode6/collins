@@ -26,6 +26,9 @@ class SessionItem(GObject.Object):
     favorite = GObject.Property(type=bool, default=False)
     status = GObject.Property(type=str, default="")  # "", "open", "attention" (tab state)
     state = GObject.Property(type=str, default="")  # "", "waiting", "interrupted" (transcript)
+    # Conversation moved to a fork the store hasn't discovered yet (row is
+    # kept visible but disabled until the fork's row can take its place).
+    syncing = GObject.Property(type=bool, default=False)
 
     def __init__(self, session: Session) -> None:
         super().__init__()

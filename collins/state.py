@@ -114,6 +114,9 @@ class AppState:
         self.project_order: list[str] = []  # user-arranged sidebar order, by project name
         self.expanded_groups: set[str] = set()  # sidebar groups the user expanded
         self.panel_states: dict[str, dict] = {}  # per-session panel open/mode/sizes
+        # old session id -> the id its conversation continued under (Claude's
+        # /bg forks a backgrounded session to a fresh background session).
+        self.session_forwards: dict[str, str] = {}
         self.settings: dict = dict(DEFAULT_SETTINGS)
         self._load()
 
@@ -141,6 +144,9 @@ class AppState:
         self.panel_states = {
             k: v for k, v in (data.get("panel_states") or {}).items() if isinstance(v, dict)
         }
+        self.session_forwards = {
+            k: v for k, v in (data.get("session_forwards") or {}).items() if isinstance(v, str)
+        }
         self.settings = {**DEFAULT_SETTINGS, **(data.get("settings") or {})}
 
     def save(self) -> None:
@@ -155,6 +161,7 @@ class AppState:
             "project_order": self.project_order,  # order is the payload — never sort
             "expanded_groups": sorted(self.expanded_groups),
             "panel_states": self.panel_states,
+            "session_forwards": self.session_forwards,
             "settings": self.settings,
         }
         tmp = _STATE_FILE.with_suffix(".json.tmp")
@@ -271,6 +278,42 @@ class AppState:
         else:
             self.expanded_groups.difference_update(groups)
         self.save()
+
+    # -- session forwards --------------------------------------------------
+
+    def forward_session(self, old_id: str, new_id: str) -> None:
+        """Record that a session's conversation continued under a new id
+        (Claude's /bg forks a backgrounded session to a fresh background
+        session). Carries the user's metadata over — without clobbering
+        anything already set on the new id. One write to disk.
+
+        The stale original row is *not* hidden here: visibility is derived
+        from the forward at display time (see SessionStore), so the original
+        stays in the sidebar — disabled — until the fork's row can take its
+        place, instead of vanishing for the scan-lag gap."""
+        if not old_id or not new_id or old_id == new_id:
+            return
+        self.session_forwards[old_id] = new_id
+        if old_id in self.names and new_id not in self.names:
+            self.names[new_id] = self.names[old_id]
+        if old_id in self.generated_names and new_id not in self.generated_names:
+            self.generated_names[new_id] = self.generated_names[old_id]
+        if old_id in self.emojis and new_id not in self.emojis:
+            self.emojis[new_id] = self.emojis[old_id]
+        if old_id in self.favorites:
+            self.favorites.add(new_id)
+        if old_id in self.panel_states and new_id not in self.panel_states:
+            self.panel_states[new_id] = dict(self.panel_states[old_id])
+        self.save()
+
+    def resolve_forward(self, session_id: str) -> str:
+        """Follow the forward chain (a session may be backgrounded repeatedly)
+        to the latest id. Cycle-safe; returns the input when unforwarded."""
+        seen = {session_id}
+        while (nxt := self.session_forwards.get(session_id)) and nxt not in seen:
+            session_id = nxt
+            seen.add(nxt)
+        return session_id
 
     # -- per-session panel state -------------------------------------------
 
