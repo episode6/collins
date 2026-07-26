@@ -53,6 +53,7 @@ DEFAULT_SETTINGS = {
     "notify_idle": True,  # notify when a background session goes quiet
     "auto_title_sessions": True,  # summarize each new session's first prompt into a short title
     "new_session_dir": "",  # remembered folder for new sessions (empty = ask)
+    "show_tab_bar": True,  # tab bar visibility (tabs keep working underneath)
     "sidebar_width": 300,  # persisted sidebar pane width in px
     "panel_position": "bottom",  # secondary terminal panel placement: bottom | right
     "panel_size_bottom": 0,  # last-set panel height in px (0 = default fraction)

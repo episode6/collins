@@ -392,6 +392,9 @@ msgstr "Schließen"
 msgid "Toggle sidebar (F9)"
 msgstr "Seitenleiste umschalten (F9)"
 
+msgid "Show or hide the tab bar"
+msgstr "Tab-Leiste ein- oder ausblenden"
+
 msgid "New {name} session…"
 msgstr "Neue {name}-Sitzung…"
 
