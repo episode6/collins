@@ -250,6 +250,10 @@ class MainWindow(Adw.ApplicationWindow):
             GLib.source_remove(self._geometry_save_source)
         self._save_window_geometry()
         if self._quitting:
+            # The user insisted mid-drain: any tabs still alive skip the
+            # per-tab drain, so capture their panel histories now (a no-op
+            # for tabs that already drained through _on_close_page).
+            self._save_panel_histories()
             return False  # tabs drained (or the user insisted) — really close
         busy = self._busy_tab_count()
         if busy == 0:
