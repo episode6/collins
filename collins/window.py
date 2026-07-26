@@ -343,6 +343,7 @@ class MainWindow(Adw.ApplicationWindow):
             "close-menu-tab": lambda *_: self._close_menu_tab(),
             "toggle-panel": lambda *_: self._toggle_panel(),
             "swap-panel": lambda *_: self._swap_panel(),
+            "clear-panel": lambda *_: self._clear_panel(),
             "toggle-sidebar": lambda *_: self.sidebar.set_visible(
                 not self.sidebar.get_visible()
             ),
@@ -401,6 +402,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control><Shift>k", "win.quick-switch"),
             ("<Control><Shift>e", "win.toggle-tab-emoji"),
             ("<Control>j", "win.toggle-panel"),
+            ("<Control>k", "win.clear-panel"),
             ("F9", "win.toggle-sidebar"),
         ):
             controller.add_shortcut(
@@ -862,6 +864,11 @@ class MainWindow(Adw.ApplicationWindow):
         tab = self._current_terminal_tab()
         if tab is not None:  # remember the choice as the default for new tabs
             self.state.set_setting("panel_position", tab.swap_panel())
+
+    def _clear_panel(self) -> None:
+        tab = self._current_terminal_tab()
+        if tab is not None:
+            tab.clear_panel_history()
 
     def _on_selected_page_changed(self, view: Adw.TabView, _pspec) -> None:
         page = view.get_selected_page()

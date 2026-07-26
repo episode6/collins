@@ -18,5 +18,7 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
 | `Ctrl+Shift+K` | Quick switcher — jump to any session |
 | `Ctrl+Shift+E` | Toggle a 😊 marker on the current tab |
 | `Shift+Enter` | Insert a newline in the agent's prompt |
+| `Ctrl+J` | Show/hide the terminal panel |
+| `Ctrl+K` | Clear the terminal panel (screen and saved history) |
 | `F9` | Toggle the sidebar |
 | `Ctrl+,` | Preferences |

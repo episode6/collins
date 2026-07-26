@@ -157,6 +157,13 @@ class PanelTerminal(Gtk.Box):
     def has_running_command(self) -> bool:
         return _has_running_command(self.terminal, self._child_pid)
 
+    def clear(self) -> None:
+        """Wipe the screen and scrollback; a running shell keeps running and
+        is nudged to repaint its prompt (\\x0c = Ctrl+L)."""
+        self.terminal.reset(False, True)
+        if self._spawned:
+            self.terminal.feed_child(b"\x0c")
+
     def capture_contents(self) -> str:
         """The panel's current text contents including scrollback (plain text
         — VTE's dump carries no colors or attributes)."""
@@ -729,6 +736,15 @@ class TerminalTab(Gtk.Box):
         if self.fork or not self.session_id or not self._panel.ever_spawned:
             return
         panelhistory.save(self.session_id, self._panel.capture_contents())
+
+    def clear_panel_history(self) -> None:
+        """Wipe the panel's scrollback and its persisted history file. The
+        onscreen buffer must go too — the save on tab/window close would
+        otherwise re-dump it and resurrect the file. Also clears stale
+        history from a previous run when the panel was never opened here."""
+        self._panel.clear()
+        if not self.fork and self.session_id:
+            panelhistory.delete(self.session_id)
 
     def swap_panel(self) -> str:
         """Move the panel bottom↔right (the shell keeps running) and return
