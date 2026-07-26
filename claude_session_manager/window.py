@@ -65,6 +65,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._closing_pages: dict[Adw.TabPage, int] = {}  # graceful close in progress -> attempts
         self._menu_page: Adw.TabPage | None = None
         self._base_titles: dict[Adw.TabPage, str] = {}  # fork/new tab title without emoji
+        # Tabs whose session id was just resolved, waiting for the store to
+        # discover the session: page -> (session id, title at resolution).
+        self._pending_resolved: dict[Adw.TabPage, tuple[str, str]] = {}
         self._idle_sources: dict[Adw.TabPage, int] = {}  # pending idle-notify timers
         self._switcher: QuickSwitcher | None = None
 
@@ -152,6 +155,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("open-session", self._on_sidebar_open)
         self.sidebar.connect("open-many", self._on_sidebar_open_many)
         self.sidebar.connect("trash-many", self._on_sidebar_trash_many)
+        self.store.connect("refreshed", self._on_store_refreshed)
 
         self.sidebar.set_size_request(220, -1)  # minimum drag width
         self.split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
@@ -430,12 +434,42 @@ class MainWindow(Adw.ApplicationWindow):
         page.set_title(title)
         page.set_tooltip(tooltip)
         tab.connect("process-exited", self._on_process_exited, page)
+        tab.connect("session-resolved", self._on_session_resolved, page)
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
         self.tab_view.set_selected_page(page)
         self.content_stack.set_visible_child_name("tabs")
         self._apply_tab_status(page)
         GLib.idle_add(tab.grab_terminal_focus)
         return page
+
+    def _on_session_resolved(self, _tab: TerminalTab, session_id: str, page: Adw.TabPage) -> None:
+        """A fresh tab (new / continue) discovered its session id: bind the tab
+        to the session so the sidebar dot, open-dedup, rename and status sync
+        work exactly like a tab opened from the sidebar."""
+        if self._pages.get(session_id) not in (None, page):
+            return  # another tab already owns this session
+        self._pages[session_id] = page
+        self._pending_resolved[page] = (session_id, page.get_title())
+        self._sync_status(session_id)
+        self._apply_resolved_sessions()
+
+    def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
+        if self._pending_resolved:
+            self._apply_resolved_sessions()
+
+    def _apply_resolved_sessions(self) -> None:
+        """Finish attaching resolved tabs once the store discovers their sessions
+        (its rescan is debounced, so this may run a couple of seconds after the
+        transcript appears)."""
+        for page, (session_id, title) in list(self._pending_resolved.items()):
+            session = self.store.get_session(session_id)
+            if session is None:
+                continue  # not scanned yet; retried on the next store refresh
+            del self._pending_resolved[page]
+            if page.get_title() == title:  # keep any manual rename/emoji
+                page.set_title(self._tab_title(session))
+            page.set_tooltip(f"{session.project_name} — {session.session_id}")
+            self._sync_status(session_id)
 
     # -- chat sessions (headless streaming) --------------------------------
 
@@ -735,6 +769,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._confirmed_closes.discard(page)
         self._closing_pages.pop(page, None)
         self._base_titles.pop(page, None)
+        self._pending_resolved.pop(page, None)
         self._cancel_idle(page)
         session_id = self._session_id_of(page)
         if session_id:

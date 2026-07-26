@@ -1,4 +1,7 @@
+import os
 import shutil
+import time
+from pathlib import Path
 
 from claude_session_manager import providers
 from claude_session_manager.providers import (
@@ -47,6 +50,42 @@ def test_cursor_parse_details(cursor_projects_dir):
     assert details.models == []
     assert ("user", "Build foo") in details.messages
     assert ("assistant", "Done.") in details.messages
+
+
+# -- transcript resolution ----------------------------------------------------
+
+
+def test_claude_transcripts_for_cwd(projects_dir):
+    _root, ids = projects_dir
+    claude = ClaudeProvider()
+    stems = {p.stem for p in claude.transcripts_for_cwd("/home/user/alpha")}
+    assert {ids["alpha1"], ids["alpha2"]} <= stems
+    assert "not-a-session" not in stems  # non-uuid noise is ignored
+    assert claude.transcripts_for_cwd("/home/user/nope") == []
+    assert claude.transcripts_for_cwd("") == []
+
+
+def test_claude_latest_transcript_for_cwd(projects_dir):
+    root, ids = projects_dir
+    newest = root / "-home-user-alpha" / f"{ids['alpha1']}.jsonl"
+    future = time.time() + 100
+    os.utime(newest, (future, future))
+    assert ClaudeProvider().latest_transcript_for_cwd("/home/user/alpha") == newest
+
+
+def test_cursor_transcripts_for_cwd(cursor_projects_dir):
+    _root, ids = cursor_projects_dir
+    cursor = CursorProvider()
+    paths = cursor.transcripts_for_cwd("/home/user/foo")
+    assert [p.stem for p in paths] == [ids["one"]]
+    assert cursor.transcripts_for_cwd("/home/user/nope") == []
+
+
+def test_session_id_for_transcript():
+    assert ClaudeProvider().session_id_for_transcript(Path("/p/abc-123.jsonl")) == "abc-123"
+    # Cursor's id is the per-session directory, not the file name.
+    cursor_path = Path("/p/agent-transcripts/uid-1/whatever.jsonl")
+    assert CursorProvider().session_id_for_transcript(cursor_path) == "uid-1"
 
 
 # -- helpers ------------------------------------------------------------------

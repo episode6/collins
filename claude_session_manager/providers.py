@@ -100,11 +100,23 @@ class Provider:
             pass
         return dirs
 
+    def transcripts_for_cwd(self, cwd: str) -> list[Path]:
+        """All transcript files for a cwd. Empty if unsupported."""
+        return []
+
     def latest_transcript_for_cwd(self, cwd: str) -> Path | None:
         """Newest transcript for a cwd — used to attach a freshly-started
         session's prompt detection once the agent writes its transcript. None if
         unsupported."""
-        return None
+        cands = self.transcripts_for_cwd(cwd)
+        try:
+            return max(cands, key=lambda p: p.stat().st_mtime, default=None)
+        except OSError:
+            return None
+
+    def session_id_for_transcript(self, path: Path) -> str:
+        """Session id a transcript file belongs to."""
+        return path.stem
 
     def discover(self) -> list[Session]:
         raise NotImplementedError
@@ -250,19 +262,15 @@ class ClaudeProvider(Provider):
             argv += ["--resume", session_id]
         return argv
 
-    def latest_transcript_for_cwd(self, cwd: str) -> Path | None:
+    def transcripts_for_cwd(self, cwd: str) -> list[Path]:
         if not cwd:
-            return None
+            return []
         # Claude encodes the cwd into the project dir by replacing every
         # non-alphanumeric char with '-' (e.g. /a/b_c -> -a-b-c).
         directory = self.projects_dir / re.sub(r"[^A-Za-z0-9]", "-", cwd)
         if not directory.is_dir():
-            return None
-        cands = [p for p in directory.glob("*.jsonl") if _UUID_RE.match(p.stem)]
-        try:
-            return max(cands, key=lambda p: p.stat().st_mtime, default=None)
-        except OSError:
-            return None
+            return []
+        return [p for p in directory.glob("*.jsonl") if _UUID_RE.match(p.stem)]
 
     def answer_keystrokes(self, questions: list, option_index: int) -> str | None:
         # Reliable only for a single-question, single-select prompt: the first
@@ -394,19 +402,20 @@ class CursorProvider(Provider):
             pass
         return dirs
 
-    def latest_transcript_for_cwd(self, cwd: str) -> Path | None:
+    def transcripts_for_cwd(self, cwd: str) -> list[Path]:
         if not cwd:
-            return None
+            return []
         directory = (
             self.projects_dir / re.sub(r"[^A-Za-z0-9]", "-", cwd).lstrip("-") / "agent-transcripts"
         )
         if not directory.is_dir():
-            return None
-        cands = list(directory.glob("*/*.jsonl"))
-        try:
-            return max(cands, key=lambda p: p.stat().st_mtime, default=None)
-        except OSError:
-            return None
+            return []
+        return list(directory.glob("*/*.jsonl"))
+
+    def session_id_for_transcript(self, path: Path) -> str:
+        # Transcripts live in a per-session dir named by the session id; the
+        # file usually shares that name but may not (see discover()).
+        return path.parent.name
 
     def discover(self) -> list[Session]:
         found: list[Session] = []
