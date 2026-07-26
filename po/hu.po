@@ -322,6 +322,15 @@ msgstr "Munkamenet felfedése"
 msgid "Hide session"
 msgstr "Munkamenet elrejtése"
 
+msgid "Unhide project"
+msgstr "Projekt felfedése"
+
+msgid "Hide project"
+msgstr "Projekt elrejtése"
+
+msgid "New session here"
+msgstr "Új munkamenet itt"
+
 msgid "Move transcript to trash…"
 msgstr "Átirat kukába helyezése…"
 

@@ -322,6 +322,15 @@ msgstr "Sitzung einblenden"
 msgid "Hide session"
 msgstr "Sitzung ausblenden"
 
+msgid "Unhide project"
+msgstr "Projekt einblenden"
+
+msgid "Hide project"
+msgstr "Projekt ausblenden"
+
+msgid "New session here"
+msgstr "Neue Sitzung hier"
+
 msgid "Move transcript to trash…"
 msgstr "Transkript in den Papierkorb verschieben…"
 
