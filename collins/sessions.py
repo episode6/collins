@@ -140,6 +140,36 @@ def _scan_transcript(path: Path) -> tuple[str | None, str, float | None]:
     return cwd, preview, created
 
 
+def first_message_uuid(path: Path) -> str | None:
+    """The uuid of a transcript's first user/assistant message, or None.
+
+    Claude's /bg copies the conversation into a new session id verbatim —
+    message uuids included — so a matching first uuid identifies two
+    transcripts as the same conversation (used to pair a backgrounded
+    session with its fork).
+    """
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            read = 0
+            for i, line in enumerate(fh):
+                read += len(line)
+                if i >= _MAX_SCAN_LINES or read > _MAX_SCAN_BYTES:
+                    break
+                try:
+                    entry = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("type") in ("user", "assistant") and isinstance(
+                    entry.get("uuid"), str
+                ):
+                    return entry["uuid"]
+    except OSError:
+        pass
+    return None
+
+
 _TAIL_BYTES = 64 * 1024
 
 

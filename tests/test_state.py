@@ -237,6 +237,51 @@ def test_move_in_order_before_and_to_end():
     assert move_in_order(["a", "b"], "a", "gone") == ["b", "a"]  # unknown anchor → end
 
 
+def test_forward_session_carries_metadata_and_hides_original(app_state):
+    state = app_state.AppState()
+    state.set_name("old", "My task")
+    state.set_emoji("old", "🚀")
+    state.toggle_favorite("old")
+    state.set_panel_state("old", {"open": True, "mode": "bottom"})
+    state.forward_session("old", "new")
+
+    fresh = app_state.AppState()
+    assert fresh.resolve_forward("old") == "new"
+    assert fresh.get_name("new") == "My task"
+    assert fresh.get_emoji("new") == "🚀"
+    assert fresh.is_favorite("new")
+    assert fresh.get_panel_state("new") == {"open": True, "mode": "bottom"}
+    assert fresh.is_hidden("old")  # the stale original row disappears
+    assert not fresh.is_hidden("new")
+
+
+def test_forward_session_never_clobbers_target_metadata(app_state):
+    state = app_state.AppState()
+    state.set_name("old", "Old name")
+    state.set_name("new", "New name")
+    state.forward_session("old", "new")
+    assert state.get_name("new") == "New name"
+
+
+def test_forward_session_ignores_degenerate_ids(app_state):
+    state = app_state.AppState()
+    state.forward_session("x", "x")
+    state.forward_session("", "y")
+    state.forward_session("x", "")
+    assert state.session_forwards == {}
+
+
+def test_resolve_forward_follows_chains_and_survives_cycles(app_state):
+    state = app_state.AppState()
+    assert state.resolve_forward("solo") == "solo"
+    state.forward_session("a", "b")
+    state.forward_session("b", "c")
+    assert state.resolve_forward("a") == "c"
+    # A cycle (corrupt state) must terminate, not hang.
+    state.session_forwards["c"] = "a"
+    assert state.resolve_forward("a") in {"a", "b", "c"}
+
+
 def test_migrates_legacy_names_file(app_state):
     app_state._LEGACY_NAMES_FILE.parent.mkdir(parents=True, exist_ok=True)
     app_state._LEGACY_NAMES_FILE.write_text(json.dumps({"old-sid": "Old name"}), encoding="utf-8")

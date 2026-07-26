@@ -22,6 +22,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, GObject  # noqa: E402
 
+from . import panelhistory
 from .models import FAV_GROUP, SessionItem
 from .providers import available_providers
 from .sessions import Session, discover_sessions
@@ -332,6 +333,14 @@ class SessionStore(GObject.Object):
 
     def set_project_hidden(self, project_name: str, hidden: bool) -> None:
         self.state.set_project_hidden(project_name, hidden)
+        self._apply()
+
+    def record_forward(self, old_id: str, new_id: str) -> None:
+        """A backgrounded session continued under a new id: carry the user's
+        metadata (and panel history) over, hide the stale original row, and
+        remember the forward so opening the old session redirects."""
+        self.state.forward_session(old_id, new_id)
+        panelhistory.copy(old_id, new_id)
         self._apply()
 
     def move_project(self, name: str, before: str | None) -> None:

@@ -10,6 +10,7 @@ from collins.sessions import (
     configured_mcp_servers,
     discover_sessions,
     export_markdown,
+    first_message_uuid,
     parse_details,
     read_mcp_config,
     resume_cwd,
@@ -343,6 +344,25 @@ def test_resume_cwd_without_cwd_entries(tmp_path):
                  encoding="utf-8")
     session = session_from_file(p)
     assert resume_cwd(session) is None  # nothing recorded anywhere -> None
+
+
+def test_first_message_uuid(tmp_path):
+    p = tmp_path / "abc.jsonl"
+    lines = [
+        {"type": "ai-title", "aiTitle": "T"},  # /bg forks start with metadata lines
+        {"type": "mode"},
+        {"type": "user", "uuid": "uuid-1", "message": {"role": "user", "content": "hi"}},
+        {"type": "assistant", "uuid": "uuid-2", "message": {"role": "assistant", "content": []}},
+    ]
+    p.write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")
+    assert first_message_uuid(p) == "uuid-1"
+
+
+def test_first_message_uuid_none_when_unavailable(tmp_path):
+    p = tmp_path / "abc.jsonl"
+    p.write_text(json.dumps({"type": "mode"}) + "\nnot json\n", encoding="utf-8")
+    assert first_message_uuid(p) is None
+    assert first_message_uuid(tmp_path / "missing.jsonl") is None
 
 
 def test_export_markdown(projects_dir):

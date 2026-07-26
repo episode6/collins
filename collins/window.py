@@ -8,6 +8,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import gi
@@ -23,7 +24,13 @@ from .models import SessionItem
 from .prefs import PreferencesDialog
 from .providers import available_providers, get_provider
 from .replayview import ReplayTab
-from .sessions import Session, export_markdown, resume_cwd, session_from_file
+from .sessions import (
+    Session,
+    export_markdown,
+    first_message_uuid,
+    resume_cwd,
+    session_from_file,
+)
 from .sidebar import SessionSidebar
 from .state import AppState, clamp_window_size
 from .store import SessionStore
@@ -543,6 +550,14 @@ class MainWindow(Adw.ApplicationWindow):
         provider = get_provider(session.provider)
         fork = fork and provider.supports_fork
         if not fork:
+            # A backgrounded session may have continued under a new id (/bg
+            # forks the conversation): open the live end of the chain instead
+            # of the stale original. Forks stay on the id the user picked.
+            forwarded = self.state.resolve_forward(session.session_id)
+            if forwarded != session.session_id:
+                target = self.store.get_session(forwarded)
+                if target is not None:
+                    session = target
             page = self._pages.get(session.session_id)
             if page is not None:
                 self.tab_view.set_selected_page(page)
@@ -953,7 +968,9 @@ class MainWindow(Adw.ApplicationWindow):
             self._close_confirmed(page)
             return
         exit_text = tab.provider.background_exit() if page in self._bg_ok else None
-        if not exit_text:
+        if exit_text:
+            self._watch_background_fork(tab)
+        else:
             exit_text = tab.provider.graceful_exit()
         if not exit_text:
             self._close_confirmed(page)
@@ -962,6 +979,54 @@ class MainWindow(Adw.ApplicationWindow):
         # Enter in a raw-mode TUI is carriage return, not newline.
         tab.feed_child_text(exit_text)
         GLib.timeout_add(300, self._poll_graceful, page, tab)
+
+    def _watch_background_fork(self, tab: TerminalTab) -> None:
+        """/bg doesn't detach the session in place: Claude spawns a background
+        agent under a *new* session id whose transcript is a copy of the
+        conversation, leaving the original behind as a stale duplicate. Watch
+        the agent list (off the main thread) for that successor and record
+        old -> new, so the stale row is hidden, the user's name/emoji/favorite
+        carry over, and opening the old session redirects to the live one."""
+        old_id = tab.session_id
+        provider = tab.provider
+        if not old_id or tab.fork:
+            return
+        cwd = tab.current_agent_cwd()
+        old_session = self.store.get_session(old_id)
+        old_uuid = (
+            first_message_uuid(old_session.jsonl_path) if old_session is not None else None
+        )
+        known = {a.session_id for a in provider.background_agents()}
+
+        def matches(agent) -> bool:
+            if agent.session_id in known or agent.session_id == old_id:
+                return False
+            # Same conversation = same copied first-message uuid. That
+            # disambiguates several same-project tabs backgrounded at once
+            # (e.g. the quit flow); fall back to cwd when uuids are
+            # unavailable (transcript not yet written / no messages).
+            path = next(
+                (
+                    p
+                    for p in provider.transcripts_for_cwd(agent.cwd)
+                    if p.stem == agent.session_id
+                ),
+                None,
+            )
+            new_uuid = first_message_uuid(path) if path is not None else None
+            if old_uuid and new_uuid:
+                return old_uuid == new_uuid
+            return bool(cwd and agent.cwd and agent.cwd == cwd)
+
+        def work() -> None:
+            for _ in range(30):  # the fork appears within seconds of the /bg
+                for agent in provider.background_agents():
+                    if matches(agent):
+                        GLib.idle_add(self.store.record_forward, old_id, agent.session_id)
+                        return
+                time.sleep(1)
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _poll_graceful(self, page: Adw.TabPage, tab: TerminalTab) -> bool:
         if page not in self._closing_pages:

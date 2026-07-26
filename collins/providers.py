@@ -42,6 +42,19 @@ class SessionOptions:
 
 
 @dataclass(frozen=True)
+class BackgroundAgent:
+    """One detached agent, as reported by the agent CLI (e.g. `claude agents`).
+
+    `job_id` is the short id the CLI's attach/logs subcommands expect —
+    distinct from the session id, which they do not accept.
+    """
+
+    session_id: str
+    job_id: str
+    cwd: str
+
+
+@dataclass(frozen=True)
 class ChatVariant:
     """One way to start a native chat with an agent.
 
@@ -168,6 +181,10 @@ class Provider:
         background, or None if this agent can't be backgrounded."""
         return None
 
+    def background_agents(self) -> list[BackgroundAgent]:
+        """The agent CLI's currently-running detached sessions. Base: none."""
+        return []
+
     def answer_keystrokes(self, questions: list, option_index: int) -> str | None:
         """Keystrokes that select option `option_index` of a structured prompt,
         or None if this agent/shape can't be auto-answered (→ fall back to the
@@ -199,27 +216,32 @@ class ClaudeProvider(Provider):
     def resume_command(self, session_id: str, fork: bool = False) -> str | None:
         # Attach-first: if the session is still running detached (e.g. after
         # /bg), `claude attach` reconnects to the live process instead of
-        # starting a new foreground turn over the transcript. Forks always
-        # resume: attach can't create a new session.
+        # starting a new foreground turn over the transcript. Attach only
+        # accepts the daemon's short job id — the full session id gets
+        # "No job matching". Forks always resume: attach can't create a
+        # new session.
         cmd = super().resume_command(session_id, fork=fork)
         if cmd is None or fork:
             return cmd
-        if self._running_in_background(session_id):
+        agent = next(
+            (a for a in self.background_agents() if a.session_id == session_id), None
+        )
+        if agent is not None:
             cli = shutil.which(self.cli)
-            return f"{shlex.quote(cli)} attach {shlex.quote(session_id)}"
+            return f"{shlex.quote(cli)} attach {shlex.quote(agent.job_id)}"
         return cmd
 
-    def _running_in_background(self, session_id: str) -> bool:
-        """Whether the session is running detached, per `claude agents --json`.
+    def background_agents(self) -> list[BackgroundAgent]:
+        """Detached sessions, per `claude agents --json`.
 
         Only `"kind": "background"` entries count — `"interactive"` ones are
         sessions open in a foreground TUI somewhere (including our own tabs),
         which attach doesn't target. Any failure (old CLI without the
-        subcommand, timeout, bad JSON) means "not running" → plain resume.
+        subcommand, timeout, bad JSON) means "none running" → plain resume.
         """
         cli = shutil.which(self.cli)
         if cli is None:
-            return False
+            return []
         try:
             out = subprocess.run(
                 [cli, "agents", "--json"],
@@ -229,12 +251,23 @@ class ClaudeProvider(Provider):
             ).stdout
             agents = json.loads(out)
         except (OSError, subprocess.SubprocessError, ValueError):
-            return False
-        return any(
-            a.get("sessionId") == session_id and a.get("kind") == "background"
-            for a in agents
-            if isinstance(a, dict)
-        )
+            return []
+        found: list[BackgroundAgent] = []
+        for a in agents if isinstance(agents, list) else []:
+            if not isinstance(a, dict) or a.get("kind") != "background":
+                continue
+            session_id = a.get("sessionId")
+            job_id = a.get("id")
+            if isinstance(session_id, str) and isinstance(job_id, str) and job_id:
+                cwd = a.get("cwd")
+                found.append(
+                    BackgroundAgent(
+                        session_id=session_id,
+                        job_id=job_id,
+                        cwd=cwd if isinstance(cwd, str) else "",
+                    )
+                )
+        return found
 
     supports_add_dir = True
 

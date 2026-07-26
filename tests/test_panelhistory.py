@@ -33,6 +33,25 @@ def test_delete(history):
     history.delete("sid-1")  # deleting again is a no-op, not an error
 
 
+def test_copy(history):
+    history.save("old", "$ make\nok")
+    history.copy("old", "new")
+    assert history.load("new") == "$ make\nok"
+    assert history.load("old") == "$ make\nok"  # source untouched
+
+
+def test_copy_missing_source_is_noop(history):
+    history.copy("missing", "new")
+    assert history.load("new") is None
+
+
+def test_copy_never_overwrites_target(history):
+    history.save("old", "from old")
+    history.save("new", "already here")
+    history.copy("old", "new")
+    assert history.load("new") == "already here"
+
+
 def test_unsafe_session_ids_rejected(history):
     for bad in ("", "../../etc/passwd", "a/b", ".hidden", "a b"):
         history.save(bad, "text")

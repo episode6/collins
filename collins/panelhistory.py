@@ -11,6 +11,7 @@ home for history data — one plain-text file per session.
 from __future__ import annotations
 
 import os
+import shutil
 import string
 from pathlib import Path
 
@@ -72,6 +73,20 @@ def load(session_id: str) -> str | None:
     except OSError:
         return None
     return text or None
+
+
+def copy(old_id: str, new_id: str) -> None:
+    """Duplicate one session's history to another (a backgrounded session
+    continues under a new id). Missing source or existing target = no-op."""
+    src, dst = _path(old_id), _path(new_id)
+    if src is None or dst is None:
+        return
+    try:
+        if src.is_file() and not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+    except OSError:
+        pass  # best-effort, like save()
 
 
 def delete(session_id: str) -> None:
