@@ -79,6 +79,20 @@ def test_migrates_old_config_dir(app_state):
     assert app_state._STATE_FILE.exists()  # copied into the new location
 
 
+def test_migration_leaves_old_config_untouched(app_state):
+    # Copy-only migration: the old app must keep its state so both apps can
+    # run side by side.
+    old_dir = app_state._OLD_CONFIG_DIRS[0]
+    old_dir.mkdir(parents=True, exist_ok=True)
+    old_file = old_dir / "state.json"
+    original = json.dumps({"names": {"sid": "Carried over"}})
+    old_file.write_text(original, encoding="utf-8")
+    state = app_state.AppState()
+    state.set_name("sid", "Renamed in Collins")  # persists via save()
+    assert old_file.read_text(encoding="utf-8") == original  # never modified
+    assert app_state.AppState().get_name("sid") == "Renamed in Collins"
+
+
 def test_migrates_oldest_config_dir(app_state):
     # A state.json two renames back still migrates, and the newer dir wins.
     oldest_dir = app_state._OLD_CONFIG_DIRS[1]

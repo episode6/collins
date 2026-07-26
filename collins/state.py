@@ -28,7 +28,12 @@ _LEGACY_NAMES_FILE = _CONFIG_BASE / "claude-session-manager" / "names.json"
 
 
 def _migrate_old_config() -> None:
-    """One-time: carry settings/names over from the old config dir names."""
+    """One-time: carry settings/names over from the old config dir names.
+
+    Copy only — the old dirs are never modified or removed, so the pre-rebrand
+    apps keep working side by side with their own (from then on independent)
+    state.
+    """
     if _STATE_FILE.exists():
         return
     for old_dir in _OLD_CONFIG_DIRS:
