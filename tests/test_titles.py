@@ -1,7 +1,7 @@
 import threading
 import time
 
-from claude_session_manager.titles import (
+from collins.titles import (
     TitleError,
     TitleGenerator,
     fallback_title,

@@ -17,20 +17,26 @@ from collections.abc import Iterable
 from pathlib import Path
 
 _CONFIG_BASE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-_CONFIG_DIR = _CONFIG_BASE / "agent-session-manager"
-_OLD_CONFIG_DIR = _CONFIG_BASE / "claude-session-manager"  # pre-rebrand location
+_CONFIG_DIR = _CONFIG_BASE / "collins"
+# Pre-rebrand locations, newest first (collins ← agent-session-manager ← claude-session-manager).
+_OLD_CONFIG_DIRS = [
+    _CONFIG_BASE / "agent-session-manager",
+    _CONFIG_BASE / "claude-session-manager",
+]
 _STATE_FILE = _CONFIG_DIR / "state.json"
-_LEGACY_NAMES_FILE = _OLD_CONFIG_DIR / "names.json"
+_LEGACY_NAMES_FILE = _CONFIG_BASE / "claude-session-manager" / "names.json"
 
 
 def _migrate_old_config() -> None:
-    """One-time: carry settings/names over from the old config dir name."""
-    if _STATE_FILE.exists() or not _OLD_CONFIG_DIR.is_dir():
+    """One-time: carry settings/names over from the old config dir names."""
+    if _STATE_FILE.exists():
         return
-    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    old_state = _OLD_CONFIG_DIR / "state.json"
-    if old_state.exists():
-        shutil.copy2(old_state, _STATE_FILE)
+    for old_dir in _OLD_CONFIG_DIRS:
+        old_state = old_dir / "state.json"
+        if old_state.exists():
+            _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(old_state, _STATE_FILE)
+            return
 
 DEFAULT_SETTINGS = {
     "font": "",  # empty = VTE default

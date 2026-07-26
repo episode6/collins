@@ -4,26 +4,27 @@ Modified from the original agent-session-manager
 fork. Last modified: 2026-07-26. Full change history: git log for this file.
 -->
 
-# Agent Session Manager
+# Collins
 
-[![CI](https://github.com/r4nd3l/agent-session-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/r4nd3l/agent-session-manager/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/agent-session-manager-gtk?label=PyPI)](https://pypi.org/project/agent-session-manager-gtk/)
-[![AUR](https://img.shields.io/aur/version/agent-session-manager?label=AUR)](https://aur.archlinux.org/packages/agent-session-manager)
-[![Release](https://img.shields.io/github/v/release/r4nd3l/agent-session-manager?label=release)](https://github.com/r4nd3l/agent-session-manager/releases/latest)
+[![CI](https://github.com/ghackett/agent-session-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/ghackett/agent-session-manager/actions/workflows/ci.yml)
 
 Native GTK4/libadwaita desktop app to browse, name, and resume your [Claude Code](https://claude.com/claude-code) sessions in embedded terminal tabs.
 
-📖 **[Documentation](https://r4nd3l.github.io/agent-session-manager/)**
+> My wife keeps referring to Claude as Collins. So now when she asks me if I'm talking to Collins, I can say yes
+
+Collins is a fork of [agent-session-manager](https://github.com/r4nd3l/agent-session-manager) by Máté Molnár — all credit for the original app goes there. This fork is GPL-3.0 like the original.
+
+📖 **[Documentation](https://ghackett.github.io/agent-session-manager/)**
 
 > **Unofficial community tool.** An independent community project, not affiliated with or endorsed by any agent vendor (including Anthropic).
 > It never modifies your agents' own session data — all app state lives in its own config file.
 
-![Agent Session Manager](data/screenshot.png)
+![Collins](data/screenshot.png)
 
 Features:
 
 - **Sidebar** lists every session found on disk (for Claude Code, under `~/.claude/projects/`), grouped by project (collapsible headers, with collapse-all/expand-all buttons next to the search box), with a **Favorites** section pinned on top — star a session to move it there. **Drag a project header** to rearrange projects — the order and each project's expanded state persist across restarts. A **search box** filters by name, project, preview, or session id, and the list **updates live** as sessions are created or written to.
-- Sessions can be given **custom names** (pencil icon), and unnamed sessions get an **auto-generated title**: pre-existing sessions are titled locally on launch (first 10 words of the initial prompt), while sessions created during an app run have their first prompt summarized to ≤5 words by a headless `claude -p --model haiku` run — the same CLI and login the whole app is based on, no extra credentials needed. Titles are persisted so each is generated only once; right-click → **Regenerate name** re-runs the model for one session, and a Preferences toggle turns auto-titling off (a manual rename always wins). Names, favorites, and hidden sessions persist in `~/.config/agent-session-manager/state.json` — your agents' own session files are never modified.
+- Sessions can be given **custom names** (pencil icon), and unnamed sessions get an **auto-generated title**: pre-existing sessions are titled locally on launch (first 10 words of the initial prompt), while sessions created during an app run have their first prompt summarized to ≤5 words by a headless `claude -p --model haiku` run — the same CLI and login the whole app is based on, no extra credentials needed. Titles are persisted so each is generated only once; right-click → **Regenerate name** re-runs the model for one session, and a Preferences toggle turns auto-titling off (a manual rename always wins). Names, favorites, and hidden sessions persist in `~/.config/collins/state.json` — your agents' own session files are never modified.
 - **Clicking a session** opens a tab in the main area; each tab is an embedded **VTE terminal** running your `$SHELL` with the agent's resume command (`claude --resume <session-id>` for Claude Code) typed into it, in the session's original project directory. When the agent exits you drop to a shell prompt; the tab closes when the shell exits. Closing a tab asks the agent to exit cleanly (Claude Code's `/exit`) in the background first.
 - **In-terminal search** with a find bar (`Ctrl+Shift+G`) over the tab's scrollback.
 - **Terminal panel** (`Ctrl+J`, or the small buttons in the window's bottom-right corner): every tab has a second plain-shell terminal — no agent auto-launched — below or beside the agent terminal. It opens in the agent's *current* working directory (worktree-aware), and the swap button (shown only while a panel is open) moves it bottom↔right without restarting its shell — each layout's panel size is remembered per tab while the app runs, and the last-set size per layout is saved app-wide, so every panel opened from then on defaults to it. Typing `exit` in it hides the panel; the last-used position (bottom/right) is remembered app-wide, and whichever panel you open next defaults to it. Closing a tab while a command is running in its panel — even a hidden one — asks for confirmation before the command is killed. Closing the whole window with busy sessions shows a **single confirmation**, then asks every agent to exit cleanly before the window goes away.
@@ -81,50 +82,36 @@ sudo pacman -S python-gobject gtk4 libadwaita vte4
 
 Plus a supported agent's CLI on your `PATH` — currently the [`claude` CLI](https://claude.com/claude-code).
 
-> Installing with `pipx`? PyGObject comes from the system, so use
-> `pipx install --system-site-packages agent-session-manager-gtk`.
-
 ## Install
-
-**Ubuntu — PPA:**
-
-```bash
-sudo add-apt-repository ppa:matemiller992/agent-session-manager
-sudo apt update && sudo apt install agent-session-manager
-```
-
-**Arch — AUR:** `yay -S agent-session-manager`
-
-**Any distro — pipx:** `pipx install --system-site-packages agent-session-manager-gtk`
-
-**Debian/Ubuntu — .deb package** (from the [latest release](https://github.com/r4nd3l/agent-session-manager/releases/latest)):
-
-```bash
-sudo apt install ./agent-session-manager_0.8.0_all.deb
-```
-
-Dependencies are pulled in automatically; the app appears in your app grid as "Agent Session Manager".
 
 **From source:**
 
 ```bash
-git clone https://github.com/r4nd3l/agent-session-manager.git
-cd agent-session-manager
-python3 -m claude_session_manager
+git clone https://github.com/ghackett/agent-session-manager.git collins
+cd collins
+python3 -m collins
 ```
 
-Or install the desktop launcher + icon (shows up in the app grid as "Agent Session Manager"):
+Or install the desktop launcher + icon (shows up in the app grid as "Collins"):
 
 ```bash
 ./data/install.sh
 ```
+
+**Debian/Ubuntu — .deb package** (build it with `./scripts/build_deb.sh`, or grab one from this repo's releases if published):
+
+```bash
+sudo apt install ./collins_2.0.0_all.deb
+```
+
+Dependencies are pulled in automatically; the app appears in your app grid as "Collins".
 
 Terminal shortcuts: `Ctrl+Shift+C` copy, `Ctrl+Shift+V` paste.
 
 ## Layout
 
 ```
-claude_session_manager/
+collins/
 ├── app.py        # Adw.Application entry point + CSS
 ├── window.py     # main window: split view, sidebar, tabs, actions, dialogs
 ├── sessions.py   # session discovery + transcript statistics
@@ -132,32 +119,29 @@ claude_session_manager/
 ├── prefs.py      # preferences dialog
 └── terminal.py   # VTE terminal tab spawning the agent CLI
 data/
-├── io.github.r4nd3l.AgentSessionManager.desktop   # launcher template
-├── icons/io.github.r4nd3l.AgentSessionManager.svg # app icon
-└── install.sh                              # install launcher + icon for current user
+├── com.episode6.Collins.desktop   # launcher template
+├── icons/com.episode6.Collins.svg # app icon
+└── install.sh                           # install launcher + icon for current user
 scripts/
-├── build_deb.sh                            # build the .deb package into dist/
-└── make_demo_data.py                       # fake sessions for screenshots/demos
+├── build_deb.sh                         # build the .deb package into dist/
+└── make_demo_data.py                    # fake sessions for screenshots/demos
 ```
 
 ## Publishing (maintainers)
 
-Releases are one step: **push a `v*` tag**. `.github/workflows/release.yml` then
-builds the wheel/sdist and the `.deb`, creates the GitHub Release (with the
-`.deb` attached and auto-generated notes), and publishes to
-[PyPI](https://pypi.org/project/agent-session-manager-gtk/) via **trusted
-publishing** (OIDC — no API tokens).
+Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds the
+wheel/sdist and the `.deb` and creates the GitHub Release (with the `.deb`
+attached and auto-generated notes). The PyPI job uses trusted publishing
+(OIDC) and only works once a trusted publisher is configured for this repo.
 
 ```bash
 # bump version in pyproject.toml / __init__.py / debian/changelog, commit, then:
-git tag -a v0.8.0 -m v0.8.0 && git push origin v0.8.0
+git tag -a v2.0.0 -m v2.0.0 && git push origin v2.0.0
 ```
 
-PyPI trusted-publisher setup expects workflow `release.yml` (owner `r4nd3l`,
-repo `agent-session-manager`). The AUR and PPA are updated separately
-(see `packaging/`).
+## Credits & license
 
-## Roadmap
-
-- Distribution: AUR, Ubuntu PPA, Flathub
-- Chat polish: per-message copy, code syntax highlighting, model picker in the compose bar
+Collins is a rebranded fork of
+[**agent-session-manager**](https://github.com/r4nd3l/agent-session-manager)
+by Máté Molnár, which did all the heavy lifting. Released under
+[GPL-3.0-or-later](LICENSE), same as the original.

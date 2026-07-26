@@ -4,7 +4,7 @@
 
 import json
 
-from claude_session_manager.state import clamp_window_size, merge_project_order, move_in_order
+from collins.state import clamp_window_size, merge_project_order, move_in_order
 
 
 def test_roundtrip(app_state):
@@ -67,8 +67,9 @@ def test_corrupt_state_file_recovers(app_state):
 
 def test_migrates_old_config_dir(app_state):
     # state.json in the pre-rebrand dir is carried over to the new dir.
-    app_state._OLD_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    (app_state._OLD_CONFIG_DIR / "state.json").write_text(
+    old_dir = app_state._OLD_CONFIG_DIRS[0]
+    old_dir.mkdir(parents=True, exist_ok=True)
+    (old_dir / "state.json").write_text(
         json.dumps({"names": {"sid": "Carried over"}, "favorites": ["sid"]}),
         encoding="utf-8",
     )
@@ -76,6 +77,17 @@ def test_migrates_old_config_dir(app_state):
     assert state.get_name("sid") == "Carried over"
     assert state.is_favorite("sid")
     assert app_state._STATE_FILE.exists()  # copied into the new location
+
+
+def test_migrates_oldest_config_dir(app_state):
+    # A state.json two renames back still migrates, and the newer dir wins.
+    oldest_dir = app_state._OLD_CONFIG_DIRS[1]
+    oldest_dir.mkdir(parents=True, exist_ok=True)
+    (oldest_dir / "state.json").write_text(
+        json.dumps({"names": {"sid": "From oldest"}}), encoding="utf-8"
+    )
+    state = app_state.AppState()
+    assert state.get_name("sid") == "From oldest"
 
 
 def test_panel_size_settings_roundtrip(app_state):

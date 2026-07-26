@@ -1,13 +1,18 @@
+<!--
+Modified from the original agent-session-manager
+(https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+fork. Last modified: 2026-07-26. Full change history: git log for this file.
+-->
 # AUR packaging
 
 `PKGBUILD` and `.SRCINFO` for the [AUR](https://aur.archlinux.org/) package
-`claude-session-manager`.
+`collins`.
 
 ## Updating for a new release
 
 1. Bump `pkgver` in `PKGBUILD` and refresh the source hash:
    ```bash
-   curl -sL https://github.com/r4nd3l/claude-session-manager/archive/refs/tags/v<VER>.tar.gz | sha256sum
+   curl -sL https://github.com/ghackett/agent-session-manager/archive/refs/tags/v<VER>.tar.gz | sha256sum
    ```
    Put the hash in `sha256sums=(...)`.
 2. Regenerate `.SRCINFO` (on an Arch system): `makepkg --printsrcinfo > .SRCINFO`
@@ -20,7 +25,7 @@ One-time: create an [AUR account](https://aur.archlinux.org/) and add your
 SSH public key under *My Account*.
 
 ```bash
-git clone ssh://aur@aur.archlinux.org/claude-session-manager.git aur-csm
+git clone ssh://aur@aur.archlinux.org/collins.git aur-csm
 cp PKGBUILD .SRCINFO aur-csm/
 cd aur-csm
 git add PKGBUILD .SRCINFO
@@ -28,6 +33,6 @@ git commit -m "Update to v<VER>"
 git push
 ```
 
-> If the package name `claude-session-manager` is already taken on the AUR,
-> rename `pkgname`/`pkgbase` to `claude-session-manager-gtk` to match the PyPI
+> If the package name `collins` is already taken on the AUR,
+> rename `pkgname`/`pkgbase` to `collins-gtk` to match the PyPI
 > distribution and re-clone the matching AUR repo.

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+Modified from the original agent-session-manager
+(https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+fork. Last modified: 2026-07-26. Full change history: git log for this file.
+-->
 <svg width="1000" height="420" viewBox="0 0 1000 420" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -15,7 +20,7 @@
         fill="#FAF7F2"/>
 
   <!-- title + subtitle -->
-  <text x="60" y="205" font-family="Cantarell, sans-serif" font-size="40" font-weight="bold" fill="#EDE9E1">Agent Session Manager</text>
+  <text x="60" y="205" font-family="Cantarell, sans-serif" font-size="40" font-weight="bold" fill="#EDE9E1">Collins</text>
   <text x="60" y="245" font-family="Cantarell, sans-serif" font-size="21" fill="#A89F93">A native Linux home for your AI coding-agent sessions</text>
 
   <!-- prompt chip -->

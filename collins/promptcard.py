@@ -1,3 +1,6 @@
+# Modified from the original agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+# fork. Last modified: 2026-07-26. Full change history: git log for this file.
 """A native card for an agent's structured prompt (Claude's AskUserQuestion).
 
 Shown as an overlay on the terminal: instead of navigating the TUI, the user

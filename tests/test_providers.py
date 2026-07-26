@@ -7,8 +7,8 @@ import shutil
 import time
 from pathlib import Path
 
-from claude_session_manager import providers
-from claude_session_manager.providers import (
+from collins import providers
+from collins.providers import (
     ClaudeProvider,
     available_providers,
     get_provider,
@@ -74,7 +74,7 @@ def test_chat_variants_empty_when_cli_missing(monkeypatch):
 
 
 def test_new_command_options(monkeypatch):
-    from claude_session_manager.providers import SessionOptions
+    from collins.providers import SessionOptions
     monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
     claude = ClaudeProvider()
     opts = SessionOptions(model="opus", permission_mode="plan", add_dirs=("/extra",))

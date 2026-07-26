@@ -307,7 +307,7 @@ class SessionSidebar(Gtk.Box):
         menu.append(_("Show hidden sessions"), "win.show-hidden")
         menu.append(_("MCP servers"), "win.mcp-servers")
         menu.append(_("Preferences"), "win.preferences")
-        menu.append(_("About Agent Session Manager"), "win.about")
+        menu.append(_("About Collins"), "win.about")
         header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu))
 
         refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")

@@ -1,10 +1,15 @@
+<!--
+Modified from the original agent-session-manager
+(https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+fork. Last modified: 2026-07-26. Full change history: git log for this file.
+-->
 # How It Works
 
 ## Reading sessions
 
 Each supported agent stores its sessions as JSONL transcripts — Claude Code,
 for example, writes them under
-`~/.claude/projects/<encoded-path>/<uuid>.jsonl`. Agent Session Manager scans
+`~/.claude/projects/<encoded-path>/<uuid>.jsonl`. Collins scans
 that directory, reads a small prefix of each transcript to extract the project
 directory and a message preview, and watches the folder with a
 `Gio.FileMonitor` so the list stays live.
@@ -16,7 +21,7 @@ a confirmation.
 ## App state
 
 Custom names, emoji, favorites, hidden sessions, and preferences are stored
-separately in `~/.config/agent-session-manager/state.json`. This keeps the
+separately in `~/.config/collins/state.json`. This keeps the
 app's data fully decoupled from the agents' own — you can delete the config at
 any time without affecting a single session.
 
@@ -30,7 +35,7 @@ exits.
 
 ## The stack
 
-Agent Session Manager is built with **GTK4**, **libadwaita**, **VTE**, and
+Collins is built with **GTK4**, **libadwaita**, **VTE**, and
 **PyGObject** — pure Python, no build step. VTE is the deciding factor: it's the
 only production-grade embeddable terminal on Linux, which is why the app is
 Linux-native. The data layer (session discovery, parsing, state) is GTK-free
@@ -39,7 +44,7 @@ and unit-tested.
 ## Architecture
 
 ```
-claude_session_manager/
+collins/
 ├── app.py        # Adw.Application entry point + CSS
 ├── window.py     # main window: tabs, actions, dialogs wiring
 ├── sidebar.py    # the session list widget
@@ -53,5 +58,5 @@ claude_session_manager/
 ```
 
 The source lives on
-[GitHub](https://github.com/r4nd3l/agent-session-manager) under GPL-3.0 —
+[GitHub](https://github.com/ghackett/agent-session-manager) under GPL-3.0 —
 contributions welcome.

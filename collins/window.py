@@ -71,8 +71,8 @@ class MainWindow(Adw.ApplicationWindow):
         super().__init__(**kwargs)
         self.state = state
         self.store = store
-        self.set_title("Agent Session Manager")
-        self.set_icon_name("io.github.r4nd3l.AgentSessionManager")
+        self.set_title("Collins")
+        self.set_icon_name("com.episode6.Collins")
         self._restore_window_geometry()
         self._pages: dict[str, Adw.TabPage] = {}  # session_id -> open tab
         self._confirmed_closes: set[Adw.TabPage] = set()
@@ -1181,8 +1181,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _show_about(self) -> None:
         about = Adw.AboutDialog(
-            application_name="Agent Session Manager",
-            application_icon="io.github.r4nd3l.AgentSessionManager",
+            application_name="Collins",
+            application_icon="com.episode6.Collins",
             developer_name="Máté Molnár",
             version=__version__,
             license_type=Gtk.License.GPL_3_0,
@@ -1190,8 +1190,8 @@ class MainWindow(Adw.ApplicationWindow):
                 _("Manage and resume your AI coding agent sessions.\n\n"
                 "Unofficial community tool — not affiliated with or endorsed by Anthropic.")
             ),
-            website="https://github.com/r4nd3l/agent-session-manager",
-            issue_url="https://github.com/r4nd3l/agent-session-manager/issues",
+            website="https://github.com/ghackett/agent-session-manager",
+            issue_url="https://github.com/ghackett/agent-session-manager/issues",
         )
         about.present(self)
 

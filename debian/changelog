@@ -1,3 +1,11 @@
+collins (2.0.0) noble; urgency=medium
+
+  * Rebrand the app as Collins (fork of agent-session-manager): new package
+    name, command (collins), app id (com.episode6.Collins), and config
+    dir (~/.config/collins, migrated automatically from the old locations).
+
+ -- Geoff Hackett <ghackett@gmail.com>  Sun, 26 Jul 2026 12:00:00 +0000
+
 agent-session-manager (1.0.0) noble; urgency=medium
 
   * Native streaming chat (Claude) with token-by-token output and interactive

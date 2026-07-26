@@ -4,12 +4,12 @@ Modified from the original agent-session-manager
 fork. Last modified: 2026-07-26. Full change history: git log for this file.
 -->
 
-# What is Agent Session Manager?
+# What is Collins?
 
-Agent Session Manager is a native Linux desktop app that gives your
+Collins is a native Linux desktop app that gives your
 [Claude Code](https://claude.com/claude-code) sessions a proper home.
 
-![Agent Session Manager](https://raw.githubusercontent.com/r4nd3l/agent-session-manager/main/data/screenshot.png)
+![Collins](https://raw.githubusercontent.com/ghackett/agent-session-manager/main/data/screenshot.png)
 
 If you use a coding agent daily, you accumulate **dozens of sessions** scattered
 across every project you touch. They live as JSONL transcripts named by UUID
@@ -23,10 +23,10 @@ that matter, and opens any of them in an **embedded terminal tab** that resumes
 it right where the session started.
 
 ::: tip Unofficial community tool
-Agent Session Manager is an independent community project, not affiliated with
+Collins is an independent community project, not affiliated with
 or endorsed by any agent vendor (including Anthropic). It is strictly read-only
 with respect to your agents' data — names, favorites, and all app state live in
-`~/.config/agent-session-manager/`. Your transcripts are never modified.
+`~/.config/collins/`. Your transcripts are never modified.
 :::
 
 ## Why use it?
@@ -44,10 +44,10 @@ with respect to your agents' data — names, favorites, and all app state live i
 ## How it compares
 
 Coding agents are terminal programs, and you can absolutely keep using them
-bare. Agent Session Manager is a layer *on top* — it doesn't replace the CLI, it
+bare. Collins is a layer *on top* — it doesn't replace the CLI, it
 launches and organizes it:
 
-| | Bare `--resume` | Agent Session Manager |
+| | Bare `--resume` | Collins |
 | --- | --- | --- |
 | See all sessions across projects | ❌ | ✅ |
 | Custom names & favorites | ❌ | ✅ |

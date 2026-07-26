@@ -2,20 +2,20 @@
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
 # fork. Last modified: 2026-07-26. Full change history: git log for this file.
 
-Source: agent-session-manager
+Source: collins
 Section: utils
 Priority: optional
-Maintainer: Máté Molnár <matemiller992@gmail.com>
+Maintainer: Geoff Hackett <ghackett@gmail.com>
 Build-Depends: debhelper-compat (= 13),
                dh-python,
                pybuild-plugin-pyproject,
                python3-all,
                python3-setuptools
 Standards-Version: 4.6.2
-Homepage: https://github.com/r4nd3l/agent-session-manager
+Homepage: https://github.com/ghackett/agent-session-manager
 Rules-Requires-Root: no
 
-Package: agent-session-manager
+Package: collins
 Architecture: all
 Depends: ${python3:Depends},
          ${misc:Depends},
@@ -24,7 +24,7 @@ Depends: ${python3:Depends},
          gir1.2-adw-1,
          gir1.2-vte-3.91
 Description: native GTK4 desktop app to manage Claude Code sessions
- Agent Session Manager browses every Claude Code session on your machine in a
+ Collins browses every Claude Code session on your machine in a
  sidebar grouped by project, lets you name and star them, and resumes any of
  them in embedded terminal tabs.
  .

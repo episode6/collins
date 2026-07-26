@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
 
-export CSM_APP_ID=io.github.r4nd3l.AgentSessionManager.Debug 
-python3 -m claude_session_manager
+export COLLINS_APP_ID=com.episode6.Collins.Debug 
+python3 -m collins
 

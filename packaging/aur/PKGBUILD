@@ -2,32 +2,37 @@
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
 # fork. Last modified: 2026-07-26. Full change history: git log for this file.
 
-# Maintainer: Máté Molnár <molnar.mate@zengo.eu>
-pkgname=agent-session-manager
-pkgver=1.0.0
+# Maintainer: Geoff Hackett <ghackett@gmail.com>
+# Contributor: Máté Molnár <molnar.mate@zengo.eu> (original agent-session-manager)
+pkgname=collins
+pkgver=2.0.0
 pkgrel=1
 pkgdesc="Native GTK4 desktop app to manage and resume Claude Code sessions"
 arch=('any')
-url="https://github.com/r4nd3l/agent-session-manager"
+url="https://github.com/ghackett/agent-session-manager"
 license=('GPL-3.0-or-later')
 depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'vte4')
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
 optdepends=('claude-code: resume Claude Code sessions')
+# GitHub archives extract to <repo-name>-<ver>; the repo is still named
+# agent-session-manager. Refresh the sha256 when a v$pkgver tag exists
+# (see packaging/aur/README.md).
+_srcdir=agent-session-manager-$pkgver
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('59004120002cd1bb7bbe942e00be7349947a85644295bcfeb5ee27f6648d2bf9')
+sha256sums=('SKIP')
 
 build() {
-  cd "agent-session-manager-$pkgver"
+  cd "$_srcdir"
   python -m build --wheel --no-isolation
 }
 
 package() {
-  cd "agent-session-manager-$pkgver"
+  cd "$_srcdir"
   python -m installer --destdir="$pkgdir" dist/*.whl
 
-  local appid=io.github.r4nd3l.AgentSessionManager
+  local appid=com.episode6.Collins
   # Desktop entry: launch the installed command, drop the dev working dir.
-  sed -e "s|^Exec=.*|Exec=agent-session-manager|" -e "/^Path=/d" \
+  sed -e "s|^Exec=.*|Exec=collins|" -e "/^Path=/d" \
     "data/$appid.desktop" | install -Dm644 /dev/stdin \
     "$pkgdir/usr/share/applications/$appid.desktop"
 

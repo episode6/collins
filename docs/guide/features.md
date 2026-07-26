@@ -49,7 +49,7 @@ Enter opens, Esc closes.
 
 ![Setting a tab emoji, with two sessions open as tabs](/img/tab-emoji.png)
 
-All of this is stored in `~/.config/agent-session-manager/state.json`. Your
+All of this is stored in `~/.config/collins/state.json`. Your
 agents' own session files are never modified.
 
 ## Tabs & terminals
