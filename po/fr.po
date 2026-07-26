@@ -515,6 +515,12 @@ msgstr "Reprise de la session précédente — les messages antérieurs ne sont 
 msgid "Close all tabs"
 msgstr "Fermer tous les onglets"
 
+msgid "Exit Session"
+msgstr "Quitter la session"
+
+msgid "Exit Sessions"
+msgstr "Quitter les sessions"
+
 msgid "Background Session"
 msgstr "Session en arrière-plan"
 

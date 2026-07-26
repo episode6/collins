@@ -515,6 +515,12 @@ msgstr "Frühere Sitzung wird fortgesetzt — ältere Nachrichten werden hier ni
 msgid "Close all tabs"
 msgstr "Alle Tabs schließen"
 
+msgid "Exit Session"
+msgstr "Sitzung beenden"
+
+msgid "Exit Sessions"
+msgstr "Sitzungen beenden"
+
 msgid "Background Session"
 msgstr "Sitzung in den Hintergrund"
 

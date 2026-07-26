@@ -201,6 +201,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Continuing the previous session — earlier messages aren't shown here.":
             "A korábbi munkamenet folytatása — a régebbi üzenetek itt nem jelennek meg.",
         "Close all tabs": "Összes lap bezárása",
+        "Exit Session": "Kilépés a munkamenetből",
+        "Exit Sessions": "Kilépés a munkamenetekből",
         "Background Session": "Munkamenet a háttérbe",
         "Background Sessions": "Munkamenetek a háttérbe",
         "Backgrounding instead keeps the agent running detached — reopen the "
@@ -419,6 +421,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Continuing the previous session — earlier messages aren't shown here.":
             "Frühere Sitzung wird fortgesetzt — ältere Nachrichten werden hier nicht angezeigt.",
         "Close all tabs": "Alle Tabs schließen",
+        "Exit Session": "Sitzung beenden",
+        "Exit Sessions": "Sitzungen beenden",
         "Background Session": "Sitzung in den Hintergrund",
         "Background Sessions": "Sitzungen in den Hintergrund",
         "Backgrounding instead keeps the agent running detached — reopen the "
@@ -640,6 +644,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Continuing the previous session — earlier messages aren't shown here.":
             "Continuando la sesión anterior: los mensajes anteriores no se muestran aquí.",
         "Close all tabs": "Cerrar todas las pestañas",
+        "Exit Session": "Salir de la sesión",
+        "Exit Sessions": "Salir de las sesiones",
         "Background Session": "Sesión a segundo plano",
         "Background Sessions": "Sesiones a segundo plano",
         "Backgrounding instead keeps the agent running detached — reopen the "
@@ -862,6 +868,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Continuing the previous session — earlier messages aren't shown here.":
             "Reprise de la session précédente — les messages antérieurs ne sont pas affichés ici.",
         "Close all tabs": "Fermer tous les onglets",
+        "Exit Session": "Quitter la session",
+        "Exit Sessions": "Quitter les sessions",
         "Background Session": "Session en arrière-plan",
         "Background Sessions": "Sessions en arrière-plan",
         "Backgrounding instead keeps the agent running detached — reopen the "

@@ -12,7 +12,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: collins\n"
 "Report-Msgid-Bugs-To: matemiller992@gmail.com\n"
-"POT-Creation-Date: 2026-07-26 16:46-0400\n"
+"POT-Creation-Date: 2026-07-26 17:12-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -765,7 +765,7 @@ msgid "Close window with {n} active session(s)?"
 msgstr ""
 
 #: collins/window.py:330
-msgid "Close Window"
+msgid "Exit Sessions"
 msgstr ""
 
 #: collins/window.py:334
@@ -785,7 +785,7 @@ msgstr ""
 msgid "The files are moved to the trash and can be restored."
 msgstr ""
 
-#: collins/window.py:474 collins/window.py:1226
+#: collins/window.py:474 collins/window.py:1228
 msgid "Move to Trash"
 msgstr ""
 
@@ -835,83 +835,87 @@ msgstr ""
 
 #: collins/window.py:815
 msgid ""
-" Backgrounding instead keeps the agent running detached — reopen the session "
+"Backgrounding instead keeps the agent running detached — reopen the session "
 "later to re-attach."
 msgstr ""
 
-#: collins/window.py:821
+#: collins/window.py:818
+msgid "Exit Session"
+msgstr ""
+
+#: collins/window.py:818
 msgid "Close Tab"
 msgstr ""
 
-#: collins/window.py:825
+#: collins/window.py:827
 msgid "Background Session"
 msgstr ""
 
-#: collins/window.py:983
+#: collins/window.py:985
 msgid "Tab name"
 msgstr ""
 
-#: collins/window.py:1153
+#: collins/window.py:1155
 msgid "Export session as Markdown"
 msgstr ""
 
-#: collins/window.py:1171
+#: collins/window.py:1173
 msgid "Export failed"
 msgstr ""
 
-#: collins/window.py:1210
+#: collins/window.py:1212
 msgid "Could not trash transcript"
 msgstr ""
 
-#: collins/window.py:1220
+#: collins/window.py:1222
 msgid "Move transcript to trash?"
 msgstr ""
 
-#: collins/window.py:1221
+#: collins/window.py:1223
 #, python-brace-format
 msgid "“{name}” will be removed from Claude's history."
 msgstr ""
 
-#: collins/window.py:1225
+#: collins/window.py:1227
 msgid "The file is moved to the trash and can be restored."
 msgstr ""
 
-#: collins/window.py:1238
+#: collins/window.py:1240
 msgid "Could not delete transcript"
 msgstr ""
 
-#: collins/window.py:1248
+#: collins/window.py:1250
 msgid "Delete session permanently?"
 msgstr ""
 
-#: collins/window.py:1249
+#: collins/window.py:1251
 #, python-brace-format
 msgid ""
 "“{name}” and its transcript file will be permanently deleted. This cannot be "
 "undone."
 msgstr ""
 
-#: collins/window.py:1251
+#: collins/window.py:1253
 msgid "Delete permanently"
 msgstr ""
 
-#: collins/window.py:1258
+#: collins/window.py:1260
 msgid "Open session transcript"
 msgstr ""
 
-#: collins/window.py:1260
+#: collins/window.py:1262
 msgid "Session transcripts (*.jsonl)"
 msgstr ""
 
-#: collins/window.py:1280
+#: collins/window.py:1282
 msgid "Could not open transcript"
 msgstr ""
 
-#: collins/window.py:1281
+#: collins/window.py:1283
 msgid "The file couldn't be read as a session transcript."
 msgstr ""
 
-#: collins/window.py:1296
+#: collins/window.py:1298
 msgid ""
 "Manage and resume your AI coding agent sessions.\n"
 "\n"

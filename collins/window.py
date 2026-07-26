@@ -327,7 +327,7 @@ class MainWindow(Adw.ApplicationWindow):
             self,
             _("Close window with {n} active session(s)?").format(n=busy),
             body,
-            _("Close Window"),
+            _("Exit Sessions"),
             do_quit,
             on_dismiss=lambda: setattr(self, "_quit_asking", False),
             default_response="confirm",
@@ -814,11 +814,13 @@ class MainWindow(Adw.ApplicationWindow):
         if can_background:
             body += " " + _("Backgrounding instead keeps the agent running "
                             "detached — reopen the session later to re-attach.")
+        # A panel-only-busy tab has no agent session to exit — say "Close Tab".
+        confirm_label = _("Exit Session") if agent_busy else _("Close Tab")
         dialogs.confirm_dialog(
             self,
             heading,
             body,
-            _("Close Tab"),
+            confirm_label,
             do_close,
             on_dismiss=lambda: self._close_asking.discard(page),
             default_response="confirm",

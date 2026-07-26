@@ -515,6 +515,12 @@ msgstr "A korábbi munkamenet folytatása — a régebbi üzenetek itt nem jelen
 msgid "Close all tabs"
 msgstr "Összes lap bezárása"
 
+msgid "Exit Session"
+msgstr "Kilépés a munkamenetből"
+
+msgid "Exit Sessions"
+msgstr "Kilépés a munkamenetekből"
+
 msgid "Background Session"
 msgstr "Munkamenet a háttérbe"
 

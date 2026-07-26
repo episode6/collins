@@ -515,6 +515,12 @@ msgstr "Continuando la sesión anterior: los mensajes anteriores no se muestran 
 msgid "Close all tabs"
 msgstr "Cerrar todas las pestañas"
 
+msgid "Exit Session"
+msgstr "Salir de la sesión"
+
+msgid "Exit Sessions"
+msgstr "Salir de las sesiones"
+
 msgid "Background Session"
 msgstr "Sesión a segundo plano"
 
