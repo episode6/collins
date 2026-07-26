@@ -185,6 +185,9 @@ class App(Adw.Application):
         window = self.get_active_window()
         if window is None:
             window = self._new_window()
+            # Fresh launch: reopen the session that was active when the app
+            # was last closed. Extra windows (Ctrl+Shift+N) start empty.
+            window.restore_last_session()
         window.present()
 
 

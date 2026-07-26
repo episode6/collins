@@ -152,6 +152,13 @@ def test_panel_state_ignores_corrupt_entries(app_state):
     assert fresh.get_panel_state("bad") is None
 
 
+def test_last_active_session_roundtrip(app_state):
+    state = app_state.AppState()
+    assert state.get_setting("last_active_session") == ""  # default: nothing to reopen
+    state.set_setting("last_active_session", "sid-42")
+    assert app_state.AppState().get_setting("last_active_session") == "sid-42"
+
+
 def test_window_geometry_roundtrip(app_state):
     state = app_state.AppState()
     state.update_settings({"window_width": 1600, "window_height": 900, "window_maximized": True})
