@@ -11,9 +11,11 @@ only; the Claude adapter wraps the original discovery logic in sessions.py.
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -188,15 +190,43 @@ class ClaudeProvider(Provider):
 
     def resume_command(self, session_id: str, fork: bool = False) -> str | None:
         # Attach-first: if the session is still running detached (e.g. after
-        # /bg), `claude attach` reconnects to the live process. It exits
-        # non-zero when no such job exists — or on CLIs that predate attach —
-        # and the plain resume runs instead. Forks always resume: attach
-        # can't create a new session.
+        # /bg), `claude attach` reconnects to the live process instead of
+        # starting a new foreground turn over the transcript. Forks always
+        # resume: attach can't create a new session.
         cmd = super().resume_command(session_id, fork=fork)
         if cmd is None or fork:
             return cmd
+        if self._running_in_background(session_id):
+            cli = shutil.which(self.cli)
+            return f"{shlex.quote(cli)} attach {shlex.quote(session_id)}"
+        return cmd
+
+    def _running_in_background(self, session_id: str) -> bool:
+        """Whether the session is running detached, per `claude agents --json`.
+
+        Only `"kind": "background"` entries count — `"interactive"` ones are
+        sessions open in a foreground TUI somewhere (including our own tabs),
+        which attach doesn't target. Any failure (old CLI without the
+        subcommand, timeout, bad JSON) means "not running" → plain resume.
+        """
         cli = shutil.which(self.cli)
-        return f"{shlex.quote(cli)} attach {shlex.quote(session_id)} || {cmd}"
+        if cli is None:
+            return False
+        try:
+            out = subprocess.run(
+                [cli, "agents", "--json"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            ).stdout
+            agents = json.loads(out)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return False
+        return any(
+            a.get("sessionId") == session_id and a.get("kind") == "background"
+            for a in agents
+            if isinstance(a, dict)
+        )
 
     supports_add_dir = True
 
