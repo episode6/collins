@@ -515,6 +515,18 @@ msgstr "Frühere Sitzung wird fortgesetzt — ältere Nachrichten werden hier ni
 msgid "Close all tabs"
 msgstr "Alle Tabs schließen"
 
+msgid "Background Session"
+msgstr "Sitzung in den Hintergrund"
+
+msgid "Background Sessions"
+msgstr "Sitzungen in den Hintergrund"
+
+msgid "Backgrounding instead keeps the agent running detached — reopen the session later to re-attach."
+msgstr "Beim Verschieben in den Hintergrund läuft der Agent abgekoppelt weiter — öffne die Sitzung später erneut, um dich wieder zu verbinden."
+
+msgid "Agents are asked to exit cleanly first; other running commands will be terminated. Backgrounding instead keeps the agents running detached — reopen a session later to re-attach."
+msgstr "Agenten werden zuerst gebeten, sich sauber zu beenden; andere laufende Befehle werden abgebrochen. Beim Verschieben in den Hintergrund laufen die Agenten abgekoppelt weiter — öffne eine Sitzung später erneut, um dich wieder zu verbinden."
+
 msgid "No session open"
 msgstr "Keine Sitzung geöffnet"
 

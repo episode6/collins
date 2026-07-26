@@ -163,6 +163,11 @@ class Provider:
         """Text to feed the agent to make it exit cleanly, or None to force-close."""
         return None
 
+    def background_exit(self) -> str | None:
+        """Text to feed the agent to detach it and keep it running in the
+        background, or None if this agent can't be backgrounded."""
+        return None
+
     def answer_keystrokes(self, questions: list, option_index: int) -> str | None:
         """Keystrokes that select option `option_index` of a structured prompt,
         or None if this agent/shape can't be auto-answered (→ fall back to the
@@ -187,6 +192,9 @@ class ClaudeProvider(Provider):
 
     def graceful_exit(self) -> str | None:
         return "/exit\r"
+
+    def background_exit(self) -> str | None:
+        return "/bg\r"
 
     def resume_command(self, session_id: str, fork: bool = False) -> str | None:
         # Attach-first: if the session is still running detached (e.g. after

@@ -515,6 +515,18 @@ msgstr "A korábbi munkamenet folytatása — a régebbi üzenetek itt nem jelen
 msgid "Close all tabs"
 msgstr "Összes lap bezárása"
 
+msgid "Background Session"
+msgstr "Munkamenet a háttérbe"
+
+msgid "Background Sessions"
+msgstr "Munkamenetek a háttérbe"
+
+msgid "Backgrounding instead keeps the agent running detached — reopen the session later to re-attach."
+msgstr "A háttérbe küldéssel az ügynök leválasztva tovább fut — a munkamenet későbbi megnyitásával újra csatlakozhatsz."
+
+msgid "Agents are asked to exit cleanly first; other running commands will be terminated. Backgrounding instead keeps the agents running detached — reopen a session later to re-attach."
+msgstr "Az ügynököket először tiszta kilépésre kérjük; a többi futó parancs leáll. A háttérbe küldéssel az ügynökök leválasztva tovább futnak — egy munkamenet későbbi megnyitásával újra csatlakozhatsz."
+
 msgid "No session open"
 msgstr "Nincs megnyitott munkamenet"
 

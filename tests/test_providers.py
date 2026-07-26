@@ -10,6 +10,7 @@ from pathlib import Path
 from collins import providers
 from collins.providers import (
     ClaudeProvider,
+    Provider,
     available_providers,
     get_provider,
 )
@@ -148,6 +149,12 @@ def test_get_provider_default():
 
 def test_graceful_exit_text():
     assert ClaudeProvider().graceful_exit() == "/exit\r"
+
+
+def test_background_exit_text():
+    assert ClaudeProvider().background_exit() == "/bg\r"
+    # Base providers can't be backgrounded → no Background option in dialogs.
+    assert Provider().background_exit() is None
 
 
 def test_claude_answer_keystrokes_single_select():
