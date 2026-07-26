@@ -51,9 +51,51 @@ def test_available_providers_gating(monkeypatch):
 
 def test_resume_and_new_commands(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(ClaudeProvider, "_running_in_background", lambda self, sid: False)
     claude = ClaudeProvider()
     assert claude.resume_command("abc") == "/usr/bin/claude --resume abc"
     assert claude.resume_command("abc", fork=True) == "/usr/bin/claude --resume abc --fork-session"
+
+
+def test_resume_attaches_to_running_background_session(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(ClaudeProvider, "_running_in_background", lambda self, sid: True)
+    claude = ClaudeProvider()
+    assert claude.resume_command("abc") == "/usr/bin/claude attach abc"
+    # Forks always resume: attach can't create a new session.
+    assert claude.resume_command("abc", fork=True) == "/usr/bin/claude --resume abc --fork-session"
+
+
+def test_running_in_background_parses_agents_json(monkeypatch):
+    import json
+
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    payload = json.dumps(
+        [
+            {"sessionId": "fg-id", "kind": "interactive"},
+            {"sessionId": "bg-id", "kind": "background"},
+        ]
+    )
+
+    class Result:
+        stdout = payload
+
+    monkeypatch.setattr(providers.subprocess, "run", lambda *a, **k: Result())
+    claude = ClaudeProvider()
+    assert claude._running_in_background("bg-id") is True
+    # Interactive = open in a foreground TUI somewhere; attach doesn't target it.
+    assert claude._running_in_background("fg-id") is False
+    assert claude._running_in_background("gone-id") is False
+
+
+def test_running_in_background_false_on_error(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+
+    def boom(*a, **k):
+        raise OSError("exec failed")
+
+    monkeypatch.setattr(providers.subprocess, "run", boom)
+    assert ClaudeProvider()._running_in_background("abc") is False
 
 
 def test_commands_none_when_cli_missing(monkeypatch):
