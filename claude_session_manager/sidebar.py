@@ -129,6 +129,7 @@ class SessionRow(Gtk.ListBoxRow):
         top.append(self.dot)
 
         name_label = Gtk.Label(xalign=0.0, hexpand=True)
+        name_label.set_margin_start(8)  # ~half the highlight-edge-to-dot distance
         name_label.set_ellipsize(_ELLIPSIZE_END)
         top.append(name_label)
 
