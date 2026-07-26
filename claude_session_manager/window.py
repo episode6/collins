@@ -76,6 +76,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._closing_pages: dict[Adw.TabPage, int] = {}  # graceful close in progress -> attempts
         self._panel_close_asking: set[Adw.TabPage] = set()  # busy-panel dialog open
         self._panel_close_ok: set[Adw.TabPage] = set()  # user okayed killing the panel job
+        self._quitting = False  # window close confirmed; draining tabs
+        self._quit_asking = False  # the single quit-confirmation dialog is open
         self._menu_page: Adw.TabPage | None = None
         self._base_titles: dict[Adw.TabPage, str] = {}  # fork/new tab title without emoji
         # Tabs whose session id was just resolved, waiting for the store to
@@ -252,7 +254,48 @@ class MainWindow(Adw.ApplicationWindow):
         if self._geometry_save_source is not None:
             GLib.source_remove(self._geometry_save_source)
         self._save_window_geometry()
-        return False  # continue with the normal close
+        if self._quitting:
+            return False  # tabs drained (or the user insisted) — really close
+        busy = self._busy_tab_count()
+        if busy == 0:
+            return False  # nothing running; continue with the normal close
+        if not self._quit_asking:  # one dialog for however many sessions are busy
+            self._confirm_quit(busy)
+        return True
+
+    def _busy_tab_count(self) -> int:
+        count = 0
+        for i in range(self.tab_view.get_n_pages()):
+            tab = self.tab_view.get_nth_page(i).get_child()
+            if isinstance(tab, TerminalTab) and (
+                tab.has_running_command() or tab.panel_has_running_command()
+            ):
+                count += 1
+        return count
+
+    def _confirm_quit(self, busy: int) -> None:
+        self._quit_asking = True
+
+        def do_quit() -> None:
+            self._quit_asking = False
+            self._quitting = True
+            # The window-level dialog already covered the panels: don't let
+            # each tab ask again. Agents still get their graceful /exit.
+            for i in range(self.tab_view.get_n_pages()):
+                self._panel_close_ok.add(self.tab_view.get_nth_page(i))
+            # _on_close_page reissues the window close once the last tab drains
+            # (immediately, if every close completes synchronously).
+            self._close_all_tabs()
+
+        dialogs.confirm_dialog(
+            self,
+            _("Close window with {n} active session(s)?").format(n=busy),
+            _("Agents are asked to exit cleanly first; "
+              "other running commands will be terminated."),
+            _("Close Window"),
+            do_quit,
+            on_dismiss=lambda: setattr(self, "_quit_asking", False),
+        )
 
     # -- sidebar width persistence -------------------------------------------
 
@@ -916,6 +959,8 @@ class MainWindow(Adw.ApplicationWindow):
         view.close_page_finish(page, True)
         if view.get_n_pages() == 0:
             self.content_stack.set_visible_child_name("empty")
+            if self._quitting:  # last tab drained — finish the window close
+                GLib.idle_add(self.close)
         return True  # we handled it
 
     # -- per-session actions ---------------------------------------------------
