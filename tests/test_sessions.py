@@ -28,6 +28,7 @@ def test_session_from_file_claude(tmp_path):
     assert session.session_id == "abc"
     assert session.provider == "claude"  # detected from top-level "type"
     assert session.cwd == "/proj"
+    assert session.created == session.mtime  # no timestamps -> mtime fallback
 
 
 def test_session_from_file_missing(tmp_path):
@@ -56,6 +57,14 @@ def test_discover_extracts_cwd_and_preview(projects_dir):
     assert alpha.cwd == "/home/user/alpha"
     assert alpha.preview == "Build the alpha feature"
     assert alpha.project_name == "alpha"
+
+
+def test_discover_extracts_created_timestamp(projects_dir):
+    from datetime import datetime
+
+    expected = datetime.fromisoformat("2026-06-01T10:00:00+00:00").timestamp()
+    for session in discover_sessions():
+        assert session.created == expected
 
 
 def test_discover_sorted_newest_first(projects_dir):

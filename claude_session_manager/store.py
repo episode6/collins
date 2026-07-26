@@ -112,11 +112,14 @@ class SessionStore(GObject.Object):
         favorites = [s for s in visible if self.state.is_favorite(s.session_id)]
         rest = [s for s in visible if not self.state.is_favorite(s.session_id)]
 
-        # Sessions within a group stay mtime-sorted (newest first); the groups
+        # Sessions within a group are sorted by creation time (newest first) so
+        # rows don't jump around as sessions get activity; the groups
         # themselves follow the user-arranged persisted order.
         grouped: dict[tuple, list[Session]] = {}
         for session in rest:
             grouped.setdefault(("proj", session.project_name), []).append(session)
+        for group_sessions in grouped.values():
+            group_sessions.sort(key=lambda s: s.created, reverse=True)
 
         previous_order = self.resolved_project_order
         self.resolved_project_order = merge_project_order(
