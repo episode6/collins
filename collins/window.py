@@ -176,6 +176,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("open-session", self._on_sidebar_open)
         self.sidebar.connect("open-many", self._on_sidebar_open_many)
         self.sidebar.connect("trash-many", self._on_sidebar_trash_many)
+        self.sidebar.connect("hide-many", self._on_sidebar_hide_many)
         self.store.connect("refreshed", self._on_store_refreshed)
 
         self.sidebar.set_size_request(220, -1)  # minimum drag width
@@ -417,6 +418,11 @@ class MainWindow(Adw.ApplicationWindow):
             _("Move to Trash"),
             do_trash,
         )
+
+    def _on_sidebar_hide_many(self, _sidebar, items: list[SessionItem]) -> None:
+        self.store.hide_many([item.session_id for item in items])
+        for item in items:
+            self._close_session_tab(item.session_id)
 
     # -- tabs --------------------------------------------------------------
 
@@ -1087,7 +1093,17 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_hide_session(self, _action, param: GLib.Variant) -> None:
         session_id = param.get_string()
-        self.store.set_hidden(session_id, not self.state.is_hidden(session_id))
+        hidden = not self.state.is_hidden(session_id)
+        self.store.set_hidden(session_id, hidden)
+        if hidden:
+            self._close_session_tab(session_id)
+
+    def _close_session_tab(self, session_id: str) -> None:
+        """Close the session's open tab (if any) through the normal close-page
+        flow, so busy tabs still get their confirmation dialog."""
+        page = self._pages.get(session_id)
+        if page is not None:
+            self.tab_view.close_page(page)
 
     def _on_hide_project(self, _action, param: GLib.Variant) -> None:
         name = param.get_string()
