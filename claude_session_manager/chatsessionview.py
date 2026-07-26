@@ -1,3 +1,7 @@
+# Modified from the original agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+
 """A chat tab backed by a live headless `claude -p` stream-json session.
 
 Renders the session as chat bubbles with token-by-token streaming (the payoff of
@@ -13,10 +17,11 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from .chatbubbles import make_bubble, make_label, make_tool_chip, set_bubble_text  # noqa: E402
 from .chatsession import Event, make_chat_session  # noqa: E402
+from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
 from .providers import ChatVariant, Provider  # noqa: E402
 
@@ -63,6 +68,8 @@ class ChatSessionTab(Gtk.Box):
         self.append(self._scroller)
 
         self.append(self._build_compose())
+        if cwd:
+            self.append(self._build_footer(cwd))
 
         keys = Gtk.EventControllerKey()
         keys.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
@@ -91,6 +98,18 @@ class ChatSessionTab(Gtk.Box):
         return _("Chat with {name} — ⚠ runs edits and commands automatically, without asking.").format(
             name=name
         )
+
+    def _build_footer(self, cwd: str) -> Gtk.Widget:
+        """Slim status row showing the directory the chat session works in."""
+        label = Gtk.Label(label=display_path(cwd), xalign=0.0, hexpand=True)
+        label.set_ellipsize(Pango.EllipsizeMode.START)
+        label.set_tooltip_text(cwd)
+        label.add_css_class("caption")
+        label.add_css_class("dim-label")
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        footer.add_css_class("tab-footer")
+        footer.append(label)
+        return footer
 
     # -- compose ---------------------------------------------------------------
 

@@ -1,8 +1,23 @@
+# Modified from the original agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+
 """Small human-readable formatting helpers shared across the UI."""
 
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
+
+
+def display_path(path: str) -> str:
+    """A directory path as shown in the UI: the home prefix collapsed to ~."""
+    home = str(Path.home())
+    if path == home:
+        return "~"
+    if path.startswith(home + "/"):
+        return "~" + path[len(home):]
+    return path
 
 
 def format_tokens(count: int) -> str:

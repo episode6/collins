@@ -101,6 +101,17 @@ row.session-child.active-tab:hover {
   padding: 4px 8px;
 }
 
+/* slim per-tab footer row: working directory + terminal-panel buttons */
+.tab-footer {
+  padding: 1px 8px;
+  border-top: 1px solid alpha(currentColor, 0.15);
+}
+.tab-footer button {
+  padding: 0 6px;
+  min-height: 22px;
+  min-width: 22px;
+}
+
 /* chat-session tab: streaming bubbles + tool chips */
 .chat-bubble {
   padding: 8px 12px;
