@@ -892,3 +892,7 @@ msgid ""
 "\n"
 "Unofficial community tool — not affiliated with or endorsed by Anthropic."
 msgstr ""
+
+#: collins/terminal.py:115
+msgid "── restored panel history ──"
+msgstr ""
