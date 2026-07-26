@@ -281,6 +281,7 @@ class MainWindow(Adw.ApplicationWindow):
             _("Close Window"),
             do_quit,
             on_dismiss=lambda: setattr(self, "_quit_asking", False),
+            default_response="confirm",
         )
 
     # -- sidebar width persistence -------------------------------------------
@@ -750,6 +751,7 @@ class MainWindow(Adw.ApplicationWindow):
             _("Close Tab"),
             do_close,
             on_dismiss=lambda: self._close_asking.discard(page),
+            default_response="confirm",
         )
 
     def _graceful_close(self, page: Adw.TabPage) -> None:
