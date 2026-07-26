@@ -150,6 +150,21 @@ class SessionRow(Gtk.ListBoxRow):
             lambda *_: self.activate_action("win.rename-session", GLib.Variant("s", item.session_id)),
         )
         top.append(rename)
+
+        # Hidden rows are only listed while "Show hidden sessions" is on, and
+        # toggling rebuilds the list, so the icon never goes stale.
+        hidden = sidebar.store.state.is_hidden(item.session_id)
+        hide_btn = Gtk.Button(
+            icon_name="view-reveal-symbolic" if hidden else "view-conceal-symbolic",
+            valign=Gtk.Align.CENTER,
+        )
+        hide_btn.add_css_class("flat")
+        hide_btn.set_tooltip_text(_("Unhide session") if hidden else _("Hide session"))
+        hide_btn.connect(
+            "clicked",
+            lambda *_: self.activate_action("win.hide-session", GLib.Variant("s", item.session_id)),
+        )
+        top.append(hide_btn)
         box.append(top)
 
         path_label = Gtk.Label(xalign=0.0)
