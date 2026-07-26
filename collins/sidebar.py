@@ -109,6 +109,7 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         count_label = Gtk.Label(label=str(count))
         count_label.add_css_class("count-badge")
         count_label.add_css_class("dim-label")
+        count_label.set_visible(count > 0)
         box.append(count_label)
 
         if cwd:
