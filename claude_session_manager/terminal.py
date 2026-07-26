@@ -593,15 +593,18 @@ class TerminalTab(Gtk.Box):
     def panel_visible(self) -> bool:
         return self._panel.get_visible()
 
-    def toggle_panel(self) -> None:
+    def toggle_panel(self, default_mode: str | None = None) -> None:
         if self.panel_visible:
             self.hide_panel()
         else:
-            self.show_panel()
+            self.show_panel(default_mode)
 
-    def show_panel(self) -> None:
+    def show_panel(self, default_mode: str | None = None) -> None:
         """Show the panel, starting (or re-pointing) its shell at the agent's
-        current working directory."""
+        current working directory. `default_mode` ("bottom" | "right") opens
+        the panel in the app-wide last-used mode; None keeps the tab's own."""
+        if not self.panel_visible and default_mode in ("bottom", "right"):
+            self._set_panel_mode(default_mode)
         self._panel.open_shell(self.current_agent_cwd())
         if not self.panel_visible:
             self._panel.set_visible(True)
@@ -633,6 +636,13 @@ class TerminalTab(Gtk.Box):
         if self.panel_visible:
             self._apply_panel_position()
         return "bottom" if to_bottom else "right"
+
+    def _set_panel_mode(self, mode: str) -> None:
+        """Reorient a hidden panel; there's no divider on screen to capture."""
+        if mode != self._panel_mode():
+            self._paned.set_orientation(
+                Gtk.Orientation.VERTICAL if mode == "bottom" else Gtk.Orientation.HORIZONTAL
+            )
 
     def _panel_mode(self) -> str:
         vertical = self._paned.get_orientation() == Gtk.Orientation.VERTICAL

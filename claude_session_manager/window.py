@@ -801,8 +801,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _toggle_panel(self) -> None:
         tab = self._current_terminal_tab()
-        if tab is not None:
-            tab.toggle_panel()
+        if tab is not None:  # a freshly opened panel uses the last-used mode
+            tab.toggle_panel(self.state.get_setting("panel_position"))
 
     def _swap_panel(self) -> None:
         tab = self._current_terminal_tab()
