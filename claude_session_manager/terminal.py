@@ -19,6 +19,7 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import themes  # noqa: E402
+from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
@@ -461,6 +462,7 @@ class TerminalTab(Gtk.Box):
         self._cwd_label.set_ellipsize(Pango.EllipsizeMode.START)
         self._cwd_label.add_css_class("caption")
         self._cwd_label.add_css_class("dim-label")
+        enable_copy_on_click(self._cwd_label, lambda: self._footer_cwd)
 
         # Only the selected tab is visible (and thus clickable), so routing
         # through the window's actions still targets the right tab.
@@ -499,7 +501,7 @@ class TerminalTab(Gtk.Box):
         if cwd != self._footer_cwd:
             self._footer_cwd = cwd
             self._cwd_label.set_text(display_path(cwd) if cwd else "")
-            self._cwd_label.set_tooltip_text(cwd)
+            self._cwd_label.set_tooltip_text(copy_tooltip(cwd) if cwd else None)
 
     # -- graceful close ----------------------------------------------------
 

@@ -21,6 +21,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from .chatbubbles import make_bubble, make_label, make_tool_chip, set_bubble_text  # noqa: E402
 from .chatsession import Event, make_chat_session  # noqa: E402
+from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
 from .providers import ChatVariant, Provider  # noqa: E402
@@ -103,9 +104,10 @@ class ChatSessionTab(Gtk.Box):
         """Slim status row showing the directory the chat session works in."""
         label = Gtk.Label(label=display_path(cwd), xalign=0.0, hexpand=True)
         label.set_ellipsize(Pango.EllipsizeMode.START)
-        label.set_tooltip_text(cwd)
+        label.set_tooltip_text(copy_tooltip(cwd))
         label.add_css_class("caption")
         label.add_css_class("dim-label")
+        enable_copy_on_click(label, lambda: cwd)
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         footer.add_css_class("tab-footer")
         footer.append(label)
