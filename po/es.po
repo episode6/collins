@@ -202,6 +202,21 @@ msgstr "Restablecer la fuente predeterminada"
 msgid "Scrollback lines"
 msgstr "Líneas de historial"
 
+msgid "Copy on select"
+msgstr "Copiar al seleccionar"
+
+msgid "Automatically copy selected terminal text to the clipboard"
+msgstr "Copiar automáticamente al portapapeles el texto seleccionado en la terminal"
+
+msgid "Copy"
+msgstr "Copiar"
+
+msgid "Paste"
+msgstr "Pegar"
+
+msgid "Select All"
+msgstr "Seleccionar todo"
+
 msgid "Color theme"
 msgstr "Tema de color"
 

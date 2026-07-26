@@ -104,6 +104,14 @@ class PreferencesDialog(Adw.PreferencesDialog):
         scroll_row.connect("notify::value", self._on_scrollback_changed)
         terminal_group.add(scroll_row)
 
+        self._copy_select_row = Adw.SwitchRow(
+            title=_("Copy on select"),
+            subtitle=_("Automatically copy selected terminal text to the clipboard"),
+        )
+        self._copy_select_row.set_active(bool(state.get_setting("copy_on_select")))
+        self._copy_select_row.connect("notify::active", self._on_copy_select_changed)
+        terminal_group.add(self._copy_select_row)
+
         current_theme = state.get_setting("terminal_theme") or DEFAULT_THEME
         if current_theme not in THEME_NAMES:
             current_theme = DEFAULT_THEME
@@ -211,6 +219,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
         key = _SCHEMES[row.get_selected()][0]
         self._state.set_setting("color_scheme", key)
         apply_color_scheme(key)
+        self._on_change()
+
+    def _on_copy_select_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("copy_on_select", row.get_active())
         self._on_change()
 
     def _on_notify_changed(self, row: Adw.SwitchRow, _pspec) -> None:

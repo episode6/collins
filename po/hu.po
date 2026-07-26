@@ -202,6 +202,21 @@ msgstr "Visszaállítás az alapértelmezett betűtípusra"
 msgid "Scrollback lines"
 msgstr "Visszagörgetési sorok"
 
+msgid "Copy on select"
+msgstr "Másolás kijelöléskor"
+
+msgid "Automatically copy selected terminal text to the clipboard"
+msgstr "A kijelölt terminálszöveg automatikus másolása a vágólapra"
+
+msgid "Copy"
+msgstr "Másolás"
+
+msgid "Paste"
+msgstr "Beillesztés"
+
+msgid "Select All"
+msgstr "Összes kijelölése"
+
 msgid "Color theme"
 msgstr "Színtéma"
 

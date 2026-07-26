@@ -202,6 +202,21 @@ msgstr "Auf Standardschriftart zurücksetzen"
 msgid "Scrollback lines"
 msgstr "Scrollback-Zeilen"
 
+msgid "Copy on select"
+msgstr "Beim Auswählen kopieren"
+
+msgid "Automatically copy selected terminal text to the clipboard"
+msgstr "Ausgewählten Terminaltext automatisch in die Zwischenablage kopieren"
+
+msgid "Copy"
+msgstr "Kopieren"
+
+msgid "Paste"
+msgstr "Einfügen"
+
+msgid "Select All"
+msgstr "Alles auswählen"
+
 msgid "Color theme"
 msgstr "Farbthema"
 
