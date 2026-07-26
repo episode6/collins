@@ -163,33 +163,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.content_stack.add_named(placeholder, "empty")
         self.content_stack.add_named(self.tab_view, "tabs")
 
-        # Small corner buttons controlling the current tab's terminal panel.
-        toggle_panel_btn = Gtk.Button(icon_name="utilities-terminal-symbolic")
-        toggle_panel_btn.set_tooltip_text(_("Show/hide terminal panel (Ctrl+J)"))
-        toggle_panel_btn.connect("clicked", lambda *_: self._toggle_panel())
-        swap_panel_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
-        swap_panel_btn.set_tooltip_text(_("Move terminal panel bottom/right"))
-        swap_panel_btn.connect("clicked", lambda *_: self._swap_panel())
-        swap_panel_btn.set_visible(False)  # only shown while a panel is open
-        self._swap_panel_btn = swap_panel_btn
-        self._panel_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self._panel_buttons.set_halign(Gtk.Align.END)
-        self._panel_buttons.set_valign(Gtk.Align.END)
-        self._panel_buttons.set_margin_end(6)
-        self._panel_buttons.set_margin_bottom(6)
-        self._panel_buttons.set_visible(False)
-        for btn in (toggle_panel_btn, swap_panel_btn):
-            btn.add_css_class("osd")
-            btn.add_css_class("circular")
-            self._panel_buttons.append(btn)
-
-        content_overlay = Gtk.Overlay(child=self.content_stack)
-        content_overlay.add_overlay(self._panel_buttons)
-
         content_view = Adw.ToolbarView()
         content_view.add_top_bar(content_header)
         content_view.add_top_bar(tab_bar)
-        content_view.set_content(content_overlay)
+        content_view.set_content(self.content_stack)
 
         # --- sidebar ---
         self.sidebar = SessionSidebar(self.store)
@@ -563,7 +540,6 @@ class MainWindow(Adw.ApplicationWindow):
         tab.connect("process-exited", self._on_process_exited, page)
         tab.connect("session-resolved", self._on_session_resolved, page)
         tab.connect("panel-size-changed", self._on_panel_size_changed)
-        tab.connect("panel-visibility-changed", self._on_panel_visibility_changed)
         tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
         self.tab_view.set_selected_page(page)
@@ -814,17 +790,8 @@ class MainWindow(Adw.ApplicationWindow):
         if tab is not None:  # remember the choice as the default for new tabs
             self.state.set_setting("panel_position", tab.swap_panel())
 
-    def _on_panel_visibility_changed(self, tab: TerminalTab, visible: bool) -> None:
-        page = self.tab_view.get_selected_page()
-        if page is not None and page.get_child() is tab:
-            self._swap_panel_btn.set_visible(visible)
-
     def _on_selected_page_changed(self, view: Adw.TabView, _pspec) -> None:
         page = view.get_selected_page()
-        tab = page.get_child() if page is not None else None
-        is_terminal = isinstance(tab, TerminalTab)
-        self._panel_buttons.set_visible(is_terminal)
-        self._swap_panel_btn.set_visible(is_terminal and tab.panel_visible)
         self._update_active_row()
         if page is None:
             return

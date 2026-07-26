@@ -19,6 +19,7 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import themes  # noqa: E402
+from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
@@ -26,6 +27,7 @@ from .transcript import TranscriptModel  # noqa: E402
 
 _TRANSCRIPT_DEBOUNCE_MS = 400
 _PROMPT_POLL_MS = 1000  # backstop poll for detecting the agent's prompts
+_CWD_POLL_MS = 2000  # footer refresh; only ticks while the tab is visible
 
 # PCRE2 flags for the find bar: multiline, case-insensitive.
 _PCRE2_CASELESS = 0x00000008
@@ -188,9 +190,6 @@ class TerminalTab(Gtk.Box):
         # where mode is "bottom" | "right" and size the new panel px size,
         # so the window can persist it as the app-wide default.
         "panel-size-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, int)),
-        # Emitted when the panel is shown/hidden (bool = now visible), so the
-        # window can sync panel-related controls.
-        "panel-visibility-changed": (GObject.SignalFlags.RUN_FIRST, None, (bool,)),
     }
 
     def __init__(
@@ -271,6 +270,10 @@ class TerminalTab(Gtk.Box):
         self._paned.set_resize_end_child(False)
         self._paned.set_shrink_end_child(False)
         self.append(self._paned)
+
+        self._footer_cwd: str | None = None  # last value shown in the footer
+        self._cwd_refresh_source: int | None = None
+        self.append(self._build_footer())
 
         self._transcript = TranscriptModel(jsonl_path)
 
@@ -449,6 +452,55 @@ class TerminalTab(Gtk.Box):
         else:
             self.terminal.search_find_previous()
 
+    # -- footer ------------------------------------------------------------
+
+    def _build_footer(self) -> Gtk.Widget:
+        """Slim status row under the terminal: the tab's live working
+        directory, plus the buttons controlling the terminal panel."""
+        self._cwd_label = Gtk.Label(xalign=0.0, hexpand=True)
+        self._cwd_label.set_ellipsize(Pango.EllipsizeMode.START)
+        self._cwd_label.add_css_class("caption")
+        self._cwd_label.add_css_class("dim-label")
+
+        # Only the selected tab is visible (and thus clickable), so routing
+        # through the window's actions still targets the right tab.
+        toggle_btn = Gtk.Button(icon_name="utilities-terminal-symbolic")
+        toggle_btn.set_tooltip_text(_("Show/hide terminal panel (Ctrl+J)"))
+        toggle_btn.set_action_name("win.toggle-panel")
+        self._swap_panel_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
+        self._swap_panel_btn.set_tooltip_text(_("Move terminal panel bottom/right"))
+        self._swap_panel_btn.set_action_name("win.swap-panel")
+        self._swap_panel_btn.set_visible(False)  # only shown while a panel is open
+
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        footer.add_css_class("tab-footer")
+        footer.append(self._cwd_label)
+        for btn in (toggle_btn, self._swap_panel_btn):
+            btn.add_css_class("flat")
+            footer.append(btn)
+        # Poll only while on screen; refresh immediately on every tab switch.
+        self.connect("map", lambda *_: self._start_cwd_refresh())
+        return footer
+
+    def _start_cwd_refresh(self) -> None:
+        self._refresh_cwd_label()
+        if self._cwd_refresh_source is None:
+            self._cwd_refresh_source = GLib.timeout_add(_CWD_POLL_MS, self._cwd_tick)
+
+    def _cwd_tick(self) -> bool:
+        if not self.get_mapped():  # hidden/closed tab → resume on next map
+            self._cwd_refresh_source = None
+            return GLib.SOURCE_REMOVE
+        self._refresh_cwd_label()
+        return GLib.SOURCE_CONTINUE
+
+    def _refresh_cwd_label(self) -> None:
+        cwd = self.current_agent_cwd()
+        if cwd != self._footer_cwd:
+            self._footer_cwd = cwd
+            self._cwd_label.set_text(display_path(cwd) if cwd else "")
+            self._cwd_label.set_tooltip_text(cwd)
+
     # -- graceful close ----------------------------------------------------
 
     def feed_child_text(self, text: str) -> None:
@@ -619,7 +671,7 @@ class TerminalTab(Gtk.Box):
         if not self.panel_visible:
             self._panel.set_visible(True)
             self._apply_panel_size()
-            self.emit("panel-visibility-changed", True)
+            self._swap_panel_btn.set_visible(True)
         GLib.idle_add(self._panel.grab_terminal_focus)
 
     def hide_panel(self) -> None:
@@ -628,7 +680,7 @@ class TerminalTab(Gtk.Box):
         self._remember_panel_size()
         refocus = self._panel.terminal.has_focus()
         self._panel.set_visible(False)
-        self.emit("panel-visibility-changed", False)
+        self._swap_panel_btn.set_visible(False)
         if refocus:
             self.grab_terminal_focus()
 
