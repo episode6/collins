@@ -37,6 +37,7 @@ DEFAULT_SETTINGS = {
     "notify_idle": True,  # notify when a background session goes quiet
     "new_session_dir": "",  # remembered folder for new sessions (empty = ask)
     "sidebar_width": 300,  # persisted sidebar pane width in px
+    "panel_position": "bottom",  # secondary terminal panel placement: bottom | right
     "window_width": 1280,  # last window size (floating, unmaximized)
     "window_height": 800,
     "window_maximized": False,

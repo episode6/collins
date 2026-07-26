@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import threading
 from pathlib import Path
 
@@ -26,6 +27,148 @@ _PROMPT_POLL_MS = 1000  # backstop poll for detecting the agent's prompts
 _PCRE2_CASELESS = 0x00000008
 _PCRE2_MULTILINE = 0x00000400
 _SEARCH_FLAGS = _PCRE2_CASELESS | _PCRE2_MULTILINE
+
+
+def _has_running_command(terminal: Vte.Terminal, child_pid: int | None) -> bool:
+    """True when something other than the spawned shell owns the terminal's
+    foreground — the cue terminal emulators use for close-confirmation."""
+    if child_pid is None:
+        return False
+    pty = terminal.get_pty()
+    if pty is None:
+        return False
+    try:
+        foreground = os.tcgetpgrp(pty.get_fd())
+        return foreground not in (-1, os.getpgid(child_pid))
+    except OSError:
+        return False
+
+
+def _process_cwd(pid: int | None) -> str | None:
+    if not pid or pid <= 0:
+        return None
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        return None
+
+
+class PanelTerminal(Gtk.Box):
+    """The tab's secondary terminal: a plain shell with no agent auto-launched.
+
+    Spawns lazily the first time it is shown and survives hide/show and
+    bottom↔right swaps; the shell is only lost when the tab itself closes."""
+
+    __gsignals__ = {
+        # Emitted when the panel's shell exits (e.g. the user typed `exit`).
+        "shell-exited": (GObject.SignalFlags.RUN_FIRST, None, ()),
+    }
+
+    def __init__(self) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self._child_pid: int | None = None
+        self._spawned = False
+        self._easy_copy_paste = False
+
+        self.terminal = Vte.Terminal()
+        self.terminal.set_scrollback_lines(10_000)
+        self.terminal.set_scroll_on_output(False)
+        self.terminal.set_scroll_on_keystroke(True)
+        self.terminal.set_mouse_autohide(True)
+        self.terminal.connect("child-exited", self._on_child_exited)
+
+        scrolled = Gtk.ScrolledWindow(child=self.terminal, vexpand=True)
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self.append(scrolled)
+
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._on_key_pressed)
+        self.terminal.add_controller(keys)
+
+    def open_shell(self, cwd: str | None) -> None:
+        """Spawn the shell on first show; on later shows follow the agent's
+        cwd (it may have moved into a worktree) if the shell sits idle."""
+        if not self._spawned:
+            self._spawn(cwd)
+        else:
+            self._sync_cwd(cwd)
+
+    def _spawn(self, cwd: str | None) -> None:
+        self._spawned = True
+        if cwd is None or not Path(cwd).is_dir():
+            cwd = str(Path.home())
+        shell = os.environ.get("SHELL") or "/bin/bash"
+        self.terminal.spawn_async(
+            Vte.PtyFlags.DEFAULT,
+            cwd,
+            [shell],
+            None,  # envv: inherit
+            GLib.SpawnFlags.DEFAULT,
+            None,  # child_setup
+            None,  # child_setup_data
+            -1,  # timeout
+            None,  # cancellable
+            self._on_spawned,
+        )
+
+    def _on_spawned(self, terminal: Vte.Terminal, pid: int, error: GLib.Error | None) -> None:
+        if error is not None:
+            terminal.feed(
+                _("failed to start shell: {msg}").format(msg=error.message).encode()
+            )
+            return
+        self._child_pid = pid
+
+    def _on_child_exited(self, _terminal: Vte.Terminal, _status: int) -> None:
+        self._spawned = False  # a fresh shell is spawned on the next show
+        self._child_pid = None
+        self.terminal.reset(True, True)
+        self.emit("shell-exited")
+
+    def _sync_cwd(self, cwd: str | None) -> None:
+        if not cwd or not Path(cwd).is_dir() or self._child_pid is None:
+            return
+        if self.has_running_command():
+            return  # don't interrupt whatever the user left running
+        if _process_cwd(self._child_pid) == cwd:
+            return
+        # \x15 (kill-line) clears any half-typed input before the cd.
+        self.terminal.feed_child(f"\x15cd {shlex.quote(cwd)}\n".encode())
+
+    def has_running_command(self) -> bool:
+        return _has_running_command(self.terminal, self._child_pid)
+
+    def apply_settings(self, settings: dict) -> None:
+        font = settings.get("font") or ""
+        self.terminal.set_font(Pango.FontDescription.from_string(font) if font else None)
+        try:
+            self.terminal.set_scrollback_lines(int(settings.get("scrollback") or 10_000))
+        except (TypeError, ValueError):
+            pass
+        themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
+        self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
+
+    def grab_terminal_focus(self) -> None:
+        self.terminal.grab_focus()
+
+    def _on_key_pressed(self, _ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:
+        ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
+        if self._easy_copy_paste and ctrl and not shift:
+            if keyval == Gdk.KEY_c and self.terminal.get_has_selection():
+                self.terminal.copy_clipboard_format(Vte.Format.TEXT)
+                return True
+            if keyval == Gdk.KEY_v:
+                self.terminal.paste_clipboard()
+                return True
+        if ctrl and shift:
+            if keyval == Gdk.KEY_C:
+                self.terminal.copy_clipboard_format(Vte.Format.TEXT)
+                return True
+            if keyval == Gdk.KEY_V:
+                self.terminal.paste_clipboard()
+                return True
+        return False
 
 
 class TerminalTab(Gtk.Box):
@@ -89,7 +232,25 @@ class TerminalTab(Gtk.Box):
         self._overlay = Gtk.Overlay()
         self._overlay.set_vexpand(True)
         self._overlay.set_child(scrolled)
-        self.append(self._overlay)
+
+        # Secondary plain-shell panel, below or beside the agent terminal.
+        # Swapping bottom↔right only flips the paned's orientation, so the
+        # panel's shell keeps running.
+        self._panel = PanelTerminal()
+        self._panel.set_visible(False)
+        self._panel.connect("shell-exited", lambda *_: self.hide_panel())
+        panel_right = bool(settings) and settings.get("panel_position") == "right"
+        self._paned = Gtk.Paned(
+            orientation=Gtk.Orientation.HORIZONTAL if panel_right else Gtk.Orientation.VERTICAL,
+            vexpand=True,
+        )
+        self._paned.set_start_child(self._overlay)
+        self._paned.set_end_child(self._panel)
+        self._paned.set_resize_start_child(True)
+        self._paned.set_shrink_start_child(False)
+        self._paned.set_resize_end_child(False)
+        self._paned.set_shrink_end_child(False)
+        self.append(self._paned)
 
         self._transcript = TranscriptModel(jsonl_path, self.provider.id)
 
@@ -114,6 +275,7 @@ class TerminalTab(Gtk.Box):
                     _("warning: project dir {cwd} no longer exists, starting in HOME").format(cwd=cwd)
                 )
             cwd = str(Path.home())
+        self._cwd = cwd
 
         # Run the user's interactive shell and type the agent command into it,
         # so aliases/env apply and the tab drops to a prompt when the agent exits.
@@ -415,22 +577,83 @@ class TerminalTab(Gtk.Box):
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
 
+    # -- secondary terminal panel ------------------------------------------
+
+    @property
+    def panel_visible(self) -> bool:
+        return self._panel.get_visible()
+
+    def toggle_panel(self) -> None:
+        if self.panel_visible:
+            self.hide_panel()
+        else:
+            self.show_panel()
+
+    def show_panel(self) -> None:
+        """Show the panel, starting (or re-pointing) its shell at the agent's
+        current working directory."""
+        self._panel.open_shell(self.current_agent_cwd())
+        if not self.panel_visible:
+            self._panel.set_visible(True)
+            self._reset_panel_position()
+        GLib.idle_add(self._panel.grab_terminal_focus)
+
+    def hide_panel(self) -> None:
+        if not self.panel_visible:
+            return
+        refocus = self._panel.terminal.has_focus()
+        self._panel.set_visible(False)
+        if refocus:
+            self.grab_terminal_focus()
+
+    def swap_panel(self) -> str:
+        """Move the panel bottom↔right (the shell keeps running) and return
+        the new position: "bottom" or "right"."""
+        to_bottom = self._paned.get_orientation() == Gtk.Orientation.HORIZONTAL
+        self._paned.set_orientation(
+            Gtk.Orientation.VERTICAL if to_bottom else Gtk.Orientation.HORIZONTAL
+        )
+        if self.panel_visible:
+            self._reset_panel_position()
+        return "bottom" if to_bottom else "right"
+
+    def _reset_panel_position(self) -> None:
+        """Give the panel roughly a third of the paned, once sizes are known."""
+
+        def position() -> bool:
+            vertical = self._paned.get_orientation() == Gtk.Orientation.VERTICAL
+            total = self._paned.get_height() if vertical else self._paned.get_width()
+            if total > 0:
+                self._paned.set_position(int(total * 0.62))
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(position)
+
+    def current_agent_cwd(self) -> str | None:
+        """Best-effort cwd of what's running in the agent terminal: the
+        foreground process if any (the agent may have cd'd into a worktree),
+        else the shell, else the directory the tab started in."""
+        pids = []
+        pty = self.terminal.get_pty()
+        if pty is not None:
+            try:
+                pids.append(os.tcgetpgrp(pty.get_fd()))
+            except OSError:
+                pass
+        if self._child_pid is not None:
+            pids.append(self._child_pid)
+        for pid in pids:
+            cwd = _process_cwd(pid)
+            if cwd is not None:
+                return cwd
+        return self._cwd
+
     # -- helpers -----------------------------------------------------------
 
     def has_running_command(self) -> bool:
         """True when something other than the shell (e.g. claude) owns the
-        terminal's foreground — the cue terminal emulators use for
-        close-confirmation."""
-        if self._child_pid is None:
-            return False
-        pty = self.terminal.get_pty()
-        if pty is None:
-            return False
-        try:
-            foreground = os.tcgetpgrp(pty.get_fd())
-            return foreground not in (-1, os.getpgid(self._child_pid))
-        except OSError:
-            return False
+        terminal's foreground."""
+        return _has_running_command(self.terminal, self._child_pid)
 
     def apply_settings(self, settings: dict) -> None:
         font = settings.get("font") or ""
@@ -441,6 +664,7 @@ class TerminalTab(Gtk.Box):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
+        self._panel.apply_settings(settings)
 
     def feed_message(self, text: str) -> None:
         self.terminal.feed(f"\r\n\x1b[1;33m[session manager]\x1b[0m {text}\r\n".encode())

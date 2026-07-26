@@ -156,10 +156,31 @@ class MainWindow(Adw.ApplicationWindow):
         self.content_stack.add_named(placeholder, "empty")
         self.content_stack.add_named(self.tab_view, "tabs")
 
+        # Small corner buttons controlling the current tab's terminal panel.
+        toggle_panel_btn = Gtk.Button(icon_name="utilities-terminal-symbolic")
+        toggle_panel_btn.set_tooltip_text(_("Show/hide terminal panel (Ctrl+J)"))
+        toggle_panel_btn.connect("clicked", lambda *_: self._toggle_panel())
+        swap_panel_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
+        swap_panel_btn.set_tooltip_text(_("Move terminal panel bottom/right"))
+        swap_panel_btn.connect("clicked", lambda *_: self._swap_panel())
+        self._panel_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._panel_buttons.set_halign(Gtk.Align.END)
+        self._panel_buttons.set_valign(Gtk.Align.END)
+        self._panel_buttons.set_margin_end(6)
+        self._panel_buttons.set_margin_bottom(6)
+        self._panel_buttons.set_visible(False)
+        for btn in (toggle_panel_btn, swap_panel_btn):
+            btn.add_css_class("osd")
+            btn.add_css_class("circular")
+            self._panel_buttons.append(btn)
+
+        content_overlay = Gtk.Overlay(child=self.content_stack)
+        content_overlay.add_overlay(self._panel_buttons)
+
         content_view = Adw.ToolbarView()
         content_view.add_top_bar(content_header)
         content_view.add_top_bar(tab_bar)
-        content_view.set_content(self.content_stack)
+        content_view.set_content(content_overlay)
 
         # --- sidebar ---
         self.sidebar = SessionSidebar(self.store)
@@ -267,6 +288,8 @@ class MainWindow(Adw.ApplicationWindow):
             "open-session-file": lambda *_: self._open_session_file(),
             "copy-tab-session-id": lambda *_: self._copy_tab_session_id(),
             "close-menu-tab": lambda *_: self._close_menu_tab(),
+            "toggle-panel": lambda *_: self._toggle_panel(),
+            "swap-panel": lambda *_: self._swap_panel(),
             "toggle-sidebar": lambda *_: self.sidebar.set_visible(
                 not self.sidebar.get_visible()
             ),
@@ -322,6 +345,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control>comma", "win.preferences"),
             ("<Control><Shift>k", "win.quick-switch"),
             ("<Control><Shift>e", "win.toggle-tab-emoji"),
+            ("<Control>j", "win.toggle-panel"),
             ("F9", "win.toggle-sidebar"),
         ):
             controller.add_shortcut(
@@ -679,8 +703,28 @@ class MainWindow(Adw.ApplicationWindow):
         if self.state.get_setting("notify_idle"):
             self._schedule_idle_notify(page)
 
+    # -- terminal panel ------------------------------------------------------
+
+    def _current_terminal_tab(self) -> TerminalTab | None:
+        page = self.tab_view.get_selected_page()
+        tab = page.get_child() if page is not None else None
+        return tab if isinstance(tab, TerminalTab) else None
+
+    def _toggle_panel(self) -> None:
+        tab = self._current_terminal_tab()
+        if tab is not None:
+            tab.toggle_panel()
+
+    def _swap_panel(self) -> None:
+        tab = self._current_terminal_tab()
+        if tab is not None:  # remember the choice as the default for new tabs
+            self.state.set_setting("panel_position", tab.swap_panel())
+
     def _on_selected_page_changed(self, view: Adw.TabView, _pspec) -> None:
         page = view.get_selected_page()
+        self._panel_buttons.set_visible(
+            page is not None and isinstance(page.get_child(), TerminalTab)
+        )
         if page is None:
             return
         self._cancel_idle(page)  # foreground now; no "finished" notification
