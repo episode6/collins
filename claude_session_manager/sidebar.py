@@ -115,7 +115,7 @@ class SessionRow(Gtk.ListBoxRow):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         box.set_margin_top(8)
         box.set_margin_bottom(8)
-        box.set_margin_start(10)
+        box.set_margin_start(0)  # theme row padding alone ≈ the 10px dot-to-title gap
         box.set_margin_end(12)
 
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
