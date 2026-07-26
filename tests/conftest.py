@@ -76,51 +76,8 @@ def projects_dir(tmp_path, monkeypatch):
     import claude_session_manager.sessions as sessions_mod
 
     monkeypatch.setattr(sessions_mod, "CLAUDE_PROJECTS_DIR", root)
-    # Isolate discovery to Claude: force it available regardless of PATH, and
-    # keep Cursor out of these fixtures so it doesn't scan the real ~/.cursor.
+    # Force Claude available regardless of PATH.
     monkeypatch.setattr(providers_mod.ClaudeProvider, "available", lambda self: True)
-    monkeypatch.setattr(providers_mod.CursorProvider, "available", lambda self: False)
-    return root, ids
-
-
-def make_cursor_lines(user_text: str, assistant_text: str) -> list[dict]:
-    """Minimal Cursor agent-transcript entries (role + content blocks)."""
-    return [
-        {
-            "role": "user",
-            "message": {"content": [{"type": "text", "text": f"<user_query>\n{user_text}\n</user_query>"}]},
-        },
-        {
-            "role": "assistant",
-            "message": {"content": [{"type": "text", "text": assistant_text}]},
-        },
-    ]
-
-
-@pytest.fixture
-def cursor_projects_dir(tmp_path, monkeypatch):
-    """A fake ~/.cursor/projects with two agent transcripts."""
-    root = tmp_path / "cursor_projects"
-
-    def write_session(encoded_project: str, user_text: str, assistant_text: str) -> str:
-        uid = str(uuid.uuid4())
-        sess_dir = root / encoded_project / "agent-transcripts" / uid
-        sess_dir.mkdir(parents=True, exist_ok=True)
-        path = sess_dir / f"{uid}.jsonl"
-        lines = make_cursor_lines(user_text, assistant_text)
-        path.write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")
-        return uid
-
-    ids = {
-        "one": write_session("home-user-foo", "Build foo", "Done."),
-        "two": write_session("home-user-bar", "Fix bar", "Which file?"),  # ends with "?" -> waiting
-    }
-
-    import claude_session_manager.providers as providers_mod
-
-    monkeypatch.setattr(providers_mod, "CURSOR_PROJECTS_DIR", root)
-    monkeypatch.setattr(providers_mod.CursorProvider, "available", lambda self: True)
-    monkeypatch.setattr(providers_mod.ClaudeProvider, "available", lambda self: False)
     return root, ids
 
 

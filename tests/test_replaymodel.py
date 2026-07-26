@@ -24,7 +24,7 @@ def test_claude_full_turns_in_order(tmp_path):
         {"type": "user", "message": {"role": "user",
          "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}},
     ])
-    turns = read_session_turns(p, "claude")
+    turns = read_session_turns(p)
     summary = [(t.role, t.kind, t.text or t.tool_name) for t in turns]
     assert summary == [
         ("user", "message", "Build it"),
@@ -40,28 +40,17 @@ def test_bash_tool_summary(tmp_path):
     p = tmp_path / "s.jsonl"
     _write(p, [{"type": "assistant", "message": {"role": "assistant", "content": [
         {"type": "tool_use", "id": "b", "name": "Bash", "input": {"command": "ls -la /tmp"}}]}}])
-    (turn,) = read_session_turns(p, "claude")
+    (turn,) = read_session_turns(p)
     assert turn.kind == "tool" and turn.text == "Bash: ls -la /tmp"
-
-
-def test_cursor_strips_user_query(tmp_path):
-    p = tmp_path / "c.jsonl"
-    uq = "<user_query>\nFix bar\n</user_query>"
-    _write(p, [
-        {"role": "user", "message": {"content": [{"type": "text", "text": uq}]}},
-        {"role": "assistant", "message": {"content": [{"type": "text", "text": "Done."}]}},
-    ])
-    turns = read_session_turns(p, "cursor")
-    assert [(t.role, t.text) for t in turns] == [("user", "Fix bar"), ("assistant", "Done.")]
 
 
 def test_noise_message_dropped(tmp_path):
     p = tmp_path / "s.jsonl"
     _write(p, [{"type": "assistant", "message": {"role": "assistant",
                "content": [{"type": "text", "text": "No response requested."}]}}])
-    assert read_session_turns(p, "claude") == []
+    assert read_session_turns(p) == []
 
 
 def test_missing_and_empty(tmp_path):
-    assert read_session_turns(None, "claude") == []
-    assert read_session_turns(tmp_path / "nope.jsonl", "claude") == []
+    assert read_session_turns(None) == []
+    assert read_session_turns(tmp_path / "nope.jsonl") == []

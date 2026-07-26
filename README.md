@@ -5,7 +5,7 @@
 [![AUR](https://img.shields.io/aur/version/agent-session-manager?label=AUR)](https://aur.archlinux.org/packages/agent-session-manager)
 [![Release](https://img.shields.io/github/v/release/r4nd3l/agent-session-manager?label=release)](https://github.com/r4nd3l/agent-session-manager/releases/latest)
 
-Native GTK4/libadwaita desktop app to browse, name, and resume your AI coding-agent sessions in embedded terminal tabs. Supports [Claude Code](https://claude.com/claude-code) and [Cursor](https://cursor.com), side by side.
+Native GTK4/libadwaita desktop app to browse, name, and resume your [Claude Code](https://claude.com/claude-code) sessions in embedded terminal tabs.
 
 📖 **[Documentation](https://r4nd3l.github.io/agent-session-manager/)**
 
@@ -35,7 +35,7 @@ Features:
 
 ### Native chat & replay
 
-- **Native chat** (New Session → *New … chat*): a token-streaming conversation driven over the agent's headless stream-json channel — no transcript scraping. For Claude, every tool use (Edit / Write / Bash) pauses for an **interactive permission card** — *Allow once* / *Always allow* / *Deny* — so nothing touches your project without a click. Cursor offers a read-only **ask** chat and a **trusted** (auto-run) chat. **Continue in chat** (right-click a session) reopens it as a live chat.
+- **Native chat** (New Session → *New … chat*): a token-streaming conversation driven over the agent's headless stream-json channel — no transcript scraping. Every tool use (Edit / Write / Bash) pauses for an **interactive permission card** — *Allow once* / *Always allow* / *Deny* — so nothing touches your project without a click. **Continue in chat** (right-click a session) reopens it as a live chat.
 - **Session replay** (right-click → Replay…): step through any transcript as native chat bubbles, or play it back.
 - **Prompt cards**: when the agent asks a structured question in the terminal, a native option card overlays it — answer with a click.
 - **Advanced new session** (New Session menu): choose a **model**, **permission mode**, **extra directories** (`--add-dir`), or **continue** the last session in a folder.
@@ -155,4 +155,3 @@ repo `agent-session-manager`). The AUR and PPA are updated separately
 
 - Distribution: AUR, Ubuntu PPA, Flathub
 - Chat polish: per-message copy, code syntax highlighting, model picker in the compose bar
-- More provider adapters beyond Claude Code and Cursor

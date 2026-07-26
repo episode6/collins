@@ -9,10 +9,9 @@
 
   <description>
     <p>
-      A native desktop companion for AI coding-agent CLIs such as Claude Code and
-      Cursor. Browse every session on your machine in a sidebar grouped by project,
-      give sessions custom names, star favorites, and resume any of them in embedded
-      terminal tabs.
+      A native desktop companion for the Claude Code CLI. Browse every session on
+      your machine in a sidebar grouped by project, give sessions custom names,
+      star favorites, and resume any of them in embedded terminal tabs.
     </p>
     <p>Features:</p>
     <ul>

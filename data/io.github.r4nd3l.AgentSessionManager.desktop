@@ -8,6 +8,6 @@ Path=/home/matt/Documents/Git/Project__Zengo/ClaudeSessionManager
 Icon=io.github.r4nd3l.AgentSessionManager
 Terminal=false
 Categories=Development;
-Keywords=claude;cursor;ai;agent;terminal;session;code;
+Keywords=claude;ai;agent;terminal;session;code;
 StartupNotify=true
 StartupWMClass=io.github.r4nd3l.AgentSessionManager

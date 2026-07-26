@@ -418,12 +418,6 @@ msgstr "Chat mit {name} — jede Dateiänderung und jeder Befehl fragt zuerst um
 msgid "New {name} chat ({mode})"
 msgstr "Neuer {name}-Chat ({mode})"
 
-msgid "ask, read-only"
-msgstr "fragen, schreibgeschützt"
-
-msgid "trusted, auto-run"
-msgstr "vertraut, automatisch"
-
 msgid "Read-only chat with {name} — analyses and answers, never edits."
 msgstr "Schreibgeschützter Chat mit {name} — analysiert und antwortet, bearbeitet nie."
 

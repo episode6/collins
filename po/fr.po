@@ -418,12 +418,6 @@ msgstr "Discussion avec {name} — chaque modification de fichier et commande de
 msgid "New {name} chat ({mode})"
 msgstr "Nouvelle discussion {name} ({mode})"
 
-msgid "ask, read-only"
-msgstr "questions, lecture seule"
-
-msgid "trusted, auto-run"
-msgstr "de confiance, automatique"
-
 msgid "Read-only chat with {name} — analyses and answers, never edits."
 msgstr "Discussion en lecture seule avec {name} — analyse et répond, ne modifie jamais."
 

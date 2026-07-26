@@ -55,30 +55,6 @@ class Session:
         return datetime.fromtimestamp(self.mtime)
 
 
-def _detect_provider(path: Path) -> str:
-    """Guess the agent from a transcript's shape: Claude lines carry a top-level
-    `type`, Cursor lines a top-level `role`. Falls back to the path, then Claude."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except (json.JSONDecodeError, ValueError):
-                    break
-                if isinstance(obj, dict):
-                    if "type" in obj:
-                        return "claude"
-                    if "role" in obj:
-                        return "cursor"
-                break
-    except OSError:
-        pass
-    return "cursor" if ".cursor" in str(path) else "claude"
-
-
 def session_from_file(path: Path) -> Session | None:
     """Build a Session from an arbitrary transcript .jsonl on disk (for the
     'open session from file' action). Returns None if it can't be read."""
@@ -98,7 +74,7 @@ def session_from_file(path: Path) -> Session | None:
         mtime=stat.st_mtime,
         size=stat.st_size,
         state="",
-        provider=_detect_provider(path),
+        provider="claude",
     )
 
 

@@ -4,7 +4,7 @@
 # stays "claude_session_manager".
 name = "agent-session-manager-gtk"
 version = "1.0.0"
-description = "Native GTK4 GUI to manage and resume AI coding agent sessions (Claude Code, Cursor)"
+description = "Native GTK4 GUI to manage and resume Claude Code sessions"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
 authors = [{ name = "Máté Molnár", email = "molnar.mate@zengo.eu" }]

@@ -3,8 +3,6 @@ import json
 
 from claude_session_manager.chatsession import (
     ChatSession,
-    CursorStreamParser,
-    SpawnResumeChatSession,
     StreamParser,
     make_chat_session,
 )
@@ -158,57 +156,10 @@ def test_respond_permission_deny_envelope():
     assert sent["response"]["response"] == {"behavior": "deny", "message": "nope"}
 
 
-def _cfeed(parser, *entries):
-    events = []
-    for e in entries:
-        events.extend(parser.feed((json.dumps(e) + "\n").encode()))
-    return events
-
-
-def test_cursor_stream_normalized():
-    p = CursorStreamParser()
-    events = _cfeed(
-        p,
-        {"type": "system", "subtype": "init", "session_id": "cur-1"},
-        {"type": "thinking", "subtype": "delta", "text": "hmm"},
-        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Hel"}]},
-         "timestamp_ms": 1},
-        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "lo"}]},
-         "timestamp_ms": 2},
-        # final consolidated message (no timestamp_ms) must be skipped → no dup text
-        {"type": "assistant",
-         "message": {"role": "assistant", "content": [{"type": "text", "text": "Hello"}]}},
-        {"type": "tool_call", "subtype": "started",
-         "tool_call": {"editToolCall": {"args": {"path": "/a"}}, "toolCallId": "x"}},
-        {"type": "result", "subtype": "success", "is_error": False, "result": "Hello"},
-    )
-    kinds = [(e.kind, e.text or e.tool_name) for e in events]
-    assert kinds == [
-        ("init", ""),
-        ("thinking", "hmm"),
-        ("text", "Hel"),
-        ("text", "lo"),
-        ("tool", "Edit"),
-        ("turn_end", "Hello"),
-    ]
-    assert events[0].session_id == "cur-1"
-
-
-def test_cursor_result_error():
-    p = CursorStreamParser()
-    (ev,) = _cfeed(p, {"type": "result", "subtype": "error", "is_error": True, "result": "boom"})
-    assert ev.kind == "error" and "boom" in ev.text
-
-
 def test_resume_seeds_session_id():
-    # Cursor (spawn_resume) session resumes by starting with the given id, so the
-    # first turn's --resume targets the existing session.
-    v = ChatVariant(key="ask", transport="spawn_resume")
-    sess = make_chat_session(object(), v, None, lambda ev: None, "existing-id")
-    assert isinstance(sess, SpawnResumeChatSession)
-    assert sess.session_id == "existing-id"
-    # Claude (stdin_stream) session likewise knows the id before its init event.
-    cv = ChatVariant(key="default", transport="stdin_stream")
+    # The session knows the id before its init event, so the first turn's
+    # --resume targets the existing session.
+    cv = ChatVariant(key="default")
     csess = make_chat_session(object(), cv, None, lambda ev: None, "claude-id")
     assert isinstance(csess, ChatSession)
     assert csess.session_id == "claude-id"

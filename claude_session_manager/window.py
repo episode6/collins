@@ -675,7 +675,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._open_replay(session)
 
     def _open_replay(self, session: Session) -> None:
-        tab = ReplayTab(session, session.provider)
+        tab = ReplayTab(session)
         page = self.tab_view.append(tab)
         page.set_title(_("Replay — {name}").format(name=self.store.display_name(session)))
         page.set_tooltip(f"replay — {session.project_name} — {session.session_id}")
@@ -732,7 +732,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _graceful_close(self, page: Adw.TabPage) -> None:
         """Ask the agent to exit cleanly (e.g. Claude's /exit), then close once the
         shell returns. Falls back to a force-close after a timeout. Agents with no
-        clean-exit command (e.g. Cursor) are force-closed directly."""
+        clean-exit command are force-closed directly."""
         tab = page.get_child()
         if not isinstance(tab, TerminalTab):
             self._close_confirmed(page)
