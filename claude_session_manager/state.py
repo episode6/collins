@@ -40,6 +40,7 @@ DEFAULT_SETTINGS = {
     "easy_copy_paste": False,  # Ctrl+C copies the selection (else SIGINT), Ctrl+V pastes, right-click menu
     "language": "",  # UI language code; "" = follow the system locale
     "notify_idle": True,  # notify when a background session goes quiet
+    "auto_title_sessions": True,  # summarize each new session's first prompt into a short title
     "new_session_dir": "",  # remembered folder for new sessions (empty = ask)
     "sidebar_width": 300,  # persisted sidebar pane width in px
     "panel_position": "bottom",  # secondary terminal panel placement: bottom | right
@@ -92,6 +93,7 @@ def clamp_window_size(width: int, height: int, monitor_sizes: list[tuple[int, in
 class AppState:
     def __init__(self) -> None:
         self.names: dict[str, str] = {}
+        self.generated_names: dict[str, str] = {}  # auto-generated titles (user names win)
         self.emojis: dict[str, str] = {}
         self.favorites: set[str] = set()
         self.hidden: set[str] = set()
@@ -115,6 +117,7 @@ class AppState:
             except (OSError, json.JSONDecodeError):
                 data = {}
         self.names = dict(data.get("names") or {})
+        self.generated_names = dict(data.get("generated_names") or {})
         self.emojis = dict(data.get("emojis") or {})
         self.favorites = set(data.get("favorites") or [])
         self.hidden = set(data.get("hidden") or [])
@@ -127,6 +130,7 @@ class AppState:
         _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         payload = {
             "names": self.names,
+            "generated_names": self.generated_names,
             "emojis": self.emojis,
             "favorites": sorted(self.favorites),
             "hidden": sorted(self.hidden),
@@ -150,6 +154,27 @@ class AppState:
             self.names[session_id] = name
         else:
             self.names.pop(session_id, None)
+        self.save()
+
+    # -- generated names ---------------------------------------------------
+
+    def get_generated_name(self, session_id: str) -> str | None:
+        return self.generated_names.get(session_id)
+
+    def set_generated_name(self, session_id: str, name: str) -> None:
+        name = name.strip()
+        if name:
+            self.generated_names[session_id] = name
+        else:
+            self.generated_names.pop(session_id, None)
+        self.save()
+
+    def set_generated_names(self, names: dict[str, str]) -> None:
+        """Set several generated names with a single write to disk."""
+        for session_id, name in names.items():
+            name = name.strip()
+            if name:
+                self.generated_names[session_id] = name
         self.save()
 
     # -- emojis ------------------------------------------------------------
