@@ -37,7 +37,26 @@ DEFAULT_SETTINGS = {
     "notify_idle": True,  # notify when a background session goes quiet
     "new_session_dir": "",  # remembered folder for new sessions (empty = ask)
     "sidebar_width": 300,  # persisted sidebar pane width in px
+    "window_width": 1280,  # last window size (floating, unmaximized)
+    "window_height": 800,
+    "window_maximized": False,
 }
+
+# Floor for a restored window, so a corrupt/absurd saved value can't produce
+# an unusably tiny window.
+_MIN_WINDOW_SIZE = (640, 480)
+
+
+def clamp_window_size(width: int, height: int, monitor_sizes: list[tuple[int, int]]) -> tuple[int, int]:
+    """Clamp a remembered window size so it fits the available monitors.
+
+    The compositor decides which monitor the window opens on, so each
+    dimension is clamped to the largest extent across all monitors.
+    """
+    if monitor_sizes:
+        width = min(width, max(w for w, _h in monitor_sizes))
+        height = min(height, max(h for _w, h in monitor_sizes))
+    return max(width, _MIN_WINDOW_SIZE[0]), max(height, _MIN_WINDOW_SIZE[1])
 
 
 class AppState:
@@ -139,4 +158,9 @@ class AppState:
 
     def set_setting(self, key: str, value) -> None:
         self.settings[key] = value
+        self.save()
+
+    def update_settings(self, values: dict) -> None:
+        """Set several settings with a single write to disk."""
+        self.settings.update(values)
         self.save()

@@ -1,5 +1,7 @@
 import json
 
+from claude_session_manager.state import clamp_window_size
+
 
 def test_roundtrip(app_state):
     state = app_state.AppState()
@@ -53,6 +55,42 @@ def test_migrates_old_config_dir(app_state):
     assert state.get_name("sid") == "Carried over"
     assert state.is_favorite("sid")
     assert app_state._STATE_FILE.exists()  # copied into the new location
+
+
+def test_window_geometry_roundtrip(app_state):
+    state = app_state.AppState()
+    state.update_settings({"window_width": 1600, "window_height": 900, "window_maximized": True})
+    fresh = app_state.AppState()
+    assert fresh.get_setting("window_width") == 1600
+    assert fresh.get_setting("window_height") == 900
+    assert fresh.get_setting("window_maximized") is True
+
+
+def test_window_geometry_defaults(app_state):
+    state = app_state.AppState()
+    assert state.get_setting("window_width") == 1280
+    assert state.get_setting("window_height") == 800
+    assert state.get_setting("window_maximized") is False
+
+
+def test_clamp_window_size_fits_unchanged():
+    assert clamp_window_size(1280, 800, [(1920, 1080)]) == (1280, 800)
+
+
+def test_clamp_window_size_shrinks_to_largest_monitor():
+    assert clamp_window_size(3000, 2000, [(1280, 720), (1920, 1080)]) == (1920, 1080)
+
+
+def test_clamp_window_size_clamps_each_dimension_independently():
+    assert clamp_window_size(2500, 900, [(1920, 1080)]) == (1920, 900)
+
+
+def test_clamp_window_size_without_monitors_leaves_size_alone():
+    assert clamp_window_size(3000, 2000, []) == (3000, 2000)
+
+
+def test_clamp_window_size_enforces_minimum():
+    assert clamp_window_size(10, 10, [(1920, 1080)]) == (640, 480)
 
 
 def test_migrates_legacy_names_file(app_state):
