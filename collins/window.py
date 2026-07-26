@@ -251,24 +251,35 @@ class MainWindow(Adw.ApplicationWindow):
         self._save_window_geometry()
         if self._quitting:
             # The user insisted mid-drain: any tabs still alive skip the
-            # per-tab drain, so capture their panel histories now (a no-op
-            # for tabs that already drained through _on_close_page).
-            self._save_panel_histories()
+            # per-tab drain, so capture their panel histories and state now
+            # (a no-op for tabs that already drained through _on_close_page).
+            self._save_panel_data()
             return False  # tabs drained (or the user insisted) — really close
         busy = self._busy_tab_count()
         if busy == 0:
-            # This close skips the per-tab drain, so capture panel histories here.
-            self._save_panel_histories()
+            # This close skips the per-tab drain, so capture panel histories
+            # and state here.
+            self._save_panel_data()
             return False  # nothing running; continue with the normal close
         if not self._quit_asking:  # one dialog for however many sessions are busy
             self._confirm_quit(busy)
         return True
 
-    def _save_panel_histories(self) -> None:
+    def _save_panel_data(self) -> None:
         for i in range(self.tab_view.get_n_pages()):
             tab = self.tab_view.get_nth_page(i).get_child()
             if isinstance(tab, TerminalTab):
                 tab.save_panel_history()
+                self._save_panel_state(tab)
+
+    def _save_panel_state(self, tab: TerminalTab) -> None:
+        """Persist the tab's panel open/mode/size for its session. A tab that
+        never used the panel leaves the session's saved state alone."""
+        if tab.fork or not tab.session_id:
+            return
+        state = tab.capture_panel_state()
+        if state is not None:
+            self.state.set_panel_state(tab.session_id, state)
 
     def _busy_tab_count(self) -> int:
         count = 0
@@ -433,6 +444,7 @@ class MainWindow(Adw.ApplicationWindow):
                 if page is not None:
                     self.tab_view.close_page(page)
                 panelhistory.delete(item.session_id)
+                self.state.set_panel_state(item.session_id, None)
             if errors:
                 dialogs.error_dialog(self, _("Some transcripts could not be trashed"), "\n".join(errors))
 
@@ -474,6 +486,9 @@ class MainWindow(Adw.ApplicationWindow):
         if not fork:
             self._pages[session.session_id] = page
             self._sync_status(session.session_id)
+            saved_panel = self.state.get_panel_state(session.session_id)
+            if saved_panel:  # reopen the panel the way this session left it
+                tab.restore_panel_state(saved_panel)
 
     def _tab_title(self, session: Session) -> str:
         """Tab title with the session's saved emoji prefix (tabs only)."""
@@ -1030,6 +1045,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._cancel_idle(page)
         if isinstance(tab, TerminalTab):
             tab.save_panel_history()  # before the widget (and its VTE buffer) is destroyed
+            self._save_panel_state(tab)
         session_id = self._session_id_of(page)
         if session_id:
             self._pages.pop(session_id, None)
@@ -1166,6 +1182,7 @@ class MainWindow(Adw.ApplicationWindow):
             if page is not None:
                 self.tab_view.close_page(page)
             panelhistory.delete(session.session_id)
+            self.state.set_panel_state(session.session_id, None)
 
         dialogs.confirm_dialog(
             self,
@@ -1193,6 +1210,7 @@ class MainWindow(Adw.ApplicationWindow):
             if page is not None:
                 self.tab_view.close_page(page)
             panelhistory.delete(session.session_id)
+            self.state.set_panel_state(session.session_id, None)
 
         dialogs.confirm_dialog(
             self,
