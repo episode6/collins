@@ -34,6 +34,9 @@ class TerminalTab(Gtk.Box):
     __gsignals__ = {
         # Emitted when the agent process exits (int = exit status).
         "process-exited": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
+        # Emitted when a tab started without a session id (new / continue)
+        # discovers which session it is running (str = session id).
+        "session-resolved": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(
@@ -59,6 +62,7 @@ class TerminalTab(Gtk.Box):
         self._poll_source: int | None = None
         self._resolver_source: int | None = None
         self._resolver_attempts = 0
+        self._known_transcripts: set[Path] = set()  # transcripts predating this tab
         self._updating = False  # an off-thread transcript parse is in flight
         self._current_question_id: str | None = None  # question the card is showing
         self._handled_question_id: str | None = None  # answered/dismissed; don't reshow
@@ -328,6 +332,15 @@ class TerminalTab(Gtk.Box):
     def _start_transcript_resolver(self, cwd: str | None) -> None:
         if not cwd:
             return
+        # A brand-new session must attach to a transcript that didn't exist
+        # when the tab started — the newest *existing* one belongs to some other
+        # session. `--continue` (command_override) reuses the newest existing
+        # transcript, which is exactly the session it resumes.
+        self._known_transcripts = (
+            set(self.provider.transcripts_for_cwd(cwd))
+            if self._command_override is None
+            else set()
+        )
         self._resolver_attempts = 0
         self._resolver_source = GLib.timeout_add(1500, lambda: self._resolve_transcript(cwd))
 
@@ -336,9 +349,18 @@ class TerminalTab(Gtk.Box):
             self._resolver_source = None
             return GLib.SOURCE_REMOVE
         self._resolver_attempts += 1
-        path = self.provider.latest_transcript_for_cwd(cwd)
+        cands = [
+            p for p in self.provider.transcripts_for_cwd(cwd) if p not in self._known_transcripts
+        ]
+        try:
+            path = max(cands, key=lambda p: p.stat().st_mtime, default=None)
+        except OSError:
+            path = None
         if path is not None:
             self.set_transcript_path(str(path))
+            if self.session_id is None:
+                self.session_id = self.provider.session_id_for_transcript(path)
+                self.emit("session-resolved", self.session_id)
             self._resolver_source = None
             return GLib.SOURCE_REMOVE
         if self._resolver_attempts > 120:  # ~3 min, give up
