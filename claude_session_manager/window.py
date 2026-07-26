@@ -86,6 +86,9 @@ class MainWindow(Adw.ApplicationWindow):
         # Tabs whose session id was just resolved, waiting for the store to
         # discover the session: page -> (session id, title at resolution).
         self._pending_resolved: dict[Adw.TabPage, tuple[str, str]] = {}
+        # Tabs renamed locally before their session was bound: never auto-sync
+        # their titles from the store.
+        self._local_titles: set[Adw.TabPage] = set()
         self._idle_sources: dict[Adw.TabPage, int] = {}  # pending idle-notify timers
         self._switcher: QuickSwitcher | None = None
 
@@ -571,6 +574,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
         if self._pending_resolved:
             self._apply_resolved_sessions()
+        self._refresh_tab_titles()
 
     def _apply_resolved_sessions(self) -> None:
         """Finish attaching resolved tabs once the store discovers their sessions
@@ -583,8 +587,25 @@ class MainWindow(Adw.ApplicationWindow):
             del self._pending_resolved[page]
             if page.get_title() == title:  # keep any manual rename/emoji
                 page.set_title(self._tab_title(session))
+            else:
+                self._local_titles.add(page)
             page.set_tooltip(f"{session.project_name} — {session.session_id}")
             self._sync_status(session_id)
+
+    def _refresh_tab_titles(self) -> None:
+        """Keep tab titles in sync with the store: auto-generated titles arrive
+        after the tab is already open, and sidebar renames / regenerated names
+        land through here too. Session-bound titles are always derived from
+        persisted state, so recomputing them never loses a manual rename."""
+        for session_id, page in self._pages.items():
+            if page in self._pending_resolved or page in self._local_titles:
+                continue
+            session = self.store.get_session(session_id)
+            if session is None:
+                continue
+            title = self._tab_title(session)
+            if page.get_title() != title:
+                page.set_title(title)
 
     # -- chat sessions (headless streaming) --------------------------------
 
@@ -962,6 +983,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._close_ok.discard(page)
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
+        self._local_titles.discard(page)
         self._cancel_idle(page)
         session_id = self._session_id_of(page)
         if session_id:
