@@ -1,3 +1,7 @@
+# Modified from the original agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+
 """SessionStore: the single source of truth between disk and UI.
 
 Owns discovery (off the main thread), file monitoring, grouping/ordering,
@@ -21,7 +25,7 @@ from gi.repository import Gio, GLib, GObject  # noqa: E402
 from .models import FAV_GROUP, SessionItem
 from .providers import available_providers
 from .sessions import Session, discover_sessions
-from .state import AppState
+from .state import AppState, merge_project_order, move_in_order
 
 _DEBOUNCE_MS = 2000
 
@@ -55,6 +59,9 @@ class SessionStore(GObject.Object):
         # Projects with no rows under their group (all sessions hidden or
         # favorited): (group_key, label, cwd), newest first.
         self.empty_groups: list[tuple[tuple, str, str | None]] = []
+        # Project names in display order (persisted user order + new projects
+        # appended alphabetically), covering hidden projects too.
+        self.resolved_project_order: list[str] = []
         self.show_hidden = False
 
         self._items: dict[str, SessionItem] = {}
@@ -105,16 +112,23 @@ class SessionStore(GObject.Object):
         favorites = [s for s in visible if self.state.is_favorite(s.session_id)]
         rest = [s for s in visible if not self.state.is_favorite(s.session_id)]
 
-        # Input is mtime-sorted, so project groups order by most recent session.
+        # Sessions within a group stay mtime-sorted (newest first); the groups
+        # themselves follow the user-arranged persisted order.
         grouped: dict[tuple, list[Session]] = {}
         for session in rest:
             grouped.setdefault(("proj", session.project_name), []).append(session)
 
+        previous_order = self.resolved_project_order
+        self.resolved_project_order = merge_project_order(
+            self.state.get_project_order(), (s.project_name for s in sessions)
+        )
+        rank = {name: i for i, name in enumerate(self.resolved_project_order)}
+
         ordered: list[tuple[Session, tuple, str]] = [
             (s, FAV_GROUP, "Favorites") for s in favorites
         ]
-        for key, group_sessions in grouped.items():
-            ordered.extend((s, key, key[1]) for s in group_sessions)
+        for key in sorted(grouped, key=lambda k: rank.get(k[1], len(rank))):
+            ordered.extend((s, key, key[1]) for s in grouped[key])
 
         self.group_counts = {}
         items: list[SessionItem] = []
@@ -142,7 +156,13 @@ class SessionStore(GObject.Object):
                 None,
             )
             empty_groups.append((key, session.project_name, cwd))
-        empty_changed = empty_groups != self.empty_groups
+        empty_groups.sort(key=lambda g: rank.get(g[1], len(rank)))
+        # The sidebar interleaves empty headers with session groups by
+        # resolved order, so an order change alone must trigger a rebuild.
+        empty_changed = (
+            empty_groups != self.empty_groups
+            or previous_order != self.resolved_project_order
+        )
         self.empty_groups = empty_groups
 
         wanted_ids = {item.session_id for item in items}
@@ -239,6 +259,17 @@ class SessionStore(GObject.Object):
 
     def set_project_hidden(self, project_name: str, hidden: bool) -> None:
         self.state.set_project_hidden(project_name, hidden)
+        self._apply()
+
+    def move_project(self, name: str, before: str | None) -> None:
+        """Move a project in the sidebar order, before `before` (or to the
+        end). Persists the full resolved order, so hidden projects keep
+        their slot too."""
+        order = merge_project_order(
+            self.state.get_project_order(),
+            {s.project_name for s in self._last_sessions} | {name},
+        )
+        self.state.set_project_order(move_in_order(order, name, before))
         self._apply()
 
     def set_show_hidden(self, show: bool) -> None:

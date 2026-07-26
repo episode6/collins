@@ -1,6 +1,10 @@
+# Modified from the original agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+
 import json
 
-from claude_session_manager.state import clamp_window_size
+from claude_session_manager.state import clamp_window_size, merge_project_order, move_in_order
 
 
 def test_roundtrip(app_state):
@@ -102,6 +106,48 @@ def test_clamp_window_size_without_monitors_leaves_size_alone():
 
 def test_clamp_window_size_enforces_minimum():
     assert clamp_window_size(10, 10, [(1920, 1080)]) == (640, 480)
+
+
+def test_project_order_roundtrip(app_state):
+    state = app_state.AppState()
+    state.set_project_order(["zeta", "alpha", "mid"])
+    fresh = app_state.AppState()
+    assert fresh.get_project_order() == ["zeta", "alpha", "mid"]  # order preserved, not sorted
+
+
+def test_expanded_groups_roundtrip(app_state):
+    state = app_state.AppState()
+    state.set_group_expanded("proj:alpha", True)
+    state.set_groups_expanded(["proj:beta", "fav:"], True)
+    state.set_group_expanded("proj:alpha", False)
+    fresh = app_state.AppState()
+    assert not fresh.is_group_expanded("proj:alpha")
+    assert fresh.is_group_expanded("proj:beta")
+    assert fresh.is_group_expanded("fav:")
+
+
+def test_merge_project_order_keeps_saved_order_and_appends_new_alphabetically():
+    assert merge_project_order(["zeta", "alpha"], ["alpha", "Beta", "gamma", "zeta"]) == [
+        "zeta",
+        "alpha",
+        "Beta",
+        "gamma",
+    ]
+
+
+def test_merge_project_order_drops_stale_names():
+    assert merge_project_order(["gone", "kept"], ["kept"]) == ["kept"]
+
+
+def test_merge_project_order_empty_saved_is_alphabetical():
+    assert merge_project_order([], ["b", "A", "c"]) == ["A", "b", "c"]
+
+
+def test_move_in_order_before_and_to_end():
+    assert move_in_order(["a", "b", "c"], "c", "a") == ["c", "a", "b"]
+    assert move_in_order(["a", "b", "c"], "a", None) == ["b", "c", "a"]
+    assert move_in_order(["a", "b"], "new", "b") == ["a", "new", "b"]
+    assert move_in_order(["a", "b"], "a", "gone") == ["b", "a"]  # unknown anchor → end
 
 
 def test_migrates_legacy_names_file(app_state):

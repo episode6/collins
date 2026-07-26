@@ -1,3 +1,7 @@
+# Modified from the original agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+
 """Persistent app state: custom names, favorites, hidden sessions, settings.
 
 Everything lives in our own config file — the agents' session data is never
@@ -9,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from collections.abc import Iterable
 from pathlib import Path
 
 _CONFIG_BASE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
@@ -50,6 +55,28 @@ DEFAULT_SETTINGS = {
 _MIN_WINDOW_SIZE = (640, 480)
 
 
+def merge_project_order(saved: list[str], names: Iterable[str]) -> list[str]:
+    """Resolve the sidebar display order for `names` against the saved order.
+
+    Names present in `saved` keep their saved relative order; names not yet
+    ranked are appended alphabetically. Saved entries for projects that no
+    longer exist are dropped from the result (but not from the saved list).
+    """
+    present = set(names)
+    ranked = set(saved)
+    ordered = [n for n in saved if n in present]
+    ordered += sorted((n for n in present if n not in ranked), key=str.casefold)
+    return ordered
+
+
+def move_in_order(order: list[str], name: str, before: str | None) -> list[str]:
+    """Return `order` with `name` moved before `before` (or to the end)."""
+    result = [n for n in order if n != name]
+    index = result.index(before) if before is not None and before in result else len(result)
+    result.insert(index, name)
+    return result
+
+
 def clamp_window_size(width: int, height: int, monitor_sizes: list[tuple[int, int]]) -> tuple[int, int]:
     """Clamp a remembered window size so it fits the available monitors.
 
@@ -69,6 +96,8 @@ class AppState:
         self.favorites: set[str] = set()
         self.hidden: set[str] = set()
         self.hidden_projects: set[str] = set()  # by project name (the group identity)
+        self.project_order: list[str] = []  # user-arranged sidebar order, by project name
+        self.expanded_groups: set[str] = set()  # sidebar groups the user expanded
         self.settings: dict = dict(DEFAULT_SETTINGS)
         self._load()
 
@@ -90,6 +119,8 @@ class AppState:
         self.favorites = set(data.get("favorites") or [])
         self.hidden = set(data.get("hidden") or [])
         self.hidden_projects = set(data.get("hidden_projects") or [])
+        self.project_order = list(data.get("project_order") or [])
+        self.expanded_groups = set(data.get("expanded_groups") or [])
         self.settings = {**DEFAULT_SETTINGS, **(data.get("settings") or {})}
 
     def save(self) -> None:
@@ -100,6 +131,8 @@ class AppState:
             "favorites": sorted(self.favorites),
             "hidden": sorted(self.hidden),
             "hidden_projects": sorted(self.hidden_projects),
+            "project_order": self.project_order,  # order is the payload — never sort
+            "expanded_groups": sorted(self.expanded_groups),
             "settings": self.settings,
         }
         tmp = _STATE_FILE.with_suffix(".json.tmp")
@@ -165,6 +198,35 @@ class AppState:
             self.hidden_projects.add(project_name)
         else:
             self.hidden_projects.discard(project_name)
+        self.save()
+
+    # -- project order -----------------------------------------------------
+
+    def get_project_order(self) -> list[str]:
+        return list(self.project_order)
+
+    def set_project_order(self, order: list[str]) -> None:
+        self.project_order = list(order)
+        self.save()
+
+    # -- expanded groups ---------------------------------------------------
+
+    def is_group_expanded(self, group: str) -> bool:
+        return group in self.expanded_groups
+
+    def set_group_expanded(self, group: str, expanded: bool) -> None:
+        if expanded:
+            self.expanded_groups.add(group)
+        else:
+            self.expanded_groups.discard(group)
+        self.save()
+
+    def set_groups_expanded(self, groups: Iterable[str], expanded: bool) -> None:
+        """Expand/collapse several groups with a single write to disk."""
+        if expanded:
+            self.expanded_groups.update(groups)
+        else:
+            self.expanded_groups.difference_update(groups)
         self.save()
 
     # -- settings ------------------------------------------------------------

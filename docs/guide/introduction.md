@@ -1,3 +1,9 @@
+<!--
+Modified from the original agent-session-manager
+(https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+fork. Last modified: 2026-07-26. Full change history: git log for this file.
+-->
+
 # What is Agent Session Manager?
 
 Agent Session Manager is a native Linux desktop app that gives your
@@ -25,7 +31,8 @@ with respect to your agents' data — names, favorites, and all app state live i
 
 ## Why use it?
 
-- **One place for everything.** Every session, every project, newest first —
+- **One place for everything.** Every session, every project — sessions newest
+  first, projects in your own order (drag a project header to rearrange) —
   instead of UUID-named files and per-directory pickers.
 - **Human-readable.** Rename `a3b2152e…` to “JWT auth”, star your daily
   drivers, add an emoji to a tab.

@@ -1,3 +1,7 @@
+# Modified from the original agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+
 """Application entry point."""
 
 from __future__ import annotations
@@ -32,6 +36,10 @@ _CSS = b"""
 .status-dot.attention { background-color: #3584e4; }
 
 .group-header { padding: 10px 10px 4px 10px; }
+
+/* insertion line while dragging a project header to a new position */
+row.drop-above { box-shadow: inset 0 2px 0 0 @accent_bg_color; }
+row.drop-below { box-shadow: inset 0 -2px 0 0 @accent_bg_color; }
 
 /* session-row state badges */
 .waiting-badge { color: #e5a50a; }      /* Claude asked a question */
