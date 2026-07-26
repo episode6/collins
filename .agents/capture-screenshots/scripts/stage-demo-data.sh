@@ -2,15 +2,18 @@
 # Stage an isolated Collins data environment for screenshots.
 #
 # Usage: stage-demo-data.sh <dir>
-# Writes <dir>/projects, <dir>/config/collins/state.json, <dir>/claude.json.
+# Writes <dir>/projects, <dir>/config/collins/state.json, <dir>/claude.json,
+# and <dir>/state (XDG_STATE_HOME: saved panel-terminal history).
 # Scene: project "alpha-widgets" with 3 sessions, project "beta-server" whose
 # only session is favorited (so its header renders with a session count of 0).
+# The first alpha-widgets session has saved panel history, so capturing it
+# with capture.py --open-session $U1 --panel demos the restored panel.
 set -e
 E2E="${1:?usage: stage-demo-data.sh <dir>}"
 mkdir -p "$E2E"
 E2E="$(cd "$E2E" && pwd)"
-rm -rf "$E2E/projects" "$E2E/config"
-mkdir -p "$E2E/projects" "$E2E/config/collins"
+rm -rf "$E2E/projects" "$E2E/config" "$E2E/state"
+mkdir -p "$E2E/projects" "$E2E/config/collins" "$E2E/state/collins/panel_history"
 
 U1=11111111-1111-4111-8111-111111111111
 U2=22222222-2222-4222-8222-222222222222
@@ -48,6 +51,15 @@ cat > "$E2E/config/collins/state.json" <<EOF
     "window_height": 720
   }
 }
+EOF
+
+cat > "$E2E/state/collins/panel_history/$U1.txt" <<EOF
+\$ git status
+On branch main
+nothing to commit, working tree clean
+\$ python3 -m pytest tests/ -q
+........................................................  [100%]
+102 passed in 0.18s
 EOF
 
 echo '{}' > "$E2E/claude.json"

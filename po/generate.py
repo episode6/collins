@@ -20,6 +20,7 @@ DOMAIN = "collins"
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "hu": {
+        "── restored panel history ──": "── visszaállított panelelőzmények ──",
         "Rename session": "Munkamenet átnevezése",
         "Custom name": "Egyéni név",
         "Cancel": "Mégse",
@@ -223,6 +224,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "A fájl a kukába kerül, és visszaállítható.",
     },
     "de": {
+        "── restored panel history ──": "── wiederhergestellter Panel-Verlauf ──",
         "Rename session": "Sitzung umbenennen",
         "Custom name": "Eigener Name",
         "Cancel": "Abbrechen",
@@ -430,6 +432,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Die Datei wird in den Papierkorb verschoben und kann wiederhergestellt werden.",
     },
     "es": {
+        "── restored panel history ──": "── historial del panel restaurado ──",
         "Rename session": "Renombrar sesión",
         "Custom name": "Nombre personalizado",
         "Cancel": "Cancelar",
@@ -636,6 +639,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "El archivo se mueve a la papelera y se puede restaurar.",
     },
     "fr": {
+        "── restored panel history ──": "── historique du panneau restauré ──",
         "Rename session": "Renommer la session",
         "Custom name": "Nom personnalisé",
         "Cancel": "Annuler",

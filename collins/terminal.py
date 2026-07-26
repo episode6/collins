@@ -18,7 +18,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Vte", "3.91")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
-from . import themes  # noqa: E402
+from . import panelhistory, themes  # noqa: E402
 from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
@@ -75,6 +75,7 @@ class PanelTerminal(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._child_pid: int | None = None
         self._spawned = False
+        self._ever_spawned = False  # panel was used at some point in this tab's life
         self._easy_copy_paste = False
 
         self.terminal = Vte.Terminal()
@@ -92,16 +93,27 @@ class PanelTerminal(Gtk.Box):
         keys.connect("key-pressed", self._on_key_pressed)
         self.terminal.add_controller(keys)
 
-    def open_shell(self, cwd: str | None) -> None:
+    @property
+    def ever_spawned(self) -> bool:
+        return self._ever_spawned
+
+    def open_shell(self, cwd: str | None, restore_text: str | None = None) -> None:
         """Spawn the shell on first show; on later shows follow the agent's
-        cwd (it may have moved into a worktree) if the shell sits idle."""
+        cwd (it may have moved into a worktree) if the shell sits idle.
+        `restore_text` (first spawn only) is replayed into the scrollback
+        before the shell starts — the previous tab's saved panel history."""
         if not self._spawned:
-            self._spawn(cwd)
+            self._spawn(cwd, restore_text)
         else:
             self._sync_cwd(cwd)
 
-    def _spawn(self, cwd: str | None) -> None:
+    def _spawn(self, cwd: str | None, restore_text: str | None = None) -> None:
         self._spawned = True
+        self._ever_spawned = True
+        if restore_text:
+            self.terminal.feed(restore_text.replace("\n", "\r\n").encode())
+            marker = _("── restored panel history ──")
+            self.terminal.feed(f"\r\n\x1b[2m{marker}\x1b[0m\r\n".encode())
         if cwd is None or not Path(cwd).is_dir():
             cwd = str(Path.home())
         shell = os.environ.get("SHELL") or "/bin/bash"
@@ -144,6 +156,18 @@ class PanelTerminal(Gtk.Box):
 
     def has_running_command(self) -> bool:
         return _has_running_command(self.terminal, self._child_pid)
+
+    def capture_contents(self) -> str:
+        """The panel's current text contents including scrollback (plain text
+        — VTE's dump carries no colors or attributes)."""
+        stream = Gio.MemoryOutputStream.new_resizable()
+        try:
+            self.terminal.write_contents_sync(stream, Vte.WriteFlags.DEFAULT, None)
+            stream.close(None)
+        except GLib.Error:
+            return ""
+        data = stream.steal_as_bytes().get_data()
+        return (data or b"").decode("utf-8", errors="replace")
 
     def apply_settings(self, settings: dict) -> None:
         font = settings.get("font") or ""
@@ -669,7 +693,8 @@ class TerminalTab(Gtk.Box):
         the panel in the app-wide last-used mode; None keeps the tab's own."""
         if not self.panel_visible and default_mode in ("bottom", "right"):
             self._set_panel_mode(default_mode)
-        self._panel.open_shell(self.current_agent_cwd())
+        restore = self._load_panel_history() if not self._panel.ever_spawned else None
+        self._panel.open_shell(self.current_agent_cwd(), restore)
         if not self.panel_visible:
             self._panel.set_visible(True)
             self._apply_panel_size()
@@ -690,6 +715,20 @@ class TerminalTab(Gtk.Box):
         """True when a command is running in the panel shell — even a hidden
         panel's job is protected by the close confirmation."""
         return self._panel.has_running_command()
+
+    def _load_panel_history(self) -> str | None:
+        """Saved panel scrollback for this session — forks don't restore (their
+        panel would clash with the original tab's) and never save."""
+        if self.fork or not self.session_id:
+            return None
+        return panelhistory.load(self.session_id)
+
+    def save_panel_history(self) -> None:
+        """Persist the panel's scrollback so re-opening this session restores
+        it. A panel never opened in this tab leaves prior history untouched."""
+        if self.fork or not self.session_id or not self._panel.ever_spawned:
+            return
+        panelhistory.save(self.session_id, self._panel.capture_contents())
 
     def swap_panel(self) -> str:
         """Move the panel bottom↔right (the shell keeps running) and return

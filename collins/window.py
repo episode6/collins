@@ -16,7 +16,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import __version__, dialogs
+from . import __version__, dialogs, panelhistory
 from .chatsessionview import ChatSessionTab
 from .i18n import _
 from .models import SessionItem
@@ -250,13 +250,25 @@ class MainWindow(Adw.ApplicationWindow):
             GLib.source_remove(self._geometry_save_source)
         self._save_window_geometry()
         if self._quitting:
+            # The user insisted mid-drain: any tabs still alive skip the
+            # per-tab drain, so capture their panel histories now (a no-op
+            # for tabs that already drained through _on_close_page).
+            self._save_panel_histories()
             return False  # tabs drained (or the user insisted) — really close
         busy = self._busy_tab_count()
         if busy == 0:
+            # This close skips the per-tab drain, so capture panel histories here.
+            self._save_panel_histories()
             return False  # nothing running; continue with the normal close
         if not self._quit_asking:  # one dialog for however many sessions are busy
             self._confirm_quit(busy)
         return True
+
+    def _save_panel_histories(self) -> None:
+        for i in range(self.tab_view.get_n_pages()):
+            tab = self.tab_view.get_nth_page(i).get_child()
+            if isinstance(tab, TerminalTab):
+                tab.save_panel_history()
 
     def _busy_tab_count(self) -> int:
         count = 0
@@ -418,6 +430,7 @@ class MainWindow(Adw.ApplicationWindow):
                 page = self._pages.get(item.session_id)
                 if page is not None:
                     self.tab_view.close_page(page)
+                panelhistory.delete(item.session_id)
             if errors:
                 dialogs.error_dialog(self, _("Some transcripts could not be trashed"), "\n".join(errors))
 
@@ -1008,6 +1021,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._pending_resolved.pop(page, None)
         self._local_titles.discard(page)
         self._cancel_idle(page)
+        if isinstance(tab, TerminalTab):
+            tab.save_panel_history()  # before the widget (and its VTE buffer) is destroyed
         session_id = self._session_id_of(page)
         if session_id:
             self._pages.pop(session_id, None)
@@ -1143,6 +1158,7 @@ class MainWindow(Adw.ApplicationWindow):
             page = self._pages.get(session.session_id)
             if page is not None:
                 self.tab_view.close_page(page)
+            panelhistory.delete(session.session_id)
 
         dialogs.confirm_dialog(
             self,
@@ -1169,6 +1185,7 @@ class MainWindow(Adw.ApplicationWindow):
             page = self._pages.get(session.session_id)
             if page is not None:
                 self.tab_view.close_page(page)
+            panelhistory.delete(session.session_id)
 
         dialogs.confirm_dialog(
             self,
