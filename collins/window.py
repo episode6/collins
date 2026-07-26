@@ -986,7 +986,14 @@ class MainWindow(Adw.ApplicationWindow):
         conversation, leaving the original behind as a stale duplicate. Watch
         the agent list (off the main thread) for that successor and record
         old -> new, so the stale row is hidden, the user's name/emoji/favorite
-        carry over, and opening the old session redirects to the live one."""
+        carry over, and opening the old session redirects to the live one.
+
+        A tab that was *attached* to an already-detached session is different:
+        /bg spawns no fork there — the CLI just drops back to its agent-list
+        screen and keeps the terminal, so the close would hang until the
+        force-close safety net. Its own session id showing up as a background
+        agent is the tell; either way, once the session is confirmed running
+        detached, the CLI gets an /exit nudge if it still holds the terminal."""
         old_id = tab.session_id
         provider = tab.provider
         if not old_id or tab.fork:
@@ -1021,12 +1028,39 @@ class MainWindow(Adw.ApplicationWindow):
         def work() -> None:
             for _ in range(30):  # the fork appears within seconds of the /bg
                 for agent in provider.background_agents():
+                    if agent.session_id == old_id:
+                        # Already detached in place (this tab was attached to
+                        # a running background agent): no fork to record.
+                        GLib.idle_add(self._on_backgrounded, tab, old_id, "")
+                        return
                     if matches(agent):
-                        GLib.idle_add(self.store.record_forward, old_id, agent.session_id)
+                        GLib.idle_add(self._on_backgrounded, tab, old_id, agent.session_id)
                         return
                 time.sleep(1)
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _on_backgrounded(self, tab: TerminalTab, old_id: str, new_id: str) -> bool:
+        """The tab's session is confirmed running detached (new_id is its
+        fork's session id, or "" when it detached in place)."""
+        if new_id:
+            self.store.record_forward(old_id, new_id)
+        # Give the CLI a moment to exit on its own before nudging it off any
+        # screen it parked on (see _watch_background_fork).
+        GLib.timeout_add(700, self._nudge_detached_exit, tab)
+        return GLib.SOURCE_REMOVE
+
+    def _nudge_detached_exit(self, tab: TerminalTab) -> bool:
+        """The session is safely detached, yet the CLI still owns the tab's
+        terminal — it parked on the agent-list screen instead of exiting.
+        Feed /exit to dismiss it so the pending close can finish. A no-op
+        when the CLI already exited (then the text would only reach the
+        shell, which the close is about to end anyway)."""
+        if tab.get_root() is not None and tab.has_running_command():
+            exit_text = tab.provider.graceful_exit()
+            if exit_text:
+                tab.feed_child_text(exit_text)
+        return GLib.SOURCE_REMOVE
 
     def _poll_graceful(self, page: Adw.TabPage, tab: TerminalTab) -> bool:
         if page not in self._closing_pages:
