@@ -115,6 +115,43 @@ def test_panel_size_settings_roundtrip(app_state):
     assert fresh.get_setting("panel_size_right") == 512
 
 
+def test_panel_state_roundtrip(app_state):
+    state = app_state.AppState()
+    snap = {"open": True, "mode": "right", "sizes": {"right": 300, "bottom": 240}}
+    state.set_panel_state("sid", snap)
+    fresh = app_state.AppState()
+    assert fresh.get_panel_state("sid") == snap
+    assert fresh.get_panel_state("other") is None
+
+
+def test_panel_state_none_removes_entry(app_state):
+    state = app_state.AppState()
+    state.set_panel_state("sid", {"open": False, "mode": "bottom"})
+    state.set_panel_state("sid", None)
+    assert app_state.AppState().get_panel_state("sid") is None
+
+
+def test_panel_state_unchanged_is_not_rewritten(app_state):
+    state = app_state.AppState()
+    snap = {"open": True, "mode": "bottom", "sizes": {"bottom": 200}}
+    state.set_panel_state("sid", snap)
+    app_state._STATE_FILE.unlink()  # a redundant save would recreate the file
+    state.set_panel_state("sid", dict(snap))  # identical snapshot
+    state.set_panel_state("absent", None)  # removing a missing entry
+    assert not app_state._STATE_FILE.exists()
+
+
+def test_panel_state_ignores_corrupt_entries(app_state):
+    state = app_state.AppState()
+    state.set_panel_state("good", {"open": True, "mode": "bottom"})
+    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
+    data["panel_states"]["bad"] = "not-a-dict"
+    app_state._STATE_FILE.write_text(json.dumps(data), encoding="utf-8")
+    fresh = app_state.AppState()
+    assert fresh.get_panel_state("good") == {"open": True, "mode": "bottom"}
+    assert fresh.get_panel_state("bad") is None
+
+
 def test_window_geometry_roundtrip(app_state):
     state = app_state.AppState()
     state.update_settings({"window_width": 1600, "window_height": 900, "window_maximized": True})

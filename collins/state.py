@@ -112,6 +112,7 @@ class AppState:
         self.hidden_projects: set[str] = set()  # by project name (the group identity)
         self.project_order: list[str] = []  # user-arranged sidebar order, by project name
         self.expanded_groups: set[str] = set()  # sidebar groups the user expanded
+        self.panel_states: dict[str, dict] = {}  # per-session panel open/mode/sizes
         self.settings: dict = dict(DEFAULT_SETTINGS)
         self._load()
 
@@ -136,6 +137,9 @@ class AppState:
         self.hidden_projects = set(data.get("hidden_projects") or [])
         self.project_order = list(data.get("project_order") or [])
         self.expanded_groups = set(data.get("expanded_groups") or [])
+        self.panel_states = {
+            k: v for k, v in (data.get("panel_states") or {}).items() if isinstance(v, dict)
+        }
         self.settings = {**DEFAULT_SETTINGS, **(data.get("settings") or {})}
 
     def save(self) -> None:
@@ -149,6 +153,7 @@ class AppState:
             "hidden_projects": sorted(self.hidden_projects),
             "project_order": self.project_order,  # order is the payload — never sort
             "expanded_groups": sorted(self.expanded_groups),
+            "panel_states": self.panel_states,
             "settings": self.settings,
         }
         tmp = _STATE_FILE.with_suffix(".json.tmp")
@@ -264,6 +269,25 @@ class AppState:
             self.expanded_groups.update(groups)
         else:
             self.expanded_groups.difference_update(groups)
+        self.save()
+
+    # -- per-session panel state -------------------------------------------
+
+    def get_panel_state(self, session_id: str) -> dict | None:
+        return self.panel_states.get(session_id)
+
+    def set_panel_state(self, session_id: str, state: dict | None) -> None:
+        """Persist a session's panel snapshot ({"open", "mode", "sizes"});
+        None or empty removes the entry. Tabs snapshot on every close, so an
+        unchanged snapshot is deliberately not rewritten to disk."""
+        if state:
+            if self.panel_states.get(session_id) == state:
+                return
+            self.panel_states[session_id] = state
+        else:
+            if session_id not in self.panel_states:
+                return
+            del self.panel_states[session_id]
         self.save()
 
     # -- settings ------------------------------------------------------------

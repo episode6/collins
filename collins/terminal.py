@@ -694,10 +694,11 @@ class TerminalTab(Gtk.Box):
         else:
             self.show_panel(default_mode)
 
-    def show_panel(self, default_mode: str | None = None) -> None:
+    def show_panel(self, default_mode: str | None = None, focus: bool = True) -> None:
         """Show the panel, starting (or re-pointing) its shell at the agent's
         current working directory. `default_mode` ("bottom" | "right") opens
-        the panel in the app-wide last-used mode; None keeps the tab's own."""
+        the panel in the app-wide last-used mode; None keeps the tab's own.
+        `focus=False` leaves keyboard focus where it is (session restore)."""
         if not self.panel_visible and default_mode in ("bottom", "right"):
             self._set_panel_mode(default_mode)
         restore = self._load_panel_history() if not self._panel.ever_spawned else None
@@ -706,7 +707,8 @@ class TerminalTab(Gtk.Box):
             self._panel.set_visible(True)
             self._apply_panel_size()
             self._swap_panel_btn.set_visible(True)
-        GLib.idle_add(self._panel.grab_terminal_focus)
+        if focus:
+            GLib.idle_add(self._panel.grab_terminal_focus)
 
     def hide_panel(self) -> None:
         if not self.panel_visible:
@@ -745,6 +747,37 @@ class TerminalTab(Gtk.Box):
         self._panel.clear()
         if not self.fork and self.session_id:
             panelhistory.delete(self.session_id)
+
+    def capture_panel_state(self) -> dict | None:
+        """Snapshot the panel's open/mode/sizes for per-session persistence.
+        None when the panel was never used in this tab, so a session's saved
+        state survives tabs that never touched the panel. Forks never
+        persist (mirroring panel history)."""
+        if self.fork or (not self._panel.ever_spawned and not self._panel_sizes):
+            return None
+        self._remember_panel_size()  # capture the live divider position
+        state: dict = {"open": self.panel_visible, "mode": self._panel_mode()}
+        if self._panel_sizes:
+            state["sizes"] = dict(self._panel_sizes)
+        return state
+
+    def restore_panel_state(self, state: dict) -> None:
+        """Re-apply a session's saved panel snapshot. Mode and sizes land in
+        this tab's own memory — restoring a session must not disturb the
+        app-wide defaults for new panels — and a panel saved open is shown
+        again (spawning its shell and restoring its saved history) without
+        stealing focus from the agent terminal."""
+        sizes = state.get("sizes")
+        if isinstance(sizes, dict):
+            for mode in ("bottom", "right"):
+                size = sizes.get(mode)
+                if isinstance(size, int) and size > 0:
+                    self._panel_sizes[mode] = size
+        mode = state.get("mode")
+        if mode in ("bottom", "right"):
+            self._set_panel_mode(mode)
+        if state.get("open"):
+            self.show_panel(focus=False)
 
     def swap_panel(self) -> str:
         """Move the panel bottom↔right (the shell keeps running) and return
