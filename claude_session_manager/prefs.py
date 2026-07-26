@@ -166,8 +166,8 @@ class PreferencesDialog(Adw.PreferencesDialog):
             title=_("Auto-generate session titles"),
             subtitle=_(
                 "Summarize each new session's first prompt into a short title "
-                "with a small Claude model (needs the anthropic package and "
-                "API credentials)"
+                "using the claude CLI (haiku); pre-existing sessions are "
+                "titled locally from their prompt"
             ),
         )
         self._auto_title_row.set_active(bool(state.get_setting("auto_title_sessions")))

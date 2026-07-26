@@ -3,40 +3,62 @@
 Sessions that already exist when the app launches get a cheap local title
 (the first words of their prompt, via ``fallback_title``). Sessions created
 while the app runs get their first prompt summarized to five words or fewer
-by a cheap Claude model (claude-haiku-4-5); the store persists the result so
-each title is generated exactly once per session. "Regenerate name" in the
-sidebar re-runs the model for a single session on demand.
+by a headless ``claude -p --model haiku`` run — the same CLI and login the
+whole app is built on, so no separate API credentials are needed. The store
+persists each result, so a title is generated exactly once per session.
+"Regenerate name" in the sidebar re-runs the model for one session on demand.
 
-The ``anthropic`` SDK is an optional dependency (``pip install
-agent-session-manager-gtk[titles]``); when it is missing, or no API
-credentials are configured, the feature quietly stays off and the sidebar
-keeps showing the raw prompt preview.
+Headless runs write their own transcripts under ``~/.claude/projects``, so
+they execute from a dedicated scratch directory: discovery skips that
+project (otherwise every title run would appear as a session and itself get
+queued for titling), and its transcripts are removed after each call.
 """
 
 from __future__ import annotations
 
 import logging
 import queue
+import re
+import shutil
+import subprocess
 import threading
 from collections.abc import Callable
+from pathlib import Path
+
+from . import sessions, state
 
 log = logging.getLogger(__name__)
 
-TITLE_MODEL = "claude-haiku-4-5"
+# CLI model alias: version-agnostic, resolves to the current Haiku tier.
+TITLE_MODEL = "haiku"
 
-# The preview passed in is already short; keep a hard cap anyway so a future
-# caller can't accidentally ship a whole transcript to the API.
+_TIMEOUT_S = 120
 _MAX_PROMPT_CHARS = 1000
 _MAX_TITLE_CHARS = 60
+_FALLBACK_WORDS = 10
+# Consecutive failures (e.g. CLI not logged in) before the worker gives up
+# for the rest of the run.
+_MAX_CONSECUTIVE_FAILURES = 3
 
-_SYSTEM_PROMPT = (
-    "You generate titles for coding-agent sessions. Summarize the user's "
-    "prompt as a title of five words or fewer. Reply with the title only: "
-    "no quotes, no trailing punctuation, no explanation."
+# `claude -p` keeps Claude Code's own system prompt, so the instructions ride
+# in the user message instead.
+_PROMPT_TEMPLATE = (
+    "Summarize the following coding-agent prompt as a session title of five "
+    "words or fewer. Reply with the title only - no quotes, no punctuation, "
+    "no explanation.\n\nPrompt:\n{prompt}"
 )
 
 
-_FALLBACK_WORDS = 10
+def scratch_dir() -> Path:
+    """Working directory for headless title runs. Session discovery excludes
+    the ~/.claude/projects entry this maps to."""
+    return state._CONFIG_DIR / "title-scratch"
+
+
+def scratch_project_dirname() -> str:
+    """The ~/.claude/projects directory name Claude Code derives from the
+    scratch dir (every non-alphanumeric char becomes '-')."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(scratch_dir()))
 
 
 def sanitize_title(text: str) -> str:
@@ -47,23 +69,49 @@ def sanitize_title(text: str) -> str:
 
 
 def fallback_title(prompt: str) -> str:
-    """A no-API title: the first few words of the prompt, tidied up. Used to
+    """A no-model title: the first few words of the prompt, tidied up. Used to
     backfill pre-existing sessions on launch so only sessions created while
-    the app runs are ever sent to the API."""
+    the app runs are ever sent to the model."""
     words = prompt.split()[:_FALLBACK_WORDS]
     return " ".join(words).strip("\"'` ").rstrip(".,;:")
 
 
-def _default_client():
-    import anthropic  # optional dependency; ImportError disables the feature
+class TitleError(Exception):
+    """A failed title run. ``fatal`` means retrying can't help this run
+    (e.g. the CLI is missing entirely)."""
 
-    # Resolves credentials from the environment (ANTHROPIC_API_KEY or an
-    # `ant auth login` profile). Raises when none are available.
-    return anthropic.Anthropic()
+    def __init__(self, message: str, fatal: bool = False) -> None:
+        super().__init__(message)
+        self.fatal = fatal
+
+
+def _run_claude(prompt: str) -> str:
+    """One headless CLI call; returns the model's reply text."""
+    cli = shutil.which("claude")
+    if cli is None:
+        raise TitleError("claude CLI not found on PATH", fatal=True)
+    workdir = scratch_dir()
+    workdir.mkdir(parents=True, exist_ok=True)
+    try:
+        result = subprocess.run(
+            [cli, "-p", "--model", TITLE_MODEL],
+            input=prompt,
+            capture_output=True,
+            text=True,
+            cwd=workdir,
+            timeout=_TIMEOUT_S,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise TitleError(f"claude exited {result.returncode}: {detail[:200]}")
+        return result.stdout
+    finally:
+        # Drop the transcript the headless run just wrote.
+        shutil.rmtree(sessions.CLAUDE_PROJECTS_DIR / scratch_project_dirname(), ignore_errors=True)
 
 
 class TitleGenerator:
-    """Serial background worker that titles sessions via the Claude API.
+    """Serial background worker that titles sessions via the claude CLI.
 
     ``submit()`` must be called from a single thread (the GLib main loop);
     ``callback(session_id, title)`` fires on the worker thread, so the caller
@@ -73,13 +121,13 @@ class TitleGenerator:
     def __init__(
         self,
         callback: Callable[[str, str], None],
-        client_factory: Callable[[], object] = _default_client,
+        runner: Callable[[str], str] = _run_claude,
     ) -> None:
         self._callback = callback
-        self._client_factory = client_factory
+        self._runner = runner
         self._queue: queue.SimpleQueue[tuple[str, str]] = queue.SimpleQueue()
         self._seen: set[str] = set()  # queued or attempted during this run
-        self._client: object | None = None
+        self._failures = 0  # consecutive; reset on success
         self._disabled = False
         self._thread: threading.Thread | None = None
 
@@ -112,40 +160,22 @@ class TitleGenerator:
                 self._callback(session_id, title)
 
     def _generate(self, prompt: str) -> str | None:
-        if self._client is None:
-            try:
-                self._client = self._client_factory()
-            except Exception as err:
-                self._disabled = True
-                log.info("session title generation disabled: %s", err)
-                return None
         try:
-            response = self._client.messages.create(
-                model=TITLE_MODEL,
-                max_tokens=30,
-                system=_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt[:_MAX_PROMPT_CHARS]}],
-            )
-        except Exception as err:
-            self._handle_api_error(err)
+            reply = self._runner(_PROMPT_TEMPLATE.format(prompt=prompt[:_MAX_PROMPT_CHARS]))
+        except Exception as err:  # TitleError, TimeoutExpired, OSError, ...
+            self._handle_error(err)
             return None
-        if getattr(response, "stop_reason", None) == "refusal":
-            return None
-        text = "".join(
-            block.text for block in response.content if getattr(block, "type", "") == "text"
-        )
-        return sanitize_title(text) or None
+        self._failures = 0
+        return sanitize_title(reply) or None
 
-    def _handle_api_error(self, err: Exception) -> None:
-        """Bad credentials won't fix themselves mid-run: stop the worker.
-        Anything else (rate limit after the SDK's retries, network, 5xx)
-        skips just this session; it is retried on the next app run."""
-        try:
-            import anthropic
-        except ImportError:  # injected client without the SDK: treat as transient
-            log.warning("session title generation failed: %s", err)
-            return
-        if isinstance(err, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+    def _handle_error(self, err: Exception) -> None:
+        """A missing CLI won't fix itself mid-run, and neither will a setup
+        that fails every call (e.g. not logged in) — stop the worker after a
+        few strikes. One-off failures skip just this session; it is retried
+        on the next app run."""
+        self._failures += 1
+        fatal = isinstance(err, TitleError) and err.fatal
+        if fatal or self._failures >= _MAX_CONSECUTIVE_FAILURES:
             self._disabled = True
             log.info("session title generation disabled: %s", err)
         else:

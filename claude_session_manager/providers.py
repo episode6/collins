@@ -26,6 +26,7 @@ from .sessions import (
     _tail_state,
 )
 from .sessions import parse_details as _claude_parse_details
+from .titles import scratch_project_dirname
 
 
 @dataclass(frozen=True)
@@ -268,8 +269,11 @@ class ClaudeProvider(Provider):
         base = self.projects_dir
         if not base.is_dir():
             return found
+        # Headless title-generation runs (titles.py) write transcripts under
+        # this project; surfacing them would re-trigger titling forever.
+        scratch = scratch_project_dirname()
         for project_dir in base.iterdir():
-            if not project_dir.is_dir():
+            if not project_dir.is_dir() or project_dir.name == scratch:
                 continue
             for jsonl in project_dir.glob("*.jsonl"):
                 if not _UUID_RE.match(jsonl.stem):

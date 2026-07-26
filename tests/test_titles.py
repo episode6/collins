@@ -1,39 +1,28 @@
 import threading
 import time
 
-from claude_session_manager.titles import TITLE_MODEL, TitleGenerator, fallback_title, sanitize_title
+from claude_session_manager.titles import (
+    TitleError,
+    TitleGenerator,
+    fallback_title,
+    sanitize_title,
+)
 
 
-class FakeBlock:
-    type = "text"
+class FakeRunner:
+    """Stands in for the headless `claude -p` call. Each entry in `replies`
+    is either a reply string or an exception to raise."""
 
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-
-class FakeResponse:
-    stop_reason = "end_turn"
-
-    def __init__(self, text: str) -> None:
-        self.content = [FakeBlock(text)]
-
-
-class FakeMessages:
     def __init__(self, replies: list) -> None:
         self.replies = replies
-        self.calls: list[dict] = []
+        self.prompts: list[str] = []
 
-    def create(self, **kwargs):
-        self.calls.append(kwargs)
+    def __call__(self, prompt: str) -> str:
+        self.prompts.append(prompt)
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
-        return FakeResponse(reply)
-
-
-class FakeClient:
-    def __init__(self, replies: list) -> None:
-        self.messages = FakeMessages(replies)
+        return reply
 
 
 class Collector:
@@ -49,6 +38,15 @@ class Collector:
 
     def wait(self) -> bool:
         return self._event.wait(timeout=5)
+
+
+def wait_until(predicate, timeout: float = 5) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
 
 
 def test_sanitize_title():
@@ -68,66 +66,64 @@ def test_fallback_title():
 
 
 def test_generates_and_delivers_title():
-    client = FakeClient(["Fix login bug"])
+    runner = FakeRunner(["Fix login bug\n"])
     collector = Collector()
-    generator = TitleGenerator(collector, client_factory=lambda: client)
+    generator = TitleGenerator(collector, runner=runner)
     generator.submit("sid-1", "please fix the login bug in auth.py")
     assert collector.wait()
     assert collector.results == {"sid-1": "Fix login bug"}
-    call = client.messages.calls[0]
-    assert call["model"] == TITLE_MODEL
-    assert call["messages"] == [{"role": "user", "content": "please fix the login bug in auth.py"}]
+    assert "please fix the login bug in auth.py" in runner.prompts[0]
 
 
 def test_duplicate_and_empty_submits_are_ignored():
-    client = FakeClient(["Title one"])
+    runner = FakeRunner(["Title one"])
     collector = Collector()
-    generator = TitleGenerator(collector, client_factory=lambda: client)
+    generator = TitleGenerator(collector, runner=runner)
     generator.submit("sid-1", "   ")  # empty prompt: dropped
     generator.submit("sid-1", "do the thing")
     generator.submit("sid-1", "do the thing")  # duplicate: dropped
     assert collector.wait()
-    assert client.messages.calls == client.messages.calls[:1]
+    assert len(runner.prompts) == 1
     assert collector.results == {"sid-1": "Title one"}
 
 
 def test_force_resubmits_an_already_titled_session():
-    client = FakeClient(["First title", "Second title"])
+    runner = FakeRunner(["First title", "Second title"])
     collector = Collector()
-    generator = TitleGenerator(collector, client_factory=lambda: client)
+    generator = TitleGenerator(collector, runner=runner)
     generator.submit("sid-1", "do the thing")
     assert collector.wait()
     generator.submit("sid-1", "do the thing")  # deduped
     generator.submit("sid-1", "do the thing", force=True)
-    for _ in range(50):
-        if collector.results.get("sid-1") == "Second title":
-            break
-        time.sleep(0.1)
-    assert collector.results == {"sid-1": "Second title"}
-    assert len(client.messages.calls) == 2
+    assert wait_until(lambda: collector.results.get("sid-1") == "Second title")
+    assert len(runner.prompts) == 2
 
 
-def test_client_factory_failure_disables_generator():
-    def broken_factory():
-        raise RuntimeError("no credentials")
-
+def test_fatal_error_disables_generator():
+    runner = FakeRunner([TitleError("claude CLI not found on PATH", fatal=True)])
     collector = Collector()
-    generator = TitleGenerator(collector, client_factory=broken_factory)
+    generator = TitleGenerator(collector, runner=runner)
     generator.submit("sid-1", "do the thing")
-    for _ in range(50):  # wait for the worker to hit the factory
-        if generator._disabled:
-            break
-        time.sleep(0.1)
-    assert generator._disabled
+    assert wait_until(lambda: generator._disabled)
     assert collector.results == {}
 
 
-def test_request_error_skips_session_but_continues():
-    client = FakeClient([RuntimeError("boom"), "Second title"])
+def test_transient_error_skips_session_but_continues():
+    runner = FakeRunner([TitleError("exit 1: transient"), "Second title"])
     collector = Collector()
-    generator = TitleGenerator(collector, client_factory=lambda: client)
+    generator = TitleGenerator(collector, runner=runner)
     generator.submit("sid-1", "first prompt")
     generator.submit("sid-2", "second prompt")
     assert collector.wait()
     assert collector.results == {"sid-2": "Second title"}
     assert not generator._disabled
+
+
+def test_consecutive_failures_disable_generator():
+    runner = FakeRunner([RuntimeError("boom")] * 3)
+    collector = Collector()
+    generator = TitleGenerator(collector, runner=runner)
+    for i in range(3):
+        generator.submit(f"sid-{i}", "some prompt")
+    assert wait_until(lambda: generator._disabled)
+    assert collector.results == {}
