@@ -62,7 +62,7 @@ Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, gir1.2-vte
 Recommends: gir1.2-glib-2.0
 Installed-Size: $INSTALLED_SIZE
 Maintainer: Máté Molnár <molnar.mate@zengo.eu>
-Homepage: https://github.com/ghackett/agent-session-manager
+Homepage: https://github.com/episode6/collins
 Description: Manage and resume AI coding agent sessions (GTK4 GUI)
  Native GTK4/libadwaita desktop app for the Claude Code CLI: browse all
  sessions grouped by project, name and star them, and resume any session in

@@ -9,7 +9,7 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
 Collins is a native Linux desktop app that gives your
 [Claude Code](https://claude.com/claude-code) sessions a proper home.
 
-![Collins](https://raw.githubusercontent.com/ghackett/agent-session-manager/main/data/screenshot.png)
+![Collins](https://raw.githubusercontent.com/episode6/collins/main/data/screenshot.png)
 
 If you use a coding agent daily, you accumulate **dozens of sessions** scattered
 across every project you touch. They live as JSONL transcripts named by UUID

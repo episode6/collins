@@ -58,5 +58,5 @@ collins/
 ```
 
 The source lives on
-[GitHub](https://github.com/ghackett/agent-session-manager) under GPL-3.0 —
+[GitHub](https://github.com/episode6/collins) under GPL-3.0 —
 contributions welcome.

@@ -38,7 +38,7 @@ sudo pacman -S python-gobject gtk4 libadwaita vte4
 
 Build the package with `./scripts/build_deb.sh`, or grab the latest `.deb`
 from the
-[releases page](https://github.com/ghackett/agent-session-manager/releases/latest)
+[releases page](https://github.com/episode6/collins/releases/latest)
 if one is published, then install it — dependencies are pulled in
 automatically:
 
@@ -52,7 +52,7 @@ It appears in your app grid as **Collins**, and the installed command is
 ### From source
 
 ```bash
-git clone https://github.com/ghackett/agent-session-manager.git collins
+git clone https://github.com/episode6/collins.git
 cd collins
 python3 -m collins
 ```

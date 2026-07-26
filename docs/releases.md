@@ -8,7 +8,7 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
 
 A running overview of what's shipped and what's planned. For the full notes and
 downloads of each version, see the
-[GitHub releases](https://github.com/ghackett/agent-session-manager/releases).
+[GitHub releases](https://github.com/episode6/collins/releases).
 
 ## Roadmap
 

@@ -9,7 +9,7 @@ export default defineConfig({
   description: 'A native Linux home for your AI coding-agent sessions.',
   lang: 'en-US',
   // Must match the GitHub repo name (GitHub Pages project path).
-  base: '/agent-session-manager/',
+  base: '/collins/',
   lastUpdated: true,
   cleanUrls: true,
 
@@ -19,7 +19,7 @@ export default defineConfig({
     ['meta', { property: 'og:title', content: 'Collins' }],
     ['meta', {
       property: 'og:image',
-      content: 'https://raw.githubusercontent.com/ghackett/agent-session-manager/main/data/banner.png',
+      content: 'https://raw.githubusercontent.com/episode6/collins/main/data/banner.png',
     }],
   ],
 
@@ -51,11 +51,11 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/ghackett/agent-session-manager' },
+      { icon: 'github', link: 'https://github.com/episode6/collins' },
     ],
 
     editLink: {
-      pattern: 'https://github.com/ghackett/agent-session-manager/edit/main/docs/:path',
+      pattern: 'https://github.com/episode6/collins/edit/main/docs/:path',
       text: 'Edit this page on GitHub',
     },
 

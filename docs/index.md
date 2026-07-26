@@ -10,7 +10,7 @@ hero:
   text: "A native home for your AI coding-agent sessions"
   tagline: Browse, name, and resume every Claude Code session on your machine — in embedded terminal tabs.
   image:
-    src: https://raw.githubusercontent.com/ghackett/agent-session-manager/main/data/screenshot.png
+    src: https://raw.githubusercontent.com/episode6/collins/main/data/screenshot.png
     alt: Collins
   actions:
     - theme: brand
@@ -21,7 +21,7 @@ hero:
       link: /guide/getting-started
     - theme: alt
       text: View on GitHub
-      link: https://github.com/ghackett/agent-session-manager
+      link: https://github.com/episode6/collins
 
 features:
   - icon: 🗂️
@@ -54,7 +54,7 @@ sudo apt install ./collins_*_all.deb
 ```
 
 ```bash [From source]
-git clone https://github.com/ghackett/agent-session-manager.git collins
+git clone https://github.com/episode6/collins.git
 cd collins
 python3 -m collins
 ```

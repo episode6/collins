@@ -12,7 +12,7 @@ Build-Depends: debhelper-compat (= 13),
                python3-all,
                python3-setuptools
 Standards-Version: 4.6.2
-Homepage: https://github.com/ghackett/agent-session-manager
+Homepage: https://github.com/episode6/collins
 Rules-Requires-Root: no
 
 Package: collins
