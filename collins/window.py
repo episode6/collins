@@ -1055,15 +1055,15 @@ class MainWindow(Adw.ApplicationWindow):
             self.store.record_forward(old_id, new_id)
         # Give the CLI a moment to exit on its own before nudging it off any
         # screen it parked on (see _watch_background_fork).
-        GLib.timeout_add(700, self._nudge_detached_exit, tab)
+        GLib.timeout_add(700, self._nudge_cli_exit, tab)
         return GLib.SOURCE_REMOVE
 
-    def _nudge_detached_exit(self, tab: TerminalTab) -> bool:
-        """The session is safely detached, yet the CLI still owns the tab's
-        terminal — it parked on the agent-list screen instead of exiting.
-        Feed /exit to dismiss it so the pending close can finish. A no-op
-        when the CLI already exited (then the text would only reach the
-        shell, which the close is about to end anyway)."""
+    def _nudge_cli_exit(self, tab: TerminalTab) -> bool:
+        """The CLI was asked to leave (via /exit or /bg) yet still owns the
+        tab's terminal — typically parked on its session-list screen. Feed
+        /exit to dismiss it so the pending close can finish. A no-op when
+        the CLI already exited (then the text would only reach the shell,
+        which the close is about to end anyway)."""
         if tab.get_root() is not None and tab.has_running_command():
             exit_text = tab.provider.graceful_exit()
             if exit_text:
@@ -1077,6 +1077,15 @@ class MainWindow(Adw.ApplicationWindow):
             tab.feed_child_text("exit\r")  # close the shell → child-exited closes the tab
             return GLib.SOURCE_REMOVE
         self._closing_pages[page] += 1
+        # /exit and /bg sometimes drop the CLI to its session-list screen
+        # instead of exiting (seen with tabs attached to a detached session),
+        # which would hang the close until the force-close below. A CLI still
+        # owning the terminal this long after being asked to leave is the
+        # tell: nudge it with /exit again. Safe for a merely-slow exit too —
+        # the extra input queues behind the pending command and is discarded
+        # when the CLI exits.
+        if self._closing_pages[page] in (8, 24):  # ~2.4s / ~7.2s
+            self._nudge_cli_exit(tab)
         if self._closing_pages[page] >= 40:  # ~12s safety net
             self._close_confirmed(page)
             return GLib.SOURCE_REMOVE
