@@ -1,3 +1,9 @@
+<!--
+Modified from the original agent-session-manager
+(https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+fork. Last modified: 2026-07-26. Full change history: git log for this file.
+-->
+
 # Agent Session Manager
 
 [![CI](https://github.com/r4nd3l/agent-session-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/r4nd3l/agent-session-manager/actions/workflows/ci.yml)
@@ -16,7 +22,7 @@ Native GTK4/libadwaita desktop app to browse, name, and resume your [Claude Code
 
 Features:
 
-- **Sidebar** lists every session found on disk (for Claude Code, under `~/.claude/projects/`), grouped by project (collapsible headers, with collapse-all/expand-all buttons next to the search box), with a **Favorites** section pinned on top — star a session to move it there. A **search box** filters by name, project, preview, or session id, and the list **updates live** as sessions are created or written to.
+- **Sidebar** lists every session found on disk (for Claude Code, under `~/.claude/projects/`), grouped by project (collapsible headers, with collapse-all/expand-all buttons next to the search box), with a **Favorites** section pinned on top — star a session to move it there. **Drag a project header** to rearrange projects — the order and each project's expanded state persist across restarts. A **search box** filters by name, project, preview, or session id, and the list **updates live** as sessions are created or written to.
 - Sessions can be given **custom names** (pencil icon). Names, favorites, and hidden sessions persist in `~/.config/agent-session-manager/state.json` — your agents' own session files are never modified.
 - **Clicking a session** opens a tab in the main area; each tab is an embedded **VTE terminal** running your `$SHELL` with the agent's resume command (`claude --resume <session-id>` for Claude Code) typed into it, in the session's original project directory. When the agent exits you drop to a shell prompt; the tab closes when the shell exits. Closing a tab asks the agent to exit cleanly (Claude Code's `/exit`) in the background first.
 - **In-terminal search** with a find bar (`Ctrl+Shift+G`) over the tab's scrollback.

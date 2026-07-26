@@ -1,3 +1,7 @@
+# Modified from the original agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+
 """Session sidebar: search, project accordion, favorites, selection mode.
 
 Rows bind to SessionItem properties, so renames/stars/status changes update
@@ -46,6 +50,11 @@ def _abbreviate_path(path: str | None) -> str:
     return path
 
 
+def _group_state_key(group_key: tuple) -> str:
+    """Stable string identity for a sidebar group, for persisted state."""
+    return f"{group_key[0]}:{group_key[1]}"
+
+
 class GroupHeaderRow(Gtk.ListBoxRow):
     """A real row acting as a group header, so it stays visible when the
     group's session rows are filtered out (collapsed)."""
@@ -70,6 +79,13 @@ class GroupHeaderRow(Gtk.ListBoxRow):
                 "pressed", lambda _g, _n, x, y: sidebar.show_group_menu(self, x, y)
             )
             self.add_controller(right_click)
+
+            # Project headers can be dragged to rearrange the sidebar order
+            # (favorites stays pinned first).
+            drag = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
+            drag.connect("prepare", self._on_drag_prepare)
+            drag.connect("drag-begin", self._on_drag_begin)
+            self.add_controller(drag)
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         box.add_css_class("group-header")
@@ -112,6 +128,13 @@ class GroupHeaderRow(Gtk.ListBoxRow):
 
     def set_collapsed(self, collapsed: bool) -> None:
         self._arrow.set_from_icon_name("pan-end-symbolic" if collapsed else "pan-down-symbolic")
+
+    def _on_drag_prepare(self, _source: Gtk.DragSource, _x: float, _y: float) -> Gdk.ContentProvider:
+        value = GObject.Value(GObject.TYPE_STRING, self.group_key[1])
+        return Gdk.ContentProvider.new_for_value(value)
+
+    def _on_drag_begin(self, source: Gtk.DragSource, _drag: Gdk.Drag) -> None:
+        source.set_icon(Gtk.WidgetPaintable.new(self), 0, 0)
 
 
 class SessionRow(Gtk.ListBoxRow):
@@ -257,7 +280,6 @@ class SessionSidebar(Gtk.Box):
         self._view = Adw.ToolbarView(vexpand=True)
         self.append(self._view)
         self._collapsed: set[tuple] = set()
-        self._known_groups: set[tuple] = set()  # groups seen before (for collapse-by-default)
         self._selection_mode = False
         self._selected: set[str] = set()
         self._rows: dict[str, SessionRow] = {}
@@ -322,6 +344,14 @@ class SessionSidebar(Gtk.Box):
         self.list.add_css_class("navigation-sidebar")
         self.list.connect("row-activated", self._on_row_activated)
         self.list.set_filter_func(self._filter_row)
+
+        # Accept project headers dragged to a new position in the list.
+        self._indicator_row: Gtk.ListBoxRow | None = None
+        drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+        drop.connect("motion", self._on_drop_motion)
+        drop.connect("leave", lambda *_: self._set_drop_indicator(None, True))
+        drop.connect("drop", self._on_drop)
+        self.list.add_controller(drop)
 
         scrolled = Gtk.ScrolledWindow(child=self.list)
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -392,49 +422,54 @@ class SessionSidebar(Gtk.Box):
         self._rows = {}
         self._header_rows = {}
 
-        # Collapse project groups by default — but only the first time each is
-        # seen, so manual expand/collapse choices survive live refreshes.
-        groups = []
         # Directory per project group (from its most recent session with a
         # cwd), so headers can offer a "new session here" button. Favorites
         # mixes projects, so it never gets one.
+        items_by_group: dict[tuple, list[SessionItem]] = {}
         group_cwds: dict[tuple, str] = {}
         for i in range(self.store.model.get_n_items()):
             item = self.store.model.get_item(i)
             key = item.group_key
-            if key not in groups:
-                groups.append(key)
+            items_by_group.setdefault(key, []).append(item)
             if key != FAV_GROUP and key not in group_cwds and item.session.cwd:
                 group_cwds[key] = item.session.cwd
-        for key in groups + [key for key, _label, _cwd in self.store.empty_groups]:
-            if key not in self._known_groups:
-                self._collapsed.add(key)
-        self._known_groups = set(groups) | {key for key, _label, _cwd in self.store.empty_groups}
 
-        previous_group: tuple | None = None
-        for i in range(self.store.model.get_n_items()):
-            item = self.store.model.get_item(i)
-            if item.group_key != previous_group:
-                header = GroupHeaderRow(
-                    item.group_key,
-                    _("Favorites") if item.group_key == FAV_GROUP else item.group_label,
-                    self.store.group_counts.get(item.group_key, 0),
-                    item.group_key in self._collapsed,
-                    cwd=group_cwds.get(item.group_key),
-                    sidebar=self,
-                )
-                self._header_rows[item.group_key] = header
-                self.list.append(header)
-                previous_group = item.group_key
-            row = SessionRow(item, self)
-            self._rows[item.session_id] = row
-            self.list.append(row)
-        # Projects with no visible session rows still get a header, so their
-        # "new session" button stays reachable.
-        for key, label, cwd in self.store.empty_groups:
-            header = GroupHeaderRow(key, label, 0, key in self._collapsed, cwd=cwd, sidebar=self)
+        # Every header in display order: favorites pinned first, then all
+        # projects — with or without visible session rows (empty ones keep
+        # their "new session" button reachable) — in the user's order.
+        headers: list[tuple[tuple, str, str | None]] = []
+        if FAV_GROUP in items_by_group:
+            headers.append((FAV_GROUP, _("Favorites"), None))
+        empty_by_key = {key: (label, cwd) for key, label, cwd in self.store.empty_groups}
+        for name in self.store.resolved_project_order:
+            key = ("proj", name)
+            if key in items_by_group:
+                headers.append((key, name, group_cwds.get(key)))
+            elif key in empty_by_key:
+                headers.append((key, *empty_by_key[key]))
+
+        # Expansion is persisted per group; unknown groups start collapsed.
+        self._collapsed = {
+            key
+            for key, _label, _cwd in headers
+            if not self.store.state.is_group_expanded(_group_state_key(key))
+        }
+
+        for key, label, cwd in headers:
+            header = GroupHeaderRow(
+                key,
+                label,
+                self.store.group_counts.get(key, 0),
+                key in self._collapsed,
+                cwd=cwd,
+                sidebar=self,
+            )
             self._header_rows[key] = header
             self.list.append(header)
+            for item in items_by_group.get(key, []):
+                row = SessionRow(item, self)
+                self._rows[item.session_id] = row
+                self.list.append(row)
         self._apply_selection_to_rows()
 
     def _apply_selection_to_rows(self) -> None:
@@ -467,20 +502,90 @@ class SessionSidebar(Gtk.Box):
         return row.item.group_key not in self._collapsed
 
     def _toggle_group(self, group_key: tuple) -> None:
-        if group_key in self._collapsed:
+        expanded = group_key in self._collapsed
+        if expanded:
             self._collapsed.discard(group_key)
         else:
             self._collapsed.add(group_key)
+        self.store.state.set_group_expanded(_group_state_key(group_key), expanded)
         header = self._header_rows.get(group_key)
         if header is not None:
             header.set_collapsed(group_key in self._collapsed)
         self._invalidate()
 
     def _set_all_collapsed(self, collapsed: bool) -> None:
-        self._collapsed = set(self.store.group_counts) if collapsed else set()
+        self._collapsed = set(self._header_rows) if collapsed else set()
+        self.store.state.set_groups_expanded(
+            [_group_state_key(key) for key in self._header_rows], not collapsed
+        )
         for group_key, header in self._header_rows.items():
             header.set_collapsed(group_key in self._collapsed)
         self._invalidate()
+
+    # -- drag & drop project reordering ---------------------------------------
+
+    def _project_headers(self) -> list[str]:
+        """Project names in current display order (favorites excluded)."""
+        return [key[1] for key in self._header_rows if key != FAV_GROUP]
+
+    def _last_visible_row(self) -> Gtk.ListBoxRow | None:
+        child = self.list.get_last_child()
+        while child is not None:
+            if isinstance(child, Gtk.ListBoxRow) and self._filter_row(child):
+                return child
+            child = child.get_prev_sibling()
+        return None
+
+    def _drop_anchor(self, y: float) -> tuple[str | None, Gtk.ListBoxRow | None, bool]:
+        """Where a project dragged to `y` would land.
+
+        Returns (project to insert before — None means the end, row to draw
+        the insertion indicator on, whether the indicator goes above it).
+        """
+        names = self._project_headers()
+        if not names:
+            return None, None, True
+        row = self.list.get_row_at_y(int(y))
+        if row is None:  # pointer below the last row
+            return None, self._last_visible_row(), False
+        key = row.group_key if isinstance(row, GroupHeaderRow) else row.item.group_key
+        if key == FAV_GROUP:  # favorites stays pinned first
+            return names[0], self._header_rows.get(("proj", names[0])), True
+        name = key[1]
+        if isinstance(row, GroupHeaderRow):
+            ok, bounds = row.compute_bounds(self.list)
+            if ok and y - bounds.origin.y < bounds.size.height / 2:
+                return name, row, True
+        # Bottom half of a header, or one of its session rows: after this group.
+        index = names.index(name) + 1 if name in names else len(names)
+        if index >= len(names):
+            return None, self._last_visible_row(), False
+        return names[index], self._header_rows.get(("proj", names[index])), True
+
+    def _set_drop_indicator(self, row: Gtk.ListBoxRow | None, above: bool) -> None:
+        if self._indicator_row is not None and self._indicator_row is not row:
+            self._indicator_row.remove_css_class("drop-above")
+            self._indicator_row.remove_css_class("drop-below")
+        self._indicator_row = row
+        if row is not None:
+            row.add_css_class("drop-above" if above else "drop-below")
+            row.remove_css_class("drop-below" if above else "drop-above")
+
+    def _on_drop_motion(self, _target: Gtk.DropTarget, _x: float, y: float) -> Gdk.DragAction:
+        _before, row, above = self._drop_anchor(y)
+        self._set_drop_indicator(row, above)
+        return Gdk.DragAction.MOVE
+
+    def _on_drop(self, _target: Gtk.DropTarget, value, _x: float, y: float) -> bool:
+        self._set_drop_indicator(None, True)
+        name = str(value)
+        if ("proj", name) not in self._header_rows:
+            return False  # not one of our headers (e.g. stray text drag)
+        before, _row, _above = self._drop_anchor(y)
+        if before == name:
+            return False
+        self.store.move_project(name, before)
+        return True
 
     # -- activation ----------------------------------------------------------
 
