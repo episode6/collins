@@ -191,6 +191,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("trash-many", self._on_sidebar_trash_many)
         self.sidebar.connect("hide-many", self._on_sidebar_hide_many)
         self.sidebar.connect("open-placeholder", self._on_sidebar_open_placeholder)
+        self.sidebar.connect("close-placeholder", self._on_sidebar_close_placeholder)
         self.store.connect("refreshed", self._on_store_refreshed)
 
         self.sidebar.set_size_request(220, -1)  # minimum drag width
@@ -561,11 +562,21 @@ class MainWindow(Adw.ApplicationWindow):
         if placeholder_id is not None:
             self.sidebar.remove_placeholder(placeholder_id)
 
-    def _on_sidebar_open_placeholder(self, _sidebar, placeholder_id: str) -> None:
+    def _placeholder_page(self, placeholder_id: str) -> Adw.TabPage | None:
         for page, pid in self._placeholder_pages.items():
             if pid == placeholder_id:
-                self.tab_view.set_selected_page(page)
-                return
+                return page
+        return None
+
+    def _on_sidebar_open_placeholder(self, _sidebar, placeholder_id: str) -> None:
+        page = self._placeholder_page(placeholder_id)
+        if page is not None:
+            self.tab_view.set_selected_page(page)
+
+    def _on_sidebar_close_placeholder(self, _sidebar, placeholder_id: str) -> None:
+        page = self._placeholder_page(placeholder_id)
+        if page is not None:  # usual close flow: busy tabs confirm first
+            self.tab_view.close_page(page)
 
     # -- advanced new session / continue -----------------------------------
 

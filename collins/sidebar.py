@@ -12,7 +12,8 @@ Emits:
   open-many        (list[SessionItem])
   trash-many       (list[SessionItem])
   hide-many        (list[SessionItem])
-  open-placeholder (str placeholder id)
+  open-placeholder  (str placeholder id)
+  close-placeholder (str placeholder id)
 """
 
 from __future__ import annotations
@@ -145,15 +146,15 @@ class PlaceholderRow(Gtk.ListBoxRow):
     unknown (no transcript on disk yet). Swapped for a real SessionRow once
     the store discovers the session."""
 
-    def __init__(self, placeholder_id: str, group_key: tuple) -> None:
+    def __init__(self, placeholder_id: str, group_key: tuple, sidebar: SessionSidebar) -> None:
         super().__init__()
         self.placeholder_id = placeholder_id
         self.group_key = group_key
         self.add_css_class("session-child")
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        box.set_margin_top(8)
-        box.set_margin_bottom(8)
+        box.set_margin_top(4)  # match SessionRow: the flat button fills the row
+        box.set_margin_bottom(4)
 
         dot = Gtk.Box(valign=Gtk.Align.CENTER)
         dot.add_css_class("status-dot")
@@ -165,6 +166,16 @@ class PlaceholderRow(Gtk.ListBoxRow):
         label.add_css_class("dim-label")
         label.set_ellipsize(_ELLIPSIZE_END)
         box.append(label)
+
+        # There is no session to hide yet, so the hide button closes the tab
+        # instead (through the usual busy-tab confirmation flow).
+        close_btn = Gtk.Button(icon_name="view-conceal-symbolic", valign=Gtk.Align.CENTER)
+        close_btn.add_css_class("flat")
+        close_btn.set_tooltip_text(_("Close tab"))
+        close_btn.connect(
+            "clicked", lambda *_: sidebar.emit("close-placeholder", placeholder_id)
+        )
+        box.append(close_btn)
 
         self.set_child(box)
 
@@ -297,6 +308,7 @@ class SessionSidebar(Gtk.Box):
         "trash-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "hide-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "open-placeholder": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        "close-placeholder": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(self, store: SessionStore) -> None:
@@ -511,7 +523,7 @@ class SessionSidebar(Gtk.Box):
             self._header_rows[key] = header
             self.list.append(header)
             for pid in placeholders_by_group.get(key, ()):
-                prow = PlaceholderRow(pid, key)
+                prow = PlaceholderRow(pid, key, self)
                 if pid == self._active_session_id:
                     prow.add_css_class("active-tab")
                 self._placeholder_rows[pid] = prow
