@@ -11,10 +11,12 @@ from collins.sessions import (
     discover_sessions,
     export_markdown,
     first_message_uuid,
+    is_discoverable_transcript,
     parse_details,
     read_mcp_config,
     resume_cwd,
     session_from_file,
+    transcript_is_stub,
 )
 
 
@@ -93,6 +95,42 @@ def test_discover_skips_metadata_only_stubs(projects_dir):
         "\n".join(_json.dumps(line) for line in lines), encoding="utf-8"
     )
     assert {s.session_id for s in discover_sessions()} == set(ids.values())
+
+
+def test_transcript_is_stub():
+    assert transcript_is_stub(None, "")
+    assert not transcript_is_stub("/proj", "")
+    assert not transcript_is_stub(None, "Do the thing")
+
+
+def test_is_discoverable_transcript(tmp_path):
+    # A dead /bg fork's transcript: only ai-title / agent-name metadata, no
+    # conversation copy. A scan will never surface it, so a forward pointing
+    # at it must be treated as stale — not "syncing" — or the original
+    # session's row stays disabled forever.
+    stub = tmp_path / "stub.jsonl"
+    stub.write_text(
+        json.dumps({"type": "ai-title", "aiTitle": "T", "sessionId": "s"})
+        + "\n"
+        + json.dumps({"type": "agent-name", "agentName": "T", "sessionId": "s"})
+        + "\n",
+        encoding="utf-8",
+    )
+    assert not is_discoverable_transcript(stub)
+
+    real = tmp_path / "real.jsonl"
+    real.write_text(
+        json.dumps({"type": "user", "cwd": "/proj", "message": {"role": "user", "content": "hi"}})
+        + "\n",
+        encoding="utf-8",
+    )
+    assert is_discoverable_transcript(real)
+
+    empty = tmp_path / "empty.jsonl"
+    empty.touch()
+    assert not is_discoverable_transcript(empty)
+
+    assert not is_discoverable_transcript(tmp_path / "missing.jsonl")
 
 
 def test_discover_keeps_session_with_preview_but_no_cwd(projects_dir):
