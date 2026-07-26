@@ -104,12 +104,15 @@ class PreferencesDialog(Adw.PreferencesDialog):
         scroll_row.connect("notify::value", self._on_scrollback_changed)
         terminal_group.add(scroll_row)
 
-        self._easy_copy_row = Adw.SwitchRow(
-            title=_("Easy copy & paste"),
-            subtitle=_(
+        # use_markup off, and set before the title: the bare "&" in the title
+        # is not valid Pango markup.
+        self._easy_copy_row = Adw.SwitchRow(use_markup=False)
+        self._easy_copy_row.set_title(_("Easy copy & paste"))
+        self._easy_copy_row.set_subtitle(
+            _(
                 "Ctrl+C copies selected text (otherwise interrupts as usual), "
                 "Ctrl+V pastes, and right-click opens a copy/paste menu"
-            ),
+            )
         )
         self._easy_copy_row.set_active(bool(state.get_setting("easy_copy_paste")))
         self._easy_copy_row.connect("notify::active", self._on_easy_copy_changed)
