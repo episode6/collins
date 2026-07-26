@@ -143,6 +143,37 @@ def _scan_transcript(path: Path) -> tuple[str | None, str, float | None]:
 _TAIL_BYTES = 64 * 1024
 
 
+def _read_tail(path: Path) -> str:
+    """The last _TAIL_BYTES of a transcript, decoded; "" if unreadable."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            if size > _TAIL_BYTES:
+                fh.seek(-_TAIL_BYTES, os.SEEK_END)
+            return fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def resume_cwd(session: Session) -> str | None:
+    """Where to start the CLI when resuming: the last cwd recorded in the
+    transcript, since the agent may have left the project directory
+    mid-session (e.g. moved into a git worktree). Falls back to the
+    session's starting directory when the tail records no cwd or the
+    directory no longer exists."""
+    cwd: str | None = None
+    for line in _read_tail(session.jsonl_path).splitlines():
+        try:
+            entry = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(entry, dict) and isinstance(entry.get("cwd"), str):
+            cwd = entry["cwd"]
+    if cwd and Path(cwd).is_dir():
+        return cwd
+    return session.cwd
+
+
 def _tail_state(path: Path) -> str:
     """Cheaply read the transcript's tail to classify its state.
 
@@ -150,14 +181,7 @@ def _tail_state(path: Path) -> str:
     - "interrupted": the last event was the user stopping Claude mid-task.
     - "" otherwise.
     """
-    try:
-        size = path.stat().st_size
-        with path.open("rb") as fh:
-            if size > _TAIL_BYTES:
-                fh.seek(-_TAIL_BYTES, os.SEEK_END)
-            blob = fh.read().decode("utf-8", errors="replace")
-    except OSError:
-        return ""
+    blob = _read_tail(path)
 
     latest: str | None = None  # "assistant", "user", or "interrupted"
     latest_assistant_text = ""

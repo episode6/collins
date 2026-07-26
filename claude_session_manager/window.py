@@ -23,7 +23,7 @@ from .models import SessionItem
 from .prefs import PreferencesDialog
 from .providers import available_providers, get_provider
 from .replayview import ReplayTab
-from .sessions import Session, export_markdown, session_from_file
+from .sessions import Session, export_markdown, resume_cwd, session_from_file
 from .sidebar import SessionSidebar
 from .state import AppState, clamp_window_size
 from .store import SessionStore
@@ -427,7 +427,7 @@ class MainWindow(Adw.ApplicationWindow):
                 return
 
         tab = TerminalTab(
-            cwd=session.cwd,
+            cwd=resume_cwd(session),
             session_id=session.session_id,
             fork=fork,
             settings=self.state.settings,
@@ -639,7 +639,8 @@ class MainWindow(Adw.ApplicationWindow):
         if variant is None:
             return
         tab = ChatSessionTab(
-            cwd=session.cwd, provider=provider, variant=variant, resume_session_id=session_id
+            cwd=resume_cwd(session), provider=provider, variant=variant,
+            resume_session_id=session_id,
         )
         page = self.tab_view.append(tab)
         page.set_title(_("Chat — {name}").format(name=self.store.display_name(session)))
@@ -983,7 +984,8 @@ class MainWindow(Adw.ApplicationWindow):
         provider = get_provider(session.provider)
         if shutil.which(provider.cli) is None:
             return
-        cwd = session.cwd if session.cwd and Path(session.cwd).is_dir() else str(Path.home())
+        cwd = resume_cwd(session)
+        cwd = cwd if cwd and Path(cwd).is_dir() else str(Path.home())
         subprocess.Popen(
             [_GHOSTTY, f"--working-directory={cwd}", "-e",
              provider.cli, "--resume", session.session_id],
