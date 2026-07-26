@@ -11,7 +11,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, GObject, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import __version__, dialogs
 from .chatsessionview import ChatSessionTab
@@ -22,7 +22,7 @@ from .providers import available_providers, get_provider
 from .replayview import ReplayTab
 from .sessions import Session, export_markdown, session_from_file
 from .sidebar import SessionSidebar
-from .state import AppState
+from .state import AppState, clamp_window_size
 from .store import SessionStore
 from .switcher import QuickSwitcher
 from .terminal import TerminalTab
@@ -35,6 +35,18 @@ _IDLE_NOTIFY_MS = 4000
 # Tab status dots, matching the sidebar (.status-dot CSS in app.py).
 _STATUS_COLORS = {"open": "#2ec27e", "attention": "#3584e4"}
 _status_icon_cache: dict[str, Gio.Icon] = {}
+
+
+def _monitor_sizes() -> list[tuple[int, int]]:
+    display = Gdk.Display.get_default()
+    if display is None:
+        return []
+    monitors = display.get_monitors()
+    sizes = []
+    for i in range(monitors.get_n_items()):
+        geometry = monitors.get_item(i).get_geometry()
+        sizes.append((geometry.width, geometry.height))
+    return sizes
 
 
 def _status_icon(status: str) -> Gio.Icon | None:
@@ -54,12 +66,11 @@ def _status_icon(status: str) -> Gio.Icon | None:
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, state: AppState, store: SessionStore, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.set_title("Agent Session Manager")
-        self.set_icon_name("io.github.r4nd3l.AgentSessionManager")
-        self.set_default_size(1280, 800)
-
         self.state = state
         self.store = store
+        self.set_title("Agent Session Manager")
+        self.set_icon_name("io.github.r4nd3l.AgentSessionManager")
+        self._restore_window_geometry()
         self._pages: dict[str, Adw.TabPage] = {}  # session_id -> open tab
         self._confirmed_closes: set[Adw.TabPage] = set()
         self._closing_pages: dict[Adw.TabPage, int] = {}  # graceful close in progress -> attempts
@@ -178,6 +189,47 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar_toggle.connect(
             "toggled", lambda b: self.sidebar.set_visible(b.get_active())
         )
+
+        # Persist window geometry (debounced, like the sidebar width).
+        self._geometry_save_source: int | None = None
+        for prop in ("default-width", "default-height", "maximized"):
+            self.connect(f"notify::{prop}", self._schedule_save_window_geometry)
+        self.connect("close-request", self._on_close_request)
+
+    # -- window geometry persistence -----------------------------------------
+
+    def _restore_window_geometry(self) -> None:
+        """Reopen at the last used size, clamped to fit the current monitors.
+
+        GTK4 has no API to read or set a window's on-screen position (Wayland
+        compositors own placement), so only size + maximized state persist."""
+        width = int(self.state.get_setting("window_width"))
+        height = int(self.state.get_setting("window_height"))
+        self.set_default_size(*clamp_window_size(width, height, _monitor_sizes()))
+        if self.state.get_setting("window_maximized"):
+            self.maximize()
+
+    def _schedule_save_window_geometry(self, *_args) -> None:
+        if self._geometry_save_source is not None:
+            GLib.source_remove(self._geometry_save_source)
+        self._geometry_save_source = GLib.timeout_add(600, self._save_window_geometry)
+
+    def _save_window_geometry(self) -> bool:
+        self._geometry_save_source = None
+        values = {"window_maximized": bool(self.is_maximized())}
+        # default-width/height track the floating (unmaximized) size live.
+        width, height = self.get_default_size()
+        if not self.is_maximized() and width > 0 and height > 0:
+            values["window_width"] = width
+            values["window_height"] = height
+        self.state.update_settings(values)
+        return GLib.SOURCE_REMOVE
+
+    def _on_close_request(self, *_args) -> bool:
+        if self._geometry_save_source is not None:
+            GLib.source_remove(self._geometry_save_source)
+        self._save_window_geometry()
+        return False  # continue with the normal close
 
     # -- sidebar width persistence -------------------------------------------
 
