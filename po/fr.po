@@ -512,8 +512,11 @@ msgstr "Continuer dans la discussion ({mode})"
 msgid "Continuing the previous session — earlier messages aren't shown here."
 msgstr "Reprise de la session précédente — les messages antérieurs ne sont pas affichés ici."
 
-msgid "Close all tabs"
-msgstr "Fermer tous les onglets"
+msgid "Exit session and close tab"
+msgstr "Quitter la session et fermer l’onglet"
+
+msgid "Background session and close tab"
+msgstr "Session en arrière-plan et fermer l’onglet"
 
 msgid "Exit Session"
 msgstr "Quitter la session"

@@ -72,7 +72,10 @@ agents' own session files are never modified.
   (Claude Code's `/bg`) — the agent keeps running detached, and reopening the
   session re-attaches to it. The same option appears when closing the whole
   window with active sessions.
-- A **close-all-tabs** button appears when more than one tab is open.
+- While a session tab is focused, two header buttons act on it directly,
+  skipping the confirmation dialog: one **exits** the session and closes the
+  tab, the other **backgrounds** it (shown only for agents that support
+  detaching) and closes the tab.
 - The **New Session** button starts in the last-used folder; its dropdown picks
   a different one. The sidebar is **resizable** (drag the divider) and its width
   is remembered.
