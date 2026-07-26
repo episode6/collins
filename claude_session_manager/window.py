@@ -581,6 +581,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._pages[session_id] = page
         self._pending_resolved[page] = (session_id, page.get_title())
         self._sync_status(session_id)
+        self._update_active_row()  # the resolved tab may be the selected one
         self._apply_resolved_sessions()
 
     def _on_panel_size_changed(self, _tab: TerminalTab, mode: str, size: int) -> None:
@@ -772,6 +773,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.store.set_status(session_id, status)
         self.sidebar.update_footer()
 
+    def _update_active_row(self) -> None:
+        """Tell the sidebar which session the selected tab is showing."""
+        page = self.tab_view.get_selected_page()
+        session_id = self._session_id_of(page) if page is not None else None
+        self.sidebar.set_active_session(session_id)
+
     def _session_id_of(self, page: Adw.TabPage) -> str | None:
         tab = page.get_child()
         if isinstance(tab, TerminalTab) and tab.session_id and not tab.fork:
@@ -818,6 +825,7 @@ class MainWindow(Adw.ApplicationWindow):
         is_terminal = isinstance(tab, TerminalTab)
         self._panel_buttons.set_visible(is_terminal)
         self._swap_panel_btn.set_visible(is_terminal and tab.panel_visible)
+        self._update_active_row()
         if page is None:
             return
         self._cancel_idle(page)  # foreground now; no "finished" notification

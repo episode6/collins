@@ -72,6 +72,14 @@ row.session-child:hover {
   background-color: alpha(currentColor, 0.1);
   border-left-color: alpha(currentColor, 0.3);
 }
+/* the session shown in the currently selected tab */
+row.session-child.active-tab {
+  background-color: alpha(#D97757, 0.16);
+  border-left-color: #D97757;
+}
+row.session-child.active-tab:hover {
+  background-color: alpha(#D97757, 0.22);
+}
 
 /* interactive prompt card overlaid on the terminal */
 .chat-card {

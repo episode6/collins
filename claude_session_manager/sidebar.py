@@ -284,6 +284,7 @@ class SessionSidebar(Gtk.Box):
         self._selected: set[str] = set()
         self._rows: dict[str, SessionRow] = {}
         self._header_rows: dict[tuple, GroupHeaderRow] = {}
+        self._active_session_id: str | None = None
         self.show_folder_path = bool(store.state.get_setting("show_folder_path"))
 
         store.connect("refreshed", self._on_store_refreshed)
@@ -468,6 +469,8 @@ class SessionSidebar(Gtk.Box):
             self.list.append(header)
             for item in items_by_group.get(key, []):
                 row = SessionRow(item, self)
+                if item.session_id == self._active_session_id:
+                    row.add_css_class("active-tab")
                 self._rows[item.session_id] = row
                 self.list.append(row)
         self._apply_selection_to_rows()
@@ -476,6 +479,18 @@ class SessionSidebar(Gtk.Box):
         for row in self._rows.values():
             row.check.set_visible(self._selection_mode)
             row.check.set_active(row.item.session_id in self._selected)
+
+    def set_active_session(self, session_id: str | None) -> None:
+        """Highlight the row of the session shown in the currently selected tab."""
+        if session_id == self._active_session_id:
+            return
+        previous = self._rows.get(self._active_session_id)
+        if previous is not None:
+            previous.remove_css_class("active-tab")
+        self._active_session_id = session_id
+        row = self._rows.get(session_id)
+        if row is not None:
+            row.add_css_class("active-tab")
 
     def focus_search(self) -> None:
         self.search_entry.grab_focus()
