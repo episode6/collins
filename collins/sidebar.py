@@ -175,15 +175,6 @@ class SessionRow(Gtk.ListBoxRow):
         self._state_badge = Gtk.Image(valign=Gtk.Align.CENTER)
         top.append(self._state_badge)
 
-        rename = Gtk.Button(icon_name="document-edit-symbolic", valign=Gtk.Align.CENTER)
-        rename.add_css_class("flat")
-        rename.set_tooltip_text(_("Rename session"))
-        rename.connect(
-            "clicked",
-            lambda *_: self.activate_action("win.rename-session", GLib.Variant("s", item.session_id)),
-        )
-        top.append(rename)
-
         # Hidden rows are only listed while "Show hidden sessions" is on, and
         # toggling rebuilds the list, so the icon never goes stale.
         hidden = sidebar.store.state.is_hidden(item.session_id)
