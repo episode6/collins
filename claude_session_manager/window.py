@@ -74,6 +74,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._pages: dict[str, Adw.TabPage] = {}  # session_id -> open tab
         self._confirmed_closes: set[Adw.TabPage] = set()
         self._closing_pages: dict[Adw.TabPage, int] = {}  # graceful close in progress -> attempts
+        self._panel_close_asking: set[Adw.TabPage] = set()  # busy-panel dialog open
+        self._panel_close_ok: set[Adw.TabPage] = set()  # user okayed killing the panel job
         self._menu_page: Adw.TabPage | None = None
         self._base_titles: dict[Adw.TabPage, str] = {}  # fork/new tab title without emoji
         # Tabs whose session id was just resolved, waiting for the store to
@@ -645,6 +647,32 @@ class MainWindow(Adw.ApplicationWindow):
         self._confirmed_closes.add(page)
         self.tab_view.close_page(page)
 
+    def _page_alive(self, page: Adw.TabPage) -> bool:
+        return any(
+            self.tab_view.get_nth_page(i) is page for i in range(self.tab_view.get_n_pages())
+        )
+
+    def _ask_panel_close(self, page: Adw.TabPage, tab: TerminalTab) -> None:
+        """Confirm closing a tab whose panel shell has a command running."""
+        self._panel_close_asking.add(page)
+        tab.show_panel()  # reveal what's about to be killed (a busy shell is never cd'd)
+
+        def do_close() -> None:
+            self._panel_close_asking.discard(page)
+            self._panel_close_ok.add(page)
+            if self._page_alive(page):  # continue: graceful agent close, then teardown
+                self.tab_view.close_page(page)
+
+        dialogs.confirm_dialog(
+            self,
+            _("Close tab with a running command?"),
+            _("A command is still running in this tab's terminal panel "
+              "and will be terminated."),
+            _("Close Anyway"),
+            do_close,
+            on_dismiss=lambda: self._panel_close_asking.discard(page),
+        )
+
     def _graceful_close(self, page: Adw.TabPage) -> None:
         """Ask the agent to exit cleanly (e.g. Claude's /exit), then close once the
         shell returns. Falls back to a force-close after a timeout. Agents with no
@@ -856,6 +884,18 @@ class MainWindow(Adw.ApplicationWindow):
         if (
             isinstance(tab, TerminalTab)
             and page not in self._confirmed_closes
+            and page not in self._panel_close_ok
+            and tab.panel_has_running_command()
+        ):
+            # The panel shell is busy. Unlike the agent there's no graceful
+            # exit for an arbitrary command, so ask before killing it.
+            view.close_page_finish(page, False)  # keep the tab while we ask
+            if page not in self._panel_close_asking:
+                self._ask_panel_close(page, tab)
+            return True
+        if (
+            isinstance(tab, TerminalTab)
+            and page not in self._confirmed_closes
             and tab.has_running_command()
         ):
             if page not in self._closing_pages:  # start a graceful /exit in the background
@@ -864,6 +904,8 @@ class MainWindow(Adw.ApplicationWindow):
             return True
         self._confirmed_closes.discard(page)
         self._closing_pages.pop(page, None)
+        self._panel_close_asking.discard(page)
+        self._panel_close_ok.discard(page)
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
         self._cancel_idle(page)

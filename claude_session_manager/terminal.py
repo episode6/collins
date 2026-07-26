@@ -606,6 +606,11 @@ class TerminalTab(Gtk.Box):
         if refocus:
             self.grab_terminal_focus()
 
+    def panel_has_running_command(self) -> bool:
+        """True when a command is running in the panel shell — even a hidden
+        panel's job is protected by the close confirmation."""
+        return self._panel.has_running_command()
+
     def swap_panel(self) -> str:
         """Move the panel bottom↔right (the shell keeps running) and return
         the new position: "bottom" or "right"."""
