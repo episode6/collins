@@ -1,3 +1,7 @@
+# Modified from the original agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
 A provider knows how to discover its sessions on disk, how to resume/start them

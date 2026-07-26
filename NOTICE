@@ -1,0 +1,9 @@
+Per GPLv3 section 5(a), the following pre-fork files were changed in this fork
+but cannot carry an in-file modification notice (binary or comment-less
+formats):
+
+- claude_session_manager/locale/de/LC_MESSAGES/claude-session-manager.mo: modified in this fork, 2026-07-26
+- claude_session_manager/locale/es/LC_MESSAGES/claude-session-manager.mo: modified in this fork, 2026-07-26
+- claude_session_manager/locale/fr/LC_MESSAGES/claude-session-manager.mo: modified in this fork, 2026-07-26
+- claude_session_manager/locale/hu/LC_MESSAGES/claude-session-manager.mo: modified in this fork, 2026-07-26
+- data/icons/hicolor/scalable/actions/agent-cursor-symbolic.svg: deleted in this fork, 2026-07-26
