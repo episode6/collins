@@ -52,7 +52,12 @@ def test_available_providers_gating(monkeypatch):
 def test_resume_and_new_commands(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
     claude = ClaudeProvider()
-    assert claude.resume_command("abc") == "/usr/bin/claude --resume abc"
+    # Plain resume tries attaching to a still-running detached session first,
+    # falling back to --resume when no such job exists.
+    assert claude.resume_command("abc") == (
+        "/usr/bin/claude attach abc || /usr/bin/claude --resume abc"
+    )
+    # Forks always resume: attach can't create a new session.
     assert claude.resume_command("abc", fork=True) == "/usr/bin/claude --resume abc --fork-session"
 
 

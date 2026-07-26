@@ -186,6 +186,18 @@ class ClaudeProvider(Provider):
     def graceful_exit(self) -> str | None:
         return "/exit\r"
 
+    def resume_command(self, session_id: str, fork: bool = False) -> str | None:
+        # Attach-first: if the session is still running detached (e.g. after
+        # /bg), `claude attach` reconnects to the live process. It exits
+        # non-zero when no such job exists — or on CLIs that predate attach —
+        # and the plain resume runs instead. Forks always resume: attach
+        # can't create a new session.
+        cmd = super().resume_command(session_id, fork=fork)
+        if cmd is None or fork:
+            return cmd
+        cli = shutil.which(self.cli)
+        return f"{shlex.quote(cli)} attach {shlex.quote(session_id)} || {cmd}"
+
     supports_add_dir = True
 
     def session_models(self) -> list[tuple[str, str]]:
