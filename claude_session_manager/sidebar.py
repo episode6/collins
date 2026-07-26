@@ -133,27 +133,14 @@ class SessionRow(Gtk.ListBoxRow):
         name_label.set_ellipsize(_ELLIPSIZE_END)
         top.append(name_label)
 
-        agent_icon = Gtk.Image.new_from_icon_name(item.provider_icon)
-        agent_icon.set_valign(Gtk.Align.CENTER)
-        agent_icon.add_css_class("dim-label")
-        agent_icon.set_tooltip_text(item.provider_label)
-        top.append(agent_icon)
-
         time_label = Gtk.Label(valign=Gtk.Align.CENTER)
+        time_label.set_margin_start(8)  # match the 10px gaps around the status dot
         time_label.add_css_class("dim-label")
         time_label.add_css_class("caption")
         top.append(time_label)
 
         self._state_badge = Gtk.Image(valign=Gtk.Align.CENTER)
         top.append(self._state_badge)
-
-        star = Gtk.Button(valign=Gtk.Align.CENTER)
-        star.add_css_class("flat")
-        star.connect(
-            "clicked",
-            lambda *_: self.activate_action("win.toggle-favorite", GLib.Variant("s", item.session_id)),
-        )
-        top.append(star)
 
         rename = Gtk.Button(icon_name="document-edit-symbolic", valign=Gtk.Align.CENTER)
         rename.add_css_class("flat")
@@ -180,14 +167,6 @@ class SessionRow(Gtk.ListBoxRow):
         flags = GObject.BindingFlags.SYNC_CREATE
         item.bind_property("display-name", name_label, "label", flags)
         item.bind_property("subtitle", time_label, "label", flags)
-        item.bind_property(
-            "favorite", star, "icon-name", flags,
-            lambda _b, fav: "starred-symbolic" if fav else "non-starred-symbolic",
-        )
-        item.bind_property(
-            "favorite", star, "tooltip-text", flags,
-            lambda _b, fav: _("Remove from favorites") if fav else _("Add to favorites"),
-        )
 
         # Status dot + state badge need CSS-class updates: plain signals,
         # detached on unroot.
