@@ -515,6 +515,24 @@ msgstr "Continuando la sesión anterior: los mensajes anteriores no se muestran 
 msgid "Close all tabs"
 msgstr "Cerrar todas las pestañas"
 
+msgid "Exit Session"
+msgstr "Salir de la sesión"
+
+msgid "Exit Sessions"
+msgstr "Salir de las sesiones"
+
+msgid "Background Session"
+msgstr "Sesión a segundo plano"
+
+msgid "Background Sessions"
+msgstr "Sesiones a segundo plano"
+
+msgid "Backgrounding instead keeps the agent running detached — reopen the session later to re-attach."
+msgstr "Al pasarla a segundo plano, el agente sigue ejecutándose desacoplado — vuelve a abrir la sesión más tarde para reconectarte."
+
+msgid "Agents are asked to exit cleanly first; other running commands will be terminated. Backgrounding instead keeps the agents running detached — reopen a session later to re-attach."
+msgstr "Primero se pide a los agentes que salgan limpiamente; los demás comandos en ejecución se terminarán. Al pasarlas a segundo plano, los agentes siguen ejecutándose desacoplados — vuelve a abrir una sesión más tarde para reconectarte."
+
 msgid "No session open"
 msgstr "Ninguna sesión abierta"
 

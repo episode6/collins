@@ -71,9 +71,15 @@ def confirm_dialog(
     on_confirm: Callable[[], None],
     on_dismiss: Callable[[], None] | None = None,
     default_response: str = "cancel",
+    extra_label: str | None = None,
+    on_extra: Callable[[], None] | None = None,
 ) -> None:
+    """Two-button confirmation (Cancel + a destructive `confirm_label`).
+    `extra_label`/`on_extra` add a third, non-destructive choice between them."""
     dialog = Adw.AlertDialog(heading=heading, body=body)
     dialog.add_response("cancel", _("Cancel"))
+    if extra_label is not None:
+        dialog.add_response("extra", extra_label)
     dialog.add_response("confirm", confirm_label)
     dialog.set_response_appearance("confirm", Adw.ResponseAppearance.DESTRUCTIVE)
     dialog.set_default_response(default_response)
@@ -82,6 +88,8 @@ def confirm_dialog(
     def respond(_dialog, response: str) -> None:
         if response == "confirm":
             on_confirm()
+        elif response == "extra" and on_extra is not None:
+            on_extra()
         elif on_dismiss is not None:
             on_dismiss()
 

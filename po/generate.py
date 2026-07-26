@@ -201,6 +201,20 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Continuing the previous session — earlier messages aren't shown here.":
             "A korábbi munkamenet folytatása — a régebbi üzenetek itt nem jelennek meg.",
         "Close all tabs": "Összes lap bezárása",
+        "Exit Session": "Kilépés a munkamenetből",
+        "Exit Sessions": "Kilépés a munkamenetekből",
+        "Background Session": "Munkamenet a háttérbe",
+        "Background Sessions": "Munkamenetek a háttérbe",
+        "Backgrounding instead keeps the agent running detached — reopen the "
+        "session later to re-attach.":
+            "A háttérbe küldéssel az ügynök leválasztva tovább fut — a munkamenet "
+            "későbbi megnyitásával újra csatlakozhatsz.",
+        "Agents are asked to exit cleanly first; other running commands will be "
+        "terminated. Backgrounding instead keeps the agents running detached — "
+        "reopen a session later to re-attach.":
+            "Az ügynököket először tiszta kilépésre kérjük; a többi futó parancs "
+            "leáll. A háttérbe küldéssel az ügynökök leválasztva tovább futnak — "
+            "egy munkamenet későbbi megnyitásával újra csatlakozhatsz.",
         "No session open": "Nincs megnyitott munkamenet",
         "Pick a session from the sidebar, or start a new one.":
             "Válassz egy munkamenetet az oldalsávból, vagy indíts egy újat.",
@@ -407,6 +421,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Continuing the previous session — earlier messages aren't shown here.":
             "Frühere Sitzung wird fortgesetzt — ältere Nachrichten werden hier nicht angezeigt.",
         "Close all tabs": "Alle Tabs schließen",
+        "Exit Session": "Sitzung beenden",
+        "Exit Sessions": "Sitzungen beenden",
+        "Background Session": "Sitzung in den Hintergrund",
+        "Background Sessions": "Sitzungen in den Hintergrund",
+        "Backgrounding instead keeps the agent running detached — reopen the "
+        "session later to re-attach.":
+            "Beim Verschieben in den Hintergrund läuft der Agent abgekoppelt "
+            "weiter — öffne die Sitzung später erneut, um dich wieder zu verbinden.",
+        "Agents are asked to exit cleanly first; other running commands will be "
+        "terminated. Backgrounding instead keeps the agents running detached — "
+        "reopen a session later to re-attach.":
+            "Agenten werden zuerst gebeten, sich sauber zu beenden; andere laufende "
+            "Befehle werden abgebrochen. Beim Verschieben in den Hintergrund laufen "
+            "die Agenten abgekoppelt weiter — öffne eine Sitzung später erneut, um "
+            "dich wieder zu verbinden.",
         "No session open": "Keine Sitzung geöffnet",
         "Pick a session from the sidebar, or start a new one.":
             "Wähle eine Sitzung in der Seitenleiste oder starte eine neue.",
@@ -615,6 +644,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Continuing the previous session — earlier messages aren't shown here.":
             "Continuando la sesión anterior: los mensajes anteriores no se muestran aquí.",
         "Close all tabs": "Cerrar todas las pestañas",
+        "Exit Session": "Salir de la sesión",
+        "Exit Sessions": "Salir de las sesiones",
+        "Background Session": "Sesión a segundo plano",
+        "Background Sessions": "Sesiones a segundo plano",
+        "Backgrounding instead keeps the agent running detached — reopen the "
+        "session later to re-attach.":
+            "Al pasarla a segundo plano, el agente sigue ejecutándose desacoplado — "
+            "vuelve a abrir la sesión más tarde para reconectarte.",
+        "Agents are asked to exit cleanly first; other running commands will be "
+        "terminated. Backgrounding instead keeps the agents running detached — "
+        "reopen a session later to re-attach.":
+            "Primero se pide a los agentes que salgan limpiamente; los demás comandos "
+            "en ejecución se terminarán. Al pasarlas a segundo plano, los agentes "
+            "siguen ejecutándose desacoplados — vuelve a abrir una sesión más tarde "
+            "para reconectarte.",
         "No session open": "Ninguna sesión abierta",
         "Pick a session from the sidebar, or start a new one.":
             "Elige una sesión en la barra lateral o inicia una nueva.",
@@ -824,6 +868,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Continuing the previous session — earlier messages aren't shown here.":
             "Reprise de la session précédente — les messages antérieurs ne sont pas affichés ici.",
         "Close all tabs": "Fermer tous les onglets",
+        "Exit Session": "Quitter la session",
+        "Exit Sessions": "Quitter les sessions",
+        "Background Session": "Session en arrière-plan",
+        "Background Sessions": "Sessions en arrière-plan",
+        "Backgrounding instead keeps the agent running detached — reopen the "
+        "session later to re-attach.":
+            "Le passage en arrière-plan laisse l'agent s'exécuter détaché — rouvrez "
+            "la session plus tard pour vous y rattacher.",
+        "Agents are asked to exit cleanly first; other running commands will be "
+        "terminated. Backgrounding instead keeps the agents running detached — "
+        "reopen a session later to re-attach.":
+            "Les agents sont d'abord invités à quitter proprement ; les autres "
+            "commandes en cours seront interrompues. Le passage en arrière-plan "
+            "laisse les agents s'exécuter détachés — rouvrez une session plus tard "
+            "pour vous y rattacher.",
         "No session open": "Aucune session ouverte",
         "Pick a session from the sidebar, or start a new one.":
             "Choisissez une session dans la barre latérale, ou démarrez-en une nouvelle.",

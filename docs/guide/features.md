@@ -67,7 +67,11 @@ agents' own session files are never modified.
   selected — otherwise interrupts as usual — `Ctrl+V` pastes, and
   right-click opens a Copy / Paste / Select All menu.
 - Closing a tab asks the agent to **exit cleanly** (Claude Code's `/exit`) in
-  the background first, rather than terminating it.
+  the background first, rather than terminating it. For agents that support
+  it, the close dialog also offers to **background the session** instead
+  (Claude Code's `/bg`) — the agent keeps running detached, and reopening the
+  session re-attaches to it. The same option appears when closing the whole
+  window with active sessions.
 - A **close-all-tabs** button appears when more than one tab is open.
 - The **New Session** button starts in the last-used folder; its dropdown picks
   a different one. The sidebar is **resizable** (drag the divider) and its width

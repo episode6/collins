@@ -79,6 +79,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._closing_pages: dict[Adw.TabPage, int] = {}  # graceful close in progress -> attempts
         self._close_asking: set[Adw.TabPage] = set()  # busy-tab confirm dialog open
         self._close_ok: set[Adw.TabPage] = set()  # user okayed closing the busy tab
+        self._bg_ok: set[Adw.TabPage] = set()  # user chose to background the agent instead
+        # Hide requested for an open session: applied only once its tab
+        # really closes (page -> session id).
+        self._hide_on_close: dict[Adw.TabPage, str] = {}
         self._quitting = False  # window close confirmed; draining tabs
         self._quit_asking = False  # the single quit-confirmation dialog is open
         self._menu_page: Adw.TabPage | None = None
@@ -300,26 +304,44 @@ class MainWindow(Adw.ApplicationWindow):
     def _confirm_quit(self, busy: int) -> None:
         self._quit_asking = True
 
-        def do_quit() -> None:
+        def do_quit(background: bool = False) -> None:
             self._quit_asking = False
             self._quitting = True
             # The window-level dialog already covered every tab: don't let
-            # each one ask again. Agents still get their graceful /exit.
+            # each one ask again. Agents still get their graceful /exit
+            # (or /bg, if the user chose to background them).
             for i in range(self.tab_view.get_n_pages()):
-                self._close_ok.add(self.tab_view.get_nth_page(i))
+                page = self.tab_view.get_nth_page(i)
+                self._close_ok.add(page)
+                if background:
+                    self._bg_ok.add(page)
             # _on_close_page reissues the window close once the last tab drains
             # (immediately, if every close completes synchronously).
             self._close_all_tabs()
 
+        can_background = any(
+            isinstance(tab := self.tab_view.get_nth_page(i).get_child(), TerminalTab)
+            and tab.has_running_command()
+            and tab.provider.background_exit() is not None
+            for i in range(self.tab_view.get_n_pages())
+        )
+        body = _("Agents are asked to exit cleanly first; "
+                 "other running commands will be terminated.")
+        if can_background:
+            body = _("Agents are asked to exit cleanly first; other running "
+                     "commands will be terminated. Backgrounding instead keeps "
+                     "the agents running detached — reopen a session later to "
+                     "re-attach.")
         dialogs.confirm_dialog(
             self,
             _("Close window with {n} active session(s)?").format(n=busy),
-            _("Agents are asked to exit cleanly first; "
-              "other running commands will be terminated."),
-            _("Close Window"),
+            body,
+            _("Exit Sessions"),
             do_quit,
             on_dismiss=lambda: setattr(self, "_quit_asking", False),
             default_response="confirm",
+            extra_label=_("Background Sessions") if can_background else None,
+            on_extra=(lambda: do_quit(background=True)) if can_background else None,
         )
 
     # -- sidebar width persistence -------------------------------------------
@@ -813,12 +835,15 @@ class MainWindow(Adw.ApplicationWindow):
         if panel_busy:
             tab.show_panel()  # reveal what's about to be killed (a busy shell is never cd'd)
 
-        def do_close() -> None:
+        def do_close(background: bool = False) -> None:
             self._close_asking.discard(page)
             self._close_ok.add(page)
+            if background:
+                self._bg_ok.add(page)
             if self._page_alive(page):  # continue: graceful agent close, then teardown
                 self.tab_view.close_page(page)
 
+        can_background = agent_busy and tab.provider.background_exit() is not None
         if agent_busy and panel_busy:
             heading = _("Close tab with an active session?")
             body = _("The agent is asked to exit cleanly first; the command "
@@ -830,25 +855,39 @@ class MainWindow(Adw.ApplicationWindow):
             heading = _("Close tab with a running command?")
             body = _("A command is still running in this tab's terminal panel "
                      "and will be terminated.")
+        if can_background:
+            body += " " + _("Backgrounding instead keeps the agent running "
+                            "detached — reopen the session later to re-attach.")
+        # A panel-only-busy tab has no agent session to exit — say "Close Tab".
+        confirm_label = _("Exit Session") if agent_busy else _("Close Tab")
+        def dismiss() -> None:
+            self._close_asking.discard(page)
+            self._hide_on_close.pop(page, None)  # cancelled: keep the session visible
+
         dialogs.confirm_dialog(
             self,
             heading,
             body,
-            _("Close Tab"),
+            confirm_label,
             do_close,
-            on_dismiss=lambda: self._close_asking.discard(page),
+            on_dismiss=dismiss,
             default_response="confirm",
+            extra_label=_("Background Session") if can_background else None,
+            on_extra=(lambda: do_close(background=True)) if can_background else None,
         )
 
     def _graceful_close(self, page: Adw.TabPage) -> None:
-        """Ask the agent to exit cleanly (e.g. Claude's /exit), then close once the
-        shell returns. Falls back to a force-close after a timeout. Agents with no
-        clean-exit command are force-closed directly."""
+        """Ask the agent to exit cleanly (e.g. Claude's /exit) — or to detach
+        (e.g. /bg) if the user chose to background it — then close once the
+        shell returns. Falls back to a force-close after a timeout. Agents with
+        no clean-exit command are force-closed directly."""
         tab = page.get_child()
         if not isinstance(tab, TerminalTab):
             self._close_confirmed(page)
             return
-        exit_text = tab.provider.graceful_exit()
+        exit_text = tab.provider.background_exit() if page in self._bg_ok else None
+        if not exit_text:
+            exit_text = tab.provider.graceful_exit()
         if not exit_text:
             self._close_confirmed(page)
             return
@@ -1084,6 +1123,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._closing_pages.pop(page, None)
         self._close_asking.discard(page)
         self._close_ok.discard(page)
+        self._bg_ok.discard(page)
+        hide_session_id = self._hide_on_close.pop(page, None)
+        if hide_session_id:
+            self.store.set_hidden(hide_session_id, True)
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
         self._remove_placeholder(page)
@@ -1195,16 +1238,16 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_hide_session(self, _action, param: GLib.Variant) -> None:
         session_id = param.get_string()
         hidden = not self.state.is_hidden(session_id)
-        self.store.set_hidden(session_id, hidden)
-        if hidden:
-            self._close_session_tab(session_id)
-
-    def _close_session_tab(self, session_id: str) -> None:
-        """Close the session's open tab (if any) through the normal close-page
-        flow, so busy tabs still get their confirmation dialog."""
-        page = self._pages.get(session_id)
+        page = self._pages.get(session_id) if hidden else None
         if page is not None:
+            # Close the tab through the normal close-page flow, so a busy tab
+            # still gets its confirmation dialog — and hide the session only
+            # once the tab really closes: cancelling the dialog keeps it
+            # visible.
+            self._hide_on_close[page] = session_id
             self.tab_view.close_page(page)
+            return
+        self.store.set_hidden(session_id, hidden)
 
     def _on_hide_project(self, _action, param: GLib.Variant) -> None:
         name = param.get_string()

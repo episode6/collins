@@ -515,6 +515,24 @@ msgstr "Reprise de la session précédente — les messages antérieurs ne sont 
 msgid "Close all tabs"
 msgstr "Fermer tous les onglets"
 
+msgid "Exit Session"
+msgstr "Quitter la session"
+
+msgid "Exit Sessions"
+msgstr "Quitter les sessions"
+
+msgid "Background Session"
+msgstr "Session en arrière-plan"
+
+msgid "Background Sessions"
+msgstr "Sessions en arrière-plan"
+
+msgid "Backgrounding instead keeps the agent running detached — reopen the session later to re-attach."
+msgstr "Le passage en arrière-plan laisse l'agent s'exécuter détaché — rouvrez la session plus tard pour vous y rattacher."
+
+msgid "Agents are asked to exit cleanly first; other running commands will be terminated. Backgrounding instead keeps the agents running detached — reopen a session later to re-attach."
+msgstr "Les agents sont d'abord invités à quitter proprement ; les autres commandes en cours seront interrompues. Le passage en arrière-plan laisse les agents s'exécuter détachés — rouvrez une session plus tard pour vous y rattacher."
+
 msgid "No session open"
 msgstr "Aucune session ouverte"
 
