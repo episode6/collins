@@ -54,7 +54,7 @@ Features:
 | `Ctrl+Shift+F` | Focus search |
 | `Ctrl+Shift+T` | New session |
 | `Ctrl+Shift+N` | New window |
-| `Ctrl+Shift+W` | Close current tab |
+| `Ctrl+W` | Close current tab |
 | `Ctrl+PgUp` / `Ctrl+PgDn` | Previous / next tab |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in terminal |
 | `Ctrl+Shift+G` | Find in terminal |

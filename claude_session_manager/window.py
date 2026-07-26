@@ -368,7 +368,7 @@ class MainWindow(Adw.ApplicationWindow):
         for trigger, action in (
             ("<Control><Shift>f", "win.focus-search"),
             ("<Control><Shift>t", "win.new-session"),
-            ("<Control><Shift>w", "win.close-tab"),
+            ("<Control>w", "win.close-tab"),
             ("<Control>Page_Down", "win.next-tab"),
             ("<Control>Page_Up", "win.prev-tab"),
             ("<Control>comma", "win.preferences"),
