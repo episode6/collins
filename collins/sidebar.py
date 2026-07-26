@@ -11,6 +11,7 @@ Emits:
   open-session   (SessionItem, bool fork)
   open-many      (list[SessionItem])
   trash-many     (list[SessionItem])
+  hide-many      (list[SessionItem])
 """
 
 from __future__ import annotations
@@ -264,6 +265,7 @@ class SessionSidebar(Gtk.Box):
         "open-session": (GObject.SignalFlags.RUN_FIRST, None, (object, bool)),
         "open-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "trash-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
+        "hide-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
     }
 
     def __init__(self, store: SessionStore) -> None:
@@ -770,7 +772,7 @@ class SessionSidebar(Gtk.Box):
         self.store.set_favorites([i.session_id for i in self._selected_items()], favorite)
 
     def _bulk_hide(self) -> None:
-        self.store.hide_many([i.session_id for i in self._selected_items()])
+        self.emit("hide-many", self._selected_items())
 
     def _bulk_trash(self) -> None:
         items = self._selected_items()
