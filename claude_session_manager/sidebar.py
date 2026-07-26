@@ -118,7 +118,7 @@ class SessionRow(Gtk.ListBoxRow):
         box.set_margin_start(10)
         box.set_margin_end(12)
 
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
 
         self.check = Gtk.CheckButton(valign=Gtk.Align.CENTER, visible=False)
         self.check.connect("toggled", lambda c: sidebar.on_row_check_toggled(self, c.get_active()))
@@ -128,15 +128,15 @@ class SessionRow(Gtk.ListBoxRow):
         self.dot.add_css_class("status-dot")
         top.append(self.dot)
 
+        name_label = Gtk.Label(xalign=0.0, hexpand=True)
+        name_label.set_ellipsize(_ELLIPSIZE_END)
+        top.append(name_label)
+
         agent_icon = Gtk.Image.new_from_icon_name(item.provider_icon)
         agent_icon.set_valign(Gtk.Align.CENTER)
         agent_icon.add_css_class("dim-label")
         agent_icon.set_tooltip_text(item.provider_label)
         top.append(agent_icon)
-
-        name_label = Gtk.Label(xalign=0.0, hexpand=True)
-        name_label.set_ellipsize(_ELLIPSIZE_END)
-        top.append(name_label)
 
         time_label = Gtk.Label(valign=Gtk.Align.CENTER)
         time_label.add_css_class("dim-label")
