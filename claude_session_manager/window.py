@@ -77,8 +77,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._pages: dict[str, Adw.TabPage] = {}  # session_id -> open tab
         self._confirmed_closes: set[Adw.TabPage] = set()
         self._closing_pages: dict[Adw.TabPage, int] = {}  # graceful close in progress -> attempts
-        self._panel_close_asking: set[Adw.TabPage] = set()  # busy-panel dialog open
-        self._panel_close_ok: set[Adw.TabPage] = set()  # user okayed killing the panel job
+        self._close_asking: set[Adw.TabPage] = set()  # busy-tab confirm dialog open
+        self._close_ok: set[Adw.TabPage] = set()  # user okayed closing the busy tab
         self._quitting = False  # window close confirmed; draining tabs
         self._quit_asking = False  # the single quit-confirmation dialog is open
         self._menu_page: Adw.TabPage | None = None
@@ -261,10 +261,10 @@ class MainWindow(Adw.ApplicationWindow):
         def do_quit() -> None:
             self._quit_asking = False
             self._quitting = True
-            # The window-level dialog already covered the panels: don't let
-            # each tab ask again. Agents still get their graceful /exit.
+            # The window-level dialog already covered every tab: don't let
+            # each one ask again. Agents still get their graceful /exit.
             for i in range(self.tab_view.get_n_pages()):
-                self._panel_close_ok.add(self.tab_view.get_nth_page(i))
+                self._close_ok.add(self.tab_view.get_nth_page(i))
             # _on_close_page reissues the window close once the last tab drains
             # (immediately, if every close completes synchronously).
             self._close_all_tabs()
@@ -690,25 +690,39 @@ class MainWindow(Adw.ApplicationWindow):
             self.tab_view.get_nth_page(i) is page for i in range(self.tab_view.get_n_pages())
         )
 
-    def _ask_panel_close(self, page: Adw.TabPage, tab: TerminalTab) -> None:
-        """Confirm closing a tab whose panel shell has a command running."""
-        self._panel_close_asking.add(page)
-        tab.show_panel()  # reveal what's about to be killed (a busy shell is never cd'd)
+    def _ask_tab_close(self, page: Adw.TabPage, tab: TerminalTab) -> None:
+        """Confirm closing a tab with an active agent session and/or a command
+        running in its panel shell."""
+        self._close_asking.add(page)
+        agent_busy = tab.has_running_command()
+        panel_busy = tab.panel_has_running_command()
+        if panel_busy:
+            tab.show_panel()  # reveal what's about to be killed (a busy shell is never cd'd)
 
         def do_close() -> None:
-            self._panel_close_asking.discard(page)
-            self._panel_close_ok.add(page)
+            self._close_asking.discard(page)
+            self._close_ok.add(page)
             if self._page_alive(page):  # continue: graceful agent close, then teardown
                 self.tab_view.close_page(page)
 
+        if agent_busy and panel_busy:
+            heading = _("Close tab with an active session?")
+            body = _("The agent is asked to exit cleanly first; the command "
+                     "running in this tab's terminal panel will be terminated.")
+        elif agent_busy:
+            heading = _("Close tab with an active session?")
+            body = _("The agent is asked to exit cleanly first.")
+        else:
+            heading = _("Close tab with a running command?")
+            body = _("A command is still running in this tab's terminal panel "
+                     "and will be terminated.")
         dialogs.confirm_dialog(
             self,
-            _("Close tab with a running command?"),
-            _("A command is still running in this tab's terminal panel "
-              "and will be terminated."),
-            _("Close Anyway"),
+            heading,
+            body,
+            _("Close Tab"),
             do_close,
-            on_dismiss=lambda: self._panel_close_asking.discard(page),
+            on_dismiss=lambda: self._close_asking.discard(page),
         )
 
     def _graceful_close(self, page: Adw.TabPage) -> None:
@@ -923,31 +937,29 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_close_page(self, view: Adw.TabView, page: Adw.TabPage) -> bool:
         tab = page.get_child()
-        if (
-            isinstance(tab, TerminalTab)
-            and page not in self._confirmed_closes
-            and page not in self._panel_close_ok
-            and tab.panel_has_running_command()
-        ):
-            # The panel shell is busy. Unlike the agent there's no graceful
-            # exit for an arbitrary command, so ask before killing it.
-            view.close_page_finish(page, False)  # keep the tab while we ask
-            if page not in self._panel_close_asking:
-                self._ask_panel_close(page, tab)
-            return True
-        if (
-            isinstance(tab, TerminalTab)
-            and page not in self._confirmed_closes
-            and tab.has_running_command()
-        ):
-            if page not in self._closing_pages:  # start a graceful /exit in the background
+        if isinstance(tab, TerminalTab) and page not in self._confirmed_closes:
+            agent_busy = tab.has_running_command()
+            panel_busy = tab.panel_has_running_command()
+            if page in self._closing_pages and agent_busy:
+                # A graceful /exit is already in flight; keep the tab open
+                # until the shell drains.
+                view.close_page_finish(page, False)
+                return True
+            if (agent_busy or panel_busy) and page not in self._close_ok:
+                # The agent session and/or the panel shell is busy: ask before
+                # ending the session or killing the panel job.
+                view.close_page_finish(page, False)  # keep the tab while we ask
+                if page not in self._close_asking:
+                    self._ask_tab_close(page, tab)
+                return True
+            if agent_busy:  # confirmed: start a graceful /exit in the background
                 self._graceful_close(page)
-            view.close_page_finish(page, False)  # keep the tab until it exits cleanly
-            return True
+                view.close_page_finish(page, False)  # keep the tab until it exits cleanly
+                return True
         self._confirmed_closes.discard(page)
         self._closing_pages.pop(page, None)
-        self._panel_close_asking.discard(page)
-        self._panel_close_ok.discard(page)
+        self._close_asking.discard(page)
+        self._close_ok.discard(page)
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
         self._cancel_idle(page)
