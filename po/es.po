@@ -205,14 +205,8 @@ msgstr "Líneas de historial"
 msgid "Easy copy & paste"
 msgstr "Copiado y pegado fáciles"
 
-msgid "Ctrl+C copies selected text (otherwise interrupts as usual); Ctrl+V pastes"
-msgstr "Ctrl+C copia el texto seleccionado (si no, interrumpe como de costumbre); Ctrl+V pega"
-
-msgid "Copy on select"
-msgstr "Copiar al seleccionar"
-
-msgid "Automatically copy selected terminal text to the clipboard"
-msgstr "Copiar automáticamente al portapapeles el texto seleccionado en la terminal"
+msgid "Ctrl+C copies selected text (otherwise interrupts as usual), Ctrl+V pastes, and right-click opens a copy/paste menu"
+msgstr "Ctrl+C copia el texto seleccionado (si no, interrumpe como de costumbre), Ctrl+V pega y el clic derecho abre un menú de copiar/pegar"
 
 msgid "Copy"
 msgstr "Copiar"

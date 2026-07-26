@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: claude-session-manager\n"
 "Report-Msgid-Bugs-To: matemiller992@gmail.com\n"
-"POT-Creation-Date: 2026-07-25 21:12-0400\n"
+"POT-Creation-Date: 2026-07-25 21:15-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -321,64 +321,57 @@ msgstr ""
 msgid "Easy copy & paste"
 msgstr ""
 
-#: claude_session_manager/prefs.py:109
+#: claude_session_manager/prefs.py:110
 msgid ""
-"Ctrl+C copies selected text (otherwise interrupts as usual); Ctrl+V pastes"
+"Ctrl+C copies selected text (otherwise interrupts as usual), Ctrl+V pastes, "
+"and right-click opens a copy/paste menu"
 msgstr ""
 
-#: claude_session_manager/prefs.py:116
-msgid "Copy on select"
-msgstr ""
-
-#: claude_session_manager/prefs.py:117
-msgid "Automatically copy selected terminal text to the clipboard"
-msgstr ""
-
-#: claude_session_manager/prefs.py:126
+#: claude_session_manager/prefs.py:121
 msgid "Color theme"
 msgstr ""
 
-#: claude_session_manager/prefs.py:144
+#: claude_session_manager/prefs.py:139
 msgid "Appearance"
 msgstr ""
 
-#: claude_session_manager/prefs.py:145
+#: claude_session_manager/prefs.py:140
 msgid "Color scheme"
 msgstr ""
 
-#: claude_session_manager/prefs.py:155
+#: claude_session_manager/prefs.py:150
 msgid "Session list"
 msgstr ""
 
-#: claude_session_manager/prefs.py:157
+#: claude_session_manager/prefs.py:152
 msgid "Show folder path"
 msgstr ""
 
-#: claude_session_manager/prefs.py:158
+#: claude_session_manager/prefs.py:153
 msgid "Show each session's project folder path in the sidebar"
 msgstr ""
 
-#: claude_session_manager/prefs.py:170 claude_session_manager/prefs.py:176
+#: claude_session_manager/prefs.py:165 claude_session_manager/prefs.py:171
 msgid "Language"
 msgstr ""
 
-#: claude_session_manager/prefs.py:170
+#: claude_session_manager/prefs.py:165
 msgid "Restart to apply"
 msgstr ""
 
-#: claude_session_manager/prefs.py:171
+#: claude_session_manager/prefs.py:166
 msgid "Restart now"
 msgstr ""
 
-#: claude_session_manager/prefs.py:193
+#: claude_session_manager/prefs.py:188
 msgid "Notifications"
 msgstr ""
 
-#: claude_session_manager/prefs.py:195
+#: claude_session_manager/prefs.py:190
 msgid "Notify when a session goes idle"
 msgstr ""
 
-#: claude_session_manager/prefs.py:196
+#: claude_session_manager/prefs.py:191
 msgid "Desktop notification when a background tab stops producing output"
 msgstr ""
 
@@ -603,17 +596,17 @@ msgstr ""
 msgid "Open selected in tabs"
 msgstr ""
 
-#: claude_session_manager/terminal.py:116
+#: claude_session_manager/terminal.py:114
 #, python-brace-format
 msgid "warning: project dir {cwd} no longer exists, starting in HOME"
 msgstr ""
 
-#: claude_session_manager/terminal.py:132
+#: claude_session_manager/terminal.py:130
 #, python-brace-format
 msgid "warning: `{cli}` not found in PATH — starting a plain shell"
 msgstr ""
 
-#: claude_session_manager/terminal.py:157
+#: claude_session_manager/terminal.py:155
 #, python-brace-format
 msgid "failed to start shell: {msg}"
 msgstr ""
@@ -630,15 +623,15 @@ msgstr ""
 msgid "Select All"
 msgstr ""
 
-#: claude_session_manager/terminal.py:221
+#: claude_session_manager/terminal.py:212
 msgid "Find in terminal…"
 msgstr ""
 
-#: claude_session_manager/terminal.py:228
+#: claude_session_manager/terminal.py:219
 msgid "Previous match"
 msgstr ""
 
-#: claude_session_manager/terminal.py:230
+#: claude_session_manager/terminal.py:221
 msgid "Next match"
 msgstr ""
 

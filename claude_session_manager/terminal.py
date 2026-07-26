@@ -75,9 +75,7 @@ class TerminalTab(Gtk.Box):
         self.terminal.set_mouse_autohide(True)
         self.terminal.connect("child-exited", self._on_child_exited)
 
-        self._copy_on_select = False
         self._easy_copy_paste = False
-        self.terminal.connect("selection-changed", self._on_selection_changed)
         self._setup_context_menu()
 
         self._search_bar = self._build_search_bar()
@@ -188,6 +186,8 @@ class TerminalTab(Gtk.Box):
         self.terminal.add_controller(right_click)
 
     def _on_right_click(self, gesture: Gtk.GestureClick, _n_press, x: float, y: float) -> None:
+        if not self._easy_copy_paste:  # leave the click to VTE / the running app
+            return
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self._copy_action.set_enabled(self.terminal.get_has_selection())
 
@@ -204,15 +204,6 @@ class TerminalTab(Gtk.Box):
         popover.set_pointing_to(rect)
         popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
         popover.popup()
-
-    def _on_selection_changed(self, _terminal) -> None:
-        # get_realized(): VTE's clipboard only exists once the widget is on screen.
-        if (
-            self._copy_on_select
-            and self.terminal.get_realized()
-            and self.terminal.get_has_selection()
-        ):
-            self.terminal.copy_clipboard_format(Vte.Format.TEXT)
 
     # -- search bar --------------------------------------------------------
 
@@ -449,7 +440,6 @@ class TerminalTab(Gtk.Box):
         except (TypeError, ValueError):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
-        self._copy_on_select = bool(settings.get("copy_on_select"))
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
 
     def feed_message(self, text: str) -> None:

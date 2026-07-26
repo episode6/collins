@@ -205,14 +205,8 @@ msgstr "Visszagörgetési sorok"
 msgid "Easy copy & paste"
 msgstr "Egyszerű másolás és beillesztés"
 
-msgid "Ctrl+C copies selected text (otherwise interrupts as usual); Ctrl+V pastes"
-msgstr "A Ctrl+C másolja a kijelölt szöveget (különben szokás szerint megszakít); a Ctrl+V beilleszt"
-
-msgid "Copy on select"
-msgstr "Másolás kijelöléskor"
-
-msgid "Automatically copy selected terminal text to the clipboard"
-msgstr "A kijelölt terminálszöveg automatikus másolása a vágólapra"
+msgid "Ctrl+C copies selected text (otherwise interrupts as usual), Ctrl+V pastes, and right-click opens a copy/paste menu"
+msgstr "A Ctrl+C másolja a kijelölt szöveget (különben szokás szerint megszakít), a Ctrl+V beilleszt, a jobb kattintás pedig másolás/beillesztés menüt nyit"
 
 msgid "Copy"
 msgstr "Másolás"

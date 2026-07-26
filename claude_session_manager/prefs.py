@@ -106,19 +106,14 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
         self._easy_copy_row = Adw.SwitchRow(
             title=_("Easy copy & paste"),
-            subtitle=_("Ctrl+C copies selected text (otherwise interrupts as usual); Ctrl+V pastes"),
+            subtitle=_(
+                "Ctrl+C copies selected text (otherwise interrupts as usual), "
+                "Ctrl+V pastes, and right-click opens a copy/paste menu"
+            ),
         )
         self._easy_copy_row.set_active(bool(state.get_setting("easy_copy_paste")))
         self._easy_copy_row.connect("notify::active", self._on_easy_copy_changed)
         terminal_group.add(self._easy_copy_row)
-
-        self._copy_select_row = Adw.SwitchRow(
-            title=_("Copy on select"),
-            subtitle=_("Automatically copy selected terminal text to the clipboard"),
-        )
-        self._copy_select_row.set_active(bool(state.get_setting("copy_on_select")))
-        self._copy_select_row.connect("notify::active", self._on_copy_select_changed)
-        terminal_group.add(self._copy_select_row)
 
         current_theme = state.get_setting("terminal_theme") or DEFAULT_THEME
         if current_theme not in THEME_NAMES:
@@ -231,10 +226,6 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_easy_copy_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("easy_copy_paste", row.get_active())
-        self._on_change()
-
-    def _on_copy_select_changed(self, row: Adw.SwitchRow, _pspec) -> None:
-        self._state.set_setting("copy_on_select", row.get_active())
         self._on_change()
 
     def _on_notify_changed(self, row: Adw.SwitchRow, _pspec) -> None:

@@ -205,14 +205,8 @@ msgstr "Scrollback-Zeilen"
 msgid "Easy copy & paste"
 msgstr "Einfaches Kopieren & Einfügen"
 
-msgid "Ctrl+C copies selected text (otherwise interrupts as usual); Ctrl+V pastes"
-msgstr "Strg+C kopiert markierten Text (unterbricht sonst wie üblich); Strg+V fügt ein"
-
-msgid "Copy on select"
-msgstr "Beim Auswählen kopieren"
-
-msgid "Automatically copy selected terminal text to the clipboard"
-msgstr "Ausgewählten Terminaltext automatisch in die Zwischenablage kopieren"
+msgid "Ctrl+C copies selected text (otherwise interrupts as usual), Ctrl+V pastes, and right-click opens a copy/paste menu"
+msgstr "Strg+C kopiert markierten Text (unterbricht sonst wie üblich), Strg+V fügt ein, und Rechtsklick öffnet ein Kopieren/Einfügen-Menü"
 
 msgid "Copy"
 msgstr "Kopieren"
