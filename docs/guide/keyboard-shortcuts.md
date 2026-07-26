@@ -1,3 +1,9 @@
+<!--
+Modified from the original agent-session-manager
+(https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+fork. Last modified: 2026-07-26. Full change history: git log for this file.
+-->
+
 # Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -5,7 +11,7 @@
 | `Ctrl+Shift+F` | Focus the sidebar search |
 | `Ctrl+Shift+T` | New session |
 | `Ctrl+Shift+N` | New window |
-| `Ctrl+Shift+W` | Close the current tab |
+| `Ctrl+W` | Close the current tab |
 | `Ctrl+PgUp` / `Ctrl+PgDn` | Previous / next tab |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in the terminal |
 | `Ctrl+Shift+G` | Find in the terminal |
