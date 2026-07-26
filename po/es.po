@@ -202,6 +202,12 @@ msgstr "Restablecer la fuente predeterminada"
 msgid "Scrollback lines"
 msgstr "Líneas de historial"
 
+msgid "Easy copy & paste"
+msgstr "Copiado y pegado fáciles"
+
+msgid "Ctrl+C copies selected text (otherwise interrupts as usual); Ctrl+V pastes"
+msgstr "Ctrl+C copia el texto seleccionado (si no, interrumpe como de costumbre); Ctrl+V pega"
+
 msgid "Copy on select"
 msgstr "Copiar al seleccionar"
 

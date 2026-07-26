@@ -202,6 +202,12 @@ msgstr "Réinitialiser la police par défaut"
 msgid "Scrollback lines"
 msgstr "Lignes d’historique"
 
+msgid "Easy copy & paste"
+msgstr "Copier-coller simplifié"
+
+msgid "Ctrl+C copies selected text (otherwise interrupts as usual); Ctrl+V pastes"
+msgstr "Ctrl+C copie le texte sélectionné (sinon interrompt comme d’habitude) ; Ctrl+V colle"
+
 msgid "Copy on select"
 msgstr "Copier lors de la sélection"
 

@@ -76,6 +76,7 @@ class TerminalTab(Gtk.Box):
         self.terminal.connect("child-exited", self._on_child_exited)
 
         self._copy_on_select = False
+        self._easy_copy_paste = False
         self.terminal.connect("selection-changed", self._on_selection_changed)
         self._setup_context_menu()
 
@@ -449,6 +450,7 @@ class TerminalTab(Gtk.Box):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
         self._copy_on_select = bool(settings.get("copy_on_select"))
+        self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
 
     def feed_message(self, text: str) -> None:
         self.terminal.feed(f"\r\n\x1b[1;33m[session manager]\x1b[0m {text}\r\n".encode())
@@ -470,6 +472,16 @@ class TerminalTab(Gtk.Box):
         ):
             self.terminal.feed_child(b"\x1b\r")
             return True
+
+        # Easy copy & paste (Black Box-style): Ctrl+C copies when text is
+        # selected — otherwise it falls through as SIGINT — and Ctrl+V pastes.
+        if self._easy_copy_paste and ctrl and not shift:
+            if keyval == Gdk.KEY_c and self.terminal.get_has_selection():
+                self.terminal.copy_clipboard_format(Vte.Format.TEXT)
+                return True
+            if keyval == Gdk.KEY_v:
+                self.terminal.paste_clipboard()
+                return True
 
         if ctrl and shift:
             if keyval == Gdk.KEY_C:

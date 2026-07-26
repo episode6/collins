@@ -86,6 +86,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Applies to all terminal tabs": "Minden terminállapra érvényes",
         "Reset to default font": "Visszaállítás az alapértelmezett betűtípusra",
         "Scrollback lines": "Visszagörgetési sorok",
+        "Easy copy & paste": "Egyszerű másolás és beillesztés",
+        "Ctrl+C copies selected text (otherwise interrupts as usual); Ctrl+V pastes":
+            "A Ctrl+C másolja a kijelölt szöveget (különben szokás szerint megszakít); a Ctrl+V beilleszt",
         "Copy on select": "Másolás kijelöléskor",
         "Automatically copy selected terminal text to the clipboard":
             "A kijelölt terminálszöveg automatikus másolása a vágólapra",
@@ -288,6 +291,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Applies to all terminal tabs": "Gilt für alle Terminal-Tabs",
         "Reset to default font": "Auf Standardschriftart zurücksetzen",
         "Scrollback lines": "Scrollback-Zeilen",
+        "Easy copy & paste": "Einfaches Kopieren & Einfügen",
+        "Ctrl+C copies selected text (otherwise interrupts as usual); Ctrl+V pastes":
+            "Strg+C kopiert markierten Text (unterbricht sonst wie üblich); Strg+V fügt ein",
         "Copy on select": "Beim Auswählen kopieren",
         "Automatically copy selected terminal text to the clipboard":
             "Ausgewählten Terminaltext automatisch in die Zwischenablage kopieren",
@@ -493,6 +499,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Applies to all terminal tabs": "Se aplica a todas las pestañas de terminal",
         "Reset to default font": "Restablecer la fuente predeterminada",
         "Scrollback lines": "Líneas de historial",
+        "Easy copy & paste": "Copiado y pegado fáciles",
+        "Ctrl+C copies selected text (otherwise interrupts as usual); Ctrl+V pastes":
+            "Ctrl+C copia el texto seleccionado (si no, interrumpe como de costumbre); Ctrl+V pega",
         "Copy on select": "Copiar al seleccionar",
         "Automatically copy selected terminal text to the clipboard":
             "Copiar automáticamente al portapapeles el texto seleccionado en la terminal",
@@ -697,6 +706,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Applies to all terminal tabs": "S’applique à tous les onglets de terminal",
         "Reset to default font": "Réinitialiser la police par défaut",
         "Scrollback lines": "Lignes d’historique",
+        "Easy copy & paste": "Copier-coller simplifié",
+        "Ctrl+C copies selected text (otherwise interrupts as usual); Ctrl+V pastes":
+            "Ctrl+C copie le texte sélectionné (sinon interrompt comme d’habitude) ; Ctrl+V colle",
         "Copy on select": "Copier lors de la sélection",
         "Automatically copy selected terminal text to the clipboard":
             "Copier automatiquement dans le presse-papiers le texte sélectionné dans le terminal",

@@ -104,6 +104,14 @@ class PreferencesDialog(Adw.PreferencesDialog):
         scroll_row.connect("notify::value", self._on_scrollback_changed)
         terminal_group.add(scroll_row)
 
+        self._easy_copy_row = Adw.SwitchRow(
+            title=_("Easy copy & paste"),
+            subtitle=_("Ctrl+C copies selected text (otherwise interrupts as usual); Ctrl+V pastes"),
+        )
+        self._easy_copy_row.set_active(bool(state.get_setting("easy_copy_paste")))
+        self._easy_copy_row.connect("notify::active", self._on_easy_copy_changed)
+        terminal_group.add(self._easy_copy_row)
+
         self._copy_select_row = Adw.SwitchRow(
             title=_("Copy on select"),
             subtitle=_("Automatically copy selected terminal text to the clipboard"),
@@ -219,6 +227,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
         key = _SCHEMES[row.get_selected()][0]
         self._state.set_setting("color_scheme", key)
         apply_color_scheme(key)
+        self._on_change()
+
+    def _on_easy_copy_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("easy_copy_paste", row.get_active())
         self._on_change()
 
     def _on_copy_select_changed(self, row: Adw.SwitchRow, _pspec) -> None:
