@@ -113,12 +113,12 @@ class SessionRow(Gtk.ListBoxRow):
         self.add_css_class("session-child")  # indented, with a left guide line
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_margin_top(8)
-        box.set_margin_bottom(8)
-        box.set_margin_start(10)
-        box.set_margin_end(12)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+        box.set_margin_start(0)  # theme row padding alone ≈ the 10px dot-to-title gap
+        box.set_margin_end(0)  # theme row padding + the flat button's inset suffice
 
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
 
         self.check = Gtk.CheckButton(valign=Gtk.Align.CENTER, visible=False)
         self.check.connect("toggled", lambda c: sidebar.on_row_check_toggled(self, c.get_active()))
@@ -128,27 +128,19 @@ class SessionRow(Gtk.ListBoxRow):
         self.dot.add_css_class("status-dot")
         top.append(self.dot)
 
-        agent_icon = Gtk.Image.new_from_icon_name(item.provider_icon)
-        agent_icon.set_valign(Gtk.Align.CENTER)
-        agent_icon.add_css_class("dim-label")
-        agent_icon.set_tooltip_text(item.provider_label)
-        top.append(agent_icon)
-
         name_label = Gtk.Label(xalign=0.0, hexpand=True)
+        name_label.set_margin_start(8)  # ~half the highlight-edge-to-dot distance
         name_label.set_ellipsize(_ELLIPSIZE_END)
-        name_label.add_css_class("heading")
         top.append(name_label)
+
+        time_label = Gtk.Label(valign=Gtk.Align.CENTER)
+        time_label.set_margin_start(8)  # match the 10px gaps around the status dot
+        time_label.add_css_class("dim-label")
+        time_label.add_css_class("caption")
+        top.append(time_label)
 
         self._state_badge = Gtk.Image(valign=Gtk.Align.CENTER)
         top.append(self._state_badge)
-
-        star = Gtk.Button(valign=Gtk.Align.CENTER)
-        star.add_css_class("flat")
-        star.connect(
-            "clicked",
-            lambda *_: self.activate_action("win.toggle-favorite", GLib.Variant("s", item.session_id)),
-        )
-        top.append(star)
 
         rename = Gtk.Button(icon_name="document-edit-symbolic", valign=Gtk.Align.CENTER)
         rename.add_css_class("flat")
@@ -158,13 +150,22 @@ class SessionRow(Gtk.ListBoxRow):
             lambda *_: self.activate_action("win.rename-session", GLib.Variant("s", item.session_id)),
         )
         top.append(rename)
-        box.append(top)
 
-        subtitle_label = Gtk.Label(xalign=0.0)
-        subtitle_label.set_ellipsize(_ELLIPSIZE_END)
-        subtitle_label.add_css_class("dim-label")
-        subtitle_label.add_css_class("caption")
-        box.append(subtitle_label)
+        # Hidden rows are only listed while "Show hidden sessions" is on, and
+        # toggling rebuilds the list, so the icon never goes stale.
+        hidden = sidebar.store.state.is_hidden(item.session_id)
+        hide_btn = Gtk.Button(
+            icon_name="view-reveal-symbolic" if hidden else "view-conceal-symbolic",
+            valign=Gtk.Align.CENTER,
+        )
+        hide_btn.add_css_class("flat")
+        hide_btn.set_tooltip_text(_("Unhide session") if hidden else _("Hide session"))
+        hide_btn.connect(
+            "clicked",
+            lambda *_: self.activate_action("win.hide-session", GLib.Variant("s", item.session_id)),
+        )
+        top.append(hide_btn)
+        box.append(top)
 
         path_label = Gtk.Label(xalign=0.0)
         path_label.set_ellipsize(_ELLIPSIZE_START)  # keep the tail (the leaf dir) visible
@@ -175,30 +176,12 @@ class SessionRow(Gtk.ListBoxRow):
         self._path_label = path_label
         box.append(path_label)
 
-        preview_label = Gtk.Label(xalign=0.0)
-        preview_label.set_ellipsize(_ELLIPSIZE_END)
-        preview_label.add_css_class("dim-label")
-        preview_label.add_css_class("caption")
-        box.append(preview_label)
-
         self.set_child(box)
 
         # Property bindings: released automatically when either side is finalized.
         flags = GObject.BindingFlags.SYNC_CREATE
         item.bind_property("display-name", name_label, "label", flags)
-        item.bind_property("subtitle", subtitle_label, "label", flags)
-        item.bind_property("preview", preview_label, "label", flags)
-        item.bind_property(
-            "preview", preview_label, "visible", flags, lambda _b, value: bool(value)
-        )
-        item.bind_property(
-            "favorite", star, "icon-name", flags,
-            lambda _b, fav: "starred-symbolic" if fav else "non-starred-symbolic",
-        )
-        item.bind_property(
-            "favorite", star, "tooltip-text", flags,
-            lambda _b, fav: _("Remove from favorites") if fav else _("Add to favorites"),
-        )
+        item.bind_property("subtitle", time_label, "label", flags)
 
         # Status dot + state badge need CSS-class updates: plain signals,
         # detached on unroot.
