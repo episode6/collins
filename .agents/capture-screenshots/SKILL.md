@@ -39,12 +39,15 @@ writes the user's real state:
 export COLLINS_PROJECTS_DIR="$E2E/projects"     # session transcripts
 export COLLINS_CLAUDE_CONFIG="$E2E/claude.json" # echo '{}' > it
 export XDG_CONFIG_HOME="$E2E/config"            # app state lives in config/collins/state.json
+export XDG_STATE_HOME="$E2E/state"              # saved panel-terminal history
 ```
 
 ## Staging demo data
 
-`scripts/stage-demo-data.sh <dir>` writes a ready-made scene (two projects,
-one favorited session). Adapt it, or hand-roll following these rules:
+`.agents/capture-screenshots/scripts/stage-demo-data.sh <dir>` — script paths
+in this skill are from the repo root — writes a ready-made scene (two
+projects, one favorited session, saved panel history for the first
+alpha-widgets session `$U1`). Adapt it, or hand-roll following these rules:
 
 - Transcripts live at `projects/<encoded-cwd>/<uuid>.jsonl`. The directory
   name is the session's cwd with every non-alphanumeric character replaced by
@@ -67,27 +70,42 @@ one favorited session). Adapt it, or hand-roll following these rules:
     headless `claude` runs to title your fake sessions) and
     `"notify_idle": false`; `window_width`/`window_height` size the shot
     (1100×720 reads well).
+- Saved panel-terminal history is plain text at
+  `state/collins/panel_history/<uuid>.txt`; a session with a file there
+  replays it when its tab's panel opens.
 
 ## Capturing
 
 Compositor screenshot APIs are locked down on GNOME Wayland (the Shell D-Bus
 call is AccessDenied for unprivileged callers, and no CLI grabbers are
 installed), so don't fight the compositor: render the window in-process
-instead. `scripts/capture.py` launches the app from a given source tree,
-waits for the first paint, renders the window widget tree via Gsk to a PNG,
-and quits:
+instead. `.agents/capture-screenshots/scripts/capture.py` launches the app
+from a given source tree, waits for the first paint, renders the window
+widget tree via Gsk to a PNG, and quits:
 
 ```bash
 COLLINS_APP_ID=com.episode6.Collins.E2E \
 COLLINS_PROJECTS_DIR="$E2E/projects" \
 COLLINS_CLAUDE_CONFIG="$E2E/claude.json" \
 XDG_CONFIG_HOME="$E2E/config" \
-python3 scripts/capture.py <repo-root> "$E2E/shot.png"
+XDG_STATE_HOME="$E2E/state" \
+python3 .agents/capture-screenshots/scripts/capture.py <repo-root> "$E2E/shot.png"
 ```
 
-The window flashes on screen for ~2.5s — harmless. Always **look at the
-resulting PNG** before using it; a blank or half-populated frame means the
-store hadn't settled (bump the timeout in capture.py).
+Optional flags, for shots beyond the default sidebar-only window:
+
+- `--open-session <uuid>`: wait for the store to discover that session, then
+  open its tab. The tab spawns a real shell and types the provider CLI into
+  it (`claude --resume <uuid>`), so with a staged fake uuid the top terminal
+  shows the CLI's startup/trust prompt — fine when the shot is about the
+  surrounding chrome, not the agent conversation.
+- `--panel` (requires `--open-session`): also open the tab's secondary
+  terminal panel — e.g. to demo restored panel history for a staged session.
+- `--settle-ms <n>`: delay before the shot (default 2500).
+
+The window flashes on screen for a few seconds — harmless. Always **look at
+the resulting PNG** before using it; a blank or half-populated frame means
+the store hadn't settled (raise `--settle-ms`).
 
 ## Before/after comparisons
 
@@ -96,7 +114,8 @@ Capture "before" from a temporary worktree of main — the first argument to
 
 ```bash
 git worktree add "$E2E/main-wt" origin/main
-python3 scripts/capture.py "$E2E/main-wt" "$E2E/before.png"   # + env as above
+python3 .agents/capture-screenshots/scripts/capture.py \
+  "$E2E/main-wt" "$E2E/before.png"   # + env as above
 git worktree remove "$E2E/main-wt"
 ```
 
