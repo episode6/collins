@@ -280,7 +280,7 @@ class ClaudeProvider(Provider):
                     continue
                 if stat.st_size == 0:
                     continue
-                cwd, preview = _scan_transcript(jsonl)
+                cwd, preview, created = _scan_transcript(jsonl)
                 found.append(
                     Session(
                         session_id=jsonl.stem,
@@ -288,6 +288,7 @@ class ClaudeProvider(Provider):
                         cwd=cwd,
                         preview=preview,
                         mtime=stat.st_mtime,
+                        created=created if created is not None else stat.st_mtime,
                         size=stat.st_size,
                         state=_tail_state(jsonl),
                         provider=self.id,

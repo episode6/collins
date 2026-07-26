@@ -44,6 +44,7 @@ class Session:
     cwd: str | None  # project directory recorded in the transcript
     preview: str  # first user message, truncated
     mtime: float  # last activity (file mtime)
+    created: float = 0.0  # session start (first transcript timestamp; mtime fallback)
     size: int = 0  # transcript size in bytes
     state: str = ""  # "" or "waiting" (the agent's last message was a question)
     provider: str = "claude"  # provider id (see providers.py)
@@ -69,13 +70,14 @@ def session_from_file(path: Path) -> Session | None:
         return None
     if not path.is_file():
         return None
-    cwd, preview = _scan_transcript(path)
+    cwd, preview, created = _scan_transcript(path)
     return Session(
         session_id=path.stem,
         jsonl_path=path,
         cwd=cwd,
         preview=preview,
         mtime=stat.st_mtime,
+        created=created if created is not None else stat.st_mtime,
         size=stat.st_size,
         state="",
         provider="claude",
@@ -92,10 +94,22 @@ def _extract_text(content) -> str:
     return ""
 
 
-def _scan_transcript(path: Path) -> tuple[str | None, str]:
-    """Return (cwd, preview) from the first lines of a transcript."""
+def _parse_timestamp(value) -> float | None:
+    """Epoch seconds from a transcript entry's ISO-8601 timestamp, or None."""
+    if not isinstance(value, str):
+        return None
+    try:
+        # fromisoformat() can't parse a trailing "Z" until Python 3.11.
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _scan_transcript(path: Path) -> tuple[str | None, str, float | None]:
+    """Return (cwd, preview, created) from the first lines of a transcript."""
     cwd: str | None = None
     preview = ""
+    created: float | None = None
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             read = 0
@@ -109,6 +123,8 @@ def _scan_transcript(path: Path) -> tuple[str | None, str]:
                     continue
                 if not isinstance(entry, dict):
                     continue
+                if created is None:
+                    created = _parse_timestamp(entry.get("timestamp"))
                 if cwd is None and isinstance(entry.get("cwd"), str):
                     cwd = entry["cwd"]
                 if not preview and entry.get("type") == "user":
@@ -117,11 +133,11 @@ def _scan_transcript(path: Path) -> tuple[str | None, str]:
                     # Skip harness-injected content (commands, reminders)
                     if text and not text.startswith("<"):
                         preview = " ".join(text.split())[:120]
-                if cwd and preview:
+                if cwd and preview and created is not None:
                     break
     except OSError:
         pass
-    return cwd, preview
+    return cwd, preview, created
 
 
 _TAIL_BYTES = 64 * 1024
