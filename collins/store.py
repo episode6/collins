@@ -173,6 +173,7 @@ class SessionStore(GObject.Object):
             or not (
                 self.state.is_hidden(s.session_id)
                 or self.state.is_project_hidden(s.project_name)
+                or self._forward_state(s) == "moved"
             )
         ]
         favorites = [s for s in visible if self.state.is_favorite(s.session_id)]
@@ -245,6 +246,22 @@ class SessionStore(GObject.Object):
             self.model.splice(0, self.model.get_n_items(), items)
         self.emit("refreshed", order_changed)
 
+    def _forward_state(self, session: Session) -> str:
+        """How a session's forward (recorded when /bg forked it) affects its
+        row: "moved" — the fork is discovered, this row is replaced by it;
+        "syncing" — the fork's transcript exists but isn't scanned yet, keep
+        the row visible but disabled; "" — no forward, or the fork's
+        transcript vanished (e.g. trashed) so the forward is stale and the
+        row behaves normally again."""
+        target = self.state.resolve_forward(session.session_id)
+        if target == session.session_id:
+            return ""
+        if target in self.sessions:
+            return "moved"
+        if (Path(session.jsonl_path).parent / f"{target}.jsonl").is_file():
+            return "syncing"
+        return ""
+
     def _update_item(self, item: SessionItem, session: Session, group_key: tuple, group_label: str) -> None:
         item.session = session
         item.group_key = group_key
@@ -255,6 +272,7 @@ class SessionStore(GObject.Object):
             "preview": session.preview,
             "favorite": self.state.is_favorite(session.session_id),
             "state": session.state,
+            "syncing": self._forward_state(session) == "syncing",
         }
         for prop, value in updates.items():
             if item.get_property(prop) != value:

@@ -248,6 +248,11 @@ class SessionRow(Gtk.ListBoxRow):
         flags = GObject.BindingFlags.SYNC_CREATE
         item.bind_property("display-name", name_label, "label", flags)
         item.bind_property("subtitle", time_label, "label", flags)
+        # A backgrounded session mid-handoff (its fork not yet scanned) stays
+        # visible but disabled, so it can't be opened into a stale state.
+        item.bind_property(
+            "syncing", self, "sensitive", flags | GObject.BindingFlags.INVERT_BOOLEAN
+        )
 
         # Status dot + state badge need CSS-class updates: plain signals,
         # detached on unroot.

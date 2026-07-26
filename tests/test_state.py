@@ -251,7 +251,10 @@ def test_forward_session_carries_metadata_and_hides_original(app_state):
     assert fresh.get_emoji("new") == "🚀"
     assert fresh.is_favorite("new")
     assert fresh.get_panel_state("new") == {"open": True, "mode": "bottom"}
-    assert fresh.is_hidden("old")  # the stale original row disappears
+    # The stale original is NOT flagged hidden here: the store derives its
+    # row's fate from the forward (visible-but-disabled until the fork is
+    # discovered, replaced afterwards).
+    assert not fresh.is_hidden("old")
     assert not fresh.is_hidden("new")
 
 

@@ -558,6 +558,14 @@ class MainWindow(Adw.ApplicationWindow):
                 target = self.store.get_session(forwarded)
                 if target is not None:
                     session = target
+                elif (session.jsonl_path.parent / f"{forwarded}.jsonl").is_file():
+                    # The fork exists but the store hasn't scanned it yet.
+                    # Its sidebar row is disabled during this window; guard
+                    # the other entry paths (switcher, session restore) too
+                    # rather than open the stale original.
+                    return
+                # Fork transcript gone (e.g. trashed): stale forward — fall
+                # through and open the original normally.
             page = self._pages.get(session.session_id)
             if page is not None:
                 self.tab_view.set_selected_page(page)

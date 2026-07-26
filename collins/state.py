@@ -285,8 +285,12 @@ class AppState:
         """Record that a session's conversation continued under a new id
         (Claude's /bg forks a backgrounded session to a fresh background
         session). Carries the user's metadata over — without clobbering
-        anything already set on the new id — and hides the stale original
-        row. One write to disk."""
+        anything already set on the new id. One write to disk.
+
+        The stale original row is *not* hidden here: visibility is derived
+        from the forward at display time (see SessionStore), so the original
+        stays in the sidebar — disabled — until the fork's row can take its
+        place, instead of vanishing for the scan-lag gap."""
         if not old_id or not new_id or old_id == new_id:
             return
         self.session_forwards[old_id] = new_id
@@ -300,7 +304,6 @@ class AppState:
             self.favorites.add(new_id)
         if old_id in self.panel_states and new_id not in self.panel_states:
             self.panel_states[new_id] = dict(self.panel_states[old_id])
-        self.hidden.add(old_id)
         self.save()
 
     def resolve_forward(self, session_id: str) -> str:
