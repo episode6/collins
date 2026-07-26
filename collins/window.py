@@ -80,6 +80,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._close_asking: set[Adw.TabPage] = set()  # busy-tab confirm dialog open
         self._close_ok: set[Adw.TabPage] = set()  # user okayed closing the busy tab
         self._bg_ok: set[Adw.TabPage] = set()  # user chose to background the agent instead
+        # Hide requested for an open session: applied only once its tab
+        # really closes (page -> session id).
+        self._hide_on_close: dict[Adw.TabPage, str] = {}
         self._quitting = False  # window close confirmed; draining tabs
         self._quit_asking = False  # the single quit-confirmation dialog is open
         self._menu_page: Adw.TabPage | None = None
@@ -816,13 +819,17 @@ class MainWindow(Adw.ApplicationWindow):
                             "detached — reopen the session later to re-attach.")
         # A panel-only-busy tab has no agent session to exit — say "Close Tab".
         confirm_label = _("Exit Session") if agent_busy else _("Close Tab")
+        def dismiss() -> None:
+            self._close_asking.discard(page)
+            self._hide_on_close.pop(page, None)  # cancelled: keep the session visible
+
         dialogs.confirm_dialog(
             self,
             heading,
             body,
             confirm_label,
             do_close,
-            on_dismiss=lambda: self._close_asking.discard(page),
+            on_dismiss=dismiss,
             default_response="confirm",
             extra_label=_("Background Session") if can_background else None,
             on_extra=(lambda: do_close(background=True)) if can_background else None,
@@ -1072,6 +1079,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._close_asking.discard(page)
         self._close_ok.discard(page)
         self._bg_ok.discard(page)
+        hide_session_id = self._hide_on_close.pop(page, None)
+        if hide_session_id:
+            self.store.set_hidden(hide_session_id, True)
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
         self._local_titles.discard(page)
@@ -1182,16 +1192,16 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_hide_session(self, _action, param: GLib.Variant) -> None:
         session_id = param.get_string()
         hidden = not self.state.is_hidden(session_id)
-        self.store.set_hidden(session_id, hidden)
-        if hidden:
-            self._close_session_tab(session_id)
-
-    def _close_session_tab(self, session_id: str) -> None:
-        """Close the session's open tab (if any) through the normal close-page
-        flow, so busy tabs still get their confirmation dialog."""
-        page = self._pages.get(session_id)
+        page = self._pages.get(session_id) if hidden else None
         if page is not None:
+            # Close the tab through the normal close-page flow, so a busy tab
+            # still gets its confirmation dialog — and hide the session only
+            # once the tab really closes: cancelling the dialog keeps it
+            # visible.
+            self._hide_on_close[page] = session_id
             self.tab_view.close_page(page)
+            return
+        self.store.set_hidden(session_id, hidden)
 
     def _on_hide_project(self, _action, param: GLib.Variant) -> None:
         name = param.get_string()
