@@ -85,6 +85,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._hide_on_close: dict[Adw.TabPage, str] = {}
         self._quitting = False  # window close confirmed; draining tabs
         self._quit_asking = False  # the single quit-confirmation dialog is open
+        # Active tab's session at the first close request, before the tab
+        # drain disturbs the selection ("" = none); persisted when the last
+        # window really closes so the next launch can reopen it.
+        self._last_active_session = ""
+        # Session to reopen once the store's first scan delivers it.
+        self._restore_session_id: str | None = None
         self._menu_page: Adw.TabPage | None = None
         self._base_titles: dict[Adw.TabPage, str] = {}  # fork/new tab title without emoji
         # Tabs whose session id was just resolved, waiting for the store to
@@ -264,16 +270,35 @@ class MainWindow(Adw.ApplicationWindow):
             # per-tab drain, so capture their panel histories and state now
             # (a no-op for tabs that already drained through _on_close_page).
             self._save_panel_data()
+            self._persist_last_session()
             return False  # tabs drained (or the user insisted) — really close
+        self._last_active_session = self._active_session_id() or ""
         busy = self._busy_tab_count()
         if busy == 0:
             # This close skips the per-tab drain, so capture panel histories
             # and state here.
             self._save_panel_data()
+            self._persist_last_session()
             return False  # nothing running; continue with the normal close
         if not self._quit_asking:  # one dialog for however many sessions are busy
             self._confirm_quit(busy)
         return True
+
+    def _active_session_id(self) -> str | None:
+        page = self.tab_view.get_selected_page()
+        return self._session_id_of(page) if page is not None else None
+
+    def _persist_last_session(self) -> None:
+        """Remember the active tab's session when the last window closes, so
+        the next launch reopens it. A non-session active tab (fork, chat,
+        replay, unresolved new session) clears the memory instead — reopening
+        would restore a tab the user wasn't actually looking at."""
+        app = self.get_application()
+        windows = app.get_windows() if app is not None else []
+        if any(isinstance(w, MainWindow) and w is not self for w in windows):
+            return  # another window remains; its close records the session
+        if self.state.get_setting("last_active_session") != self._last_active_session:
+            self.state.set_setting("last_active_session", self._last_active_session)
 
     def _save_panel_data(self) -> None:
         for i in range(self.tab_view.get_n_pages()):
@@ -491,6 +516,29 @@ class MainWindow(Adw.ApplicationWindow):
 
     # -- tabs --------------------------------------------------------------
 
+    def restore_last_session(self) -> None:
+        """Reopen the session that was in the active tab when the app was last
+        closed. Called only for a launch's first window; the store scans in
+        the background, so the open may wait for its first refresh."""
+        session_id = self.state.get_setting("last_active_session")
+        if not session_id:
+            return
+        session = self.store.get_session(session_id)
+        if session is not None:
+            self.open_session(session)
+        else:
+            self._restore_session_id = str(session_id)
+
+    def _apply_restore_session(self) -> None:
+        """One shot on the store's first refresh: if the remembered session
+        still exists (and the user hasn't opened anything first), reopen it."""
+        session_id, self._restore_session_id = self._restore_session_id, None
+        if not session_id or self.tab_view.get_n_pages() > 0:
+            return
+        session = self.store.get_session(session_id)
+        if session is not None:
+            self.open_session(session)
+
     def open_session(self, session: Session, fork: bool = False) -> None:
         provider = get_provider(session.provider)
         fork = fork and provider.supports_fork
@@ -679,6 +727,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.state.set_setting(key, size)
 
     def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
+        if self._restore_session_id is not None:
+            self._apply_restore_session()
         if self._pending_resolved:
             self._apply_resolved_sessions()
         self._refresh_tab_titles()

@@ -61,6 +61,7 @@ DEFAULT_SETTINGS = {
     "window_width": 1280,  # last window size (floating, unmaximized)
     "window_height": 800,
     "window_maximized": False,
+    "last_active_session": "",  # session in the active tab when the last window closed
 }
 
 # Floor for a restored window, so a corrupt/absurd saved value can't produce
