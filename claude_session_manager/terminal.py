@@ -246,6 +246,8 @@ class TerminalTab(Gtk.Box):
         )
         # The hairline divider is hard to grab; use the wide handle throughout.
         self._paned.set_wide_handle(True)
+        self._panel_positions: dict[str, int] = {}  # divider px per mode (bottom/right)
+        self._panel_position_pending = False  # a programmatic apply is queued
         self._paned.set_start_child(self._overlay)
         self._paned.set_end_child(self._panel)
         self._paned.set_resize_start_child(True)
@@ -597,12 +599,13 @@ class TerminalTab(Gtk.Box):
         self._panel.open_shell(self.current_agent_cwd())
         if not self.panel_visible:
             self._panel.set_visible(True)
-            self._reset_panel_position()
+            self._apply_panel_position()
         GLib.idle_add(self._panel.grab_terminal_focus)
 
     def hide_panel(self) -> None:
         if not self.panel_visible:
             return
+        self._remember_panel_position()
         refocus = self._panel.terminal.has_focus()
         self._panel.set_visible(False)
         if refocus:
@@ -616,22 +619,43 @@ class TerminalTab(Gtk.Box):
     def swap_panel(self) -> str:
         """Move the panel bottom↔right (the shell keeps running) and return
         the new position: "bottom" or "right"."""
+        self._remember_panel_position()  # capture the outgoing mode's divider
         to_bottom = self._paned.get_orientation() == Gtk.Orientation.HORIZONTAL
         self._paned.set_orientation(
             Gtk.Orientation.VERTICAL if to_bottom else Gtk.Orientation.HORIZONTAL
         )
         if self.panel_visible:
-            self._reset_panel_position()
+            self._apply_panel_position()
         return "bottom" if to_bottom else "right"
 
-    def _reset_panel_position(self) -> None:
-        """Give the panel roughly a third of the paned, once sizes are known."""
+    def _panel_mode(self) -> str:
+        vertical = self._paned.get_orientation() == Gtk.Orientation.VERTICAL
+        return "bottom" if vertical else "right"
+
+    def _paned_total(self) -> int:
+        vertical = self._paned.get_orientation() == Gtk.Orientation.VERTICAL
+        return self._paned.get_height() if vertical else self._paned.get_width()
+
+    def _remember_panel_position(self) -> None:
+        """Record the divider's spot for the current mode. Skipped while an
+        apply is still queued — the position it would read is the previous
+        mode's, and saving it would corrupt this mode's remembered value."""
+        if not self.panel_visible or self._panel_position_pending:
+            return
+        if self._paned_total() > 0:
+            self._panel_positions[self._panel_mode()] = self._paned.get_position()
+
+    def _apply_panel_position(self) -> None:
+        """Restore this mode's remembered divider — or, first time, give the
+        panel roughly a third of the paned — once sizes are known."""
+        self._panel_position_pending = True
 
         def position() -> bool:
-            vertical = self._paned.get_orientation() == Gtk.Orientation.VERTICAL
-            total = self._paned.get_height() if vertical else self._paned.get_width()
+            self._panel_position_pending = False
+            total = self._paned_total()
             if total > 0:
-                self._paned.set_position(int(total * 0.62))
+                saved = self._panel_positions.get(self._panel_mode())
+                self._paned.set_position(saved if saved is not None else int(total * 0.62))
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(position)
