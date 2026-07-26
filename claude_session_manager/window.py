@@ -167,6 +167,8 @@ class MainWindow(Adw.ApplicationWindow):
         swap_panel_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
         swap_panel_btn.set_tooltip_text(_("Move terminal panel bottom/right"))
         swap_panel_btn.connect("clicked", lambda *_: self._swap_panel())
+        swap_panel_btn.set_visible(False)  # only shown while a panel is open
+        self._swap_panel_btn = swap_panel_btn
         self._panel_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self._panel_buttons.set_halign(Gtk.Align.END)
         self._panel_buttons.set_valign(Gtk.Align.END)
@@ -557,6 +559,7 @@ class MainWindow(Adw.ApplicationWindow):
         tab.connect("process-exited", self._on_process_exited, page)
         tab.connect("session-resolved", self._on_session_resolved, page)
         tab.connect("panel-size-changed", self._on_panel_size_changed)
+        tab.connect("panel-visibility-changed", self._on_panel_visibility_changed)
         tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
         self.tab_view.set_selected_page(page)
@@ -800,11 +803,17 @@ class MainWindow(Adw.ApplicationWindow):
         if tab is not None:  # remember the choice as the default for new tabs
             self.state.set_setting("panel_position", tab.swap_panel())
 
+    def _on_panel_visibility_changed(self, tab: TerminalTab, visible: bool) -> None:
+        page = self.tab_view.get_selected_page()
+        if page is not None and page.get_child() is tab:
+            self._swap_panel_btn.set_visible(visible)
+
     def _on_selected_page_changed(self, view: Adw.TabView, _pspec) -> None:
         page = view.get_selected_page()
-        self._panel_buttons.set_visible(
-            page is not None and isinstance(page.get_child(), TerminalTab)
-        )
+        tab = page.get_child() if page is not None else None
+        is_terminal = isinstance(tab, TerminalTab)
+        self._panel_buttons.set_visible(is_terminal)
+        self._swap_panel_btn.set_visible(is_terminal and tab.panel_visible)
         if page is None:
             return
         self._cancel_idle(page)  # foreground now; no "finished" notification

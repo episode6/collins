@@ -184,6 +184,9 @@ class TerminalTab(Gtk.Box):
         # where mode is "bottom" | "right" and size the new panel px size,
         # so the window can persist it as the app-wide default.
         "panel-size-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, int)),
+        # Emitted when the panel is shown/hidden (bool = now visible), so the
+        # window can sync panel-related controls.
+        "panel-visibility-changed": (GObject.SignalFlags.RUN_FIRST, None, (bool,)),
     }
 
     def __init__(
@@ -612,6 +615,7 @@ class TerminalTab(Gtk.Box):
         if not self.panel_visible:
             self._panel.set_visible(True)
             self._apply_panel_size()
+            self.emit("panel-visibility-changed", True)
         GLib.idle_add(self._panel.grab_terminal_focus)
 
     def hide_panel(self) -> None:
@@ -620,6 +624,7 @@ class TerminalTab(Gtk.Box):
         self._remember_panel_size()
         refocus = self._panel.terminal.has_focus()
         self._panel.set_visible(False)
+        self.emit("panel-visibility-changed", False)
         if refocus:
             self.grab_terminal_focus()
 
