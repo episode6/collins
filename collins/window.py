@@ -168,7 +168,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.exit_btn.set_tooltip_text(_("Exit session and close tab"))
         self.exit_btn.connect("clicked", lambda *_: self._exit_current_tab())
         content_header.pack_start(self.exit_btn)
-        self.background_btn = Gtk.Button(icon_name="window-minimize-symbolic", visible=False)
+        self.background_btn = Gtk.Button(icon_name="document-save-symbolic", visible=False)
         self.background_btn.set_tooltip_text(_("Background session and close tab"))
         self.background_btn.connect("clicked", lambda *_: self._background_current_tab())
         content_header.pack_start(self.background_btn)
