@@ -12,7 +12,7 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
 
 1. Bump `pkgver` in `PKGBUILD` and refresh the source hash:
    ```bash
-   curl -sL https://github.com/ghackett/agent-session-manager/archive/refs/tags/v<VER>.tar.gz | sha256sum
+   curl -sL https://github.com/episode6/collins/archive/refs/tags/v<VER>.tar.gz | sha256sum
    ```
    Put the hash in `sha256sums=(...)`.
 2. Regenerate `.SRCINFO` (on an Arch system): `makepkg --printsrcinfo > .SRCINFO`

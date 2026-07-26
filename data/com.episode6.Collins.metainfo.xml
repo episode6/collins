@@ -41,9 +41,9 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
     <name>Geoff Hackett</name>
   </developer>
 
-  <url type="homepage">https://github.com/ghackett/agent-session-manager</url>
-  <url type="bugtracker">https://github.com/ghackett/agent-session-manager/issues</url>
-  <url type="vcs-browser">https://github.com/ghackett/agent-session-manager</url>
+  <url type="homepage">https://github.com/episode6/collins</url>
+  <url type="bugtracker">https://github.com/episode6/collins/issues</url>
+  <url type="vcs-browser">https://github.com/episode6/collins</url>
 
   <content_rating type="oars-1.1"/>
 

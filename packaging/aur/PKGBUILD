@@ -9,25 +9,22 @@ pkgver=2.0.0
 pkgrel=1
 pkgdesc="Native GTK4 desktop app to manage and resume Claude Code sessions"
 arch=('any')
-url="https://github.com/ghackett/agent-session-manager"
+url="https://github.com/episode6/collins"
 license=('GPL-3.0-or-later')
 depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'vte4')
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
 optdepends=('claude-code: resume Claude Code sessions')
-# GitHub archives extract to <repo-name>-<ver>; the repo is still named
-# agent-session-manager. Refresh the sha256 when a v$pkgver tag exists
-# (see packaging/aur/README.md).
-_srcdir=agent-session-manager-$pkgver
+# Refresh the sha256 when a v$pkgver tag exists (see packaging/aur/README.md).
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {
-  cd "$_srcdir"
+  cd "$pkgname-$pkgver"
   python -m build --wheel --no-isolation
 }
 
 package() {
-  cd "$_srcdir"
+  cd "$pkgname-$pkgver"
   python -m installer --destdir="$pkgdir" dist/*.whl
 
   local appid=com.episode6.Collins

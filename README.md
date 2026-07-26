@@ -6,7 +6,7 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
 
 # Collins
 
-[![CI](https://github.com/ghackett/agent-session-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/ghackett/agent-session-manager/actions/workflows/ci.yml)
+[![CI](https://github.com/episode6/collins/actions/workflows/ci.yml/badge.svg)](https://github.com/episode6/collins/actions/workflows/ci.yml)
 
 Native GTK4/libadwaita desktop app to browse, name, and resume your [Claude Code](https://claude.com/claude-code) sessions in embedded terminal tabs.
 
@@ -14,7 +14,7 @@ Native GTK4/libadwaita desktop app to browse, name, and resume your [Claude Code
 
 Collins is a fork of [agent-session-manager](https://github.com/r4nd3l/agent-session-manager) by Máté Molnár — all credit for the original app goes there. This fork is GPL-3.0 like the original.
 
-📖 **[Documentation](https://ghackett.github.io/agent-session-manager/)**
+📖 **[Documentation](https://episode6.github.io/collins/)**
 
 > **Unofficial community tool.** An independent community project, not affiliated with or endorsed by any agent vendor (including Anthropic).
 > It never modifies your agents' own session data — all app state lives in its own config file.
@@ -87,7 +87,7 @@ Plus a supported agent's CLI on your `PATH` — currently the [`claude` CLI](htt
 **From source:**
 
 ```bash
-git clone https://github.com/ghackett/agent-session-manager.git collins
+git clone https://github.com/episode6/collins.git
 cd collins
 python3 -m collins
 ```

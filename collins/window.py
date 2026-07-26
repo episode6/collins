@@ -1190,8 +1190,8 @@ class MainWindow(Adw.ApplicationWindow):
                 _("Manage and resume your AI coding agent sessions.\n\n"
                 "Unofficial community tool — not affiliated with or endorsed by Anthropic.")
             ),
-            website="https://github.com/ghackett/agent-session-manager",
-            issue_url="https://github.com/ghackett/agent-session-manager/issues",
+            website="https://github.com/episode6/collins",
+            issue_url="https://github.com/episode6/collins/issues",
         )
         about.present(self)
 

@@ -26,8 +26,8 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/ghackett/agent-session-manager"
-Issues = "https://github.com/ghackett/agent-session-manager/issues"
+Homepage = "https://github.com/episode6/collins"
+Issues = "https://github.com/episode6/collins/issues"
 
 [project.scripts]
 collins = "collins.app:main"
