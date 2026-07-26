@@ -135,7 +135,7 @@ class SessionStore(GObject.Object):
         item.group_label = group_label
         updates = {
             "display_name": self.display_name(session),
-            "subtitle": f"{session.project_name} · {_relative_time(session.last_active)}",
+            "subtitle": _relative_time(session.last_active),
             "preview": session.preview,
             "favorite": self.state.is_favorite(session.session_id),
             "state": session.state,

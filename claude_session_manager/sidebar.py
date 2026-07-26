@@ -118,7 +118,7 @@ class SessionRow(Gtk.ListBoxRow):
         box.set_margin_start(10)
         box.set_margin_end(12)
 
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
 
         self.check = Gtk.CheckButton(valign=Gtk.Align.CENTER, visible=False)
         self.check.connect("toggled", lambda c: sidebar.on_row_check_toggled(self, c.get_active()))
@@ -136,8 +136,12 @@ class SessionRow(Gtk.ListBoxRow):
 
         name_label = Gtk.Label(xalign=0.0, hexpand=True)
         name_label.set_ellipsize(_ELLIPSIZE_END)
-        name_label.add_css_class("heading")
         top.append(name_label)
+
+        time_label = Gtk.Label(valign=Gtk.Align.CENTER)
+        time_label.add_css_class("dim-label")
+        time_label.add_css_class("caption")
+        top.append(time_label)
 
         self._state_badge = Gtk.Image(valign=Gtk.Align.CENTER)
         top.append(self._state_badge)
@@ -160,12 +164,6 @@ class SessionRow(Gtk.ListBoxRow):
         top.append(rename)
         box.append(top)
 
-        subtitle_label = Gtk.Label(xalign=0.0)
-        subtitle_label.set_ellipsize(_ELLIPSIZE_END)
-        subtitle_label.add_css_class("dim-label")
-        subtitle_label.add_css_class("caption")
-        box.append(subtitle_label)
-
         path_label = Gtk.Label(xalign=0.0)
         path_label.set_ellipsize(_ELLIPSIZE_START)  # keep the tail (the leaf dir) visible
         path_label.add_css_class("dim-label")
@@ -175,22 +173,12 @@ class SessionRow(Gtk.ListBoxRow):
         self._path_label = path_label
         box.append(path_label)
 
-        preview_label = Gtk.Label(xalign=0.0)
-        preview_label.set_ellipsize(_ELLIPSIZE_END)
-        preview_label.add_css_class("dim-label")
-        preview_label.add_css_class("caption")
-        box.append(preview_label)
-
         self.set_child(box)
 
         # Property bindings: released automatically when either side is finalized.
         flags = GObject.BindingFlags.SYNC_CREATE
         item.bind_property("display-name", name_label, "label", flags)
-        item.bind_property("subtitle", subtitle_label, "label", flags)
-        item.bind_property("preview", preview_label, "label", flags)
-        item.bind_property(
-            "preview", preview_label, "visible", flags, lambda _b, value: bool(value)
-        )
+        item.bind_property("subtitle", time_label, "label", flags)
         item.bind_property(
             "favorite", star, "icon-name", flags,
             lambda _b, fav: "starred-symbolic" if fav else "non-starred-symbolic",

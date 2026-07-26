@@ -17,7 +17,7 @@ class SessionItem(GObject.Object):
     __gtype_name__ = "CsmSessionItem"
 
     display_name = GObject.Property(type=str, default="")
-    subtitle = GObject.Property(type=str, default="")
+    subtitle = GObject.Property(type=str, default="")  # relative "time ago" of last activity
     preview = GObject.Property(type=str, default="")
     favorite = GObject.Property(type=bool, default=False)
     status = GObject.Property(type=str, default="")  # "", "open", "attention" (tab state)
