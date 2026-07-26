@@ -145,9 +145,6 @@ class MainWindow(Adw.ApplicationWindow):
         new_btn = Adw.SplitButton(icon_name="tab-new-symbolic")
         new_btn.set_tooltip_text(_("New session (Ctrl+Shift+T)"))
         new_btn.set_menu_model(new_menu)
-        new_btn.connect("clicked", lambda *_: self._new_session())
-        content_header.pack_start(new_btn)
-
         self.tab_bar_toggle = Gtk.ToggleButton(
             icon_name="view-paged-symbolic",
             active=self.tab_bar.get_visible(),
@@ -155,6 +152,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.tab_bar_toggle.set_tooltip_text(_("Show or hide the tab bar"))
         self.tab_bar_toggle.connect("toggled", self._on_tab_bar_toggled)
         content_header.pack_start(self.tab_bar_toggle)
+
+        new_btn.connect("clicked", lambda *_: self._new_session())
+        content_header.pack_start(new_btn)
 
         self.close_all_btn = Gtk.Button(icon_name="tab-close-symbolic", visible=False)
         self.close_all_btn.set_tooltip_text(_("Close all tabs"))
