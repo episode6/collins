@@ -824,9 +824,14 @@ class TerminalTab(Gtk.Box):
         size = total - self._paned.get_position()
         if size > 0 and self._panel_sizes.get(mode) != size:
             self._panel_sizes[mode] = size
-            self._size_emit_mode = mode
             if self._size_emit_source is not None:
                 GLib.source_remove(self._size_emit_source)
+                if self._size_emit_mode != mode:
+                    # A different mode's update is still pending (resize, then
+                    # swap within the debounce): flush it now rather than drop
+                    # it — each mode's default must be preserved independently.
+                    self._emit_size_changed()
+            self._size_emit_mode = mode
             self._size_emit_source = GLib.timeout_add(500, self._emit_size_changed)
 
     def _emit_size_changed(self) -> bool:
