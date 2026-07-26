@@ -335,6 +335,12 @@ class ClaudeProvider(Provider):
                 if stat.st_size == 0:
                     continue
                 cwd, preview, created = _scan_transcript(jsonl)
+                # Claude's worktree agent runs leave metadata-only stubs
+                # (ai-title/agent-name lines) behind: no cwd, no user message.
+                # They can't be resumed and would surface phantom projects
+                # named after the munged worktree path.
+                if cwd is None and not preview:
+                    continue
                 found.append(
                     Session(
                         session_id=jsonl.stem,
