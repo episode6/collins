@@ -65,16 +65,22 @@ def confirm_dialog(
     body: str,
     confirm_label: str,
     on_confirm: Callable[[], None],
+    on_dismiss: Callable[[], None] | None = None,
 ) -> None:
     dialog = Adw.AlertDialog(heading=heading, body=body)
     dialog.add_response("cancel", _("Cancel"))
     dialog.add_response("confirm", confirm_label)
     dialog.set_response_appearance("confirm", Adw.ResponseAppearance.DESTRUCTIVE)
     dialog.set_default_response("cancel")
-    dialog.connect(
-        "response",
-        lambda _d, response: on_confirm() if response == "confirm" else None,
-    )
+    dialog.set_close_response("cancel")
+
+    def respond(_dialog, response: str) -> None:
+        if response == "confirm":
+            on_confirm()
+        elif on_dismiss is not None:
+            on_dismiss()
+
+    dialog.connect("response", respond)
     dialog.present(parent)
 
 

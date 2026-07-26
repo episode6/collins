@@ -57,6 +57,17 @@ def test_migrates_old_config_dir(app_state):
     assert app_state._STATE_FILE.exists()  # copied into the new location
 
 
+def test_panel_size_settings_roundtrip(app_state):
+    state = app_state.AppState()
+    assert state.get_setting("panel_size_bottom") == 0  # unset → fraction default
+    assert state.get_setting("panel_size_right") == 0
+    state.set_setting("panel_size_bottom", 420)
+    state.set_setting("panel_size_right", 512)
+    fresh = app_state.AppState()
+    assert fresh.get_setting("panel_size_bottom") == 420
+    assert fresh.get_setting("panel_size_right") == 512
+
+
 def test_window_geometry_roundtrip(app_state):
     state = app_state.AppState()
     state.update_settings({"window_width": 1600, "window_height": 900, "window_maximized": True})

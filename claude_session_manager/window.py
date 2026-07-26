@@ -74,6 +74,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._pages: dict[str, Adw.TabPage] = {}  # session_id -> open tab
         self._confirmed_closes: set[Adw.TabPage] = set()
         self._closing_pages: dict[Adw.TabPage, int] = {}  # graceful close in progress -> attempts
+        self._panel_close_asking: set[Adw.TabPage] = set()  # busy-panel dialog open
+        self._panel_close_ok: set[Adw.TabPage] = set()  # user okayed killing the panel job
+        self._quitting = False  # window close confirmed; draining tabs
+        self._quit_asking = False  # the single quit-confirmation dialog is open
         self._menu_page: Adw.TabPage | None = None
         self._base_titles: dict[Adw.TabPage, str] = {}  # fork/new tab title without emoji
         # Tabs whose session id was just resolved, waiting for the store to
@@ -156,10 +160,33 @@ class MainWindow(Adw.ApplicationWindow):
         self.content_stack.add_named(placeholder, "empty")
         self.content_stack.add_named(self.tab_view, "tabs")
 
+        # Small corner buttons controlling the current tab's terminal panel.
+        toggle_panel_btn = Gtk.Button(icon_name="utilities-terminal-symbolic")
+        toggle_panel_btn.set_tooltip_text(_("Show/hide terminal panel (Ctrl+J)"))
+        toggle_panel_btn.connect("clicked", lambda *_: self._toggle_panel())
+        swap_panel_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
+        swap_panel_btn.set_tooltip_text(_("Move terminal panel bottom/right"))
+        swap_panel_btn.connect("clicked", lambda *_: self._swap_panel())
+        swap_panel_btn.set_visible(False)  # only shown while a panel is open
+        self._swap_panel_btn = swap_panel_btn
+        self._panel_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._panel_buttons.set_halign(Gtk.Align.END)
+        self._panel_buttons.set_valign(Gtk.Align.END)
+        self._panel_buttons.set_margin_end(6)
+        self._panel_buttons.set_margin_bottom(6)
+        self._panel_buttons.set_visible(False)
+        for btn in (toggle_panel_btn, swap_panel_btn):
+            btn.add_css_class("osd")
+            btn.add_css_class("circular")
+            self._panel_buttons.append(btn)
+
+        content_overlay = Gtk.Overlay(child=self.content_stack)
+        content_overlay.add_overlay(self._panel_buttons)
+
         content_view = Adw.ToolbarView()
         content_view.add_top_bar(content_header)
         content_view.add_top_bar(tab_bar)
-        content_view.set_content(self.content_stack)
+        content_view.set_content(content_overlay)
 
         # --- sidebar ---
         self.sidebar = SessionSidebar(self.store)
@@ -229,7 +256,48 @@ class MainWindow(Adw.ApplicationWindow):
         if self._geometry_save_source is not None:
             GLib.source_remove(self._geometry_save_source)
         self._save_window_geometry()
-        return False  # continue with the normal close
+        if self._quitting:
+            return False  # tabs drained (or the user insisted) — really close
+        busy = self._busy_tab_count()
+        if busy == 0:
+            return False  # nothing running; continue with the normal close
+        if not self._quit_asking:  # one dialog for however many sessions are busy
+            self._confirm_quit(busy)
+        return True
+
+    def _busy_tab_count(self) -> int:
+        count = 0
+        for i in range(self.tab_view.get_n_pages()):
+            tab = self.tab_view.get_nth_page(i).get_child()
+            if isinstance(tab, TerminalTab) and (
+                tab.has_running_command() or tab.panel_has_running_command()
+            ):
+                count += 1
+        return count
+
+    def _confirm_quit(self, busy: int) -> None:
+        self._quit_asking = True
+
+        def do_quit() -> None:
+            self._quit_asking = False
+            self._quitting = True
+            # The window-level dialog already covered the panels: don't let
+            # each tab ask again. Agents still get their graceful /exit.
+            for i in range(self.tab_view.get_n_pages()):
+                self._panel_close_ok.add(self.tab_view.get_nth_page(i))
+            # _on_close_page reissues the window close once the last tab drains
+            # (immediately, if every close completes synchronously).
+            self._close_all_tabs()
+
+        dialogs.confirm_dialog(
+            self,
+            _("Close window with {n} active session(s)?").format(n=busy),
+            _("Agents are asked to exit cleanly first; "
+              "other running commands will be terminated."),
+            _("Close Window"),
+            do_quit,
+            on_dismiss=lambda: setattr(self, "_quit_asking", False),
+        )
 
     # -- sidebar width persistence -------------------------------------------
 
@@ -267,6 +335,8 @@ class MainWindow(Adw.ApplicationWindow):
             "open-session-file": lambda *_: self._open_session_file(),
             "copy-tab-session-id": lambda *_: self._copy_tab_session_id(),
             "close-menu-tab": lambda *_: self._close_menu_tab(),
+            "toggle-panel": lambda *_: self._toggle_panel(),
+            "swap-panel": lambda *_: self._swap_panel(),
             "toggle-sidebar": lambda *_: self.sidebar.set_visible(
                 not self.sidebar.get_visible()
             ),
@@ -322,6 +392,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control>comma", "win.preferences"),
             ("<Control><Shift>k", "win.quick-switch"),
             ("<Control><Shift>e", "win.toggle-tab-emoji"),
+            ("<Control>j", "win.toggle-panel"),
             ("F9", "win.toggle-sidebar"),
         ):
             controller.add_shortcut(
@@ -487,6 +558,9 @@ class MainWindow(Adw.ApplicationWindow):
         page.set_tooltip(tooltip)
         tab.connect("process-exited", self._on_process_exited, page)
         tab.connect("session-resolved", self._on_session_resolved, page)
+        tab.connect("panel-size-changed", self._on_panel_size_changed)
+        tab.connect("panel-visibility-changed", self._on_panel_visibility_changed)
+        tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
         self.tab_view.set_selected_page(page)
         self.content_stack.set_visible_child_name("tabs")
@@ -504,6 +578,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._pending_resolved[page] = (session_id, page.get_title())
         self._sync_status(session_id)
         self._apply_resolved_sessions()
+
+    def _on_panel_size_changed(self, _tab: TerminalTab, mode: str, size: int) -> None:
+        """A divider was dragged: remember the size app-wide, so every panel
+        opened from now on (in any tab) defaults to it."""
+        key = f"panel_size_{mode}"
+        if self.state.get_setting(key) != size:
+            self.state.set_setting(key, size)
 
     def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
         if self._pending_resolved:
@@ -621,6 +702,32 @@ class MainWindow(Adw.ApplicationWindow):
         self._confirmed_closes.add(page)
         self.tab_view.close_page(page)
 
+    def _page_alive(self, page: Adw.TabPage) -> bool:
+        return any(
+            self.tab_view.get_nth_page(i) is page for i in range(self.tab_view.get_n_pages())
+        )
+
+    def _ask_panel_close(self, page: Adw.TabPage, tab: TerminalTab) -> None:
+        """Confirm closing a tab whose panel shell has a command running."""
+        self._panel_close_asking.add(page)
+        tab.show_panel()  # reveal what's about to be killed (a busy shell is never cd'd)
+
+        def do_close() -> None:
+            self._panel_close_asking.discard(page)
+            self._panel_close_ok.add(page)
+            if self._page_alive(page):  # continue: graceful agent close, then teardown
+                self.tab_view.close_page(page)
+
+        dialogs.confirm_dialog(
+            self,
+            _("Close tab with a running command?"),
+            _("A command is still running in this tab's terminal panel "
+              "and will be terminated."),
+            _("Close Anyway"),
+            do_close,
+            on_dismiss=lambda: self._panel_close_asking.discard(page),
+        )
+
     def _graceful_close(self, page: Adw.TabPage) -> None:
         """Ask the agent to exit cleanly (e.g. Claude's /exit), then close once the
         shell returns. Falls back to a force-close after a timeout. Agents with no
@@ -679,8 +786,34 @@ class MainWindow(Adw.ApplicationWindow):
         if self.state.get_setting("notify_idle"):
             self._schedule_idle_notify(page)
 
+    # -- terminal panel ------------------------------------------------------
+
+    def _current_terminal_tab(self) -> TerminalTab | None:
+        page = self.tab_view.get_selected_page()
+        tab = page.get_child() if page is not None else None
+        return tab if isinstance(tab, TerminalTab) else None
+
+    def _toggle_panel(self) -> None:
+        tab = self._current_terminal_tab()
+        if tab is not None:  # a freshly opened panel uses the last-used mode
+            tab.toggle_panel(self.state.get_setting("panel_position"))
+
+    def _swap_panel(self) -> None:
+        tab = self._current_terminal_tab()
+        if tab is not None:  # remember the choice as the default for new tabs
+            self.state.set_setting("panel_position", tab.swap_panel())
+
+    def _on_panel_visibility_changed(self, tab: TerminalTab, visible: bool) -> None:
+        page = self.tab_view.get_selected_page()
+        if page is not None and page.get_child() is tab:
+            self._swap_panel_btn.set_visible(visible)
+
     def _on_selected_page_changed(self, view: Adw.TabView, _pspec) -> None:
         page = view.get_selected_page()
+        tab = page.get_child() if page is not None else None
+        is_terminal = isinstance(tab, TerminalTab)
+        self._panel_buttons.set_visible(is_terminal)
+        self._swap_panel_btn.set_visible(is_terminal and tab.panel_visible)
         if page is None:
             return
         self._cancel_idle(page)  # foreground now; no "finished" notification
@@ -812,6 +945,18 @@ class MainWindow(Adw.ApplicationWindow):
         if (
             isinstance(tab, TerminalTab)
             and page not in self._confirmed_closes
+            and page not in self._panel_close_ok
+            and tab.panel_has_running_command()
+        ):
+            # The panel shell is busy. Unlike the agent there's no graceful
+            # exit for an arbitrary command, so ask before killing it.
+            view.close_page_finish(page, False)  # keep the tab while we ask
+            if page not in self._panel_close_asking:
+                self._ask_panel_close(page, tab)
+            return True
+        if (
+            isinstance(tab, TerminalTab)
+            and page not in self._confirmed_closes
             and tab.has_running_command()
         ):
             if page not in self._closing_pages:  # start a graceful /exit in the background
@@ -820,6 +965,8 @@ class MainWindow(Adw.ApplicationWindow):
             return True
         self._confirmed_closes.discard(page)
         self._closing_pages.pop(page, None)
+        self._panel_close_asking.discard(page)
+        self._panel_close_ok.discard(page)
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
         self._cancel_idle(page)
@@ -830,6 +977,8 @@ class MainWindow(Adw.ApplicationWindow):
         view.close_page_finish(page, True)
         if view.get_n_pages() == 0:
             self.content_stack.set_visible_child_name("empty")
+            if self._quitting:  # last tab drained — finish the window close
+                GLib.idle_add(self.close)
         return True  # we handled it
 
     # -- per-session actions ---------------------------------------------------

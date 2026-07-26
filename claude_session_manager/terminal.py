@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import threading
 from pathlib import Path
 
@@ -28,6 +29,148 @@ _PCRE2_MULTILINE = 0x00000400
 _SEARCH_FLAGS = _PCRE2_CASELESS | _PCRE2_MULTILINE
 
 
+def _has_running_command(terminal: Vte.Terminal, child_pid: int | None) -> bool:
+    """True when something other than the spawned shell owns the terminal's
+    foreground — the cue terminal emulators use for close-confirmation."""
+    if child_pid is None:
+        return False
+    pty = terminal.get_pty()
+    if pty is None:
+        return False
+    try:
+        foreground = os.tcgetpgrp(pty.get_fd())
+        return foreground not in (-1, os.getpgid(child_pid))
+    except OSError:
+        return False
+
+
+def _process_cwd(pid: int | None) -> str | None:
+    if not pid or pid <= 0:
+        return None
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        return None
+
+
+class PanelTerminal(Gtk.Box):
+    """The tab's secondary terminal: a plain shell with no agent auto-launched.
+
+    Spawns lazily the first time it is shown and survives hide/show and
+    bottom↔right swaps; the shell is only lost when the tab itself closes."""
+
+    __gsignals__ = {
+        # Emitted when the panel's shell exits (e.g. the user typed `exit`).
+        "shell-exited": (GObject.SignalFlags.RUN_FIRST, None, ()),
+    }
+
+    def __init__(self) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self._child_pid: int | None = None
+        self._spawned = False
+        self._easy_copy_paste = False
+
+        self.terminal = Vte.Terminal()
+        self.terminal.set_scrollback_lines(10_000)
+        self.terminal.set_scroll_on_output(False)
+        self.terminal.set_scroll_on_keystroke(True)
+        self.terminal.set_mouse_autohide(True)
+        self.terminal.connect("child-exited", self._on_child_exited)
+
+        scrolled = Gtk.ScrolledWindow(child=self.terminal, vexpand=True)
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self.append(scrolled)
+
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._on_key_pressed)
+        self.terminal.add_controller(keys)
+
+    def open_shell(self, cwd: str | None) -> None:
+        """Spawn the shell on first show; on later shows follow the agent's
+        cwd (it may have moved into a worktree) if the shell sits idle."""
+        if not self._spawned:
+            self._spawn(cwd)
+        else:
+            self._sync_cwd(cwd)
+
+    def _spawn(self, cwd: str | None) -> None:
+        self._spawned = True
+        if cwd is None or not Path(cwd).is_dir():
+            cwd = str(Path.home())
+        shell = os.environ.get("SHELL") or "/bin/bash"
+        self.terminal.spawn_async(
+            Vte.PtyFlags.DEFAULT,
+            cwd,
+            [shell],
+            None,  # envv: inherit
+            GLib.SpawnFlags.DEFAULT,
+            None,  # child_setup
+            None,  # child_setup_data
+            -1,  # timeout
+            None,  # cancellable
+            self._on_spawned,
+        )
+
+    def _on_spawned(self, terminal: Vte.Terminal, pid: int, error: GLib.Error | None) -> None:
+        if error is not None:
+            terminal.feed(
+                _("failed to start shell: {msg}").format(msg=error.message).encode()
+            )
+            return
+        self._child_pid = pid
+
+    def _on_child_exited(self, _terminal: Vte.Terminal, _status: int) -> None:
+        self._spawned = False  # a fresh shell is spawned on the next show
+        self._child_pid = None
+        self.terminal.reset(True, True)
+        self.emit("shell-exited")
+
+    def _sync_cwd(self, cwd: str | None) -> None:
+        if not cwd or not Path(cwd).is_dir() or self._child_pid is None:
+            return
+        if self.has_running_command():
+            return  # don't interrupt whatever the user left running
+        if _process_cwd(self._child_pid) == cwd:
+            return
+        # \x15 (kill-line) clears any half-typed input before the cd.
+        self.terminal.feed_child(f"\x15cd {shlex.quote(cwd)}\n".encode())
+
+    def has_running_command(self) -> bool:
+        return _has_running_command(self.terminal, self._child_pid)
+
+    def apply_settings(self, settings: dict) -> None:
+        font = settings.get("font") or ""
+        self.terminal.set_font(Pango.FontDescription.from_string(font) if font else None)
+        try:
+            self.terminal.set_scrollback_lines(int(settings.get("scrollback") or 10_000))
+        except (TypeError, ValueError):
+            pass
+        themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
+        self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
+
+    def grab_terminal_focus(self) -> None:
+        self.terminal.grab_focus()
+
+    def _on_key_pressed(self, _ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:
+        ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
+        if self._easy_copy_paste and ctrl and not shift:
+            if keyval == Gdk.KEY_c and self.terminal.get_has_selection():
+                self.terminal.copy_clipboard_format(Vte.Format.TEXT)
+                return True
+            if keyval == Gdk.KEY_v:
+                self.terminal.paste_clipboard()
+                return True
+        if ctrl and shift:
+            if keyval == Gdk.KEY_C:
+                self.terminal.copy_clipboard_format(Vte.Format.TEXT)
+                return True
+            if keyval == Gdk.KEY_V:
+                self.terminal.paste_clipboard()
+                return True
+        return False
+
+
 class TerminalTab(Gtk.Box):
     """Embeds Vte.Terminal (with a find bar) and spawns an agent CLI into it."""
 
@@ -37,6 +180,13 @@ class TerminalTab(Gtk.Box):
         # Emitted when a tab started without a session id (new / continue)
         # discovers which session it is running (str = session id).
         "session-resolved": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # Emitted (debounced) when the panel divider is moved: (mode, size)
+        # where mode is "bottom" | "right" and size the new panel px size,
+        # so the window can persist it as the app-wide default.
+        "panel-size-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, int)),
+        # Emitted when the panel is shown/hidden (bool = now visible), so the
+        # window can sync panel-related controls.
+        "panel-visibility-changed": (GObject.SignalFlags.RUN_FIRST, None, (bool,)),
     }
 
     def __init__(
@@ -89,7 +239,34 @@ class TerminalTab(Gtk.Box):
         self._overlay = Gtk.Overlay()
         self._overlay.set_vexpand(True)
         self._overlay.set_child(scrolled)
-        self.append(self._overlay)
+
+        # Secondary plain-shell panel, below or beside the agent terminal.
+        # Swapping bottom↔right only flips the paned's orientation, so the
+        # panel's shell keeps running.
+        self._panel = PanelTerminal()
+        self._panel.set_visible(False)
+        self._panel.connect("shell-exited", lambda *_: self.hide_panel())
+        panel_right = bool(settings) and settings.get("panel_position") == "right"
+        self._paned = Gtk.Paned(
+            orientation=Gtk.Orientation.HORIZONTAL if panel_right else Gtk.Orientation.VERTICAL,
+            vexpand=True,
+        )
+        # The hairline divider is hard to grab; use the wide handle throughout.
+        self._paned.set_wide_handle(True)
+        self._panel_sizes: dict[str, int] = {}  # this tab's panel px size per mode
+        self._panel_apply_pending = False  # a programmatic divider set is queued
+        self._panel_size_lookup = None  # mode -> app-wide last-set size (set by the window)
+        self._size_emit_source: int | None = None  # debounce for panel-size-changed
+        self._size_emit_mode: str | None = None  # mode whose size changed last
+        # Dragging the divider records the new panel size for the current mode.
+        self._paned.connect("notify::position", lambda *_: self._remember_panel_size())
+        self._paned.set_start_child(self._overlay)
+        self._paned.set_end_child(self._panel)
+        self._paned.set_resize_start_child(True)
+        self._paned.set_shrink_start_child(False)
+        self._paned.set_resize_end_child(False)
+        self._paned.set_shrink_end_child(False)
+        self.append(self._paned)
 
         self._transcript = TranscriptModel(jsonl_path, self.provider.id)
 
@@ -114,6 +291,7 @@ class TerminalTab(Gtk.Box):
                     _("warning: project dir {cwd} no longer exists, starting in HOME").format(cwd=cwd)
                 )
             cwd = str(Path.home())
+        self._cwd = cwd
 
         # Run the user's interactive shell and type the agent command into it,
         # so aliases/env apply and the tab drops to a prompt when the agent exits.
@@ -415,22 +593,150 @@ class TerminalTab(Gtk.Box):
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
 
+    # -- secondary terminal panel ------------------------------------------
+
+    @property
+    def panel_visible(self) -> bool:
+        return self._panel.get_visible()
+
+    def toggle_panel(self, default_mode: str | None = None) -> None:
+        if self.panel_visible:
+            self.hide_panel()
+        else:
+            self.show_panel(default_mode)
+
+    def show_panel(self, default_mode: str | None = None) -> None:
+        """Show the panel, starting (or re-pointing) its shell at the agent's
+        current working directory. `default_mode` ("bottom" | "right") opens
+        the panel in the app-wide last-used mode; None keeps the tab's own."""
+        if not self.panel_visible and default_mode in ("bottom", "right"):
+            self._set_panel_mode(default_mode)
+        self._panel.open_shell(self.current_agent_cwd())
+        if not self.panel_visible:
+            self._panel.set_visible(True)
+            self._apply_panel_size()
+            self.emit("panel-visibility-changed", True)
+        GLib.idle_add(self._panel.grab_terminal_focus)
+
+    def hide_panel(self) -> None:
+        if not self.panel_visible:
+            return
+        self._remember_panel_size()
+        refocus = self._panel.terminal.has_focus()
+        self._panel.set_visible(False)
+        self.emit("panel-visibility-changed", False)
+        if refocus:
+            self.grab_terminal_focus()
+
+    def panel_has_running_command(self) -> bool:
+        """True when a command is running in the panel shell — even a hidden
+        panel's job is protected by the close confirmation."""
+        return self._panel.has_running_command()
+
+    def swap_panel(self) -> str:
+        """Move the panel bottom↔right (the shell keeps running) and return
+        the new position: "bottom" or "right"."""
+        self._remember_panel_size()  # capture the outgoing mode's panel size
+        to_bottom = self._paned.get_orientation() == Gtk.Orientation.HORIZONTAL
+        self._paned.set_orientation(
+            Gtk.Orientation.VERTICAL if to_bottom else Gtk.Orientation.HORIZONTAL
+        )
+        if self.panel_visible:
+            self._apply_panel_size()
+        return "bottom" if to_bottom else "right"
+
+    def _set_panel_mode(self, mode: str) -> None:
+        """Reorient a hidden panel; there's no divider on screen to capture."""
+        if mode != self._panel_mode():
+            self._paned.set_orientation(
+                Gtk.Orientation.VERTICAL if mode == "bottom" else Gtk.Orientation.HORIZONTAL
+            )
+
+    def _panel_mode(self) -> str:
+        vertical = self._paned.get_orientation() == Gtk.Orientation.VERTICAL
+        return "bottom" if vertical else "right"
+
+    def _paned_total(self) -> int:
+        vertical = self._paned.get_orientation() == Gtk.Orientation.VERTICAL
+        return self._paned.get_height() if vertical else self._paned.get_width()
+
+    def set_panel_size_lookup(self, lookup) -> None:
+        """`lookup(mode) -> px` supplies the app-wide last-set panel size,
+        used for modes this tab hasn't sized itself yet."""
+        self._panel_size_lookup = lookup
+
+    def _remember_panel_size(self) -> None:
+        """Record the panel's size for the current mode. Skipped while an
+        apply is still queued — the value it would read is the previous
+        mode's, and saving it would corrupt this mode's remembered size."""
+        if not self.panel_visible or self._panel_apply_pending:
+            return
+        total = self._paned_total()
+        if total <= 0:
+            return
+        mode = self._panel_mode()
+        size = total - self._paned.get_position()
+        if size > 0 and self._panel_sizes.get(mode) != size:
+            self._panel_sizes[mode] = size
+            self._size_emit_mode = mode
+            if self._size_emit_source is not None:
+                GLib.source_remove(self._size_emit_source)
+            self._size_emit_source = GLib.timeout_add(500, self._emit_size_changed)
+
+    def _emit_size_changed(self) -> bool:
+        self._size_emit_source = None
+        mode = self._size_emit_mode
+        if mode in self._panel_sizes:
+            self.emit("panel-size-changed", mode, self._panel_sizes[mode])
+        return GLib.SOURCE_REMOVE
+
+    def _apply_panel_size(self) -> None:
+        """Size the panel once the paned's own size is known: this tab's
+        remembered size for the mode, else the app-wide last-set size, else
+        roughly a third of the paned."""
+        self._panel_apply_pending = True
+
+        def position() -> bool:
+            self._panel_apply_pending = False
+            total = self._paned_total()
+            if total <= 0:
+                return GLib.SOURCE_REMOVE
+            size = self._panel_sizes.get(self._panel_mode()) or 0
+            if size <= 0 and self._panel_size_lookup is not None:
+                size = self._panel_size_lookup(self._panel_mode()) or 0
+            if 0 < size < total:
+                self._paned.set_position(total - size)
+            else:  # nothing sensible remembered anywhere yet
+                self._paned.set_position(int(total * 0.62))
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(position)
+
+    def current_agent_cwd(self) -> str | None:
+        """Best-effort cwd of what's running in the agent terminal: the
+        foreground process if any (the agent may have cd'd into a worktree),
+        else the shell, else the directory the tab started in."""
+        pids = []
+        pty = self.terminal.get_pty()
+        if pty is not None:
+            try:
+                pids.append(os.tcgetpgrp(pty.get_fd()))
+            except OSError:
+                pass
+        if self._child_pid is not None:
+            pids.append(self._child_pid)
+        for pid in pids:
+            cwd = _process_cwd(pid)
+            if cwd is not None:
+                return cwd
+        return self._cwd
+
     # -- helpers -----------------------------------------------------------
 
     def has_running_command(self) -> bool:
         """True when something other than the shell (e.g. claude) owns the
-        terminal's foreground — the cue terminal emulators use for
-        close-confirmation."""
-        if self._child_pid is None:
-            return False
-        pty = self.terminal.get_pty()
-        if pty is None:
-            return False
-        try:
-            foreground = os.tcgetpgrp(pty.get_fd())
-            return foreground not in (-1, os.getpgid(self._child_pid))
-        except OSError:
-            return False
+        terminal's foreground."""
+        return _has_running_command(self.terminal, self._child_pid)
 
     def apply_settings(self, settings: dict) -> None:
         font = settings.get("font") or ""
@@ -441,6 +747,7 @@ class TerminalTab(Gtk.Box):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
+        self._panel.apply_settings(settings)
 
     def feed_message(self, text: str) -> None:
         self.terminal.feed(f"\r\n\x1b[1;33m[session manager]\x1b[0m {text}\r\n".encode())
