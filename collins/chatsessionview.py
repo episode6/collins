@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 """A chat tab backed by a live headless `claude -p` stream-json session.
 
@@ -102,25 +102,31 @@ class ChatSessionTab(Gtk.Box):
         )
 
     def _build_footer(self, cwd: str) -> Gtk.Widget:
-        """Slim status row showing the directory the chat session works in."""
-        label = Gtk.Label(label=display_path(cwd), xalign=0.0, hexpand=True)
+        """Slim status row showing the directory (and branch) the chat session
+        works in."""
+        label = Gtk.Label(label=display_path(cwd), xalign=0.0)
         label.set_ellipsize(Pango.EllipsizeMode.START)
         label.set_tooltip_text(copy_tooltip(cwd))
         label.add_css_class("caption")
         label.add_css_class("dim-label")
         enable_copy_on_click(label, lambda: cwd)
-        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         footer.add_css_class("tab-footer")
         footer.append(label)
         branch = current_branch(cwd)
         if branch:
+            # dividers flanking the branch label; the 8px box spacing on
+            # each side of them matches the footer's own 8px edge padding
+            footer.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
             branch_label = Gtk.Label(label=f"⎇ {branch}")
             branch_label.set_ellipsize(Pango.EllipsizeMode.END)
             branch_label.set_max_width_chars(24)
-            branch_label.set_tooltip_text(_("Git branch"))
+            branch_label.set_tooltip_text(copy_tooltip(branch))
             branch_label.add_css_class("caption")
             branch_label.add_css_class("dim-label")
+            enable_copy_on_click(branch_label, lambda: branch, lambda b: f"⎇ {b}")
             footer.append(branch_label)
+            footer.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
         return footer
 
     # -- compose ---------------------------------------------------------------

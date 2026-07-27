@@ -1,4 +1,4 @@
-"""Click-to-copy behaviour for the footer working-directory labels."""
+"""Click-to-copy behaviour for the footer labels (working directory, branch)."""
 
 from __future__ import annotations
 
@@ -16,32 +16,36 @@ from .i18n import _  # noqa: E402
 _FLASH_MS = 1200  # how long the "Copied" confirmation replaces the path
 
 
-def copy_tooltip(path: str) -> str:
-    """Tooltip for a copyable path label: the full path plus the click hint."""
-    return path + "\n" + _("Click to copy")
+def copy_tooltip(text: str) -> str:
+    """Tooltip for a copyable label: the full text plus the click hint."""
+    return text + "\n" + _("Click to copy")
 
 
-def enable_copy_on_click(label: Gtk.Label, get_path: Callable[[], str | None]) -> None:
-    """Copy the full path to the clipboard when the label is clicked.
+def enable_copy_on_click(
+    label: Gtk.Label,
+    get_text: Callable[[], str | None],
+    format_text: Callable[[str], str] = display_path,
+) -> None:
+    """Copy the label's full text to the clipboard when it is clicked.
 
     The label briefly shows a confirmation, then restores itself from
-    `get_path` (re-read at restore time, so a path that changed mid-flash
-    comes back current).
+    `get_text` rendered through `format_text` (re-read at restore time, so a
+    value that changed mid-flash comes back current).
     """
     label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
     flash_source: list[int] = []
 
     def restore() -> bool:
         flash_source.clear()
-        path = get_path()
-        label.set_text(display_path(path) if path else "")
+        text = get_text()
+        label.set_text(format_text(text) if text else "")
         return GLib.SOURCE_REMOVE
 
     def on_released(_gesture, _n_press, _x, _y) -> None:
-        path = get_path()
-        if not path:
+        text = get_text()
+        if not text:
             return
-        label.get_clipboard().set(path)
+        label.get_clipboard().set(text)
         label.set_text(_("Copied to clipboard"))
         if flash_source:
             GLib.source_remove(flash_source.pop())

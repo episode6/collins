@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -491,20 +491,29 @@ class TerminalTab(Gtk.Box):
 
     def _build_footer(self) -> Gtk.Widget:
         """Slim status row under the terminal: the tab's live working
-        directory, plus the buttons controlling the terminal panel."""
-        self._cwd_label = Gtk.Label(xalign=0.0, hexpand=True)
+        directory and git branch, plus the buttons controlling the terminal
+        panel."""
+        self._cwd_label = Gtk.Label(xalign=0.0)
         self._cwd_label.set_ellipsize(Pango.EllipsizeMode.START)
         self._cwd_label.add_css_class("caption")
         self._cwd_label.add_css_class("dim-label")
         enable_copy_on_click(self._cwd_label, lambda: self._footer_cwd)
+
+        # dividers flanking the branch label; the 8px box spacing on each
+        # side of them matches the footer's own 8px edge padding
+        self._branch_seps = tuple(
+            Gtk.Separator(orientation=Gtk.Orientation.VERTICAL) for _ in range(2)
+        )
+        for sep in self._branch_seps:
+            sep.set_visible(False)
 
         self._branch_label = Gtk.Label()
         self._branch_label.set_ellipsize(Pango.EllipsizeMode.END)
         self._branch_label.set_max_width_chars(24)
         self._branch_label.add_css_class("caption")
         self._branch_label.add_css_class("dim-label")
-        self._branch_label.set_tooltip_text(_("Git branch"))
         self._branch_label.set_visible(False)
+        enable_copy_on_click(self._branch_label, lambda: self._footer_branch, lambda b: f"⎇ {b}")
 
         # Only the selected tab is visible (and thus clickable), so routing
         # through the window's actions still targets the right tab.
@@ -516,10 +525,18 @@ class TerminalTab(Gtk.Box):
         self._swap_panel_btn.set_action_name("win.swap-panel")
         self._swap_panel_btn.set_visible(False)  # only shown while a panel is open
 
+        # cwd and branch sit together on the left; the wrapper box (not the
+        # cwd label) takes the slack so the buttons stay pinned right even
+        # while the branch label is hidden.
+        left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
+        left.append(self._cwd_label)
+        left.append(self._branch_seps[0])
+        left.append(self._branch_label)
+        left.append(self._branch_seps[1])
+
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         footer.add_css_class("tab-footer")
-        footer.append(self._cwd_label)
-        footer.append(self._branch_label)
+        footer.append(left)
         for btn in (toggle_btn, self._swap_panel_btn):
             btn.add_css_class("flat")
             footer.append(btn)
@@ -549,7 +566,10 @@ class TerminalTab(Gtk.Box):
         if branch != self._footer_branch:
             self._footer_branch = branch
             self._branch_label.set_text(f"⎇ {branch}" if branch else "")
+            self._branch_label.set_tooltip_text(copy_tooltip(branch) if branch else None)
             self._branch_label.set_visible(branch is not None)
+            for sep in self._branch_seps:
+                sep.set_visible(branch is not None)
 
     # -- graceful close ----------------------------------------------------
 
