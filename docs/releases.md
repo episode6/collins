@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-26. Full change history: git log for this file.
+fork. Last modified: 2026-07-27. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -15,9 +15,9 @@ downloads of each version, see the
 ### Shipped milestones
 
 - ✅ **Core** — sidebar of all sessions, embedded terminal tabs, resume/fork
-- ✅ **Organization** — favorites, custom names, project groups, search, quick switcher
-- ✅ **Insight** — session details, transcript peek, MCP servers & usage, waiting / interrupted badges
-- ✅ **Workflow** — idle notifications, graceful `/exit` close, Export as Markdown, tab emoji
+- ✅ **Organization** — favorites, custom names, auto-generated titles, project groups (reorderable, hideable), search, quick switcher
+- ✅ **Insight** — session details, transcript peek, MCP servers & usage, waiting / interrupted badges, Claude subscription usage panel
+- ✅ **Workflow** — terminal panel per tab, session backgrounding (`/bg`) & re-attach, graceful `/exit` close, per-tab cwd + git-branch footer, idle notifications, Export as Markdown, tab emoji
 - ✅ **Theming** — light/dark plus selectable terminal color palettes
 - ✅ **Localization** — English, Hungarian, German, Spanish, French
 - ✅ **Multi-window**
@@ -33,15 +33,50 @@ downloads of each version, see the
 
 ## Changelog
 
-### v2.0.0 — Rebrand to Collins
+### v0.1.0 — Collins
 
-- Renamed the fork from **Agent Session Manager** to **Collins** — app name,
-  command (`collins`), Python package, app id (`com.episode6.Collins`),
-  and docs. Forked from
-  [agent-session-manager](https://github.com/r4nd3l/agent-session-manager).
-- Existing settings, names, and favorites migrate automatically from the old
-  `~/.config/agent-session-manager/` (or older `~/.config/claude-session-manager/`)
-  location on first run.
+The first release under the **Collins** name, and the fork's version reset —
+Collins forked from
+[agent-session-manager](https://github.com/r4nd3l/agent-session-manager)
+([original project website](https://r4nd3l.github.io/agent-session-manager/))
+and restarted its version numbering at 0.1.0.
+
+- **Rebrand to Collins** — app name, command (`collins`), Python package, app
+  id (`com.episode6.Collins`), docs, and an original **Tom Collins glass**
+  app icon. Existing settings, names, and favorites migrate automatically from
+  the old `~/.config/agent-session-manager/` (or older
+  `~/.config/claude-session-manager/`) location on first run.
+- **Claude Code only** — the upstream Cursor provider was removed; this fork
+  focuses on Claude Code.
+- **Terminal panel** — a second plain-shell terminal per tab (`Ctrl+J`),
+  bottom or right, with persisted per-session layout and scrollback history.
+- **Claude usage panel** — subscription limits with reset countdowns under the
+  session list, polled every 5 minutes (paused while minimized/locked).
+- **Session backgrounding & re-attach** — close dialogs and header buttons can
+  background a session (`/bg`) instead of exiting it; opening a
+  still-running session attaches to the live process instead of resuming a
+  copy.
+- **Auto-generated session titles** — pre-existing sessions titled locally,
+  new ones summarized by a headless `claude -p --model haiku` run.
+- **Sidebar upgrades** — compact single-line rows, drag-to-reorder projects,
+  per-project `+` buttons, empty projects with hide/unhide, a "New Thread"
+  placeholder for just-started sessions, active-tab highlight, and
+  creation-time sorting.
+- **Per-tab footer** — the agent's live working directory (click to copy) and
+  the current git branch.
+- **Quality of life** — reopen the last active session on launch, remembered
+  window size, tab-bar hide toggle, `Ctrl+W` to close a tab, and retuned
+  defaults (easy copy & paste on, idle notifications off).
+
+---
+
+## Upstream history
+
+Everything below is the changelog of the upstream project,
+[agent-session-manager](https://github.com/r4nd3l/agent-session-manager) by
+Máté Molnár, as it stood at the fork point. Version numbers are upstream's
+(unrelated to Collins's own 0.1.0). Note that Cursor support, added upstream
+in v0.10.0, was removed in Collins.
 
 ### v1.0.0 — Native chat, replay & richer sessions
 

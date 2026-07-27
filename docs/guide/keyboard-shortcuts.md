@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-26. Full change history: git log for this file.
+fork. Last modified: 2026-07-27. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -22,3 +22,12 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
 | `Ctrl+K` | Clear the terminal panel (screen and saved history) |
 | `F9` | Toggle the sidebar |
 | `Ctrl+,` | Preferences |
+
+::: tip Easy copy & paste
+With **easy copy & paste** on (the default, see Preferences), `Ctrl+C` copies
+when text is selected — otherwise it interrupts as usual — and `Ctrl+V`
+pastes.
+:::
+
+Note that `Ctrl+K` clears the *panel* terminal app-wide, so it takes priority
+over the shell's own kill-line binding inside terminals.

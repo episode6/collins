@@ -107,6 +107,21 @@ The window flashes on screen for a few seconds — harmless. Always **look at
 the resulting PNG** before using it; a blank or half-populated frame means
 the store hadn't settled (raise `--settle-ms`).
 
+## Refreshing the docs screenshot set
+
+`.agents/capture-screenshots/scripts/stage-docs-data.sh <dir>` stages the
+richer scene used by the docs site (three projects, MCP config, a usage
+fixture, git repos for the branch footer, transcripts with models/tokens, and
+a `claude` shim in `<dir>/bin` that renders demo output for `--resume`).
+`scripts/capture-docs.py <repo-root> <out.png> --scene NAME` then captures one
+of: `main-window`, `sidebar-search`, `quick-switcher`, `tab-emoji`,
+`session-details`, `mcp-servers`, `preferences`, `terminal-panel`, `hero`
+(the last one is `data/screenshot.png`). Run it with the isolation env from
+above **plus** `COLLINS_USAGE_FIXTURE=<dir>/usage-fixture.json`, `HOME=<dir>`
+(so paths render as `~/dev/...`), and `PATH=<dir>/bin:$PATH` (so the typed
+command is the shim). The two sidebar images in `docs/public/img/` are crops
+of the leftmost ~417px of the `hero` and `sidebar-search` shots.
+
 ## Before/after comparisons
 
 Capture "before" from a temporary worktree of main — the first argument to
