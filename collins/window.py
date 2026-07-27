@@ -600,11 +600,24 @@ class MainWindow(Adw.ApplicationWindow):
         providers = available_providers()
         return providers[0] if providers else get_provider("claude")
 
+    def _visible_project_dir(self) -> str | None:
+        """Project directory of the session in the visible tab: the directory
+        the session was started in, not its current working directory (which
+        may have moved into a git worktree). None when the visible tab has no
+        bound session or the directory no longer exists."""
+        session_id = self._active_session_id()
+        if session_id is None:
+            return None
+        session = self.store.get_session(session_id)
+        if session is not None and session.cwd and Path(session.cwd).is_dir():
+            return session.cwd
+        return None
+
     def _new_session(self, provider=None) -> None:
-        """Start in the remembered folder if it still exists, else ask."""
+        """Start in the visible session's project directory, else ask."""
         provider = provider or self._default_provider()
-        default = self.state.get_setting("new_session_dir")
-        if default and Path(default).is_dir():
+        default = self._visible_project_dir()
+        if default:
             self._start_new_session(default, provider)
         else:
             self._choose_new_session_folder(provider)
@@ -612,8 +625,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _choose_new_session_folder(self, provider=None) -> None:
         self._new_session_provider = provider or self._default_provider()
         dialog = Gtk.FileDialog(title=_("Choose project directory"))
-        default = self.state.get_setting("new_session_dir")
-        if default and Path(default).is_dir():
+        default = self._visible_project_dir()
+        if default:
             dialog.set_initial_folder(Gio.File.new_for_path(default))
         dialog.select_folder(self, None, self._on_new_session_folder)
 
@@ -623,7 +636,6 @@ class MainWindow(Adw.ApplicationWindow):
         except GLib.Error:
             return  # cancelled
         cwd = folder.get_path()
-        self.state.set_setting("new_session_dir", cwd)  # remember for next time
         self._start_new_session(cwd, getattr(self, "_new_session_provider", None))
 
     def _start_new_session(self, cwd: str, provider=None, options=None) -> None:
@@ -676,8 +688,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _new_session_advanced(self, provider) -> None:
         self._adv_provider = provider or self._default_provider()
         dialog = Gtk.FileDialog(title=_("Choose project directory"))
-        default = self.state.get_setting("new_session_dir")
-        if default and Path(default).is_dir():
+        default = self._visible_project_dir()
+        if default:
             dialog.set_initial_folder(Gio.File.new_for_path(default))
         dialog.select_folder(self, None, self._on_advanced_folder)
 
@@ -687,7 +699,6 @@ class MainWindow(Adw.ApplicationWindow):
         except GLib.Error:
             return
         cwd = folder.get_path()
-        self.state.set_setting("new_session_dir", cwd)
         provider = getattr(self, "_adv_provider", None) or self._default_provider()
         dialogs.new_session_options_dialog(
             self, provider, lambda opts: self._start_new_session(cwd, provider, opts)
@@ -696,8 +707,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _continue_session(self, provider) -> None:
         self._cont_provider = provider or self._default_provider()
         dialog = Gtk.FileDialog(title=_("Choose project directory"))
-        default = self.state.get_setting("new_session_dir")
-        if default and Path(default).is_dir():
+        default = self._visible_project_dir()
+        if default:
             dialog.set_initial_folder(Gio.File.new_for_path(default))
         dialog.select_folder(self, None, self._on_continue_folder)
 
@@ -707,7 +718,6 @@ class MainWindow(Adw.ApplicationWindow):
         except GLib.Error:
             return
         cwd = folder.get_path()
-        self.state.set_setting("new_session_dir", cwd)
         provider = getattr(self, "_cont_provider", None) or self._default_provider()
         tab = TerminalTab(
             cwd=cwd, settings=self.state.settings, provider=provider,
@@ -799,8 +809,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._new_chat_provider = provider
         self._new_chat_variant_key = variant_key
         dialog = Gtk.FileDialog(title=_("Choose project directory"))
-        default = self.state.get_setting("new_session_dir")
-        if default and Path(default).is_dir():
+        default = self._visible_project_dir()
+        if default:
             dialog.set_initial_folder(Gio.File.new_for_path(default))
         dialog.select_folder(self, None, self._on_new_chat_folder)
 
@@ -810,7 +820,6 @@ class MainWindow(Adw.ApplicationWindow):
         except GLib.Error:
             return  # cancelled
         cwd = folder.get_path()
-        self.state.set_setting("new_session_dir", cwd)
         self._start_new_chat_session(
             cwd,
             getattr(self, "_new_chat_provider", None),
