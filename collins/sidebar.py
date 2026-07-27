@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -249,8 +249,9 @@ class SessionRow(Gtk.ListBoxRow):
         flags = GObject.BindingFlags.SYNC_CREATE
         item.bind_property("display-name", name_label, "label", flags)
         item.bind_property("subtitle", time_label, "label", flags)
-        # A backgrounded session mid-handoff (its fork not yet scanned) stays
-        # visible but disabled, so it can't be opened into a stale state.
+        # A backgrounded session mid-handoff (its legacy /bg fork not yet
+        # scanned) stays visible but disabled, so it can't be opened into a
+        # stale state.
         item.bind_property(
             "syncing", self, "sensitive", flags | GObject.BindingFlags.INVERT_BOOLEAN
         )

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -247,13 +247,14 @@ class SessionStore(GObject.Object):
         self.emit("refreshed", order_changed)
 
     def forward_state(self, session: Session) -> str:
-        """How a session's forward (recorded when /bg forked it) affects its
-        row: "moved" — the fork is discovered, this row is replaced by it;
-        "syncing" — the fork's transcript exists and a scan will surface it,
-        keep the row visible but disabled until then; "" — no forward, or the
-        fork's transcript vanished (e.g. trashed) or never became a real
-        session (a /bg fork whose agent died leaving a metadata-only stub),
-        so the forward is stale and the row behaves normally again."""
+        """How a session's forward (recorded when a legacy /bg forked it)
+        affects its row: "moved" — the fork is discovered, this row is
+        replaced by it; "syncing" — the fork's transcript exists and a scan
+        will surface it, keep the row visible but disabled until then; "" —
+        no forward, or the fork's transcript vanished (e.g. trashed) or never
+        became a real session (a fork whose agent died leaving a
+        metadata-only stub), so the forward is stale and the row behaves
+        normally again."""
         target = self.state.resolve_forward(session.session_id)
         if target == session.session_id:
             return ""
@@ -355,9 +356,10 @@ class SessionStore(GObject.Object):
         self._apply()
 
     def record_forward(self, old_id: str, new_id: str) -> None:
-        """A backgrounded session continued under a new id: carry the user's
-        metadata (and panel history) over, hide the stale original row, and
-        remember the forward so opening the old session redirects."""
+        """A backgrounded session continued under a new id (a legacy /bg
+        fork): carry the user's metadata (and panel history) over, hide the
+        stale original row, and remember the forward so opening the old
+        session redirects."""
         self.state.forward_session(old_id, new_id)
         panelhistory.copy(old_id, new_id)
         self._apply()

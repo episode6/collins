@@ -28,9 +28,12 @@ still running detached — say you backgrounded it with `/bg` — Collins finds
 the live process via `claude agents --json` and types `claude attach <job-id>`
 instead, reconnecting rather than resuming a copy.
 
-Backgrounding a session forks its conversation to a new session id; Collins
-tracks the forwarding so the old sidebar row is replaced by the live one and
-names, favorites, emoji, and panel state carry over.
+On current Claude Code versions, backgrounding (`/bg`) detaches the session
+in place — the same session id keeps running as a background agent, so the
+sidebar row simply stays put. Older CLI versions instead forked the
+conversation to a new session id; when that happens, Collins tracks the
+forwarding so the old sidebar row is replaced by the live one and names,
+favorites, emoji, and panel state carry over.
 
 ## Session titles
 

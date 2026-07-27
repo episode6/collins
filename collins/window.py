@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -550,9 +550,10 @@ class MainWindow(Adw.ApplicationWindow):
         provider = get_provider(session.provider)
         fork = fork and provider.supports_fork
         if not fork:
-            # A backgrounded session may have continued under a new id (/bg
-            # forks the conversation): open the live end of the chain instead
-            # of the stale original. Forks stay on the id the user picked.
+            # A backgrounded session may have continued under a new id (older
+            # CLIs' /bg forked the conversation): open the live end of the
+            # chain instead of the stale original. Forks stay on the id the
+            # user picked.
             forward = self.store.forward_state(session)
             if forward == "moved":
                 session = self.store.get_session(
@@ -998,18 +999,21 @@ class MainWindow(Adw.ApplicationWindow):
         GLib.timeout_add(300, self._poll_graceful, page, tab)
 
     def _watch_background_fork(self, tab: TerminalTab) -> None:
-        """/bg doesn't detach the session in place: Claude spawns a background
-        agent under a *new* session id whose transcript is a copy of the
-        conversation, leaving the original behind as a stale duplicate. Watch
-        the agent list (off the main thread) for that successor and record
-        old -> new, so the stale row is hidden, the user's name/emoji/favorite
-        carry over, and opening the old session redirects to the live one.
+        """Confirm the session is running detached, and record its successor
+        id if the CLI forked one. Current Claude CLIs detach in place on /bg —
+        the same session id keeps running as a background agent — but older
+        CLIs spawned the background agent under a *new* session id whose
+        transcript was a copy of the conversation, leaving the original behind
+        as a stale duplicate. Watch the agent list (off the main thread) for
+        either outcome. The tab's own session id appearing means an in-place
+        detach: nothing to record. A fresh id with a matching conversation
+        means a legacy fork: record old -> new, so the stale row is hidden,
+        the user's name/emoji/favorite carry over, and opening the old
+        session redirects to the live one.
 
-        A tab that was *attached* to an already-detached session is different:
-        /bg spawns no fork there — the CLI just drops back to its agent-list
-        screen and keeps the terminal, so the close would hang until the
-        force-close safety net. Its own session id showing up as a background
-        agent is the tell; either way, once the session is confirmed running
+        Either way the CLI may keep the terminal after /bg (parked on its
+        agent-list screen), which would hang the pending close until the
+        force-close safety net — so once the session is confirmed running
         detached, the CLI gets an /exit nudge if it still holds the terminal."""
         old_id = tab.session_id
         provider = tab.provider
@@ -1043,11 +1047,10 @@ class MainWindow(Adw.ApplicationWindow):
             return bool(cwd and agent.cwd and agent.cwd == cwd)
 
         def work() -> None:
-            for _attempt in range(30):  # the fork appears within seconds of the /bg
+            for _attempt in range(30):  # the agent entry appears within seconds of /bg
                 for agent in provider.background_agents():
                     if agent.session_id == old_id:
-                        # Already detached in place (this tab was attached to
-                        # a running background agent): no fork to record.
+                        # Detached in place (current CLIs): no fork to record.
                         GLib.idle_add(self._on_backgrounded, tab, old_id, "")
                         return
                     if matches(agent):
@@ -1059,7 +1062,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_backgrounded(self, tab: TerminalTab, old_id: str, new_id: str) -> bool:
         """The tab's session is confirmed running detached (new_id is its
-        fork's session id, or "" when it detached in place)."""
+        legacy fork's session id, or "" when it detached in place — the
+        normal case on current CLIs)."""
         if new_id:
             self.store.record_forward(old_id, new_id)
         # Give the CLI a moment to exit on its own before nudging it off any
