@@ -45,6 +45,7 @@ export default defineConfig({
             { text: 'Features', link: '/guide/features' },
             { text: 'Keyboard Shortcuts', link: '/guide/keyboard-shortcuts' },
             { text: 'How It Works', link: '/guide/how-it-works' },
+            { text: 'FAQ', link: '/guide/faq' },
           ],
         },
       ],
