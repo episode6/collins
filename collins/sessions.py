@@ -140,6 +140,30 @@ def _scan_transcript(path: Path) -> tuple[str | None, str, float | None]:
     return cwd, preview, created
 
 
+def transcript_is_stub(cwd: str | None, preview: str) -> bool:
+    """Whether a transcript's scan results mark it as a metadata-only stub.
+
+    Claude leaves such transcripts (ai-title / agent-name lines only — no
+    cwd, no user message) behind for worktree agent runs, and for /bg forks
+    whose background agent exits before the conversation copy is written.
+    They can't be resumed, so discovery skips them.
+    """
+    return cwd is None and not preview
+
+
+def is_discoverable_transcript(path: Path) -> bool:
+    """Whether a scan would surface `path` as a session row: a non-empty
+    transcript file that isn't a metadata-only stub. Mirrors the filters in
+    ClaudeProvider.discover()."""
+    try:
+        if path.stat().st_size == 0:
+            return False
+    except OSError:
+        return False
+    cwd, preview, _created = _scan_transcript(path)
+    return not transcript_is_stub(cwd, preview)
+
+
 def first_message_uuid(path: Path) -> str | None:
     """The uuid of a transcript's first user/assistant message, or None.
 

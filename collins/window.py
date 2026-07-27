@@ -553,19 +553,19 @@ class MainWindow(Adw.ApplicationWindow):
             # A backgrounded session may have continued under a new id (/bg
             # forks the conversation): open the live end of the chain instead
             # of the stale original. Forks stay on the id the user picked.
-            forwarded = self.state.resolve_forward(session.session_id)
-            if forwarded != session.session_id:
-                target = self.store.get_session(forwarded)
-                if target is not None:
-                    session = target
-                elif (session.jsonl_path.parent / f"{forwarded}.jsonl").is_file():
-                    # The fork exists but the store hasn't scanned it yet.
-                    # Its sidebar row is disabled during this window; guard
-                    # the other entry paths (switcher, session restore) too
-                    # rather than open the stale original.
-                    return
-                # Fork transcript gone (e.g. trashed): stale forward — fall
-                # through and open the original normally.
+            forward = self.store.forward_state(session)
+            if forward == "moved":
+                session = self.store.get_session(
+                    self.state.resolve_forward(session.session_id)
+                )
+            elif forward == "syncing":
+                # The fork exists but the store hasn't scanned it yet.
+                # Its sidebar row is disabled during this window; guard
+                # the other entry paths (switcher, session restore) too
+                # rather than open the stale original.
+                return
+            # Fork transcript gone (e.g. trashed) or never a real session
+            # (dead /bg stub): stale forward — open the original normally.
             page = self._pages.get(session.session_id)
             if page is not None:
                 self.tab_view.set_selected_page(page)

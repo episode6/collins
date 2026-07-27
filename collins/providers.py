@@ -26,6 +26,7 @@ from .sessions import (
     SessionDetails,
     _scan_transcript,
     _tail_state,
+    transcript_is_stub,
 )
 from .sessions import parse_details as _claude_parse_details
 from .titles import scratch_project_dirname
@@ -368,11 +369,10 @@ class ClaudeProvider(Provider):
                 if stat.st_size == 0:
                     continue
                 cwd, preview, created = _scan_transcript(jsonl)
-                # Claude's worktree agent runs leave metadata-only stubs
-                # (ai-title/agent-name lines) behind: no cwd, no user message.
-                # They can't be resumed and would surface phantom projects
-                # named after the munged worktree path.
-                if cwd is None and not preview:
+                # Metadata-only stubs (worktree agent runs, dead /bg forks)
+                # can't be resumed and would surface phantom projects named
+                # after the munged worktree path.
+                if transcript_is_stub(cwd, preview):
                     continue
                 found.append(
                     Session(
