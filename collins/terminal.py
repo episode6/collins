@@ -21,6 +21,7 @@ from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 from . import panelhistory, themes  # noqa: E402
 from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
 from .formatting import display_path  # noqa: E402
+from .gitinfo import current_branch  # noqa: E402
 from .i18n import _  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
@@ -305,6 +306,7 @@ class TerminalTab(Gtk.Box):
         self.append(self._paned)
 
         self._footer_cwd: str | None = None  # last value shown in the footer
+        self._footer_branch: str | None = None
         self._cwd_refresh_source: int | None = None
         self.append(self._build_footer())
 
@@ -496,6 +498,14 @@ class TerminalTab(Gtk.Box):
         self._cwd_label.add_css_class("dim-label")
         enable_copy_on_click(self._cwd_label, lambda: self._footer_cwd)
 
+        self._branch_label = Gtk.Label()
+        self._branch_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self._branch_label.set_max_width_chars(24)
+        self._branch_label.add_css_class("caption")
+        self._branch_label.add_css_class("dim-label")
+        self._branch_label.set_tooltip_text(_("Git branch"))
+        self._branch_label.set_visible(False)
+
         # Only the selected tab is visible (and thus clickable), so routing
         # through the window's actions still targets the right tab.
         toggle_btn = Gtk.Button(icon_name="utilities-terminal-symbolic")
@@ -509,6 +519,7 @@ class TerminalTab(Gtk.Box):
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         footer.add_css_class("tab-footer")
         footer.append(self._cwd_label)
+        footer.append(self._branch_label)
         for btn in (toggle_btn, self._swap_panel_btn):
             btn.add_css_class("flat")
             footer.append(btn)
@@ -534,6 +545,11 @@ class TerminalTab(Gtk.Box):
             self._footer_cwd = cwd
             self._cwd_label.set_text(display_path(cwd) if cwd else "")
             self._cwd_label.set_tooltip_text(copy_tooltip(cwd) if cwd else None)
+        branch = current_branch(cwd)  # rechecked every tick: checkouts don't change the cwd
+        if branch != self._footer_branch:
+            self._footer_branch = branch
+            self._branch_label.set_text(f"⎇ {branch}" if branch else "")
+            self._branch_label.set_visible(branch is not None)
 
     # -- graceful close ----------------------------------------------------
 

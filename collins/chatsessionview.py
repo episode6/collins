@@ -23,6 +23,7 @@ from .chatbubbles import make_bubble, make_label, make_tool_chip, set_bubble_tex
 from .chatsession import Event, make_chat_session  # noqa: E402
 from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
 from .formatting import display_path  # noqa: E402
+from .gitinfo import current_branch  # noqa: E402
 from .i18n import _  # noqa: E402
 from .providers import ChatVariant, Provider  # noqa: E402
 
@@ -108,9 +109,18 @@ class ChatSessionTab(Gtk.Box):
         label.add_css_class("caption")
         label.add_css_class("dim-label")
         enable_copy_on_click(label, lambda: cwd)
-        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         footer.add_css_class("tab-footer")
         footer.append(label)
+        branch = current_branch(cwd)
+        if branch:
+            branch_label = Gtk.Label(label=f"⎇ {branch}")
+            branch_label.set_ellipsize(Pango.EllipsizeMode.END)
+            branch_label.set_max_width_chars(24)
+            branch_label.set_tooltip_text(_("Git branch"))
+            branch_label.add_css_class("caption")
+            branch_label.add_css_class("dim-label")
+            footer.append(branch_label)
         return footer
 
     # -- compose ---------------------------------------------------------------
