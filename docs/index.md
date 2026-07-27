@@ -30,6 +30,9 @@ features:
   - icon: 🖥️
     title: Embedded terminals
     details: Click a session to resume it in a real VTE terminal tab — in the directory it last worked in, inside your own shell — plus a secondary shell panel per tab (Ctrl+J).
+  - icon: 📋
+    title: Copy & paste that just works
+    details: Plain Ctrl+C copies whenever text is selected (and interrupts otherwise); Ctrl+V pastes; right-click for a menu. No Ctrl+Shift gymnastics.
   - icon: 🏷️
     title: Name & tag freely
     details: Give sessions custom names and tabs emoji prefixes. Everything is stored app-side; your agents' own data is never touched.

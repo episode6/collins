@@ -28,7 +28,7 @@ Features:
 - **Clicking a session** opens a tab in the main area; each tab is an embedded **VTE terminal** running your `$SHELL` with the agent's resume command (`claude --resume <session-id>` for Claude Code) typed into it, in the directory the session last worked in (worktree-aware). If the session is still running detached, Collins **re-attaches** to the live process (`claude attach`) instead of resuming a copy. When the agent exits you drop to a shell prompt; the tab closes when the shell exits. Closing a tab asks the agent to exit cleanly (Claude Code's `/exit`) in the background first — or, for agents that support it, the close dialog offers to **background the session** instead (Claude Code's `/bg`), leaving it running detached to re-attach to later. On the next launch the app **reopens the session you had focused** when you closed it, and the window comes back at its last size.
 - **In-terminal search** with a find bar (`Ctrl+Shift+G`) over the tab's scrollback.
 - **Terminal panel** (`Ctrl+J`, or the small buttons in the window's bottom-right corner): every tab has a second plain-shell terminal — no agent auto-launched — below or beside the agent terminal. It opens in the agent's *current* working directory (worktree-aware), and the swap button (shown only while a panel is open) moves it bottom↔right without restarting its shell — each layout's panel size is remembered per tab while the app runs, and the last-set size per layout is saved app-wide, so every panel opened from then on defaults to it. Typing `exit` in it hides the panel; the last-used position (bottom/right) is remembered app-wide, and whichever panel you open next defaults to it. Closing a tab while a command is running in its panel — even a hidden one — asks for confirmation before the command is killed. Closing the whole window with busy sessions shows a **single confirmation** — close (every agent is asked to exit cleanly) or background the sessions (`/bg`) — before the window goes away.
-- **Copy & paste**: `Ctrl+Shift+C` / `Ctrl+Shift+V`, plus an optional **easy copy & paste** mode (Preferences): `Ctrl+C` copies when text is selected — otherwise interrupts as usual — `Ctrl+V` pastes, and right-click opens a Copy / Paste / Select All menu.
+- **Easy copy & paste** (on by default): plain `Ctrl+C` **copies whenever text is selected** — otherwise it interrupts the agent as usual — plain `Ctrl+V` pastes, and right-click opens a Copy / Paste / Select All menu. No `Ctrl+Shift` finger-twisting just because it's a terminal (`Ctrl+Shift+C` / `Ctrl+Shift+V` still work, and the mode can be turned off in Preferences).
 - **Status dots** in both the sidebar and on each open tab: green = open, blue = output arrived in a background tab. A **waiting badge** (amber ?) marks sessions where the agent's last message was a question awaiting your reply, and an **interrupted badge** (red stop icon) marks sessions you stopped mid-task.
 - A **Claude usage panel** at the bottom of the sidebar shows your subscription limits (session, weekly, extra usage) as progress bars with reset countdowns — read straight from the `claude` CLI's own login, refreshed every 5 minutes (paused while the window is minimized or the screen is locked). Toggle it in Preferences.
 - **Tabs** can be renamed, given an emoji prefix, or have their session ID copied (right-click → Rename… / Set emoji… / Copy session ID); renaming a session's tab updates its name everywhere. While a session tab is focused, header buttons **exit** or **background** it and close the tab immediately — no confirmation dialog — the **tab bar can be hidden** with its own header toggle, and the **sidebar toggles** with the header button or `F9`. **Shift+Enter** inserts a newline in the agent's prompt.
@@ -55,7 +55,8 @@ Features:
 | `Ctrl+Shift+N` | New window |
 | `Ctrl+W` | Close current tab |
 | `Ctrl+PgUp` / `Ctrl+PgDn` | Previous / next tab |
-| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in terminal |
+| `Ctrl+C` / `Ctrl+V` | Copy selection / paste (easy copy & paste, on by default) |
+| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in terminal (always available) |
 | `Ctrl+Shift+G` | Find in terminal |
 | `Ctrl+Shift+K` | Quick switcher (jump to any session) |
 | `Ctrl+Shift+E` | Toggle 😊 marker on the current tab |
@@ -105,7 +106,7 @@ sudo apt install ./collins_0.1.0_all.deb
 
 Dependencies are pulled in automatically; the app appears in your app grid as "Collins".
 
-Terminal shortcuts: `Ctrl+Shift+C` copy, `Ctrl+Shift+V` paste.
+Terminal copy & paste works the way you'd expect out of the box: plain `Ctrl+C` (when text is selected) and `Ctrl+V` — see **easy copy & paste** above. `Ctrl+Shift+C` / `Ctrl+Shift+V` always work too.
 
 ## Layout
 

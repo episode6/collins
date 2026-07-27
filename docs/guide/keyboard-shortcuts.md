@@ -13,7 +13,8 @@ fork. Last modified: 2026-07-27. Full change history: git log for this file.
 | `Ctrl+Shift+N` | New window |
 | `Ctrl+W` | Close the current tab |
 | `Ctrl+PgUp` / `Ctrl+PgDn` | Previous / next tab |
-| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in the terminal |
+| `Ctrl+C` / `Ctrl+V` | Copy selection / paste (easy copy & paste, on by default) |
+| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in the terminal (always available) |
 | `Ctrl+Shift+G` | Find in the terminal |
 | `Ctrl+Shift+K` | Quick switcher — jump to any session |
 | `Ctrl+Shift+E` | Toggle a 😊 marker on the current tab |

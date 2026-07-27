@@ -94,10 +94,12 @@ agents' own session files are never modified.
   (`--fork-session`) from the right-click menu.
 - **Shift+Enter** inserts a newline in the agent's prompt.
 - **In-terminal search** (`Ctrl+Shift+G`) over the scrollback.
-- **Copy & paste**: `Ctrl+Shift+C` / `Ctrl+Shift+V`, plus an **easy copy &
-  paste** mode (on by default; Preferences): `Ctrl+C` copies when text is
-  selected — otherwise interrupts as usual — `Ctrl+V` pastes, and
-  right-click opens a Copy / Paste / Select All menu.
+- **Easy copy & paste** (on by default): plain `Ctrl+C` **copies whenever
+  text is selected** — otherwise it interrupts the agent as usual — plain
+  `Ctrl+V` pastes, and right-click opens a Copy / Paste / Select All menu.
+  No `Ctrl+Shift` finger-twisting just because it's a terminal; the classic
+  `Ctrl+Shift+C` / `Ctrl+Shift+V` always work, and the mode can be toggled
+  in Preferences.
 - Closing a tab asks the agent to **exit cleanly** (Claude Code's `/exit`) in
   the background first, rather than terminating it. For agents that support
   it, the close dialog also offers to **background the session** instead
