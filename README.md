@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-26. Full change history: git log for this file.
+fork. Last modified: 2026-07-27. Full change history: git log for this file.
 -->
 
 # Collins
@@ -10,9 +10,9 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
 
 Native GTK4/libadwaita desktop app to browse, name, and resume your [Claude Code](https://claude.com/claude-code) sessions in embedded terminal tabs.
 
-> My wife keeps referring to Claude as Collins. So now when she asks me if I'm talking to Collins, I can say yes
+> My wife keeps referring to Claude as Collins by mistake. So now when she asks me if I'm talking to Collins, I can say yes.
 
-Collins is a fork of [agent-session-manager](https://github.com/r4nd3l/agent-session-manager) by Máté Molnár — all credit for the original app goes there. This fork is GPL-3.0 like the original.
+Collins is a fork of [agent-session-manager](https://github.com/r4nd3l/agent-session-manager) by Máté Molnár ([original project website](https://r4nd3l.github.io/agent-session-manager/)) — all credit for the original app goes there. This fork is GPL-3.0 like the original.
 
 📖 **[Documentation](https://episode6.github.io/collins/)**
 
@@ -24,29 +24,27 @@ Collins is a fork of [agent-session-manager](https://github.com/r4nd3l/agent-ses
 Features:
 
 - **Sidebar** lists every session found on disk (for Claude Code, under `~/.claude/projects/`), grouped by project (collapsible headers, with collapse-all/expand-all buttons next to the search box), with a **Favorites** section pinned on top — star a session to move it there. **Drag a project header** to rearrange projects — the order and each project's expanded state persist across restarts. A **search box** filters by name, project, preview, or session id, and the list **updates live** as sessions are created or written to.
-- Sessions can be given **custom names** (pencil icon), and unnamed sessions get an **auto-generated title**: pre-existing sessions are titled locally on launch (first 10 words of the initial prompt), while sessions created during an app run have their first prompt summarized to ≤5 words by a headless `claude -p --model haiku` run — the same CLI and login the whole app is based on, no extra credentials needed. Titles are persisted so each is generated only once; right-click → **Regenerate name** re-runs the model for one session, and a Preferences toggle turns auto-titling off (a manual rename always wins). Names, favorites, and hidden sessions persist in `~/.config/collins/state.json` — your agents' own session files are never modified.
-- **Clicking a session** opens a tab in the main area; each tab is an embedded **VTE terminal** running your `$SHELL` with the agent's resume command (`claude --resume <session-id>` for Claude Code) typed into it, in the session's original project directory. When the agent exits you drop to a shell prompt; the tab closes when the shell exits. Closing a tab asks the agent to exit cleanly (Claude Code's `/exit`) in the background first — or, for agents that support it, the close dialog offers to **background the session** instead (Claude Code's `/bg`), leaving it running detached to re-attach to later.
+- Sessions can be given **custom names** (right-click → Rename…, or rename the session's tab), and unnamed sessions get an **auto-generated title**: pre-existing sessions are titled locally on launch (first 10 words of the initial prompt), while sessions created during an app run have their first prompt summarized to ≤5 words by a headless `claude -p --model haiku` run — the same CLI and login the whole app is based on, no extra credentials needed. Titles are persisted so each is generated only once; right-click → **Regenerate name** re-runs the model for one session, and a Preferences toggle turns auto-titling off (a manual rename always wins). Names, favorites, and hidden sessions persist in `~/.config/collins/state.json` — your agents' own session files are never modified.
+- **Clicking a session** opens a tab in the main area; each tab is an embedded **VTE terminal** running your `$SHELL` with the agent's resume command (`claude --resume <session-id>` for Claude Code) typed into it, in the directory the session last worked in (worktree-aware). If the session is still running detached, Collins **re-attaches** to the live process (`claude attach`) instead of resuming a copy. When the agent exits you drop to a shell prompt; the tab closes when the shell exits. Closing a tab asks the agent to exit cleanly (Claude Code's `/exit`) in the background first — or, for agents that support it, the close dialog offers to **background the session** instead (Claude Code's `/bg`), leaving it running detached to re-attach to later. On the next launch the app **reopens the session you had focused** when you closed it, and the window comes back at its last size.
 - **In-terminal search** with a find bar (`Ctrl+Shift+G`) over the tab's scrollback.
 - **Terminal panel** (`Ctrl+J`, or the small buttons in the window's bottom-right corner): every tab has a second plain-shell terminal — no agent auto-launched — below or beside the agent terminal. It opens in the agent's *current* working directory (worktree-aware), and the swap button (shown only while a panel is open) moves it bottom↔right without restarting its shell — each layout's panel size is remembered per tab while the app runs, and the last-set size per layout is saved app-wide, so every panel opened from then on defaults to it. Typing `exit` in it hides the panel; the last-used position (bottom/right) is remembered app-wide, and whichever panel you open next defaults to it. Closing a tab while a command is running in its panel — even a hidden one — asks for confirmation before the command is killed. Closing the whole window with busy sessions shows a **single confirmation** — close (every agent is asked to exit cleanly) or background the sessions (`/bg`) — before the window goes away.
-- **Copy & paste**: `Ctrl+Shift+C` / `Ctrl+Shift+V`, plus an optional **easy copy & paste** mode (Preferences): `Ctrl+C` copies when text is selected — otherwise interrupts as usual — `Ctrl+V` pastes, and right-click opens a Copy / Paste / Select All menu.
-- **Status dots** in both the sidebar and on each open tab: green = open, blue = output arrived in a background tab. A **waiting badge** (amber ?) marks sessions where the agent's last message was a question awaiting your reply.
-- **Tabs** can be renamed, given an emoji prefix, or have their session ID copied (right-click → Rename… / Set emoji… / Copy session ID); renaming a session's tab updates its name everywhere. While a session tab is focused, header buttons **exit** or **background** it and close the tab immediately — no confirmation dialog — and the **sidebar toggles** with the header button or `F9`. **Shift+Enter** inserts a newline in the agent's prompt.
-- **Right-click a session** for the full action set: open, open in [Ghostty](https://ghostty.org) (external window — Ghostty can't be embedded), fork (`--fork-session`), rename, favorite, **details** (messages/models/tokens, a peek at recent messages, and MCP servers/usage), copy session id, reveal transcript, hide, or move the transcript to trash.
+- **Easy copy & paste** (on by default): plain `Ctrl+C` **copies whenever text is selected** — otherwise it interrupts the agent as usual — plain `Ctrl+V` pastes, and right-click opens a Copy / Paste / Select All menu. No `Ctrl+Shift` finger-twisting just because it's a terminal (`Ctrl+Shift+C` / `Ctrl+Shift+V` still work, and the mode can be turned off in Preferences).
+- **Status dots** in both the sidebar and on each open tab: green = open, blue = output arrived in a background tab. A **waiting badge** (amber ?) marks sessions where the agent's last message was a question awaiting your reply, and an **interrupted badge** (red stop icon) marks sessions you stopped mid-task.
+- A **Claude usage panel** at the bottom of the sidebar shows your subscription limits (session, weekly, extra usage) as progress bars with reset countdowns — read straight from the `claude` CLI's own login, refreshed every 5 minutes (paused while the window is minimized or the screen is locked). Toggle it in Preferences.
+- **Tabs** can be renamed, given an emoji prefix, or have their session ID copied (right-click → Rename… / Set emoji… / Copy session ID); renaming a session's tab updates its name everywhere. While a session tab is focused, header buttons **exit** or **background** it and close the tab immediately — no confirmation dialog — the **tab bar can be hidden** with its own header toggle, and the **sidebar toggles** with the header button or `F9`. **Shift+Enter** inserts a newline in the agent's prompt.
+- Each tab has a slim **footer** showing the agent's live working directory (click to copy; worktree-aware) and the current **git branch** (⎇), plus the terminal-panel buttons.
+- **Right-click a session** for the full action set: open, open in [Ghostty](https://ghostty.org) (external window — Ghostty can't be embedded), fork (`--fork-session`), rename, regenerate name, favorite, **details** (messages/models/tokens, a peek at recent messages, and MCP servers/usage), copy session id, export as Markdown, reveal transcript, hide, move the transcript to trash, or delete permanently. **Right-click a project header** to start a new session there or hide the whole project — projects with no visible sessions still show their header (with a `+` button) so a folder stays reachable.
 - **Desktop notifications** when a background session goes quiet after producing output — click to jump to that tab (toggle in Preferences).
 - **Select mode** (checkbox button in the sidebar header) for bulk actions: open, star, hide, or trash many sessions at once.
-- **New session** (tab icon in the header) asks for a project folder and starts a fresh agent session (`claude`) there.
-- **Quick switcher** (`Ctrl+Shift+K`) jumps to any session by type-ahead; the **New Session** button remembers your last folder; the sidebar is **resizable** and its width is remembered.
+- **New session** (tab icon in the header) starts a fresh agent session (`claude`) in the **visible session's project** — no dialog needed; with no session visible it asks for a folder. Every project header also has a **`+` button** to start a session right there, and a just-started session shows a **"New Thread"** placeholder row until the agent writes its transcript.
+- **Quick switcher** (`Ctrl+Shift+K`) jumps to any session by type-ahead; the sidebar is **resizable** and its width is remembered.
 - **MCP servers browser** (menu → MCP servers): a read-only view of every MCP server configured in `~/.claude.json`, global and per-project.
-- **Preferences** (menu → Preferences, or `Ctrl+,`): terminal font, scrollback, color scheme, **easy copy & paste**, plus **Show folder path** and **Auto-generate session titles** toggles for the sidebar.
-- A status footer shows session, project, transcript-size, and open-tab counts.
+- **Preferences** (menu → Preferences, or `Ctrl+,`): terminal font, scrollback, **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin, Tokyo Night, Monokai, One Dark…), color scheme, **language** (English, Magyar, Deutsch, Español, Français), **easy copy & paste**, idle notifications, plus **Show folder path**, **Show Claude usage**, and **Auto-generate session titles** toggles for the sidebar.
+- A sidebar status footer shows session, project, transcript-size, and open-tab counts.
 
-### Native chat & replay
-
-- **Native chat** (New Session → *New … chat*): a token-streaming conversation driven over the agent's headless stream-json channel — no transcript scraping. Every tool use (Edit / Write / Bash) pauses for an **interactive permission card** — *Allow once* / *Always allow* / *Deny* — so nothing touches your project without a click. **Continue in chat** (right-click a session) reopens it as a live chat.
-- **Session replay** (right-click → Replay…): step through any transcript as native chat bubbles, or play it back.
 - **Prompt cards**: when the agent asks a structured question in the terminal, a native option card overlays it — answer with a click.
 - **Advanced new session** (New Session menu): choose a **model**, **permission mode**, **extra directories** (`--add-dir`), or **continue** the last session in a folder.
-- **Open session from file** (menu → Open session file…) opens any `.jsonl` transcript directly; **permanent delete** sits alongside *Move to trash*; `Ctrl+Shift+E` toggles a 😊 marker on the current tab.
+- **Permanent delete** sits alongside *Move to trash*; `Ctrl+Shift+E` toggles a 😊 marker on the current tab.
 
 ### Keyboard shortcuts
 
@@ -57,7 +55,8 @@ Features:
 | `Ctrl+Shift+N` | New window |
 | `Ctrl+W` | Close current tab |
 | `Ctrl+PgUp` / `Ctrl+PgDn` | Previous / next tab |
-| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in terminal |
+| `Ctrl+C` / `Ctrl+V` | Copy selection / paste (easy copy & paste, on by default) |
+| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in terminal (always available) |
 | `Ctrl+Shift+G` | Find in terminal |
 | `Ctrl+Shift+K` | Quick switcher (jump to any session) |
 | `Ctrl+Shift+E` | Toggle 😊 marker on the current tab |
@@ -81,7 +80,7 @@ sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4
 sudo pacman -S python-gobject gtk4 libadwaita vte4
 ```
 
-Plus a supported agent's CLI on your `PATH` — currently the [`claude` CLI](https://claude.com/claude-code).
+Plus the [`claude` CLI](https://claude.com/claude-code) on your `PATH` — Collins is a tool for Claude specifically.
 
 ## Install
 
@@ -107,18 +106,29 @@ sudo apt install ./collins_0.1.0_all.deb
 
 Dependencies are pulled in automatically; the app appears in your app grid as "Collins".
 
-Terminal shortcuts: `Ctrl+Shift+C` copy, `Ctrl+Shift+V` paste.
+Terminal copy & paste works the way you'd expect out of the box: plain `Ctrl+C` (when text is selected) and `Ctrl+V` — see **easy copy & paste** above. `Ctrl+Shift+C` / `Ctrl+Shift+V` always work too.
 
 ## Layout
 
 ```
 collins/
-├── app.py        # Adw.Application entry point + CSS
-├── window.py     # main window: split view, sidebar, tabs, actions, dialogs
-├── sessions.py   # session discovery + transcript statistics
-├── state.py      # persistent app state (names, favorites, hidden, settings)
-├── prefs.py      # preferences dialog
-└── terminal.py   # VTE terminal tab spawning the agent CLI
+├── app.py            # Adw.Application entry point + CSS
+├── window.py         # main window: tabs, actions, dialogs wiring
+├── sidebar.py        # session list: search, groups, badges, select mode
+├── store.py          # single source of truth: threaded scans, file monitors
+├── models.py         # SessionItem GObject with bindable properties
+├── sessions.py       # transcript discovery & parsing (pure Python)
+├── providers.py      # agent CLI abstraction (currently Claude Code)
+├── state.py          # persistent app state (names, favorites, settings)
+├── terminal.py       # VTE terminal tab + secondary shell panel
+├── titles.py         # auto-generated session titles (local + haiku)
+├── usage.py          # Claude subscription usage fetch/parse
+├── usagepanel.py     # the sidebar usage panel widget
+├── gitinfo.py        # git branch detection for the tab footer
+├── promptcard.py     # native option cards over the terminal
+├── dialogs.py        # rename / emoji / confirm / details / MCP dialogs
+├── prefs.py          # preferences dialog
+└── themes.py, i18n.py, switcher.py, panelhistory.py, copylabel.py, …
 data/
 ├── com.episode6.Collins.desktop   # launcher template
 ├── icons/com.episode6.Collins.svg # app icon
@@ -144,5 +154,7 @@ git tag -a v0.1.0 -m v0.1.0 && git push origin v0.1.0
 
 Collins is a rebranded fork of
 [**agent-session-manager**](https://github.com/r4nd3l/agent-session-manager)
-by Máté Molnár, which did all the heavy lifting. Released under
+by Máté Molnár, which did all the heavy lifting — see the
+[original project's website](https://r4nd3l.github.io/agent-session-manager/)
+for the app Collins grew out of. Released under
 [GPL-3.0-or-later](LICENSE), same as the original.

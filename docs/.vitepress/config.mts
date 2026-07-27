@@ -1,15 +1,17 @@
 // Modified from the original agent-session-manager
 // (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-// fork. Last modified: 2026-07-26. Full change history: git log for this file.
+// fork. Last modified: 2026-07-27. Full change history: git log for this file.
 import { defineConfig } from 'vitepress'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
   title: 'Collins',
-  description: 'A native Linux home for your AI coding-agent sessions.',
+  description: 'An opinionated AI-native workspace for Claude — an agent-first IDE and agent orchestrator that browses, names, and resumes your Claude Code sessions in embedded terminals.',
   lang: 'en-US',
   // Must match the GitHub repo name (GitHub Pages project path).
   base: '/collins/',
+  // Terminal look: default to dark (readers can still toggle light).
+  appearance: 'dark',
   lastUpdated: true,
   cleanUrls: true,
 
@@ -45,6 +47,7 @@ export default defineConfig({
             { text: 'Features', link: '/guide/features' },
             { text: 'Keyboard Shortcuts', link: '/guide/keyboard-shortcuts' },
             { text: 'How It Works', link: '/guide/how-it-works' },
+            { text: 'FAQ', link: '/guide/faq' },
           ],
         },
       ],
@@ -60,7 +63,7 @@ export default defineConfig({
     },
 
     footer: {
-      message: 'Unofficial community tool — not affiliated with or endorsed by Anthropic. Released under GPL-3.0. Forked from agent-session-manager by Máté Molnár.',
+      message: 'Unofficial community tool — not affiliated with or endorsed by Anthropic. Released under GPL-3.0. Forked from <a href="https://r4nd3l.github.io/agent-session-manager/">agent-session-manager</a> by Máté Molnár.',
       copyright: 'Copyright © 2026 Máté Molnár (original), Geoff Hackett (fork)',
     },
 

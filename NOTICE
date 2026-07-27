@@ -15,3 +15,12 @@ formats):
 - debian/changelog: modified in this fork, 2026-07-26
 - docs/package.json: modified in this fork, 2026-07-26
 - docs/package-lock.json: modified in this fork, 2026-07-26
+- data/screenshot.png: modified in this fork, 2026-07-27
+- docs/public/img/main-window.png: modified in this fork, 2026-07-27
+- docs/public/img/mcp-servers.png: modified in this fork, 2026-07-27
+- docs/public/img/preferences.png: modified in this fork, 2026-07-27
+- docs/public/img/quick-switcher.png: modified in this fork, 2026-07-27
+- docs/public/img/session-details.png: modified in this fork, 2026-07-27
+- docs/public/img/sidebar-favorites.png: modified in this fork, 2026-07-27
+- docs/public/img/sidebar-search.png: modified in this fork, 2026-07-27
+- docs/public/img/tab-emoji.png: modified in this fork, 2026-07-27
