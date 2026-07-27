@@ -1567,6 +1567,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _apply_preferences(self) -> None:
         self._apply_settings_to_tabs()
         self.sidebar.refresh_folder_path()
+        self.sidebar.refresh_usage_panel()
 
     def _apply_settings_to_tabs(self) -> None:
         for i in range(self.tab_view.get_n_pages()):
