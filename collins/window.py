@@ -211,7 +211,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("close-placeholder", self._on_sidebar_close_placeholder)
         self.store.connect("refreshed", self._on_store_refreshed)
 
-        self.sidebar.set_size_request(220, -1)  # minimum drag width
+        self.sidebar.set_size_request(180, -1)  # minimum drag width
         self.split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         self.split.set_start_child(self.sidebar)
         self.split.set_end_child(content_view)
