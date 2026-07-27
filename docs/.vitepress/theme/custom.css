@@ -90,8 +90,9 @@ h1, h2, h3,
 }
 
 .VPHero .name::before {
-  content: "$ ";
+  content: "$";
   color: #4ade80;
+  margin-right: 0.4ch;
 }
 
 .dark .VPFeature {
