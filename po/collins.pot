@@ -12,7 +12,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: collins\n"
 "Report-Msgid-Bugs-To: matemiller992@gmail.com\n"
-"POT-Creation-Date: 2026-07-26 20:03-0400\n"
+"POT-Creation-Date: 2026-07-26 20:39-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -718,44 +718,48 @@ msgstr ""
 msgid "Week — model"
 msgstr ""
 
-#: collins/usagepanel.py:102
+#: collins/usagepanel.py:113
 #, python-brace-format
 msgid "Resets in {t}"
 msgstr ""
 
-#: collins/usagepanel.py:113
+#: collins/usagepanel.py:124
 msgid "Claude usage"
 msgstr ""
 
-#: collins/usagepanel.py:118
+#: collins/usagepanel.py:129
 msgid "Refresh usage"
 msgstr ""
 
-#: collins/usagepanel.py:145
+#: collins/usagepanel.py:162
 msgid "Checking usage…"
 msgstr ""
 
-#: collins/usagepanel.py:198
+#: collins/usagepanel.py:215
 #, python-brace-format
 msgid "As of {n}m ago"
 msgstr ""
 
-#: collins/usagepanel.py:202 collins/usagepanel.py:217
+#: collins/usagepanel.py:219 collins/usagepanel.py:235
 msgid "Usage unavailable"
 msgstr ""
 
-#: collins/usagepanel.py:225
+#: collins/usagepanel.py:244
 #, python-brace-format
-msgid "Extra usage: {used} of {limit}"
+msgid "{used} of {limit}"
 msgstr ""
 
-#: collins/usagepanel.py:229
+#: collins/usagepanel.py:248 collins/usagepanel.py:259
+msgid " — limit reached"
+msgstr ""
+
+#: collins/usagepanel.py:250
+msgid "Extra usage"
+msgstr ""
+
+#: collins/usagepanel.py:257
 #, python-brace-format
 msgid "Extra usage: {used}"
-msgstr ""
-
-#: collins/usagepanel.py:231
-msgid " — limit reached"
 msgstr ""
 
 #: collins/window.py:127

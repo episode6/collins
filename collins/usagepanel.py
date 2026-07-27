@@ -78,22 +78,33 @@ class _BarRow(Gtk.Box):
 
     def set_data(self, bar: usage.UsageBar) -> None:
         self._data = bar
-        self._title.set_text(_bar_title(bar))
-        self._percent.set_text(f"{bar.raw_percent}%")
-        self._bar.set_fraction(bar.percent / 100)
+        self._render(_bar_title(bar), bar.raw_percent, bar.severity)
+        self.update_countdown()
+
+    def set_static(self, title: str, raw_percent: float, sub_text: str,
+                   severity: str = "normal") -> None:
+        """Render values that aren't an API limit bar (extra-usage credits):
+        a fixed sub-line instead of a reset countdown."""
+        self._data = None
+        self._render(title, round(raw_percent), severity)
+        self._resets.set_text(sub_text)
+        self._resets.set_visible(bool(sub_text))
+
+    def _render(self, title: str, raw_percent: int, severity: str) -> None:
+        self._title.set_text(title)
+        self._percent.set_text(f"{raw_percent}%")
+        self._bar.set_fraction(min(max(raw_percent, 0), 100) / 100)
         for cls in ("usage-sev-warning", "usage-sev-critical"):
             self._bar.remove_css_class(cls)
-        severity = bar.severity
         if severity == "normal":  # derive from percent when the API doesn't say
             severity = (
-                "critical" if bar.raw_percent >= 90
-                else "warning" if bar.raw_percent >= 70
+                "critical" if raw_percent >= 90
+                else "warning" if raw_percent >= 70
                 else "normal"
             )
         if severity not in ("normal", ""):
             cls = "usage-sev-critical" if severity != "warning" else "usage-sev-warning"
             self._bar.add_css_class(cls)
-        self.update_countdown()
 
     def update_countdown(self) -> None:
         """Re-render "Resets in …" from the stored data; called on every tick
@@ -132,6 +143,12 @@ class UsagePanel(Gtk.Box):
         for row in self._bar_rows:
             row.set_visible(False)
             self._bars_box.append(row)
+        # Extra-usage credits: a bar when a limit gives us a percentage,
+        # otherwise the plain caption line. Kept out of _bar_rows so the
+        # countdown tick never touches it.
+        self._credits_bar = _BarRow()
+        self._credits_bar.set_visible(False)
+        self._bars_box.append(self._credits_bar)
         self._credits = Gtk.Label(xalign=0.0, wrap=True)
         self._credits.add_css_class("caption")
         self._credits.add_css_class("dim-label")
@@ -220,20 +237,30 @@ class UsagePanel(Gtk.Box):
             return
 
         credits = snapshot.credits
+        show_bar = show_line = False
         if credits and (credits.enabled or credits.used > 0):
             used = _format_money(credits.used, credits.currency)
-            if credits.limit is not None:
-                text = _("Extra usage: {used} of {limit}").format(
+            if credits.limit:
+                sub = _("{used} of {limit}").format(
                     used=used, limit=_format_money(credits.limit, credits.currency)
                 )
-            else:
+                if credits.spend_limit_reached:
+                    sub += _(" — limit reached")
+                self._credits_bar.set_static(
+                    _("Extra usage"),
+                    credits.used / credits.limit * 100,
+                    sub,
+                    severity="critical" if credits.spend_limit_reached else "normal",
+                )
+                show_bar = True
+            else:  # no limit set → no percentage to draw, keep the text line
                 text = _("Extra usage: {used}").format(used=used)
-            if credits.spend_limit_reached:
-                text += _(" — limit reached")
-            self._credits.set_text(text)
-            self._credits.set_visible(True)
-        else:
-            self._credits.set_visible(False)
+                if credits.spend_limit_reached:
+                    text += _(" — limit reached")
+                self._credits.set_text(text)
+                show_line = True
+        self._credits_bar.set_visible(show_bar)
+        self._credits.set_visible(show_line)
         self._stack.set_visible_child_name("data")
 
 

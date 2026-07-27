@@ -77,8 +77,11 @@ msgstr "Réinitialisation dans {t}"
 msgid "As of {n}m ago"
 msgstr "Il y a {n} min"
 
-msgid "Extra usage: {used} of {limit}"
-msgstr "Utilisation supplémentaire : {used} sur {limit}"
+msgid "Extra usage"
+msgstr "Utilisation supplémentaire"
+
+msgid "{used} of {limit}"
+msgstr "{used} sur {limit}"
 
 msgid "Extra usage: {used}"
 msgstr "Utilisation supplémentaire : {used}"

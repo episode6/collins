@@ -77,8 +77,11 @@ msgstr "Zurücksetzung in {t}"
 msgid "As of {n}m ago"
 msgstr "Stand: vor {n} min"
 
-msgid "Extra usage: {used} of {limit}"
-msgstr "Zusätzliche Nutzung: {used} von {limit}"
+msgid "Extra usage"
+msgstr "Zusätzliche Nutzung"
+
+msgid "{used} of {limit}"
+msgstr "{used} von {limit}"
 
 msgid "Extra usage: {used}"
 msgstr "Zusätzliche Nutzung: {used}"
