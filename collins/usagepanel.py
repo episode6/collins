@@ -7,7 +7,9 @@ weekly all-models, weekly model-scoped) plus extra-usage credits when the
 account has them. The panel owns its own poller: fetches run on a daemon
 thread and marshal back via ``GLib.idle_add``, and the timer is gated on the
 widget being mapped (same pattern as the terminal footer's cwd poll), so a
-hidden sidebar or disabled panel costs nothing.
+hidden sidebar or disabled panel costs nothing. Polling also pauses while
+the window is suspended (minimized / fully hidden, GTK >= 4.12) or the
+session is locked (screensaver ``ActiveChanged`` over D-Bus).
 """
 
 from __future__ import annotations
@@ -15,12 +17,12 @@ from __future__ import annotations
 import threading
 import time
 
-from gi.repository import GLib, Gtk
+from gi.repository import Gio, GLib, Gtk
 
 from . import usage
 from .i18n import _
 
-_POLL_INTERVAL_S = 120
+_POLL_INTERVAL_S = 300
 # A sidebar toggle remaps the panel; don't re-fetch if the data is this fresh.
 _MIN_REFRESH_GAP_S = 30
 # The endpoint reports at most session + weekly + a few scoped bars; cap the
@@ -165,12 +167,68 @@ class UsagePanel(Gtk.Box):
         self._snapshot: usage.UsageSnapshot | None = None
         self._fetching = False
         self._source: int | None = None
+        self._suspended = False  # toplevel minimized / fully hidden
+        self._locked = False  # session screen locked
+        self._watching_window = False
+        self._watch_screen_lock()
         # Poll only while on screen; resumes automatically on the next map.
-        self.connect("map", lambda *_a: self._start())
+        self.connect("map", lambda *_a: self._on_map())
 
     # -- polling -----------------------------------------------------------
 
+    def _on_map(self) -> None:
+        self._watch_window()
+        self._start()
+
+    def _watch_window(self) -> None:
+        if self._watching_window:
+            return
+        root = self.get_root()
+        if root is None:
+            return
+        self._watching_window = True
+        # Gtk.Window:suspended needs GTK 4.12; on older GTK the panel just
+        # keeps polling while minimized, as before.
+        if root.find_property("suspended") is not None:
+            self._suspended = root.get_property("suspended")
+            root.connect("notify::suspended", self._on_window_suspended)
+
+    def _on_window_suspended(self, window: Gtk.Window, _pspec: object) -> None:
+        self._suspended = window.get_property("suspended")
+        self._sync_paused()
+
+    def _watch_screen_lock(self) -> None:
+        """GNOME and the freedesktop screensaver interfaces share the same
+        ``ActiveChanged(b)`` signal shape; subscribing to both covers most
+        desktops, and a desktop with neither simply never signals."""
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        except GLib.Error:
+            return
+        for iface in ("org.freedesktop.ScreenSaver", "org.gnome.ScreenSaver"):
+            bus.signal_subscribe(None, iface, "ActiveChanged", None, None,
+                                 Gio.DBusSignalFlags.NONE, self._on_lock_signal)
+
+    def _on_lock_signal(self, _bus: Gio.DBusConnection, _sender: str,
+                        _path: str, _iface: str, _signal: str,
+                        params: GLib.Variant) -> None:
+        self._locked = bool(params.unpack()[0])
+        self._sync_paused()
+
+    def _paused(self) -> bool:
+        return self._suspended or self._locked
+
+    def _sync_paused(self) -> None:
+        if self._paused():
+            if self._source is not None:
+                GLib.source_remove(self._source)
+                self._source = None
+        elif self.get_mapped():
+            self._start()
+
     def _start(self) -> None:
+        if self._paused():
+            return
         last = self._snapshot.fetched_at if self._snapshot else 0.0
         if time.time() - last >= _MIN_REFRESH_GAP_S:
             self._refresh()
@@ -178,7 +236,9 @@ class UsagePanel(Gtk.Box):
             self._source = GLib.timeout_add_seconds(_POLL_INTERVAL_S, self._tick)
 
     def _tick(self) -> bool:
-        if not self.get_mapped():  # hidden sidebar/panel → resume on next map
+        # Hidden sidebar/panel, minimized window, or locked screen → stop;
+        # map / notify::suspended / ActiveChanged restarts the timer.
+        if not self.get_mapped() or self._paused():
             self._source = None
             return GLib.SOURCE_REMOVE
         for row in self._bar_rows:
