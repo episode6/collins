@@ -91,11 +91,6 @@ collins/
 ├── usagepanel.py     # the sidebar usage panel widget
 ├── gitinfo.py        # git branch detection for the tab footer
 ├── panelhistory.py   # persisted panel scrollback
-├── chatsession.py    # headless stream-json chat driver
-├── chatsessionview.py# native chat tab (bubbles, permission cards)
-├── chatbubbles.py    # markdown → Pango chat bubbles
-├── replaymodel.py    # transcript → ordered replay turns
-├── replayview.py     # session replay tab
 ├── promptcard.py     # native option cards over the terminal
 ├── transcript.py     # tail transcripts for pending structured prompts
 ├── switcher.py       # quick-switcher dialog

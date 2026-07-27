@@ -21,14 +21,11 @@ downloads of each version, see the
 - ✅ **Theming** — light/dark plus selectable terminal color palettes
 - ✅ **Localization** — English, Hungarian, German, Spanish, French
 - ✅ **Multi-window**
-- ✅ **Native chat** — token-streaming chat with interactive permission cards; resume any session into a chat
-- ✅ **Session replay** — step through a transcript as native chat bubbles
 - ✅ **Prompt cards** — answer the agent's questions with native option cards over the terminal
 - ✅ **Distribution** — `.deb`, one-step tag-driven releases
 
 ### Exploring next
 
-- 🔭 **Chat polish** — per-message copy, code syntax highlighting, model picker in the compose bar
 - 🔭 **Flathub** distribution
 
 ## Changelog
@@ -75,8 +72,10 @@ and restarted its version numbering at 0.1.0.
 Everything below is the changelog of the upstream project,
 [agent-session-manager](https://github.com/r4nd3l/agent-session-manager) by
 Máté Molnár, as it stood at the fork point. Version numbers are upstream's
-(unrelated to Collins's own 0.1.0). Note that Cursor support, added upstream
-in v0.10.0, was removed in Collins.
+(unrelated to Collins's own 0.1.0). Note that Cursor support (added upstream
+in v0.10.0) and the native chat / session replay features (added in v1.0.0)
+are not part of Collins, which focuses on wrapping the agent CLI in embedded
+terminals.
 
 ### v1.0.0 — Native chat, replay & richer sessions
 

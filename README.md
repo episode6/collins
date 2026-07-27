@@ -33,7 +33,7 @@ Features:
 - A **Claude usage panel** at the bottom of the sidebar shows your subscription limits (session, weekly, extra usage) as progress bars with reset countdowns — read straight from the `claude` CLI's own login, refreshed every 5 minutes (paused while the window is minimized or the screen is locked). Toggle it in Preferences.
 - **Tabs** can be renamed, given an emoji prefix, or have their session ID copied (right-click → Rename… / Set emoji… / Copy session ID); renaming a session's tab updates its name everywhere. While a session tab is focused, header buttons **exit** or **background** it and close the tab immediately — no confirmation dialog — the **tab bar can be hidden** with its own header toggle, and the **sidebar toggles** with the header button or `F9`. **Shift+Enter** inserts a newline in the agent's prompt.
 - Each tab has a slim **footer** showing the agent's live working directory (click to copy; worktree-aware) and the current **git branch** (⎇), plus the terminal-panel buttons.
-- **Right-click a session** for the full action set: open, open in [Ghostty](https://ghostty.org) (external window — Ghostty can't be embedded), fork (`--fork-session`), continue in chat, rename, regenerate name, favorite, **details** (messages/models/tokens, a peek at recent messages, and MCP servers/usage), replay, copy session id, export as Markdown, reveal transcript, hide, move the transcript to trash, or delete permanently. **Right-click a project header** to start a new session there or hide the whole project — projects with no visible sessions still show their header (with a `+` button) so a folder stays reachable.
+- **Right-click a session** for the full action set: open, open in [Ghostty](https://ghostty.org) (external window — Ghostty can't be embedded), fork (`--fork-session`), rename, regenerate name, favorite, **details** (messages/models/tokens, a peek at recent messages, and MCP servers/usage), copy session id, export as Markdown, reveal transcript, hide, move the transcript to trash, or delete permanently. **Right-click a project header** to start a new session there or hide the whole project — projects with no visible sessions still show their header (with a `+` button) so a folder stays reachable.
 - **Desktop notifications** when a background session goes quiet after producing output — click to jump to that tab (toggle in Preferences).
 - **Select mode** (checkbox button in the sidebar header) for bulk actions: open, star, hide, or trash many sessions at once.
 - **New session** (tab icon in the header) starts a fresh agent session (`claude`) in the **visible session's project** — no dialog needed; with no session visible it asks for a folder. Every project header also has a **`+` button** to start a session right there, and a just-started session shows a **"New Thread"** placeholder row until the agent writes its transcript.
@@ -42,13 +42,9 @@ Features:
 - **Preferences** (menu → Preferences, or `Ctrl+,`): terminal font, scrollback, **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin, Tokyo Night, Monokai, One Dark…), color scheme, **language** (English, Magyar, Deutsch, Español, Français), **easy copy & paste**, idle notifications, plus **Show folder path**, **Show Claude usage**, and **Auto-generate session titles** toggles for the sidebar.
 - A sidebar status footer shows session, project, transcript-size, and open-tab counts.
 
-### Native chat & replay
-
-- **Native chat** (New Session → *New … chat*): a token-streaming conversation driven over the agent's headless stream-json channel — no transcript scraping. Every tool use (Edit / Write / Bash) pauses for an **interactive permission card** — *Allow once* / *Always allow* / *Deny* — so nothing touches your project without a click. **Continue in chat** (right-click a session) reopens it as a live chat.
-- **Session replay** (right-click → Replay…): step through any transcript as native chat bubbles, or play it back.
 - **Prompt cards**: when the agent asks a structured question in the terminal, a native option card overlays it — answer with a click.
 - **Advanced new session** (New Session menu): choose a **model**, **permission mode**, **extra directories** (`--add-dir`), or **continue** the last session in a folder.
-- **Open session from file** (menu → Open session file…) opens any `.jsonl` transcript directly; **permanent delete** sits alongside *Move to trash*; `Ctrl+Shift+E` toggles a 😊 marker on the current tab.
+- **Permanent delete** sits alongside *Move to trash*; `Ctrl+Shift+E` toggles a 😊 marker on the current tab.
 
 ### Keyboard shortcuts
 
@@ -128,8 +124,6 @@ collins/
 ├── usage.py          # Claude subscription usage fetch/parse
 ├── usagepanel.py     # the sidebar usage panel widget
 ├── gitinfo.py        # git branch detection for the tab footer
-├── chatsession*.py   # native streaming chat (driver, view, bubbles)
-├── replay*.py        # transcript replay as chat bubbles
 ├── promptcard.py     # native option cards over the terminal
 ├── dialogs.py        # rename / emoji / confirm / details / MCP dialogs
 ├── prefs.py          # preferences dialog

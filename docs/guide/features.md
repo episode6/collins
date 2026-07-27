@@ -160,18 +160,10 @@ Toggle it in Preferences (*Show Claude usage*).
 
 ![MCP servers browser](/img/mcp-servers.png)
 
-## Native chat, replay & prompt cards
+## Prompt cards
 
-- **Native chat** (New Session → *New Claude Code chat…*): a token-streaming
-  conversation driven over the agent's headless stream-json channel — no
-  transcript scraping. Every tool use (Edit / Write / Bash) pauses for an
-  **interactive permission card** — *Allow once* / *Always allow* / *Deny* —
-  so nothing touches your project without a click. **Continue in chat**
-  (right-click a session) reopens any session as a live chat.
-- **Session replay** (right-click → *Replay…*): step through any transcript as
-  native chat bubbles, or play it back.
-- **Prompt cards**: when the agent asks a structured question in the terminal,
-  a native option card overlays it — answer with a click.
+When the agent asks a structured question in the terminal, a native option
+card overlays it — answer with a click instead of typing a number.
 
 ## Starting sessions
 
@@ -181,8 +173,6 @@ Toggle it in Preferences (*Show Claude usage*).
 - **Advanced new session** (New Session menu): choose a **model**, a
   **permission mode**, or an **extra directory** (`--add-dir`).
 - **Continue** the most recent session in a folder (`claude --continue`).
-- **Open session from file** (sidebar menu → *Open session file…*) opens any
-  `.jsonl` transcript directly as a replay.
 
 ## Bulk actions & housekeeping
 

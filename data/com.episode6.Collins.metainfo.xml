@@ -59,15 +59,11 @@ fork. Last modified: 2026-07-27. Full change history: git log for this file.
     </release>
     <release version="1.0.0" date="2026-06-21">
       <description>
-        <p>Native chat, session replay, and richer session management.</p>
+        <p>Richer session management.</p>
         <ul>
-          <li>Native streaming chat with token-by-token output</li>
-          <li>Interactive permission cards (Allow / Always allow / Deny) for tool use</li>
-          <li>Resume any session into a chat tab</li>
-          <li>Session replay: step through a transcript as native bubbles</li>
           <li>Interactive prompt cards over the terminal</li>
           <li>Advanced new-session flags: model, permission mode, extra directories, continue</li>
-          <li>Open a session from a transcript file; permanent delete; folder path in the sidebar</li>
+          <li>Permanent delete; folder path in the sidebar</li>
           <li>New generic agent icon and banner</li>
         </ul>
       </description>
