@@ -1,23 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Modified from the original agent-session-manager
-(https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-26. Full change history: git log for this file.
+Original artwork created for the ghackett fork (replaces the upstream
+agent-session-manager icon). A Tom Collins, with cursor-block ice cubes.
 -->
 <svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
   <!-- terminal tile -->
   <rect x="8" y="8" width="112" height="112" rx="26" fill="#262320"/>
   <rect x="8" y="8" width="112" height="112" rx="26" fill="none" stroke="#4a443c" stroke-width="2" opacity="0.6"/>
 
-  <!-- agent mark: chat bubble + AI spark (generic, no vendor logo) -->
-  <path d="M36 26 h56 a12 12 0 0 1 12 12 v26 a12 12 0 0 1 -12 12 H58 l-14 13 v-13 h-8
-           a12 12 0 0 1 -12 -12 V38 a12 12 0 0 1 12 -12 Z" fill="#D97757"/>
-  <!-- four-point spark inside the bubble -->
-  <path d="M64 36 C66 47 69 50 80 52 C69 54 66 57 64 68 C62 57 59 54 48 52 C59 50 62 47 64 36 Z"
-        fill="#FAF7F2"/>
+  <!-- straw -->
+  <line x1="78" y1="14" x2="67" y2="50" stroke="#EDE9E1" stroke-width="5" stroke-linecap="round"/>
 
-  <!-- prompt line: chevron + cursor -->
-  <polyline points="40,92 52,100 40,108" fill="none" stroke="#EDE9E1" stroke-width="8"
-            stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="64" y="94" width="24" height="12" rx="3" fill="#EDE9E1" opacity="0.85"/>
+  <!-- drink -->
+  <rect x="48" y="52" width="32" height="50" rx="4" fill="#D97757"/>
+
+  <!-- glass -->
+  <rect x="42" y="22" width="44" height="86" rx="8" fill="none" stroke="#EDE9E1" stroke-width="6"/>
+
+  <!-- cursor-block ice cubes -->
+  <rect x="52" y="58" width="14" height="10" rx="2" fill="#EDE9E1" transform="rotate(-8 59 63)"/>
+  <rect x="61" y="76" width="14" height="10" rx="2" fill="#EDE9E1" transform="rotate(10 68 81)" opacity="0.9"/>
 </svg>
