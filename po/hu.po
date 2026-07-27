@@ -32,6 +32,63 @@ msgstr "Mappa elérési útjának megjelenítése"
 msgid "Show each session's project folder path in the sidebar"
 msgstr "Az egyes munkamenetek projektmappájának elérési útja az oldalsávon"
 
+msgid "Show Claude usage"
+msgstr "Claude-használat megjelenítése"
+
+msgid "Show subscription usage limits below the session list"
+msgstr "Az előfizetés használati korlátainak megjelenítése a munkamenetlista alatt"
+
+msgid "Claude usage"
+msgstr "Claude-használat"
+
+msgid "Refresh usage"
+msgstr "Használat frissítése"
+
+msgid "Checking usage…"
+msgstr "Használat lekérdezése…"
+
+msgid "Not logged in to Claude"
+msgstr "Nincs bejelentkezve a Claude-ba"
+
+msgid "Claude login expired — run claude to refresh"
+msgstr "A Claude-bejelentkezés lejárt — futtasd a claude-ot a frissítéshez"
+
+msgid "Usage unavailable (offline)"
+msgstr "A használat nem érhető el (offline)"
+
+msgid "Usage unavailable"
+msgstr "A használat nem érhető el"
+
+msgid "Session (5h)"
+msgstr "Munkamenet (5 óra)"
+
+msgid "Week — all models"
+msgstr "Hét — minden modell"
+
+msgid "Week — {model}"
+msgstr "Hét — {model}"
+
+msgid "Week — model"
+msgstr "Hét — modell"
+
+msgid "Resets in {t}"
+msgstr "Visszaáll: {t}"
+
+msgid "As of {n}m ago"
+msgstr "{n} perce frissítve"
+
+msgid "Extra usage"
+msgstr "Extra használat"
+
+msgid "{used} of {limit}"
+msgstr "{used} / {limit}"
+
+msgid "Extra usage: {used}"
+msgstr "Extra használat: {used}"
+
+msgid " — limit reached"
+msgstr " — elérte a korlátot"
+
 msgid "Open session file…"
 msgstr "Munkamenetfájl megnyitása…"
 

@@ -32,6 +32,63 @@ msgstr "Afficher le chemin du dossier"
 msgid "Show each session's project folder path in the sidebar"
 msgstr "Afficher le chemin du dossier de projet de chaque session dans la barre latérale"
 
+msgid "Show Claude usage"
+msgstr "Afficher l’utilisation de Claude"
+
+msgid "Show subscription usage limits below the session list"
+msgstr "Afficher les limites d’utilisation de l’abonnement sous la liste des sessions"
+
+msgid "Claude usage"
+msgstr "Utilisation de Claude"
+
+msgid "Refresh usage"
+msgstr "Actualiser l’utilisation"
+
+msgid "Checking usage…"
+msgstr "Vérification de l’utilisation…"
+
+msgid "Not logged in to Claude"
+msgstr "Non connecté à Claude"
+
+msgid "Claude login expired — run claude to refresh"
+msgstr "Connexion Claude expirée — lancez claude pour la renouveler"
+
+msgid "Usage unavailable (offline)"
+msgstr "Utilisation indisponible (hors ligne)"
+
+msgid "Usage unavailable"
+msgstr "Utilisation indisponible"
+
+msgid "Session (5h)"
+msgstr "Session (5 h)"
+
+msgid "Week — all models"
+msgstr "Semaine — tous les modèles"
+
+msgid "Week — {model}"
+msgstr "Semaine — {model}"
+
+msgid "Week — model"
+msgstr "Semaine — modèle"
+
+msgid "Resets in {t}"
+msgstr "Réinitialisation dans {t}"
+
+msgid "As of {n}m ago"
+msgstr "Il y a {n} min"
+
+msgid "Extra usage"
+msgstr "Utilisation supplémentaire"
+
+msgid "{used} of {limit}"
+msgstr "{used} sur {limit}"
+
+msgid "Extra usage: {used}"
+msgstr "Utilisation supplémentaire : {used}"
+
+msgid " — limit reached"
+msgstr " — limite atteinte"
+
 msgid "Open session file…"
 msgstr "Ouvrir un fichier de session…"
 

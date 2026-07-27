@@ -32,6 +32,7 @@ from .i18n import _
 from .models import FAV_GROUP, SessionItem
 from .providers import get_provider
 from .store import SessionStore
+from .usagepanel import UsagePanel
 
 _GHOSTTY = shutil.which("ghostty")
 _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
@@ -321,6 +322,10 @@ class SessionSidebar(Gtk.Box):
         self.store = store
         self._view = Adw.ToolbarView(vexpand=True)
         self.append(self._view)
+        # Claude subscription usage readout, tucked under the session list.
+        self.usage_panel = UsagePanel()
+        self.usage_panel.set_visible(bool(store.state.get_setting("show_usage_panel")))
+        self.append(self.usage_panel)
         self._collapsed: set[tuple] = set()
         self._selection_mode = False
         self._selected: set[str] = set()
@@ -463,6 +468,11 @@ class SessionSidebar(Gtk.Box):
         self.show_folder_path = bool(self.store.state.get_setting("show_folder_path"))
         for row in self._rows.values():
             row.update_folder_path(self.show_folder_path)
+
+    def refresh_usage_panel(self) -> None:
+        """Re-read the 'show usage panel' setting. Hiding unmaps the panel,
+        which stops its poll timer on the next tick."""
+        self.usage_panel.set_visible(bool(self.store.state.get_setting("show_usage_panel")))
 
     def _rebuild_rows(self) -> None:
         self.list.remove_all()

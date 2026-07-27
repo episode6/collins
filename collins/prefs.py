@@ -162,6 +162,13 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._folder_path_row.set_active(bool(state.get_setting("show_folder_path")))
         self._folder_path_row.connect("notify::active", self._on_folder_path_changed)
         sidebar_group.add(self._folder_path_row)
+        self._usage_panel_row = Adw.SwitchRow(
+            title=_("Show Claude usage"),
+            subtitle=_("Show subscription usage limits below the session list"),
+        )
+        self._usage_panel_row.set_active(bool(state.get_setting("show_usage_panel")))
+        self._usage_panel_row.connect("notify::active", self._on_usage_panel_changed)
+        sidebar_group.add(self._usage_panel_row)
         self._auto_title_row = Adw.SwitchRow(
             title=_("Auto-generate session titles"),
             subtitle=_(
@@ -252,6 +259,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_folder_path_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("show_folder_path", row.get_active())
+        self._on_change()
+
+    def _on_usage_panel_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("show_usage_panel", row.get_active())
         self._on_change()
 
     def _on_auto_title_changed(self, row: Adw.SwitchRow, _pspec) -> None:

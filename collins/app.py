@@ -112,6 +112,20 @@ row.session-child.active-tab:hover {
   min-width: 22px;
 }
 
+/* sidebar usage panel: subscription limit bars under the session list */
+.usage-panel {
+  padding: 8px 12px 10px 12px;
+  border-top: 1px solid alpha(currentColor, 0.15);
+}
+.usage-panel progressbar.usage-bar trough,
+.usage-panel progressbar.usage-bar progress {
+  min-height: 6px;
+  border-radius: 3px;
+}
+.usage-panel progressbar.usage-bar progress { background-color: #D97757; }
+.usage-panel progressbar.usage-bar.usage-sev-warning progress { background-color: #e5a50a; }
+.usage-panel progressbar.usage-bar.usage-sev-critical progress { background-color: #e01b24; }
+
 /* chat-session tab: streaming bubbles + tool chips */
 .chat-bubble {
   padding: 8px 12px;
