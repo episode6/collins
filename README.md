@@ -10,7 +10,7 @@ fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 Native GTK4/libadwaita desktop app to browse, name, and resume your [Claude Code](https://claude.com/claude-code) sessions in embedded terminal tabs.
 
-> My wife keeps referring to Claude as Collins by mistake. So now when she asks me if I'm talking to Collins, I can say yes
+> My wife keeps referring to Claude as Collins by mistake. So now when she asks me if I'm talking to Collins, I can say yes.
 
 Collins is a fork of [agent-session-manager](https://github.com/r4nd3l/agent-session-manager) by Máté Molnár ([original project website](https://r4nd3l.github.io/agent-session-manager/)) — all credit for the original app goes there. This fork is GPL-3.0 like the original.
 
