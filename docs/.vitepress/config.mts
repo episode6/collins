@@ -10,6 +10,8 @@ export default defineConfig({
   lang: 'en-US',
   // Must match the GitHub repo name (GitHub Pages project path).
   base: '/collins/',
+  // Terminal look: default to dark (readers can still toggle light).
+  appearance: 'dark',
   lastUpdated: true,
   cleanUrls: true,
 

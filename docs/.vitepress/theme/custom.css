@@ -1,3 +1,9 @@
+/*
+Modified from the original agent-session-manager
+(https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+fork. Last modified: 2026-07-27. Full change history: git log for this file.
+*/
+
 /* Brand accent */
 :root {
   --vp-c-brand-1: #c2410c;
@@ -39,3 +45,65 @@
     align-items: center;
   }
 }
+
+/* "Terminal" theme: dark-first, monospace display type, prompt glyphs. */
+.dark {
+  --vp-c-bg: #101311;
+  --vp-c-bg-alt: #0b0d0c;
+  --vp-c-bg-soft: #181c19;
+  --vp-c-bg-elv: #181c19;
+  --vp-c-divider: #2a322c;
+  --vp-c-gutter: #2a322c;
+  --vp-c-brand-1: #e8927c;
+  --vp-c-brand-2: #d97757;
+  --vp-c-brand-3: #d97757;
+  --vp-c-brand-soft: rgba(217, 119, 87, 0.18);
+  --vp-c-text-1: #d8e2d8;
+  --vp-c-text-2: #93a396;
+  --vp-home-hero-name-color: #e8927c;
+}
+
+h1, h2, h3,
+.VPHero .name, .VPHero .text,
+.VPFeature .title,
+.VPNavBarTitle .title {
+  font-family: ui-monospace, "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+  letter-spacing: -0.02em;
+}
+
+/* Mono runs wide — pull the hero display sizes down from the defaults. */
+.VPHero .name, .VPHero .text {
+  font-size: 26px;
+  line-height: 34px;
+}
+@media (min-width: 640px) {
+  .VPHero .name, .VPHero .text {
+    font-size: 32px;
+    line-height: 40px;
+  }
+}
+@media (min-width: 960px) {
+  .VPHero .name, .VPHero .text {
+    font-size: 38px;
+    line-height: 46px;
+  }
+}
+
+.VPHero .name::before {
+  content: "$ ";
+  color: #4ade80;
+}
+
+.dark .VPFeature {
+  background: #141815;
+  border: 1px solid #2a322c;
+  border-radius: 8px;
+}
+.dark .VPFeature .title::before {
+  content: "> ";
+  color: #4ade80;
+}
+
+.VPButton { border-radius: 6px !important; font-family: ui-monospace, monospace; }
+
+.dark .VPNavBar { border-bottom: 1px solid #2a322c; }
