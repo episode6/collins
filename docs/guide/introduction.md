@@ -20,7 +20,7 @@ Máté Molnár — see the
 for the app it grew out of. All credit for the original goes there; the fork
 is GPL-3.0 like the original.
 
-![Collins](https://raw.githubusercontent.com/episode6/collins/main/data/screenshot.png)
+![Collins](/img/hero.png)
 
 If you use a coding agent daily, you accumulate **dozens of sessions** scattered
 across every project you touch. They live as JSONL transcripts named by UUID

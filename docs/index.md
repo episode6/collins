@@ -10,7 +10,7 @@ hero:
   text: "A native home for your AI coding-agent sessions"
   tagline: Browse, name, and resume every Claude Code session on your machine — in embedded terminal tabs.
   image:
-    src: https://raw.githubusercontent.com/episode6/collins/main/data/screenshot.png
+    src: /img/hero.png
     alt: Collins
   actions:
     - theme: brand
