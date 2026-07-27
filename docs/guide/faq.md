@@ -33,20 +33,10 @@ refreshed or written.
 No. If `claude` works in your terminal, Collins works. Session titles and the
 usage panel reuse the CLI's existing login — no extra credentials.
 
-## Why is there no built-in chat UI?
-
-By design. Collins wraps the real CLI in embedded terminals instead of
-reimplementing a chat interface on top of it — the terminal is the source of
-truth, and everything Claude Code can do works exactly as it does in any
-other terminal. Collins adds the organization around it: naming, search,
-tabs, status, and usage.
-
 ## Why Linux only?
 
-The embedded terminal is [VTE](https://gitlab.gnome.org/GNOME/vte) — the
-widget behind GNOME Terminal — and it's the only production-grade embeddable
-terminal widget out there, which makes the app GTK4/Linux-native. Prefer an
-external window? Right-click a session → *Open in Ghostty*.
+Because I wasn't happy with any of the existing claude tools for linux,
+while other platforms get native claude app support.
 
 ## Why "Collins"?
 
