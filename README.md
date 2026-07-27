@@ -102,7 +102,7 @@ Or install the desktop launcher + icon (shows up in the app grid as "Collins"):
 **Debian/Ubuntu — .deb package** (build it with `./scripts/build_deb.sh`, or grab one from this repo's releases if published):
 
 ```bash
-sudo apt install ./collins_2.0.0_all.deb
+sudo apt install ./collins_0.1.0_all.deb
 ```
 
 Dependencies are pulled in automatically; the app appears in your app grid as "Collins".
@@ -137,7 +137,7 @@ attached and auto-generated notes). The PyPI job uses trusted publishing
 
 ```bash
 # bump version in pyproject.toml / __init__.py / debian/changelog, commit, then:
-git tag -a v2.0.0 -m v2.0.0 && git push origin v2.0.0
+git tag -a v0.1.0 -m v0.1.0 && git push origin v0.1.0
 ```
 
 ## Credits & license
