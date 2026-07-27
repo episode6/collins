@@ -40,7 +40,7 @@ while other platforms get native claude app support.
 
 ## Why "Collins"?
 
-> My wife keeps referring to Claude as Collins. So now when she asks me if
+> My wife keeps referring to Claude as Collins by mistake. So now when she asks me if
 > I'm talking to Collins, I can say yes
 
 See [What is Collins?](/guide/introduction) for the fork's full origin story.

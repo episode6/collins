@@ -16,7 +16,7 @@ hero:
     - theme: brand
       text: What is it?
       link: /guide/introduction
-    - theme: alt
+    - theme: brand
       text: Getting Started
       link: /guide/getting-started
     - theme: alt
@@ -49,7 +49,7 @@ features:
 
 ## Why "Collins"?
 
-> My wife keeps referring to Claude as Collins. So now when she asks me if I'm talking to Collins, I can say yes
+> My wife keeps referring to Claude as Collins by mistake. So now when she asks me if I'm talking to Collins, I can say yes
 
 Collins is a fork of
 [agent-session-manager](https://github.com/r4nd3l/agent-session-manager)
