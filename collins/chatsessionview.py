@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 """A chat tab backed by a live headless `claude -p` stream-json session.
 
@@ -87,7 +87,13 @@ class ChatSessionTab(Gtk.Box):
         )
         self.connect("unrealize", lambda *_: self._session.close())
         self._session.start()
-        GLib.idle_add(self._entry.grab_focus)
+        GLib.idle_add(self._focus_entry)
+
+    def _focus_entry(self) -> bool:
+        # Wrapper: grab_focus() returns True, which idle_add would treat as
+        # SOURCE_CONTINUE — re-focusing (and select-all-ing) the entry forever.
+        self._entry.grab_focus()
+        return GLib.SOURCE_REMOVE
 
     def _banner_text(self) -> str:
         name = self.provider.name
