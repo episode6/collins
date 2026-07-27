@@ -1,8 +1,20 @@
 # FAQ
 
+## What kind of app is Collins?
+
+Call it an **Agent-First IDE**, an **AI-Native Workspace**, or an **Agent
+Orchestrator** — Collins is an opinionated version of what a desktop
+workspace built around a coding agent should look like: the agent front and
+center in real terminals, with your sessions organized around it.
+
 ## Why did you remove Cursor support?
 
 Can't support the new owner.
+
+## Will Collins support other agents?
+
+No. Collins is a tool for Claude specifically, and there are no plans to
+introduce support for other agents.
 
 ## Is Collins affiliated with Anthropic?
 

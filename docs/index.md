@@ -47,6 +47,15 @@ features:
     details: Built with GTK4, libadwaita, and VTE. Installs as a .deb or runs from source. GPL-3.0, open source.
 ---
 
+## An opinionated, Claude-first workspace
+
+Call it an **Agent-First IDE**, an **AI-Native Workspace**, or an **Agent
+Orchestrator** — Collins is an opinionated take on what a desktop workspace
+built around a coding agent should look like: the agent front and center in
+real terminals, with your sessions organized around it. It is also,
+deliberately, a tool for **Claude** — there are no plans to support other
+agents.
+
 ## Why "Collins"?
 
 > My wife keeps referring to Claude as Collins by mistake. So now when she asks me if I'm talking to Collins, I can say yes.

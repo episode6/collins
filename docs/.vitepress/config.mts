@@ -6,7 +6,7 @@ import { defineConfig } from 'vitepress'
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
   title: 'Collins',
-  description: 'A native Linux home for your AI coding-agent sessions.',
+  description: 'An opinionated AI-native workspace for Claude — an agent-first IDE and agent orchestrator that browses, names, and resumes your Claude Code sessions in embedded terminals.',
   lang: 'en-US',
   // Must match the GitHub repo name (GitHub Pages project path).
   base: '/collins/',

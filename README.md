@@ -80,7 +80,7 @@ sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4
 sudo pacman -S python-gobject gtk4 libadwaita vte4
 ```
 
-Plus a supported agent's CLI on your `PATH` — currently the [`claude` CLI](https://claude.com/claude-code).
+Plus the [`claude` CLI](https://claude.com/claude-code) on your `PATH` — Collins is a tool for Claude specifically.
 
 ## Install
 
