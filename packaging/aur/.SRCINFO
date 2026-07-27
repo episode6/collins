@@ -4,7 +4,7 @@
 
 pkgbase = collins
 	pkgdesc = Native GTK4 desktop app to manage and resume Claude Code sessions
-	pkgver = 2.0.0
+	pkgver = 0.1.0
 	pkgrel = 1
 	url = https://github.com/episode6/collins
 	arch = any
@@ -19,7 +19,7 @@ pkgbase = collins
 	depends = libadwaita
 	depends = vte4
 	optdepends = claude-code: resume Claude Code sessions
-	source = collins-2.0.0.tar.gz::https://github.com/episode6/collins/archive/refs/tags/v2.0.0.tar.gz
+	source = collins-0.1.0.tar.gz::https://github.com/episode6/collins/archive/refs/tags/v0.1.0.tar.gz
 	sha256sums = SKIP
 
 pkgname = collins

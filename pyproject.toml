@@ -6,7 +6,7 @@
 # PyPI distribution name (suffixed to stay unambiguous on PyPI). The
 # installed command and the import package are both "collins".
 name = "collins-gtk"
-version = "2.0.0"
+version = "0.1.0"
 description = "Collins — native GTK4 GUI to manage and resume Claude Code sessions"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }

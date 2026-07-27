@@ -48,7 +48,7 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
   <content_rating type="oars-1.1"/>
 
   <releases>
-    <release version="2.0.0" date="2026-07-26">
+    <release version="0.1.0" date="2026-07-26">
       <description>
         <p>Rebranded as Collins.</p>
         <ul>
