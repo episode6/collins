@@ -51,6 +51,7 @@ DEFAULT_SETTINGS = {
     "easy_copy_paste": True,  # Ctrl+C copies the selection (else SIGINT), Ctrl+V pastes, right-click menu
     "language": "",  # UI language code; "" = follow the system locale
     "notify_idle": False,  # notify when a background session goes quiet
+    "background_status_poll": False,  # timed-poll fallback for the yellow "running detached" dots
     "auto_title_sessions": True,  # summarize each new session's first prompt into a short title
     "show_tab_bar": True,  # tab bar visibility (tabs keep working underneath)
     "show_folder_path": False,  # show each session's project folder path in the sidebar

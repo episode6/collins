@@ -18,6 +18,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import __version__, dialogs, panelhistory
+from .bgstatus import BackgroundStatusPoller
 from .chatsessionview import ChatSessionTab
 from .i18n import _
 from .models import SessionItem
@@ -210,6 +211,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("open-placeholder", self._on_sidebar_open_placeholder)
         self.sidebar.connect("close-placeholder", self._on_sidebar_close_placeholder)
         self.store.connect("refreshed", self._on_store_refreshed)
+
+        # Yellow "running detached" dots: keep the set of backgrounded session
+        # ids fresh (see bgstatus.py for the trigger strategy).
+        self._bg_status = BackgroundStatusPoller(on_change=self._on_background_ids_changed)
+        self._bg_status.start(
+            [d for p in available_providers() if (d := p.background_watch_dir()) is not None]
+        )
+        self._bg_status.set_polling(bool(self.state.get_setting("background_status_poll")))
+        self.connect("destroy", lambda *_: self._bg_status.stop())
 
         self.sidebar.set_size_request(180, -1)  # minimum drag width
         self.split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
@@ -766,6 +776,10 @@ class MainWindow(Adw.ApplicationWindow):
         if self._pending_resolved:
             self._apply_resolved_sessions()
         self._refresh_tab_titles()
+        # Freshly discovered rows start with no status; re-assert yellow dots
+        # for sessions known to be running detached (no-op when unchanged).
+        for session_id in self._bg_status.background_ids:
+            self._sync_status(session_id)
 
     def _apply_resolved_sessions(self) -> None:
         """Finish attaching resolved tabs once the store discovers their sessions
@@ -1066,6 +1080,9 @@ class MainWindow(Adw.ApplicationWindow):
         normal case on current CLIs)."""
         if new_id:
             self.store.record_forward(old_id, new_id)
+        # The agent list already shows the detached session: refresh now so
+        # the yellow dot lands promptly even if the jobs-dir monitor misses it.
+        self._bg_status.refresh()
         # Give the CLI a moment to exit on its own before nudging it off any
         # screen it parked on (see _watch_background_fork).
         GLib.timeout_add(700, self._nudge_cli_exit, tab)
@@ -1107,13 +1124,18 @@ class MainWindow(Adw.ApplicationWindow):
     def _sync_status(self, session_id: str) -> None:
         page = self._pages.get(session_id)
         if page is None:
-            status = ""
+            # No tab — but the session may still be running detached (/bg).
+            status = "background" if session_id in self._bg_status.background_ids else ""
         elif page.get_needs_attention():
             status = "attention"
         else:
             status = "open"
         self.store.set_status(session_id, status)
         self.sidebar.update_footer()
+
+    def _on_background_ids_changed(self, changed: set[str]) -> None:
+        for session_id in changed:
+            self._sync_status(session_id)
 
     def _update_active_row(self) -> None:
         """Tell the sidebar which session (or new-session placeholder) the
@@ -1581,6 +1603,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_settings_to_tabs()
         self.sidebar.refresh_folder_path()
         self.sidebar.refresh_usage_panel()
+        self._bg_status.set_polling(bool(self.state.get_setting("background_status_poll")))
 
     def _apply_settings_to_tabs(self) -> None:
         for i in range(self.tab_view.get_n_pages()):

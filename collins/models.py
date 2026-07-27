@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 """GObject view-models. UI widgets bind to SessionItem properties, so
 renames, favorites and status changes propagate without list rebuilds."""
@@ -24,7 +24,8 @@ class SessionItem(GObject.Object):
     subtitle = GObject.Property(type=str, default="")  # relative "time ago" of last activity
     preview = GObject.Property(type=str, default="")
     favorite = GObject.Property(type=bool, default=False)
-    status = GObject.Property(type=str, default="")  # "", "open", "attention" (tab state)
+    # "" | "open" | "attention" (tab state) | "background" (running detached)
+    status = GObject.Property(type=str, default="")
     state = GObject.Property(type=str, default="")  # "", "waiting", "interrupted" (transcript)
     # Conversation moved to a fork the store hasn't discovered yet (row is
     # kept visible but disabled until the fork's row can take its place).

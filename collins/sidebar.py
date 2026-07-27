@@ -280,7 +280,7 @@ class SessionRow(Gtk.ListBoxRow):
         Gtk.ListBoxRow.do_unroot(self)
 
     def _on_status_changed(self, item: SessionItem, _pspec) -> None:
-        for css in ("open", "attention"):
+        for css in ("open", "attention", "background"):
             self.dot.remove_css_class(css)
         if item.status:
             self.dot.add_css_class(item.status)
@@ -453,7 +453,9 @@ class SessionSidebar(Gtk.Box):
         sessions = self.store.sessions.values()
         projects = {s.project_name for s in sessions}
         open_tabs = sum(
-            1 for sid in self.store.sessions if (item := self.store.get_item(sid)) and item.status
+            1
+            for sid in self.store.sessions
+            if (item := self.store.get_item(sid)) and item.status in ("open", "attention")
         )
         parts = [
             _("{n} sessions").format(n=len(sessions)),
