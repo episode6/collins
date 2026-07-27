@@ -69,8 +69,10 @@ On first launch the sidebar lists every session found under
 `~/.claude/projects/`, with all groups collapsed. Each session is given an
 auto-generated title (locally, from its first prompt), so you see names
 instead of UUIDs right away. Expand a project, click a session, and it opens
-in a terminal tab that resumes it. If you haven't used Claude Code yet, run
-`claude` in a project once and the session will show up automatically.
+in a terminal tab that resumes it. If you haven't used Claude Code yet, start
+a session right from the app — the **New Session** button (`Ctrl+Shift+T`)
+asks for a project folder and launches `claude` there — or run `claude` in a
+project yourself and the session will show up automatically.
 
 On later launches the app reopens the session you had focused when you closed
 the window.
