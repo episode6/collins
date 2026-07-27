@@ -51,10 +51,9 @@ features:
 
 Call it an **Agent-First IDE**, an **AI-Native Workspace**, or an **Agent
 Orchestrator** — Collins is an opinionated take on what a desktop workspace
-built around a coding agent should look like: the agent front and center in
-real terminals, with your sessions organized around it. It is also,
-deliberately, a tool for **Claude** — there are no plans to support other
-agents.
+built around a coding agent should look like: the agent front and center,
+with your sessions organized around it. It is also, deliberately, a tool for
+**Claude** — there are no plans to support other agents.
 
 ## Why "Collins"?
 

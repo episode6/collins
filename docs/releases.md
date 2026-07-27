@@ -74,8 +74,7 @@ Everything below is the changelog of the upstream project,
 Máté Molnár, as it stood at the fork point. Version numbers are upstream's
 (unrelated to Collins's own 0.1.0). Note that Cursor support (added upstream
 in v0.10.0) and the native chat / session replay features (added in v1.0.0)
-are not part of Collins, which focuses on wrapping the agent CLI in embedded
-terminals.
+are not currently part of Collins.
 
 ### v1.0.0 — Native chat, replay & richer sessions
 

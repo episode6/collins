@@ -5,7 +5,7 @@
 Call it an **Agent-First IDE**, an **AI-Native Workspace**, or an **Agent
 Orchestrator** — Collins is an opinionated version of what a desktop
 workspace built around a coding agent should look like: the agent front and
-center in real terminals, with your sessions organized around it.
+center, with your sessions organized around it.
 
 ## Why did you remove Cursor support?
 
