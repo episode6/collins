@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, hidden sessions, settings.
 
@@ -115,8 +115,9 @@ class AppState:
         self.project_order: list[str] = []  # user-arranged sidebar order, by project name
         self.expanded_groups: set[str] = set()  # sidebar groups the user expanded
         self.panel_states: dict[str, dict] = {}  # per-session panel open/mode/sizes
-        # old session id -> the id its conversation continued under (Claude's
-        # /bg forks a backgrounded session to a fresh background session).
+        # old session id -> the id its conversation continued under (older
+        # Claude CLIs' /bg forked a backgrounded session to a fresh background
+        # session; current CLIs detach in place, adding no entries here).
         self.session_forwards: dict[str, str] = {}
         self.settings: dict = dict(DEFAULT_SETTINGS)
         self._load()
@@ -284,8 +285,9 @@ class AppState:
 
     def forward_session(self, old_id: str, new_id: str) -> None:
         """Record that a session's conversation continued under a new id
-        (Claude's /bg forks a backgrounded session to a fresh background
-        session). Carries the user's metadata over — without clobbering
+        (older Claude CLIs' /bg forked a backgrounded session to a fresh
+        background session; current CLIs detach in place, so this only fires
+        on legacy forks). Carries the user's metadata over — without clobbering
         anything already set on the new id. One write to disk.
 
         The stale original row is *not* hidden here: visibility is derived
