@@ -17,6 +17,7 @@ fork. Last modified: 2026-07-28. Full change history: git log for this file.
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in the terminal (always available) |
 | `Ctrl+Shift+G` | Find in the terminal |
 | `Ctrl+Shift+K` | Quick switcher — jump to any session |
+| `Ctrl+Shift+A` | Archive the current session (closes its tab) |
 | `Ctrl+Shift+E` | Toggle a 😊 marker on the current tab |
 | `Shift+Enter` | Insert a newline in the agent's prompt |
 | `Ctrl+J` | Show/hide the terminal panel |
