@@ -188,7 +188,13 @@ card overlays it — answer with a click instead of typing a number.
   transcript moved to the trash. Hiding is cheap and the pile grows quietly,
   so the confirmation spells out the damage first: how many transcripts, in
   which projects, and how many of those projects lose *every* session they
-  have and so disappear from the sidebar. Greyed out when nothing is hidden.
+  have. Greyed out when nothing is hidden.
+- **Keeping a project after its sessions go**: any dialog that would empty a
+  project out offers *"Keep the N emptied project(s) in the sidebar"* (checked
+  by default). Kept projects stay as empty headers with their folder, so
+  **New session here** still works — they're remembered across restarts, and
+  the header's right-click menu can **Remove project from sidebar** again. A
+  project that gets real sessions back simply keeps its place.
 - **Export as Markdown** (right-click) writes a session transcript to a
   readable Markdown file.
 - **Move a transcript to trash** (recoverable) or **delete it permanently** —

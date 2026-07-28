@@ -456,14 +456,19 @@ class SessionSidebar(Gtk.Box):
             self._rebuild_rows()
         self._update_selection_label()
         self._invalidate()
+        # Kept (virtual) projects are headers with nothing under them, but they
+        # are still a session list — not the "no sessions yet" status page.
         self._content_stack.set_visible_child_name(
-            "empty" if not (store.sessions or self._placeholders) else "list"
+            "empty" if not (store.sessions or store.empty_groups or self._placeholders) else "list"
         )
         self.update_footer()
 
     def update_footer(self) -> None:
         sessions = self.store.sessions.values()
-        projects = {s.project_name for s in sessions}
+        # Kept projects have no sessions to count them, but they are projects.
+        projects = {s.project_name for s in sessions} | {
+            label for _key, label, _cwd in self.store.empty_groups
+        }
         open_tabs = sum(
             1
             for sid in self.store.sessions
@@ -815,6 +820,15 @@ class SessionSidebar(Gtk.Box):
             "win.hide-project", GLib.Variant("s", project_name)
         )
         danger_section.append_item(hide_item)
+
+        # A project kept after its last session went away has nothing left to
+        # hide — dropping it is the only way it ever leaves the sidebar.
+        if self.store.state.is_virtual_project(project_name):
+            forget_item = Gio.MenuItem.new(_("Remove project from sidebar"), None)
+            forget_item.set_action_and_target_value(
+                "win.forget-project", GLib.Variant("s", project_name)
+            )
+            danger_section.append_item(forget_item)
 
         menu = Gio.Menu()
         menu.append_section(None, open_section)

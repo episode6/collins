@@ -197,9 +197,11 @@ class SessionStore(GObject.Object):
         for group_sessions in grouped.values():
             group_sessions.sort(key=lambda s: s.created, reverse=True)
 
+        virtual = self.state.get_virtual_projects()
         previous_order = self.resolved_project_order
         self.resolved_project_order = merge_project_order(
-            self.state.get_project_order(), (s.project_name for s in sessions)
+            self.state.get_project_order(),
+            [s.project_name for s in sessions] + list(virtual),
         )
         rank = {name: i for i, name in enumerate(self.resolved_project_order)}
 
@@ -230,11 +232,17 @@ class SessionStore(GObject.Object):
                 continue
             if not self.show_hidden and self.state.is_project_hidden(session.project_name):
                 continue
-            cwd = next(
-                (s.cwd for s in sessions if s.project_name == session.project_name and s.cwd),
-                None,
-            )
-            empty_groups.append((key, session.project_name, cwd))
+            empty_groups.append((key, session.project_name, self.project_cwd(session.project_name)))
+        # Virtual projects: kept deliberately after their last session went
+        # away, so they hang on as headers until removed. A project that has
+        # sessions again is already covered above — never list it twice.
+        for name, cwd in virtual.items():
+            key = ("proj", name)
+            if key in grouped or any(g[0] == key for g in empty_groups):
+                continue
+            if not self.show_hidden and self.state.is_project_hidden(name):
+                continue
+            empty_groups.append((key, name, cwd or None))
         empty_groups.sort(key=lambda g: rank.get(g[1], len(rank)))
         # The sidebar interleaves empty headers with session groups by
         # resolved order, so an order change alone must trigger a rebuild.
@@ -371,6 +379,29 @@ class SessionStore(GObject.Object):
             or self.state.is_project_hidden(s.project_name)
         ]
 
+    def project_cwd(self, project_name: str) -> str | None:
+        """A project's working directory, from its most recent session that
+        records one — what the group header's "new session here" button needs,
+        and what a virtual project has to remember once its sessions are gone."""
+        return next(
+            (s.cwd for s in self._last_sessions if s.project_name == project_name and s.cwd),
+            None,
+        )
+
+    def keep_projects(self, project_names: list[str]) -> None:
+        """Keep these projects in the sidebar after their sessions go: they
+        stay as empty headers, with their folder, until removed."""
+        self.state.keep_virtual_projects(
+            {name: self.project_cwd(name) or "" for name in project_names}
+        )
+        self._apply()
+
+    def forget_project(self, project_name: str) -> None:
+        """Drop a kept (virtual) project from the sidebar. Its sessions, if any
+        ever come back, bring the group back with them."""
+        self.state.forget_virtual_project(project_name)
+        self._apply()
+
     def hidden_breakdown(self) -> list[tuple[str, int, int]]:
         """What hidden_sessions() covers, per project: (project name, hidden
         count, total sessions in that project), biggest first. A project whose
@@ -406,7 +437,9 @@ class SessionStore(GObject.Object):
         their slot too."""
         order = merge_project_order(
             self.state.get_project_order(),
-            {s.project_name for s in self._last_sessions} | {name},
+            {s.project_name for s in self._last_sessions}
+            | set(self.state.get_virtual_projects())
+            | {name},
         )
         self.state.set_project_order(move_in_order(order, name, before))
         self._apply()

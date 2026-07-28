@@ -53,6 +53,43 @@ def test_hidden_breakdown_counts_per_project(store):
     ]
 
 
+def _empty_group_names(store) -> list[str]:
+    return [label for _key, label, _cwd in store.empty_groups]
+
+
+def test_kept_project_outlives_its_sessions(store, monkeypatch):
+    monkeypatch.setattr(store_mod, "_trash_file", lambda path: None)
+    beta = [s for s in store._last_sessions if s.project_name == "beta"]
+
+    store.keep_projects(["beta"])
+    # Still has sessions, so it's a real group — not an empty header as well.
+    assert _empty_group_names(store) == []
+
+    store.trash_many([s.session_id for s in beta])
+    assert _by_project(store, "beta") == []  # every session gone
+    assert _empty_group_names(store) == ["beta"]
+    # The header keeps the folder, so "new session here" still works.
+    assert store.empty_groups[0][2] == "/home/user/beta"
+    assert "beta" in store.resolved_project_order
+
+    store.forget_project("beta")
+    assert _empty_group_names(store) == []
+    assert not store.state.is_virtual_project("beta")
+
+
+def test_kept_project_persists_and_respects_hiding(store, app_state, monkeypatch):
+    monkeypatch.setattr(store_mod, "_trash_file", lambda path: None)
+    store.keep_projects(["beta"])
+    store.trash_many([s.session_id for s in store._last_sessions if s.project_name == "beta"])
+
+    assert app_state.AppState().get_virtual_projects() == {"beta": "/home/user/beta"}
+
+    store.set_project_hidden("beta", True)
+    assert _empty_group_names(store) == []
+    store.set_show_hidden(True)
+    assert _empty_group_names(store) == ["beta"]
+
+
 def test_trash_many_keeps_orphaned_forwards_hidden(store, monkeypatch):
     monkeypatch.setattr(store_mod, "_trash_file", lambda path: None)
     original, fork = (s.session_id for s in store._last_sessions[:2])

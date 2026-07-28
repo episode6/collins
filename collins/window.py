@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 import gi
 
@@ -45,6 +46,13 @@ _GHOSTTY = shutil.which("ghostty")
 
 # Quiet period before a background tab is considered "idle" / finished.
 _IDLE_NOTIFY_MS = 4000
+
+class _KeepProjects(NamedTuple):
+    """The "keep the emptied projects" check button and what it applies to."""
+
+    check: Gtk.CheckButton
+    projects: list[str]
+
 
 # Projects listed by name in the "delete hidden sessions" confirmation before
 # the rest are summed up on one line — enough to see the damage, few enough
@@ -474,6 +482,7 @@ class MainWindow(Adw.ApplicationWindow):
             "session-details": self._on_session_details,
             "hide-session": self._on_hide_session,
             "hide-project": self._on_hide_project,
+            "forget-project": lambda _a, p: self.store.forget_project(p.get_string()),
             "trash-session": self._on_trash_session,
         }
         for name, callback in per_session.items():
@@ -520,7 +529,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.open_session(item.session)
 
     def _on_sidebar_trash_many(self, _sidebar, items: list[SessionItem]) -> None:
+        keep = self._keep_projects_check([item.session_id for item in items])
+
         def do_trash() -> None:
+            self._apply_keep_projects(keep)
             errors = []
             for item in items:
                 error = self.store.trash(item.session_id)
@@ -537,6 +549,7 @@ class MainWindow(Adw.ApplicationWindow):
             _("The files are moved to the trash and can be restored."),
             _("Move to Trash"),
             do_trash,
+            extra_child=keep.check if keep else None,
         )
 
     def _on_sidebar_hide_many(self, _sidebar, items: list[SessionItem]) -> None:
@@ -1592,7 +1605,10 @@ class MainWindow(Adw.ApplicationWindow):
         if not sessions:
             return
 
+        keep = self._keep_projects_check([s.session_id for s in sessions])
+
         def do_trash() -> None:
+            self._apply_keep_projects(keep)
             errors = self.store.trash_many([s.session_id for s in sessions])
             for session in sessions:
                 if session.session_id in errors:
@@ -1619,7 +1635,38 @@ class MainWindow(Adw.ApplicationWindow):
             self._hidden_blast_radius(len(sessions)),
             _("Move to Trash"),
             do_trash,
+            extra_child=keep.check if keep else None,
         )
+
+    def _keep_projects_check(self, session_ids: list[str]) -> _KeepProjects | None:
+        """A check button for the projects that lose *every* session they have
+        when `session_ids` go, so they can stay in the sidebar as empty headers
+        instead of vanishing with their sessions. None when no project empties
+        out. Checked by default: losing a project you never removed is the
+        surprise, and an empty header costs nothing."""
+        doomed = set(session_ids)
+        losing: set[str] = set()
+        surviving: set[str] = set()
+        for session in self.store.sessions.values():
+            target = losing if session.session_id in doomed else surviving
+            target.add(session.project_name)
+        emptied = sorted(losing - surviving)
+        if not emptied:
+            return None
+        return _KeepProjects(
+            Gtk.CheckButton(
+                label=_("Keep the {p} emptied project(s) in the sidebar").format(p=len(emptied)),
+                active=True,
+                halign=Gtk.Align.CENTER,
+            ),
+            emptied,
+        )
+
+    def _apply_keep_projects(self, keep: _KeepProjects | None) -> None:
+        """Act on the check button — call before the transcripts go, while the
+        projects still have sessions to take their folder from."""
+        if keep is not None and keep.check.get_active():
+            self.store.keep_projects(keep.projects)
 
     def _hidden_blast_radius(self, total: int) -> str:
         """Spell out what "all hidden sessions" actually means before the user
@@ -1651,8 +1698,7 @@ class MainWindow(Adw.ApplicationWindow):
         if emptied:
             lines.append("")
             lines.append(
-                _("{p} of these project(s) lose every session they have and "
-                  "disappear from the sidebar.").format(p=emptied)
+                _("{p} of these project(s) lose every session they have.").format(p=emptied)
             )
         return "\n".join(lines)
 
@@ -1669,8 +1715,10 @@ class MainWindow(Adw.ApplicationWindow):
         session = self._session_for(param)
         if session is None:
             return
+        keep = self._keep_projects_check([session.session_id])
 
         def do_trash() -> None:
+            self._apply_keep_projects(keep)
             error = self.store.trash(session.session_id)
             if error:
                 dialogs.error_dialog(self, _("Could not trash transcript"), error)
@@ -1687,14 +1735,17 @@ class MainWindow(Adw.ApplicationWindow):
             + _("The file is moved to the trash and can be restored."),
             _("Move to Trash"),
             do_trash,
+            extra_child=keep.check if keep else None,
         )
 
     def _on_delete_session(self, _action, param: GLib.Variant) -> None:
         session = self._session_for(param)
         if session is None:
             return
+        keep = self._keep_projects_check([session.session_id])
 
         def do_delete() -> None:
+            self._apply_keep_projects(keep)
             error = self.store.delete(session.session_id)
             if error:
                 dialogs.error_dialog(self, _("Could not delete transcript"), error)
@@ -1708,6 +1759,7 @@ class MainWindow(Adw.ApplicationWindow):
               "This cannot be undone.").format(name=self.store.display_name(session)),
             _("Delete permanently"),
             do_delete,
+            extra_child=keep.check if keep else None,
         )
 
     # -- open transcript from file -----------------------------------------
