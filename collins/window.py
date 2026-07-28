@@ -409,6 +409,7 @@ class MainWindow(Adw.ApplicationWindow):
             default_response="confirm",
             extra_label=_("Background Sessions") if can_background else None,
             on_extra=(lambda: do_quit(background=True)) if can_background else None,
+            keys={"e": "confirm", "b": "extra", "c": "cancel"},
         )
 
     # -- sidebar width persistence -------------------------------------------
@@ -1034,6 +1035,7 @@ class MainWindow(Adw.ApplicationWindow):
             default_response="confirm",
             extra_label=_("Background Session") if can_background else None,
             on_extra=(lambda: do_close(background=True)) if can_background else None,
+            keys={"e": "confirm", "b": "extra", "c": "cancel"},
         )
 
     def _graceful_close(self, page: Adw.TabPage) -> None:

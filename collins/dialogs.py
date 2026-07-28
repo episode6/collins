@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -13,7 +13,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from .formatting import format_size, format_timestamp, format_tokens
 from .i18n import _
@@ -74,10 +74,13 @@ def confirm_dialog(
     extra_label: str | None = None,
     on_extra: Callable[[], None] | None = None,
     extra_child: Gtk.Widget | None = None,
+    keys: dict[str, str] | None = None,
 ) -> None:
     """Two-button confirmation (Cancel + a destructive `confirm_label`).
     `extra_label`/`on_extra` add a third, non-destructive choice between them;
-    `extra_child` puts a widget (a check button, say) above the buttons."""
+    `extra_child` puts a widget (a check button, say) above the buttons.
+    `keys` maps bare key names (e.g. "e") to response ids so the dialog can be
+    answered without reaching for the mouse."""
     dialog = Adw.AlertDialog(heading=heading, body=body)
     if extra_child is not None:
         dialog.set_extra_child(extra_child)
@@ -88,6 +91,58 @@ def confirm_dialog(
     dialog.set_response_appearance("confirm", Adw.ResponseAppearance.DESTRUCTIVE)
     dialog.set_default_response(default_response)
     dialog.set_close_response("cancel")
+
+    if keys:
+        def on_key(_ctrl, keyval, _keycode, state) -> bool:
+            if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK):
+                return Gdk.EVENT_PROPAGATE
+            response = keys.get(Gdk.keyval_name(Gdk.keyval_to_lower(keyval)) or "")
+            if response is None or (response == "extra" and extra_label is None):
+                return Gdk.EVENT_PROPAGATE
+            # Route through close() with the chosen response as the close
+            # response: the "response" signal then fires exactly once, through
+            # the same path as an Escape dismissal. Emitting the signal
+            # directly and then closing would fire a second, spurious "cancel".
+            dialog.set_close_response(response)
+            dialog.close()
+            return Gdk.EVENT_STOP
+
+        controller = Gtk.EventControllerKey()
+        controller.connect("key-pressed", on_key)
+        dialog.add_controller(controller)
+
+        # Underline each shortcut's letter in its button so the mapping is
+        # visible. AlertDialog exposes no API for its buttons, so once the
+        # dialog maps, find each response label by its text and attribute the
+        # first occurrence of the key's letter. Purely cosmetic: if a label
+        # lacks the letter (translations) or the walk finds nothing, the keys
+        # above still work.
+        label_for = {"cancel": _("Cancel"), "confirm": confirm_label}
+        if extra_label is not None:
+            label_for["extra"] = extra_label
+        wanted: dict[str, int] = {}
+        for key, response in keys.items():
+            text = label_for.get(response, "")
+            index = text.lower().find(key) if len(key) == 1 else -1
+            if index >= 0:
+                wanted[text] = index
+
+        def underline_labels(widget: Gtk.Widget) -> None:
+            child = widget.get_first_child()
+            while child is not None:
+                if isinstance(child, Gtk.Label) and child.get_text() in wanted:
+                    text = child.get_text()
+                    start = len(text[: wanted[text]].encode())  # byte offsets
+                    attr = Pango.attr_underline_new(Pango.Underline.SINGLE)
+                    attr.start_index = start
+                    attr.end_index = start + len(text[wanted[text]].encode())
+                    attrs = Pango.AttrList()
+                    attrs.insert(attr)
+                    child.set_attributes(attrs)
+                underline_labels(child)
+                child = child.get_next_sibling()
+
+        dialog.connect("map", lambda *_a: underline_labels(dialog))
 
     def respond(_dialog, response: str) -> None:
         if response == "confirm":
