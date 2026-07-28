@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg height="16px" viewBox="0 0 16 16" width="16px" xmlns="http://www.w3.org/2000/svg">
     <!-- Filled paths only: GTK recolors symbolic icons by overriding fill on
-         every shape, so stroked outlines collapse into silhouettes. -->
+         every shape, so stroked outlines collapse into silhouettes. These
+         paths are the 1.25px-stroke outline design expanded into fills. -->
     <g fill="#2e3436">
-        <path d="M 2.5 9 H 3.75 V 11.5 A 0.75 0.75 0 0 0 4.5 12.25 H 11.5 A 0.75 0.75 0 0 0 12.25 11.5 V 9 H 13.5 V 11.5 A 2 2 0 0 1 11.5 13.5 H 4.5 A 2 2 0 0 1 2.5 11.5 Z"/>
-        <path d="M 8 1.75 L 11.25 5 L 10.35 5.9 L 8.65 4.2 V 10.5 H 7.35 V 4.2 L 5.65 5.9 L 4.75 5 Z"/>
+        <path d="M 2.125 9.75 H 3.375 V 11.25 A 1.375 1.375 0 0 0 4.75 12.625 H 11.25 A 1.375 1.375 0 0 0 12.625 11.25 V 9.75 H 13.875 V 11.25 A 2.625 2.625 0 0 1 11.25 13.875 H 4.75 A 2.625 2.625 0 0 1 2.125 11.25 Z"/>
+        <rect x="7.375" y="2.75" width="1.25" height="8.625" rx="0.625"/>
+        <path d="M 5.692 5.942 A 0.625 0.625 0 0 1 4.808 5.058 L 7.558 2.308 A 0.625 0.625 0 0 1 8.442 2.308 L 11.192 5.058 A 0.625 0.625 0 0 1 10.308 5.942 L 8 3.634 Z"/>
     </g>
 </svg>

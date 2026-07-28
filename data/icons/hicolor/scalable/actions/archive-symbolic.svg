@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg height="16px" viewBox="0 0 16 16" width="16px" xmlns="http://www.w3.org/2000/svg">
     <!-- Filled paths only: GTK recolors symbolic icons by overriding fill on
-         every shape, so stroked outlines collapse into silhouettes. -->
+         every shape, so stroked outlines collapse into silhouettes. These
+         paths are the 1.25px-stroke outline design expanded into fills. -->
     <g fill="#2e3436">
-        <rect x="1.5" y="2.5" width="13" height="2.75" rx="0.9"/>
-        <path fill-rule="evenodd" d="M 2.5 6.5 H 13.5 V 11.5 A 2 2 0 0 1 11.5 13.5 H 4.5 A 2 2 0 0 1 2.5 11.5 Z M 3.75 7.75 V 11.5 A 0.75 0.75 0 0 0 4.5 12.25 H 11.5 A 0.75 0.75 0 0 0 12.25 11.5 V 7.75 Z"/>
-        <rect x="6" y="9.125" width="4" height="1.25" rx="0.625"/>
+        <path fill-rule="evenodd" d="M 1.125 3.5 A 1.375 1.375 0 0 1 2.5 2.125 H 13.5 A 1.375 1.375 0 0 1 14.875 3.5 V 4.5 A 1.375 1.375 0 0 1 13.5 5.875 H 2.5 A 1.375 1.375 0 0 1 1.125 4.5 Z M 2.375 3.5 V 4.5 A 0.125 0.125 0 0 0 2.5 4.625 H 13.5 A 0.125 0.125 0 0 0 13.625 4.5 V 3.5 A 0.125 0.125 0 0 0 13.5 3.375 H 2.5 A 0.125 0.125 0 0 0 2.375 3.5 Z"/>
+        <path d="M 2.125 5.25 H 3.375 V 11.75 A 0.875 0.875 0 0 0 4.25 12.625 H 11.75 A 0.875 0.875 0 0 0 12.625 11.75 V 5.25 H 13.875 V 11.75 A 2.125 2.125 0 0 1 11.75 13.875 H 4.25 A 2.125 2.125 0 0 1 2.125 11.75 Z"/>
+        <rect x="5.625" y="7.625" width="4.75" height="1.25" rx="0.625"/>
     </g>
 </svg>
