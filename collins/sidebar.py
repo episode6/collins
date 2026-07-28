@@ -232,7 +232,23 @@ class SessionRow(Gtk.ListBoxRow):
             "clicked",
             lambda *_: self.activate_action("win.archive-session", GLib.Variant("s", item.session_id)),
         )
-        top.append(archive_btn)
+        self._archive_btn = archive_btn
+
+        # The archive button only appears while the pointer is over the row,
+        # so at rest the timestamp sits flush right and the title gets the
+        # freed width. A stack (swapping the button for an empty page) rather
+        # than set_visible keeps the button's height reserved — otherwise the
+        # row grows on hover and the list below it jumps. Archiving is still
+        # reachable without a pointer via the row's context menu.
+        self._action_stack = Gtk.Stack(hhomogeneous=False, vhomogeneous=True)
+        self._action_stack.add_named(Gtk.Box(), "rest")
+        self._action_stack.add_named(archive_btn, "hover")
+        top.append(self._action_stack)
+
+        hover = Gtk.EventControllerMotion()
+        hover.connect("enter", lambda *_: self._action_stack.set_visible_child_name("hover"))
+        hover.connect("leave", lambda *_: self._action_stack.set_visible_child_name("rest"))
+        self.add_controller(hover)
         box.append(top)
 
         path_label = Gtk.Label(xalign=0.0)
