@@ -17,10 +17,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-import gi
-
-gi.require_version("Gtk", "4.0")
-from gi.repository import Gio, GLib, GObject  # noqa: E402
+from gi.repository import Gio, GLib, GObject
 
 from . import panelhistory
 from .models import FAV_GROUP, SessionItem

@@ -1,4 +1,4 @@
-from collins.window import blast_radius_body
+from collins.formatting import blast_radius_body
 
 
 def _breakdown(count: int, hidden: int = 2, total: int = 2):
