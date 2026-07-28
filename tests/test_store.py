@@ -39,6 +39,33 @@ def test_hidden_sessions_include_hidden_projects(store):
     )
 
 
+def test_hidden_breakdown_counts_per_project(store):
+    alpha = [s for s in store._last_sessions if s.project_name == "alpha"]
+    beta = [s for s in store._last_sessions if s.project_name == "beta"]
+    store.set_hidden(alpha[0].session_id, True)
+    store.set_project_hidden("beta", True)
+
+    # (project, hidden count, total sessions in the project) — beta loses every
+    # session it has, which is what the confirmation warns about.
+    assert store.hidden_breakdown() == [
+        ("alpha", 1, len(alpha)),
+        ("beta", len(beta), len(beta)),
+    ]
+
+
+def test_trash_many_keeps_orphaned_forwards_hidden(store, monkeypatch):
+    monkeypatch.setattr(store_mod, "_trash_file", lambda path: None)
+    original, fork = (s.session_id for s in store._last_sessions[:2])
+    store.record_forward(original, fork)
+    assert store.forward_state(store.sessions[original]) == "moved"  # row suppressed
+
+    store.trash_many([fork])
+
+    # The forward is stale now, so the original's row would pop back into view
+    # after having been invisible all along; it stays hidden instead.
+    assert store.state.is_hidden(original)
+
+
 def test_trash_many_drops_rows(store, monkeypatch):
     trashed = []
     monkeypatch.setattr(store_mod, "_trash_file", lambda path: trashed.append(path))

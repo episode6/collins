@@ -46,6 +46,11 @@ _GHOSTTY = shutil.which("ghostty")
 # Quiet period before a background tab is considered "idle" / finished.
 _IDLE_NOTIFY_MS = 4000
 
+# Projects listed by name in the "delete hidden sessions" confirmation before
+# the rest are summed up on one line — enough to see the damage, few enough
+# that the dialog still fits on screen.
+_BLAST_RADIUS_ROWS = 8
+
 # Tab status dots, matching the sidebar (.status-dot CSS in app.py).
 _STATUS_COLORS = {"open": "#2ec27e", "attention": "#3584e4"}
 _status_icon_cache: dict[str, Gio.Icon] = {}
@@ -1611,14 +1616,45 @@ class MainWindow(Adw.ApplicationWindow):
         dialogs.confirm_dialog(
             self,
             _("Delete {n} hidden session(s)?").format(n=len(sessions)),
-            _(
-                "Every session hidden from the sidebar — including the sessions "
-                "in hidden projects — has its transcript moved to the trash, "
-                "where it can be restored."
-            ),
+            self._hidden_blast_radius(len(sessions)),
             _("Move to Trash"),
             do_trash,
         )
+
+    def _hidden_blast_radius(self, total: int) -> str:
+        """Spell out what "all hidden sessions" actually means before the user
+        commits to it: how many transcripts, spread over which projects, and
+        which of those projects lose *every* session they have — hiding is
+        cheap and accumulates, so the pile is usually far bigger than it
+        feels, and a project that loses everything vanishes from the
+        sidebar."""
+        breakdown = self.store.hidden_breakdown()
+        lines = [
+            _("{n} session(s) in {p} project(s) have their transcripts moved to "
+              "the trash, where they can be restored. Sessions hidden with their "
+              "whole project are included.").format(n=total, p=len(breakdown))
+        ]
+        shown = breakdown[:_BLAST_RADIUS_ROWS]
+        lines.append("")
+        lines += [
+            _("{project} — {n} of {total}").format(project=name, n=count, total=project_total)
+            for name, count, project_total in shown
+        ]
+        rest = breakdown[len(shown):]
+        if rest:
+            lines.append(
+                _("…and {p} more project(s) — {n} session(s)").format(
+                    p=len(rest), n=sum(count for _n, count, _t in rest)
+                )
+            )
+        emptied = sum(1 for _n, count, project_total in breakdown if count >= project_total)
+        if emptied:
+            lines.append("")
+            lines.append(
+                _("{p} of these project(s) lose every session they have and "
+                  "disappear from the sidebar.").format(p=emptied)
+            )
+        return "\n".join(lines)
 
     def _forget_transcript(self, session_id: str) -> None:
         """Drop everything the app kept for a session whose transcript just

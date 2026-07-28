@@ -371,6 +371,22 @@ class SessionStore(GObject.Object):
             or self.state.is_project_hidden(s.project_name)
         ]
 
+    def hidden_breakdown(self) -> list[tuple[str, int, int]]:
+        """What hidden_sessions() covers, per project: (project name, hidden
+        count, total sessions in that project), biggest first. A project whose
+        hidden count equals its total loses every session it has — deleting
+        them drops it from the sidebar altogether."""
+        totals: dict[str, int] = {}
+        for session in self._last_sessions:
+            totals[session.project_name] = totals.get(session.project_name, 0) + 1
+        hidden: dict[str, int] = {}
+        for session in self.hidden_sessions():
+            hidden[session.project_name] = hidden.get(session.project_name, 0) + 1
+        return sorted(
+            ((name, count, totals[name]) for name, count in hidden.items()),
+            key=lambda row: (-row[1], row[0]),
+        )
+
     def set_project_hidden(self, project_name: str, hidden: bool) -> None:
         self.state.set_project_hidden(project_name, hidden)
         self._apply()
@@ -433,8 +449,19 @@ class SessionStore(GObject.Object):
             self._last_sessions = [
                 s for s in self._last_sessions if s.session_id not in trashed
             ]
+            self._hide_orphaned_forwards(trashed)
             self._apply()
         return errors
+
+    def _hide_orphaned_forwards(self, gone: set[str]) -> None:
+        """A row suppressed as "moved" (a legacy /bg fork took its place) comes
+        back the moment the fork's transcript disappears: forward_state reads
+        the forward as stale. Keep those rows out of sight — they were already
+        invisible, and trashing something else is no reason to resurface
+        them."""
+        for session in self._last_sessions:
+            if self.state.resolve_forward(session.session_id) in gone:
+                self.state.set_hidden(session.session_id, True)
 
     def delete(self, session_id: str) -> str | None:
         """Permanently delete the transcript file (irreversible). Returns an
