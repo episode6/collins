@@ -366,6 +366,7 @@ class SessionSidebar(Gtk.Box):
         menu = Gio.Menu()
         menu.append(_("Open session file…"), "win.open-session-file")
         menu.append(_("Show hidden sessions"), "win.show-hidden")
+        menu.append(_("Delete hidden sessions…"), "win.trash-hidden")
         menu.append(_("MCP servers"), "win.mcp-servers")
         menu.append(_("Preferences"), "win.preferences")
         menu.append(_("About Collins"), "win.about")

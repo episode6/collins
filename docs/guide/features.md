@@ -183,6 +183,10 @@ card overlays it — answer with a click instead of typing a number.
 - **Hide** sessions you don't want to see (kept on disk, toggle "Show hidden");
   hiding a session with an open tab closes the tab too. Whole **projects** can
   be hidden from their header's right-click menu.
+- **Delete hidden sessions…** (sidebar menu) clears the lot in one go: every
+  hidden session — including the ones inside hidden projects — has its
+  transcript moved to the trash, behind a confirmation. Greyed out when
+  nothing is hidden.
 - **Export as Markdown** (right-click) writes a session transcript to a
   readable Markdown file.
 - **Move a transcript to trash** (recoverable) or **delete it permanently** —

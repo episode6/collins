@@ -32,6 +32,15 @@ from .titles import TitleGenerator, fallback_title
 _DEBOUNCE_MS = 2000
 
 
+def _trash_file(path: Path) -> str | None:
+    """Move one file to the system trash. Returns an error message or None."""
+    try:
+        Gio.File.new_for_path(str(path)).trash(None)
+    except GLib.Error as err:
+        return err.message
+    return None
+
+
 def _relative_time(dt: datetime) -> str:
     delta = datetime.now() - dt
     seconds = int(delta.total_seconds())
@@ -351,6 +360,17 @@ class SessionStore(GObject.Object):
             self.state.set_hidden(session_id, True)
         self._apply()
 
+    def hidden_sessions(self) -> list[Session]:
+        """Every session the sidebar hides: individually hidden ones plus
+        everything inside a hidden project. Independent of `show_hidden`,
+        which only controls whether those rows are currently drawn."""
+        return [
+            s
+            for s in self._last_sessions
+            if self.state.is_hidden(s.session_id)
+            or self.state.is_project_hidden(s.project_name)
+        ]
+
     def set_project_hidden(self, project_name: str, hidden: bool) -> None:
         self.state.set_project_hidden(project_name, hidden)
         self._apply()
@@ -391,16 +411,30 @@ class SessionStore(GObject.Object):
 
     def trash(self, session_id: str) -> str | None:
         """Move the transcript to trash. Returns an error message or None."""
-        session = self.sessions.get(session_id)
-        if session is None:
-            return "session not found"
-        try:
-            Gio.File.new_for_path(str(session.jsonl_path)).trash(None)
-        except GLib.Error as err:
-            return err.message
-        self._last_sessions = [s for s in self._last_sessions if s.session_id != session_id]
-        self._apply()
-        return None
+        return self.trash_many([session_id]).get(session_id)
+
+    def trash_many(self, session_ids: list[str]) -> dict[str, str]:
+        """Move several transcripts to trash, refreshing the list once at the
+        end. Returns the error message per session id that failed; ids missing
+        from the result were trashed."""
+        errors: dict[str, str] = {}
+        trashed: set[str] = set()
+        for session_id in session_ids:
+            session = self.sessions.get(session_id)
+            if session is None:
+                errors[session_id] = "session not found"
+                continue
+            error = _trash_file(session.jsonl_path)
+            if error:
+                errors[session_id] = error
+            else:
+                trashed.add(session_id)
+        if trashed:
+            self._last_sessions = [
+                s for s in self._last_sessions if s.session_id not in trashed
+            ]
+            self._apply()
+        return errors
 
     def delete(self, session_id: str) -> str | None:
         """Permanently delete the transcript file (irreversible). Returns an

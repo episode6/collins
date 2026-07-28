@@ -434,11 +434,17 @@ class MainWindow(Adw.ApplicationWindow):
             "toggle-sidebar": lambda *_: self.sidebar.set_visible(
                 not self.sidebar.get_visible()
             ),
+            "trash-hidden": lambda *_: self._trash_hidden(),
         }
         for name, callback in plain.items():
             action = Gio.SimpleAction(name=name)
             action.connect("activate", callback)
             self.add_action(action)
+
+        # Greyed out until something is actually hidden; kept in sync on every
+        # store refresh (hiding/unhiding goes through one).
+        self._trash_hidden_action = self.lookup_action("trash-hidden")
+        self._sync_trash_hidden_action()
 
         per_session = {
             "new-session-provider": lambda _a, p: self._choose_new_session_folder(
@@ -516,11 +522,7 @@ class MainWindow(Adw.ApplicationWindow):
                 if error:
                     errors.append(f"{item.display_name}: {error}")
                     continue
-                page = self._pages.get(item.session_id)
-                if page is not None:
-                    self.tab_view.close_page(page)
-                panelhistory.delete(item.session_id)
-                self.state.set_panel_state(item.session_id, None)
+                self._forget_transcript(item.session_id)
             if errors:
                 dialogs.error_dialog(self, _("Some transcripts could not be trashed"), "\n".join(errors))
 
@@ -783,6 +785,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.state.set_setting(key, size)
 
     def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
+        self._sync_trash_hidden_action()
         if self._restore_session_id is not None:
             self._apply_restore_session()
         if self._pending_resolved:
@@ -1574,6 +1577,58 @@ class MainWindow(Adw.ApplicationWindow):
         action.set_state(value)
         self.store.set_show_hidden(value.get_boolean())
 
+    def _sync_trash_hidden_action(self) -> None:
+        self._trash_hidden_action.set_enabled(bool(self.store.hidden_sessions()))
+
+    def _trash_hidden(self) -> None:
+        """Sidebar menu → trash every session the sidebar is hiding: the ones
+        hidden individually plus everything inside a hidden project."""
+        sessions = self.store.hidden_sessions()
+        if not sessions:
+            return
+
+        def do_trash() -> None:
+            errors = self.store.trash_many([s.session_id for s in sessions])
+            for session in sessions:
+                if session.session_id in errors:
+                    continue
+                self._forget_transcript(session.session_id)
+                # The row is gone for good — don't leave its id in the hidden
+                # set forever. A hidden *project* stays hidden: new sessions
+                # started there should still land out of sight.
+                self.state.set_hidden(session.session_id, False)
+            if errors:
+                dialogs.error_dialog(
+                    self,
+                    _("Some transcripts could not be trashed"),
+                    "\n".join(
+                        f"{self.store.display_name(s)}: {errors[s.session_id]}"
+                        for s in sessions
+                        if s.session_id in errors
+                    ),
+                )
+
+        dialogs.confirm_dialog(
+            self,
+            _("Delete {n} hidden session(s)?").format(n=len(sessions)),
+            _(
+                "Every session hidden from the sidebar — including the sessions "
+                "in hidden projects — has its transcript moved to the trash, "
+                "where it can be restored."
+            ),
+            _("Move to Trash"),
+            do_trash,
+        )
+
+    def _forget_transcript(self, session_id: str) -> None:
+        """Drop everything the app kept for a session whose transcript just
+        went away: its tab, its panel scrollback, its panel layout."""
+        page = self._pages.get(session_id)
+        if page is not None:
+            self.tab_view.close_page(page)
+        panelhistory.delete(session_id)
+        self.state.set_panel_state(session_id, None)
+
     def _on_trash_session(self, _action, param: GLib.Variant) -> None:
         session = self._session_for(param)
         if session is None:
@@ -1584,11 +1639,7 @@ class MainWindow(Adw.ApplicationWindow):
             if error:
                 dialogs.error_dialog(self, _("Could not trash transcript"), error)
                 return
-            page = self._pages.get(session.session_id)
-            if page is not None:
-                self.tab_view.close_page(page)
-            panelhistory.delete(session.session_id)
-            self.state.set_panel_state(session.session_id, None)
+            self._forget_transcript(session.session_id)
 
         dialogs.confirm_dialog(
             self,
@@ -1612,11 +1663,7 @@ class MainWindow(Adw.ApplicationWindow):
             if error:
                 dialogs.error_dialog(self, _("Could not delete transcript"), error)
                 return
-            page = self._pages.get(session.session_id)
-            if page is not None:
-                self.tab_view.close_page(page)
-            panelhistory.delete(session.session_id)
-            self.state.set_panel_state(session.session_id, None)
+            self._forget_transcript(session.session_id)
 
         dialogs.confirm_dialog(
             self,
