@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -77,13 +77,23 @@ def _status_icon(status: str) -> Gio.Icon | None:
     return icon
 
 
+def _app_icon_name(window: Gtk.Window) -> str:
+    """The debug build (and any COLLINS_APP_ID derived from its id) wears a
+    recolored icon so the two apps read apart in a dock."""
+    app = window.get_application()
+    app_id = app.get_application_id() if app is not None else None
+    if app_id and app_id.startswith("com.episode6.Collins.Debug"):
+        return "com.episode6.Collins.Debug"
+    return "com.episode6.Collins"
+
+
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, state: AppState, store: SessionStore, **kwargs) -> None:
         super().__init__(**kwargs)
         self.state = state
         self.store = store
         self.set_title("Collins")
-        self.set_icon_name("com.episode6.Collins")
+        self.set_icon_name(_app_icon_name(self))
         self._restore_window_geometry()
         self._pages: dict[str, Adw.TabPage] = {}  # session_id -> open tab
         self._confirmed_closes: set[Adw.TabPage] = set()
@@ -1663,7 +1673,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _show_about(self) -> None:
         about = Adw.AboutDialog(
             application_name="Collins",
-            application_icon="com.episode6.Collins",
+            application_icon=_app_icon_name(self),
             developer_name="Máté Molnár",
             version=__version__,
             license_type=Gtk.License.GPL_3_0,
