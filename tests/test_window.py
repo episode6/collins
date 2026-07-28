@@ -13,15 +13,22 @@ def test_blast_radius_names_every_project_when_it_fits():
     assert "3 of these project(s) lose every session they have." in body
 
 
-def test_blast_radius_names_a_lone_leftover_instead_of_summing_it():
-    # 5 projects, 4 rows: summarising a single project as "…and 1 other" reads
-    # worse than just naming it.
-    body = blast_radius_body(10, _breakdown(5))
-    assert "project-004 — 2 of 2" in body
+def test_blast_radius_names_a_full_short_list():
+    # Seven still fits: naming them all beats cutting to four plus a summary
+    # line for the three that are left.
+    body = blast_radius_body(14, _breakdown(7))
+    assert "project-006 — 2 of 2" in body
     assert "other project" not in body
 
 
-def test_blast_radius_caps_the_list_and_sums_the_rest():
+def test_blast_radius_caps_the_list_once_it_grows():
+    body = blast_radius_body(16, _breakdown(8))
+    named = [line for line in body.splitlines() if line.startswith("project-")]
+    assert len(named) == 4
+    assert "…and 4 other project(s) — 8 session(s)" in body
+
+
+def test_blast_radius_stays_the_same_size_at_scale():
     body = blast_radius_body(400, _breakdown(200))
     named = [line for line in body.splitlines() if line.startswith("project-")]
     assert len(named) == 4  # 200 projects must not grow the dialog

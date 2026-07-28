@@ -55,17 +55,19 @@ def blast_radius_body(total: int, breakdown: list[tuple[str, int, int]]) -> str:
     that loses everything is gone from the sidebar unless it's kept.
 
     `breakdown` is store.hidden_breakdown(): (project, hidden, total) biggest
-    first. Only the first few projects are named — with hundreds of them the
-    dialog has to stay a readable size — and the rest are summed on one line.
+    first. A short list is named in full; a long one is cut to the biggest few
+    with the rest summed on one line, so the dialog stays a readable size with
+    hundreds of projects hidden.
     """
     lines = [
         _("{n} session(s) in {p} project(s) have their transcripts moved to "
           "the trash, where they can be restored. Sessions hidden with their "
           "whole project are included.").format(n=total, p=len(breakdown))
     ]
-    shown, rest = breakdown[:_BLAST_RADIUS_ROWS], breakdown[_BLAST_RADIUS_ROWS:]
-    if len(rest) == 1:
-        shown, rest = breakdown, []  # one leftover is worth naming, not summing
+    if len(breakdown) <= _BLAST_RADIUS_MAX:
+        shown, rest = breakdown, []
+    else:
+        shown, rest = breakdown[:_BLAST_RADIUS_ROWS], breakdown[_BLAST_RADIUS_ROWS:]
     lines.append("")
     lines += [
         _("{project} — {n} of {total}").format(project=name, n=count, total=project_total)
@@ -93,10 +95,12 @@ class _KeepProjects(NamedTuple):
     projects: list[str]
 
 
-# Projects listed by name in the "delete hidden sessions" confirmation before
-# the rest are summed up on one line — enough to see the damage, few enough
-# that the dialog stays a readable size with hundreds of projects hidden.
-_BLAST_RADIUS_ROWS = 4
+# Projects named in the "delete hidden sessions" confirmation: list them all
+# while the list is short, and once it isn't, name only the biggest few and sum
+# the rest on one line — enough to see the damage, and the same readable dialog
+# whether 3 projects are affected or 300.
+_BLAST_RADIUS_MAX = 7  # list every project up to this many
+_BLAST_RADIUS_ROWS = 4  # named once the list is capped
 
 # Tab status dots, matching the sidebar (.status-dot CSS in app.py).
 _STATUS_COLORS = {"open": "#2ec27e", "attention": "#3584e4"}
