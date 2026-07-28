@@ -47,7 +47,17 @@ _GHOSTTY = shutil.which("ghostty")
 # Quiet period before a background tab is considered "idle" / finished.
 _IDLE_NOTIFY_MS = 4000
 
-def blast_radius_body(total: int, breakdown: list[tuple[str, int, int]]) -> str:
+class BlastRadius(NamedTuple):
+    """The confirmation's text, split by how each half has to be laid out.
+    `summary` is a wrapped paragraph and reads fine centred, the way
+    AdwAlertDialog sets its body; `detail` is a ragged column of short lines,
+    which centring turns into a jumble — it goes in a left-aligned child."""
+
+    summary: str
+    detail: str
+
+
+def blast_radius(total: int, breakdown: list[tuple[str, int, int]]) -> BlastRadius:
     """Spell out what "all hidden sessions" actually means before the user
     commits to it: how many transcripts, spread over which projects, and how
     many of those lose *every* session they have — every row the sidebar keeps
@@ -60,18 +70,17 @@ def blast_radius_body(total: int, breakdown: list[tuple[str, int, int]]) -> str:
     with the rest summed on one line, so the dialog stays a readable size with
     hundreds of projects hidden.
     """
-    lines = [
-        _("{n} session(s) in {p} project(s) have their transcripts moved to "
-          "the trash, where they can be restored. Sessions hidden with their "
-          "whole project — and originals a backgrounded fork replaced — are "
-          "included.").format(n=total, p=len(breakdown))
-    ]
+    summary = _(
+        "{n} session(s) in {p} project(s) have their transcripts moved to "
+        "the trash, where they can be restored. Sessions hidden with their "
+        "whole project — and originals a backgrounded fork replaced — are "
+        "included."
+    ).format(n=total, p=len(breakdown))
     if len(breakdown) <= _BLAST_RADIUS_MAX:
         shown, rest = breakdown, []
     else:
         shown, rest = breakdown[:_BLAST_RADIUS_ROWS], breakdown[_BLAST_RADIUS_ROWS:]
-    lines.append("")
-    lines += [
+    lines = [
         _("{project} — {n} of {total}").format(project=name, n=count, total=project_total)
         for name, count, project_total in shown
     ]
@@ -87,7 +96,7 @@ def blast_radius_body(total: int, breakdown: list[tuple[str, int, int]]) -> str:
         lines.append(
             _("{p} of these project(s) lose every session they have.").format(p=emptied)
         )
-    return "\n".join(lines)
+    return BlastRadius(summary, "\n".join(lines))
 
 
 class _KeepProjects(NamedTuple):
@@ -95,6 +104,31 @@ class _KeepProjects(NamedTuple):
 
     check: Gtk.CheckButton
     projects: list[str]
+
+
+def _blast_radius_child(radius: BlastRadius, keep: _KeepProjects | None) -> Gtk.Widget:
+    """The whole confirmation below the heading, in one left-aligned column:
+    what happens, the per-project damage, and the keep-projects check button.
+    AdwAlertDialog centres its own body, which turns a ragged column of
+    "project — n of m" lines into a jumble, so the body is left empty and the
+    text lives here instead — every line starting in the same place."""
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+    for text in (radius.summary, radius.detail):
+        label = Gtk.Label(
+            label=text,
+            xalign=0,
+            halign=Gtk.Align.START,
+            justify=Gtk.Justification.LEFT,
+            wrap=True,
+            # Wide enough for the longest list line, so only prose wraps.
+            max_width_chars=44,
+        )
+        label.add_css_class("body")
+        box.append(label)
+    if keep is not None:
+        keep.check.set_halign(Gtk.Align.START)
+        box.append(keep.check)
+    return box
 
 
 # Projects named in the "delete hidden sessions" confirmation: list them all
@@ -1677,10 +1711,12 @@ class MainWindow(Adw.ApplicationWindow):
         dialogs.confirm_dialog(
             self,
             _("Delete {n} hidden session(s)?").format(n=len(sessions)),
-            blast_radius_body(len(sessions), self.store.hidden_breakdown()),
+            "",  # the body would be centred; _blast_radius_child owns the text
             _("Move to Trash"),
             do_trash,
-            extra_child=keep.check if keep else None,
+            extra_child=_blast_radius_child(
+                blast_radius(len(sessions), self.store.hidden_breakdown()), keep
+            ),
         )
 
     def _keep_projects_check(self, session_ids: list[str]) -> _KeepProjects | None:
