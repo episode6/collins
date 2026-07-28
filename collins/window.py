@@ -112,6 +112,9 @@ class MainWindow(Adw.ApplicationWindow):
         # their titles from the store.
         self._local_titles: set[Adw.TabPage] = set()
         self._idle_sources: dict[Adw.TabPage, int] = {}  # pending idle-notify timers
+        # Sessions whose /bg was fed but whose detach isn't confirmed yet:
+        # session id -> safety-timeout source (see _mark_backgrounding).
+        self._pending_bg: dict[str, int] = {}
         self._switcher: QuickSwitcher | None = None
 
         self._install_actions()
@@ -560,6 +563,12 @@ class MainWindow(Adw.ApplicationWindow):
         provider = get_provider(session.provider)
         fork = fork and provider.supports_fork
         if not fork:
+            if session.session_id in self._pending_bg:
+                # Mid-/bg handoff: attach isn't possible until the CLI lists
+                # the agent, so opening now would resume a new foreground turn
+                # over the transcript. The sidebar row is disabled; guard the
+                # other entry paths (switcher, session restore) too.
+                return
             # A backgrounded session may have continued under a new id (older
             # CLIs' /bg forked the conversation): open the live end of the
             # chain instead of the stale original. Forks stay on the id the
@@ -1002,6 +1011,10 @@ class MainWindow(Adw.ApplicationWindow):
         exit_text = tab.provider.background_exit() if page in self._bg_ok else None
         if exit_text:
             self._watch_background_fork(tab)
+            if tab.session_id and not tab.fork:
+                # Show the yellow dot as soon as the tab closes, and keep the
+                # row unopenable until the detach is confirmed (or times out).
+                self._mark_backgrounding(tab.session_id)
         else:
             exit_text = tab.provider.graceful_exit()
         if not exit_text:
@@ -1071,6 +1084,9 @@ class MainWindow(Adw.ApplicationWindow):
                         GLib.idle_add(self._on_backgrounded, tab, old_id, agent.session_id)
                         return
                 time.sleep(1)
+            # Never confirmed: the detach presumably failed — drop the
+            # pre-emptive yellow dot and re-enable the row.
+            GLib.idle_add(self._clear_backgrounding, old_id)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -1080,6 +1096,8 @@ class MainWindow(Adw.ApplicationWindow):
         normal case on current CLIs)."""
         if new_id:
             self.store.record_forward(old_id, new_id)
+            # The forward ("syncing"/"moved") machinery owns the old row now.
+            self._clear_backgrounding(old_id)
         # The agent list already shows the detached session: refresh now so
         # the yellow dot lands promptly even if the jobs-dir monitor misses it.
         self._bg_status.refresh()
@@ -1124,8 +1142,13 @@ class MainWindow(Adw.ApplicationWindow):
     def _sync_status(self, session_id: str) -> None:
         page = self._pages.get(session_id)
         if page is None:
-            # No tab — but the session may still be running detached (/bg).
-            status = "background" if session_id in self._bg_status.background_ids else ""
+            # No tab — but the session may still be running detached (/bg),
+            # or be mid-detach (pending confirmation: assume it worked).
+            detached = (
+                session_id in self._bg_status.background_ids
+                or session_id in self._pending_bg
+            )
+            status = "background" if detached else ""
         elif page.get_needs_attention():
             status = "attention"
         else:
@@ -1134,8 +1157,43 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.update_footer()
 
     def _on_background_ids_changed(self, changed: set[str]) -> None:
+        # Confirmed detaches: membership owns the yellow dot from here on,
+        # so the pre-emptive pending state (and its disabled row) can go.
+        for session_id in changed & self._bg_status.background_ids:
+            self._clear_backgrounding(session_id)
         for session_id in changed:
             self._sync_status(session_id)
+
+    # -- pre-emptive /bg status ----------------------------------------------
+
+    def _mark_backgrounding(self, session_id: str) -> None:
+        """A /bg was just fed: treat the session as backgrounded right away —
+        yellow dot once its tab closes, sidebar row disabled — instead of
+        waiting for the agent CLI to list it. Cleared when the poller confirms
+        the detach, when a legacy fork takes over, when the confirmation watch
+        gives up, or by the safety timeout."""
+        if session_id in self._pending_bg:
+            return
+        self._pending_bg[session_id] = GLib.timeout_add_seconds(
+            45, self._backgrounding_expired, session_id
+        )
+        self.store.set_backgrounding(session_id, True)
+
+    def _clear_backgrounding(self, session_id: str) -> None:
+        source = self._pending_bg.pop(session_id, None)
+        if source is None:
+            return
+        GLib.source_remove(source)
+        self.store.set_backgrounding(session_id, False)
+        self._sync_status(session_id)  # dot follows reality (the poll set) again
+
+    def _backgrounding_expired(self, session_id: str) -> bool:
+        # Confirmation never arrived (e.g. the agent exited right after
+        # detaching): stop pretending, re-enable the row.
+        self._pending_bg.pop(session_id, None)
+        self.store.set_backgrounding(session_id, False)
+        self._sync_status(session_id)
+        return GLib.SOURCE_REMOVE
 
     def _update_active_row(self) -> None:
         """Tell the sidebar which session (or new-session placeholder) the

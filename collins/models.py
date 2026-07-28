@@ -30,6 +30,10 @@ class SessionItem(GObject.Object):
     # Conversation moved to a fork the store hasn't discovered yet (row is
     # kept visible but disabled until the fork's row can take its place).
     syncing = GObject.Property(type=bool, default=False)
+    # A /bg detach fed but not yet confirmed: the dot shows yellow
+    # pre-emptively and the row is disabled until the agent CLI lists the
+    # session as a background agent (or confirmation times out).
+    backgrounding = GObject.Property(type=bool, default=False)
 
     def __init__(self, session: Session) -> None:
         super().__init__()
