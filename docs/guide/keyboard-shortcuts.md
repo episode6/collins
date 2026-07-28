@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-27. Full change history: git log for this file.
+fork. Last modified: 2026-07-28. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -23,6 +23,15 @@ fork. Last modified: 2026-07-27. Full change history: git log for this file.
 | `Ctrl+K` | Clear the terminal panel (screen and saved history) |
 | `F9` | Toggle the sidebar |
 | `Ctrl+,` | Preferences |
+
+In the close-tab and close-window confirmation dialogs (shown when a session
+is still active), a single keypress answers the dialog:
+
+| Key | Action |
+| --- | --- |
+| `E` | Exit the session(s) |
+| `B` | Background the session(s) (when available) |
+| `C` (or `Esc`) | Cancel |
 
 ::: tip Easy copy & paste
 With **easy copy & paste** on (the default, see Preferences), `Ctrl+C` copies
