@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -18,6 +18,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
+from .i18n import _
 from .prefs import apply_color_scheme
 from .state import AppState
 from .store import SessionStore
@@ -167,6 +168,11 @@ class App(Adw.Application):
         if _BUNDLED_ICONS.is_dir():  # running from source; installed icons live in the system theme
             Gtk.IconTheme.get_for_display(display).add_search_path(str(_BUNDLED_ICONS))
 
+        # Caffeine Mode: non-None while we hold a sleep/idle inhibitor.
+        # Deliberately not persisted — a restart must never silently keep
+        # the machine awake.
+        self._caffeine_cookie: int | None = None
+
         # Shared across all windows so scans/monitors aren't duplicated and
         # state.json writes don't race.
         self.state = AppState()
@@ -182,6 +188,33 @@ class App(Adw.Application):
         new_window.connect("activate", lambda *_: self._new_window())
         self.add_action(new_window)
         self.set_accels_for_action("app.new-window", ["<Control><Shift>n"])
+
+    @property
+    def caffeine_enabled(self) -> bool:
+        return self._caffeine_cookie is not None
+
+    def set_caffeine_enabled(self, enabled: bool) -> None:
+        """Toggle Caffeine Mode: inhibit suspend and screen blanking app-wide."""
+        if enabled == self.caffeine_enabled:
+            return
+        if enabled:
+            # inhibit() returns 0 when the platform can't inhibit; treating
+            # that as "still off" makes every window's toggle snap back.
+            self._caffeine_cookie = (
+                self.inhibit(
+                    self.get_active_window(),
+                    Gtk.ApplicationInhibitFlags.SUSPEND | Gtk.ApplicationInhibitFlags.IDLE,
+                    _("Caffeine Mode is on"),
+                )
+                or None
+            )
+        else:
+            self.uninhibit(self._caffeine_cookie)
+            self._caffeine_cookie = None
+        for window in self.get_windows():
+            sync = getattr(window, "sync_caffeine_toggle", None)
+            if sync is not None:
+                sync()
 
     def _new_window(self) -> MainWindow:
         window = MainWindow(application=self, state=self.state, store=self.store)

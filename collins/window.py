@@ -212,6 +212,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.background_btn.connect("clicked", lambda *_: self._background_current_tab())
         content_header.pack_start(self.background_btn)
 
+        # Caffeine Mode: first pack_end child, so it sits immediately left of
+        # the window controls (minimize/maximize/close).
+        self.caffeine_btn = Gtk.ToggleButton(
+            active=bool(getattr(self.get_application(), "caffeine_enabled", False))
+        )
+        self._sync_caffeine_visuals()
+        self.caffeine_btn.connect("toggled", self._on_caffeine_toggled)
+        content_header.pack_end(self.caffeine_btn)
+
         placeholder = Adw.StatusPage(
             icon_name="utilities-terminal-symbolic",
             title=_("No session open"),
@@ -949,6 +958,29 @@ class MainWindow(Adw.ApplicationWindow):
         show = button.get_active()
         self.tab_bar.set_visible(show)
         self.state.set_setting("show_tab_bar", show)
+
+    def _on_caffeine_toggled(self, button: Gtk.ToggleButton) -> None:
+        app = self.get_application()
+        if hasattr(app, "set_caffeine_enabled"):
+            app.set_caffeine_enabled(button.get_active())
+        self._sync_caffeine_visuals()
+
+    def sync_caffeine_toggle(self) -> None:
+        """Called by the app so every window's button tracks the shared state."""
+        app = self.get_application()
+        self.caffeine_btn.set_active(bool(getattr(app, "caffeine_enabled", False)))
+        self._sync_caffeine_visuals()
+
+    def _sync_caffeine_visuals(self) -> None:
+        on = self.caffeine_btn.get_active()
+        self.caffeine_btn.set_icon_name(
+            "caffeine-cup-full-symbolic" if on else "caffeine-cup-empty-symbolic"
+        )
+        self.caffeine_btn.set_tooltip_text(
+            _("Caffeine Mode is on — the computer will stay awake")
+            if on
+            else _("Caffeine Mode: keep the computer awake and the screen on")
+        )
 
     def _close_current_tab(self) -> None:
         page = self.tab_view.get_selected_page()
