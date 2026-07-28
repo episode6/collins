@@ -110,9 +110,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._close_asking: set[Adw.TabPage] = set()  # busy-tab confirm dialog open
         self._close_ok: set[Adw.TabPage] = set()  # user okayed closing the busy tab
         self._bg_ok: set[Adw.TabPage] = set()  # user chose to background the agent instead
-        # Hide requested for an open session: applied only once its tab
+        # Archive requested for an open session: applied only once its tab
         # really closes (page -> session id).
-        self._hide_on_close: dict[Adw.TabPage, str] = {}
+        self._archive_on_close: dict[Adw.TabPage, str] = {}
         self._quitting = False  # window close confirmed; draining tabs
         self._quit_asking = False  # the single quit-confirmation dialog is open
         # Active tab's session at the first close request, before the tab
@@ -232,7 +232,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("open-session", self._on_sidebar_open)
         self.sidebar.connect("open-many", self._on_sidebar_open_many)
         self.sidebar.connect("trash-many", self._on_sidebar_trash_many)
-        self.sidebar.connect("hide-many", self._on_sidebar_hide_many)
+        self.sidebar.connect("archive-many", self._on_sidebar_archive_many)
         self.sidebar.connect("open-placeholder", self._on_sidebar_open_placeholder)
         self.sidebar.connect("close-placeholder", self._on_sidebar_close_placeholder)
         self.store.connect("refreshed", self._on_store_refreshed)
@@ -454,17 +454,17 @@ class MainWindow(Adw.ApplicationWindow):
             "toggle-sidebar": lambda *_: self.sidebar.set_visible(
                 not self.sidebar.get_visible()
             ),
-            "trash-hidden": lambda *_: self._trash_hidden(),
+            "trash-archived": lambda *_: self._trash_archived(),
         }
         for name, callback in plain.items():
             action = Gio.SimpleAction(name=name)
             action.connect("activate", callback)
             self.add_action(action)
 
-        # Greyed out until something is actually hidden; kept in sync on every
-        # store refresh (hiding/unhiding goes through one).
-        self._trash_hidden_action = self.lookup_action("trash-hidden")
-        self._sync_trash_hidden_action()
+        # Greyed out until something is actually archived; kept in sync on
+        # every store refresh (archiving/restoring goes through one).
+        self._trash_archived_action = self.lookup_action("trash-archived")
+        self._sync_trash_archived_action()
 
         per_session = {
             "new-session-provider": lambda _a, p: self._choose_new_session_folder(
@@ -487,8 +487,8 @@ class MainWindow(Adw.ApplicationWindow):
             "reveal-transcript": self._on_reveal_transcript,
             "export-session": self._on_export_session,
             "session-details": self._on_session_details,
-            "hide-session": self._on_hide_session,
-            "hide-project": self._on_hide_project,
+            "archive-session": self._on_archive_session,
+            "archive-project": self._on_archive_project,
             "forget-project": lambda _a, p: self.store.forget_project(p.get_string()),
             "trash-session": self._on_trash_session,
         }
@@ -497,11 +497,11 @@ class MainWindow(Adw.ApplicationWindow):
             action.connect("activate", callback)
             self.add_action(action)
 
-        show_hidden = Gio.SimpleAction.new_stateful(
-            "show-hidden", None, GLib.Variant.new_boolean(False)
+        show_archived = Gio.SimpleAction.new_stateful(
+            "show-archived", None, GLib.Variant.new_boolean(False)
         )
-        show_hidden.connect("change-state", self._on_show_hidden)
-        self.add_action(show_hidden)
+        show_archived.connect("change-state", self._on_show_archived)
+        self.add_action(show_archived)
 
     def _install_shortcuts(self) -> None:
         controller = Gtk.ShortcutController()
@@ -559,8 +559,8 @@ class MainWindow(Adw.ApplicationWindow):
             extra_child=keep.check if keep else None,
         )
 
-    def _on_sidebar_hide_many(self, _sidebar, items: list[SessionItem]) -> None:
-        self.store.hide_many([item.session_id for item in items])
+    def _on_sidebar_archive_many(self, _sidebar, items: list[SessionItem]) -> None:
+        self.store.archive_many([item.session_id for item in items])
         for item in items:
             self._close_session_tab(item.session_id)
 
@@ -810,7 +810,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.state.set_setting(key, size)
 
     def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
-        self._sync_trash_hidden_action()
+        self._sync_trash_archived_action()
         if self._restore_session_id is not None:
             self._apply_restore_session()
         if self._pending_resolved:
@@ -1023,7 +1023,7 @@ class MainWindow(Adw.ApplicationWindow):
         confirm_label = _("Exit Session") if agent_busy else _("Close Tab")
         def dismiss() -> None:
             self._close_asking.discard(page)
-            self._hide_on_close.pop(page, None)  # cancelled: keep the session visible
+            self._archive_on_close.pop(page, None)  # cancelled: keep the session visible
 
         dialogs.confirm_dialog(
             self,
@@ -1470,9 +1470,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._close_asking.discard(page)
         self._close_ok.discard(page)
         self._bg_ok.discard(page)
-        hide_session_id = self._hide_on_close.pop(page, None)
-        if hide_session_id:
-            self.store.set_hidden(hide_session_id, True)
+        archive_session_id = self._archive_on_close.pop(page, None)
+        if archive_session_id:
+            self.store.set_archived(archive_session_id, True)
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
         self._remove_placeholder(page)
@@ -1581,35 +1581,36 @@ class MainWindow(Adw.ApplicationWindow):
         if session is not None:
             dialogs.details_dialog(self, session, self.store.display_name(session))
 
-    def _on_hide_session(self, _action, param: GLib.Variant) -> None:
+    def _on_archive_session(self, _action, param: GLib.Variant) -> None:
         session_id = param.get_string()
-        hidden = not self.state.is_hidden(session_id)
-        page = self._pages.get(session_id) if hidden else None
+        archived = not self.state.is_archived(session_id)
+        page = self._pages.get(session_id) if archived else None
         if page is not None:
             # Close the tab through the normal close-page flow, so a busy tab
-            # still gets its confirmation dialog — and hide the session only
-            # once the tab really closes: cancelling the dialog keeps it
+            # still gets its confirmation dialog — and archive the session
+            # only once the tab really closes: cancelling the dialog keeps it
             # visible.
-            self._hide_on_close[page] = session_id
+            self._archive_on_close[page] = session_id
             self.tab_view.close_page(page)
             return
-        self.store.set_hidden(session_id, hidden)
+        self.store.set_archived(session_id, archived)
 
-    def _on_hide_project(self, _action, param: GLib.Variant) -> None:
+    def _on_archive_project(self, _action, param: GLib.Variant) -> None:
         name = param.get_string()
-        self.store.set_project_hidden(name, not self.state.is_project_hidden(name))
+        self.store.set_project_archived(name, not self.state.is_project_archived(name))
 
-    def _on_show_hidden(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
+    def _on_show_archived(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
         action.set_state(value)
-        self.store.set_show_hidden(value.get_boolean())
+        self.store.set_show_archived(value.get_boolean())
 
-    def _sync_trash_hidden_action(self) -> None:
-        self._trash_hidden_action.set_enabled(bool(self.store.hidden_sessions()))
+    def _sync_trash_archived_action(self) -> None:
+        self._trash_archived_action.set_enabled(bool(self.store.archived_sessions()))
 
-    def _trash_hidden(self) -> None:
-        """Sidebar menu → trash every session the sidebar is hiding: the ones
-        hidden individually plus everything inside a hidden project."""
-        sessions = self.store.hidden_sessions()
+    def _trash_archived(self) -> None:
+        """Sidebar menu → trash every session the sidebar keeps out of sight:
+        the ones archived individually plus everything inside an archived
+        project."""
+        sessions = self.store.archived_sessions()
         if not sessions:
             return
 
@@ -1622,10 +1623,10 @@ class MainWindow(Adw.ApplicationWindow):
                 if session.session_id in errors:
                     continue
                 self._forget_transcript(session.session_id)
-                # The row is gone for good — don't leave its id in the hidden
-                # set forever. A hidden *project* stays hidden: new sessions
-                # started there should still land out of sight.
-                self.state.set_hidden(session.session_id, False)
+                # The row is gone for good — don't leave its id in the
+                # archived set forever. An archived *project* stays archived:
+                # new sessions started there should still land out of sight.
+                self.state.set_archived(session.session_id, False)
             if errors:
                 dialogs.error_dialog(
                     self,
@@ -1639,8 +1640,8 @@ class MainWindow(Adw.ApplicationWindow):
 
         dialogs.confirm_dialog(
             self,
-            _("Delete {n} hidden session(s)?").format(n=len(sessions)),
-            blast_radius_body(len(sessions), self.store.hidden_breakdown()),
+            _("Delete {n} archived session(s)?").format(n=len(sessions)),
+            blast_radius_body(len(sessions), self.store.archived_breakdown()),
             _("Move to Trash"),
             do_trash,
             extra_child=keep.check if keep else None,

@@ -19,8 +19,8 @@ fork. Last modified: 2026-07-28. Full change history: git log for this file.
   path*). Within a project, sessions sort by creation time, newest first, so
   rows don't jump around as sessions produce output.
 - A **`+` button on every project header** starts a new session in that
-  project; right-click a header for *New session here* and *Hide project*.
-  Projects whose sessions are all hidden or favorited still show their header,
+  project; right-click a header for *New session here* and *Archive project*.
+  Projects whose sessions are all archived or favorited still show their header,
   so the folder stays reachable.
 - A **search box** that filters by name, project, message preview, or session
   ID, plus a footer showing session, project, transcript-size, and open-tab
@@ -178,18 +178,19 @@ card overlays it — answer with a click instead of typing a number.
 
 ## Bulk actions & housekeeping
 
-- **Select mode** (checkbox button in the sidebar header) to open, star, hide,
-  or trash many sessions at once.
-- **Hide** sessions you don't want to see (kept on disk, toggle "Show hidden");
-  hiding a session with an open tab closes the tab too. Whole **projects** can
-  be hidden from their header's right-click menu.
-- **Delete hidden sessions…** (sidebar menu) clears the lot in one go: every
-  session the sidebar keeps out of sight — hidden by hand, hidden with its
+- **Select mode** (checkbox button in the sidebar header) to open, star,
+  archive, or trash many sessions at once.
+- **Archive** sessions you're done with (kept on disk, toggle "Show archived"
+  to see them and restore any of them); archiving a session with an open tab
+  closes the tab too. Whole **projects** can be archived from their header's
+  right-click menu.
+- **Delete archived sessions…** (sidebar menu) clears the lot in one go: every
+  session the sidebar keeps out of sight — archived by hand, archived with its
   whole project, or replaced by a backgrounded fork — has its transcript moved
-  to the trash. Hiding is cheap and the pile grows quietly,
+  to the trash. Archiving is cheap and the pile grows quietly,
   so the confirmation spells out the damage first: how many transcripts, in
   which projects, and how many of those projects lose *every* session they
-  have. Greyed out when nothing is hidden.
+  have. Greyed out when nothing is archived.
 - **Keeping a project after its sessions go**: any dialog that would empty a
   project out offers *"Keep the N emptied project(s) in the sidebar"* (checked
   by default). Kept projects stay as empty headers with their folder, so

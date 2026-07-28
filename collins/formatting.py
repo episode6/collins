@@ -49,7 +49,7 @@ def format_timestamp(ts: str | None) -> str:
         return ts
 
 
-# Projects named in the "delete hidden sessions" confirmation: list them all
+# Projects named in the "delete archived sessions" confirmation: list them all
 # while the list is short, and once it isn't, name only the biggest few and sum
 # the rest on one line — enough to see the damage, and the same readable dialog
 # whether 3 projects are affected or 300.
@@ -58,17 +58,17 @@ _BLAST_RADIUS_ROWS = 4  # named once the list is capped
 
 
 def blast_radius_body(total: int, breakdown: list[tuple[str, int, int]]) -> str:
-    """Spell out what "all hidden sessions" actually means before the user
+    """Spell out what "all archived sessions" actually means before the user
     commits to it: how many transcripts, spread over which projects, and how
     many of those lose *every* session they have — every row the sidebar keeps
-    out of sight, not only the ones hidden by hand. Hiding is cheap and
+    out of sight, not only the ones archived by hand. Archiving is cheap and
     accumulates, so the pile is usually far bigger than it feels, and a project
     that loses everything is gone from the sidebar unless it's kept.
 
-    `breakdown` is store.hidden_breakdown(): (project, hidden, total) biggest
-    first. A short list is named in full; a long one is cut to the biggest few
-    with the rest summed on one line, so the dialog stays a readable size with
-    hundreds of projects hidden.
+    `breakdown` is store.archived_breakdown(): (project, archived, total)
+    biggest first. A short list is named in full; a long one is cut to the
+    biggest few with the rest summed on one line, so the dialog stays a
+    readable size with hundreds of projects archived.
 
     Which projects get named goes by session count, but the lines are then
     ordered shortest first. AdwAlertDialog centres its body, and a centred
@@ -77,9 +77,9 @@ def blast_radius_body(total: int, breakdown: list[tuple[str, int, int]]) -> str:
     """
     lines = [
         _("{n} session(s) in {p} project(s) have their transcripts moved to "
-          "the trash, where they can be restored. Sessions hidden with their "
-          "whole project — and originals a backgrounded fork replaced — are "
-          "included.").format(n=total, p=len(breakdown))
+          "the trash, where they can be restored. Sessions archived with "
+          "their whole project — and originals a backgrounded fork replaced "
+          "— are included.").format(n=total, p=len(breakdown))
     ]
     if len(breakdown) <= _BLAST_RADIUS_MAX:
         shown, rest = breakdown, []

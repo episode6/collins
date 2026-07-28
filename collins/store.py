@@ -64,13 +64,13 @@ class SessionStore(GObject.Object):
         self.model = Gio.ListStore(item_type=SessionItem)
         self.sessions: dict[str, Session] = {}
         self.group_counts: dict[tuple, int] = {}
-        # Projects with no rows under their group (all sessions hidden or
+        # Projects with no rows under their group (all sessions archived or
         # favorited): (group_key, label, cwd), newest first.
         self.empty_groups: list[tuple[tuple, str, str | None]] = []
         # Project names in display order (persisted user order + new projects
-        # appended alphabetically), covering hidden projects too.
+        # appended alphabetically), covering archived projects too.
         self.resolved_project_order: list[str] = []
-        self.show_hidden = False
+        self.show_archived = False
 
         # Delivers on the worker thread; hop to the main loop before mutating.
         self._titles = TitleGenerator(
@@ -172,7 +172,7 @@ class SessionStore(GObject.Object):
         sessions = self._last_sessions
         self.sessions = {s.session_id: s for s in sessions}
 
-        visible = [s for s in sessions if self.show_hidden or not self.is_out_of_sight(s)]
+        visible = [s for s in sessions if self.show_archived or not self.is_out_of_sight(s)]
         favorites = [s for s in visible if self.state.is_favorite(s.session_id)]
         rest = [s for s in visible if not self.state.is_favorite(s.session_id)]
 
@@ -210,7 +210,7 @@ class SessionStore(GObject.Object):
             items.append(item)
             self.group_counts[group_key] = self.group_counts.get(group_key, 0) + 1
 
-        # Projects whose sessions are all hidden (or all favorited) get no
+        # Projects whose sessions are all archived (or all favorited) get no
         # rows above, but should still show an empty header in the sidebar so
         # their "new session" button stays reachable.
         empty_groups: list[tuple[tuple, str, str | None]] = []
@@ -218,7 +218,7 @@ class SessionStore(GObject.Object):
             key = ("proj", session.project_name)
             if key in grouped or any(g[0] == key for g in empty_groups):
                 continue
-            if not self.show_hidden and self.state.is_project_hidden(session.project_name):
+            if not self.show_archived and self.state.is_project_archived(session.project_name):
                 continue
             empty_groups.append((key, session.project_name, self.project_cwd(session.project_name)))
         # Virtual projects: kept deliberately after their last session went
@@ -228,7 +228,7 @@ class SessionStore(GObject.Object):
             key = ("proj", name)
             if key in grouped or any(g[0] == key for g in empty_groups):
                 continue
-            if not self.show_hidden and self.state.is_project_hidden(name):
+            if not self.show_archived and self.state.is_project_archived(name):
                 continue
             empty_groups.append((key, name, cwd or None))
         empty_groups.sort(key=lambda g: rank.get(g[1], len(rank)))
@@ -341,8 +341,8 @@ class SessionStore(GObject.Object):
         self.state.toggle_favorite(session_id)
         self._apply()
 
-    def set_hidden(self, session_id: str, hidden: bool) -> None:
-        self.state.set_hidden(session_id, hidden)
+    def set_archived(self, session_id: str, archived: bool) -> None:
+        self.state.set_archived(session_id, archived)
         self._apply()
 
     def set_favorites(self, session_ids: list[str], favorite: bool) -> None:
@@ -351,27 +351,27 @@ class SessionStore(GObject.Object):
                 self.state.toggle_favorite(session_id)
         self._apply()
 
-    def hide_many(self, session_ids: list[str]) -> None:
+    def archive_many(self, session_ids: list[str]) -> None:
         for session_id in session_ids:
-            self.state.set_hidden(session_id, True)
+            self.state.set_archived(session_id, True)
         self._apply()
 
     def is_out_of_sight(self, session: Session) -> bool:
-        """Every reason the sidebar keeps a row out of the list: the user hid
-        it, its whole project is hidden, or a legacy /bg fork replaced it.
-        Independent of `show_hidden`, which only controls whether those rows
-        are drawn anyway."""
+        """Every reason the sidebar keeps a row out of the list: the user
+        archived it, its whole project is archived, or a legacy /bg fork
+        replaced it. Independent of `show_archived`, which only controls
+        whether those rows are drawn anyway."""
         return (
-            self.state.is_hidden(session.session_id)
-            or self.state.is_project_hidden(session.project_name)
+            self.state.is_archived(session.session_id)
+            or self.state.is_project_archived(session.project_name)
             or self.forward_state(session) == "moved"
         )
 
-    def hidden_sessions(self) -> list[Session]:
+    def archived_sessions(self) -> list[Session]:
         """Every session the sidebar keeps out of sight — what "delete all
-        hidden sessions" acts on. A /bg fork's original counts: it is as
-        invisible as a hidden row, and the fork it was replaced by carries a
-        copy of everything it held, so nothing survives only in it."""
+        archived sessions" acts on. A /bg fork's original counts: it is as
+        invisible as an archived row, and the fork it was replaced by carries
+        a copy of everything it held, so nothing survives only in it."""
         return [s for s in self._last_sessions if self.is_out_of_sight(s)]
 
     def project_cwd(self, project_name: str) -> str | None:
@@ -397,24 +397,24 @@ class SessionStore(GObject.Object):
         self.state.forget_virtual_project(project_name)
         self._apply()
 
-    def hidden_breakdown(self) -> list[tuple[str, int, int]]:
-        """What hidden_sessions() covers, per project: (project name, hidden
-        count, total sessions in that project), biggest first. A project whose
-        hidden count equals its total loses every session it has — deleting
-        them drops it from the sidebar altogether."""
+    def archived_breakdown(self) -> list[tuple[str, int, int]]:
+        """What archived_sessions() covers, per project: (project name,
+        archived count, total sessions in that project), biggest first. A
+        project whose archived count equals its total loses every session it
+        has — deleting them drops it from the sidebar altogether."""
         totals: dict[str, int] = {}
         for session in self._last_sessions:
             totals[session.project_name] = totals.get(session.project_name, 0) + 1
-        hidden: dict[str, int] = {}
-        for session in self.hidden_sessions():
-            hidden[session.project_name] = hidden.get(session.project_name, 0) + 1
+        archived: dict[str, int] = {}
+        for session in self.archived_sessions():
+            archived[session.project_name] = archived.get(session.project_name, 0) + 1
         return sorted(
-            ((name, count, totals[name]) for name, count in hidden.items()),
+            ((name, count, totals[name]) for name, count in archived.items()),
             key=lambda row: (-row[1], row[0]),
         )
 
-    def set_project_hidden(self, project_name: str, hidden: bool) -> None:
-        self.state.set_project_hidden(project_name, hidden)
+    def set_project_archived(self, project_name: str, archived: bool) -> None:
+        self.state.set_project_archived(project_name, archived)
         self._apply()
 
     def record_forward(self, old_id: str, new_id: str) -> None:
@@ -428,7 +428,7 @@ class SessionStore(GObject.Object):
 
     def move_project(self, name: str, before: str | None) -> None:
         """Move a project in the sidebar order, before `before` (or to the
-        end). Persists the full resolved order, so hidden projects keep
+        end). Persists the full resolved order, so archived projects keep
         their slot too."""
         order = merge_project_order(
             self.state.get_project_order(),
@@ -439,8 +439,8 @@ class SessionStore(GObject.Object):
         self.state.set_project_order(move_in_order(order, name, before))
         self._apply()
 
-    def set_show_hidden(self, show: bool) -> None:
-        self.show_hidden = show
+    def set_show_archived(self, show: bool) -> None:
+        self.show_archived = show
         self._apply()
 
     def set_status(self, session_id: str, status: str) -> None:
@@ -477,11 +477,11 @@ class SessionStore(GObject.Object):
             self._last_sessions = [
                 s for s in self._last_sessions if s.session_id not in trashed
             ]
-            self._hide_orphaned_forwards(trashed)
+            self._archive_orphaned_forwards(trashed)
             self._apply()
         return errors
 
-    def _hide_orphaned_forwards(self, gone: set[str]) -> None:
+    def _archive_orphaned_forwards(self, gone: set[str]) -> None:
         """A row suppressed as "moved" (a legacy /bg fork took its place) comes
         back the moment the fork's transcript disappears: forward_state reads
         the forward as stale. Keep those rows out of sight — they were already
@@ -489,7 +489,7 @@ class SessionStore(GObject.Object):
         them."""
         for session in self._last_sessions:
             if self.state.resolve_forward(session.session_id) in gone:
-                self.state.set_hidden(session.session_id, True)
+                self.state.set_archived(session.session_id, True)
 
     def delete(self, session_id: str) -> str | None:
         """Permanently delete the transcript file (irreversible). Returns an

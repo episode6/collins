@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 """Generate fake Claude Code sessions for screenshots and demos.
 
 Usage:
@@ -114,7 +114,7 @@ def main() -> None:
 
     (config_dir / "state.json").write_text(
         json.dumps(
-            {"names": names, "emojis": emojis, "favorites": favorites, "hidden": [], "settings": {}},
+            {"names": names, "emojis": emojis, "favorites": favorites, "archived": [], "settings": {}},
             indent=2,
         ),
         encoding="utf-8",

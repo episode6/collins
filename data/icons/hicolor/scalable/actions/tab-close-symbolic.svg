@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg height="16px" viewBox="0 0 16 16" width="16px" xmlns="http://www.w3.org/2000/svg">
-    <g fill="none" stroke="#2e3436" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round">
-        <rect x="1.5" y="1.5" width="13" height="13" rx="3"/>
-        <path d="M 5.75 5.75 L 10.25 10.25"/>
-        <path d="M 10.25 5.75 L 5.75 10.25"/>
+    <!-- Modified from the original agent-session-manager
+         (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
+         fork. Last modified: 2026-07-28. Full change history: git log for this file. -->
+    <!-- Filled paths only: GTK recolors symbolic icons by overriding fill on
+         every shape, so stroked outlines collapse into silhouettes. -->
+    <g fill="#2e3436">
+        <path fill-rule="evenodd" d="M 1.5 4.5 A 3 3 0 0 1 4.5 1.5 H 11.5 A 3 3 0 0 1 14.5 4.5 V 11.5 A 3 3 0 0 1 11.5 14.5 H 4.5 A 3 3 0 0 1 1.5 11.5 Z M 2.75 4.5 V 11.5 A 1.75 1.75 0 0 0 4.5 13.25 H 11.5 A 1.75 1.75 0 0 0 13.25 11.5 V 4.5 A 1.75 1.75 0 0 0 11.5 2.75 H 4.5 A 1.75 1.75 0 0 0 2.75 4.5 Z"/>
+        <path d="M 5.75 4.87 L 8 7.12 L 10.25 4.87 L 11.13 5.75 L 8.88 8 L 11.13 10.25 L 10.25 11.13 L 8 8.88 L 5.75 11.13 L 4.87 10.25 L 7.12 8 L 4.87 5.75 Z"/>
     </g>
 </svg>
