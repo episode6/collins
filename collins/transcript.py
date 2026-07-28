@@ -1,12 +1,16 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 
 """Detect an agent's pending structured prompt by tailing its JSONL transcript.
 
 Backs the question card: an ``AskUserQuestion`` tool_use whose id has no matching
 ``tool_result`` yet is a live, unanswered prompt. Tailing is incremental (byte
 offset) so it stays cheap on large, actively-written transcripts.
+
+The same pass also picks up the ``pr-link`` records Claude Code writes when a
+session opens or touches a pull request (see prstatus), which costs nothing
+extra: the bytes are already being read and decoded here.
 """
 
 from __future__ import annotations
@@ -14,6 +18,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from .prstatus import PullRequest, parse_pr_link
 
 
 @dataclass
@@ -28,6 +34,7 @@ class TranscriptModel:
         self._questions: dict[str, list] = {}  # tool_use_id -> questions payload
         self._order: list[str] = []  # question ids, arrival order
         self._resolved: set[str] = set()  # tool_use_ids that have a tool_result
+        self._pr: PullRequest | None = None  # last pr-link record seen
         self._offset = 0
         self._buf = b""
 
@@ -37,6 +44,7 @@ class TranscriptModel:
         self._questions = {}
         self._order = []
         self._resolved = set()
+        self._pr = None
         self._offset = 0
         self._buf = b""
 
@@ -50,6 +58,7 @@ class TranscriptModel:
             return False
         if size < self._offset:  # rewritten/truncated → start over
             self._questions, self._order, self._resolved = {}, [], set()
+            self._pr = None
             self._offset, self._buf = 0, b""
         if size <= self._offset:
             return False
@@ -77,6 +86,12 @@ class TranscriptModel:
         return changed
 
     def _ingest(self, entry: dict) -> bool:
+        if entry.get("type") == "pr-link":  # bare metadata record, no message
+            pr = parse_pr_link(entry)
+            if pr is None or pr == self._pr:
+                return False
+            self._pr = pr
+            return True
         content = (entry.get("message") or {}).get("content")
         if not isinstance(content, list):
             return False
@@ -97,6 +112,14 @@ class TranscriptModel:
                     self._resolved.add(rid)
                     changed = True
         return changed
+
+    def current_pr(self) -> PullRequest | None:
+        """The pull request this session is linked to, or None.
+
+        Unenriched — call ``prstatus.enrich()`` (which touches the filesystem)
+        off the main loop to add CI status.
+        """
+        return self._pr
 
     def pending_question(self) -> Question | None:
         """The most recent AskUserQuestion still awaiting an answer, or None."""

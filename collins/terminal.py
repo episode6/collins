@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -19,12 +19,18 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import panelhistory, themes  # noqa: E402
-from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
+from .copylabel import (  # noqa: E402
+    copy_tooltip,
+    enable_copy_on_click,
+    enable_open_on_click,
+    open_tooltip,
+)
 from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch  # noqa: E402
 from .i18n import _  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
+from .prstatus import PullRequest, describe, enrich  # noqa: E402
 from .transcript import TranscriptModel  # noqa: E402
 
 _TRANSCRIPT_DEBOUNCE_MS = 400
@@ -307,6 +313,7 @@ class TerminalTab(Gtk.Box):
 
         self._footer_cwd: str | None = None  # last value shown in the footer
         self._footer_branch: str | None = None
+        self._footer_pr: PullRequest | None = None
         self._cwd_refresh_source: int | None = None
         self.append(self._build_footer())
 
@@ -515,6 +522,19 @@ class TerminalTab(Gtk.Box):
         self._branch_label.set_visible(False)
         enable_copy_on_click(self._branch_label, lambda: self._footer_branch, lambda b: f"⎇ {b}")
 
+        # The PR chip trails the branch, sharing its leading divider. Unlike
+        # its neighbours it opens rather than copies: the number on screen is
+        # a stand-in for the PR page, and going there is what you want next.
+        self._pr_label = Gtk.Label()
+        self._pr_label.add_css_class("caption")
+        self._pr_label.add_css_class("dim-label")
+        self._pr_label.set_visible(False)
+        enable_open_on_click(
+            self._pr_label, lambda: self._footer_pr.url if self._footer_pr else None
+        )
+        self._pr_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        self._pr_sep.set_visible(False)
+
         # Only the selected tab is visible (and thus clickable), so routing
         # through the window's actions still targets the right tab.
         toggle_btn = Gtk.Button(icon_name="utilities-terminal-symbolic")
@@ -525,14 +545,16 @@ class TerminalTab(Gtk.Box):
         self._swap_panel_btn.set_action_name("win.swap-panel")
         self._swap_panel_btn.set_visible(False)  # only shown while a panel is open
 
-        # cwd and branch sit together on the left; the wrapper box (not the
+        # cwd, branch and PR sit together on the left; the wrapper box (not the
         # cwd label) takes the slack so the buttons stay pinned right even
-        # while the branch label is hidden.
+        # while the branch and PR labels are hidden.
         left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
         left.append(self._cwd_label)
         left.append(self._branch_seps[0])
         left.append(self._branch_label)
         left.append(self._branch_seps[1])
+        left.append(self._pr_label)
+        left.append(self._pr_sep)
 
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         footer.add_css_class("tab-footer")
@@ -568,8 +590,31 @@ class TerminalTab(Gtk.Box):
             self._branch_label.set_text(f"⎇ {branch}" if branch else "")
             self._branch_label.set_tooltip_text(copy_tooltip(branch) if branch else None)
             self._branch_label.set_visible(branch is not None)
-            for sep in self._branch_seps:
-                sep.set_visible(branch is not None)
+            self._sync_footer_seps()
+
+    def _sync_footer_seps(self) -> None:
+        """Show only the dividers that separate two visible chips.
+
+        The branch's leading divider does double duty as the PR's when there
+        is no branch to show, so the row never opens with a stray divider.
+        """
+        branch = self._footer_branch is not None
+        pr = self._footer_pr is not None
+        self._branch_seps[0].set_visible(branch or pr)
+        self._branch_seps[1].set_visible(branch)
+        self._pr_sep.set_visible(pr)
+
+    def _refresh_pr_label(self, pr: PullRequest | None) -> None:
+        """Show the session's linked PR, with its CI state when one is cached."""
+        if pr == self._footer_pr:
+            return
+        self._footer_pr = pr
+        self._pr_label.set_text(pr.label if pr else "")
+        self._pr_label.set_tooltip_text(
+            open_tooltip(describe(pr) + "\n" + pr.url) if pr else None
+        )
+        self._pr_label.set_visible(pr is not None)
+        self._sync_footer_seps()
 
     # -- graceful close ----------------------------------------------------
 
@@ -584,6 +629,7 @@ class TerminalTab(Gtk.Box):
         self._transcript.set_path(jsonl_path)
         self._current_question_id = None
         self._handled_question_id = None
+        self._refresh_pr_label(None)  # re-read from the new transcript below
         self._hide_card()
         if self._transcript_monitor is not None:
             self._transcript_monitor.cancel()
@@ -633,13 +679,20 @@ class TerminalTab(Gtk.Box):
                 self._transcript.update()
             except Exception:
                 pass
-            GLib.idle_add(self._apply_update)
+            try:
+                # reads the gh status cache, so it belongs on this thread too;
+                # a session with no linked PR touches no files at all
+                pr = enrich(self._transcript.current_pr())
+            except Exception:
+                pr = self._footer_pr  # leave the chip as it is
+            GLib.idle_add(self._apply_update, pr)
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _apply_update(self) -> bool:
+    def _apply_update(self, pr: PullRequest | None = None) -> bool:
         self._updating = False
         self._check_prompt()
+        self._refresh_pr_label(pr)
         return GLib.SOURCE_REMOVE
 
     def _check_prompt(self) -> None:
