@@ -1,51 +1,71 @@
-from collins.window import blast_radius
+from collins.window import blast_radius_body
 
 
 def _breakdown(count: int, hidden: int = 2, total: int = 2):
     return [(f"project-{i:03d}", hidden, total) for i in range(count)]
 
 
+def _list_lines(body: str) -> list[str]:
+    """The per-project block: the paragraph above it and the warning below are
+    separated by blank lines."""
+    return body.split("\n\n")[1].splitlines()
+
+
+def _named(body: str) -> list[str]:
+    """The same block minus the "…and N others" line, which sums up the
+    projects the list didn't name."""
+    return [line for line in _list_lines(body) if not line.startswith("…")]
+
+
 def test_blast_radius_names_every_project_when_it_fits():
-    radius = blast_radius(6, _breakdown(3))
-    assert "project-000 — 2 of 2" in radius.detail
-    assert "project-002 — 2 of 2" in radius.detail
-    assert "other project" not in radius.detail
-    assert "3 of these project(s) lose every session they have." in radius.detail
+    body = blast_radius_body(6, _breakdown(3))
+    assert "project-000 — 2 of 2" in body
+    assert "project-002 — 2 of 2" in body
+    assert "other project" not in body
+    assert "3 of these project(s) lose every session they have." in body
 
 
 def test_blast_radius_names_a_full_short_list():
     # Seven still fits: naming them all beats cutting to four plus a summary
     # line for the three that are left.
-    radius = blast_radius(14, _breakdown(7))
-    assert "project-006 — 2 of 2" in radius.detail
-    assert "other project" not in radius.detail
+    body = blast_radius_body(14, _breakdown(7))
+    assert "project-006 — 2 of 2" in body
+    assert "other project" not in body
 
 
 def test_blast_radius_caps_the_list_once_it_grows():
-    radius = blast_radius(16, _breakdown(8))
-    named = [line for line in radius.detail.splitlines() if line.startswith("project-")]
-    assert len(named) == 4
-    assert "…and 4 other project(s) — 8 session(s)" in radius.detail
+    body = blast_radius_body(16, _breakdown(8))
+    assert len(_named(body)) == 4
+    assert "…and 4 other project(s) — 8 session(s)" in body
 
 
 def test_blast_radius_stays_the_same_size_at_scale():
-    radius = blast_radius(400, _breakdown(200))
-    named = [line for line in radius.detail.splitlines() if line.startswith("project-")]
-    assert len(named) == 4  # 200 projects must not grow the dialog
-    assert "…and 196 other project(s) — 392 session(s)" in radius.detail
-    assert "400 session(s) in 200 project(s)" in radius.summary
+    body = blast_radius_body(400, _breakdown(200))
+    assert len(_named(body)) == 4  # 200 projects must not grow the dialog
+    assert "…and 196 other project(s) — 392 session(s)" in body
+    assert "400 session(s) in 200 project(s)" in body
 
 
-def test_blast_radius_keeps_the_project_list_out_of_the_summary():
-    # The summary is the dialog's body, the detail a left-aligned child: the
-    # per-project column must not leak back into the centred half, and the
-    # detail must start on the list rather than on a blank line.
-    radius = blast_radius(6, _breakdown(3))
-    assert "project-000" not in radius.summary
-    assert radius.detail.splitlines()[0] == "project-000 — 2 of 2"
+def test_blast_radius_orders_the_lines_shortest_first():
+    # Centred in the dialog, the column tapers evenly instead of jumping about.
+    # Which projects get named still goes by session count, not by length.
+    breakdown = [("epsilon-web-frontend", 9, 9), ("beta", 4, 4), ("gamma-api", 2, 2)]
+    assert _named(blast_radius_body(15, breakdown)) == [
+        "beta — 4 of 4",
+        "gamma-api — 2 of 2",
+        "epsilon-web-frontend — 9 of 9",
+    ]
+
+
+def test_blast_radius_keeps_the_summed_line_last():
+    # It stands for the projects the named lines left out, however short it is.
+    breakdown = [(f"a-project-with-a-long-name-{i}", 5, 5) for i in range(8)]
+    assert _list_lines(blast_radius_body(40, breakdown))[-1] == (
+        "…and 4 other project(s) — 20 session(s)"
+    )
 
 
 def test_blast_radius_omits_the_warning_when_no_project_empties():
-    radius = blast_radius(3, [("alpha", 3, 9)])
-    assert "alpha — 3 of 9" in radius.detail
-    assert "lose every session" not in radius.detail
+    body = blast_radius_body(3, [("alpha", 3, 9)])
+    assert "alpha — 3 of 9" in body
+    assert "lose every session" not in body
