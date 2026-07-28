@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -17,10 +17,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-import gi
-
-gi.require_version("Gtk", "4.0")
-from gi.repository import Gio, GLib, GObject  # noqa: E402
+from gi.repository import Gio, GLib, GObject
 
 from . import panelhistory
 from .models import FAV_GROUP, SessionItem
@@ -30,6 +27,15 @@ from .state import AppState, merge_project_order, move_in_order
 from .titles import TitleGenerator, fallback_title
 
 _DEBOUNCE_MS = 2000
+
+
+def _trash_file(path: Path) -> str | None:
+    """Move one file to the system trash. Returns an error message or None."""
+    try:
+        Gio.File.new_for_path(str(path)).trash(None)
+    except GLib.Error as err:
+        return err.message
+    return None
 
 
 def _relative_time(dt: datetime) -> str:
@@ -166,16 +172,7 @@ class SessionStore(GObject.Object):
         sessions = self._last_sessions
         self.sessions = {s.session_id: s for s in sessions}
 
-        visible = [
-            s
-            for s in sessions
-            if self.show_hidden
-            or not (
-                self.state.is_hidden(s.session_id)
-                or self.state.is_project_hidden(s.project_name)
-                or self.forward_state(s) == "moved"
-            )
-        ]
+        visible = [s for s in sessions if self.show_hidden or not self.is_out_of_sight(s)]
         favorites = [s for s in visible if self.state.is_favorite(s.session_id)]
         rest = [s for s in visible if not self.state.is_favorite(s.session_id)]
 
@@ -188,9 +185,11 @@ class SessionStore(GObject.Object):
         for group_sessions in grouped.values():
             group_sessions.sort(key=lambda s: s.created, reverse=True)
 
+        virtual = self.state.get_virtual_projects()
         previous_order = self.resolved_project_order
         self.resolved_project_order = merge_project_order(
-            self.state.get_project_order(), (s.project_name for s in sessions)
+            self.state.get_project_order(),
+            [s.project_name for s in sessions] + list(virtual),
         )
         rank = {name: i for i, name in enumerate(self.resolved_project_order)}
 
@@ -221,11 +220,17 @@ class SessionStore(GObject.Object):
                 continue
             if not self.show_hidden and self.state.is_project_hidden(session.project_name):
                 continue
-            cwd = next(
-                (s.cwd for s in sessions if s.project_name == session.project_name and s.cwd),
-                None,
-            )
-            empty_groups.append((key, session.project_name, cwd))
+            empty_groups.append((key, session.project_name, self.project_cwd(session.project_name)))
+        # Virtual projects: kept deliberately after their last session went
+        # away, so they hang on as headers until removed. A project that has
+        # sessions again is already covered above — never list it twice.
+        for name, cwd in virtual.items():
+            key = ("proj", name)
+            if key in grouped or any(g[0] == key for g in empty_groups):
+                continue
+            if not self.show_hidden and self.state.is_project_hidden(name):
+                continue
+            empty_groups.append((key, name, cwd or None))
         empty_groups.sort(key=lambda g: rank.get(g[1], len(rank)))
         # The sidebar interleaves empty headers with session groups by
         # resolved order, so an order change alone must trigger a rebuild.
@@ -351,6 +356,63 @@ class SessionStore(GObject.Object):
             self.state.set_hidden(session_id, True)
         self._apply()
 
+    def is_out_of_sight(self, session: Session) -> bool:
+        """Every reason the sidebar keeps a row out of the list: the user hid
+        it, its whole project is hidden, or a legacy /bg fork replaced it.
+        Independent of `show_hidden`, which only controls whether those rows
+        are drawn anyway."""
+        return (
+            self.state.is_hidden(session.session_id)
+            or self.state.is_project_hidden(session.project_name)
+            or self.forward_state(session) == "moved"
+        )
+
+    def hidden_sessions(self) -> list[Session]:
+        """Every session the sidebar keeps out of sight — what "delete all
+        hidden sessions" acts on. A /bg fork's original counts: it is as
+        invisible as a hidden row, and the fork it was replaced by carries a
+        copy of everything it held, so nothing survives only in it."""
+        return [s for s in self._last_sessions if self.is_out_of_sight(s)]
+
+    def project_cwd(self, project_name: str) -> str | None:
+        """A project's working directory, from its most recent session that
+        records one — what the group header's "new session here" button needs,
+        and what a virtual project has to remember once its sessions are gone."""
+        return next(
+            (s.cwd for s in self._last_sessions if s.project_name == project_name and s.cwd),
+            None,
+        )
+
+    def keep_projects(self, project_names: list[str]) -> None:
+        """Keep these projects in the sidebar after their sessions go: they
+        stay as empty headers, with their folder, until removed."""
+        self.state.keep_virtual_projects(
+            {name: self.project_cwd(name) or "" for name in project_names}
+        )
+        self._apply()
+
+    def forget_project(self, project_name: str) -> None:
+        """Drop a kept (virtual) project from the sidebar. Its sessions, if any
+        ever come back, bring the group back with them."""
+        self.state.forget_virtual_project(project_name)
+        self._apply()
+
+    def hidden_breakdown(self) -> list[tuple[str, int, int]]:
+        """What hidden_sessions() covers, per project: (project name, hidden
+        count, total sessions in that project), biggest first. A project whose
+        hidden count equals its total loses every session it has — deleting
+        them drops it from the sidebar altogether."""
+        totals: dict[str, int] = {}
+        for session in self._last_sessions:
+            totals[session.project_name] = totals.get(session.project_name, 0) + 1
+        hidden: dict[str, int] = {}
+        for session in self.hidden_sessions():
+            hidden[session.project_name] = hidden.get(session.project_name, 0) + 1
+        return sorted(
+            ((name, count, totals[name]) for name, count in hidden.items()),
+            key=lambda row: (-row[1], row[0]),
+        )
+
     def set_project_hidden(self, project_name: str, hidden: bool) -> None:
         self.state.set_project_hidden(project_name, hidden)
         self._apply()
@@ -370,7 +432,9 @@ class SessionStore(GObject.Object):
         their slot too."""
         order = merge_project_order(
             self.state.get_project_order(),
-            {s.project_name for s in self._last_sessions} | {name},
+            {s.project_name for s in self._last_sessions}
+            | set(self.state.get_virtual_projects())
+            | {name},
         )
         self.state.set_project_order(move_in_order(order, name, before))
         self._apply()
@@ -391,16 +455,41 @@ class SessionStore(GObject.Object):
 
     def trash(self, session_id: str) -> str | None:
         """Move the transcript to trash. Returns an error message or None."""
-        session = self.sessions.get(session_id)
-        if session is None:
-            return "session not found"
-        try:
-            Gio.File.new_for_path(str(session.jsonl_path)).trash(None)
-        except GLib.Error as err:
-            return err.message
-        self._last_sessions = [s for s in self._last_sessions if s.session_id != session_id]
-        self._apply()
-        return None
+        return self.trash_many([session_id]).get(session_id)
+
+    def trash_many(self, session_ids: list[str]) -> dict[str, str]:
+        """Move several transcripts to trash, refreshing the list once at the
+        end. Returns the error message per session id that failed; ids missing
+        from the result were trashed."""
+        errors: dict[str, str] = {}
+        trashed: set[str] = set()
+        for session_id in session_ids:
+            session = self.sessions.get(session_id)
+            if session is None:
+                errors[session_id] = "session not found"
+                continue
+            error = _trash_file(session.jsonl_path)
+            if error:
+                errors[session_id] = error
+            else:
+                trashed.add(session_id)
+        if trashed:
+            self._last_sessions = [
+                s for s in self._last_sessions if s.session_id not in trashed
+            ]
+            self._hide_orphaned_forwards(trashed)
+            self._apply()
+        return errors
+
+    def _hide_orphaned_forwards(self, gone: set[str]) -> None:
+        """A row suppressed as "moved" (a legacy /bg fork took its place) comes
+        back the moment the fork's transcript disappears: forward_state reads
+        the forward as stale. Keep those rows out of sight — they were already
+        invisible, and trashing something else is no reason to resurface
+        them."""
+        for session in self._last_sessions:
+            if self.state.resolve_forward(session.session_id) in gone:
+                self.state.set_hidden(session.session_id, True)
 
     def delete(self, session_id: str) -> str | None:
         """Permanently delete the transcript file (irreversible). Returns an

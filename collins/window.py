@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 import gi
 
@@ -21,6 +22,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 from . import __version__, dialogs, panelhistory
 from .bgstatus import BackgroundStatusPoller
 from .chatsessionview import ChatSessionTab
+from .formatting import blast_radius_body
 from .i18n import _
 from .models import SessionItem
 from .prefs import PreferencesDialog
@@ -45,6 +47,13 @@ _GHOSTTY = shutil.which("ghostty")
 
 # Quiet period before a background tab is considered "idle" / finished.
 _IDLE_NOTIFY_MS = 4000
+
+class _KeepProjects(NamedTuple):
+    """The "keep the emptied projects" check button and what it applies to."""
+
+    check: Gtk.CheckButton
+    projects: list[str]
+
 
 # Tab status dots, matching the sidebar (.status-dot CSS in app.py).
 _STATUS_COLORS = {"open": "#2ec27e", "attention": "#3584e4"}
@@ -434,11 +443,17 @@ class MainWindow(Adw.ApplicationWindow):
             "toggle-sidebar": lambda *_: self.sidebar.set_visible(
                 not self.sidebar.get_visible()
             ),
+            "trash-hidden": lambda *_: self._trash_hidden(),
         }
         for name, callback in plain.items():
             action = Gio.SimpleAction(name=name)
             action.connect("activate", callback)
             self.add_action(action)
+
+        # Greyed out until something is actually hidden; kept in sync on every
+        # store refresh (hiding/unhiding goes through one).
+        self._trash_hidden_action = self.lookup_action("trash-hidden")
+        self._sync_trash_hidden_action()
 
         per_session = {
             "new-session-provider": lambda _a, p: self._choose_new_session_folder(
@@ -463,6 +478,7 @@ class MainWindow(Adw.ApplicationWindow):
             "session-details": self._on_session_details,
             "hide-session": self._on_hide_session,
             "hide-project": self._on_hide_project,
+            "forget-project": lambda _a, p: self.store.forget_project(p.get_string()),
             "trash-session": self._on_trash_session,
         }
         for name, callback in per_session.items():
@@ -509,18 +525,17 @@ class MainWindow(Adw.ApplicationWindow):
             self.open_session(item.session)
 
     def _on_sidebar_trash_many(self, _sidebar, items: list[SessionItem]) -> None:
+        keep = self._keep_projects_check([item.session_id for item in items])
+
         def do_trash() -> None:
+            self._apply_keep_projects(keep)
             errors = []
             for item in items:
                 error = self.store.trash(item.session_id)
                 if error:
                     errors.append(f"{item.display_name}: {error}")
                     continue
-                page = self._pages.get(item.session_id)
-                if page is not None:
-                    self.tab_view.close_page(page)
-                panelhistory.delete(item.session_id)
-                self.state.set_panel_state(item.session_id, None)
+                self._forget_transcript(item.session_id)
             if errors:
                 dialogs.error_dialog(self, _("Some transcripts could not be trashed"), "\n".join(errors))
 
@@ -530,6 +545,7 @@ class MainWindow(Adw.ApplicationWindow):
             _("The files are moved to the trash and can be restored."),
             _("Move to Trash"),
             do_trash,
+            extra_child=keep.check if keep else None,
         )
 
     def _on_sidebar_hide_many(self, _sidebar, items: list[SessionItem]) -> None:
@@ -783,6 +799,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.state.set_setting(key, size)
 
     def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
+        self._sync_trash_hidden_action()
         if self._restore_session_id is not None:
             self._apply_restore_session()
         if self._pending_resolved:
@@ -1574,21 +1591,101 @@ class MainWindow(Adw.ApplicationWindow):
         action.set_state(value)
         self.store.set_show_hidden(value.get_boolean())
 
+    def _sync_trash_hidden_action(self) -> None:
+        self._trash_hidden_action.set_enabled(bool(self.store.hidden_sessions()))
+
+    def _trash_hidden(self) -> None:
+        """Sidebar menu → trash every session the sidebar is hiding: the ones
+        hidden individually plus everything inside a hidden project."""
+        sessions = self.store.hidden_sessions()
+        if not sessions:
+            return
+
+        keep = self._keep_projects_check([s.session_id for s in sessions])
+
+        def do_trash() -> None:
+            self._apply_keep_projects(keep)
+            errors = self.store.trash_many([s.session_id for s in sessions])
+            for session in sessions:
+                if session.session_id in errors:
+                    continue
+                self._forget_transcript(session.session_id)
+                # The row is gone for good — don't leave its id in the hidden
+                # set forever. A hidden *project* stays hidden: new sessions
+                # started there should still land out of sight.
+                self.state.set_hidden(session.session_id, False)
+            if errors:
+                dialogs.error_dialog(
+                    self,
+                    _("Some transcripts could not be trashed"),
+                    "\n".join(
+                        f"{self.store.display_name(s)}: {errors[s.session_id]}"
+                        for s in sessions
+                        if s.session_id in errors
+                    ),
+                )
+
+        dialogs.confirm_dialog(
+            self,
+            _("Delete {n} hidden session(s)?").format(n=len(sessions)),
+            blast_radius_body(len(sessions), self.store.hidden_breakdown()),
+            _("Move to Trash"),
+            do_trash,
+            extra_child=keep.check if keep else None,
+        )
+
+    def _keep_projects_check(self, session_ids: list[str]) -> _KeepProjects | None:
+        """A check button for the projects that lose *every* session they have
+        when `session_ids` go, so they can stay in the sidebar as empty headers
+        instead of vanishing with their sessions. None when no project empties
+        out. Checked by default: losing a project you never removed is the
+        surprise, and an empty header costs nothing."""
+        doomed = set(session_ids)
+        losing: set[str] = set()
+        surviving: set[str] = set()
+        for session in self.store.sessions.values():
+            target = losing if session.session_id in doomed else surviving
+            target.add(session.project_name)
+        emptied = sorted(losing - surviving)
+        if not emptied:
+            return None
+        return _KeepProjects(
+            Gtk.CheckButton(
+                label=_("Keep the {p} emptied project(s) in the sidebar").format(p=len(emptied)),
+                active=True,
+                halign=Gtk.Align.CENTER,
+            ),
+            emptied,
+        )
+
+    def _apply_keep_projects(self, keep: _KeepProjects | None) -> None:
+        """Act on the check button — call before the transcripts go, while the
+        projects still have sessions to take their folder from."""
+        if keep is not None and keep.check.get_active():
+            self.store.keep_projects(keep.projects)
+
+    def _forget_transcript(self, session_id: str) -> None:
+        """Drop everything the app kept for a session whose transcript just
+        went away: its tab, its panel scrollback, its panel layout."""
+        page = self._pages.get(session_id)
+        if page is not None:
+            self.tab_view.close_page(page)
+        panelhistory.delete(session_id)
+        self.state.set_panel_state(session_id, None)
+
     def _on_trash_session(self, _action, param: GLib.Variant) -> None:
         session = self._session_for(param)
         if session is None:
             return
+        keep = self._keep_projects_check([session.session_id])
 
         def do_trash() -> None:
+            self._apply_keep_projects(keep)
             error = self.store.trash(session.session_id)
             if error:
                 dialogs.error_dialog(self, _("Could not trash transcript"), error)
                 return
-            page = self._pages.get(session.session_id)
-            if page is not None:
-                self.tab_view.close_page(page)
-            panelhistory.delete(session.session_id)
-            self.state.set_panel_state(session.session_id, None)
+            self._forget_transcript(session.session_id)
 
         dialogs.confirm_dialog(
             self,
@@ -1600,23 +1697,22 @@ class MainWindow(Adw.ApplicationWindow):
             + _("The file is moved to the trash and can be restored."),
             _("Move to Trash"),
             do_trash,
+            extra_child=keep.check if keep else None,
         )
 
     def _on_delete_session(self, _action, param: GLib.Variant) -> None:
         session = self._session_for(param)
         if session is None:
             return
+        keep = self._keep_projects_check([session.session_id])
 
         def do_delete() -> None:
+            self._apply_keep_projects(keep)
             error = self.store.delete(session.session_id)
             if error:
                 dialogs.error_dialog(self, _("Could not delete transcript"), error)
                 return
-            page = self._pages.get(session.session_id)
-            if page is not None:
-                self.tab_view.close_page(page)
-            panelhistory.delete(session.session_id)
-            self.state.set_panel_state(session.session_id, None)
+            self._forget_transcript(session.session_id)
 
         dialogs.confirm_dialog(
             self,
@@ -1625,6 +1721,7 @@ class MainWindow(Adw.ApplicationWindow):
               "This cannot be undone.").format(name=self.store.display_name(session)),
             _("Delete permanently"),
             do_delete,
+            extra_child=keep.check if keep else None,
         )
 
     # -- open transcript from file -----------------------------------------

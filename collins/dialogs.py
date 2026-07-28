@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -73,10 +73,14 @@ def confirm_dialog(
     default_response: str = "cancel",
     extra_label: str | None = None,
     on_extra: Callable[[], None] | None = None,
+    extra_child: Gtk.Widget | None = None,
 ) -> None:
     """Two-button confirmation (Cancel + a destructive `confirm_label`).
-    `extra_label`/`on_extra` add a third, non-destructive choice between them."""
+    `extra_label`/`on_extra` add a third, non-destructive choice between them;
+    `extra_child` puts a widget (a check button, say) above the buttons."""
     dialog = Adw.AlertDialog(heading=heading, body=body)
+    if extra_child is not None:
+        dialog.set_extra_child(extra_child)
     dialog.add_response("cancel", _("Cancel"))
     if extra_label is not None:
         dialog.add_response("extra", extra_label)

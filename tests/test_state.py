@@ -21,6 +21,17 @@ def test_roundtrip(app_state):
     assert fresh.get_setting("scrollback") == 5000
 
 
+def test_virtual_projects_roundtrip(app_state):
+    state = app_state.AppState()
+    state.keep_virtual_projects({"alpha": "/home/user/alpha", "beta": ""})
+    fresh = app_state.AppState()
+    assert fresh.get_virtual_projects() == {"alpha": "/home/user/alpha", "beta": ""}
+    assert fresh.is_virtual_project("beta")
+
+    fresh.forget_virtual_project("beta")
+    assert app_state.AppState().get_virtual_projects() == {"alpha": "/home/user/alpha"}
+
+
 def test_generated_names_roundtrip(app_state):
     state = app_state.AppState()
     state.set_generated_name("sid", "Fix login bug")

@@ -114,6 +114,10 @@ class AppState:
         self.hidden: set[str] = set()
         self.hidden_projects: set[str] = set()  # by project name (the group identity)
         self.project_order: list[str] = []  # user-arranged sidebar order, by project name
+        # Projects kept in the sidebar after their last session went away
+        # (project name -> working directory, "" when it was never known), so
+        # deleting sessions doesn't cost you the folder.
+        self.virtual_projects: dict[str, str] = {}
         self.expanded_groups: set[str] = set()  # sidebar groups the user expanded
         self.panel_states: dict[str, dict] = {}  # per-session panel open/mode/sizes
         # old session id -> the id its conversation continued under (Claude's
@@ -143,6 +147,9 @@ class AppState:
         self.hidden = set(data.get("hidden") or [])
         self.hidden_projects = set(data.get("hidden_projects") or [])
         self.project_order = list(data.get("project_order") or [])
+        self.virtual_projects = {
+            k: v for k, v in (data.get("virtual_projects") or {}).items() if isinstance(v, str)
+        }
         self.expanded_groups = set(data.get("expanded_groups") or [])
         self.panel_states = {
             k: v for k, v in (data.get("panel_states") or {}).items() if isinstance(v, dict)
@@ -162,6 +169,7 @@ class AppState:
             "hidden": sorted(self.hidden),
             "hidden_projects": sorted(self.hidden_projects),
             "project_order": self.project_order,  # order is the payload — never sort
+            "virtual_projects": self.virtual_projects,
             "expanded_groups": sorted(self.expanded_groups),
             "panel_states": self.panel_states,
             "session_forwards": self.session_forwards,
@@ -251,6 +259,24 @@ class AppState:
             self.hidden_projects.add(project_name)
         else:
             self.hidden_projects.discard(project_name)
+        self.save()
+
+    # -- virtual projects --------------------------------------------------
+
+    def get_virtual_projects(self) -> dict[str, str]:
+        return dict(self.virtual_projects)
+
+    def is_virtual_project(self, project_name: str) -> bool:
+        return project_name in self.virtual_projects
+
+    def keep_virtual_projects(self, projects: dict[str, str]) -> None:
+        """Remember projects whose sessions are about to go, so their sidebar
+        group survives. One write for the whole batch."""
+        self.virtual_projects.update(projects)
+        self.save()
+
+    def forget_virtual_project(self, project_name: str) -> None:
+        self.virtual_projects.pop(project_name, None)
         self.save()
 
     # -- project order -----------------------------------------------------
