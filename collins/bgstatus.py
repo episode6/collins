@@ -16,6 +16,7 @@ without a code change.
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -23,6 +24,8 @@ from pathlib import Path
 from gi.repository import Gio, GLib
 
 from .providers import available_providers
+
+log = logging.getLogger(__name__)
 
 _POLL_INTERVAL_S = 20
 _DEBOUNCE_MS = 1000
@@ -70,10 +73,12 @@ class BackgroundStatusPoller:
                 monitor = Gio.File.new_for_path(str(path)).monitor_directory(
                     Gio.FileMonitorFlags.NONE, None
                 )
-            except GLib.Error:
+            except GLib.Error as err:
+                log.info("bgstatus: cannot watch %s: %s", path, err.message)
                 continue
-            monitor.connect("changed", self._on_fs_event)
+            monitor.connect("changed", self._on_fs_event, str(path))
             self._monitors.append(monitor)
+            log.info("bgstatus: watching %s", path)
         self.refresh()
 
     def stop(self) -> None:
@@ -92,9 +97,11 @@ class BackgroundStatusPoller:
         Turning it on refreshes immediately; the file monitors keep running
         either way."""
         if enabled and self._poll_source is None:
+            log.info("bgstatus: timed-poll fallback on (every %ss)", _POLL_INTERVAL_S)
             self._poll_source = GLib.timeout_add_seconds(_POLL_INTERVAL_S, self._on_poll_tick)
             self.refresh()
         elif not enabled and self._poll_source is not None:
+            log.info("bgstatus: timed-poll fallback off")
             GLib.source_remove(self._poll_source)
             self._poll_source = None
 
@@ -122,17 +129,28 @@ class BackgroundStatusPoller:
             changed = ids ^ self.background_ids
             self.background_ids = ids
             if changed:
+                log.info(
+                    "bgstatus: background sessions now %s (changed: %s)",
+                    sorted(ids) or "none",
+                    sorted(changed),
+                )
                 self._on_change(changed)
+            else:
+                log.debug("bgstatus: refresh found no membership change")
         if self._refresh_pending:
             self._refresh_pending = False
             self.refresh()
         return GLib.SOURCE_REMOVE
 
-    def _on_fs_event(self, _monitor, _file, _other, _event) -> None:
+    def _on_fs_event(self, _monitor, file, _other, event, path: str) -> None:
         # The watch dir churns while agents run; debounce so a burst of
         # events becomes one refresh.
+        log.debug(
+            "bgstatus: fs event %s on %s", event.value_nick, file.get_path() or path
+        )
         if self._debounce_source is not None:
             return
+        log.info("bgstatus: %s changed -> refresh in %sms", path, _DEBOUNCE_MS)
         self._debounce_source = GLib.timeout_add(_DEBOUNCE_MS, self._debounced_refresh)
 
     def _debounced_refresh(self) -> bool:
@@ -141,5 +159,6 @@ class BackgroundStatusPoller:
         return GLib.SOURCE_REMOVE
 
     def _on_poll_tick(self) -> bool:
+        log.debug("bgstatus: timed-poll tick")
         self.refresh()
         return GLib.SOURCE_CONTINUE

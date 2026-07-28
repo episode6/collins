@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -210,6 +211,9 @@ def main() -> int:
     from . import i18n
     from .state import AppState
 
+    # COLLINS_LOG=INFO (or DEBUG) surfaces diagnostic logs on the console,
+    # e.g. bgstatus's watch-dir and refresh activity.
+    logging.basicConfig(level=(os.environ.get("COLLINS_LOG") or "WARNING").upper())
     i18n.init(AppState().get_setting("language"))
     app = App()
     return app.run(sys.argv)
