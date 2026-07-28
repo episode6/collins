@@ -792,6 +792,13 @@ class MainWindow(Adw.ApplicationWindow):
         # for sessions known to be running detached (no-op when unchanged).
         for session_id in self._bg_status.background_ids:
             self._sync_status(session_id)
+        # A pending /bg that forked stays yellow/disabled on the old row until
+        # the fork's row can take its place; once the store discovers the fork,
+        # the old row is hidden ("moved") and the pending state can go.
+        for session_id in list(self._pending_bg):
+            target = self.state.resolve_forward(session_id)
+            if target != session_id and self.store.get_session(target) is not None:
+                self._clear_backgrounding(session_id, "fork discovered; row handed off")
 
     def _apply_resolved_sessions(self) -> None:
         """Finish attaching resolved tabs once the store discovers their sessions
@@ -1103,11 +1110,14 @@ class MainWindow(Adw.ApplicationWindow):
         """The tab's session is confirmed running detached (new_id is its
         legacy fork's session id, or "" when it detached in place — the
         normal case on current CLIs)."""
-        log.info("bg-watch: %s confirmed detached (legacy fork id: %s)", old_id, new_id or "none")
+        log.info("bg-watch: %s confirmed detached (fork id: %s)", old_id, new_id or "none")
         if new_id:
             self.store.record_forward(old_id, new_id)
-            # The forward ("syncing"/"moved") machinery owns the old row now.
-            self._clear_backgrounding(old_id, "legacy fork recorded")
+            # The old row must stay yellow and disabled until the fork's row
+            # replaces it — the store hasn't discovered the fork's transcript
+            # yet, so clearing now would leave a dim, clickable row pointing
+            # at the stale original. _on_store_refreshed clears the pending
+            # state once the handoff completes.
         # The agent list already shows the detached session: refresh now so
         # the yellow dot lands promptly even if the jobs-dir monitor misses it.
         self._bg_status.refresh()
@@ -1181,8 +1191,8 @@ class MainWindow(Adw.ApplicationWindow):
         """A /bg was just fed: treat the session as backgrounded right away —
         yellow dot once its tab closes, sidebar row disabled — instead of
         waiting for the agent CLI to list it. Cleared when the poller confirms
-        the detach, when a legacy fork takes over, when the confirmation watch
-        gives up, or by the safety timeout."""
+        the detach, when a fork's row is discovered and takes over, when the
+        confirmation watch gives up, or by the safety timeout."""
         if session_id in self._pending_bg:
             return
         log.info("bg-pending: %s marked (detach fed, awaiting confirmation)", session_id)
