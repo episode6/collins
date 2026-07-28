@@ -39,6 +39,16 @@ def test_hidden_sessions_include_hidden_projects(store):
     )
 
 
+def test_hidden_sessions_include_sessions_a_fork_replaced(store):
+    original, fork = (s.session_id for s in store._last_sessions[:2])
+    store.record_forward(original, fork)
+
+    # The original's row is gone from the sidebar even though nobody hid it —
+    # the fork stands in for it — so the bulk delete has to see it as hidden.
+    assert store.forward_state(store.sessions[original]) == "moved"
+    assert [s.session_id for s in store.hidden_sessions()] == [original]
+
+
 def test_hidden_breakdown_counts_per_project(store):
     alpha = [s for s in store._last_sessions if s.project_name == "alpha"]
     beta = [s for s in store._last_sessions if s.project_name == "beta"]

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-27. Full change history: git log for this file.
+fork. Last modified: 2026-07-28. Full change history: git log for this file.
 -->
 
 # Features
@@ -184,8 +184,9 @@ card overlays it — answer with a click instead of typing a number.
   hiding a session with an open tab closes the tab too. Whole **projects** can
   be hidden from their header's right-click menu.
 - **Delete hidden sessions…** (sidebar menu) clears the lot in one go: every
-  hidden session — including the ones inside hidden projects — has its
-  transcript moved to the trash. Hiding is cheap and the pile grows quietly,
+  session the sidebar keeps out of sight — hidden by hand, hidden with its
+  whole project, or replaced by a backgrounded fork — has its transcript moved
+  to the trash. Hiding is cheap and the pile grows quietly,
   so the confirmation spells out the damage first: how many transcripts, in
   which projects, and how many of those projects lose *every* session they
   have. Greyed out when nothing is hidden.

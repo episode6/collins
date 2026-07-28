@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -175,16 +175,7 @@ class SessionStore(GObject.Object):
         sessions = self._last_sessions
         self.sessions = {s.session_id: s for s in sessions}
 
-        visible = [
-            s
-            for s in sessions
-            if self.show_hidden
-            or not (
-                self.state.is_hidden(s.session_id)
-                or self.state.is_project_hidden(s.project_name)
-                or self.forward_state(s) == "moved"
-            )
-        ]
+        visible = [s for s in sessions if self.show_hidden or not self.is_out_of_sight(s)]
         favorites = [s for s in visible if self.state.is_favorite(s.session_id)]
         rest = [s for s in visible if not self.state.is_favorite(s.session_id)]
 
@@ -368,16 +359,23 @@ class SessionStore(GObject.Object):
             self.state.set_hidden(session_id, True)
         self._apply()
 
+    def is_out_of_sight(self, session: Session) -> bool:
+        """Every reason the sidebar keeps a row out of the list: the user hid
+        it, its whole project is hidden, or a legacy /bg fork replaced it.
+        Independent of `show_hidden`, which only controls whether those rows
+        are drawn anyway."""
+        return (
+            self.state.is_hidden(session.session_id)
+            or self.state.is_project_hidden(session.project_name)
+            or self.forward_state(session) == "moved"
+        )
+
     def hidden_sessions(self) -> list[Session]:
-        """Every session the sidebar hides: individually hidden ones plus
-        everything inside a hidden project. Independent of `show_hidden`,
-        which only controls whether those rows are currently drawn."""
-        return [
-            s
-            for s in self._last_sessions
-            if self.state.is_hidden(s.session_id)
-            or self.state.is_project_hidden(s.project_name)
-        ]
+        """Every session the sidebar keeps out of sight — what "delete all
+        hidden sessions" acts on. A /bg fork's original counts: it is as
+        invisible as a hidden row, and the fork it was replaced by carries a
+        copy of everything it held, so nothing survives only in it."""
+        return [s for s in self._last_sessions if self.is_out_of_sight(s)]
 
     def project_cwd(self, project_name: str) -> str | None:
         """A project's working directory, from its most recent session that

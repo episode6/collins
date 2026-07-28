@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -50,7 +50,8 @@ _IDLE_NOTIFY_MS = 4000
 def blast_radius_body(total: int, breakdown: list[tuple[str, int, int]]) -> str:
     """Spell out what "all hidden sessions" actually means before the user
     commits to it: how many transcripts, spread over which projects, and how
-    many of those lose *every* session they have. Hiding is cheap and
+    many of those lose *every* session they have — every row the sidebar keeps
+    out of sight, not only the ones hidden by hand. Hiding is cheap and
     accumulates, so the pile is usually far bigger than it feels, and a project
     that loses everything is gone from the sidebar unless it's kept.
 
@@ -62,7 +63,8 @@ def blast_radius_body(total: int, breakdown: list[tuple[str, int, int]]) -> str:
     lines = [
         _("{n} session(s) in {p} project(s) have their transcripts moved to "
           "the trash, where they can be restored. Sessions hidden with their "
-          "whole project are included.").format(n=total, p=len(breakdown))
+          "whole project — and originals a backgrounded fork replaced — are "
+          "included.").format(n=total, p=len(breakdown))
     ]
     if len(breakdown) <= _BLAST_RADIUS_MAX:
         shown, rest = breakdown, []
