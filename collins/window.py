@@ -1117,6 +1117,12 @@ class MainWindow(Adw.ApplicationWindow):
             # yet, so clearing now would leave a dim, clickable row pointing
             # at the stale original. _on_store_refreshed clears the pending
             # state once the handoff completes.
+        elif old_id in self._bg_status.background_ids:
+            # In-place detach of a session already in the poll set (a reopened
+            # background session backgrounded again — its job stays listed
+            # through the attach): no membership change will ever fire, so
+            # clear pending now; the membership-backed dot keeps it yellow.
+            self._clear_backgrounding(old_id, "already in the agent list")
         # The agent list already shows the detached session: refresh now so
         # the yellow dot lands promptly even if the jobs-dir monitor misses it.
         self._bg_status.refresh()
