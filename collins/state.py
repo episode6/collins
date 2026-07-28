@@ -116,9 +116,9 @@ class AppState:
         self.project_order: list[str] = []  # user-arranged sidebar order, by project name
         self.expanded_groups: set[str] = set()  # sidebar groups the user expanded
         self.panel_states: dict[str, dict] = {}  # per-session panel open/mode/sizes
-        # old session id -> the id its conversation continued under (older
-        # Claude CLIs' /bg forked a backgrounded session to a fresh background
-        # session; current CLIs detach in place, adding no entries here).
+        # old session id -> the id its conversation continued under (Claude's
+        # /bg has been observed forking a backgrounded session to a fresh
+        # background session id; in-place detaches add no entries here).
         self.session_forwards: dict[str, str] = {}
         self.settings: dict = dict(DEFAULT_SETTINGS)
         self._load()
@@ -286,9 +286,9 @@ class AppState:
 
     def forward_session(self, old_id: str, new_id: str) -> None:
         """Record that a session's conversation continued under a new id
-        (older Claude CLIs' /bg forked a backgrounded session to a fresh
-        background session; current CLIs detach in place, so this only fires
-        on legacy forks). Carries the user's metadata over — without clobbering
+        (Claude's /bg forking a backgrounded session to a fresh background
+        session — still observed on current CLIs, despite docs suggesting
+        in-place detaches). Carries the user's metadata over — without clobbering
         anything already set on the new id. One write to disk.
 
         The stale original row is *not* hidden here: visibility is derived

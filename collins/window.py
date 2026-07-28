@@ -1037,16 +1037,16 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _watch_background_fork(self, tab: TerminalTab) -> None:
         """Confirm the session is running detached, and record its successor
-        id if the CLI forked one. Current Claude CLIs detach in place on /bg —
-        the same session id keeps running as a background agent — but older
-        CLIs spawned the background agent under a *new* session id whose
-        transcript was a copy of the conversation, leaving the original behind
+        id if the CLI forked one. Despite the docs suggesting in-place
+        detaches, current Claude CLIs have been observed (2026-07) forking on
+        /bg: the background agent runs under a *new* session id whose
+        transcript is a copy of the conversation, leaving the original behind
         as a stale duplicate. Watch the agent list (off the main thread) for
         either outcome. The tab's own session id appearing means an in-place
         detach: nothing to record. A fresh id with a matching conversation
-        means a legacy fork: record old -> new, so the stale row is hidden,
-        the user's name/emoji/favorite carry over, and opening the old
-        session redirects to the live one.
+        means a fork: record old -> new, so the stale row is hidden, the
+        user's name/emoji/favorite carry over, and opening the old session
+        redirects to the live one.
 
         Either way the CLI may keep the terminal after /bg (parked on its
         agent-list screen), which would hang the pending close until the
@@ -1092,7 +1092,7 @@ class MainWindow(Adw.ApplicationWindow):
                 )
                 for agent in agents:
                     if agent.session_id == old_id:
-                        # Detached in place (current CLIs): no fork to record.
+                        # Detached in place: no fork to record.
                         GLib.idle_add(self._on_backgrounded, tab, old_id, "")
                         return
                     if matches(agent):
@@ -1108,8 +1108,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_backgrounded(self, tab: TerminalTab, old_id: str, new_id: str) -> bool:
         """The tab's session is confirmed running detached (new_id is its
-        legacy fork's session id, or "" when it detached in place — the
-        normal case on current CLIs)."""
+        fork's session id, or "" when it detached in place)."""
         log.info("bg-watch: %s confirmed detached (fork id: %s)", old_id, new_id or "none")
         if new_id:
             self.store.record_forward(old_id, new_id)

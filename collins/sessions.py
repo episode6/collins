@@ -144,10 +144,9 @@ def transcript_is_stub(cwd: str | None, preview: str) -> bool:
     """Whether a transcript's scan results mark it as a metadata-only stub.
 
     Claude leaves such transcripts (ai-title / agent-name lines only — no
-    cwd, no user message) behind for worktree agent runs, and for legacy /bg
+    cwd, no user message) behind for worktree agent runs, and for /bg
     forks whose background agent exited before the conversation copy was
-    written (older CLIs forked on /bg; current ones detach in place).
-    They can't be resumed, so discovery skips them.
+    written. They can't be resumed, so discovery skips them.
     """
     return cwd is None and not preview
 
@@ -168,10 +167,10 @@ def is_discoverable_transcript(path: Path) -> bool:
 def first_message_uuid(path: Path) -> str | None:
     """The uuid of a transcript's first user/assistant message, or None.
 
-    Older Claude CLIs' /bg copied the conversation into a new session id
-    verbatim — message uuids included — so a matching first uuid identifies
-    two transcripts as the same conversation (used to pair a backgrounded
-    session with its legacy fork; current CLIs detach in place, no fork).
+    Claude's /bg copies the conversation into a new session id verbatim —
+    message uuids included — so a matching first uuid identifies two
+    transcripts as the same conversation (used to pair a backgrounded
+    session with its fork).
     """
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
