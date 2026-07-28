@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="16px" viewBox="0 0 16 16" width="16px" xmlns="http://www.w3.org/2000/svg">
+    <!-- Filled paths only: GTK recolors symbolic icons by overriding fill on
+         every shape, so stroked outlines collapse into silhouettes. These
+         paths are the 1.25px-stroke outline design expanded into fills.
+         Empty coffee cup: Caffeine Mode off. -->
+    <g fill="#2e3436">
+        <path fill-rule="evenodd" d="M 1.875 4.375 H 11.125 V 10.5 A 3.125 3.125 0 0 1 8 13.625 H 5 A 3.125 3.125 0 0 1 1.875 10.5 Z M 3.125 5.625 V 10.5 A 1.875 1.875 0 0 0 5 12.375 H 8 A 1.875 1.875 0 0 0 9.875 10.5 V 5.625 Z"/>
+        <path d="M 11.125 5.625 A 2.625 2.625 0 0 1 11.125 10.875 V 9.625 A 1.375 1.375 0 0 0 11.125 6.875 Z"/>
+    </g>
+</svg>
