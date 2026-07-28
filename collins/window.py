@@ -455,6 +455,7 @@ class MainWindow(Adw.ApplicationWindow):
                 not self.sidebar.get_visible()
             ),
             "trash-archived": lambda *_: self._trash_archived(),
+            "archive-current-session": lambda *_: self._archive_current_session(),
         }
         for name, callback in plain.items():
             action = Gio.SimpleAction(name=name)
@@ -513,6 +514,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control>Page_Down", "win.next-tab"),
             ("<Control>Page_Up", "win.prev-tab"),
             ("<Control>comma", "win.preferences"),
+            ("<Control><Shift>a", "win.archive-current-session"),
             ("<Control><Shift>k", "win.quick-switch"),
             ("<Control><Shift>e", "win.toggle-tab-emoji"),
             ("<Control>j", "win.toggle-panel"),
@@ -1582,7 +1584,15 @@ class MainWindow(Adw.ApplicationWindow):
             dialogs.details_dialog(self, session, self.store.display_name(session))
 
     def _on_archive_session(self, _action, param: GLib.Variant) -> None:
-        session_id = param.get_string()
+        self._archive_session(param.get_string())
+
+    def _archive_current_session(self) -> None:
+        page = self.tab_view.get_selected_page()
+        tab = page.get_child() if page is not None else None
+        if isinstance(tab, TerminalTab) and tab.session_id:
+            self._archive_session(tab.session_id)
+
+    def _archive_session(self, session_id: str) -> None:
         archived = not self.state.is_archived(session_id)
         page = self._pages.get(session_id) if archived else None
         if page is not None:
