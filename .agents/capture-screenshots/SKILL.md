@@ -62,8 +62,8 @@ alpha-widgets session `$U1`). Adapt it, or hand-roll following these rules:
 
 - `config/collins/state.json` controls presentation. Useful keys:
   - `names`: `{uuid: title}` — deterministic row titles for the screenshot.
-  - `favorites` / `hidden`: lists of uuids (a project whose sessions are all
-    favorited or hidden shows an empty header — count 0).
+  - `favorites` / `archived`: lists of uuids (a project whose sessions are all
+    favorited or archived shows an empty header — count 0).
   - `expanded_groups`: groups start **collapsed**; list `"proj:<project-name>"`
     for each project plus `"fav:"` for favorites.
   - `settings`: set `"auto_title_sessions": false` (otherwise the app spawns

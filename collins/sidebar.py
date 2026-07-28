@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -11,7 +11,7 @@ Emits:
   open-session     (SessionItem, bool fork)
   open-many        (list[SessionItem])
   trash-many       (list[SessionItem])
-  hide-many        (list[SessionItem])
+  archive-many     (list[SessionItem])
   open-placeholder  (str placeholder id)
   close-placeholder (str placeholder id)
 """
@@ -168,9 +168,10 @@ class PlaceholderRow(Gtk.ListBoxRow):
         label.set_ellipsize(_ELLIPSIZE_END)
         box.append(label)
 
-        # There is no session to hide yet, so the hide button closes the tab
-        # instead (through the usual busy-tab confirmation flow).
-        close_btn = Gtk.Button(icon_name="view-conceal-symbolic", valign=Gtk.Align.CENTER)
+        # There is no session to archive yet, so the slot the archive button
+        # occupies closes the tab instead (through the usual busy-tab
+        # confirmation flow).
+        close_btn = Gtk.Button(icon_name="tab-close-symbolic", valign=Gtk.Align.CENTER)
         close_btn.add_css_class("flat")
         close_btn.set_tooltip_text(_("Close tab"))
         close_btn.connect(
@@ -218,20 +219,20 @@ class SessionRow(Gtk.ListBoxRow):
         self._state_badge = Gtk.Image(valign=Gtk.Align.CENTER)
         top.append(self._state_badge)
 
-        # Hidden rows are only listed while "Show hidden sessions" is on, and
-        # toggling rebuilds the list, so the icon never goes stale.
-        hidden = sidebar.store.state.is_hidden(item.session_id)
-        hide_btn = Gtk.Button(
-            icon_name="view-reveal-symbolic" if hidden else "view-conceal-symbolic",
+        # Archived rows are only listed while "Show archived sessions" is on,
+        # and toggling rebuilds the list, so the icon never goes stale.
+        archived = sidebar.store.state.is_archived(item.session_id)
+        archive_btn = Gtk.Button(
+            icon_name="unarchive-symbolic" if archived else "archive-symbolic",
             valign=Gtk.Align.CENTER,
         )
-        hide_btn.add_css_class("flat")
-        hide_btn.set_tooltip_text(_("Unhide session") if hidden else _("Hide session"))
-        hide_btn.connect(
+        archive_btn.add_css_class("flat")
+        archive_btn.set_tooltip_text(_("Restore session") if archived else _("Archive session"))
+        archive_btn.connect(
             "clicked",
-            lambda *_: self.activate_action("win.hide-session", GLib.Variant("s", item.session_id)),
+            lambda *_: self.activate_action("win.archive-session", GLib.Variant("s", item.session_id)),
         )
-        top.append(hide_btn)
+        top.append(archive_btn)
         box.append(top)
 
         path_label = Gtk.Label(xalign=0.0)
@@ -324,7 +325,7 @@ class SessionSidebar(Gtk.Box):
         "open-session": (GObject.SignalFlags.RUN_FIRST, None, (object, bool)),
         "open-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "trash-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
-        "hide-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
+        "archive-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "open-placeholder": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "close-placeholder": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
@@ -365,8 +366,8 @@ class SessionSidebar(Gtk.Box):
 
         menu = Gio.Menu()
         menu.append(_("Open session file…"), "win.open-session-file")
-        menu.append(_("Show hidden sessions"), "win.show-hidden")
-        menu.append(_("Delete hidden sessions…"), "win.trash-hidden")
+        menu.append(_("Show archived sessions"), "win.show-archived")
+        menu.append(_("Delete archived sessions…"), "win.trash-archived")
         menu.append(_("MCP servers"), "win.mcp-servers")
         menu.append(_("Preferences"), "win.preferences")
         menu.append(_("About Collins"), "win.about")
@@ -787,8 +788,10 @@ class SessionSidebar(Gtk.Box):
         edit_section.append_item(item(_("Reveal transcript"), "reveal-transcript"))
 
         danger_section = Gio.Menu()
-        hide_label = _("Unhide session") if self.store.state.is_hidden(session_id) else _("Hide session")
-        danger_section.append_item(item(hide_label, "hide-session"))
+        archive_label = (
+            _("Restore session") if self.store.state.is_archived(session_id) else _("Archive session")
+        )
+        danger_section.append_item(item(archive_label, "archive-session"))
         danger_section.append_item(item(_("Move transcript to trash…"), "trash-session"))
         danger_section.append_item(item(_("Delete permanently…"), "delete-session"))
 
@@ -810,19 +813,19 @@ class SessionSidebar(Gtk.Box):
             open_section.append_item(new_item)
 
         danger_section = Gio.Menu()
-        hide_label = (
-            _("Unhide project")
-            if self.store.state.is_project_hidden(project_name)
-            else _("Hide project")
+        archive_label = (
+            _("Restore project")
+            if self.store.state.is_project_archived(project_name)
+            else _("Archive project")
         )
-        hide_item = Gio.MenuItem.new(hide_label, None)
-        hide_item.set_action_and_target_value(
-            "win.hide-project", GLib.Variant("s", project_name)
+        archive_item = Gio.MenuItem.new(archive_label, None)
+        archive_item.set_action_and_target_value(
+            "win.archive-project", GLib.Variant("s", project_name)
         )
-        danger_section.append_item(hide_item)
+        danger_section.append_item(archive_item)
 
         # A project kept after its last session went away has nothing left to
-        # hide — dropping it is the only way it ever leaves the sidebar.
+        # archive — dropping it is the only way it ever leaves the sidebar.
         if self.store.state.is_virtual_project(project_name):
             forget_item = Gio.MenuItem.new(_("Remove project from sidebar"), None)
             forget_item.set_action_and_target_value(
@@ -869,7 +872,7 @@ class SessionSidebar(Gtk.Box):
 
         for icon, tooltip, callback in (
             ("user-trash-symbolic", _("Move selected transcripts to trash…"), self._bulk_trash),
-            ("view-conceal-symbolic", _("Hide selected"), self._bulk_hide),
+            ("archive-symbolic", _("Archive selected"), self._bulk_archive),
             ("non-starred-symbolic", _("Remove selected from favorites"), lambda: self._bulk_favorite(False)),
             ("starred-symbolic", _("Add selected to favorites"), lambda: self._bulk_favorite(True)),
             ("tab-new-symbolic", _("Open selected in tabs"), self._bulk_open),
@@ -916,8 +919,8 @@ class SessionSidebar(Gtk.Box):
     def _bulk_favorite(self, favorite: bool) -> None:
         self.store.set_favorites([i.session_id for i in self._selected_items()], favorite)
 
-    def _bulk_hide(self) -> None:
-        self.emit("hide-many", self._selected_items())
+    def _bulk_archive(self) -> None:
+        self.emit("archive-many", self._selected_items())
 
     def _bulk_trash(self) -> None:
         items = self._selected_items()

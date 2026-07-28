@@ -1,8 +1,8 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 
-"""Persistent app state: custom names, favorites, hidden sessions, settings.
+"""Persistent app state: custom names, favorites, archived sessions, settings.
 
 Everything lives in our own config file — the agents' session data is never
 modified.
@@ -111,8 +111,8 @@ class AppState:
         self.generated_names: dict[str, str] = {}  # auto-generated titles (user names win)
         self.emojis: dict[str, str] = {}
         self.favorites: set[str] = set()
-        self.hidden: set[str] = set()
-        self.hidden_projects: set[str] = set()  # by project name (the group identity)
+        self.archived: set[str] = set()
+        self.archived_projects: set[str] = set()  # by project name (the group identity)
         self.project_order: list[str] = []  # user-arranged sidebar order, by project name
         # Projects kept in the sidebar after their last session went away
         # (project name -> working directory, "" when it was never known), so
@@ -144,8 +144,13 @@ class AppState:
         self.generated_names = dict(data.get("generated_names") or {})
         self.emojis = dict(data.get("emojis") or {})
         self.favorites = set(data.get("favorites") or [])
-        self.hidden = set(data.get("hidden") or [])
-        self.hidden_projects = set(data.get("hidden_projects") or [])
+        # "hidden"/"hidden_projects" are the pre-rename spellings of the
+        # archive keys — read them as a fallback so an existing archive
+        # carries over; save() only ever writes the new keys.
+        self.archived = set(data.get("archived") or data.get("hidden") or [])
+        self.archived_projects = set(
+            data.get("archived_projects") or data.get("hidden_projects") or []
+        )
         self.project_order = list(data.get("project_order") or [])
         self.virtual_projects = {
             k: v for k, v in (data.get("virtual_projects") or {}).items() if isinstance(v, str)
@@ -166,8 +171,8 @@ class AppState:
             "generated_names": self.generated_names,
             "emojis": self.emojis,
             "favorites": sorted(self.favorites),
-            "hidden": sorted(self.hidden),
-            "hidden_projects": sorted(self.hidden_projects),
+            "archived": sorted(self.archived),
+            "archived_projects": sorted(self.archived_projects),
             "project_order": self.project_order,  # order is the payload — never sort
             "virtual_projects": self.virtual_projects,
             "expanded_groups": sorted(self.expanded_groups),
@@ -239,26 +244,26 @@ class AppState:
         self.save()
         return session_id in self.favorites
 
-    # -- hidden ------------------------------------------------------------
+    # -- archived ----------------------------------------------------------
 
-    def is_hidden(self, session_id: str) -> bool:
-        return session_id in self.hidden
+    def is_archived(self, session_id: str) -> bool:
+        return session_id in self.archived
 
-    def set_hidden(self, session_id: str, hidden: bool) -> None:
-        if hidden:
-            self.hidden.add(session_id)
+    def set_archived(self, session_id: str, archived: bool) -> None:
+        if archived:
+            self.archived.add(session_id)
         else:
-            self.hidden.discard(session_id)
+            self.archived.discard(session_id)
         self.save()
 
-    def is_project_hidden(self, project_name: str) -> bool:
-        return project_name in self.hidden_projects
+    def is_project_archived(self, project_name: str) -> bool:
+        return project_name in self.archived_projects
 
-    def set_project_hidden(self, project_name: str, hidden: bool) -> None:
-        if hidden:
-            self.hidden_projects.add(project_name)
+    def set_project_archived(self, project_name: str, archived: bool) -> None:
+        if archived:
+            self.archived_projects.add(project_name)
         else:
-            self.hidden_projects.discard(project_name)
+            self.archived_projects.discard(project_name)
         self.save()
 
     # -- virtual projects --------------------------------------------------
@@ -317,7 +322,7 @@ class AppState:
         in-place detaches). Carries the user's metadata over — without clobbering
         anything already set on the new id. One write to disk.
 
-        The stale original row is *not* hidden here: visibility is derived
+        The stale original row is *not* archived here: visibility is derived
         from the forward at display time (see SessionStore), so the original
         stays in the sidebar — disabled — until the fork's row can take its
         place, instead of vanishing for the scan-lag gap."""

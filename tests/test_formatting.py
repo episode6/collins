@@ -1,8 +1,8 @@
 from collins.formatting import blast_radius_body
 
 
-def _breakdown(count: int, hidden: int = 2, total: int = 2):
-    return [(f"project-{i:03d}", hidden, total) for i in range(count)]
+def _breakdown(count: int, archived: int = 2, total: int = 2):
+    return [(f"project-{i:03d}", archived, total) for i in range(count)]
 
 
 def _list_lines(body: str) -> list[str]:

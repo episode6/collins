@@ -320,8 +320,8 @@ msgstr "Sesiones"
 msgid "Select sessions"
 msgstr "Seleccionar sesiones"
 
-msgid "Show hidden sessions"
-msgstr "Mostrar sesiones ocultas"
+msgid "Show archived sessions"
+msgstr "Mostrar sesiones archivadas"
 
 msgid "MCP servers"
 msgstr "Servidores MCP"
@@ -380,17 +380,17 @@ msgstr "Exportar como Markdown…"
 msgid "Reveal transcript"
 msgstr "Mostrar transcripción"
 
-msgid "Unhide session"
-msgstr "Mostrar sesión"
+msgid "Restore session"
+msgstr "Restaurar sesión"
 
-msgid "Hide session"
-msgstr "Ocultar sesión"
+msgid "Archive session"
+msgstr "Archivar sesión"
 
-msgid "Unhide project"
-msgstr "Mostrar proyecto"
+msgid "Restore project"
+msgstr "Restaurar proyecto"
 
-msgid "Hide project"
-msgstr "Ocultar proyecto"
+msgid "Archive project"
+msgstr "Archivar proyecto"
 
 msgid "New session here"
 msgstr "Nueva sesión aquí"
@@ -413,8 +413,8 @@ msgstr "Borrar selección"
 msgid "Move selected transcripts to trash…"
 msgstr "Mover las transcripciones seleccionadas a la papelera…"
 
-msgid "Hide selected"
-msgstr "Ocultar seleccionadas"
+msgid "Archive selected"
+msgstr "Archivar seleccionadas"
 
 msgid "Remove selected from favorites"
 msgstr "Quitar seleccionadas de favoritos"

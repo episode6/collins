@@ -320,8 +320,8 @@ msgstr "Munkamenetek"
 msgid "Select sessions"
 msgstr "Munkamenetek kijelölése"
 
-msgid "Show hidden sessions"
-msgstr "Rejtett munkamenetek megjelenítése"
+msgid "Show archived sessions"
+msgstr "Archivált munkamenetek megjelenítése"
 
 msgid "MCP servers"
 msgstr "MCP-kiszolgálók"
@@ -380,17 +380,17 @@ msgstr "Exportálás Markdownként…"
 msgid "Reveal transcript"
 msgstr "Átirat megjelenítése"
 
-msgid "Unhide session"
-msgstr "Munkamenet felfedése"
+msgid "Restore session"
+msgstr "Munkamenet visszaállítása"
 
-msgid "Hide session"
-msgstr "Munkamenet elrejtése"
+msgid "Archive session"
+msgstr "Munkamenet archiválása"
 
-msgid "Unhide project"
-msgstr "Projekt felfedése"
+msgid "Restore project"
+msgstr "Projekt visszaállítása"
 
-msgid "Hide project"
-msgstr "Projekt elrejtése"
+msgid "Archive project"
+msgstr "Projekt archiválása"
 
 msgid "New session here"
 msgstr "Új munkamenet itt"
@@ -413,8 +413,8 @@ msgstr "Kijelölés törlése"
 msgid "Move selected transcripts to trash…"
 msgstr "Kijelölt átiratok kukába helyezése…"
 
-msgid "Hide selected"
-msgstr "Kijelöltek elrejtése"
+msgid "Archive selected"
+msgstr "Kijelöltek archiválása"
 
 msgid "Remove selected from favorites"
 msgstr "Kijelöltek eltávolítása a kedvencekből"

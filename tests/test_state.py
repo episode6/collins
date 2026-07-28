@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 
 import json
 
@@ -11,14 +11,36 @@ def test_roundtrip(app_state):
     state = app_state.AppState()
     state.set_name("sid-1", "My session")
     state.toggle_favorite("sid-1")
-    state.set_hidden("sid-2", True)
+    state.set_archived("sid-2", True)
     state.set_setting("scrollback", 5000)
 
     fresh = app_state.AppState()
     assert fresh.get_name("sid-1") == "My session"
     assert fresh.is_favorite("sid-1")
-    assert fresh.is_hidden("sid-2")
+    assert fresh.is_archived("sid-2")
     assert fresh.get_setting("scrollback") == 5000
+
+
+def test_archived_carries_over_from_pre_rename_hidden_keys(app_state):
+    # A state.json written before the archive rename used the "hidden"
+    # spellings: they load into the archived sets, and the next save rewrites
+    # them under the new keys.
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps({"hidden": ["sid-1"], "hidden_projects": ["alpha"]}),
+        encoding="utf-8",
+    )
+
+    state = app_state.AppState()
+    assert state.is_archived("sid-1")
+    assert state.is_project_archived("alpha")
+
+    state.save()
+    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
+    assert data["archived"] == ["sid-1"]
+    assert data["archived_projects"] == ["alpha"]
+    assert "hidden" not in data
+    assert "hidden_projects" not in data
 
 
 def test_virtual_projects_roundtrip(app_state):
@@ -248,7 +270,7 @@ def test_move_in_order_before_and_to_end():
     assert move_in_order(["a", "b"], "a", "gone") == ["b", "a"]  # unknown anchor → end
 
 
-def test_forward_session_carries_metadata_and_hides_original(app_state):
+def test_forward_session_carries_metadata_without_archiving_original(app_state):
     state = app_state.AppState()
     state.set_name("old", "My task")
     state.set_emoji("old", "🚀")
@@ -262,11 +284,11 @@ def test_forward_session_carries_metadata_and_hides_original(app_state):
     assert fresh.get_emoji("new") == "🚀"
     assert fresh.is_favorite("new")
     assert fresh.get_panel_state("new") == {"open": True, "mode": "bottom"}
-    # The stale original is NOT flagged hidden here: the store derives its
+    # The stale original is NOT flagged archived here: the store derives its
     # row's fate from the forward (visible-but-disabled until the fork is
     # discovered, replaced afterwards).
-    assert not fresh.is_hidden("old")
-    assert not fresh.is_hidden("new")
+    assert not fresh.is_archived("old")
+    assert not fresh.is_archived("new")
 
 
 def test_forward_session_never_clobbers_target_metadata(app_state):
