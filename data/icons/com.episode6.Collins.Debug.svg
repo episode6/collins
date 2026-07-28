@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-Debug-build variant of com.episode6.Collins.svg (original artwork for the
-ghackett fork): the pour goes lime and a bug — it's the debug build — perches
-on the rim of the glass, dressed in the release drink's coral.
--->
 <svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!--
+  Debug-build variant of com.episode6.Collins.svg (original artwork for the
+  ghackett fork): the pour goes lime and a bug — it's the debug build — perches
+  on the rim of the glass, dressed in the release drink's coral.
+
+  Keep this comment INSIDE the root element: gdk-pixbuf only recognizes an
+  SVG when the <svg> tag appears within its sniff buffer, and a long pre-root
+  comment pushes it out, leaving the dock icon blank.
+  -->
   <!-- terminal tile -->
   <rect x="8" y="8" width="112" height="112" rx="26" fill="#262320"/>
   <rect x="8" y="8" width="112" height="112" rx="26" fill="none" stroke="#4a443c" stroke-width="2" opacity="0.6"/>
