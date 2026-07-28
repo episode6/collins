@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 import os
 import shutil
@@ -181,3 +181,9 @@ def test_answer_keystrokes_fallback_cases():
     two = [{"question": "1", "options": [{"label": "a"}]}, {"question": "2", "options": [{"label": "b"}]}]
     assert claude.answer_keystrokes(multi, 0) is None  # multi-select → terminal
     assert claude.answer_keystrokes(two, 0) is None    # multiple questions → terminal
+
+
+def test_background_watch_dir():
+    assert ClaudeProvider().background_watch_dir() == Path.home() / ".claude" / "jobs"
+    # Base providers have no background agents → nothing to watch.
+    assert Provider().background_watch_dir() is None

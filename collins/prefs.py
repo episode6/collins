@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -220,6 +220,19 @@ class PreferencesDialog(Adw.PreferencesDialog):
         notif_group.add(self._notify_row)
         page.add(notif_group)
 
+        bg_group = Adw.PreferencesGroup(title=_("Background sessions"))
+        self._bg_poll_row = Adw.SwitchRow(
+            title=_("Poll for background sessions"),
+            subtitle=_(
+                "Fallback: check the agent CLI every 20 seconds in case the "
+                "yellow status dots stop updating on their own"
+            ),
+        )
+        self._bg_poll_row.set_active(bool(state.get_setting("background_status_poll")))
+        self._bg_poll_row.connect("notify::active", self._on_bg_poll_changed)
+        bg_group.add(self._bg_poll_row)
+        page.add(bg_group)
+
         self.add(page)
 
     def _on_font_changed(self, button: Gtk.FontDialogButton, _pspec) -> None:
@@ -255,6 +268,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_notify_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("notify_idle", row.get_active())
+        self._on_change()
+
+    def _on_bg_poll_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("background_status_poll", row.get_active())
         self._on_change()
 
     def _on_folder_path_changed(self, row: Adw.SwitchRow, _pspec) -> None:

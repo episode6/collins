@@ -249,12 +249,14 @@ class SessionRow(Gtk.ListBoxRow):
         flags = GObject.BindingFlags.SYNC_CREATE
         item.bind_property("display-name", name_label, "label", flags)
         item.bind_property("subtitle", time_label, "label", flags)
-        # A backgrounded session mid-handoff (its legacy /bg fork not yet
-        # scanned) stays visible but disabled, so it can't be opened into a
-        # stale state.
-        item.bind_property(
-            "syncing", self, "sensitive", flags | GObject.BindingFlags.INVERT_BOOLEAN
+        # A session mid-/bg-handoff stays visible but disabled, so it can't
+        # be opened into a stale state: either its legacy fork isn't scanned
+        # yet ("syncing") or the detach isn't confirmed yet ("backgrounding").
+        self._syncing_handler = item.connect("notify::syncing", self._on_sensitive_changed)
+        self._backgrounding_handler = item.connect(
+            "notify::backgrounding", self._on_sensitive_changed
         )
+        self._on_sensitive_changed(item, None)
 
         # Status dot + state badge need CSS-class updates: plain signals,
         # detached on unroot.
@@ -277,10 +279,19 @@ class SessionRow(Gtk.ListBoxRow):
         if self._state_handler is not None:
             self.item.disconnect(self._state_handler)
             self._state_handler = None
+        if self._syncing_handler is not None:
+            self.item.disconnect(self._syncing_handler)
+            self._syncing_handler = None
+        if self._backgrounding_handler is not None:
+            self.item.disconnect(self._backgrounding_handler)
+            self._backgrounding_handler = None
         Gtk.ListBoxRow.do_unroot(self)
 
+    def _on_sensitive_changed(self, item: SessionItem, _pspec) -> None:
+        self.set_sensitive(not (item.syncing or item.backgrounding))
+
     def _on_status_changed(self, item: SessionItem, _pspec) -> None:
-        for css in ("open", "attention"):
+        for css in ("open", "attention", "background"):
             self.dot.remove_css_class(css)
         if item.status:
             self.dot.add_css_class(item.status)
@@ -453,7 +464,9 @@ class SessionSidebar(Gtk.Box):
         sessions = self.store.sessions.values()
         projects = {s.project_name for s in sessions}
         open_tabs = sum(
-            1 for sid in self.store.sessions if (item := self.store.get_item(sid)) and item.status
+            1
+            for sid in self.store.sessions
+            if (item := self.store.get_item(sid)) and item.status in ("open", "attention")
         )
         parts = [
             _("{n} sessions").format(n=len(sessions)),

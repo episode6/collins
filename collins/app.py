@@ -1,11 +1,12 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 """Application entry point."""
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -34,6 +35,7 @@ _CSS = b"""
 }
 .status-dot.open { background-color: #2ec27e; }
 .status-dot.attention { background-color: #3584e4; }
+.status-dot.background { background-color: #e5a50a; }  /* running detached */
 
 .group-header { padding: 10px 10px 4px 10px; }
 
@@ -209,6 +211,9 @@ def main() -> int:
     from . import i18n
     from .state import AppState
 
+    # COLLINS_LOG=INFO (or DEBUG) surfaces diagnostic logs on the console,
+    # e.g. bgstatus's watch-dir and refresh activity.
+    logging.basicConfig(level=(os.environ.get("COLLINS_LOG") or "WARNING").upper())
     i18n.init(AppState().get_setting("language"))
     app = App()
     return app.run(sys.argv)

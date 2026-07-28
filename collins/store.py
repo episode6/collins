@@ -384,6 +384,11 @@ class SessionStore(GObject.Object):
         if item is not None and item.status != status:
             item.status = status
 
+    def set_backgrounding(self, session_id: str, flag: bool) -> None:
+        item = self._items.get(session_id)
+        if item is not None and item.backgrounding != flag:
+            item.backgrounding = flag
+
     def trash(self, session_id: str) -> str | None:
         """Move the transcript to trash. Returns an error message or None."""
         session = self.sessions.get(session_id)

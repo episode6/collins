@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-27. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -186,6 +186,12 @@ class Provider:
         """The agent CLI's currently-running detached sessions. Base: none."""
         return []
 
+    def background_watch_dir(self) -> Path | None:
+        """Directory whose changes hint that background-agent state changed —
+        strictly a wake-up signal for re-polling background_agents(), never a
+        data source. Base: none."""
+        return None
+
     def answer_keystrokes(self, questions: list, option_index: int) -> str | None:
         """Keystrokes that select option `option_index` of a structured prompt,
         or None if this agent/shape can't be auto-answered (→ fall back to the
@@ -213,6 +219,11 @@ class ClaudeProvider(Provider):
 
     def background_exit(self) -> str | None:
         return "/bg\r"
+
+    def background_watch_dir(self) -> Path | None:
+        # The CLI keeps one directory per background job here. Undocumented —
+        # never parse its contents; changes just wake up the status poller.
+        return Path.home() / ".claude" / "jobs"
 
     def resume_command(self, session_id: str, fork: bool = False) -> str | None:
         # Attach-first: if the session is still running detached (e.g. after
