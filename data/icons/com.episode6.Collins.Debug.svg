@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Debug-build variant of com.episode6.Collins.svg (original artwork for the
+ghackett fork): the pour goes lime and a bug — it's the debug build — perches
+on the rim of the glass, dressed in the release drink's coral.
+-->
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- terminal tile -->
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#262320"/>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="none" stroke="#4a443c" stroke-width="2" opacity="0.6"/>
+
+  <!-- straw -->
+  <line x1="78" y1="14" x2="67" y2="50" stroke="#EDE9E1" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- drink -->
+  <rect x="48" y="52" width="32" height="50" rx="4" fill="#7FB05A"/>
+
+  <!-- glass -->
+  <rect x="42" y="22" width="44" height="86" rx="8" fill="none" stroke="#EDE9E1" stroke-width="6"/>
+
+  <!-- cursor-block ice cubes -->
+  <rect x="52" y="58" width="14" height="10" rx="2" fill="#EDE9E1" transform="rotate(-8 59 63)"/>
+  <rect x="61" y="76" width="14" height="10" rx="2" fill="#EDE9E1" transform="rotate(10 68 81)" opacity="0.9"/>
+
+  <!-- the bug, perched on the rim -->
+  <g transform="translate(0 3.5)">
+    <line x1="42" y1="17" x2="39.5" y2="21.5" stroke="#D97757" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="46" y1="18" x2="45" y2="22.5" stroke="#D97757" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="50" y1="18" x2="50.5" y2="22.5" stroke="#D97757" stroke-width="1.8" stroke-linecap="round"/>
+    <ellipse cx="43" cy="9.5" rx="4.5" ry="2.2" fill="#EDE9E1" opacity="0.85" transform="rotate(-24 43 9.5)"/>
+    <ellipse cx="49" cy="9" rx="4.5" ry="2.2" fill="#EDE9E1" opacity="0.85" transform="rotate(8 49 9)"/>
+    <ellipse cx="46" cy="14" rx="6" ry="4.4" fill="#D97757"/>
+    <circle cx="53" cy="16" r="3" fill="#D97757"/>
+  </g>
+</svg>
