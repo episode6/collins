@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-29. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -25,12 +25,14 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from .chats import is_chat_cwd
 from .formatting import format_size
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
+from .projecticons import project_icon_data
 from .providers import get_provider
 from .store import SessionStore
 from .usagepanel import UsagePanel
@@ -60,6 +62,34 @@ def _group_state_key(group_key: tuple) -> str:
     return f"{group_key[0]}:{group_key[1]}"
 
 
+def _project_icon_texture(svg: bytes | None, size: int) -> Gdk.Texture | None:
+    """Rasterize project-icon bytes at the target icon size, forced through
+    the SVG pixbuf loader. Forcing the type keeps repo-controlled bytes away
+    from gdk-pixbuf's content sniffing (which would otherwise route a crafted
+    file to any installed codec), and decoding at icon size bounds the
+    raster surface regardless of the document's own canvas dimensions."""
+    if svg is None:
+        return None
+    try:
+        loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
+    except GLib.Error:  # SVG loader not installed
+        return None
+    loader.set_size(size, size)
+    try:
+        loader.write(svg)
+        loader.close()
+    except GLib.Error:
+        try:
+            loader.close()
+        except GLib.Error:
+            pass
+        return None
+    pixbuf = loader.get_pixbuf()
+    if pixbuf is None:
+        return None
+    return Gdk.Texture.new_for_pixbuf(pixbuf)
+
+
 class GroupHeaderRow(Gtk.ListBoxRow):
     """A real row acting as a group header, so it stays visible when the
     group's session rows are filtered out (collapsed)."""
@@ -72,6 +102,7 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         collapsed: bool,
         cwd: str | None = None,
         sidebar: SessionSidebar | None = None,
+        icon_size: int = 16,
     ) -> None:
         super().__init__()
         self.group_key = group_key
@@ -96,21 +127,32 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         box.add_css_class("group-header")
 
-        self._arrow = Gtk.Image()
+        self._arrow = Gtk.Image(valign=Gtk.Align.CENTER)
         self._arrow.add_css_class("dim-label")
         box.append(self._arrow)
 
-        if group_key == FAV_GROUP:
-            icon_name = "starred-symbolic"
-        elif group_key == CHATS_GROUP:
-            icon_name = "chat-bubble-symbolic"
+        self._icon_svg = project_icon_data(cwd) if group_key[0] == "proj" else None
+        texture = _project_icon_texture(self._icon_svg, icon_size)
+        if texture is not None:
+            # The project ships its own icon; shown at the same size as the
+            # symbolic icons, but in its own colors — no dim-label recoloring.
+            icon = Gtk.Image.new_from_paintable(texture)
         else:
-            icon_name = "folder-symbolic"
-        icon = Gtk.Image.new_from_icon_name(icon_name)
-        icon.add_css_class("dim-label")
+            self._icon_svg = None  # unrenderable — stay on the fallback
+            if group_key == FAV_GROUP:
+                icon_name = "starred-symbolic"
+            elif group_key == CHATS_GROUP:
+                icon_name = "chat-bubble-symbolic"
+            else:
+                icon_name = "folder-symbolic"
+            icon = Gtk.Image.new_from_icon_name(icon_name)
+            icon.add_css_class("dim-label")
+        icon.set_pixel_size(icon_size)
+        icon.set_valign(Gtk.Align.CENTER)
+        self._icon = icon
         box.append(icon)
 
-        label = Gtk.Label(label=group_label.upper(), xalign=0.0, hexpand=True)
+        label = Gtk.Label(label=group_label.upper(), xalign=0.0, hexpand=True, valign=Gtk.Align.CENTER)
         label.add_css_class("caption-heading")
         label.add_css_class("dim-label")
         label.set_ellipsize(_ELLIPSIZE_END)
@@ -149,6 +191,14 @@ class GroupHeaderRow(Gtk.ListBoxRow):
 
     def set_collapsed(self, collapsed: bool) -> None:
         self._arrow.set_from_icon_name("pan-end-symbolic" if collapsed else "pan-down-symbolic")
+
+    def set_icon_size(self, size: int) -> None:
+        self._icon.set_pixel_size(size)
+        # A custom icon's texture was rasterized at the old size; re-render
+        # it so it stays sharp instead of scaling.
+        texture = _project_icon_texture(self._icon_svg, size)
+        if texture is not None:
+            self._icon.set_from_paintable(texture)
 
     def _on_drag_prepare(self, _source: Gtk.DragSource, _x: float, _y: float) -> Gdk.ContentProvider:
         value = GObject.Value(GObject.TYPE_STRING, self.group_key[1])
@@ -523,6 +573,16 @@ class SessionSidebar(Gtk.Box):
         which stops its poll timer on the next tick."""
         self.usage_panel.set_visible(bool(self.store.state.get_setting("show_usage_panel")))
 
+    def refresh_project_icon_size(self) -> None:
+        """Re-read the 'project icon size' setting and resize existing
+        header icons in place."""
+        size = self._project_icon_size()
+        for header in self._header_rows.values():
+            header.set_icon_size(size)
+
+    def _project_icon_size(self) -> int:
+        return int(self.store.state.get_setting("project_icon_size") or 16)
+
     def _rebuild_rows(self) -> None:
         self.list.remove_all()
         self._rows = {}
@@ -578,6 +638,7 @@ class SessionSidebar(Gtk.Box):
         # Keep just-opened tabs visible: their groups ignore a collapsed state.
         self._collapsed -= set(placeholders_by_group)
 
+        icon_size = self._project_icon_size()
         for key, label, cwd in headers:
             header = GroupHeaderRow(
                 key,
@@ -586,6 +647,7 @@ class SessionSidebar(Gtk.Box):
                 key in self._collapsed,
                 cwd=cwd,
                 sidebar=self,
+                icon_size=icon_size,
             )
             self._header_rows[key] = header
             self.list.append(header)

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-29. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -444,7 +444,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _install_actions(self) -> None:
         plain = {
-            "refresh": lambda *_: self.store.refresh(),
+            "refresh": lambda *_: self.store.refresh(force_rebuild=True),
             "new-session": lambda *_: self._new_session(),
             "new-session-in-chats": lambda *_: self._new_session_in_chats(),
             "preferences": lambda *_: self._show_preferences(),
@@ -1865,6 +1865,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_settings_to_tabs()
         self.sidebar.refresh_folder_path()
         self.sidebar.refresh_usage_panel()
+        self.sidebar.refresh_project_icon_size()
         self._bg_status.set_polling(bool(self.state.get_setting("background_status_poll")))
 
     def _apply_settings_to_tabs(self) -> None:

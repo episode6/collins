@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-29. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -105,6 +105,7 @@ class SessionStore(GObject.Object):
         self._monitors: list[Gio.FileMonitor] = []
         self._refresh_queued = False
         self._scanning = False
+        self._force_rebuild = False
 
     # -- discovery -----------------------------------------------------------
 
@@ -112,8 +113,15 @@ class SessionStore(GObject.Object):
         self.refresh()
         self._setup_monitors()
 
-    def refresh(self) -> None:
-        """Rescan every installed agent's sessions off the main thread."""
+    def refresh(self, force_rebuild: bool = False) -> None:
+        """Rescan every installed agent's sessions off the main thread.
+
+        *force_rebuild* makes the resulting `refreshed` signal report an
+        order change even when nothing moved, so listeners rebuild rows
+        whose construction bakes in on-disk state (e.g. project icons).
+        """
+        if force_rebuild:
+            self._force_rebuild = True
         if self._scanning:
             return
         self._scanning = True
@@ -280,7 +288,12 @@ class SessionStore(GObject.Object):
                 del self._items[session_id]
 
         current_ids = [self.model.get_item(i).session_id for i in range(self.model.get_n_items())]
-        order_changed = current_ids != [item.session_id for item in items] or empty_changed
+        order_changed = (
+            current_ids != [item.session_id for item in items]
+            or empty_changed
+            or self._force_rebuild
+        )
+        self._force_rebuild = False
         if order_changed:
             self.model.splice(0, self.model.get_n_items(), items)
         self.emit("refreshed", order_changed)

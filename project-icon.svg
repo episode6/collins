@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Original artwork created for the ghackett fork (replaces the upstream
+agent-session-manager icon). A Tom Collins, with cursor-block ice cubes.
+-->
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- terminal tile -->
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#262320"/>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="none" stroke="#4a443c" stroke-width="2" opacity="0.6"/>
+
+  <!-- straw -->
+  <line x1="78" y1="14" x2="67" y2="50" stroke="#EDE9E1" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- drink -->
+  <rect x="48" y="52" width="32" height="50" rx="4" fill="#D97757"/>
+
+  <!-- glass -->
+  <rect x="42" y="22" width="44" height="86" rx="8" fill="none" stroke="#EDE9E1" stroke-width="6"/>
+
+  <!-- cursor-block ice cubes -->
+  <rect x="52" y="58" width="14" height="10" rx="2" fill="#EDE9E1" transform="rotate(-8 59 63)"/>
+  <rect x="61" y="76" width="14" height="10" rx="2" fill="#EDE9E1" transform="rotate(10 68 81)" opacity="0.9"/>
+</svg>
