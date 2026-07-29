@@ -41,6 +41,10 @@ _GHOSTTY = shutil.which("ghostty")
 _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
 _ELLIPSIZE_START = 1  # Pango.EllipsizeMode.START
 
+# Row highlight per status of a session with a tab open, keyed by the status
+# a tab gives it ("background", i.e. detached, is not one of them).
+_RUNNING_CSS = {"open": "running", "attention": "running-attention"}
+
 # How far a project header's icon sits from the row's own left edge: the
 # theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
 _HEADER_ICON_OFFSET = 18
@@ -257,18 +261,14 @@ class PlaceholderRow(Gtk.ListBoxRow):
         self.placeholder_id = placeholder_id
         self.group_key = group_key
         self.add_css_class("session-child")
+        self.add_css_class(_RUNNING_CSS["open"])  # it stands for a live tab
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         box.set_margin_top(4)  # match SessionRow: the flat button fills the row
         box.set_margin_bottom(4)
-
-        dot = Gtk.Box(valign=Gtk.Align.CENTER)
-        dot.add_css_class("status-dot")
-        dot.add_css_class("open")
-        box.append(dot)
+        box.set_margin_start(8)  # match SessionRow's title inset
 
         label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
-        label.set_margin_start(8)  # match SessionRow's name label
         label.add_css_class("dim-label")
         label.set_ellipsize(_ELLIPSIZE_END)
         box.append(label)
@@ -297,7 +297,7 @@ class SessionRow(Gtk.ListBoxRow):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         box.set_margin_top(4)
         box.set_margin_bottom(4)
-        box.set_margin_start(0)  # theme row padding alone ≈ the 10px dot-to-title gap
+        box.set_margin_start(8)  # air between the guide line and the title
         box.set_margin_end(0)  # theme row padding + the flat button's inset suffice
 
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
@@ -306,17 +306,12 @@ class SessionRow(Gtk.ListBoxRow):
         self.check.connect("toggled", lambda c: sidebar.on_row_check_toggled(self, c.get_active()))
         top.append(self.check)
 
-        self.dot = Gtk.Box(valign=Gtk.Align.CENTER)
-        self.dot.add_css_class("status-dot")
-        top.append(self.dot)
-
         name_label = Gtk.Label(xalign=0.0, hexpand=True)
-        name_label.set_margin_start(8)  # ~half the highlight-edge-to-dot distance
         name_label.set_ellipsize(_ELLIPSIZE_END)
         top.append(name_label)
 
         time_label = Gtk.Label(valign=Gtk.Align.CENTER)
-        time_label.set_margin_start(8)  # match the 10px gaps around the status dot
+        time_label.set_margin_start(8)  # keep the timestamp off a long title
         time_label.add_css_class("dim-label")
         time_label.add_css_class("caption")
         top.append(time_label)
@@ -420,10 +415,14 @@ class SessionRow(Gtk.ListBoxRow):
         self.set_sensitive(not (item.syncing or item.backgrounding))
 
     def _on_status_changed(self, item: SessionItem, _pspec) -> None:
-        for css in ("open", "attention", "background"):
-            self.dot.remove_css_class(css)
-        if item.status:
-            self.dot.add_css_class(item.status)
+        # The card itself carries the status: a brighter background for every
+        # session running in a tab, with the left guide line colored by which
+        # kind of running it is. Detached (/bg) sessions stay plain.
+        for css in _RUNNING_CSS.values():
+            self.remove_css_class(css)
+        running = _RUNNING_CSS.get(item.status)
+        if running is not None:
+            self.add_css_class(running)
 
     def _on_state_changed(self, item: SessionItem, _pspec) -> None:
         badge = self._state_badge

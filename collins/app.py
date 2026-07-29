@@ -28,16 +28,6 @@ from .window import MainWindow
 _BUNDLED_ICONS = Path(__file__).resolve().parent.parent / "data" / "icons"
 
 _CSS = b"""
-.status-dot {
-  min-width: 8px;
-  min-height: 8px;
-  border-radius: 100%;
-  background-color: alpha(currentColor, 0.25);
-}
-.status-dot.open { background-color: #2ec27e; }
-.status-dot.attention { background-color: #3584e4; }
-.status-dot.background { background-color: #e5a50a; }  /* running detached */
-
 .group-header { padding: 10px 10px 4px 10px; }
 
 /* insertion line while dragging a project header to a new position */
@@ -77,6 +67,23 @@ row.session-child:hover {
   background-color: alpha(currentColor, 0.1);
   border-left-color: alpha(currentColor, 0.3);
 }
+/* sessions running in an open tab share one brighter card, so live work
+   stands out from the archive of past sessions as a group; only the left bar
+   carries the status color. Detached (/bg) sessions are left alone: the
+   yellow dot marks them, but there is no tab to return to. Must stay above
+   the active-tab rules, which override these for the one session the
+   selected tab is showing. */
+row.session-child.running,
+row.session-child.running-attention {
+  background-color: alpha(currentColor, 0.13);
+}
+row.session-child.running:hover,
+row.session-child.running-attention:hover {
+  background-color: alpha(currentColor, 0.18);
+}
+row.session-child.running { border-left-color: #2ec27e; }
+/* blue bar: a tab with output the user hasn't looked at yet */
+row.session-child.running-attention { border-left-color: #3584e4; }
 /* the session shown in the currently selected tab */
 row.session-child.active-tab {
   background-color: alpha(#D97757, 0.16);

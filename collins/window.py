@@ -55,7 +55,8 @@ class _KeepProjects(NamedTuple):
     projects: list[str]
 
 
-# Tab status dots, matching the sidebar (.status-dot CSS in app.py).
+# Tab status dots; the same colors the sidebar puts on a running row's left
+# guide line (row.session-child.running* in app.py).
 _STATUS_COLORS = {"open": "#2ec27e", "attention": "#3584e4"}
 _status_icon_cache: dict[str, Gio.Icon] = {}
 
