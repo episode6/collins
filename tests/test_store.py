@@ -303,3 +303,33 @@ def test_first_scan_sweeps_orphan_chat_dirs(app_state, projects_dir, chats_dir, 
 
     store._on_scanned(sessions)  # later rescans don't sweep again
     assert len(swept) == 1
+
+
+def test_manual_refresh_forces_a_rebuild_report(app_state, projects_dir, monkeypatch):
+    """refresh(force_rebuild=True) must report an order change even when
+    nothing moved: sidebar rows bake in on-disk state at construction time
+    (project icons), and the refresh button is how users re-read it."""
+    monkeypatch.setattr(chats_mod, "sweep_orphan_chat_dirs", lambda refs: None)
+    monkeypatch.setattr(store_mod.SessionStore, "_setup_monitors", lambda self: None)
+    monkeypatch.setattr(store_mod.SessionStore, "_request_titles", lambda self, sessions: None)
+
+    # Run the scan inline: the threaded hand-off is not what's under test.
+    class _InlineThread:
+        def __init__(self, target, daemon=None):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(store_mod.threading, "Thread", _InlineThread)
+    monkeypatch.setattr(store_mod.GLib, "idle_add", lambda fn, *a: fn(*a))
+
+    store = store_mod.SessionStore(app_state.AppState())
+    changes = []
+    store.connect("refreshed", lambda _s, changed: changes.append(changed))
+
+    store.refresh()  # first scan populates the model
+    store.refresh()  # nothing changed
+    store.refresh(force_rebuild=True)  # forced: reported anyway
+    store.refresh()  # the force flag is one-shot
+    assert changes == [True, False, True, False]
