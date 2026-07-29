@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 """Quick switcher: a type-ahead dialog to jump to any session."""
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gtk  # noqa: E402
 
+from .chats import is_chat_cwd
 from .models import SessionItem
 from .store import SessionStore
 
@@ -90,7 +91,7 @@ class QuickSwitcher(Adw.Dialog):
         name.set_ellipsize(_ELLIPSIZE_END)
         box.append(name)
 
-        subtitle = item.session.project_name
+        subtitle = "Chats" if is_chat_cwd(item.session.cwd) else item.session.project_name
         if item.session.preview:
             subtitle += f" · {item.session.preview}"
         sub = Gtk.Label(label=subtitle, xalign=0.0)

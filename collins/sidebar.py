@@ -27,9 +27,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
+from .chats import is_chat_cwd
 from .formatting import format_size
 from .i18n import _
-from .models import FAV_GROUP, SessionItem
+from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .providers import get_provider
 from .store import SessionStore
 from .usagepanel import UsagePanel
@@ -85,11 +86,12 @@ class GroupHeaderRow(Gtk.ListBoxRow):
             self.add_controller(right_click)
 
             # Project headers can be dragged to rearrange the sidebar order
-            # (favorites stays pinned first).
-            drag = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
-            drag.connect("prepare", self._on_drag_prepare)
-            drag.connect("drag-begin", self._on_drag_begin)
-            self.add_controller(drag)
+            # (favorites and the virtual Chats group stay pinned first).
+            if group_key[0] == "proj":
+                drag = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
+                drag.connect("prepare", self._on_drag_prepare)
+                drag.connect("drag-begin", self._on_drag_begin)
+                self.add_controller(drag)
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         box.add_css_class("group-header")
@@ -98,9 +100,13 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         self._arrow.add_css_class("dim-label")
         box.append(self._arrow)
 
-        icon = Gtk.Image.new_from_icon_name(
-            "starred-symbolic" if group_key == FAV_GROUP else "folder-symbolic"
-        )
+        if group_key == FAV_GROUP:
+            icon_name = "starred-symbolic"
+        elif group_key == CHATS_GROUP:
+            icon_name = "chat-bubble-symbolic"
+        else:
+            icon_name = "folder-symbolic"
+        icon = Gtk.Image.new_from_icon_name(icon_name)
         icon.add_css_class("dim-label")
         box.append(icon)
 
@@ -116,7 +122,17 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         count_label.set_visible(count > 0)
         box.append(count_label)
 
-        if cwd:
+        if group_key == CHATS_GROUP:
+            # Chats has no fixed folder: every new chat gets a fresh
+            # throwaway directory of its own.
+            new_btn = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
+            new_btn.add_css_class("flat")
+            new_btn.set_tooltip_text(_("New chat"))
+            new_btn.connect(
+                "clicked", lambda *_: self.activate_action("win.new-session-in-chats", None)
+            )
+            box.append(new_btn)
+        elif cwd:
             new_btn = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
             new_btn.add_css_class("flat")
             new_btn.set_tooltip_text(
@@ -256,7 +272,12 @@ class SessionRow(Gtk.ListBoxRow):
         path_label.add_css_class("dim-label")
         path_label.add_css_class("caption")
         path_label.set_label(_abbreviate_path(item.session.cwd))
-        path_label.set_visible(sidebar.show_folder_path and bool(item.session.cwd))
+        # Chat sessions live in throwaway directories — the path is noise.
+        path_label.set_visible(
+            sidebar.show_folder_path
+            and bool(item.session.cwd)
+            and not is_chat_cwd(item.session.cwd)
+        )
         self._path_label = path_label
         box.append(path_label)
 
@@ -287,7 +308,9 @@ class SessionRow(Gtk.ListBoxRow):
         self.add_controller(right_click)
 
     def update_folder_path(self, show: bool) -> None:
-        self._path_label.set_visible(show and bool(self.item.session.cwd))
+        self._path_label.set_visible(
+            show and bool(self.item.session.cwd) and not is_chat_cwd(self.item.session.cwd)
+        )
 
     def do_unroot(self) -> None:
         if self._status_handler is not None:
@@ -436,18 +459,9 @@ class SessionSidebar(Gtk.Box):
         scrolled = Gtk.ScrolledWindow(child=self.list)
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
-        empty = Adw.StatusPage(
-            icon_name="folder-symbolic",
-            title=_("No sessions found"),
-            description=_("Run claude in a project directory first — "
-            "sessions will appear here automatically."),
-        )
-        empty.add_css_class("compact")
-
-        self._content_stack = Gtk.Stack()
-        self._content_stack.add_named(scrolled, "list")
-        self._content_stack.add_named(empty, "empty")
-        self._view.set_content(self._content_stack)
+        # No "no sessions yet" status page: the permanent Chats header means
+        # the list is never empty.
+        self._view.set_content(scrolled)
 
         self._view.add_bottom_bar(self._build_action_bar())
 
@@ -473,19 +487,17 @@ class SessionSidebar(Gtk.Box):
             self._rebuild_rows()
         self._update_selection_label()
         self._invalidate()
-        # Kept (virtual) projects are headers with nothing under them, but they
-        # are still a session list — not the "no sessions yet" status page.
-        self._content_stack.set_visible_child_name(
-            "empty" if not (store.sessions or store.empty_groups or self._placeholders) else "list"
-        )
         self.update_footer()
 
     def update_footer(self) -> None:
         sessions = self.store.sessions.values()
         # Kept projects have no sessions to count them, but they are projects.
-        projects = {s.project_name for s in sessions} | {
+        # All chat sessions together count as one pseudo-project.
+        projects = {s.project_name for s in sessions if not is_chat_cwd(s.cwd)} | {
             label for _key, label, _cwd in self.store.empty_groups
         }
+        if any(is_chat_cwd(s.cwd) for s in sessions):
+            projects.add("Chats")
         open_tabs = sum(
             1
             for sid in self.store.sessions
@@ -535,6 +547,9 @@ class SessionSidebar(Gtk.Box):
         headers: list[tuple[tuple, str, str | None]] = []
         if FAV_GROUP in items_by_group:
             headers.append((FAV_GROUP, _("Favorites"), None))
+        # The virtual Chats project is always there — it's where "start a
+        # session without picking a folder" lives, sessions or not.
+        headers.append((CHATS_GROUP, _("Chats"), None))
         empty_by_key = {key: (label, cwd) for key, label, cwd in self.store.empty_groups}
         for name in self.store.resolved_project_order:
             key = ("proj", name)
@@ -613,7 +628,9 @@ class SessionSidebar(Gtk.Box):
 
     @staticmethod
     def _placeholder_group_key(cwd: str) -> tuple:
-        """Group a placeholder the way Session.project_name groups sessions."""
+        """Group a placeholder the way the store's _group_key groups sessions."""
+        if is_chat_cwd(cwd):
+            return CHATS_GROUP
         return ("proj", Path(cwd).name or cwd)
 
     def add_placeholder(self, placeholder_id: str, cwd: str) -> None:
@@ -621,15 +638,12 @@ class SessionSidebar(Gtk.Box):
         self._placeholders[placeholder_id] = cwd
         self._rebuild_rows()
         self._invalidate()
-        self._content_stack.set_visible_child_name("list")
 
     def remove_placeholder(self, placeholder_id: str) -> None:
         if self._placeholders.pop(placeholder_id, None) is None:
             return
         self._rebuild_rows()
         self._invalidate()
-        if not self.store.sessions and not self._placeholders:
-            self._content_stack.set_visible_child_name("empty")
 
     def focus_search(self) -> None:
         self.search_entry.grab_focus()
@@ -683,8 +697,8 @@ class SessionSidebar(Gtk.Box):
     # -- drag & drop project reordering ---------------------------------------
 
     def _project_headers(self) -> list[str]:
-        """Project names in current display order (favorites excluded)."""
-        return [key[1] for key in self._header_rows if key != FAV_GROUP]
+        """Project names in current display order (pinned groups excluded)."""
+        return [key[1] for key in self._header_rows if key[0] == "proj"]
 
     def _last_visible_row(self) -> Gtk.ListBoxRow | None:
         child = self.list.get_last_child()
@@ -707,7 +721,7 @@ class SessionSidebar(Gtk.Box):
         if row is None:  # pointer below the last row
             return None, self._last_visible_row(), False
         key = row.item.group_key if isinstance(row, SessionRow) else row.group_key
-        if key == FAV_GROUP:  # favorites stays pinned first
+        if key in (FAV_GROUP, CHATS_GROUP):  # pinned groups stay first
             return names[0], self._header_rows.get(("proj", names[0])), True
         name = key[1]
         if isinstance(row, GroupHeaderRow):
@@ -818,6 +832,13 @@ class SessionSidebar(Gtk.Box):
         self._popup_menu(menu, row, x, y)
 
     def show_group_menu(self, row: GroupHeaderRow, x: float, y: float) -> None:
+        if row.group_key == CHATS_GROUP:
+            # The Chats group is permanent: nothing to archive or remove.
+            menu = Gio.Menu()
+            menu.append(_("New chat"), "win.new-session-in-chats")
+            self._popup_menu(menu, row, x, y)
+            return
+
         project_name = row.group_key[1]
 
         open_section = Gio.Menu()
