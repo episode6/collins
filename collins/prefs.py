@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -154,6 +154,19 @@ class PreferencesDialog(Adw.PreferencesDialog):
         appearance_group.add(scheme_row)
         page.add(appearance_group)
 
+        caffeine_group = Adw.PreferencesGroup(title=_("Caffeine Mode"))
+        self._caffeine_launch_row = Adw.SwitchRow(
+            title=_("Turn on at launch"),
+            subtitle=_(
+                "Start with Caffeine Mode already on, keeping the computer "
+                "awake and the screen on until you turn it off from the header"
+            ),
+        )
+        self._caffeine_launch_row.set_active(bool(state.get_setting("caffeine_on_launch")))
+        self._caffeine_launch_row.connect("notify::active", self._on_caffeine_launch_changed)
+        caffeine_group.add(self._caffeine_launch_row)
+        page.add(caffeine_group)
+
         sidebar_group = Adw.PreferencesGroup(title=_("Session list"))
         self._folder_path_row = Adw.SwitchRow(
             title=_("Show folder path"),
@@ -260,6 +273,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
         key = _SCHEMES[row.get_selected()][0]
         self._state.set_setting("color_scheme", key)
         apply_color_scheme(key)
+        self._on_change()
+
+    def _on_caffeine_launch_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("caffeine_on_launch", row.get_active())
         self._on_change()
 
     def _on_easy_copy_changed(self, row: Adw.SwitchRow, _pspec) -> None:

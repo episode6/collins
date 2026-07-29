@@ -169,8 +169,9 @@ class App(Adw.Application):
             Gtk.IconTheme.get_for_display(display).add_search_path(str(_BUNDLED_ICONS))
 
         # Caffeine Mode: non-None while we hold a sleep/idle inhibitor.
-        # Deliberately not persisted — a restart must never silently keep
-        # the machine awake.
+        # The live toggle is deliberately not persisted — a restart must
+        # never silently keep the machine awake unless the user explicitly
+        # opted in via the caffeine_on_launch setting.
         self._caffeine_cookie: int | None = None
 
         # Shared across all windows so scans/monitors aren't duplicated and
@@ -237,6 +238,8 @@ class App(Adw.Application):
             # Fresh launch: reopen the session that was active when the app
             # was last closed. Extra windows (Ctrl+Shift+N) start empty.
             window.restore_last_session()
+            if self.state.get_setting("caffeine_on_launch"):
+                self.set_caffeine_enabled(True)
         window.present()
 
 
