@@ -90,6 +90,13 @@ def test_defaults_for_unknown_settings(app_state):
     assert state.get_setting("font") == ""
 
 
+def test_caffeine_on_launch_setting(app_state):
+    state = app_state.AppState()
+    assert state.get_setting("caffeine_on_launch") is False  # opt-in only
+    state.set_setting("caffeine_on_launch", True)
+    assert app_state.AppState().get_setting("caffeine_on_launch") is True
+
+
 def test_corrupt_state_file_recovers(app_state):
     state = app_state.AppState()
     state.set_name("sid", "x")  # creates the file
