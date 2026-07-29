@@ -1865,6 +1865,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_settings_to_tabs()
         self.sidebar.refresh_folder_path()
         self.sidebar.refresh_usage_panel()
+        self.sidebar.refresh_project_icon_size()
         self._bg_status.set_polling(bool(self.state.get_setting("background_status_poll")))
 
     def _apply_settings_to_tabs(self) -> None:

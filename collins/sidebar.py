@@ -73,6 +73,7 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         collapsed: bool,
         cwd: str | None = None,
         sidebar: SessionSidebar | None = None,
+        icon_size: int = 16,
     ) -> None:
         super().__init__()
         self.group_key = group_key
@@ -103,10 +104,9 @@ class GroupHeaderRow(Gtk.ListBoxRow):
 
         custom_icon = project_icon_path(cwd) if group_key[0] == "proj" else None
         if custom_icon is not None:
-            # The project ships its own icon; shown at the symbolic icons'
-            # size, but in its own colors — no dim-label recoloring.
+            # The project ships its own icon; shown at the same size as the
+            # symbolic icons, but in its own colors — no dim-label recoloring.
             icon = Gtk.Image.new_from_file(str(custom_icon))
-            icon.set_pixel_size(16)
         else:
             if group_key == FAV_GROUP:
                 icon_name = "starred-symbolic"
@@ -116,7 +116,9 @@ class GroupHeaderRow(Gtk.ListBoxRow):
                 icon_name = "folder-symbolic"
             icon = Gtk.Image.new_from_icon_name(icon_name)
             icon.add_css_class("dim-label")
+        icon.set_pixel_size(icon_size)
         icon.set_valign(Gtk.Align.CENTER)
+        self._icon = icon
         box.append(icon)
 
         label = Gtk.Label(label=group_label.upper(), xalign=0.0, hexpand=True, valign=Gtk.Align.CENTER)
@@ -158,6 +160,9 @@ class GroupHeaderRow(Gtk.ListBoxRow):
 
     def set_collapsed(self, collapsed: bool) -> None:
         self._arrow.set_from_icon_name("pan-end-symbolic" if collapsed else "pan-down-symbolic")
+
+    def set_icon_size(self, size: int) -> None:
+        self._icon.set_pixel_size(size)
 
     def _on_drag_prepare(self, _source: Gtk.DragSource, _x: float, _y: float) -> Gdk.ContentProvider:
         value = GObject.Value(GObject.TYPE_STRING, self.group_key[1])
@@ -532,6 +537,16 @@ class SessionSidebar(Gtk.Box):
         which stops its poll timer on the next tick."""
         self.usage_panel.set_visible(bool(self.store.state.get_setting("show_usage_panel")))
 
+    def refresh_project_icon_size(self) -> None:
+        """Re-read the 'project icon size' setting and resize existing
+        header icons in place."""
+        size = self._project_icon_size()
+        for header in self._header_rows.values():
+            header.set_icon_size(size)
+
+    def _project_icon_size(self) -> int:
+        return int(self.store.state.get_setting("project_icon_size") or 16)
+
     def _rebuild_rows(self) -> None:
         self.list.remove_all()
         self._rows = {}
@@ -587,6 +602,7 @@ class SessionSidebar(Gtk.Box):
         # Keep just-opened tabs visible: their groups ignore a collapsed state.
         self._collapsed -= set(placeholders_by_group)
 
+        icon_size = self._project_icon_size()
         for key, label, cwd in headers:
             header = GroupHeaderRow(
                 key,
@@ -595,6 +611,7 @@ class SessionSidebar(Gtk.Box):
                 key in self._collapsed,
                 cwd=cwd,
                 sidebar=self,
+                icon_size=icon_size,
             )
             self._header_rows[key] = header
             self.list.append(header)

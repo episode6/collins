@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-29. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -55,6 +55,7 @@ DEFAULT_SETTINGS = {
     "auto_title_sessions": True,  # summarize each new session's first prompt into a short title
     "show_tab_bar": True,  # tab bar visibility (tabs keep working underneath)
     "show_folder_path": False,  # show each session's project folder path in the sidebar
+    "project_icon_size": 16,  # px size of the sidebar's project/folder (and group) icons
     "show_usage_panel": True,  # Claude subscription usage bars under the session list
     "footer_apps": [],  # desktop-file IDs of apps launchable from each tab's footer
     "caffeine_on_launch": False,  # start with Caffeine Mode on (inhibit suspend/idle)

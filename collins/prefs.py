@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-29. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -176,6 +176,12 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._folder_path_row.set_active(bool(state.get_setting("show_folder_path")))
         self._folder_path_row.connect("notify::active", self._on_folder_path_changed)
         sidebar_group.add(self._folder_path_row)
+        icon_size_row = Adw.SpinRow.new_with_range(16, 32, 2)
+        icon_size_row.set_title(_("Project icon size"))
+        icon_size_row.set_subtitle(_("Size of the project and folder icons in the sidebar"))
+        icon_size_row.set_value(int(state.get_setting("project_icon_size") or 16))
+        icon_size_row.connect("notify::value", self._on_icon_size_changed)
+        sidebar_group.add(icon_size_row)
         self._usage_panel_row = Adw.SwitchRow(
             title=_("Show Claude usage"),
             subtitle=_("Show subscription usage limits below the session list"),
@@ -307,6 +313,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_folder_path_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("show_folder_path", row.get_active())
+        self._on_change()
+
+    def _on_icon_size_changed(self, row: Adw.SpinRow, _pspec) -> None:
+        self._state.set_setting("project_icon_size", int(row.get_value()))
         self._on_change()
 
     def _on_usage_panel_changed(self, row: Adw.SwitchRow, _pspec) -> None:
