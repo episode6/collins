@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-29. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -31,6 +31,7 @@ from .chats import is_chat_cwd
 from .formatting import format_size
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
+from .projecticons import project_icon_path
 from .providers import get_provider
 from .store import SessionStore
 from .usagepanel import UsagePanel
@@ -96,21 +97,29 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         box.add_css_class("group-header")
 
-        self._arrow = Gtk.Image()
+        self._arrow = Gtk.Image(valign=Gtk.Align.CENTER)
         self._arrow.add_css_class("dim-label")
         box.append(self._arrow)
 
-        if group_key == FAV_GROUP:
-            icon_name = "starred-symbolic"
-        elif group_key == CHATS_GROUP:
-            icon_name = "chat-bubble-symbolic"
+        custom_icon = project_icon_path(cwd) if group_key[0] == "proj" else None
+        if custom_icon is not None:
+            # The project ships its own icon; shown at the symbolic icons'
+            # size, but in its own colors — no dim-label recoloring.
+            icon = Gtk.Image.new_from_file(str(custom_icon))
+            icon.set_pixel_size(16)
         else:
-            icon_name = "folder-symbolic"
-        icon = Gtk.Image.new_from_icon_name(icon_name)
-        icon.add_css_class("dim-label")
+            if group_key == FAV_GROUP:
+                icon_name = "starred-symbolic"
+            elif group_key == CHATS_GROUP:
+                icon_name = "chat-bubble-symbolic"
+            else:
+                icon_name = "folder-symbolic"
+            icon = Gtk.Image.new_from_icon_name(icon_name)
+            icon.add_css_class("dim-label")
+        icon.set_valign(Gtk.Align.CENTER)
         box.append(icon)
 
-        label = Gtk.Label(label=group_label.upper(), xalign=0.0, hexpand=True)
+        label = Gtk.Label(label=group_label.upper(), xalign=0.0, hexpand=True, valign=Gtk.Align.CENTER)
         label.add_css_class("caption-heading")
         label.add_css_class("dim-label")
         label.set_ellipsize(_ELLIPSIZE_END)
