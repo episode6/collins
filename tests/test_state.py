@@ -97,6 +97,16 @@ def test_caffeine_on_launch_setting(app_state):
     assert app_state.AppState().get_setting("caffeine_on_launch") is True
 
 
+def test_footer_apps_setting_roundtrip(app_state):
+    state = app_state.AppState()
+    assert state.get_setting("footer_apps") == []  # default: no extra buttons
+    state.set_setting("footer_apps", ["org.gnome.Nautilus.desktop", "code.desktop"])
+    fresh = app_state.AppState()
+    assert fresh.get_setting("footer_apps") == ["org.gnome.Nautilus.desktop", "code.desktop"]
+    # The default list object must not have been mutated by the roundtrip.
+    assert app_state.DEFAULT_SETTINGS["footer_apps"] == []
+
+
 def test_corrupt_state_file_recovers(app_state):
     state = app_state.AppState()
     state.set_name("sid", "x")  # creates the file

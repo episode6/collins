@@ -18,7 +18,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Vte", "3.91")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
-from . import panelhistory, themes  # noqa: E402
+from . import footerapps, panelhistory, themes  # noqa: E402
 from .copylabel import (  # noqa: E402
     copy_tooltip,
     enable_copy_on_click,
@@ -556,9 +556,14 @@ class TerminalTab(Gtk.Box):
         left.append(self._pr_label)
         left.append(self._pr_sep)
 
+        # User-configured app launchers sit just left of the panel buttons;
+        # populated from settings via _set_footer_apps.
+        self._footer_apps_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         footer.add_css_class("tab-footer")
         footer.append(left)
+        footer.append(self._footer_apps_box)
         for btn in (toggle_btn, self._swap_panel_btn):
             btn.add_css_class("flat")
             footer.append(btn)
@@ -1008,7 +1013,23 @@ class TerminalTab(Gtk.Box):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
+        self._set_footer_apps(settings.get("footer_apps") or [])
         self._panel.apply_settings(settings)
+
+    def _set_footer_apps(self, app_ids: list) -> None:
+        """(Re)build the footer's app-launcher buttons; uninstalled desktop
+        IDs are skipped."""
+        while (child := self._footer_apps_box.get_first_child()) is not None:
+            self._footer_apps_box.remove(child)
+        for _app_id, info in footerapps.resolve_apps(list(app_ids)):
+            btn = Gtk.Button(child=footerapps.app_icon_image(info, 16))
+            btn.add_css_class("flat")
+            btn.set_tooltip_text(_("Open in {name}").format(name=info.get_display_name()))
+            btn.connect("clicked", self._on_footer_app_clicked, info)
+            self._footer_apps_box.append(btn)
+
+    def _on_footer_app_clicked(self, _btn, info) -> None:
+        footerapps.launch_app(info, self.current_agent_cwd())
 
     def feed_message(self, text: str) -> None:
         self.terminal.feed(f"\r\n\x1b[1;33m[session manager]\x1b[0m {text}\r\n".encode())

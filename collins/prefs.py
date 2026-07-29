@@ -17,6 +17,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
 
+from . import footerapps
 from .i18n import LANGUAGES, N_, _
 from .state import AppState
 from .themes import DEFAULT_THEME, THEME_NAMES, get_theme
@@ -195,6 +196,19 @@ class PreferencesDialog(Adw.PreferencesDialog):
         sidebar_group.add(self._auto_title_row)
         page.add(sidebar_group)
 
+        self._footer_apps_group = Adw.PreferencesGroup(
+            title=_("Footer apps"),
+            description=_("Buttons in each tab's footer that open the tab's directory"),
+        )
+        add_app_btn = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
+        add_app_btn.add_css_class("flat")
+        add_app_btn.set_tooltip_text(_("Add application…"))
+        add_app_btn.connect("clicked", self._on_add_footer_app)
+        self._footer_apps_group.set_header_suffix(add_app_btn)
+        self._footer_app_rows: list[Adw.PreferencesRow] = []
+        self._rebuild_footer_apps()
+        page.add(self._footer_apps_group)
+
         current_lang = state.get_setting("language") or ""
         self._initial_lang = current_lang
         current_label = next(
@@ -301,6 +315,73 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_auto_title_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("auto_title_sessions", row.get_active())
+        self._on_change()
+
+    # -- footer apps ---------------------------------------------------------
+
+    def _footer_app_ids(self) -> list[str]:
+        # Copy before mutating so the shared DEFAULT_SETTINGS list is never
+        # edited in place.
+        return list(self._state.get_setting("footer_apps") or [])
+
+    def _rebuild_footer_apps(self) -> None:
+        for row in self._footer_app_rows:
+            self._footer_apps_group.remove(row)
+        self._footer_app_rows = []
+        apps = footerapps.resolve_apps(self._footer_app_ids())
+        for index, (app_id, info) in enumerate(apps):
+            row = Adw.ActionRow(title=info.get_display_name() or app_id, subtitle=app_id)
+            row.add_prefix(footerapps.app_icon_image(info, 32))
+            up_btn = Gtk.Button(icon_name="go-up-symbolic", valign=Gtk.Align.CENTER)
+            up_btn.set_tooltip_text(_("Move up"))
+            up_btn.set_sensitive(index > 0)
+            up_btn.connect("clicked", self._on_move_footer_app, app_id, -1)
+            down_btn = Gtk.Button(icon_name="go-down-symbolic", valign=Gtk.Align.CENTER)
+            down_btn.set_tooltip_text(_("Move down"))
+            down_btn.set_sensitive(index < len(apps) - 1)
+            down_btn.connect("clicked", self._on_move_footer_app, app_id, 1)
+            remove_btn = Gtk.Button(icon_name="edit-delete-symbolic", valign=Gtk.Align.CENTER)
+            remove_btn.set_tooltip_text(_("Remove"))
+            remove_btn.connect("clicked", self._on_remove_footer_app, app_id)
+            for btn in (up_btn, down_btn, remove_btn):
+                btn.add_css_class("flat")
+                row.add_suffix(btn)
+            self._footer_apps_group.add(row)
+            self._footer_app_rows.append(row)
+        if not apps:
+            row = Adw.ActionRow(title=_("No apps configured"))
+            row.set_sensitive(False)
+            self._footer_apps_group.add(row)
+            self._footer_app_rows.append(row)
+
+    def _on_add_footer_app(self, _button: Gtk.Button) -> None:
+        dialog = footerapps.AppPickerDialog(
+            exclude_ids=set(self._footer_app_ids()), on_select=self._append_footer_app
+        )
+        dialog.present(self)
+
+    def _append_footer_app(self, app_id: str) -> None:
+        apps = self._footer_app_ids()
+        if app_id not in apps:
+            apps.append(app_id)
+            self._save_footer_apps(apps)
+
+    def _on_remove_footer_app(self, _button: Gtk.Button, app_id: str) -> None:
+        apps = [a for a in self._footer_app_ids() if a != app_id]
+        self._save_footer_apps(apps)
+
+    def _on_move_footer_app(self, _button: Gtk.Button, app_id: str, delta: int) -> None:
+        apps = self._footer_app_ids()
+        index = apps.index(app_id) if app_id in apps else -1
+        target = index + delta
+        if index < 0 or not 0 <= target < len(apps):
+            return
+        apps[index], apps[target] = apps[target], apps[index]
+        self._save_footer_apps(apps)
+
+    def _save_footer_apps(self, apps: list[str]) -> None:
+        self._state.set_setting("footer_apps", apps)
+        self._rebuild_footer_apps()
         self._on_change()
 
     def _on_language_radio(self, radio: Gtk.CheckButton, code: str, label: str) -> None:

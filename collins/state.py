@@ -56,6 +56,7 @@ DEFAULT_SETTINGS = {
     "show_tab_bar": True,  # tab bar visibility (tabs keep working underneath)
     "show_folder_path": False,  # show each session's project folder path in the sidebar
     "show_usage_panel": True,  # Claude subscription usage bars under the session list
+    "footer_apps": [],  # desktop-file IDs of apps launchable from each tab's footer
     "caffeine_on_launch": False,  # start with Caffeine Mode on (inhibit suspend/idle)
     "sidebar_width": 300,  # persisted sidebar pane width in px
     "panel_position": "bottom",  # secondary terminal panel placement: bottom | right
