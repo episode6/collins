@@ -18,7 +18,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Vte", "3.91")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
-from . import footerapps, panelhistory, themes  # noqa: E402
+from . import apppicker, footerapps, panelhistory, themes  # noqa: E402
 from .copylabel import (  # noqa: E402
     copy_tooltip,
     enable_copy_on_click,
@@ -1022,7 +1022,7 @@ class TerminalTab(Gtk.Box):
         while (child := self._footer_apps_box.get_first_child()) is not None:
             self._footer_apps_box.remove(child)
         for _app_id, info in footerapps.resolve_apps(list(app_ids)):
-            btn = Gtk.Button(child=footerapps.app_icon_image(info, 16))
+            btn = Gtk.Button(child=apppicker.app_icon_image(info, 16))
             btn.add_css_class("flat")
             btn.set_tooltip_text(_("Open in {name}").format(name=info.get_display_name()))
             btn.connect("clicked", self._on_footer_app_clicked, info)

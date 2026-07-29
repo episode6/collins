@@ -17,7 +17,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
 
-from . import footerapps
+from . import apppicker, footerapps
 from .i18n import LANGUAGES, N_, _
 from .state import AppState
 from .themes import DEFAULT_THEME, THEME_NAMES, get_theme
@@ -331,7 +331,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         apps = footerapps.resolve_apps(self._footer_app_ids())
         for index, (app_id, info) in enumerate(apps):
             row = Adw.ActionRow(title=info.get_display_name() or app_id, subtitle=app_id)
-            row.add_prefix(footerapps.app_icon_image(info, 32))
+            row.add_prefix(apppicker.app_icon_image(info, 32))
             up_btn = Gtk.Button(icon_name="go-up-symbolic", valign=Gtk.Align.CENTER)
             up_btn.set_tooltip_text(_("Move up"))
             up_btn.set_sensitive(index > 0)
@@ -355,7 +355,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
             self._footer_app_rows.append(row)
 
     def _on_add_footer_app(self, _button: Gtk.Button) -> None:
-        dialog = footerapps.AppPickerDialog(
+        dialog = apppicker.AppPickerDialog(
             exclude_ids=set(self._footer_app_ids()), on_select=self._append_footer_app
         )
         dialog.present(self)
