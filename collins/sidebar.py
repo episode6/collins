@@ -41,6 +41,21 @@ _GHOSTTY = shutil.which("ghostty")
 _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
 _ELLIPSIZE_START = 1  # Pango.EllipsizeMode.START
 
+# How far a project header's icon sits from the row's own left edge: the
+# theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
+_HEADER_ICON_OFFSET = 18
+
+
+def _session_child_indent(icon_size: int) -> int:
+    """Left margin for a session row, so its card starts right where the icon
+    of the project header above it ends.
+
+    A widget margin, added on top of the margin the theme gives every sidebar
+    row — that part is shared with the header, so it cancels out and only the
+    header's icon offset plus the icon's width has to be matched.
+    """
+    return _HEADER_ICON_OFFSET + icon_size
+
 
 def _abbreviate_path(path: str | None) -> str:
     """Show the folder path with $HOME collapsed to ~ for compactness."""
@@ -599,10 +614,14 @@ class SessionSidebar(Gtk.Box):
 
     def refresh_project_icon_size(self) -> None:
         """Re-read the 'project icon size' setting and resize existing
-        header icons in place."""
+        header icons in place; session rows re-indent to stay aligned just
+        past the new icon width."""
         size = self._project_icon_size()
         for header in self._header_rows.values():
             header.set_icon_size(size)
+        indent = _session_child_indent(size)
+        for child in (*self._rows.values(), *self._placeholder_rows.values()):
+            child.set_margin_start(indent)
 
     def _project_icon_size(self) -> int:
         return int(self.store.state.get_setting("project_icon_size") or 16)
@@ -663,6 +682,7 @@ class SessionSidebar(Gtk.Box):
         self._collapsed -= set(placeholders_by_group)
 
         icon_size = self._project_icon_size()
+        child_indent = _session_child_indent(icon_size)
         for key, label, cwd in headers:
             header = GroupHeaderRow(
                 key,
@@ -677,12 +697,14 @@ class SessionSidebar(Gtk.Box):
             self.list.append(header)
             for pid in placeholders_by_group.get(key, ()):
                 prow = PlaceholderRow(pid, key, self)
+                prow.set_margin_start(child_indent)
                 if pid == self._active_session_id:
                     prow.add_css_class("active-tab")
                 self._placeholder_rows[pid] = prow
                 self.list.append(prow)
             for item in items_by_group.get(key, []):
                 row = SessionRow(item, self)
+                row.set_margin_start(child_indent)
                 if item.session_id == self._active_session_id:
                     row.add_css_class("active-tab")
                 self._rows[item.session_id] = row

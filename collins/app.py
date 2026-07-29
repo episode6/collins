@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-29. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -63,9 +63,11 @@ tabbar tab:not(:checked) label { opacity: 0.6; }
   font-size: 0.8em;
 }
 
-/* children connect to their group via a left guide line, on a faint card */
+/* children connect to their group via a left guide line, on a faint card.
+   The left indent is a widget margin set in sidebar.py, not a CSS margin
+   here: it tracks the configurable project-icon size, so the card always
+   starts just past the icon of the project header above it. */
 row.session-child {
-  margin-left: 20px;
   margin-right: 16px;
   background-color: alpha(currentColor, 0.06);
   border-left: 2px solid alpha(currentColor, 0.15);
