@@ -127,30 +127,29 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         box.add_css_class("group-header")
 
-        self._arrow = Gtk.Image(valign=Gtk.Align.CENTER)
-        self._arrow.add_css_class("dim-label")
-        box.append(self._arrow)
-
+        # One image doubles as project icon and collapse caret: the icon at
+        # rest, the caret while the pointer is over the row.
         self._icon_svg = project_icon_data(cwd) if group_key[0] == "proj" else None
-        texture = _project_icon_texture(self._icon_svg, icon_size)
-        if texture is not None:
-            # The project ships its own icon; shown at the same size as the
-            # symbolic icons, but in its own colors — no dim-label recoloring.
-            icon = Gtk.Image.new_from_paintable(texture)
-        else:
+        self._texture = _project_icon_texture(self._icon_svg, icon_size)
+        if self._texture is None:
             self._icon_svg = None  # unrenderable — stay on the fallback
             if group_key == FAV_GROUP:
-                icon_name = "starred-symbolic"
+                self._fallback_icon_name = "starred-symbolic"
             elif group_key == CHATS_GROUP:
-                icon_name = "chat-bubble-symbolic"
+                self._fallback_icon_name = "chat-bubble-symbolic"
             else:
-                icon_name = "folder-symbolic"
-            icon = Gtk.Image.new_from_icon_name(icon_name)
-            icon.add_css_class("dim-label")
+                self._fallback_icon_name = "folder-symbolic"
+        icon = Gtk.Image(valign=Gtk.Align.CENTER)
         icon.set_pixel_size(icon_size)
-        icon.set_valign(Gtk.Align.CENTER)
         self._icon = icon
         box.append(icon)
+
+        self._hovered = False
+        self._collapsed = collapsed
+        hover = Gtk.EventControllerMotion()
+        hover.connect("enter", self._on_hover_enter)
+        hover.connect("leave", self._on_hover_leave)
+        self.add_controller(hover)
 
         label = Gtk.Label(label=group_label.upper(), xalign=0.0, hexpand=True, valign=Gtk.Align.CENTER)
         label.add_css_class("caption-heading")
@@ -190,7 +189,8 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         self.set_collapsed(collapsed)
 
     def set_collapsed(self, collapsed: bool) -> None:
-        self._arrow.set_from_icon_name("pan-end-symbolic" if collapsed else "pan-down-symbolic")
+        self._collapsed = collapsed
+        self._update_icon()
 
     def set_icon_size(self, size: int) -> None:
         self._icon.set_pixel_size(size)
@@ -198,7 +198,31 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         # it so it stays sharp instead of scaling.
         texture = _project_icon_texture(self._icon_svg, size)
         if texture is not None:
-            self._icon.set_from_paintable(texture)
+            self._texture = texture
+        self._update_icon()
+
+    def _update_icon(self) -> None:
+        if self._hovered:
+            self._icon.set_from_icon_name(
+                "pan-end-symbolic" if self._collapsed else "pan-down-symbolic"
+            )
+            self._icon.add_css_class("dim-label")
+        elif self._texture is not None:
+            # The project ships its own icon; shown at the same size as the
+            # symbolic icons, but in its own colors — no dim-label recoloring.
+            self._icon.set_from_paintable(self._texture)
+            self._icon.remove_css_class("dim-label")
+        else:
+            self._icon.set_from_icon_name(self._fallback_icon_name)
+            self._icon.add_css_class("dim-label")
+
+    def _on_hover_enter(self, _ctrl: Gtk.EventControllerMotion, _x: float, _y: float) -> None:
+        self._hovered = True
+        self._update_icon()
+
+    def _on_hover_leave(self, _ctrl: Gtk.EventControllerMotion) -> None:
+        self._hovered = False
+        self._update_icon()
 
     def _on_drag_prepare(self, _source: Gtk.DragSource, _x: float, _y: float) -> Gdk.ContentProvider:
         value = GObject.Value(GObject.TYPE_STRING, self.group_key[1])
