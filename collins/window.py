@@ -703,6 +703,9 @@ class MainWindow(Adw.ApplicationWindow):
         except OSError as err:
             dialogs.error_dialog(self, _("Could not create chat directory"), str(err))
             return
+        # Skip the CLI's folder-trust prompt: we created this directory
+        # ourselves two lines ago, empty.
+        chats.trust_chat_dir(cwd)
         # Unknown groups start collapsed; the first chat must not vanish the
         # moment its placeholder resolves into a real row. (Key matches the
         # sidebar's _group_state_key for CHATS_GROUP.)

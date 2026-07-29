@@ -132,3 +132,72 @@ def test_sweep_removes_only_empty_unreferenced(chats_dir):
 def test_sweep_tolerates_missing_root(tmp_path, monkeypatch):
     monkeypatch.setattr(chats, "CHATS_DIR", tmp_path / "never-created")
     chats.sweep_orphan_chat_dirs(set())
+
+
+@pytest.fixture
+def claude_config(tmp_path, monkeypatch):
+    config = tmp_path / "claude.json"
+    monkeypatch.setattr(chats, "CLAUDE_CONFIG", config)
+    return config
+
+
+def _trusted(config_path, cwd):
+    import json
+
+    data = json.loads(config_path.read_text())
+    return data.get("projects", {}).get(cwd, {}).get("hasTrustDialogAccepted")
+
+
+def test_trust_chat_dir_creates_config_and_entry(chats_dir, claude_config):
+    cwd = chats.create_chat_dir()
+    chats.trust_chat_dir(cwd)
+    assert _trusted(claude_config, cwd) is True
+
+
+def test_trust_chat_dir_preserves_existing_config(chats_dir, claude_config):
+    import json
+
+    claude_config.write_text(
+        json.dumps(
+            {
+                "mcpServers": {"linear": {"type": "http"}},
+                "projects": {"/home/user/alpha": {"hasTrustDialogAccepted": False, "lastCost": 1}},
+            }
+        )
+    )
+    cwd = chats.create_chat_dir()
+    chats.trust_chat_dir(cwd)
+
+    data = json.loads(claude_config.read_text())
+    assert data["mcpServers"] == {"linear": {"type": "http"}}
+    assert data["projects"]["/home/user/alpha"] == {"hasTrustDialogAccepted": False, "lastCost": 1}
+    assert _trusted(claude_config, cwd) is True
+
+
+def test_trust_chat_dir_ignores_non_chat_cwd(chats_dir, claude_config, tmp_path):
+    chats.trust_chat_dir(str(tmp_path / "not-a-chat"))
+    assert not claude_config.exists()
+
+
+def test_trust_chat_dir_tolerates_corrupt_config(chats_dir, claude_config):
+    claude_config.write_text("not json {")
+    cwd = chats.create_chat_dir()
+    chats.trust_chat_dir(cwd)  # must not raise
+    assert claude_config.read_text() == "not json {"  # left untouched
+
+
+def test_trust_chat_dir_writes_realpath_key_for_symlinked_root(tmp_path, monkeypatch, claude_config):
+    real = tmp_path / "real-chats"
+    real.mkdir()
+    link = tmp_path / "link-chats"
+    link.symlink_to(real)
+    monkeypatch.setattr(chats, "CHATS_DIR", link)
+
+    cwd = chats.create_chat_dir()  # path goes through the symlink
+    chats.trust_chat_dir(cwd)
+
+    import os
+
+    assert _trusted(claude_config, os.path.normpath(cwd)) is True
+    assert _trusted(claude_config, os.path.realpath(cwd)) is True
+    assert os.path.normpath(cwd) != os.path.realpath(cwd)
