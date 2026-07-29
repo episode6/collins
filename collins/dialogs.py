@@ -15,6 +15,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
+from .chats import is_chat_cwd
 from .formatting import format_size, format_timestamp, format_tokens
 from .i18n import _
 from .providers import SessionOptions, get_provider
@@ -288,7 +289,12 @@ def details_dialog(parent: Gtk.Widget, session: Session, title: str) -> None:
     page.add(group)
 
     header = Adw.HeaderBar()
-    header.set_title_widget(Adw.WindowTitle(title=title, subtitle=session.project_name))
+    header.set_title_widget(
+        Adw.WindowTitle(
+            title=title,
+            subtitle="Chats" if is_chat_cwd(session.cwd) else session.project_name,
+        )
+    )
     view = Adw.ToolbarView()
     view.add_top_bar(header)
     view.set_content(page)

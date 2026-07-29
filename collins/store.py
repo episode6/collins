@@ -14,13 +14,14 @@ row *order* actually changes.
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
 from gi.repository import Gio, GLib, GObject
 
-from . import panelhistory
-from .models import FAV_GROUP, SessionItem
+from . import chats, panelhistory
+from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .providers import available_providers
 from .sessions import Session, discover_sessions, is_discoverable_transcript
 from .state import AppState, merge_project_order, move_in_order
@@ -36,6 +37,27 @@ def _trash_file(path: Path) -> str | None:
     except GLib.Error as err:
         return err.message
     return None
+
+
+def _group_key(session: Session) -> tuple:
+    """The sidebar group a session belongs to: the virtual Chats group for
+    sessions living in throwaway chat directories, its project otherwise."""
+    return CHATS_GROUP if chats.is_chat_cwd(session.cwd) else ("proj", session.project_name)
+
+
+def emptied_projects(sessions: Iterable[Session], doomed_ids: set[str]) -> list[str]:
+    """Projects that lose *every* session they have when `doomed_ids` go —
+    what the keep-projects checkbox offers to remember. Chat sessions don't
+    count on either side: their temp-dir basenames aren't projects, and the
+    Chats group is permanent."""
+    losing: set[str] = set()
+    surviving: set[str] = set()
+    for session in sessions:
+        if chats.is_chat_cwd(session.cwd):
+            continue
+        target = losing if session.session_id in doomed_ids else surviving
+        target.add(session.project_name)
+    return sorted(losing - surviving)
 
 
 def _relative_time(dt: datetime) -> str:
@@ -108,6 +130,9 @@ class SessionStore(GObject.Object):
         if self._first_scan:
             self._first_scan = False
             self._backfill_names(sessions)
+            # Trashing a chat session leaves (or fails to trash) its throwaway
+            # directory; reap empty leftovers once per run.
+            chats.sweep_orphan_chat_dirs({s.cwd for s in sessions if s.cwd})
         self._apply()
         self._setup_monitors()  # pick up new project dirs
         self._request_titles(sessions)
@@ -181,22 +206,27 @@ class SessionStore(GObject.Object):
         # themselves follow the user-arranged persisted order.
         grouped: dict[tuple, list[Session]] = {}
         for session in rest:
-            grouped.setdefault(("proj", session.project_name), []).append(session)
+            grouped.setdefault(_group_key(session), []).append(session)
         for group_sessions in grouped.values():
             group_sessions.sort(key=lambda s: s.created, reverse=True)
 
+        # Chat sessions never contribute their temp-dir basenames to the
+        # project order: their group is pinned, not ranked.
         virtual = self.state.get_virtual_projects()
         previous_order = self.resolved_project_order
         self.resolved_project_order = merge_project_order(
             self.state.get_project_order(),
-            [s.project_name for s in sessions] + list(virtual),
+            [s.project_name for s in sessions if not chats.is_chat_cwd(s.cwd)] + list(virtual),
         )
         rank = {name: i for i, name in enumerate(self.resolved_project_order)}
 
         ordered: list[tuple[Session, tuple, str]] = [
             (s, FAV_GROUP, "Favorites") for s in favorites
         ]
+        ordered.extend((s, CHATS_GROUP, "Chats") for s in grouped.get(CHATS_GROUP, []))
         for key in sorted(grouped, key=lambda k: rank.get(k[1], len(rank))):
+            if key[0] != "proj":
+                continue
             ordered.extend((s, key, key[1]) for s in grouped[key])
 
         self.group_counts = {}
@@ -215,6 +245,10 @@ class SessionStore(GObject.Object):
         # their "new session" button stays reachable.
         empty_groups: list[tuple[tuple, str, str | None]] = []
         for session in sessions:
+            if chats.is_chat_cwd(session.cwd):
+                # The sidebar renders the Chats header unconditionally; an
+                # all-archived Chats group must not surface temp basenames.
+                continue
             key = ("proj", session.project_name)
             if key in grouped or any(g[0] == key for g in empty_groups):
                 continue
@@ -402,12 +436,15 @@ class SessionStore(GObject.Object):
         archived count, total sessions in that project), biggest first. A
         project whose archived count equals its total loses every session it
         has — deleting them drops it from the sidebar altogether."""
+        def display_project(session: Session) -> str:
+            return "Chats" if chats.is_chat_cwd(session.cwd) else session.project_name
+
         totals: dict[str, int] = {}
         for session in self._last_sessions:
-            totals[session.project_name] = totals.get(session.project_name, 0) + 1
+            totals[display_project(session)] = totals.get(display_project(session), 0) + 1
         archived: dict[str, int] = {}
         for session in self.archived_sessions():
-            archived[session.project_name] = archived.get(session.project_name, 0) + 1
+            archived[display_project(session)] = archived.get(display_project(session), 0) + 1
         return sorted(
             ((name, count, totals[name]) for name, count in archived.items()),
             key=lambda row: (-row[1], row[0]),
@@ -432,7 +469,7 @@ class SessionStore(GObject.Object):
         their slot too."""
         order = merge_project_order(
             self.state.get_project_order(),
-            {s.project_name for s in self._last_sessions}
+            {s.project_name for s in self._last_sessions if not chats.is_chat_cwd(s.cwd)}
             | set(self.state.get_virtual_projects())
             | {name},
         )
@@ -463,6 +500,7 @@ class SessionStore(GObject.Object):
         from the result were trashed."""
         errors: dict[str, str] = {}
         trashed: set[str] = set()
+        doomed: list[Session] = []
         for session_id in session_ids:
             session = self.sessions.get(session_id)
             if session is None:
@@ -473,13 +511,24 @@ class SessionStore(GObject.Object):
                 errors[session_id] = error
             else:
                 trashed.add(session_id)
+                doomed.append(session)
         if trashed:
             self._last_sessions = [
                 s for s in self._last_sessions if s.session_id not in trashed
             ]
+            self._trash_chat_dirs(doomed)
             self._archive_orphaned_forwards(trashed)
             self._apply()
         return errors
+
+    def _trash_chat_dirs(self, doomed: list[Session]) -> None:
+        """A trashed chat session takes its throwaway directory to the trash
+        with it — unless a surviving session (e.g. a fork) still lives there.
+        Failures are ignored: the startup sweep reaps empty leftovers."""
+        survivor_cwds = {s.cwd for s in self._last_sessions if s.cwd}
+        for cwd in {s.cwd for s in doomed if s.cwd and chats.is_chat_cwd(s.cwd)}:
+            if cwd not in survivor_cwds:
+                chats.trash_chat_dir(cwd)
 
     def _archive_orphaned_forwards(self, gone: set[str]) -> None:
         """A row suppressed as "moved" (a legacy /bg fork took its place) comes
@@ -502,5 +551,11 @@ class SessionStore(GObject.Object):
         except OSError as err:
             return str(err)
         self._last_sessions = [s for s in self._last_sessions if s.session_id != session_id]
+        if chats.is_chat_cwd(session.cwd) and not any(
+            s.cwd == session.cwd for s in self._last_sessions
+        ):
+            # The transcript is gone for good; so is the throwaway directory
+            # (errors only logged implicitly — the deletion itself succeeded).
+            chats.delete_chat_dir(session.cwd)
         self._apply()
         return None

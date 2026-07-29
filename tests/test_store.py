@@ -1,6 +1,13 @@
+import json
+import os
+import re
+import uuid
+
 import pytest
 
+from collins import chats as chats_mod
 from collins import store as store_mod
+from collins.models import CHATS_GROUP
 from collins.sessions import discover_sessions
 
 
@@ -140,3 +147,159 @@ def test_trash_many_reports_failures(store, monkeypatch):
     # The one that failed keeps its row; only the trashed session goes.
     assert doomed not in store.sessions
     assert survivor in store.sessions
+
+
+# -- the virtual Chats project ------------------------------------------------
+
+
+@pytest.fixture
+def chats_dir(tmp_path, monkeypatch):
+    """Chats root isolated to the temp dir."""
+    root = tmp_path / "chats"
+    monkeypatch.setattr(chats_mod, "CHATS_DIR", root)
+    return root
+
+
+def _write_chat_session(projects_root, text="Quick chat", cwd=None):
+    """A discoverable session whose transcript records a cwd inside the
+    (monkeypatched) chats root."""
+    from conftest import make_transcript_lines
+
+    cwd = cwd or chats_mod.create_chat_dir()
+    project_dir = projects_root / re.sub(r"[^A-Za-z0-9]", "-", cwd)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    session_id = str(uuid.uuid4())
+    lines = make_transcript_lines(cwd, text)
+    (project_dir / f"{session_id}.jsonl").write_text(
+        "\n".join(json.dumps(line) for line in lines), encoding="utf-8"
+    )
+    return session_id, cwd
+
+
+@pytest.fixture
+def store_with_chat(app_state, projects_dir, chats_dir):
+    """The regular three-session store plus one chat session."""
+    root, _ids = projects_dir
+    session_id, cwd = _write_chat_session(root)
+    store = store_mod.SessionStore(app_state.AppState())
+    store._last_sessions = discover_sessions()
+    store._apply()
+    return store, session_id, cwd
+
+
+def _items(store):
+    return [store.model.get_item(i) for i in range(store.model.get_n_items())]
+
+
+def test_chat_sessions_group_under_chats_key(store_with_chat):
+    store, session_id, _cwd = store_with_chat
+    item = next(i for i in _items(store) if i.session_id == session_id)
+    assert item.group_key == CHATS_GROUP
+    assert item.group_label == "Chats"
+    assert store.group_counts[CHATS_GROUP] == 1
+
+
+def test_chat_rows_ordered_after_favorites_before_projects(store_with_chat):
+    store, session_id, _cwd = store_with_chat
+    favorite = next(s for s in store._last_sessions if not chats_mod.is_chat_cwd(s.cwd))
+    store.toggle_favorite(favorite.session_id)
+
+    kinds = [item.group_key[0] for item in _items(store)]
+    assert kinds == ["fav", "chats", "proj", "proj"]
+
+
+def test_chat_sessions_excluded_from_resolved_project_order(store_with_chat):
+    store, _session_id, cwd = store_with_chat
+    assert os.path.basename(cwd) not in store.resolved_project_order
+    assert sorted(store.resolved_project_order) == ["alpha", "beta"]
+
+
+def test_move_project_does_not_persist_chat_names(store_with_chat):
+    store, _session_id, cwd = store_with_chat
+    store.move_project("beta", "alpha")
+    order = store.state.get_project_order()
+    assert os.path.basename(cwd) not in order
+    assert order == ["beta", "alpha"]
+
+
+def test_archived_chat_session_creates_no_empty_group(store_with_chat):
+    store, session_id, cwd = store_with_chat
+    store.set_archived(session_id, True)
+    labels = [label for _key, label, _cwd in store.empty_groups]
+    assert os.path.basename(cwd) not in labels
+    assert "Chats" not in labels
+    assert store.group_counts.get(CHATS_GROUP, 0) == 0
+
+
+def test_archived_breakdown_labels_chats(store_with_chat):
+    store, session_id, _cwd = store_with_chat
+    store.set_archived(session_id, True)
+    assert store.archived_breakdown() == [("Chats", 1, 1)]
+
+
+def test_delete_chat_session_removes_its_dir(store_with_chat):
+    store, session_id, cwd = store_with_chat
+    assert store.delete(session_id) is None
+    assert not os.path.exists(cwd)
+
+
+def test_delete_chat_session_keeps_dir_shared_with_fork(app_state, projects_dir, chats_dir):
+    root, _ids = projects_dir
+    original, cwd = _write_chat_session(root)
+    fork, _ = _write_chat_session(root, text="Fork of the chat", cwd=cwd)
+    store = store_mod.SessionStore(app_state.AppState())
+    store._last_sessions = discover_sessions()
+    store._apply()
+
+    assert store.delete(original) is None
+    assert os.path.isdir(cwd)  # the fork still lives there
+    assert store.delete(fork) is None
+    assert not os.path.exists(cwd)  # last one out cleans up
+
+
+def test_trash_chat_session_trashes_its_dir(store_with_chat, monkeypatch):
+    store, session_id, cwd = store_with_chat
+    monkeypatch.setattr(store_mod, "_trash_file", lambda path: None)
+    trashed_dirs = []
+    monkeypatch.setattr(chats_mod, "trash_chat_dir", lambda path: trashed_dirs.append(path))
+
+    assert store.trash(session_id) is None
+    assert trashed_dirs == [cwd]
+
+
+def test_trash_chat_session_keeps_dir_shared_with_fork(app_state, projects_dir, chats_dir, monkeypatch):
+    root, _ids = projects_dir
+    original, cwd = _write_chat_session(root)
+    _fork, _ = _write_chat_session(root, text="Fork of the chat", cwd=cwd)
+    store = store_mod.SessionStore(app_state.AppState())
+    store._last_sessions = discover_sessions()
+    store._apply()
+
+    monkeypatch.setattr(store_mod, "_trash_file", lambda path: None)
+    trashed_dirs = []
+    monkeypatch.setattr(chats_mod, "trash_chat_dir", lambda path: trashed_dirs.append(path))
+
+    assert store.trash(original) is None
+    assert trashed_dirs == []  # the fork still lives there
+
+
+def test_emptied_projects_excludes_chats(store_with_chat):
+    store, chat_id, _cwd = store_with_chat
+    beta_ids = {s.session_id for s in store._last_sessions if s.project_name == "beta"}
+    doomed = beta_ids | {chat_id}
+    assert store_mod.emptied_projects(store.sessions.values(), doomed) == ["beta"]
+
+
+def test_first_scan_sweeps_orphan_chat_dirs(app_state, projects_dir, chats_dir, monkeypatch):
+    swept = []
+    monkeypatch.setattr(chats_mod, "sweep_orphan_chat_dirs", lambda refs: swept.append(refs))
+    monkeypatch.setattr(store_mod.SessionStore, "_setup_monitors", lambda self: None)
+    monkeypatch.setattr(store_mod.SessionStore, "_request_titles", lambda self, sessions: None)
+
+    store = store_mod.SessionStore(app_state.AppState())
+    sessions = discover_sessions()
+    store._on_scanned(sessions)
+    assert swept == [{s.cwd for s in sessions if s.cwd}]
+
+    store._on_scanned(sessions)  # later rescans don't sweep again
+    assert len(swept) == 1

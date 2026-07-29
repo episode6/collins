@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-28. Full change history: git log for this file.
 
 """GObject view-models. UI widgets bind to SessionItem properties, so
 renames, favorites and status changes propagate without list rebuilds."""
@@ -13,6 +13,9 @@ from .providers import get_provider
 from .sessions import Session
 
 FAV_GROUP = ("fav", "")
+# The virtual "Chats" project: sessions living in throwaway directories
+# under chats.CHATS_DIR, pinned right after Favorites.
+CHATS_GROUP = ("chats", "")
 
 
 class SessionItem(GObject.Object):

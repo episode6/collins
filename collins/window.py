@@ -19,7 +19,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import __version__, dialogs, panelhistory
+from . import __version__, chats, dialogs, panelhistory
 from .bgstatus import BackgroundStatusPoller
 from .chatsessionview import ChatSessionTab
 from .formatting import blast_radius_body
@@ -37,7 +37,7 @@ from .sessions import (
 )
 from .sidebar import SessionSidebar
 from .state import AppState, clamp_window_size
-from .store import SessionStore
+from .store import SessionStore, emptied_projects
 from .switcher import QuickSwitcher
 from .terminal import TerminalTab
 
@@ -170,6 +170,9 @@ class MainWindow(Adw.ApplicationWindow):
                 _("New {name} session…").format(name=provider.name),
                 f"win.new-session-provider::{provider.id}",
             )
+        # The sidebar's Chats project: a session in a throwaway directory
+        # ("chat" here ≠ the native streaming chat entries below).
+        new_menu.append(_("New chat (scratch folder)"), "win.new-session-in-chats")
         for provider in available_providers():
             new_menu.append(
                 _("New {name} session (advanced)…").format(name=provider.name),
@@ -443,6 +446,7 @@ class MainWindow(Adw.ApplicationWindow):
         plain = {
             "refresh": lambda *_: self.store.refresh(),
             "new-session": lambda *_: self._new_session(),
+            "new-session-in-chats": lambda *_: self._new_session_in_chats(),
             "preferences": lambda *_: self._show_preferences(),
             "mcp-servers": lambda *_: dialogs.mcp_browser_dialog(self),
             "focus-search": lambda *_: self.sidebar.focus_search(),
@@ -632,8 +636,12 @@ class MainWindow(Adw.ApplicationWindow):
                 self.tab_view.set_selected_page(page)
                 return
 
+        cwd = resume_cwd(session)
+        # A chat's throwaway directory may have been swept or trashed since;
+        # recreate it rather than letting the terminal fall back to $HOME.
+        chats.ensure_chat_dir(cwd)
         tab = TerminalTab(
-            cwd=resume_cwd(session),
+            cwd=cwd,
             session_id=session.session_id,
             fork=fork,
             settings=self.state.settings,
@@ -641,8 +649,8 @@ class MainWindow(Adw.ApplicationWindow):
             jsonl_path=session.jsonl_path,
         )
         title = f"{self.store.display_name(session)} (fork)" if fork else self._tab_title(session)
-        page = self._add_tab(tab, title,
-                             f"{session.project_name} — {session.session_id}")
+        project = "Chats" if chats.is_chat_cwd(session.cwd) else session.project_name
+        page = self._add_tab(tab, title, f"{project} — {session.session_id}")
         if not fork:
             self._pages[session.session_id] = page
             self._sync_status(session.session_id)
@@ -678,10 +686,28 @@ class MainWindow(Adw.ApplicationWindow):
         """Start in the visible session's project directory, else ask."""
         provider = provider or self._default_provider()
         default = self._visible_project_dir()
-        if default:
+        if default and chats.is_chat_cwd(default):
+            # The visible tab is a chat: its directory is throwaway, so a new
+            # session gets a fresh one instead of silently sharing it.
+            self._new_session_in_chats(provider)
+        elif default:
             self._start_new_session(default, provider)
         else:
             self._choose_new_session_folder(provider)
+
+    def _new_session_in_chats(self, provider=None) -> None:
+        """A session in the virtual Chats project: launched in a fresh
+        throwaway directory instead of a real project folder."""
+        try:
+            cwd = chats.create_chat_dir()
+        except OSError as err:
+            dialogs.error_dialog(self, _("Could not create chat directory"), str(err))
+            return
+        # Unknown groups start collapsed; the first chat must not vanish the
+        # moment its placeholder resolves into a real row. (Key matches the
+        # sidebar's _group_state_key for CHATS_GROUP.)
+        self.state.set_group_expanded("chats:", True)
+        self._start_new_session(cwd, provider)
 
     def _choose_new_session_folder(self, provider=None) -> None:
         self._new_session_provider = provider or self._default_provider()
@@ -707,7 +733,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         page = self._add_tab(
             tab,
-            GLib.path_get_basename(cwd),
+            _("New chat") if chats.is_chat_cwd(cwd) else GLib.path_get_basename(cwd),
             f"new {provider.name} session — {cwd}",
         )
         self._add_placeholder(page, cwd)
@@ -1695,13 +1721,7 @@ class MainWindow(Adw.ApplicationWindow):
         instead of vanishing with their sessions. None when no project empties
         out. Checked by default: losing a project you never removed is the
         surprise, and an empty header costs nothing."""
-        doomed = set(session_ids)
-        losing: set[str] = set()
-        surviving: set[str] = set()
-        for session in self.store.sessions.values():
-            target = losing if session.session_id in doomed else surviving
-            target.add(session.project_name)
-        emptied = sorted(losing - surviving)
+        emptied = emptied_projects(self.store.sessions.values(), set(session_ids))
         if not emptied:
             return None
         return _KeepProjects(
