@@ -25,13 +25,14 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from .chats import is_chat_cwd
 from .formatting import format_size
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
-from .projecticons import project_icon_path
+from .projecticons import project_icon_data
 from .providers import get_provider
 from .store import SessionStore
 from .usagepanel import UsagePanel
@@ -59,6 +60,34 @@ def _abbreviate_path(path: str | None) -> str:
 def _group_state_key(group_key: tuple) -> str:
     """Stable string identity for a sidebar group, for persisted state."""
     return f"{group_key[0]}:{group_key[1]}"
+
+
+def _project_icon_texture(svg: bytes | None, size: int) -> Gdk.Texture | None:
+    """Rasterize project-icon bytes at the target icon size, forced through
+    the SVG pixbuf loader. Forcing the type keeps repo-controlled bytes away
+    from gdk-pixbuf's content sniffing (which would otherwise route a crafted
+    file to any installed codec), and decoding at icon size bounds the
+    raster surface regardless of the document's own canvas dimensions."""
+    if svg is None:
+        return None
+    try:
+        loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
+    except GLib.Error:  # SVG loader not installed
+        return None
+    loader.set_size(size, size)
+    try:
+        loader.write(svg)
+        loader.close()
+    except GLib.Error:
+        try:
+            loader.close()
+        except GLib.Error:
+            pass
+        return None
+    pixbuf = loader.get_pixbuf()
+    if pixbuf is None:
+        return None
+    return Gdk.Texture.new_for_pixbuf(pixbuf)
 
 
 class GroupHeaderRow(Gtk.ListBoxRow):
@@ -102,12 +131,14 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         self._arrow.add_css_class("dim-label")
         box.append(self._arrow)
 
-        custom_icon = project_icon_path(cwd) if group_key[0] == "proj" else None
-        if custom_icon is not None:
+        self._icon_svg = project_icon_data(cwd) if group_key[0] == "proj" else None
+        texture = _project_icon_texture(self._icon_svg, icon_size)
+        if texture is not None:
             # The project ships its own icon; shown at the same size as the
             # symbolic icons, but in its own colors — no dim-label recoloring.
-            icon = Gtk.Image.new_from_file(str(custom_icon))
+            icon = Gtk.Image.new_from_paintable(texture)
         else:
+            self._icon_svg = None  # unrenderable — stay on the fallback
             if group_key == FAV_GROUP:
                 icon_name = "starred-symbolic"
             elif group_key == CHATS_GROUP:
@@ -163,6 +194,11 @@ class GroupHeaderRow(Gtk.ListBoxRow):
 
     def set_icon_size(self, size: int) -> None:
         self._icon.set_pixel_size(size)
+        # A custom icon's texture was rasterized at the old size; re-render
+        # it so it stays sharp instead of scaling.
+        texture = _project_icon_texture(self._icon_svg, size)
+        if texture is not None:
+            self._icon.set_from_paintable(texture)
 
     def _on_drag_prepare(self, _source: Gtk.DragSource, _x: float, _y: float) -> Gdk.ContentProvider:
         value = GObject.Value(GObject.TYPE_STRING, self.group_key[1])

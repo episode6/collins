@@ -37,3 +37,35 @@ def project_icon_path(cwd: str | Path | None) -> Path | None:
     if not 0 < size <= _MAX_ICON_BYTES:
         return None
     return candidate
+
+
+def project_icon_data(cwd: str | Path | None) -> bytes | None:
+    """The raw bytes of the project's icon, if it ships a plausible one.
+
+    Beyond project_icon_path's checks, the content must look like plain
+    SVG/XML text — see _looks_like_svg. Reading and vetting the bytes here
+    keeps the sidebar from ever handing a raw repo file to an image loader.
+    """
+    path = project_icon_path(cwd)
+    if path is None:
+        return None
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if not 0 < len(data) <= _MAX_ICON_BYTES:  # re-check: the stat was a race ago
+        return None
+    return data if _looks_like_svg(data) else None
+
+
+def _looks_like_svg(data: bytes) -> bool:
+    """Cheap gate before repo-controlled bytes reach any parser: reject
+    gzip (an svgz could expand far past the size cap) and anything that
+    isn't XML-shaped text with an <svg> element near the top (a crafted
+    binary for some other image codec)."""
+    if data[:2] == b"\x1f\x8b":
+        return False
+    head = data[:4096]
+    if head[:3] == b"\xef\xbb\xbf":  # UTF-8 BOM
+        head = head[3:]
+    return head.lstrip()[:1] == b"<" and b"<svg" in head
