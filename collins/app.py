@@ -132,6 +132,14 @@ row.session-child.active-tab {
 row.session-child.active-tab:hover {
   background-color: alpha(#D97757, 0.22);
 }
+/* ...but only the card runs out to the edge: its content stays where the
+   content of every other row is. The 17px the card gave up on the right
+   (16px margin + 1px border) comes back as a margin on the content box, so
+   the timestamp, the hover buttons and a long folder path all line up with
+   the rows above and below instead of sliding out to the panel edge too. */
+row.session-child.active-tab > box {
+  margin-right: 17px;
+}
 
 /* interactive prompt card overlaid on the terminal */
 .chat-card {
