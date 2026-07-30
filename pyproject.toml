@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-29. Full change history: git log for this file.
 
 [project]
 # PyPI distribution name (suffixed to stay unambiguous on PyPI). The
@@ -40,7 +40,9 @@ build-backend = "setuptools.build_meta"
 include = ["collins*"]
 
 [tool.setuptools.package-data]
-collins = ["locale/*/LC_MESSAGES/*.mo"]
+# The notices ship inside the package (the wheel is all the .deb installs), so
+# the About dialog can always read them; the repo root symlinks to the file.
+collins = ["locale/*/LC_MESSAGES/*.mo", "THIRD_PARTY_LICENSES.md"]
 
 [tool.ruff]
 line-length = 110

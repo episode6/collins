@@ -1,15 +1,57 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-29. Full change history: git log for this file.
 
 """Small human-readable formatting helpers shared across the UI."""
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 
+from gi.repository import GLib
+
 from .i18n import _
+
+_FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
+_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_HEADING_RE = re.compile(r"(?m)^\s*#{1,6}\s+(.*)$")
+_BULLET_RE = re.compile(r"(?m)^(\s*)[-*]\s+")
+_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+_AUTOLINK_RE = re.compile(r"<(https?://[^>\s]+)>")
+_SENT_A, _SENT_B = chr(0xE000), chr(0xE001)  # PUA sentinels survive markup escaping
+
+
+def md_to_pango(text: str, links: bool = False) -> str:
+    """Render common markdown as Pango markup; code spans are protected first.
+
+    `links` turns markdown links into clickable anchors — off by default so
+    chat text keeps rendering URLs verbatim.
+    """
+    stash: list[str] = []
+
+    def keep(markup: str) -> str:
+        stash.append(markup)
+        return f"{_SENT_A}{len(stash) - 1}{_SENT_B}"
+
+    def anchor(url: str, label: str) -> str:
+        escaped = GLib.markup_escape_text(url)
+        return keep(f'<a href="{escaped}">{GLib.markup_escape_text(label)}</a>')
+
+    text = _FENCE_RE.sub(lambda m: keep(f"<tt>{GLib.markup_escape_text(m.group(1).rstrip())}</tt>"), text)
+    text = _INLINE_CODE_RE.sub(lambda m: keep(f"<tt>{GLib.markup_escape_text(m.group(1))}</tt>"), text)
+    if links:  # after code spans, so a URL inside backticks stays literal
+        text = _LINK_RE.sub(lambda m: anchor(m.group(2), m.group(1)), text)
+        text = _AUTOLINK_RE.sub(lambda m: anchor(m.group(1), m.group(1)), text)
+    text = GLib.markup_escape_text(text)
+    text = _HEADING_RE.sub(lambda m: f"<b>{m.group(1)}</b>", text)
+    text = _BOLD_RE.sub(lambda m: f"<b>{m.group(1)}</b>", text)
+    text = _BULLET_RE.sub(lambda m: f"{m.group(1)}• ", text)
+    for i, markup in enumerate(stash):
+        text = text.replace(f"{_SENT_A}{i}{_SENT_B}", markup)
+    return text
 
 
 def display_path(path: str) -> str:

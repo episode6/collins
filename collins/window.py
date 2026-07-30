@@ -24,6 +24,7 @@ from .bgstatus import BackgroundStatusPoller
 from .chatsessionview import ChatSessionTab
 from .formatting import blast_radius_body
 from .i18n import _
+from .licenses import legal_sections
 from .models import SessionItem
 from .prefs import PreferencesDialog
 from .providers import available_providers, get_provider
@@ -1866,6 +1867,10 @@ class MainWindow(Adw.ApplicationWindow):
             website="https://github.com/episode6/collins",
             issue_url="https://github.com/episode6/collins/issues",
         )
+        # Third-party notices live in THIRD_PARTY_LICENSES.md; each of its
+        # headings becomes a section under the dialog's own Legal page.
+        for title, markup in legal_sections():
+            about.add_legal_section(title, None, Gtk.License.CUSTOM, markup)
         about.present(self)
 
     def _quick_switch(self) -> None:
