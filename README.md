@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-28. Full change history: git log for this file.
+fork. Last modified: 2026-07-29. Full change history: git log for this file.
 -->
 
 # Collins
@@ -158,3 +158,7 @@ by Máté Molnár, which did all the heavy lifting — see the
 [original project's website](https://r4nd3l.github.io/agent-session-manager/)
 for the app Collins grew out of. Released under
 [GPL-3.0-or-later](LICENSE), same as the original.
+
+Everything Collins is built on is disclosed in
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) — the same document the app
+shows on the Legal page of its About dialog.

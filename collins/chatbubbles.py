@@ -21,19 +21,32 @@ _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _HEADING_RE = re.compile(r"(?m)^\s*#{1,6}\s+(.*)$")
 _BULLET_RE = re.compile(r"(?m)^(\s*)[-*]\s+")
+_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+_AUTOLINK_RE = re.compile(r"<(https?://[^>\s]+)>")
 _SENT_A, _SENT_B = chr(0xE000), chr(0xE001)  # PUA sentinels survive markup escaping
 
 
-def md_to_pango(text: str) -> str:
-    """Render common markdown as Pango markup; code spans are protected first."""
+def md_to_pango(text: str, links: bool = False) -> str:
+    """Render common markdown as Pango markup; code spans are protected first.
+
+    `links` turns markdown links into clickable Pango anchors — off by default
+    so chat text keeps rendering URLs verbatim.
+    """
     stash: list[str] = []
 
     def keep(markup: str) -> str:
         stash.append(markup)
         return f"{_SENT_A}{len(stash) - 1}{_SENT_B}"
 
+    def anchor(url: str, label: str) -> str:
+        escaped = GLib.markup_escape_text(url)
+        return keep(f'<a href="{escaped}">{GLib.markup_escape_text(label)}</a>')
+
     text = _FENCE_RE.sub(lambda m: keep(f"<tt>{GLib.markup_escape_text(m.group(1).rstrip())}</tt>"), text)
     text = _INLINE_CODE_RE.sub(lambda m: keep(f"<tt>{GLib.markup_escape_text(m.group(1))}</tt>"), text)
+    if links:  # after code spans, so a URL inside backticks stays literal
+        text = _LINK_RE.sub(lambda m: anchor(m.group(2), m.group(1)), text)
+        text = _AUTOLINK_RE.sub(lambda m: anchor(m.group(1), m.group(1)), text)
     text = GLib.markup_escape_text(text)
     text = _HEADING_RE.sub(lambda m: f"<b>{m.group(1)}</b>", text)
     text = _BOLD_RE.sub(lambda m: f"<b>{m.group(1)}</b>", text)
