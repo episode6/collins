@@ -548,8 +548,16 @@ msgstr ""
 msgid "Sessions"
 msgstr ""
 
-#: collins/sidebar.py:363
-msgid "Select sessions"
+#: collins/sidebar.py:534
+msgid "Search sessions"
+msgstr ""
+
+#: collins/sidebar.py:534
+msgid "Close search"
+msgstr ""
+
+#: collins/sidebar.py:541
+msgid "Select multiple sessions"
 msgstr ""
 
 #: collins/sidebar.py:368

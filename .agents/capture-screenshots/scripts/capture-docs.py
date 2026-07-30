@@ -76,6 +76,7 @@ def stage(win) -> None:
     if panel:
         win.tab_view.get_selected_page().get_child().show_panel()
     if scene == "sidebar-search":
+        win.sidebar.search_btn.set_active(True)  # search hides behind its button
         win.sidebar.search_entry.set_text("dark")
     elif scene == "quick-switcher":
         win._quick_switch()

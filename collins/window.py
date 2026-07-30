@@ -525,6 +525,12 @@ class MainWindow(Adw.ApplicationWindow):
         show_archived.connect("change-state", self._on_show_archived)
         self.add_action(show_archived)
 
+        select_sessions = Gio.SimpleAction.new_stateful(
+            "select-sessions", None, GLib.Variant.new_boolean(False)
+        )
+        select_sessions.connect("change-state", self._on_select_sessions)
+        self.add_action(select_sessions)
+
     def _install_shortcuts(self) -> None:
         controller = Gtk.ShortcutController()
         controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
@@ -1698,6 +1704,10 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_show_archived(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
         action.set_state(value)
         self.store.set_show_archived(value.get_boolean())
+
+    def _on_select_sessions(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
+        action.set_state(value)
+        self.sidebar.set_selection_mode(value.get_boolean())
 
     def _sync_trash_archived_action(self) -> None:
         self._trash_archived_action.set_enabled(bool(self.store.archived_sessions()))
