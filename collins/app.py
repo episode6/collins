@@ -95,11 +95,12 @@ row.session-child:hover {
 }
 /* sessions running in an open tab share one fill, so live work stands out
    from the archive of past sessions as a group; only the guide line carries
-   the status color. Detached (/bg) sessions are left alone: there is no tab
-   to return to. These rules must stay below the plain :hover one, whose
-   border-color shorthand would otherwise repaint the guide line, and above
-   the active-tab rules, which take over the fill for the one session the
-   selected tab is showing. */
+   the status color. Detached (/bg) sessions get the line without the fill:
+   they are running, but there is no tab to return to, and the fill is what
+   marks the sessions there is one for. These rules must stay below the plain
+   :hover one, whose border-color shorthand would otherwise repaint the guide
+   line, and above the active-tab rules, which take over the fill for the one
+   session the selected tab is showing. */
 row.session-child.running,
 row.session-child.running-attention {
   background-color: alpha(currentColor, 0.13);
@@ -113,6 +114,8 @@ row.session-child.running { border-left-color: #2ec27e; }
    rather than to a second status color, so unread output is a stepping-back
    of the green, not another thing shouting for attention */
 row.session-child.running-attention { border-left-color: alpha(currentColor, 0.45); }
+/* running detached (/bg): the yellow the old status dot used */
+row.session-child.detached { border-left-color: #e5a50a; }
 /* the session shown in the currently selected tab: only the fill says so, so
    the guide line keeps saying what the session's status is */
 row.session-child.active-tab {

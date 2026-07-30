@@ -40,6 +40,9 @@ fork. Last modified: 2026-07-30. Full change history: git log for this file.
   sessions. A tab with output you haven't looked at yet keeps the fill and
   turns its guide line neutral grey. The session shown in the selected tab
   takes the peach highlight.
+- **A yellow guide line** marks a session **running detached** in the
+  background (`/bg`) — no fill, because there is no tab to return to; reopen
+  the row to re-attach.
 - **Waiting badge** — an amber **?** marks sessions where the agent's last
   message was a question awaiting your reply, so you can spot what needs you at
   a glance.

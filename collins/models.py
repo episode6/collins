@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 """GObject view-models. UI widgets bind to SessionItem properties, so
 renames, favorites and status changes propagate without list rebuilds."""
@@ -33,7 +33,7 @@ class SessionItem(GObject.Object):
     # Conversation moved to a fork the store hasn't discovered yet (row is
     # kept visible but disabled until the fork's row can take its place).
     syncing = GObject.Property(type=bool, default=False)
-    # A /bg detach fed but not yet confirmed: the dot shows yellow
+    # A /bg detach fed but not yet confirmed: the guide line shows yellow
     # pre-emptively and the row is disabled until the agent CLI lists the
     # session as a background agent (or confirmation times out).
     backgrounding = GObject.Property(type=bool, default=False)

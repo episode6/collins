@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-29. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -41,9 +41,16 @@ _GHOSTTY = shutil.which("ghostty")
 _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
 _ELLIPSIZE_START = 1  # Pango.EllipsizeMode.START
 
-# Row highlight per status of a session with a tab open, keyed by the status
-# a tab gives it ("background", i.e. detached, is not one of them).
-_RUNNING_CSS = {"open": "running", "attention": "running-attention"}
+# Row highlight per session status. The two tab statuses add a fill on top of
+# their guide line (see row.session-child.running* in app.py); "background",
+# i.e. running detached, colors the line only — there is no tab to return to.
+_STATUS_CSS = {
+    "open": "running",
+    "attention": "running-attention",
+    "background": "detached",
+}
+# The statuses that mean "this session has a tab open right now".
+_IN_TAB_STATUSES = ("open", "attention")
 
 # How far a project header's icon sits from the row's own left edge: the
 # theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
@@ -261,7 +268,7 @@ class PlaceholderRow(Gtk.ListBoxRow):
         self.placeholder_id = placeholder_id
         self.group_key = group_key
         self.add_css_class("session-child")
-        self.add_css_class(_RUNNING_CSS["open"])  # it stands for a live tab
+        self.add_css_class(_STATUS_CSS["open"])  # it stands for a live tab
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         box.set_valign(Gtk.Align.CENTER)  # match SessionRow in a taller row
@@ -449,19 +456,19 @@ class SessionRow(Gtk.ListBoxRow):
         self.set_sensitive(not (item.syncing or item.backgrounding))
 
     def _on_status_changed(self, item: SessionItem, _pspec) -> None:
-        # The card itself carries the status: a brighter background for every
-        # session running in a tab, with the left guide line colored by which
-        # kind of running it is. Detached (/bg) sessions stay plain.
-        for css in _RUNNING_CSS.values():
+        # The card itself carries the status: the left guide line is colored by
+        # what the session is doing, and a session running in a tab adds a
+        # brighter background on top.
+        for css in _STATUS_CSS.values():
             self.remove_css_class(css)
-        running = _RUNNING_CSS.get(item.status)
-        if running is not None:
-            self.add_css_class(running)
+        status_css = _STATUS_CSS.get(item.status)
+        if status_css is not None:
+            self.add_css_class(status_css)
 
         # Stopping and backgrounding both work on the session's tab, so they
         # only make sense while one is open: a detached (/bg) or idle session
         # has no tab to exit or hand over to the background.
-        in_tab = running is not None
+        in_tab = item.status in _IN_TAB_STATUSES
         self._stop_btn.set_visible(in_tab)
         self._bg_btn.set_visible(in_tab and self._can_background)
 
@@ -630,7 +637,7 @@ class SessionSidebar(Gtk.Box):
         open_tabs = sum(
             1
             for sid in self.store.sessions
-            if (item := self.store.get_item(sid)) and item.status in ("open", "attention")
+            if (item := self.store.get_item(sid)) and item.status in _IN_TAB_STATUSES
         )
         parts = [
             _("{n} sessions").format(n=len(sessions)),
