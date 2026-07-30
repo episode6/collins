@@ -312,14 +312,39 @@ class SessionRow(Gtk.ListBoxRow):
         name_label.set_ellipsize(_ELLIPSIZE_END)
         top.append(name_label)
 
+        self._state_badge = Gtk.Image(valign=Gtk.Align.CENTER)
+        top.append(self._state_badge)
+
         time_label = Gtk.Label(valign=Gtk.Align.CENTER)
         time_label.set_margin_start(8)  # keep the timestamp off a long title
         time_label.add_css_class("dim-label")
         time_label.add_css_class("caption")
-        top.append(time_label)
 
-        self._state_badge = Gtk.Image(valign=Gtk.Align.CENTER)
-        top.append(self._state_badge)
+        # Stop / background act on the tab this session is open in — the same
+        # two operations as the header buttons, for a row that isn't
+        # necessarily the focused tab. Hidden unless a tab is actually open on
+        # the session (see _on_status_changed).
+        stop_btn = Gtk.Button(icon_name="tab-close-symbolic", valign=Gtk.Align.CENTER)
+        stop_btn.add_css_class("flat")
+        stop_btn.set_tooltip_text(_("Exit session and close tab"))
+        stop_btn.connect(
+            "clicked",
+            lambda *_: self.activate_action("win.stop-session", GLib.Variant("s", item.session_id)),
+        )
+        self._stop_btn = stop_btn
+
+        bg_btn = Gtk.Button(icon_name="document-save-symbolic", valign=Gtk.Align.CENTER)
+        bg_btn.add_css_class("flat")
+        bg_btn.set_tooltip_text(_("Background session and close tab"))
+        bg_btn.connect(
+            "clicked",
+            lambda *_: self.activate_action(
+                "win.background-session", GLib.Variant("s", item.session_id)
+            ),
+        )
+        self._bg_btn = bg_btn
+        # Providers that can't detach never offer backgrounding.
+        self._can_background = get_provider(item.session.provider).background_exit() is not None
 
         # Archived rows are only listed while "Show archived sessions" is on,
         # and toggling rebuilds the list, so the icon never goes stale.
@@ -336,15 +361,22 @@ class SessionRow(Gtk.ListBoxRow):
         )
         self._archive_btn = archive_btn
 
-        # The archive button only appears while the pointer is over the row,
-        # so at rest the timestamp sits flush right and the title gets the
-        # freed width. A stack (swapping the button for an empty page) rather
-        # than set_visible keeps the button's height reserved — otherwise the
-        # row grows on hover and the list below it jumps. Archiving is still
-        # reachable without a pointer via the row's context menu.
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        actions.append(stop_btn)
+        actions.append(bg_btn)
+        actions.append(archive_btn)  # rightmost: the one action every row has
+
+        # Timestamp and row actions share one slot, so the row reads as either
+        # "when" or "what can I do here", never both: at rest the timestamp
+        # sits flush right and the title gets the freed width, on hover the
+        # buttons take the slot over. A stack (rather than set_visible on each
+        # side) keeps the taller of the two heights reserved — otherwise the
+        # row grows on hover and the list below it jumps. None of the actions
+        # are pointer-only: archiving is in the row's context menu, and
+        # stopping/backgrounding are in the header of the session's own tab.
         self._action_stack = Gtk.Stack(hhomogeneous=False, vhomogeneous=True)
-        self._action_stack.add_named(Gtk.Box(), "rest")
-        self._action_stack.add_named(archive_btn, "hover")
+        self._action_stack.add_named(time_label, "rest")
+        self._action_stack.add_named(actions, "hover")
         top.append(self._action_stack)
 
         hover = Gtk.EventControllerMotion()
@@ -425,6 +457,13 @@ class SessionRow(Gtk.ListBoxRow):
         running = _RUNNING_CSS.get(item.status)
         if running is not None:
             self.add_css_class(running)
+
+        # Stopping and backgrounding both work on the session's tab, so they
+        # only make sense while one is open: a detached (/bg) or idle session
+        # has no tab to exit or hand over to the background.
+        in_tab = running is not None
+        self._stop_btn.set_visible(in_tab)
+        self._bg_btn.set_visible(in_tab and self._can_background)
 
     def _on_state_changed(self, item: SessionItem, _pspec) -> None:
         badge = self._state_badge
