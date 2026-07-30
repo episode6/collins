@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-28. Full change history: git log for this file.
+fork. Last modified: 2026-07-29. Full change history: git log for this file.
 -->
 
 # Features
@@ -18,6 +18,11 @@ fork. Last modified: 2026-07-28. Full change history: git log for this file.
   second line showing the project folder path (Preferences → *Show folder
   path*). Within a project, sessions sort by creation time, newest first, so
   rows don't jump around as sessions produce output.
+- **Row actions on hover** — pointing at a row swaps its timestamp for its
+  buttons, so a row shows either when it last ran or what you can do with it:
+  **archive** on every row, preceded by **stop** (exit the agent and close its
+  tab) and **background** (detach with `/bg`, leaving it running) on the
+  sessions that have a tab open.
 - A **`+` button on every project header** starts a new session in that
   project; right-click a header for *New session here* and *Archive project*.
   Projects whose sessions are all archived or favorited still show their header,

@@ -502,6 +502,10 @@ class MainWindow(Adw.ApplicationWindow):
             "reveal-transcript": self._on_reveal_transcript,
             "export-session": self._on_export_session,
             "session-details": self._on_session_details,
+            "stop-session": lambda _a, p: self._close_session_tab(p.get_string()),
+            "background-session": lambda _a, p: self._close_session_tab(
+                p.get_string(), background=True
+            ),
             "archive-session": self._on_archive_session,
             "archive-project": self._on_archive_project,
             "forget-project": lambda _a, p: self.store.forget_project(p.get_string()),
@@ -1040,6 +1044,18 @@ class MainWindow(Adw.ApplicationWindow):
             self._close_ok.add(page)
             self._bg_ok.add(page)
             self.tab_view.close_page(page)
+
+    def _close_session_tab(self, session_id: str, background: bool = False) -> None:
+        """Sidebar row buttons: exit (or detach) the session's own tab, whether
+        or not it is the focused one — same no-dialog behavior as the header
+        buttons. A session with no open tab has nothing to close."""
+        page = self._pages.get(session_id)
+        if page is None:
+            return
+        self._close_ok.add(page)
+        if background:
+            self._bg_ok.add(page)
+        self.tab_view.close_page(page)
 
     def _close_confirmed(self, page: Adw.TabPage) -> None:
         """Force-close (terminate the child) — the graceful-close fallback."""
