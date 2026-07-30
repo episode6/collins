@@ -105,6 +105,27 @@ def test_match_declines_ambiguous_cwd_when_strict(tmp_path):
     assert _match_background_fork(provider, "old", "/proj", "", set(), unique_cwd=True) == "f1"
 
 
+def test_match_skips_an_agent_another_row_already_claims(tmp_path):
+    agents = [
+        BackgroundAgent(session_id="claimed", job_id="j1", cwd="/proj"),
+        BackgroundAgent(session_id="fork", job_id="j2", cwd="/proj"),
+    ]
+    provider = FakeProvider(
+        agents,
+        {
+            "claimed": write_transcript(tmp_path, "claimed", None),
+            "fork": write_transcript(tmp_path, "fork", None),
+        },
+    )
+    # Replaying a pending detach passes the agents other sessions already
+    # forward to: one of two same-cwd stubs is spoken for, which leaves the
+    # other unambiguous.
+    assert (
+        _match_background_fork(provider, "old", "/proj", "", {"claimed"}, unique_cwd=True)
+        == "fork"
+    )
+
+
 def test_match_returns_none_without_a_cwd_to_compare():
     provider = FakeProvider([BackgroundAgent(session_id="fork", job_id="j1", cwd="/proj")])
     assert _match_background_fork(provider, "old", "", "", set()) is None

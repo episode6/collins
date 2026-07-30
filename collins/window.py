@@ -1306,16 +1306,22 @@ class MainWindow(Adw.ApplicationWindow):
         if not pending:
             return
         log.info("bg-replay: %s pending detach(es) to re-check", len(pending))
+        # An agent some other row already forwards to is spoken for; it can't
+        # be the one this record is looking for. That is all the standing in
+        # for `known` there is this long after the /bg, so pairing also has to
+        # be strict: see _match_background_fork's unique_cwd.
+        claimed = set(self.state.session_forwards.values())
 
         def work() -> None:
             for old_id, info in pending.items():
                 provider = get_provider(info.get("provider") or "claude")
-                cwd = info.get("cwd") or ""
-                uuid = info.get("uuid") or ""
-                # No `known` set to lean on this far after the fact, so pairing
-                # has to be strict: see _match_background_fork's unique_cwd.
                 found = _match_background_fork(
-                    provider, old_id, cwd, uuid, set(), unique_cwd=True
+                    provider,
+                    old_id,
+                    info.get("cwd") or "",
+                    info.get("uuid") or "",
+                    claimed,
+                    unique_cwd=True,
                 )
                 GLib.idle_add(self._on_detach_replayed, old_id, found)
 
