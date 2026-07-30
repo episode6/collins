@@ -57,6 +57,51 @@ def test_archived_sessions_include_sessions_a_fork_replaced(store):
     assert [s.session_id for s in store.archived_sessions()] == [original]
 
 
+def test_rows_representing_is_the_session_itself_without_a_forward(store):
+    session_id = store._last_sessions[0].session_id
+    assert store.rows_representing(session_id) == [session_id]
+    assert store.rows_representing(str(uuid.uuid4())) == []  # no row anywhere
+
+
+def test_rows_representing_covers_a_fork_with_no_row(store):
+    original = store._last_sessions[0].session_id
+    fork = str(uuid.uuid4())  # /bg fork still holding only a metadata stub
+
+    store.record_forward(original, fork)
+
+    # Nothing discoverable to scan, so the fork has no row of its own and the
+    # forward reads as stale — the row it forked from goes on standing in for
+    # it, and has to carry its status (the yellow "running detached" line).
+    assert store.forward_state(store.sessions[original]) == ""
+    assert store.rows_representing(fork) == [original]
+    assert store.rows_representing(original) == [original]
+
+
+def test_rows_representing_follows_a_chain_of_forks(store):
+    original = store._last_sessions[0].session_id
+    middle, latest = str(uuid.uuid4()), str(uuid.uuid4())
+
+    store.record_forward(original, middle)
+    store.record_forward(middle, latest)
+
+    # Backgrounded repeatedly without the agent ever doing any work: only the
+    # very first row exists, and it stands for the newest fork.
+    assert store.rows_representing(latest) == [original]
+    assert store.rows_representing(middle) == []  # not the end of the chain
+
+
+def test_rows_representing_is_only_the_fork_once_it_has_a_row(store):
+    original, fork = (s.session_id for s in store._last_sessions[:2])
+
+    store.record_forward(original, fork)
+
+    # The fork's own row took over and the original went out of sight, so the
+    # fork stands for itself alone.
+    assert store.forward_state(store.sessions[original]) == "moved"
+    assert store.rows_representing(fork) == [fork]
+    assert store.rows_representing(original) == []
+
+
 def test_archived_breakdown_counts_per_project(store):
     alpha = [s for s in store._last_sessions if s.project_name == "alpha"]
     beta = [s for s in store._last_sessions if s.project_name == "beta"]

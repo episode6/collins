@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-29. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -303,10 +303,8 @@ class SessionStore(GObject.Object):
         affects its row: "moved" — the fork is discovered, this row is
         replaced by it; "syncing" — the fork's transcript exists and a scan
         will surface it, keep the row visible but disabled until then; "" —
-        no forward, or the fork's transcript vanished (e.g. trashed) or never
-        became a real session (a fork whose agent died leaving a
-        metadata-only stub), so the forward is stale and the row behaves
-        normally again."""
+        no forward, or the fork has no discoverable transcript, so this row
+        goes on standing in for it (see rows_representing)."""
         target = self.state.resolve_forward(session.session_id)
         if target == session.session_id:
             return ""
@@ -315,6 +313,23 @@ class SessionStore(GObject.Object):
         if is_discoverable_transcript(Path(session.jsonl_path).parent / f"{target}.jsonl"):
             return "syncing"
         return ""
+
+    def rows_representing(self, session_id: str) -> list[str]:
+        """The sidebar rows that stand for this session — normally just its own.
+
+        A /bg fork only gets a row once the CLI writes the conversation copy,
+        and it writes that copy lazily: a background agent that detaches and
+        then sits idle leaves nothing but a metadata-only stub behind, possibly
+        for its whole life. Such a fork is never discovered, so the session it
+        forked from keeps standing in for it and has to carry its status.
+        """
+        rows = [session_id] if session_id in self._items else []
+        rows += [
+            row_id
+            for row_id in self._items
+            if row_id != session_id and self.state.resolve_forward(row_id) == session_id
+        ]
+        return rows
 
     def _update_item(self, item: SessionItem, session: Session, group_key: tuple, group_label: str) -> None:
         item.session = session

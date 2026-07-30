@@ -24,6 +24,7 @@ from pathlib import Path
 from gi.repository import Gio, GLib
 
 from .providers import available_providers
+from .sessions import first_message_uuid
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,63 @@ def fetch_background_ids() -> set[str]:
     for provider in available_providers():
         ids.update(agent.session_id for agent in provider.background_agents())
     return ids
+
+
+def match_background_fork(
+    provider,
+    old_id: str,
+    cwd: str | None,
+    old_uuid: str | None,
+    known: set[str],
+    unique_cwd: bool = False,
+) -> str | None:
+    """Look for `old_id`'s detached agent in the provider's agent list.
+
+    Returns the fork's session id, "" when the session detached in place
+    (its own id is listed), or None when nothing there is it. Shells out to
+    the agent CLI — never call on the main thread.
+
+    Agents already listed before the /bg (`known`) can't be the new one. A
+    candidate is the same conversation when its transcript starts with the same
+    message uuid — /bg copies the conversation verbatim, uuids included — which
+    disambiguates several same-project tabs backgrounded at once (e.g. the quit
+    flow). Uuids are unavailable while the fork holds only a metadata stub, so
+    matching falls back to the working directory; `unique_cwd` makes that
+    fallback demand a single candidate in that directory, for callers with no
+    `known` set to narrow things down (see MainWindow._replay_pending_detaches).
+    """
+    agents = provider.background_agents()
+    fresh = [a for a in agents if a.session_id not in known and a.session_id != old_id]
+    if any(a.session_id == old_id for a in agents):
+        return ""  # detached in place: no fork to record
+
+    def transcript_uuid(agent) -> str | None:
+        path = next(
+            (p for p in provider.transcripts_for_cwd(agent.cwd) if p.stem == agent.session_id),
+            None,
+        )
+        return first_message_uuid(path) if path is not None else None
+
+    if old_uuid:
+        for agent in fresh:
+            if transcript_uuid(agent) == old_uuid:
+                return agent.session_id
+    if not cwd:
+        return None
+    same_cwd = [
+        a
+        for a in fresh
+        if a.cwd
+        and a.cwd == cwd
+        # A candidate whose transcript names a different conversation is not
+        # this one, however well its directory matches.
+        and not (old_uuid and (found := transcript_uuid(a)) and found != old_uuid)
+    ]
+    if unique_cwd and len(same_cwd) != 1:
+        # Ambiguous (or nothing): a wrong pairing would hide a good row and
+        # redirect it at someone else's agent, so decline to guess.
+        return None
+    return same_cwd[0].session_id if same_cwd else None
 
 
 class BackgroundStatusPoller:
