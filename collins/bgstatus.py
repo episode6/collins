@@ -1,5 +1,5 @@
 """Tracks which agent sessions are running detached (backgrounded), so the
-sidebar can give them a yellow "running detached" status dot.
+sidebar can give them a yellow "running detached" guide line.
 
 There is no supported push mechanism for background-agent state — no hook
 event fires when a session is backgrounded or when a background agent exits —

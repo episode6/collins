@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-29. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -258,7 +258,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
             title=_("Poll for background sessions"),
             subtitle=_(
                 "Fallback: check the agent CLI every 20 seconds in case the "
-                "yellow status dots stop updating on their own"
+                "yellow guide lines stop updating on their own"
             ),
         )
         self._bg_poll_row.set_active(bool(state.get_setting("background_status_poll")))

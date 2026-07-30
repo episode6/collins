@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-29. Full change history: git log for this file.
+fork. Last modified: 2026-07-30. Full change history: git log for this file.
 -->
 
 # Features
@@ -35,8 +35,14 @@ fork. Last modified: 2026-07-29. Full change history: git log for this file.
   placeholder row until the agent writes its transcript.
 - **Quick switcher** (`Ctrl+Shift+K`) — a type-ahead dialog to jump to any
   session by name, project, preview, or ID.
-- **Status dots**: green = open in a tab, blue = produced output while in the
-  background.
+- **Running sessions are filled in**: a session with a tab open gets a fill and
+  a green left guide line, so live work stands out from the archive of past
+  sessions. A tab with output you haven't looked at yet keeps the fill and
+  turns its guide line neutral grey. The session shown in the selected tab
+  takes the peach highlight.
+- **A yellow guide line** marks a session **running detached** in the
+  background (`/bg`) — no fill, because there is no tab to return to; reopen
+  the row to re-attach.
 - **Waiting badge** — an amber **?** marks sessions where the agent's last
   message was a question awaiting your reply, so you can spot what needs you at
   a glance.
@@ -92,7 +98,8 @@ agents' own session files are never modified.
 - If the session is still **running detached** (e.g. after backgrounding it),
   Collins **re-attaches** to the live process (`claude attach`) instead of
   resuming a copy.
-- **Per-tab status dots** mirror the sidebar.
+- A **green dot** marks a tab whose output you're caught up on, matching the
+  sidebar's guide line; a tab with unread output drops the dot.
 - A slim **tab footer** shows the agent's live working directory (click to
   copy) and the current **git branch** (⎇), plus the terminal-panel buttons.
 - **Rename** tabs, **copy the session ID**, or **fork** a session

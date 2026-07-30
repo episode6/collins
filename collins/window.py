@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-29. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -56,9 +56,11 @@ class _KeepProjects(NamedTuple):
     projects: list[str]
 
 
-# Tab status dots; the same colors the sidebar puts on a running row's left
-# guide line (row.session-child.running* in app.py).
-_STATUS_COLORS = {"open": "#2ec27e", "attention": "#3584e4"}
+# Tab status dot: green for an open tab, the same color the sidebar puts on a
+# running row's left guide line (row.session-child.running in app.py). A tab
+# with unread output gets no dot of its own — AdwTabView already marks such a
+# tab, and a second marker only competed with it.
+_STATUS_COLORS = {"open": "#2ec27e"}
 _status_icon_cache: dict[str, Gio.Icon] = {}
 
 
@@ -862,7 +864,7 @@ class MainWindow(Adw.ApplicationWindow):
         if self._pending_resolved:
             self._apply_resolved_sessions()
         self._refresh_tab_titles()
-        # Freshly discovered rows start with no status; re-assert yellow dots
+        # Freshly discovered rows start with no status; re-assert yellow lines
         # for sessions known to be running detached (no-op when unchanged).
         for session_id in self._bg_status.background_ids:
             self._sync_status(session_id)
@@ -986,7 +988,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.content_stack.set_visible_child_name("tabs")
 
     def _apply_tab_status(self, page: Adw.TabPage) -> None:
-        """Mirror the sidebar status dot onto the tab itself."""
+        """Mirror the sidebar status dot onto the tab itself.
+
+        Only an open-and-read tab carries a dot; unread output drops it
+        (_status_icon returns None), leaving the tab view's own attention
+        marker to say so on its own.
+        """
         status = "attention" if page.get_needs_attention() else "open"
         page.set_icon(_status_icon(status))
 
@@ -1132,7 +1139,7 @@ class MainWindow(Adw.ApplicationWindow):
         if exit_text:
             self._watch_background_fork(tab)
             if tab.session_id and not tab.fork:
-                # Show the yellow dot as soon as the tab closes, and keep the
+                # Show the yellow guide line as soon as the tab closes, and keep the
                 # row unopenable until the detach is confirmed (or times out).
                 self._mark_backgrounding(tab.session_id)
         else:
@@ -1211,7 +1218,7 @@ class MainWindow(Adw.ApplicationWindow):
                 time.sleep(1)
             log.info("bg-watch: %s never appeared in the agent list; giving up", old_id)
             # Never confirmed: the detach presumably failed — drop the
-            # pre-emptive yellow dot and re-enable the row.
+            # pre-emptive yellow line and re-enable the row.
             GLib.idle_add(self._clear_backgrounding, old_id, "confirmation watch gave up")
 
         threading.Thread(target=work, daemon=True).start()
@@ -1231,10 +1238,10 @@ class MainWindow(Adw.ApplicationWindow):
             # In-place detach of a session already in the poll set (a reopened
             # background session backgrounded again — its job stays listed
             # through the attach): no membership change will ever fire, so
-            # clear pending now; the membership-backed dot keeps it yellow.
+            # clear pending now; the membership-backed line keeps it yellow.
             self._clear_backgrounding(old_id, "already in the agent list")
         # The agent list already shows the detached session: refresh now so
-        # the yellow dot lands promptly even if the jobs-dir monitor misses it.
+        # the yellow line lands promptly even if the jobs-dir monitor misses it.
         self._bg_status.refresh()
         # Give the CLI a moment to exit on its own before nudging it off any
         # screen it parked on (see _watch_background_fork).
@@ -1293,7 +1300,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.update_footer()
 
     def _on_background_ids_changed(self, changed: set[str]) -> None:
-        # Confirmed detaches: membership owns the yellow dot from here on,
+        # Confirmed detaches: membership owns the yellow line from here on,
         # so the pre-emptive pending state (and its disabled row) can go.
         for session_id in changed & self._bg_status.background_ids:
             self._clear_backgrounding(session_id, "detach confirmed by the agent list")
@@ -1304,7 +1311,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _mark_backgrounding(self, session_id: str) -> None:
         """A /bg was just fed: treat the session as backgrounded right away —
-        yellow dot once its tab closes, sidebar row disabled — instead of
+        yellow guide line once its tab closes, sidebar row disabled — instead of
         waiting for the agent CLI to list it. Cleared when the poller confirms
         the detach, when a fork's row is discovered and takes over, when the
         confirmation watch gives up, or by the safety timeout."""
