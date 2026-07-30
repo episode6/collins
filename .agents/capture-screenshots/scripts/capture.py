@@ -6,7 +6,9 @@ Usage: python3 capture.py <repo-root> <output.png> \
 Renders the window widget tree in-process via Gsk, so no compositor
 screenshot permission is needed. The caller must set COLLINS_APP_ID (never
 run this against the user's real app id) plus the data-isolation env vars:
-COLLINS_PROJECTS_DIR, COLLINS_CLAUDE_CONFIG, XDG_CONFIG_HOME, XDG_STATE_HOME.
+COLLINS_PROJECTS_DIR, COLLINS_CLAUDE_CONFIG, COLLINS_CHATS_DIR,
+XDG_CONFIG_HOME, XDG_STATE_HOME. COLLINS_CHATS_DIR especially: without it this
+run reaps the user's live chat working directories (see the skill).
 
 --open-session waits for the store to discover the given session, then opens
 its tab (spawning a real shell that runs the provider CLI). --panel also

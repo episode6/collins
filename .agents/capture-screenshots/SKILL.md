@@ -38,9 +38,18 @@ writes the user's real state:
 ```bash
 export COLLINS_PROJECTS_DIR="$E2E/projects"     # session transcripts
 export COLLINS_CLAUDE_CONFIG="$E2E/claude.json" # echo '{}' > it
+export COLLINS_CHATS_DIR="$E2E/chats"           # throwaway chat working dirs
 export XDG_CONFIG_HOME="$E2E/config"            # app state lives in config/collins/state.json
 export XDG_STATE_HOME="$E2E/state"              # saved panel-terminal history
 ```
+
+**`COLLINS_CHATS_DIR` is not optional.** On its first scan every instance
+reaps chat directories that none of the sessions it discovered point at. An
+instance reading staged transcripts discovers no real chats, so it treats the
+user's entire real chats root as orphaned — and "only empty ones" is no
+safety net, because a live chat that hasn't written a file yet has an empty
+directory. Omitting this override deletes the working directory out from
+under the user's running chats.
 
 ## Staging demo data
 
@@ -87,6 +96,7 @@ widget tree via Gsk to a PNG, and quits:
 COLLINS_APP_ID=com.episode6.Collins.E2E \
 COLLINS_PROJECTS_DIR="$E2E/projects" \
 COLLINS_CLAUDE_CONFIG="$E2E/claude.json" \
+COLLINS_CHATS_DIR="$E2E/chats" \
 XDG_CONFIG_HOME="$E2E/config" \
 XDG_STATE_HOME="$E2E/state" \
 python3 .agents/capture-screenshots/scripts/capture.py <repo-root> "$E2E/shot.png"

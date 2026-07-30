@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 """Drive a headless `claude -p` session over stream-json stdio.
 
@@ -24,7 +24,8 @@ import signal
 import subprocess
 import threading
 from dataclasses import dataclass
-from pathlib import Path
+
+from . import chats
 
 
 @dataclass
@@ -155,7 +156,10 @@ class ChatSession:
 
     def __init__(self, provider, cwd: str | None, on_event, resume_session_id: str = "") -> None:
         self.provider = provider
-        self.cwd = cwd if (cwd and Path(cwd).is_dir()) else str(Path.home())
+        # A chat's throwaway directory may be gone (swept, trashed, removed);
+        # recreate it, and land in a disposable scratch directory rather than
+        # $HOME when even that fails — see chats.fallback_chat_dir().
+        self.cwd = chats.chat_cwd_or_fallback(cwd)
         self._on_event = on_event  # called from the reader thread
         self._proc: subprocess.Popen | None = None
         self._parser = StreamParser()

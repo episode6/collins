@@ -1,16 +1,29 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 import io
 import json
+import os
 
+import pytest
+
+from collins import chats
 from collins.chatsession import (
     ChatSession,
     StreamParser,
     make_chat_session,
 )
 from collins.providers import ChatVariant
+
+
+@pytest.fixture(autouse=True)
+def chats_dir(tmp_path, monkeypatch):
+    """Keep the chats root (which a session with a missing cwd falls back to)
+    out of the real one."""
+    root = tmp_path / "chats"
+    monkeypatch.setattr(chats, "CHATS_DIR", root)
+    return root
 
 
 def _feed(parser, *entries):
@@ -167,6 +180,27 @@ def test_resume_seeds_session_id():
     csess = make_chat_session(object(), cv, None, lambda ev: None, "claude-id")
     assert isinstance(csess, ChatSession)
     assert csess.session_id == "claude-id"
+
+
+def test_missing_cwd_lands_in_the_fallback_not_home(chats_dir, monkeypatch):
+    home = chats_dir.parent / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    # $HOME would scope the whole home directory into the chat — and the CLI
+    # records it, so the chat would never come back out.
+    sess = ChatSession(object(), None, lambda ev: None)
+    assert chats.is_fallback_chat_dir(sess.cwd)
+    assert os.path.isdir(sess.cwd)
+
+
+def test_missing_chat_dir_is_recreated(chats_dir):
+    cwd = chats.create_chat_dir()
+    os.rmdir(cwd)  # swept by another instance while this chat sat idle
+
+    sess = ChatSession(object(), cwd, lambda ev: None)
+
+    assert sess.cwd == cwd
+    assert os.path.isdir(cwd)
 
 
 def test_unknown_and_status_lines_ignored():

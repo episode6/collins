@@ -7,8 +7,9 @@ Scenes: main-window, sidebar-search, quick-switcher, tab-emoji,
 session-details, mcp-servers, preferences, terminal-panel, hero.
 
 Same isolation env contract as the skill's capture.py (COLLINS_APP_ID,
-COLLINS_PROJECTS_DIR, COLLINS_CLAUDE_CONFIG, XDG_CONFIG_HOME, XDG_STATE_HOME,
-plus COLLINS_USAGE_FIXTURE and a claude shim on PATH from stage-docs-data.sh).
+COLLINS_PROJECTS_DIR, COLLINS_CLAUDE_CONFIG, COLLINS_CHATS_DIR,
+XDG_CONFIG_HOME, XDG_STATE_HOME, plus COLLINS_USAGE_FIXTURE and a claude shim
+on PATH from stage-docs-data.sh).
 """
 
 import argparse

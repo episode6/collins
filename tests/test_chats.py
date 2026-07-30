@@ -134,6 +134,74 @@ def test_sweep_tolerates_missing_root(tmp_path, monkeypatch):
     chats.sweep_orphan_chat_dirs(set())
 
 
+def test_sweep_spares_the_fallback_dir(chats_dir):
+    fallback = chats.fallback_chat_dir()
+
+    chats.sweep_orphan_chat_dirs(set())  # nothing references it, and it's empty
+
+    assert os.path.isdir(fallback)
+
+
+def test_fallback_chat_dir_is_created_under_the_root(chats_dir):
+    fallback = chats.fallback_chat_dir()
+    assert os.path.isdir(fallback)
+    assert os.path.dirname(fallback) == str(chats_dir)
+    assert chats.is_fallback_chat_dir(fallback)
+    # It groups under Chats like any other chat directory...
+    assert chats.is_chat_cwd(fallback)
+    # ...but is never mistaken for a throwaway chat of its own.
+    assert not chats.is_fallback_chat_dir(chats.create_chat_dir())
+
+
+def test_fallback_chat_dir_is_idempotent(chats_dir):
+    assert chats.fallback_chat_dir() == chats.fallback_chat_dir()
+
+
+def test_chat_cwd_or_fallback_recreates_the_chats_own_dir(chats_dir):
+    cwd = chats.create_chat_dir()
+    os.rmdir(cwd)  # e.g. reaped by another instance's orphan sweep
+
+    assert chats.chat_cwd_or_fallback(cwd) == cwd
+    assert os.path.isdir(cwd)
+
+
+def test_chat_cwd_or_fallback_keeps_an_existing_dir(chats_dir):
+    cwd = chats.create_chat_dir()
+    assert chats.chat_cwd_or_fallback(cwd) == cwd
+
+
+def test_chat_cwd_or_fallback_never_lands_in_home(chats_dir, tmp_path):
+    gone = str(tmp_path / "deleted-project")  # not a chat dir: not recreated
+
+    for cwd in (None, "", gone):
+        landed = chats.chat_cwd_or_fallback(cwd)
+        assert chats.is_fallback_chat_dir(landed)
+        assert os.path.isdir(landed)
+    assert not os.path.exists(gone)
+
+
+def test_is_degraded_chat_cwd_flags_fallback_and_home(chats_dir, monkeypatch):
+    home = chats_dir.parent / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    own = chats.create_chat_dir()
+
+    assert chats.is_degraded_chat_cwd(own, chats.fallback_chat_dir())
+    assert chats.is_degraded_chat_cwd(own, str(home))
+    # Where the chat actually belongs, and a worktree it moved to itself.
+    assert not chats.is_degraded_chat_cwd(own, own)
+    assert not chats.is_degraded_chat_cwd(own, str(home / "dev" / "proj"))
+    assert not chats.is_degraded_chat_cwd(own, None)
+
+
+def test_is_degraded_chat_cwd_ignores_real_projects(chats_dir, monkeypatch):
+    home = chats_dir.parent / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    # A real project session that ran in $HOME chose to; leave it alone.
+    assert not chats.is_degraded_chat_cwd(str(home / "dev" / "proj"), str(home))
+
+
 @pytest.fixture
 def claude_config(tmp_path, monkeypatch):
     config = tmp_path / "claude.json"
