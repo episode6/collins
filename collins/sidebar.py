@@ -41,6 +41,25 @@ _GHOSTTY = shutil.which("ghostty")
 _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
 _ELLIPSIZE_START = 1  # Pango.EllipsizeMode.START
 
+# Row highlight per status of a session with a tab open, keyed by the status
+# a tab gives it ("background", i.e. detached, is not one of them).
+_RUNNING_CSS = {"open": "running", "attention": "running-attention"}
+
+# How far a project header's icon sits from the row's own left edge: the
+# theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
+_HEADER_ICON_OFFSET = 18
+
+
+def _session_child_indent(icon_size: int) -> int:
+    """Left margin for a session row, so its card starts right where the icon
+    of the project header above it ends.
+
+    A widget margin, added on top of the margin the theme gives every sidebar
+    row — that part is shared with the header, so it cancels out and only the
+    header's icon offset plus the icon's width has to be matched.
+    """
+    return _HEADER_ICON_OFFSET + icon_size
+
 
 def _abbreviate_path(path: str | None) -> str:
     """Show the folder path with $HOME collapsed to ~ for compactness."""
@@ -242,18 +261,15 @@ class PlaceholderRow(Gtk.ListBoxRow):
         self.placeholder_id = placeholder_id
         self.group_key = group_key
         self.add_css_class("session-child")
+        self.add_css_class(_RUNNING_CSS["open"])  # it stands for a live tab
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        box.set_valign(Gtk.Align.CENTER)  # match SessionRow in a taller row
         box.set_margin_top(4)  # match SessionRow: the flat button fills the row
         box.set_margin_bottom(4)
-
-        dot = Gtk.Box(valign=Gtk.Align.CENTER)
-        dot.add_css_class("status-dot")
-        dot.add_css_class("open")
-        box.append(dot)
+        box.set_margin_start(4)  # match SessionRow's title inset
 
         label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
-        label.set_margin_start(8)  # match SessionRow's name label
         label.add_css_class("dim-label")
         label.set_ellipsize(_ELLIPSIZE_END)
         box.append(label)
@@ -279,10 +295,11 @@ class SessionRow(Gtk.ListBoxRow):
         self._sidebar = sidebar
         self.add_css_class("session-child")  # indented, with a left guide line
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        box.set_valign(Gtk.Align.CENTER)  # the row is taller than its content
         box.set_margin_top(4)
         box.set_margin_bottom(4)
-        box.set_margin_start(0)  # theme row padding alone ≈ the 10px dot-to-title gap
+        box.set_margin_start(4)  # air between the guide line and the title
         box.set_margin_end(0)  # theme row padding + the flat button's inset suffice
 
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
@@ -291,17 +308,12 @@ class SessionRow(Gtk.ListBoxRow):
         self.check.connect("toggled", lambda c: sidebar.on_row_check_toggled(self, c.get_active()))
         top.append(self.check)
 
-        self.dot = Gtk.Box(valign=Gtk.Align.CENTER)
-        self.dot.add_css_class("status-dot")
-        top.append(self.dot)
-
         name_label = Gtk.Label(xalign=0.0, hexpand=True)
-        name_label.set_margin_start(8)  # ~half the highlight-edge-to-dot distance
         name_label.set_ellipsize(_ELLIPSIZE_END)
         top.append(name_label)
 
         time_label = Gtk.Label(valign=Gtk.Align.CENTER)
-        time_label.set_margin_start(8)  # match the 10px gaps around the status dot
+        time_label.set_margin_start(8)  # keep the timestamp off a long title
         time_label.add_css_class("dim-label")
         time_label.add_css_class("caption")
         top.append(time_label)
@@ -405,10 +417,14 @@ class SessionRow(Gtk.ListBoxRow):
         self.set_sensitive(not (item.syncing or item.backgrounding))
 
     def _on_status_changed(self, item: SessionItem, _pspec) -> None:
-        for css in ("open", "attention", "background"):
-            self.dot.remove_css_class(css)
-        if item.status:
-            self.dot.add_css_class(item.status)
+        # The card itself carries the status: a brighter background for every
+        # session running in a tab, with the left guide line colored by which
+        # kind of running it is. Detached (/bg) sessions stay plain.
+        for css in _RUNNING_CSS.values():
+            self.remove_css_class(css)
+        running = _RUNNING_CSS.get(item.status)
+        if running is not None:
+            self.add_css_class(running)
 
     def _on_state_changed(self, item: SessionItem, _pspec) -> None:
         badge = self._state_badge
@@ -599,10 +615,14 @@ class SessionSidebar(Gtk.Box):
 
     def refresh_project_icon_size(self) -> None:
         """Re-read the 'project icon size' setting and resize existing
-        header icons in place."""
+        header icons in place; session rows re-indent to stay aligned just
+        past the new icon width."""
         size = self._project_icon_size()
         for header in self._header_rows.values():
             header.set_icon_size(size)
+        indent = _session_child_indent(size)
+        for child in (*self._rows.values(), *self._placeholder_rows.values()):
+            child.set_margin_start(indent)
 
     def _project_icon_size(self) -> int:
         return int(self.store.state.get_setting("project_icon_size") or 16)
@@ -663,6 +683,7 @@ class SessionSidebar(Gtk.Box):
         self._collapsed -= set(placeholders_by_group)
 
         icon_size = self._project_icon_size()
+        child_indent = _session_child_indent(icon_size)
         for key, label, cwd in headers:
             header = GroupHeaderRow(
                 key,
@@ -677,12 +698,14 @@ class SessionSidebar(Gtk.Box):
             self.list.append(header)
             for pid in placeholders_by_group.get(key, ()):
                 prow = PlaceholderRow(pid, key, self)
+                prow.set_margin_start(child_indent)
                 if pid == self._active_session_id:
                     prow.add_css_class("active-tab")
                 self._placeholder_rows[pid] = prow
                 self.list.append(prow)
             for item in items_by_group.get(key, []):
                 row = SessionRow(item, self)
+                row.set_margin_start(child_indent)
                 if item.session_id == self._active_session_id:
                     row.add_css_class("active-tab")
                 self._rows[item.session_id] = row

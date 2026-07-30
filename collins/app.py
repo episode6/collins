@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-29. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -28,16 +28,6 @@ from .window import MainWindow
 _BUNDLED_ICONS = Path(__file__).resolve().parent.parent / "data" / "icons"
 
 _CSS = b"""
-.status-dot {
-  min-width: 8px;
-  min-height: 8px;
-  border-radius: 100%;
-  background-color: alpha(currentColor, 0.25);
-}
-.status-dot.open { background-color: #2ec27e; }
-.status-dot.attention { background-color: #3584e4; }
-.status-dot.background { background-color: #e5a50a; }  /* running detached */
-
 .group-header { padding: 10px 10px 4px 10px; }
 
 /* insertion line while dragging a project header to a new position */
@@ -63,22 +53,68 @@ tabbar tab:not(:checked) label { opacity: 0.6; }
   font-size: 0.8em;
 }
 
-/* children connect to their group via a left guide line, on a faint card */
+/* every session row is the same outlined card with a left guide line; what a
+   running session adds is a fill, and a status color on that line. The border
+   box is identical in every state, so a row never shifts or resizes as its
+   status changes.
+   The left indent is a widget margin set in sidebar.py, not a CSS margin
+   here: it tracks the configurable project-icon size, so the card always
+   starts just past the icon of the project header above it. */
 row.session-child {
-  margin-left: 20px;
   margin-right: 16px;
-  background-color: alpha(currentColor, 0.06);
+  border: 1px solid alpha(currentColor, 0.15);
   border-left: 2px solid alpha(currentColor, 0.15);
   border-radius: 0 8px 8px 0;
+  /* smaller text than a stock sidebar row, and shorter: 34px of content plus
+     the 1px borders puts the row at 36px, with the project headers keeping the
+     coarser rhythm above it */
+  min-height: 34px;
+  font-size: 0.9em;
+}
+/* neither the archive/close button nor the selection-mode check may hold the
+   row open at its stock size: entering selection mode must not resize rows */
+row.session-child button {
+  min-height: 20px;
+  min-width: 20px;
+  padding: 0 4px;
+}
+row.session-child checkbutton {
+  min-height: 20px;
+  min-width: 20px;
+  padding: 0;
+  margin-right: 4px;  /* keep the shrunken check off the title */
+}
+row.session-child checkbutton > check {
+  min-height: 14px;
+  min-width: 14px;
+  margin: 0;
 }
 row.session-child:hover {
   background-color: alpha(currentColor, 0.1);
-  border-left-color: alpha(currentColor, 0.3);
+  border-color: alpha(currentColor, 0.3);
 }
-/* the session shown in the currently selected tab */
+/* sessions running in an open tab share one fill, so live work stands out
+   from the archive of past sessions as a group; only the guide line carries
+   the status color. Detached (/bg) sessions are left alone: there is no tab
+   to return to. These rules must stay below the plain :hover one, whose
+   border-color shorthand would otherwise repaint the guide line, and above
+   the active-tab rules, which take over the fill for the one session the
+   selected tab is showing. */
+row.session-child.running,
+row.session-child.running-attention {
+  background-color: alpha(currentColor, 0.13);
+}
+row.session-child.running:hover,
+row.session-child.running-attention:hover {
+  background-color: alpha(currentColor, 0.18);
+}
+row.session-child.running { border-left-color: #2ec27e; }
+/* blue bar: a tab with output the user hasn't looked at yet */
+row.session-child.running-attention { border-left-color: #3584e4; }
+/* the session shown in the currently selected tab: only the fill says so, so
+   the guide line keeps saying what the session's status is */
 row.session-child.active-tab {
   background-color: alpha(#D97757, 0.16);
-  border-left-color: #D97757;
 }
 row.session-child.active-tab:hover {
   background-color: alpha(#D97757, 0.22);
