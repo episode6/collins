@@ -6,10 +6,11 @@ Usage: python3 capture-docs.py <repo-root> <output.png> --scene NAME
 Scenes: main-window, sidebar-search, quick-switcher, tab-emoji,
 session-details, mcp-servers, preferences, terminal-panel, hero.
 
-Same isolation env contract as the skill's capture.py (COLLINS_APP_ID,
+Same isolation env contract as the skill's capture.py (a per-run COLLINS_APP_ID,
 COLLINS_PROJECTS_DIR, COLLINS_CLAUDE_CONFIG, COLLINS_CHATS_DIR,
 XDG_CONFIG_HOME, XDG_STATE_HOME, plus COLLINS_USAGE_FIXTURE and a claude shim
-on PATH from stage-docs-data.sh).
+on PATH from stage-docs-data.sh), and the same
+scripts/with-headless-display.sh wrapper.
 """
 
 import argparse
