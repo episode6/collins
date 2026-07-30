@@ -11,7 +11,7 @@ import logging
 import re
 from pathlib import Path
 
-from .chatbubbles import md_to_pango
+from .formatting import md_to_pango
 
 log = logging.getLogger(__name__)
 
