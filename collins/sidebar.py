@@ -266,7 +266,7 @@ class PlaceholderRow(Gtk.ListBoxRow):
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         box.set_margin_top(4)  # match SessionRow: the flat button fills the row
         box.set_margin_bottom(4)
-        box.set_margin_start(6)  # match SessionRow's title inset
+        box.set_margin_start(4)  # match SessionRow's title inset
 
         label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
         label.add_css_class("dim-label")
@@ -297,7 +297,7 @@ class SessionRow(Gtk.ListBoxRow):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         box.set_margin_top(4)
         box.set_margin_bottom(4)
-        box.set_margin_start(6)  # air between the guide line and the title
+        box.set_margin_start(4)  # air between the guide line and the title
         box.set_margin_end(0)  # theme row padding + the flat button's inset suffice
 
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
