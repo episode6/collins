@@ -531,16 +531,11 @@ class SessionSidebar(Gtk.Box):
 
         # Search is folded away behind a button: it costs the list a whole row
         # when it sits there permanently, and it is reached a handful of times
-        # a session. Opening it hands the entry the header (see
-        # _set_search_active).
+        # a session. Opening it hands the entry everything between the header's
+        # buttons (see _set_search_active).
         self.search_entry = Gtk.SearchEntry(placeholder_text=_("Search sessions…"), hexpand=True)
         self.search_entry.connect("search-changed", lambda *_: self._invalidate())
         self.search_entry.connect("stop-search", lambda *_: self.search_btn.set_active(False))
-
-        self.search_btn = Gtk.ToggleButton(icon_name="system-search-symbolic")
-        self.search_btn.set_tooltip_text(_("Search sessions"))
-        self.search_btn.connect("toggled", lambda b: self._set_search_active(b.get_active()))
-        header.pack_start(self.search_btn)
 
         menu = Gio.Menu()
         menu.append(_("Select multiple sessions"), "win.select-sessions")
@@ -550,8 +545,15 @@ class SessionSidebar(Gtk.Box):
         menu.append(_("MCP servers"), "win.mcp-servers")
         menu.append(_("Preferences"), "win.preferences")
         menu.append(_("About Collins"), "win.about")
+        # Menu and search share the left end, so the header's weight is even:
+        # two buttons on each side of the title.
         self._menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
-        header.pack_end(self._menu_btn)
+        header.pack_start(self._menu_btn)
+
+        self.search_btn = Gtk.ToggleButton(icon_name="system-search-symbolic")
+        self.search_btn.set_tooltip_text(_("Search sessions"))
+        self.search_btn.connect("toggled", lambda b: self._set_search_active(b.get_active()))
+        header.pack_start(self.search_btn)
 
         self._refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")
         self._refresh_btn.set_tooltip_text(_("Refresh session list"))
@@ -797,18 +799,14 @@ class SessionSidebar(Gtk.Box):
     def _set_search_active(self, active: bool) -> None:
         """Swap the sidebar's title for the search entry, and back.
 
-        The entry takes the header over rather than sharing it: the sidebar is
-        narrow, and a search field squeezed between the other buttons would
-        show only a few characters of the query. The other buttons step aside
-        while searching — the X that replaces the search button brings them
-        back.
+        The entry takes the title's place, so it stretches across everything
+        between the header's buttons — those all stay put and reachable, and
+        the X the search button turns into folds the entry away again.
         """
         self.search_btn.set_icon_name(
             "window-close-symbolic" if active else "system-search-symbolic"
         )
         self.search_btn.set_tooltip_text(_("Close search") if active else _("Search sessions"))
-        for button in (self._collapse_btn, self._refresh_btn, self._menu_btn):
-            button.set_visible(not active)
         if active:
             self._header.set_title_widget(self.search_entry)
             self.search_entry.grab_focus()

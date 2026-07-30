@@ -28,7 +28,7 @@ fork. Last modified: 2026-07-30. Full change history: git log for this file.
   project; right-click a header for *New session here* and *Archive project*.
   Projects whose sessions are all archived or favorited still show their header,
   so the folder stays reachable.
-- A **search button** that hands the whole sidebar header over to a search box
+- A **search button** that opens a search box across the sidebar header,
   filtering by name, project, message preview, or session ID, plus a footer
   showing session, project, transcript-size, and open-tab counts.
 - **Live updates** — sessions appear and reorder as they're created or written
