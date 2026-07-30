@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -215,6 +215,10 @@ def resume_cwd(session: Session) -> str | None:
     mid-session (e.g. moved into a git worktree). Falls back to the
     session's starting directory when the tail records no cwd or the
     directory no longer exists."""
+    # Local import breaks the sessions<->chats cycle (chats imports this module
+    # at load time; this runs only at call time).
+    from .chats import is_degraded_chat_cwd
+
     cwd: str | None = None
     for line in _read_tail(session.jsonl_path).splitlines():
         try:
@@ -223,6 +227,12 @@ def resume_cwd(session: Session) -> str | None:
             continue
         if isinstance(entry, dict) and isinstance(entry.get("cwd"), str):
             cwd = entry["cwd"]
+    if is_degraded_chat_cwd(session.cwd, cwd):
+        # The tail records where this chat was pushed when its own directory
+        # went missing, not a move it chose. Resuming there would pin it to
+        # the fallback (or $HOME) for good; go back to its own directory,
+        # which the caller recreates.
+        cwd = None
     if cwd and Path(cwd).is_dir():
         return cwd
     return session.cwd

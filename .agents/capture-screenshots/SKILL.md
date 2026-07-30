@@ -2,45 +2,89 @@
 name: capture-screenshots
 description: >-
   How to capture screenshots of the Collins app for PR descriptions, docs, or
-  demos: launch an isolated instance alongside any real/debug instance (a
-  custom COLLINS_APP_ID e2e identifier is mandatory), stage fake session data,
-  and render the window to a PNG in-process. Use whenever a UI change needs a
-  screenshot of the running app, including before/after comparisons. Covers
-  capturing only — embedding/hosting the image is handled by the separate
-  publish-screenshots skill.
+  demos: launch a throwaway instance alongside any real/debug instance (a
+  freshly generated COLLINS_APP_ID and per-run scratch directories are
+  mandatory, so concurrent agent sessions never collide), stage fake session
+  data, and render the window to a PNG in-process — headlessly, so no window
+  appears on the user's screen. Use whenever a UI change needs a screenshot of
+  the running app, including before/after comparisons. Covers capturing only —
+  embedding/hosting the image is handled by the separate publish-screenshots
+  skill.
 ---
 
 # Capturing Collins screenshots
 
-## Rule 1: always use a custom e2e app identifier
+## Rule 1: generate a fresh app identifier for every run
 
 GTK applications are single-instance per application id. If an instance with
-the same id is already running (the user's installed `com.episode6.Collins`
-or the `start-debug` instance `com.episode6.Collins.Debug`), launching
-"again" does not start a new process — it just activates the existing window.
-Your staged demo data never appears, and you may end up screenshotting the
-user's **real sessions** instead.
+the same id is already running, launching "again" does not start a new process
+— it just activates the existing window. Your staged demo data never appears,
+and you may end up screenshotting someone else's sessions instead.
 
-So every screenshot run must set a custom id, by convention:
+That applies to the user's installed `com.episode6.Collins` and the
+`start-debug` instance `com.episode6.Collins.Debug` — but **also to other agent
+sessions**, which are frequently capturing at the same time. A shared, fixed
+e2e id collides exactly like the real one does, so derive a unique id per run
+rather than hardcoding one:
 
 ```bash
-export COLLINS_APP_ID=com.episode6.Collins.E2E
+E2E=$(mktemp -d)                                    # unique scratch tree, see Rule 2
+RUN=r$(basename "$E2E" | tr -cd 'A-Za-z0-9')        # e.g. rtmp4mK9zQx1
+export COLLINS_APP_ID=com.episode6.Collins.E2E.$RUN
 ```
+
+The `r` prefix matters: a GApplication id element may not start with a digit,
+and `mktemp` names sometimes do.
 
 Never capture from the user's live instance (real or debug) — always launch a
 dedicated e2e instance with staged data.
 
-## Rule 2: isolate all data
+## Rule 2: isolate all data, in a per-run scratch tree
 
-Point every data source at a scratch directory so the run neither reads nor
-writes the user's real state:
+Point every data source at a scratch directory **created fresh for this run**
+(`E2E=$(mktemp -d)` above — never a fixed path, which two concurrent runs would
+fight over) so the run neither reads nor writes the user's real state:
 
 ```bash
 export COLLINS_PROJECTS_DIR="$E2E/projects"     # session transcripts
 export COLLINS_CLAUDE_CONFIG="$E2E/claude.json" # echo '{}' > it
+export COLLINS_CHATS_DIR="$E2E/chats"           # throwaway chat working dirs
 export XDG_CONFIG_HOME="$E2E/config"            # app state lives in config/collins/state.json
 export XDG_STATE_HOME="$E2E/state"              # saved panel-terminal history
 ```
+
+**`COLLINS_CHATS_DIR` is not optional.** On its first scan every instance
+reaps chat directories that none of the sessions it discovered point at. An
+instance reading staged transcripts discovers no real chats, so it treats the
+user's entire real chats root as orphaned — and "only empty ones" is no
+safety net, because a live chat that hasn't written a file yet has an empty
+directory. Omitting this override deletes the working directory out from
+under the user's running chats.
+
+## Rule 3: capture headlessly
+
+Wrap the capture in `.agents/capture-screenshots/scripts/with-headless-display.sh`
+so no window ever opens on the user's screen:
+
+```bash
+bash .agents/capture-screenshots/scripts/with-headless-display.sh \
+  python3 .agents/capture-screenshots/scripts/capture.py <repo-root> "$E2E/shot.png"
+```
+
+It runs GNOME Shell in `--headless` mode on its own session bus and its own
+Wayland display, renders there, and tears the whole thing down afterwards —
+adding roughly two seconds of shell startup. Multiple runs can't collide: the
+display name is unique per invocation. If a headless compositor isn't available
+it warns and falls back to the current display, so the capture still succeeds,
+just visibly.
+
+`HEADLESS_SIZE` sets the virtual monitor (default `1920x1200`). Keep it
+comfortably larger than the window you're capturing — the compositor constrains
+a window to its monitor, so a monitor the same size as the window yields a
+shrunken shot (a 1100×720 monitor gives a 1034×688 window).
+
+Without this wrapper the window appears on the user's desktop and takes focus
+for the whole settle period, interrupting whatever they're doing.
 
 ## Staging demo data
 
@@ -83,14 +127,28 @@ instead. `.agents/capture-screenshots/scripts/capture.py` launches the app
 from a given source tree, waits for the first paint, renders the window
 widget tree via Gsk to a PNG, and quits:
 
+Putting the three rules together — a complete, collision-free, invisible run:
+
 ```bash
-COLLINS_APP_ID=com.episode6.Collins.E2E \
-COLLINS_PROJECTS_DIR="$E2E/projects" \
-COLLINS_CLAUDE_CONFIG="$E2E/claude.json" \
-XDG_CONFIG_HOME="$E2E/config" \
-XDG_STATE_HOME="$E2E/state" \
-python3 .agents/capture-screenshots/scripts/capture.py <repo-root> "$E2E/shot.png"
+E2E=$(mktemp -d)
+RUN=r$(basename "$E2E" | tr -cd 'A-Za-z0-9')
+bash .agents/capture-screenshots/scripts/stage-demo-data.sh "$E2E"
+
+export COLLINS_APP_ID=com.episode6.Collins.E2E.$RUN
+export COLLINS_PROJECTS_DIR="$E2E/projects"
+export COLLINS_CLAUDE_CONFIG="$E2E/claude.json"
+export COLLINS_CHATS_DIR="$E2E/chats"
+export XDG_CONFIG_HOME="$E2E/config"
+export XDG_STATE_HOME="$E2E/state"
+
+bash .agents/capture-screenshots/scripts/with-headless-display.sh \
+  python3 .agents/capture-screenshots/scripts/capture.py <repo-root> "$E2E/shot.png"
 ```
+
+Every later capture in the same run reuses that exported env, so the shots stay
+comparable. Take the whole block as the starting point rather than reassembling
+it — the pieces that look boilerplate (a unique id, `COLLINS_CHATS_DIR`, the
+headless wrapper) are the ones with teeth.
 
 Optional flags, for shots beyond the default sidebar-only window:
 
@@ -103,7 +161,7 @@ Optional flags, for shots beyond the default sidebar-only window:
   terminal panel — e.g. to demo restored panel history for a staged session.
 - `--settle-ms <n>`: delay before the shot (default 2500).
 
-The window flashes on screen for a few seconds — harmless. Always **look at
+Under the headless wrapper nothing appears on screen at all. Always **look at
 the resulting PNG** before using it; a blank or half-populated frame means
 the store hadn't settled (raise `--settle-ms`).
 
@@ -116,7 +174,8 @@ a `claude` shim in `<dir>/bin` that renders demo output for `--resume`).
 `scripts/capture-docs.py <repo-root> <out.png> --scene NAME` then captures one
 of: `main-window`, `sidebar-search`, `quick-switcher`, `tab-emoji`,
 `session-details`, `mcp-servers`, `preferences`, `terminal-panel`, `hero`
-(the last one is `data/screenshot.png`). Run it with the isolation env from
+(the last one is `data/screenshot.png`). Run it behind the same headless
+wrapper, with the isolation env from
 above **plus** `COLLINS_USAGE_FIXTURE=<dir>/usage-fixture.json`, `HOME=<dir>`
 (so paths render as `~/dev/...`), and `PATH=<dir>/bin:$PATH` (so the typed
 command is the shim). The two sidebar images in `docs/public/img/` are crops
@@ -129,10 +188,15 @@ Capture "before" from a temporary worktree of main — the first argument to
 
 ```bash
 git worktree add "$E2E/main-wt" origin/main
-python3 .agents/capture-screenshots/scripts/capture.py \
-  "$E2E/main-wt" "$E2E/before.png"   # + env as above
+bash .agents/capture-screenshots/scripts/with-headless-display.sh \
+  python3 .agents/capture-screenshots/scripts/capture.py \
+    "$E2E/main-wt" "$E2E/before.png"   # + env as above
 git worktree remove "$E2E/main-wt"
 ```
+
+The worktree lives inside this run's own `$E2E`, so concurrent runs don't
+collide there either — but do remove it, since the repo's worktree list is
+shared.
 
 Crop to the region that changed with Pillow (installed system-wide), e.g.
 the sidebar is the leftmost ~417px at the default 1100×720 size:

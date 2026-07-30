@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 import json
 
@@ -374,6 +374,36 @@ def test_resume_cwd_falls_back_when_last_dir_gone(tmp_path):
     _write_transcript(p, ["/proj", str(tmp_path / "removed-worktree")])
     session = session_from_file(p)
     assert resume_cwd(session) == "/proj"
+
+
+def test_resume_cwd_returns_a_degraded_chat_to_its_own_dir(tmp_path, monkeypatch):
+    from collins import chats
+
+    monkeypatch.setattr(chats, "CHATS_DIR", tmp_path / "chats")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    own = chats.create_chat_dir()
+    p = tmp_path / "abc.jsonl"
+
+    # Both places a chat gets pushed when its directory goes missing. The
+    # transcript records them, and both exist — so without the degradation
+    # check the chat would resume there for good.
+    for pushed_to in (str(home), chats.fallback_chat_dir()):
+        _write_transcript(p, [own, pushed_to])
+        assert resume_cwd(session_from_file(p)) == own
+
+
+def test_resume_cwd_keeps_a_worktree_a_chat_moved_into(tmp_path, monkeypatch):
+    from collins import chats
+
+    monkeypatch.setattr(chats, "CHATS_DIR", tmp_path / "chats")
+    own = chats.create_chat_dir()
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    p = tmp_path / "abc.jsonl"
+    _write_transcript(p, [own, str(worktree)])
+    assert resume_cwd(session_from_file(p)) == str(worktree)
 
 
 def test_resume_cwd_without_cwd_entries(tmp_path):

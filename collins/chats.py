@@ -28,6 +28,12 @@ CHATS_DIR = Path(
 )
 
 
+# The one directory under CHATS_DIR that isn't a throwaway chat: the shared
+# landing spot for chats whose own directory vanished. create_chat_dir() uses
+# a "chat-" prefix, so this name can never collide with a real chat.
+_FALLBACK_NAME = "fallback"
+
+
 def _roots() -> tuple[str, ...]:
     """The chats root, both as configured and fully resolved: transcripts
     record the physical cwd, which differs when the root sits behind a
@@ -133,11 +139,74 @@ def ensure_chat_dir(cwd: str | None) -> None:
             pass
 
 
+def fallback_chat_dir() -> str:
+    """A stable working directory for a chat whose own throwaway directory is
+    gone and can't be recreated.
+
+    Never degrade a chat to $HOME: the agent CLI records its working directory
+    in every transcript entry, so a chat that starts in $HOME is read back as
+    "deliberately moved there" on the next resume and stays there for good —
+    with the user's whole home directory as its scope. This directory is
+    disposable, shared by every degraded chat, and recreated on demand; it
+    lives under the chats root so such a session still groups under Chats.
+
+    Falls back to $HOME only if even this can't be created.
+    """
+    path = CHATS_DIR / _FALLBACK_NAME
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return str(Path.home())
+    return str(path)
+
+
+def is_fallback_chat_dir(cwd: str | None) -> bool:
+    """True when *cwd* is the shared fallback directory. Purely lexical."""
+    if not cwd:
+        return False
+    path = os.path.normpath(cwd)
+    return any(path == os.path.join(root, _FALLBACK_NAME) for root in _roots())
+
+
+def chat_cwd_or_fallback(cwd: str | None) -> str:
+    """Where a chat should actually run: its own directory — recreated when a
+    sweep, the trash or the user removed it — else the shared fallback."""
+    ensure_chat_dir(cwd)
+    if cwd and os.path.isdir(cwd):
+        return cwd
+    return fallback_chat_dir()
+
+
+def is_degraded_chat_cwd(session_cwd: str | None, tail_cwd: str | None) -> bool:
+    """Whether *tail_cwd* is somewhere a chat was pushed into rather than a
+    directory it deliberately moved to (a git worktree, say).
+
+    Only ever true for chat sessions, so real projects keep resuming wherever
+    they left off. The two degradation targets are the shared fallback and
+    $HOME — where chats landed before that fallback existed.
+    """
+    if not is_chat_cwd(session_cwd) or not tail_cwd:
+        return False
+    path = os.path.normpath(tail_cwd)
+    if is_fallback_chat_dir(path):
+        return True
+    if is_chat_cwd(path):
+        return False
+    return path == os.path.normpath(str(Path.home()))
+
+
 def sweep_orphan_chat_dirs(referenced_cwds: set[str]) -> None:
     """Reap chat directories no discovered session points at (left behind
     by trashed transcripts, e.g.). Only empty ones: rmdir refuses non-empty
     directories, which is exactly the safety net a restorable trash entry
-    or stray user artifact needs."""
+    or stray user artifact needs.
+
+    Note that "empty" is no protection for a *live* chat — a chat that hasn't
+    written a file yet has an empty directory — so callers must only pass a
+    complete set of references. An instance pointed at a scratch projects
+    directory (COLLINS_PROJECTS_DIR) knows nothing about the real chats root
+    and must move it too, via COLLINS_CHATS_DIR.
+    """
     referenced = {os.path.normpath(c) for c in referenced_cwds if c}
     referenced |= {os.path.realpath(c) for c in referenced_cwds if c}
     try:
@@ -148,6 +217,8 @@ def sweep_orphan_chat_dirs(referenced_cwds: set[str]) -> None:
         path = os.path.normpath(str(entry))
         if path in referenced or os.path.realpath(path) in referenced:
             continue
+        if is_fallback_chat_dir(path):
+            continue  # shared and recreated on demand, never a stale leftover
         try:
             os.rmdir(path)
         except OSError:
