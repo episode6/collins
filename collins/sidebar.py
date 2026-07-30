@@ -264,8 +264,8 @@ class PlaceholderRow(Gtk.ListBoxRow):
         self.add_css_class(_RUNNING_CSS["open"])  # it stands for a live tab
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        box.set_margin_top(4)  # match SessionRow: the flat button fills the row
-        box.set_margin_bottom(4)
+        box.set_margin_top(2)  # match SessionRow: the flat button fills the row
+        box.set_margin_bottom(2)
         box.set_margin_start(8)  # match SessionRow's title inset
 
         label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
@@ -294,9 +294,9 @@ class SessionRow(Gtk.ListBoxRow):
         self._sidebar = sidebar
         self.add_css_class("session-child")  # indented, with a left guide line
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_margin_top(4)
-        box.set_margin_bottom(4)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        box.set_margin_top(2)
+        box.set_margin_bottom(2)
         box.set_margin_start(8)  # air between the guide line and the title
         box.set_margin_end(0)  # theme row padding + the flat button's inset suffice
 

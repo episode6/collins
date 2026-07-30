@@ -65,6 +65,28 @@ row.session-child {
   border: 1px solid alpha(currentColor, 0.15);
   border-left: 2px solid alpha(currentColor, 0.15);
   border-radius: 0 8px 8px 0;
+  /* tighter and smaller than a stock sidebar row: the list is long, and the
+     project headers should stay the coarser rhythm above it */
+  min-height: 0;
+  font-size: 0.9em;
+}
+/* neither the archive/close button nor the selection-mode check may hold the
+   row open at its stock size: entering selection mode must not resize rows */
+row.session-child button {
+  min-height: 20px;
+  min-width: 20px;
+  padding: 0 4px;
+}
+row.session-child checkbutton {
+  min-height: 20px;
+  min-width: 20px;
+  padding: 0;
+  margin-right: 4px;  /* keep the shrunken check off the title */
+}
+row.session-child checkbutton > check {
+  min-height: 14px;
+  min-width: 14px;
+  margin: 0;
 }
 row.session-child:hover {
   background-color: alpha(currentColor, 0.1);
