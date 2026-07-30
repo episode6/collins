@@ -73,8 +73,8 @@ row.session-child:hover {
 /* sessions running in an open tab share one filled card, so live work stands
    out from the archive of past sessions as a group; only the left bar carries
    the status color. Detached (/bg) sessions are left alone: there is no tab
-   to return to. Must stay above the active-tab rules, which override these
-   for the one session the selected tab is showing. */
+   to return to. Must stay above the active-tab rules, which take over the
+   fill for the one session the selected tab is showing. */
 row.session-child.running,
 row.session-child.running-attention {
   background-color: alpha(currentColor, 0.13);
@@ -91,13 +91,13 @@ row.session-child.running-attention:hover {
 row.session-child.running { border-left-color: #2ec27e; }
 /* blue bar: a tab with output the user hasn't looked at yet */
 row.session-child.running-attention { border-left-color: #3584e4; }
-/* the session shown in the currently selected tab */
+/* the session shown in the currently selected tab: only the fill says so, so
+   the guide line keeps saying what the session's status is */
 row.session-child.active-tab {
   background-color: alpha(#D97757, 0.16);
   border-top-color: transparent;
   border-right-color: transparent;
   border-bottom-color: transparent;
-  border-left-color: #D97757;
 }
 row.session-child.active-tab:hover {
   background-color: alpha(#D97757, 0.22);
