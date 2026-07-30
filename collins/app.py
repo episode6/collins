@@ -145,10 +145,17 @@ row.session-child.active-tab:hover {
   padding: 1px 8px;
   border-top: 1px solid alpha(currentColor, 0.15);
 }
+/* The footer buttons read as a row of icons, not as buttons: tight enough
+   that the icons sit close together, and with no hover background (the
+   tooltip and the pointer are feedback enough at this size). */
 .tab-footer button {
-  padding: 0 6px;
+  padding: 0 2px;
   min-height: 22px;
-  min-width: 22px;
+  min-width: 20px;
+}
+.tab-footer button:hover {
+  background: none;
+  box-shadow: none;
 }
 
 /* sidebar usage panel: subscription limit bars under the session list */
