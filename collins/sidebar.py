@@ -264,6 +264,7 @@ class PlaceholderRow(Gtk.ListBoxRow):
         self.add_css_class(_RUNNING_CSS["open"])  # it stands for a live tab
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        box.set_valign(Gtk.Align.CENTER)  # match SessionRow in a taller row
         box.set_margin_top(4)  # match SessionRow: the flat button fills the row
         box.set_margin_bottom(4)
         box.set_margin_start(4)  # match SessionRow's title inset
@@ -295,6 +296,7 @@ class SessionRow(Gtk.ListBoxRow):
         self.add_css_class("session-child")  # indented, with a left guide line
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        box.set_valign(Gtk.Align.CENTER)  # the row is taller than its content
         box.set_margin_top(4)
         box.set_margin_bottom(4)
         box.set_margin_start(4)  # air between the guide line and the title

@@ -65,9 +65,10 @@ row.session-child {
   border: 1px solid alpha(currentColor, 0.15);
   border-left: 2px solid alpha(currentColor, 0.15);
   border-radius: 0 8px 8px 0;
-  /* tighter and smaller than a stock sidebar row: the list is long, and the
-     project headers should stay the coarser rhythm above it */
-  min-height: 0;
+  /* smaller text than a stock sidebar row, and shorter: 34px of content plus
+     the 1px borders puts the row at 36px, with the project headers keeping the
+     coarser rhythm above it */
+  min-height: 34px;
   font-size: 0.9em;
 }
 /* neither the archive/close button nor the selection-mode check may hold the
