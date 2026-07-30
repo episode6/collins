@@ -53,26 +53,27 @@ tabbar tab:not(:checked) label { opacity: 0.6; }
   font-size: 0.8em;
 }
 
-/* children connect to their group via a left guide line, on a faint card.
+/* a session row is bare at rest: no card, no guide line. Only running
+   sessions (and the pointer) bring either back, so the sidebar reads as a
+   plain list with the live work marked on it. The left border stays in the
+   box as transparent, so gaining a color never shifts the title.
    The left indent is a widget margin set in sidebar.py, not a CSS margin
    here: it tracks the configurable project-icon size, so the card always
    starts just past the icon of the project header above it. */
 row.session-child {
   margin-right: 16px;
-  background-color: alpha(currentColor, 0.06);
-  border-left: 2px solid alpha(currentColor, 0.15);
+  border-left: 2px solid transparent;
   border-radius: 0 8px 8px 0;
 }
 row.session-child:hover {
   background-color: alpha(currentColor, 0.1);
   border-left-color: alpha(currentColor, 0.3);
 }
-/* sessions running in an open tab share one brighter card, so live work
-   stands out from the archive of past sessions as a group; only the left bar
-   carries the status color. Detached (/bg) sessions are left alone: the
-   yellow dot marks them, but there is no tab to return to. Must stay above
-   the active-tab rules, which override these for the one session the
-   selected tab is showing. */
+/* sessions running in an open tab share one card, so live work stands out
+   from the archive of past sessions as a group; only the left bar carries the
+   status color. Detached (/bg) sessions are left alone: there is no tab to
+   return to. Must stay above the active-tab rules, which override these for
+   the one session the selected tab is showing. */
 row.session-child.running,
 row.session-child.running-attention {
   background-color: alpha(currentColor, 0.13);
