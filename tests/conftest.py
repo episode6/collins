@@ -1,11 +1,53 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 import json
+import sys
 import uuid
 
 import pytest
+
+# Namespaces CI does not have. Its test job installs `python3-gi` and nothing
+# else (see .github/workflows/ci.yml), which brings GLib/GObject/Gio but none
+# of the GTK stack — those need separate gir packages, and constructing their
+# widgets would need a display on top.
+#
+# A dev machine running the app *does* have them, so a test importing a
+# GTK-dependent module passes locally and then fails collection on CI with a
+# bare "Namespace Gtk not available". Blocking them here means the local run
+# reproduces CI instead of disagreeing with it.
+_CI_MISSING_NAMESPACES = frozenset({"Adw", "Gdk", "Graphene", "Gsk", "Gtk", "Vte"})
+
+
+class _BlockNamespacesMissingOnCI:
+    """Meta-path finder that refuses the GTK-stack `gi.repository` namespaces.
+
+    Sits ahead of PyGObject's importer so it catches both import styles — a
+    `gi.require_version()` call and a bare `from gi.repository import Gtk`
+    (which `collins.usagepanel` does), the latter being why patching
+    `require_version` alone would not be enough.
+    """
+
+    def find_spec(self, fullname, path=None, target=None):
+        prefix = "gi.repository."
+        if fullname.startswith(prefix):
+            namespace = fullname[len(prefix):]
+            if namespace in _CI_MISSING_NAMESPACES:
+                raise ImportError(
+                    f"gi.repository.{namespace} is deliberately unavailable to the test "
+                    f"suite: CI installs python3-gi only, so a test that reaches it fails "
+                    f"there even when it passes on your machine (see tests/conftest.py).\n"
+                    f"Move the logic under test into a module that doesn't need the GTK "
+                    f"stack — bgstatus, sessions, state, store and providers are all "
+                    f"importable — or, to test widgets for real, add the gir packages and "
+                    f"a headless display to .github/workflows/ci.yml first."
+                )
+        return None
+
+
+def pytest_configure(config):
+    sys.meta_path.insert(0, _BlockNamespacesMissingOnCI())
 
 
 def make_transcript_lines(cwd: str, user_text: str, model: str = "claude-opus-4-8") -> list[dict]:
