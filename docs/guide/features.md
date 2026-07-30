@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-29. Full change history: git log for this file.
+fork. Last modified: 2026-07-30. Full change history: git log for this file.
 -->
 
 # Features
@@ -9,8 +9,9 @@ fork. Last modified: 2026-07-29. Full change history: git log for this file.
 ## Sidebar
 
 - **Every session** under `~/.claude/projects/`, **grouped by project** with
-  collapsible headers (and collapse-all / expand-all buttons). Which projects
-  are expanded is remembered across restarts.
+  collapsible headers (and one header-bar toggle that collapses every group, or
+  opens them all again). Which projects are expanded is remembered across
+  restarts.
 - **Drag a project header** up or down to rearrange projects; the order is
   yours and persists (new projects join the list alphabetically).
 - A **Favorites** section pinned on top — star any session to move it there.
@@ -27,9 +28,9 @@ fork. Last modified: 2026-07-29. Full change history: git log for this file.
   project; right-click a header for *New session here* and *Archive project*.
   Projects whose sessions are all archived or favorited still show their header,
   so the folder stays reachable.
-- A **search box** that filters by name, project, message preview, or session
-  ID, plus a footer showing session, project, transcript-size, and open-tab
-  counts.
+- A **search button** that hands the whole sidebar header over to a search box
+  filtering by name, project, message preview, or session ID, plus a footer
+  showing session, project, transcript-size, and open-tab counts.
 - **Live updates** — sessions appear and reorder as they're created or written
   to, via a filesystem watch. A just-started session shows a **"New Thread"**
   placeholder row until the agent writes its transcript.
@@ -44,7 +45,9 @@ fork. Last modified: 2026-07-29. Full change history: git log for this file.
 
 ![Sidebar with the Favorites section expanded](/img/sidebar-favorites.png)
 
-The search box filters the whole list as you type:
+The search button (or `Ctrl+Shift+F`) opens the search box across the sidebar
+header, and it filters the whole list as you type — the **X** closes it again
+and restores the unfiltered list:
 
 ![Filtering sessions with the search box](/img/sidebar-search.png)
 
@@ -183,7 +186,7 @@ card overlays it — answer with a click instead of typing a number.
 
 ## Bulk actions & housekeeping
 
-- **Select mode** (checkbox button in the sidebar header) to open, star,
+- **Select mode** (sidebar menu → *Select multiple sessions*) to open, star,
   archive, or trash many sessions at once.
 - **Archive** sessions you're done with (kept on disk, toggle "Show archived"
   to see them and restore any of them); archiving a session with an open tab

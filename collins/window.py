@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-29. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -522,6 +522,12 @@ class MainWindow(Adw.ApplicationWindow):
         )
         show_archived.connect("change-state", self._on_show_archived)
         self.add_action(show_archived)
+
+        select_sessions = Gio.SimpleAction.new_stateful(
+            "select-sessions", None, GLib.Variant.new_boolean(False)
+        )
+        select_sessions.connect("change-state", self._on_select_sessions)
+        self.add_action(select_sessions)
 
     def _install_shortcuts(self) -> None:
         controller = Gtk.ShortcutController()
@@ -1691,6 +1697,10 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_show_archived(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
         action.set_state(value)
         self.store.set_show_archived(value.get_boolean())
+
+    def _on_select_sessions(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
+        action.set_state(value)
+        self.sidebar.set_selection_mode(value.get_boolean())
 
     def _sync_trash_archived_action(self) -> None:
         self._trash_archived_action.set_enabled(bool(self.store.archived_sessions()))

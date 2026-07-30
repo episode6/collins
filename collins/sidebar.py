@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-29. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -525,50 +525,48 @@ class SessionSidebar(Gtk.Box):
         # AdwOverlaySplitView coordinating the two bars, hide them here so they
         # aren't duplicated at the pane boundary.
         header.set_show_end_title_buttons(False)
-        header.set_title_widget(Adw.WindowTitle(title=_("Sessions")))
+        self._header = header
+        self._window_title = Adw.WindowTitle(title=_("Sessions"))
+        header.set_title_widget(self._window_title)
 
-        self.select_btn = Gtk.ToggleButton(icon_name="object-select-symbolic")
-        self.select_btn.set_tooltip_text(_("Select sessions"))
-        self.select_btn.connect("toggled", lambda b: self._set_selection_mode(b.get_active()))
-        header.pack_start(self.select_btn)
+        # Search is folded away behind a button: it costs the list a whole row
+        # when it sits there permanently, and it is reached a handful of times
+        # a session. Opening it hands the entry the header (see
+        # _set_search_active).
+        self.search_entry = Gtk.SearchEntry(placeholder_text=_("Search sessions…"), hexpand=True)
+        self.search_entry.connect("search-changed", lambda *_: self._invalidate())
+        self.search_entry.connect("stop-search", lambda *_: self.search_btn.set_active(False))
+
+        self.search_btn = Gtk.ToggleButton(icon_name="system-search-symbolic")
+        self.search_btn.set_tooltip_text(_("Search sessions"))
+        self.search_btn.connect("toggled", lambda b: self._set_search_active(b.get_active()))
+        header.pack_start(self.search_btn)
 
         menu = Gio.Menu()
+        menu.append(_("Select multiple sessions"), "win.select-sessions")
         menu.append(_("Open session file…"), "win.open-session-file")
         menu.append(_("Show archived sessions"), "win.show-archived")
         menu.append(_("Delete archived sessions…"), "win.trash-archived")
         menu.append(_("MCP servers"), "win.mcp-servers")
         menu.append(_("Preferences"), "win.preferences")
         menu.append(_("About Collins"), "win.about")
-        header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu))
+        self._menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
+        header.pack_end(self._menu_btn)
 
-        refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")
-        refresh_btn.set_tooltip_text(_("Refresh session list"))
-        refresh_btn.set_action_name("win.refresh")
-        header.pack_end(refresh_btn)
+        self._refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")
+        self._refresh_btn.set_tooltip_text(_("Refresh session list"))
+        self._refresh_btn.set_action_name("win.refresh")
+        header.pack_end(self._refresh_btn)
+
+        # One button for both directions: it folds every group away, and once
+        # nothing is left expanded it opens them all again.
+        self._collapse_btn = Gtk.Button()
+        self._collapse_btn.connect(
+            "clicked", lambda *_: self._set_all_collapsed(not self._all_collapsed())
+        )
+        header.pack_end(self._collapse_btn)
+        self._update_collapse_button()
         self._view.add_top_bar(header)
-
-        # -- search + accordion controls --------------------------------------
-        self.search_entry = Gtk.SearchEntry(placeholder_text=_("Search sessions…"), hexpand=True)
-        self.search_entry.connect("search-changed", lambda *_: self._invalidate())
-
-        collapse_all = Gtk.Button(icon_name="pan-up-symbolic")
-        collapse_all.add_css_class("flat")
-        collapse_all.set_tooltip_text(_("Collapse all groups"))
-        collapse_all.connect("clicked", lambda *_: self._set_all_collapsed(True))
-
-        expand_all = Gtk.Button(icon_name="pan-down-symbolic")
-        expand_all.add_css_class("flat")
-        expand_all.set_tooltip_text(_("Expand all groups"))
-        expand_all.connect("clicked", lambda *_: self._set_all_collapsed(False))
-
-        search_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        search_box.set_margin_start(8)
-        search_box.set_margin_end(8)
-        search_box.set_margin_bottom(6)
-        search_box.append(self.search_entry)
-        search_box.append(collapse_all)
-        search_box.append(expand_all)
-        self._view.add_top_bar(search_box)
 
         # -- list ------------------------------------------------------------
         self.list = Gtk.ListBox()
@@ -750,6 +748,7 @@ class SessionSidebar(Gtk.Box):
                 self._rows[item.session_id] = row
                 self.list.append(row)
         self._apply_selection_to_rows()
+        self._update_collapse_button()
 
     def _apply_selection_to_rows(self) -> None:
         for row in self._rows.values():
@@ -793,7 +792,33 @@ class SessionSidebar(Gtk.Box):
         self._rebuild_rows()
         self._invalidate()
 
+    # -- search ------------------------------------------------------------------
+
+    def _set_search_active(self, active: bool) -> None:
+        """Swap the sidebar's title for the search entry, and back.
+
+        The entry takes the header over rather than sharing it: the sidebar is
+        narrow, and a search field squeezed between the other buttons would
+        show only a few characters of the query. The other buttons step aside
+        while searching — the X that replaces the search button brings them
+        back.
+        """
+        self.search_btn.set_icon_name(
+            "window-close-symbolic" if active else "system-search-symbolic"
+        )
+        self.search_btn.set_tooltip_text(_("Close search") if active else _("Search sessions"))
+        for button in (self._collapse_btn, self._refresh_btn, self._menu_btn):
+            button.set_visible(not active)
+        if active:
+            self._header.set_title_widget(self.search_entry)
+            self.search_entry.grab_focus()
+        else:
+            self.search_entry.set_text("")  # closing search unfilters the list
+            self._header.set_title_widget(self._window_title)
+
     def focus_search(self) -> None:
+        """Open search if it is folded away, and put the cursor in it."""
+        self.search_btn.set_active(True)
         self.search_entry.grab_focus()
 
     # -- filtering / grouping ----------------------------------------------------
@@ -831,6 +856,7 @@ class SessionSidebar(Gtk.Box):
         header = self._header_rows.get(group_key)
         if header is not None:
             header.set_collapsed(group_key in self._collapsed)
+        self._update_collapse_button()
         self._invalidate()
 
     def _set_all_collapsed(self, collapsed: bool) -> None:
@@ -840,7 +866,19 @@ class SessionSidebar(Gtk.Box):
         )
         for group_key, header in self._header_rows.items():
             header.set_collapsed(group_key in self._collapsed)
+        self._update_collapse_button()
         self._invalidate()
+
+    def _all_collapsed(self) -> bool:
+        return bool(self._header_rows) and set(self._header_rows) <= self._collapsed
+
+    def _update_collapse_button(self) -> None:
+        """Point the accordion toggle at whichever move is left to make."""
+        expands = self._all_collapsed()
+        self._collapse_btn.set_icon_name("pan-down-symbolic" if expands else "pan-up-symbolic")
+        self._collapse_btn.set_tooltip_text(
+            _("Expand all groups") if expands else _("Collapse all groups")
+        )
 
     # -- drag & drop project reordering ---------------------------------------
 
@@ -1069,7 +1107,9 @@ class SessionSidebar(Gtk.Box):
             self.action_bar.pack_end(button)
         return self.action_bar
 
-    def _set_selection_mode(self, active: bool) -> None:
+    def set_selection_mode(self, active: bool) -> None:
+        """Show a checkbox on every row and reveal the bulk action bar. Driven
+        by the window's "Select multiple sessions" menu item."""
         self._selection_mode = active
         if not active:
             self._selected.clear()
