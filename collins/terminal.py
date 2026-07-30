@@ -36,7 +36,9 @@ from .prstatus import (  # noqa: E402
     CHECKS_PENDING,
     PullRequest,
     describe,
+    discover_pr,
     enrich,
+    invalidate,
 )
 from .transcript import TranscriptModel  # noqa: E402
 
@@ -46,6 +48,7 @@ _CWD_POLL_MS = 2000  # footer refresh; only ticks while the tab is visible
 # The merge mark sits with caption-sized text, so it takes the same 12px as the
 # glyphs it replaces rather than a symbolic icon's stock 16.
 _PR_MERGED_ICON_PX = 12
+_PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
 # Each CI mark is colored like its counterpart on the PR page; the shades
 # themselves follow the light/dark scheme and live in app.py.
 _PR_CHECKS_CSS = {
@@ -331,6 +334,10 @@ class TerminalTab(Gtk.Box):
         self._footer_cwd: str | None = None  # last value shown in the footer
         self._footer_branch: str | None = None
         self._footer_pr: PullRequest | None = None
+        # A PR the refresh button found by branch, for a transcript that names
+        # none; a transcript's own pr-link always wins over it.
+        self._discovered_pr: PullRequest | None = None
+        self._pr_discover = False  # a click's search, waiting for a free tick
         self._cwd_refresh_source: int | None = None
         self.append(self._build_footer())
 
@@ -566,8 +573,18 @@ class TerminalTab(Gtk.Box):
         enable_open_on_click(
             self._pr_chip, lambda: self._footer_pr.url if self._footer_pr else None
         )
+        # Sibling of the chip, never inside it: the chip opens the PR on click,
+        # and a button in there would open the browser along with itself.
+        # It shows whether or not a PR does — with none, it is the way to go
+        # looking for one (see _on_pr_refresh).
+        refresh_icon = Gtk.Image.new_from_icon_name("view-refresh-symbolic")
+        refresh_icon.set_pixel_size(_PR_REFRESH_ICON_PX)
+        refresh_icon.add_css_class("dim-label")
+        self._pr_refresh_btn = Gtk.Button(child=refresh_icon)
+        self._pr_refresh_btn.add_css_class("flat")
+        self._pr_refresh_btn.connect("clicked", self._on_pr_refresh)
+        self._sync_pr_refresh_tooltip()
         self._pr_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-        self._pr_sep.set_visible(False)
 
         # Only the selected tab is visible (and thus clickable), so routing
         # through the window's actions still targets the right tab.
@@ -588,6 +605,7 @@ class TerminalTab(Gtk.Box):
         left.append(self._branch_label)
         left.append(self._branch_seps[1])
         left.append(self._pr_chip)
+        left.append(self._pr_refresh_btn)
         left.append(self._pr_sep)
 
         # User-configured app launchers sit just left of the panel buttons;
@@ -629,19 +647,24 @@ class TerminalTab(Gtk.Box):
             self._branch_label.set_text(f"⎇ {branch}" if branch else "")
             self._branch_label.set_tooltip_text(copy_tooltip(branch) if branch else None)
             self._branch_label.set_visible(branch is not None)
-            self._sync_footer_seps()
+            # A PR found by branch belongs to that branch; a checkout retires it
+            # (and the button offers to look again).
+            self._discovered_pr = None
+            self._sync_pr_refresh_tooltip()
+        self._sync_footer_seps()
 
     def _sync_footer_seps(self) -> None:
         """Show only the dividers that separate two visible chips.
 
-        The branch's leading divider does double duty as the PR's when there
-        is no branch to show, so the row never opens with a stray divider.
+        The PR group ends in a button that is always there, so its own dividers
+        never come and go; the branch is the one chip that does, and the
+        divider ahead of it does double duty when it's absent — the row never
+        opens or closes with a stray divider.
         """
         branch = self._footer_branch is not None
-        pr = self._footer_pr is not None
-        self._branch_seps[0].set_visible(branch or pr)
+        cwd = self._footer_cwd is not None
+        self._branch_seps[0].set_visible(cwd)
         self._branch_seps[1].set_visible(branch)
-        self._pr_sep.set_visible(pr)
 
     def _refresh_pr_label(self, pr: PullRequest | None) -> None:
         """Show the session's linked PR, with its CI state when one is known."""
@@ -660,7 +683,34 @@ class TerminalTab(Gtk.Box):
             open_tooltip(describe(pr) + "\n" + pr.url) if pr else None
         )
         self._pr_chip.set_visible(pr is not None)
+        self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
+
+    def _sync_pr_refresh_tooltip(self, not_found: bool = False) -> None:
+        """What the button offers to do, which depends on what the chip shows.
+
+        A search that came back empty says so until something changes, so a
+        click that found nothing isn't indistinguishable from one that did.
+        """
+        if not_found:
+            text = _("No pull request found for this branch")
+        elif self._footer_pr is not None:
+            text = _("Refresh pull request status")
+        else:
+            text = _("Look for this branch's pull request")
+        self._pr_refresh_btn.set_tooltip_text(text)
+
+    def _on_pr_refresh(self, _button: Gtk.Button) -> None:
+        """Refresh the PR's status now — or, with no PR on the chip, ask gh
+        whether the checked-out branch has one and show it if so.
+
+        Both end in the same place: a fetch on the update thread, landing on
+        the next poll. The button goes insensitive until then.
+        """
+        self._pr_refresh_btn.set_sensitive(False)
+        if self._footer_pr is not None:
+            invalidate(self._footer_pr.url)
+        self._request_update(discover=self._footer_pr is None)
 
     # -- graceful close ----------------------------------------------------
 
@@ -713,32 +763,49 @@ class TerminalTab(Gtk.Box):
         self._request_update()
         return GLib.SOURCE_REMOVE
 
-    def _request_update(self) -> None:
+    def _request_update(self, discover: bool = False) -> None:
         """Parse newly-appended transcript bytes off the main thread (big
-        tool-result lines would otherwise freeze the UI), then check on idle."""
+        tool-result lines would otherwise freeze the UI), then check on idle.
+
+        `discover` asks gh which PR the branch has, for a transcript that names
+        none. It is only ever set by the footer's refresh button; a request that
+        arrives while one is running is carried to the next poll rather than
+        dropped, so the click always gets its search.
+        """
         if self._updating:
+            self._pr_discover = self._pr_discover or discover
             return
         self._updating = True
+        looking = discover or self._pr_discover
+        self._pr_discover = False
 
         def work() -> None:
             try:
                 self._transcript.update()
             except Exception:
                 pass
+            if looking:
+                try:
+                    self._discovered_pr = discover_pr(self._footer_cwd, self._footer_branch)
+                except Exception:
+                    self._discovered_pr = None
             try:
                 # reads the gh status cache, so it belongs on this thread too;
                 # a session with no linked PR touches no files at all
-                pr = enrich(self._transcript.current_pr())
+                pr = enrich(self._transcript.current_pr() or self._discovered_pr)
             except Exception:
                 pr = self._footer_pr  # leave the chip as it is
-            GLib.idle_add(self._apply_update, pr)
+            GLib.idle_add(self._apply_update, pr, looking)
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _apply_update(self, pr: PullRequest | None = None) -> bool:
+    def _apply_update(self, pr: PullRequest | None = None, looked: bool = False) -> bool:
         self._updating = False
+        self._pr_refresh_btn.set_sensitive(True)
         self._check_prompt()
         self._refresh_pr_label(pr)
+        if looked and pr is None:
+            self._sync_pr_refresh_tooltip(not_found=True)
         return GLib.SOURCE_REMOVE
 
     def _check_prompt(self) -> None:

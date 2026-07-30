@@ -19,8 +19,13 @@ only while the file itself is recent (a free warm start for the first seconds
 after launch), and Collins otherwise refreshes status itself with a short
 ``gh pr view`` per linked PR, at most once a minute.
 
-That fetch is the one subprocess here; everything else is a filesystem read,
-it always happens off the main thread, and every failure degrades to "no
+A transcript is not the only way a session gets a PR, though: one opened by
+hand never shows up in it. So the footer's refresh button can also ask gh which
+PR belongs to the checked-out branch (`discover_pr`), which fills the chip in
+for a session whose transcript will never mention one.
+
+Those gh calls are the only subprocesses here; everything else is a filesystem
+read, they always happen off the main thread, and every failure degrades to "no
 status" (or "no PR") rather than raising.
 """
 
@@ -60,12 +65,22 @@ CACHE_MAX_AGE_S = 300
 _TTL_S = 60
 _ERROR_TTL_S = 300
 _GH_TIMEOUT_S = 10
+# The stamp of a status that is due no matter which TTL applies to it (see
+# invalidate) — every interval measured against it is already over.
+_DUE = float("-inf")
 _GH_FIELDS = "state,isDraft,statusCheckRollup"
+# Discovery needs to learn which PR it found, on top of that PR's status.
+_GH_DISCOVER_FIELDS = "number,url," + _GH_FIELDS
 
 # Only fetch for URLs shaped like a PR page. The URL comes out of a transcript
 # — repo content, i.e. untrusted — and lands in an argv, so this also keeps a
-# value like "--version" from ever reaching `gh`.
-_FETCHABLE = re.compile(r"https://[\w.-]+/[\w.-]+/[\w.-]+/pull/\d+$")
+# value like "--version" from ever reaching `gh`. The group is the repository.
+_FETCHABLE = re.compile(r"https://[\w.-]+/([\w.-]+/[\w.-]+)/pull/\d+$")
+
+# Branch names reach argv the same way, from a `git branch --show-current` in a
+# directory we didn't choose. git forbids a leading "-", but this is the code
+# that hands the name to a subprocess, so it says so itself.
+_BRANCH = re.compile(r"^\w[\w./+-]*$")
 
 # gh's rollup verdicts, mapped the way the CLI maps them.
 _PASSED = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
@@ -264,11 +279,11 @@ def _state(data: dict) -> str | None:
     return "DRAFT" if data.get("isDraft") is True else state
 
 
-def _run_gh(url: str) -> dict | None:
-    """One `gh pr view`, shaped like a CLI cache entry. None on any failure.
+def _gh_json(args: list[str], cwd: str | None = None) -> dict | None:
+    """One `gh` call, returning its --json object. None on any failure.
 
-    A URL argument means this works from anywhere — no repository cwd needed —
-    and covers GitHub Enterprise hosts the user is logged in to.
+    Never a shell, and never a caller-built string: *args* trails the gh binary
+    as argv, so nothing in it can become a second command.
     """
     global _gh_missing
     gh = shutil.which("gh")
@@ -278,18 +293,19 @@ def _run_gh(url: str) -> dict | None:
         return None
     try:
         result = subprocess.run(
-            [gh, "pr", "view", url, "--json", _GH_FIELDS],
+            [gh, *args],
             capture_output=True,
             text=True,
             timeout=_GH_TIMEOUT_S,
+            cwd=cwd,
         )
     except (OSError, subprocess.SubprocessError) as err:
-        log.debug("prstatus: gh pr view %s failed: %s", url, err)
+        log.debug("prstatus: gh %s failed: %s", " ".join(args), err)
         return None
     if result.returncode != 0:
         log.debug(
-            "prstatus: gh pr view %s exited %s: %s",
-            url,
+            "prstatus: gh %s exited %s: %s",
+            " ".join(args),
             result.returncode,
             (result.stderr or result.stdout).strip()[:200],
         )
@@ -298,9 +314,22 @@ def _run_gh(url: str) -> dict | None:
         data = json.loads(result.stdout)
     except (json.JSONDecodeError, ValueError):
         return None
-    if not isinstance(data, dict):
-        return None
+    return data if isinstance(data, dict) else None
+
+
+def _entry(data: dict) -> dict:
+    """A gh reply reduced to the CLI cache's `{state, checks}` shape."""
     return {"state": _state(data), "checks": _counts(data.get("statusCheckRollup"))}
+
+
+def _run_gh(url: str) -> dict | None:
+    """One `gh pr view`, shaped like a CLI cache entry. None on any failure.
+
+    A URL argument means this works from anywhere — no repository cwd needed —
+    and covers GitHub Enterprise hosts the user is logged in to.
+    """
+    data = _gh_json(["pr", "view", url, "--json", _GH_FIELDS])
+    return None if data is None else _entry(data)
 
 
 def refresh(url: str) -> None:
@@ -342,6 +371,50 @@ def _own_status(url: str) -> dict | None:
     if fetch:
         _schedule(url)
     return entry
+
+
+def invalidate(url: str) -> None:
+    """Mark *url*'s status due, so the next `enrich` refetches it.
+
+    The chip's refresh button, when a PR is already showing. The click only
+    invalidates — the fetch belongs to the poll that follows, off the main
+    thread like every other one — and the entry stays put rather than being
+    dropped, so `enrich` keeps handing back the glyph it has while the refetch
+    runs. Clicking refresh must not blank the chip on its way to updating it.
+    """
+    with _lock:
+        stamped = _statuses.get(url)
+        if stamped is not None:
+            _statuses[url] = (_DUE, stamped[1])
+
+
+def discover_pr(cwd: str | None, branch: str | None) -> PullRequest | None:
+    """The PR gh reports for *branch*, asked from inside *cwd*.
+
+    For sessions whose transcript holds no ``pr-link`` record at all — a PR
+    opened by hand, or before the agent had anything to say about it. gh
+    resolves a branch name to its PR, so one call answers both "is there one?"
+    and "how is its CI doing?"; the status is remembered as a fetch of our own,
+    because that is exactly what it was.
+
+    Never call on the main thread, and expect None often: no branch, no PR for
+    it, or no gh to ask are all ordinary.
+    """
+    if not cwd or not branch or not _BRANCH.match(branch) or _gh_missing:
+        return None
+    data = _gh_json(["pr", "view", branch, "--json", _GH_DISCOVER_FIELDS], cwd=cwd)
+    if data is None:
+        return None
+    number, url = data.get("number"), data.get("url")
+    if not isinstance(number, int) or isinstance(number, bool) or not isinstance(url, str):
+        return None
+    matched = _FETCHABLE.match(url)
+    if matched is None:  # gh handed back something we wouldn't fetch from
+        return None
+    with _lock:
+        _statuses[url] = (_now(), _entry(data))
+    log.info("prstatus: discovered #%s for branch %s", number, branch)
+    return enrich(PullRequest(number=number, url=url, repository=matched.group(1)))
 
 
 def enrich(pr: PullRequest | None) -> PullRequest | None:

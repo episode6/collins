@@ -1,5 +1,6 @@
 """Tests for prstatus — parsing Claude Code's pr-link records, its gh status
-cache, and the `gh pr view` refresh Collins runs when that cache is stale."""
+cache, the `gh pr view` refresh Collins runs when that cache is stale, and the
+branch lookup behind the footer's refresh button."""
 
 import json
 import os
@@ -13,7 +14,9 @@ from collins.prstatus import (
     CACHE_MAX_AGE_S,
     PullRequest,
     describe,
+    discover_pr,
     enrich,
+    invalidate,
     parse_pr_link,
     refresh,
     state_text,
@@ -262,6 +265,184 @@ def test_nothing_is_fetched_once_gh_is_known_missing(scheduled, monkeypatch):
 def test_only_pr_page_urls_are_fetched(scheduled, url):
     enrich(PullRequest(55, url))
     assert scheduled == []
+
+
+# -- invalidate: the refresh button's half of a refresh ----------------------
+
+
+def test_invalidating_makes_the_next_enrich_refetch(scheduled, clock, gh):
+    """Clicking refresh on a PR whose status is a few seconds old still refetches
+    — a TTL that ignores the click would make the button a lie."""
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}})
+    refresh(URL)
+    scheduled.clear()
+    enrich(parse_pr_link(_link()))
+    assert scheduled == []  # still fresh
+    invalidate(URL)
+    enrich(parse_pr_link(_link()))
+    assert scheduled == [URL]
+
+
+def test_invalidating_keeps_the_glyph_until_the_new_one_lands(scheduled, clock, gh):
+    """A click must refresh the chip in place, not blank it for a poll: the
+    status we have stands until the refetch replaces it."""
+    gh({"state": "OPEN", "checks": {"passed": 2, "failed": 0, "pending": 0}})
+    refresh(URL)
+    invalidate(URL)
+    assert enrich(parse_pr_link(_link())).glyph == "✓"  # still ✓, refetch pending
+    assert scheduled == [URL]
+
+
+def test_invalidating_a_failed_fetch_retries_it_now(scheduled, clock, gh):
+    """The error backoff is there to stop pointless retries, not to stop the
+    user asking for one — a click gets its fetch either way."""
+    gh(None)
+    refresh(URL)
+    scheduled.clear()
+    invalidate(URL)
+    enrich(parse_pr_link(_link()))
+    assert scheduled == [URL]
+
+
+def test_invalidating_leaves_other_prs_alone(scheduled, clock, gh):
+    other = "https://github.com/episode6/collins/pull/56"
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}})
+    refresh(URL)
+    refresh(other)
+    scheduled.clear()
+    invalidate(URL)
+    enrich(PullRequest(56, other))
+    assert scheduled == []
+
+
+def test_invalidating_an_unknown_pr_is_harmless(scheduled):
+    invalidate("https://github.com/episode6/collins/pull/999")
+    assert scheduled == []
+
+
+# -- discover_pr: finding a PR by its branch --------------------------------
+
+
+@pytest.fixture
+def gh_json(monkeypatch):
+    """Stub _gh_json; returns (setter, calls) for asserting what gh was asked."""
+    calls: list[tuple[list[str], str | None]] = []
+    reply: list[object] = [None]
+
+    def fake(args, cwd=None):
+        calls.append((args, cwd))
+        return reply[0]
+
+    monkeypatch.setattr(prstatus, "_gh_json", fake)
+    return (lambda value: reply.__setitem__(0, value)), calls
+
+
+_DISCOVERED = {
+    "number": 74,
+    "url": "https://github.com/episode6/collins/pull/74",
+    "state": "OPEN",
+    "isDraft": False,
+    "statusCheckRollup": [
+        {"conclusion": "SUCCESS"},
+        {"conclusion": "FAILURE"},
+    ],
+}
+
+
+def test_discovers_the_branch_pr_with_its_status(gh_json):
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    pr = discover_pr("/home/me/dev/collins", "pr-chip-status-refresh")
+    assert (pr.number, pr.url) == (74, _DISCOVERED["url"])
+    assert pr.repository == "episode6/collins"  # read back out of the URL
+    assert (pr.state, pr.passed, pr.failed) == ("OPEN", 1, 1)
+    assert pr.glyph == "✗"
+    args, cwd = calls[0]
+    assert args[:3] == ["pr", "view", "pr-chip-status-refresh"]
+    assert cwd == "/home/me/dev/collins"  # the branch means nothing outside it
+
+
+def test_a_discovered_status_counts_as_ours(gh_json, scheduled):
+    """One call answers "which PR?" and "how is its CI?", so the poll that
+    follows the click must not immediately fetch the same thing again."""
+    serve, _calls = gh_json
+    serve(_DISCOVERED)
+    pr = discover_pr("/home/me/dev/collins", "some-branch")
+    scheduled.clear()
+    assert enrich(pr).glyph == "✗"
+    assert scheduled == []
+
+
+@pytest.mark.parametrize(
+    "cwd,branch",
+    [
+        (None, "main"),  # no working directory yet
+        ("/home/me/dev/collins", None),  # not a git repo
+        ("/home/me/dev/collins", ""),  # detached head
+        ("/home/me/dev/collins", "--version"),  # never let a flag be a branch
+        ("/home/me/dev/collins", "-x"),
+        ("/home/me/dev/collins", "main; rm -rf /"),
+        ("/home/me/dev/collins", "$(id)"),
+    ],
+)
+def test_discovery_asks_nothing_without_a_usable_branch(gh_json, cwd, branch):
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    assert discover_pr(cwd, branch) is None
+    assert calls == []
+
+
+def test_discovery_allows_the_branch_names_git_allows(gh_json):
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    for branch in ("main", "feat/pr-chip", "release-1.2", "user.name/fix+2"):
+        assert discover_pr("/home/me/dev/collins", branch) is not None
+    assert [args[2] for args, _cwd in calls] == [
+        "main", "feat/pr-chip", "release-1.2", "user.name/fix+2",
+    ]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        None,  # gh failed: no PR for the branch, not logged in, not a repo
+        {},
+        {"number": 74},  # no url
+        {"url": _DISCOVERED["url"]},  # no number
+        {"number": True, "url": _DISCOVERED["url"]},  # bool is not a PR number
+        {"number": "74", "url": _DISCOVERED["url"]},
+        {"number": 74, "url": "https://github.com/episode6/collins/issues/74"},
+        {"number": 74, "url": "not a url"},
+    ],
+)
+def test_discovery_degrades_to_no_pr(gh_json, reply):
+    serve, _calls = gh_json
+    serve(reply)
+    assert discover_pr("/home/me/dev/collins", "main") is None
+
+
+def test_discovery_is_skipped_once_gh_is_known_missing(gh_json, monkeypatch):
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    monkeypatch.setattr(prstatus, "_gh_missing", True)
+    assert discover_pr("/home/me/dev/collins", "main") is None
+    assert calls == []
+
+
+def test_discovery_passes_the_branch_as_an_argument(monkeypatch):
+    """The real path down to argv: no shell, and the branch trails the
+    subcommand as one word."""
+    seen = []
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(
+        prstatus.subprocess, "run",
+        lambda argv, **kw: seen.append((argv, kw)) or _completed(json.dumps(_DISCOVERED)),
+    )
+    assert discover_pr("/home/me/dev/collins", "main").number == 74
+    argv, kwargs = seen[0]
+    assert argv[:4] == ["/usr/bin/gh", "pr", "view", "main"]
+    assert kwargs["cwd"] == "/home/me/dev/collins"
+    assert "shell" not in kwargs
 
 
 # -- shaping gh's output ----------------------------------------------------
