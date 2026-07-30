@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -30,12 +30,32 @@ from .gitinfo import current_branch  # noqa: E402
 from .i18n import _  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
-from .prstatus import PullRequest, describe, enrich  # noqa: E402
+from .prstatus import (  # noqa: E402
+    CHECKS_FAILED,
+    CHECKS_PASSED,
+    CHECKS_PENDING,
+    PullRequest,
+    describe,
+    discover_pr,
+    enrich,
+    invalidate,
+)
 from .transcript import TranscriptModel  # noqa: E402
 
 _TRANSCRIPT_DEBOUNCE_MS = 400
 _PROMPT_POLL_MS = 1000  # backstop poll for detecting the agent's prompts
 _CWD_POLL_MS = 2000  # footer refresh; only ticks while the tab is visible
+# The merge mark sits with caption-sized text, so it takes the same 12px as the
+# glyphs it replaces rather than a symbolic icon's stock 16.
+_PR_MERGED_ICON_PX = 12
+_PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
+# Each CI mark is colored like its counterpart on the PR page; the shades
+# themselves follow the light/dark scheme and live in app.py.
+_PR_CHECKS_CSS = {
+    CHECKS_PASSED: "pr-checks-passed",
+    CHECKS_FAILED: "pr-checks-failed",
+    CHECKS_PENDING: "pr-checks-pending",
+}
 
 # PCRE2 flags for the find bar: multiline, case-insensitive.
 _PCRE2_CASELESS = 0x00000008
@@ -314,6 +334,11 @@ class TerminalTab(Gtk.Box):
         self._footer_cwd: str | None = None  # last value shown in the footer
         self._footer_branch: str | None = None
         self._footer_pr: PullRequest | None = None
+        # The PR the refresh button last looked up by branch, and the
+        # transcript's pr-link at that moment (see _chosen_pr).
+        self._discovered_pr: PullRequest | None = None
+        self._linked_at_lookup: PullRequest | None = None
+        self._pr_discover = False  # a click's search, waiting for a free tick
         self._cwd_refresh_source: int | None = None
         self.append(self._build_footer())
 
@@ -528,12 +553,39 @@ class TerminalTab(Gtk.Box):
         self._pr_label = Gtk.Label()
         self._pr_label.add_css_class("caption")
         self._pr_label.add_css_class("dim-label")
-        self._pr_label.set_visible(False)
+        # The CI mark is its own label so it can carry its own color: green,
+        # red or yellow (undimmed, like the merge mark), which is what the eye
+        # picks up without reading the row.
+        self._pr_checks = Gtk.Label()
+        self._pr_checks.add_css_class("caption")
+        self._pr_checks.set_visible(False)
+        # A merged PR trades its CI glyph for GitHub's git-merge mark, purple
+        # and undimmed: the one PR state worth spotting from across the row.
+        self._pr_merged = Gtk.Image.new_from_icon_name("git-merge-symbolic")
+        self._pr_merged.set_pixel_size(_PR_MERGED_ICON_PX)
+        self._pr_merged.add_css_class("pr-merged")
+        self._pr_merged.set_visible(False)
+        # Number and marks click as one chip, so any of them opens the PR.
+        self._pr_chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._pr_chip.append(self._pr_label)
+        self._pr_chip.append(self._pr_checks)
+        self._pr_chip.append(self._pr_merged)
+        self._pr_chip.set_visible(False)
         enable_open_on_click(
-            self._pr_label, lambda: self._footer_pr.url if self._footer_pr else None
+            self._pr_chip, lambda: self._footer_pr.url if self._footer_pr else None
         )
+        # Sibling of the chip, never inside it: the chip opens the PR on click,
+        # and a button in there would open the browser along with itself.
+        # It shows whether or not a PR does — with none, it is the way to go
+        # looking for one (see _on_pr_refresh).
+        refresh_icon = Gtk.Image.new_from_icon_name("view-refresh-symbolic")
+        refresh_icon.set_pixel_size(_PR_REFRESH_ICON_PX)
+        refresh_icon.add_css_class("dim-label")
+        self._pr_refresh_btn = Gtk.Button(child=refresh_icon)
+        self._pr_refresh_btn.add_css_class("flat")
+        self._pr_refresh_btn.connect("clicked", self._on_pr_refresh)
+        self._sync_pr_refresh_tooltip()
         self._pr_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-        self._pr_sep.set_visible(False)
 
         # Only the selected tab is visible (and thus clickable), so routing
         # through the window's actions still targets the right tab.
@@ -553,7 +605,8 @@ class TerminalTab(Gtk.Box):
         left.append(self._branch_seps[0])
         left.append(self._branch_label)
         left.append(self._branch_seps[1])
-        left.append(self._pr_label)
+        left.append(self._pr_chip)
+        left.append(self._pr_refresh_btn)
         left.append(self._pr_sep)
 
         # User-configured app launchers sit just left of the panel buttons;
@@ -595,31 +648,73 @@ class TerminalTab(Gtk.Box):
             self._branch_label.set_text(f"⎇ {branch}" if branch else "")
             self._branch_label.set_tooltip_text(copy_tooltip(branch) if branch else None)
             self._branch_label.set_visible(branch is not None)
-            self._sync_footer_seps()
+            # A PR found by branch belongs to that branch; a checkout retires it
+            # (and the button offers to look again).
+            self._discovered_pr = None
+            self._linked_at_lookup = None
+            self._sync_pr_refresh_tooltip()
+        self._sync_footer_seps()
 
     def _sync_footer_seps(self) -> None:
         """Show only the dividers that separate two visible chips.
 
-        The branch's leading divider does double duty as the PR's when there
-        is no branch to show, so the row never opens with a stray divider.
+        The PR group ends in a button that is always there, so its own dividers
+        never come and go; the branch is the one chip that does, and the
+        divider ahead of it does double duty when it's absent — the row never
+        opens or closes with a stray divider.
         """
         branch = self._footer_branch is not None
-        pr = self._footer_pr is not None
-        self._branch_seps[0].set_visible(branch or pr)
+        cwd = self._footer_cwd is not None
+        self._branch_seps[0].set_visible(cwd)
         self._branch_seps[1].set_visible(branch)
-        self._pr_sep.set_visible(pr)
 
     def _refresh_pr_label(self, pr: PullRequest | None) -> None:
-        """Show the session's linked PR, with its CI state when one is cached."""
+        """Show the session's linked PR, with its CI state when one is known."""
         if pr == self._footer_pr:
             return
         self._footer_pr = pr
-        self._pr_label.set_text(pr.label if pr else "")
-        self._pr_label.set_tooltip_text(
+        glyph = pr.glyph if pr else None
+        self._pr_label.set_text(f"#{pr.number}" if pr else "")
+        self._pr_checks.set_text(glyph or "")
+        self._pr_checks.set_visible(glyph is not None)
+        self._pr_checks.set_css_classes(
+            ["caption", _PR_CHECKS_CSS.get(glyph or "", "dim-label")]
+        )
+        self._pr_merged.set_visible(pr is not None and pr.merged)
+        self._pr_chip.set_tooltip_text(
             open_tooltip(describe(pr) + "\n" + pr.url) if pr else None
         )
-        self._pr_label.set_visible(pr is not None)
+        self._pr_chip.set_visible(pr is not None)
+        self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
+
+    def _sync_pr_refresh_tooltip(self, not_found: bool = False) -> None:
+        """What the button offers to do, which depends on what the chip shows.
+
+        A search that came back empty says so until something changes, so a
+        click that found nothing isn't indistinguishable from one that did.
+        """
+        if not_found:
+            text = _("No pull request found for this branch")
+        elif self._footer_pr is not None:
+            text = _("Re-check this branch's pull request")
+        else:
+            text = _("Look for this branch's pull request")
+        self._pr_refresh_btn.set_tooltip_text(text)
+
+    def _on_pr_refresh(self, _button: Gtk.Button) -> None:
+        """Ask the branch which PR it has, and show that one with fresh status.
+
+        Always the branch, whatever the chip currently shows and whatever state
+        it is in: the transcript is the *automatic* path to a PR, and a manual
+        refresh that only ever re-read it could never notice a PR opened by hand
+        or a branch that has moved on to its next one.
+
+        The work lands on the update thread, so the click itself only asks; the
+        button goes insensitive until the answer arrives.
+        """
+        self._pr_refresh_btn.set_sensitive(False)
+        self._request_update(discover=True)
 
     # -- graceful close ----------------------------------------------------
 
@@ -672,32 +767,96 @@ class TerminalTab(Gtk.Box):
         self._request_update()
         return GLib.SOURCE_REMOVE
 
-    def _request_update(self) -> None:
+    def _request_update(self, discover: bool = False) -> None:
         """Parse newly-appended transcript bytes off the main thread (big
-        tool-result lines would otherwise freeze the UI), then check on idle."""
+        tool-result lines would otherwise freeze the UI), then check on idle.
+
+        `discover` asks the branch which PR it has. It is only ever set by the
+        footer's refresh button; a request that arrives while one is running is
+        carried to the next poll rather than dropped, so the click always gets
+        its lookup.
+        """
         if self._updating:
+            self._pr_discover = self._pr_discover or discover
             return
         self._updating = True
+        looking = discover or self._pr_discover
+        self._pr_discover = False
 
         def work() -> None:
             try:
                 self._transcript.update()
             except Exception:
                 pass
+            empty = looking and not self._look_up_branch_pr()
             try:
                 # reads the gh status cache, so it belongs on this thread too;
                 # a session with no linked PR touches no files at all
-                pr = enrich(self._transcript.current_pr())
+                pr = enrich(self._chosen_pr())
             except Exception:
                 pr = self._footer_pr  # leave the chip as it is
-            GLib.idle_add(self._apply_update, pr)
+            GLib.idle_add(self._apply_update, pr, empty)
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _apply_update(self, pr: PullRequest | None = None) -> bool:
+    def _linked_pr(self) -> PullRequest | None:
+        """The PR the transcript names, if any — the automatic path."""
+        try:
+            return self._transcript.current_pr()
+        except Exception:
+            return None
+
+    def _look_up_branch_pr(self) -> bool:
+        """The refresh button's own path to a PR: whatever branch is checked out
+        right now, then gh. True when the branch had one. Runs on the update
+        thread.
+
+        cwd and branch are re-read here rather than taken from the footer's 2s
+        poll, so a click straight after a checkout asks about the branch the user
+        is actually on instead of the one the last tick happened to see.
+        """
+        cwd = self.current_agent_cwd()
+        try:
+            found = discover_pr(cwd, current_branch(cwd))
+        except Exception:
+            found = None
+        if found is not None:
+            self._discovered_pr = found
+            self._linked_at_lookup = self._linked_pr()
+            return True
+        # Nothing on the branch. Blanking the chip because a lookup came back
+        # empty would be worse than leaving it, so the transcript's PR stays —
+        # but its status is still refreshed, which the click did ask for, and the
+        # tooltip owns up to where that PR came from.
+        self._discovered_pr = None
+        if self._footer_pr is not None:
+            invalidate(self._footer_pr.url)
+        return False
+
+    def _chosen_pr(self) -> PullRequest | None:
+        """What the chip should show.
+
+        A PR the button looked up outranks the transcript's `pr-link`, until the
+        transcript names a *different* one — the agent opening another PR is
+        newer news than an older click — or a checkout retires the lookup.
+        """
+        linked = self._linked_pr()
+        found = self._discovered_pr
+        if found is None:
+            return linked
+        at_lookup = self._linked_at_lookup
+        if linked is not None and (at_lookup is None or linked.url != at_lookup.url):
+            self._discovered_pr = None
+            return linked
+        return found
+
+    def _apply_update(self, pr: PullRequest | None = None, lookup_empty: bool = False) -> bool:
         self._updating = False
+        self._pr_refresh_btn.set_sensitive(True)
         self._check_prompt()
         self._refresh_pr_label(pr)
+        if lookup_empty:  # even with a PR still showing: it isn't this branch's
+            self._sync_pr_refresh_tooltip(not_found=True)
         return GLib.SOURCE_REMOVE
 
     def _check_prompt(self) -> None:

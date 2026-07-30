@@ -53,6 +53,11 @@ export XDG_CONFIG_HOME="$E2E/config"            # app state lives in config/coll
 export XDG_STATE_HOME="$E2E/state"              # saved panel-terminal history
 ```
 
+Redirecting `XDG_CONFIG_HOME` also hides `gh`'s credentials from the app, so a
+footer PR chip captures as a bare `#72` with no CI glyph (Collins refreshes PR
+status with `gh pr view`/`gh pr list`, which then fail auth). Add
+`GH_CONFIG_DIR="$HOME/.config/gh"` when the shot is meant to show the glyph.
+
 **`COLLINS_CHATS_DIR` is not optional.** On its first scan every instance
 reaps chat directories that none of the sessions it discovered point at. An
 instance reading staged transcripts discovers no real chats, so it treats the

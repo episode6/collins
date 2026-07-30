@@ -1,13 +1,30 @@
-"""Tests for prstatus — parsing Claude Code's pr-link records and gh cache."""
+"""Tests for prstatus — parsing Claude Code's pr-link records, its gh status
+cache, the `gh pr view` refresh Collins runs when that cache is stale, and the
+branch lookup behind the footer's refresh button."""
 
 import json
+import os
+import subprocess
+import time
 
 import pytest
 
 from collins import prstatus
-from collins.prstatus import PullRequest, describe, enrich, parse_pr_link, state_text
+from collins.prstatus import (
+    CACHE_MAX_AGE_S,
+    PullRequest,
+    describe,
+    discover_pr,
+    enrich,
+    invalidate,
+    parse_pr_link,
+    refresh,
+    state_text,
+)
 
 URL = "https://github.com/episode6/collins/pull/55"
+_TTL_S = prstatus._TTL_S
+_ERROR_TTL_S = prstatus._ERROR_TTL_S
 
 
 def _link(**overrides):
@@ -29,11 +46,58 @@ def cache(tmp_path, monkeypatch):
     path = tmp_path / "gh-pr-status-cache.json"
     monkeypatch.setattr(prstatus, "PR_STATUS_CACHE", path)
 
-    def write(payload):
+    def write(payload, age_s=0):
         path.write_text(json.dumps(payload) if isinstance(payload, (dict, list)) else payload,
                         encoding="utf-8")
+        if age_s:  # backdate it: only a recent cache is trusted
+            stamp = time.time() - age_s
+            os.utime(path, (stamp, stamp))
 
     return write
+
+
+class _Clock:
+    """Stand-in for the monotonic clock the status TTLs are measured against."""
+
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, seconds: float) -> None:
+        self.t += seconds
+
+
+@pytest.fixture(autouse=True)
+def scheduled(monkeypatch):
+    """Keep tests off the real `gh`: collects the URLs refreshes were scheduled
+    for, and clears the module's status cache around every test."""
+    urls: list[str] = []
+    monkeypatch.setattr(prstatus, "_schedule", urls.append)
+    monkeypatch.setattr(prstatus, "_gh_missing", False)
+    prstatus._statuses.clear()
+    prstatus._inflight.clear()
+    yield urls
+    prstatus._statuses.clear()
+    prstatus._inflight.clear()
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(prstatus, "_now", clock)
+    return clock
+
+
+@pytest.fixture
+def gh(monkeypatch):
+    """Stub the `gh pr view` call; returns a setter for its next result."""
+
+    def serve(entry):
+        monkeypatch.setattr(prstatus, "_run_gh", lambda url: entry)
+
+    return serve
 
 
 # -- parse_pr_link ----------------------------------------------------------
@@ -43,7 +107,7 @@ def test_parses_a_real_record():
     pr = parse_pr_link(_link())
     assert pr == PullRequest(number=55, url=URL, repository="episode6/collins")
     assert pr.slug == "episode6/collins#55"
-    assert pr.label == "#55"
+    assert pr.glyph is None
 
 
 def test_repository_is_optional():
@@ -73,7 +137,7 @@ def test_enrich_fills_state_and_checks(cache):
                  "checks": {"passed": 1, "failed": 1, "pending": 0}}})
     pr = enrich(parse_pr_link(_link()))
     assert (pr.state, pr.passed, pr.failed, pr.pending) == ("DRAFT", 1, 1, 0)
-    assert pr.label == "#55 ✗"
+    assert pr.glyph == "✗"
 
 
 def test_enrich_ignores_other_prs(cache):
@@ -103,24 +167,487 @@ def test_enrich_skips_junk_check_counts(cache):
     assert (pr.state, pr.passed, pr.failed) == (None, None, None)
 
 
+# -- the CLI cache goes stale -----------------------------------------------
+
+
+def test_a_stale_cli_cache_is_not_trusted(cache):
+    """Only FleetView refreshes that file, so an old one can be days out of
+    date — better a bare number than a wrong glyph."""
+    cache({URL: {"state": "OPEN", "checks": {"passed": 0, "failed": 1, "pending": 0}}},
+          age_s=CACHE_MAX_AGE_S + 60)
+    pr = enrich(parse_pr_link(_link()))
+    assert (pr.state, pr.failed) == (None, None)
+    assert pr.glyph is None
+
+
+def test_a_recent_cli_cache_still_warms_the_chip(cache):
+    cache({URL: {"state": "OPEN", "checks": {"passed": 2, "failed": 0, "pending": 0}}},
+          age_s=CACHE_MAX_AGE_S - 60)
+    assert enrich(parse_pr_link(_link())).glyph == "✓"
+
+
+# -- our own gh refresh -----------------------------------------------------
+
+
+def test_our_status_overrides_the_cli_cache(cache, gh):
+    cache({URL: {"state": "OPEN", "checks": {"passed": 0, "failed": 1, "pending": 0}}})
+    gh({"state": "MERGED", "checks": {"passed": 2, "failed": 0, "pending": 0}})
+    refresh(URL)
+    pr = enrich(parse_pr_link(_link()))
+    assert (pr.state, pr.passed, pr.failed) == ("MERGED", 2, 0)
+    assert pr.merged is True
+
+
+def test_enrich_schedules_a_refresh_for_an_unknown_pr(scheduled):
+    enrich(parse_pr_link(_link()))
+    assert scheduled == [URL]
+
+
+def test_only_one_refresh_is_in_flight_per_pr(scheduled):
+    for _ in range(3):  # the footer polls every second
+        enrich(parse_pr_link(_link()))
+    assert scheduled == [URL]
+
+
+def test_a_fresh_status_is_not_refetched(scheduled, clock, gh):
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}})
+    refresh(URL)
+    scheduled.clear()
+    clock.advance(_TTL_S - 1)
+    enrich(parse_pr_link(_link()))
+    assert scheduled == []
+    clock.advance(1)
+    enrich(parse_pr_link(_link()))
+    assert scheduled == [URL]
+
+
+def test_a_stale_status_is_shown_while_its_refresh_runs(clock, gh):
+    """A minute-old glyph beats a blank one; the refresh lands a poll later."""
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}})
+    refresh(URL)
+    clock.advance(_TTL_S * 10)
+    assert enrich(parse_pr_link(_link())).glyph == "✓"
+
+
+def test_a_failed_fetch_backs_off_further(scheduled, clock, gh, cache):
+    """An offline or unauthenticated gh shouldn't be retried every minute — and
+    a fresh CLI cache still covers the chip meanwhile."""
+    cache({URL: {"state": "OPEN", "checks": {"passed": 3, "failed": 0, "pending": 0}}})
+    gh(None)
+    refresh(URL)
+    scheduled.clear()
+    assert enrich(parse_pr_link(_link())).glyph == "✓"  # from the CLI cache
+    clock.advance(_TTL_S * 2)
+    enrich(parse_pr_link(_link()))
+    assert scheduled == []
+    clock.advance(_ERROR_TTL_S)
+    enrich(parse_pr_link(_link()))
+    assert scheduled == [URL]
+
+
+def test_nothing_is_fetched_once_gh_is_known_missing(scheduled, monkeypatch):
+    monkeypatch.setattr(prstatus, "_gh_missing", True)
+    assert enrich(parse_pr_link(_link())).glyph is None
+    assert scheduled == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "--version",  # a transcript's prUrl is untrusted; never hand it to argv
+        "-x",
+        "https://github.com/episode6/collins/issues/55",
+        "https://github.com/episode6/collins/pull/55; rm -rf /",
+        "https://github.com/episode6/collins/pull/",
+        "not a url at all",
+    ],
+)
+def test_only_pr_page_urls_are_fetched(scheduled, url):
+    enrich(PullRequest(55, url))
+    assert scheduled == []
+
+
+# -- invalidate: the refresh button's half of a refresh ----------------------
+
+
+def test_invalidating_makes_the_next_enrich_refetch(scheduled, clock, gh):
+    """Clicking refresh on a PR whose status is a few seconds old still refetches
+    — a TTL that ignores the click would make the button a lie."""
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}})
+    refresh(URL)
+    scheduled.clear()
+    enrich(parse_pr_link(_link()))
+    assert scheduled == []  # still fresh
+    invalidate(URL)
+    enrich(parse_pr_link(_link()))
+    assert scheduled == [URL]
+
+
+def test_invalidating_keeps_the_glyph_until_the_new_one_lands(scheduled, clock, gh):
+    """A click must refresh the chip in place, not blank it for a poll: the
+    status we have stands until the refetch replaces it."""
+    gh({"state": "OPEN", "checks": {"passed": 2, "failed": 0, "pending": 0}})
+    refresh(URL)
+    invalidate(URL)
+    assert enrich(parse_pr_link(_link())).glyph == "✓"  # still ✓, refetch pending
+    assert scheduled == [URL]
+
+
+def test_invalidating_a_failed_fetch_retries_it_now(scheduled, clock, gh):
+    """The error backoff is there to stop pointless retries, not to stop the
+    user asking for one — a click gets its fetch either way."""
+    gh(None)
+    refresh(URL)
+    scheduled.clear()
+    invalidate(URL)
+    enrich(parse_pr_link(_link()))
+    assert scheduled == [URL]
+
+
+def test_invalidating_leaves_other_prs_alone(scheduled, clock, gh):
+    other = "https://github.com/episode6/collins/pull/56"
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}})
+    refresh(URL)
+    refresh(other)
+    scheduled.clear()
+    invalidate(URL)
+    enrich(PullRequest(56, other))
+    assert scheduled == []
+
+
+def test_invalidating_an_unknown_pr_is_harmless(scheduled):
+    invalidate("https://github.com/episode6/collins/pull/999")
+    assert scheduled == []
+
+
+# -- discover_pr: finding a PR by its branch --------------------------------
+
+
+@pytest.fixture
+def gh_json(monkeypatch):
+    """Stub _gh_json; returns (setter, calls) for asserting what gh was asked."""
+    calls: list[tuple[list[str], str | None]] = []
+    reply: list[object] = [None]
+
+    def fake(args, cwd=None):
+        calls.append((args, cwd))
+        return reply[0]
+
+    monkeypatch.setattr(prstatus, "_gh_json", fake)
+    return (lambda value: reply.__setitem__(0, value)), calls
+
+
+def _found(number=74, created="2026-07-30T02:19:00Z", **overrides):
+    """One entry of a `gh pr list --head <branch>` reply."""
+    entry = {
+        "number": number,
+        "url": f"https://github.com/episode6/collins/pull/{number}",
+        "createdAt": created,
+        "state": "OPEN",
+        "isDraft": False,
+        "statusCheckRollup": [{"conclusion": "SUCCESS"}, {"conclusion": "FAILURE"}],
+    }
+    entry.update(overrides)
+    return entry
+
+
+_DISCOVERED = [_found()]
+
+
+def test_discovers_the_branch_pr_with_its_status(gh_json):
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    pr = discover_pr("/home/me/dev/collins", "pr-chip-status-refresh")
+    assert (pr.number, pr.url) == (74, _found()["url"])
+    assert pr.repository == "episode6/collins"  # read back out of the URL
+    assert (pr.state, pr.passed, pr.failed) == ("OPEN", 1, 1)
+    assert pr.glyph == "✗"
+    args, cwd = calls[0]
+    assert args[:4] == ["pr", "list", "--head", "pr-chip-status-refresh"]
+    assert cwd == "/home/me/dev/collins"  # the branch means nothing outside it
+
+
+def test_a_discovered_status_counts_as_ours(gh_json, scheduled):
+    """One call answers "which PR?" and "how is its CI?", so the poll that
+    follows the click must not immediately fetch the same thing again."""
+    serve, _calls = gh_json
+    serve(_DISCOVERED)
+    pr = discover_pr("/home/me/dev/collins", "some-branch")
+    scheduled.clear()
+    assert enrich(pr).glyph == "✗"  # the status the lookup itself came back with
+    assert scheduled == []
+
+
+def test_the_most_recent_pr_on_the_branch_wins(gh_json):
+    """Branches get reused: a merged PR then fresh work on the same name. The
+    newest is the one being worked on now."""
+    serve, _calls = gh_json
+    serve([
+        _found(70, "2026-06-01T10:00:00Z", state="MERGED"),
+        _found(75, "2026-07-29T09:00:00Z"),
+        _found(58, "2026-05-02T10:00:00Z", state="CLOSED"),
+    ])
+    assert discover_pr("/home/me/dev/collins", "feat/x").number == 75
+
+
+def test_the_higher_number_breaks_a_tie(gh_json):
+    """gh timestamps to the second, so two PRs opened in the same second are
+    ordered by number instead of by dict order."""
+    serve, _calls = gh_json
+    serve([_found(80, "2026-07-30T02:19:00Z"), _found(81, "2026-07-30T02:19:00Z")])
+    assert discover_pr("/home/me/dev/collins", "feat/x").number == 81
+
+
+def test_a_merged_pr_is_still_a_discovery(gh_json):
+    """The branch's only PR being merged is an answer, not a failure: the chip
+    should say merged rather than say nothing."""
+    serve, _calls = gh_json
+    serve([_found(70, state="MERGED", statusCheckRollup=[])])
+    pr = discover_pr("/home/me/dev/collins", "feat/x")
+    assert (pr.number, pr.state, pr.merged) == (70, "MERGED", True)
+
+
+def test_discovery_asks_for_closed_prs_too(gh_json):
+    """--state all: a branch whose PR has landed still answers which PR it was."""
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    discover_pr("/home/me/dev/collins", "feat/x")
+    args, _cwd = calls[0]
+    assert "--state" in args and args[args.index("--state") + 1] == "all"
+    assert args[args.index("--limit") + 1] == str(prstatus._DISCOVER_LIMIT)
+
+
+def test_unusable_entries_are_skipped_not_fatal(gh_json):
+    """One malformed entry among several must not lose the good one."""
+    serve, _calls = gh_json
+    serve([
+        "not a dict",
+        _found(90, "2026-07-30T03:00:00Z", url="https://github.com/o/r/issues/90"),
+        {**_found(91, "2026-07-30T02:00:00Z"), "number": True},
+        _found(60, "2026-01-01T00:00:00Z"),
+    ])
+    assert discover_pr("/home/me/dev/collins", "feat/x").number == 60
+
+
+def test_a_missing_timestamp_sorts_last(gh_json):
+    serve, _calls = gh_json
+    serve([_found(92, created=None), _found(61, "2026-01-01T00:00:00Z")])
+    assert discover_pr("/home/me/dev/collins", "feat/x").number == 61
+
+
+@pytest.mark.parametrize(
+    "cwd,branch",
+    [
+        (None, "main"),  # no working directory yet
+        ("/home/me/dev/collins", None),  # not a git repo
+        ("/home/me/dev/collins", ""),  # detached head
+        ("/home/me/dev/collins", "--version"),  # never let a flag be a branch
+        ("/home/me/dev/collins", "-x"),
+        ("/home/me/dev/collins", "main; rm -rf /"),
+        ("/home/me/dev/collins", "$(id)"),
+    ],
+)
+def test_discovery_asks_nothing_without_a_usable_branch(gh_json, cwd, branch):
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    assert discover_pr(cwd, branch) is None
+    assert calls == []
+
+
+def test_discovery_allows_the_branch_names_git_allows(gh_json):
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    for branch in ("main", "feat/pr-chip", "release-1.2", "user.name/fix+2"):
+        assert discover_pr("/home/me/dev/collins", branch) is not None
+    assert [args[3] for args, _cwd in calls] == [
+        "main", "feat/pr-chip", "release-1.2", "user.name/fix+2",
+    ]
+
+
+_URL = "https://github.com/episode6/collins/pull/74"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        None,  # gh failed: not logged in, not a repo, ...
+        [],  # no PR for this branch
+        {"number": 74, "url": _URL},  # an object where a list belongs
+        [{}],
+        [{"number": 74}],  # no url
+        [{"url": _URL}],  # no number
+        [{"number": True, "url": _URL}],  # bool is not a PR number
+        [{"number": "74", "url": _URL}],
+        [{"number": 74, "url": "https://github.com/episode6/collins/issues/74"}],
+        [{"number": 74, "url": "not a url"}],
+    ],
+)
+def test_discovery_degrades_to_no_pr(gh_json, reply):
+    serve, _calls = gh_json
+    serve(reply)
+    assert discover_pr("/home/me/dev/collins", "main") is None
+
+
+def test_discovery_is_skipped_once_gh_is_known_missing(gh_json, monkeypatch):
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    monkeypatch.setattr(prstatus, "_gh_missing", True)
+    assert discover_pr("/home/me/dev/collins", "main") is None
+    assert calls == []
+
+
+def test_discovery_passes_the_branch_as_an_argument(monkeypatch):
+    """The real path down to argv: no shell, and the branch travels as one word
+    behind --head rather than spliced into a string."""
+    seen = []
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(
+        prstatus.subprocess, "run",
+        lambda argv, **kw: seen.append((argv, kw)) or _completed(json.dumps(_DISCOVERED)),
+    )
+    assert discover_pr("/home/me/dev/collins", "main").number == 74
+    argv, kwargs = seen[0]
+    assert argv[:5] == ["/usr/bin/gh", "pr", "list", "--head", "main"]
+    assert kwargs["cwd"] == "/home/me/dev/collins"
+    assert "shell" not in kwargs
+
+
+# -- shaping gh's output ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "rollup,counts",
+    [
+        ([], (0, 0, 0)),
+        (None, (0, 0, 0)),
+        ([{"conclusion": "SUCCESS", "status": "COMPLETED"}], (1, 0, 0)),
+        ([{"conclusion": "SKIPPED"}, {"conclusion": "NEUTRAL"}], (2, 0, 0)),
+        ([{"conclusion": "FAILURE"}, {"conclusion": "ERROR"}], (0, 2, 0)),
+        ([{"conclusion": None, "status": "IN_PROGRESS"}], (0, 0, 1)),  # still running
+        ([{"state": "PENDING"}], (0, 0, 1)),  # a StatusContext, not a CheckRun
+        ([{"state": "SUCCESS"}], (1, 0, 0)),
+        ([{"conclusion": "CANCELLED", "status": "COMPLETED"}], (0, 1, 0)),  # unknown → look
+        (["nope", None, {"conclusion": "SUCCESS"}], (1, 0, 0)),  # junk entries skipped
+    ],
+)
+def test_check_counts_follow_the_rollup(rollup, counts):
+    passed, failed, pending = counts
+    assert prstatus._counts(rollup) == {
+        "passed": passed, "failed": failed, "pending": pending
+    }
+
+
+@pytest.mark.parametrize(
+    "data,state",
+    [
+        ({"state": "OPEN", "isDraft": True}, "DRAFT"),  # gh reports draft separately
+        ({"state": "OPEN", "isDraft": False}, "OPEN"),
+        ({"state": "MERGED", "isDraft": True}, "MERGED"),
+        ({"state": "CLOSED"}, "CLOSED"),
+        ({"state": ""}, None),
+        ({"state": 7}, None),
+        ({}, None),
+    ],
+)
+def test_state_folds_in_draftness(data, state):
+    assert prstatus._state(data) == state
+
+
+def _completed(stdout="", returncode=0):
+    return subprocess.CompletedProcess([], returncode, stdout=stdout, stderr="")
+
+
+def test_run_gh_shapes_a_real_reply(monkeypatch):
+    reply = json.dumps({
+        "isDraft": True,
+        "state": "OPEN",
+        "statusCheckRollup": [
+            {"__typename": "CheckRun", "conclusion": "SUCCESS", "status": "COMPLETED",
+             "name": "lint"},
+            {"__typename": "CheckRun", "conclusion": None, "status": "IN_PROGRESS",
+             "name": "test"},
+        ],
+    })
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(prstatus.subprocess, "run", lambda *a, **kw: _completed(reply))
+    assert prstatus._run_gh(URL) == {
+        "state": "DRAFT", "checks": {"passed": 1, "failed": 0, "pending": 1}
+    }
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        _completed("", 1),  # no such PR, not logged in, ...
+        _completed("not json"),
+        _completed("[]"),  # valid json, wrong shape
+        subprocess.TimeoutExpired("gh", 10),
+        OSError("boom"),
+    ],
+)
+def test_run_gh_degrades_to_no_status(monkeypatch, outcome):
+    def run(*_args, **_kwargs):
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(prstatus.subprocess, "run", run)
+    assert prstatus._run_gh(URL) is None
+
+
+def test_run_gh_gives_up_when_gh_is_absent(monkeypatch):
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: None)
+    assert prstatus._run_gh(URL) is None
+    assert prstatus._gh_missing is True
+
+
+def test_run_gh_passes_the_url_as_an_argument(monkeypatch):
+    """No shell, and the URL trails the subcommand — `gh pr view <url>` needs no
+    repository cwd, which is what lets this run from anywhere."""
+    seen = []
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(
+        prstatus.subprocess, "run",
+        lambda argv, **kw: seen.append((argv, kw)) or _completed('{"state": "OPEN"}'),
+    )
+    prstatus._run_gh(URL)
+    argv, kwargs = seen[0]
+    assert argv[:4] == ["/usr/bin/gh", "pr", "view", URL]
+    assert kwargs["timeout"] == prstatus._GH_TIMEOUT_S
+    assert "shell" not in kwargs
+
+
 # -- chip rendering ---------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "counts,label",
+    "counts,glyph",
     [
-        ((None, None, None), "#55"),  # nothing cached
-        ((0, 0, 0), "#55"),  # a PR with no checks configured
-        ((3, 0, 0), "#55 ✓"),
-        ((2, 1, 0), "#55 ✗"),  # a failure outranks passes
-        ((2, 1, 4), "#55 ✗"),  # ...and outranks pending runs
-        ((2, 0, 1), "#55 ●"),
+        ((None, None, None), None),  # nothing cached
+        ((0, 0, 0), None),  # a PR with no checks configured
+        ((3, 0, 0), "✓"),
+        ((2, 1, 0), "✗"),  # a failure outranks passes
+        ((2, 1, 4), "✗"),  # ...and outranks pending runs
+        ((2, 0, 1), "●"),
     ],
 )
-def test_label_summarizes_checks(counts, label):
+def test_glyph_summarizes_checks(counts, glyph):
     passed, failed, pending = counts
     pr = PullRequest(55, URL, passed=passed, failed=failed, pending=pending)
-    assert pr.label == label
+    assert pr.glyph == glyph
+
+
+def test_a_merged_pr_drops_its_check_glyph():
+    """The purple merge mark replaces it — how CI went on the way in is history."""
+    pr = PullRequest(55, URL, state="MERGED", passed=2, failed=0, pending=0)
+    assert (pr.merged, pr.glyph) == (True, None)
+
+
+@pytest.mark.parametrize("state", [None, "OPEN", "DRAFT", "CLOSED", "SOMETHING_NEW"])
+def test_every_other_state_keeps_the_glyph(state):
+    pr = PullRequest(55, URL, state=state, passed=2, failed=0, pending=0)
+    assert (pr.merged, pr.glyph) == (False, "✓")
 
 
 # -- describe (the tooltip's long form) -------------------------------------
