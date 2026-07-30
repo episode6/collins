@@ -55,8 +55,9 @@ tabbar tab:not(:checked) label { opacity: 0.6; }
 
 /* every session row is the same outlined card with a left guide line; what a
    running session adds is a fill, and a status color on that line. The border
-   box is identical in every state, so a row never shifts or resizes as its
-   status changes.
+   box is identical in every status, so a row never shifts or resizes as its
+   status changes; the selected tab's row is the one exception, and it changes
+   only horizontally (see .active-tab below).
    The left indent is a widget margin set in sidebar.py, not a CSS margin
    here: it tracks the configurable project-icon size, so the card always
    starts just past the icon of the project header above it. */
@@ -116,10 +117,17 @@ row.session-child.running { border-left-color: #2ec27e; }
 row.session-child.running-attention { border-left-color: alpha(currentColor, 0.45); }
 /* running detached (/bg): the yellow the old status dot used */
 row.session-child.detached { border-left-color: #e5a50a; }
-/* the session shown in the currently selected tab: only the fill says so, so
-   the guide line keeps saying what the session's status is */
+/* the session shown in the currently selected tab: the fill says which one it
+   is, and the card runs out to the panel's right edge (square-cornered, with
+   no right border) so the row reads as joined to the terminal it is showing
+   rather than as one more card in the list. The guide line keeps saying what
+   the session's status is. Only horizontal geometry changes, so the row keeps
+   its height and nothing in the list shifts as the selected tab moves. */
 row.session-child.active-tab {
   background-color: alpha(#D97757, 0.16);
+  margin-right: 0;
+  border-right: none;
+  border-radius: 0;
 }
 row.session-child.active-tab:hover {
   background-color: alpha(#D97757, 0.22);
