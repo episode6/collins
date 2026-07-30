@@ -27,13 +27,15 @@ def open_tooltip(text: str) -> str:
     return text + "\n" + _("Click to open")
 
 
-def enable_open_on_click(label: Gtk.Label, get_uri: Callable[[], str | None]) -> None:
-    """Open the label's URI in the user's browser when it is clicked.
+def enable_open_on_click(widget: Gtk.Widget, get_uri: Callable[[], str | None]) -> None:
+    """Open the widget's URI in the user's browser when it is clicked.
 
-    The label's own text is usually a short stand-in for the link (a PR
-    number, say), so the URI comes from `get_uri` rather than the label.
+    What's on screen is usually a short stand-in for the link (a PR number and
+    its state mark, say), so the URI comes from `get_uri` rather than the
+    widget — and a chip built from several widgets can hand over the box, so
+    every part of it opens the same link.
     """
-    label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+    widget.set_cursor(Gdk.Cursor.new_from_name("pointer"))
 
     def on_launched(launcher: Gtk.UriLauncher, result) -> None:
         try:
@@ -45,11 +47,11 @@ def enable_open_on_click(label: Gtk.Label, get_uri: Callable[[], str | None]) ->
         uri = get_uri()
         if not uri:
             return
-        Gtk.UriLauncher.new(uri).launch(label.get_root(), None, on_launched)
+        Gtk.UriLauncher.new(uri).launch(widget.get_root(), None, on_launched)
 
     click = Gtk.GestureClick()
     click.connect("released", on_released)
-    label.add_controller(click)
+    widget.add_controller(click)
 
 
 def enable_copy_on_click(

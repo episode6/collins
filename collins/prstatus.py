@@ -7,23 +7,39 @@ it appends a ``pr-link`` record to the session's JSONL transcript ::
      "prUrl":"https://github.com/episode6/collins/pull/55",
      "prRepository":"episode6/collins","timestamp":"…"}
 
-and re-emits it on resume/compact, so the *last* such record wins. It also
-keeps ``~/.claude/gh-pr-status-cache.json`` — a URL-keyed cache it refreshes
-from ``gh pr view`` every ~30s — holding the PR's state and check counts.
+and re-emits it on resume/compact, so the *last* such record wins. Reading the
+number back is therefore a plain filesystem read that can't fail loudly.
 
-Together those give the footer a live PR chip for free. Like gitinfo, this is
-all plain filesystem reads with no subprocesses, and every failure degrades to
-"no PR" rather than raising.
+CI status is the harder half. Claude Code keeps a URL-keyed cache of PR state
+and check counts at ``~/.claude/gh-pr-status-cache.json``, but as of CLI 2.1.220
+only FleetView refreshes it — an ordinary session never does, so the file can
+sit untouched for days while its entries rot. Trusting it wholesale means
+showing a red ✗ on a PR that has long since gone green. So the cache is used
+only while the file itself is recent (a free warm start for the first seconds
+after launch), and Collins otherwise refreshes status itself with a short
+``gh pr view`` per linked PR, at most once a minute.
+
+That fetch is the one subprocess here; everything else is a filesystem read,
+it always happens off the main thread, and every failure degrades to "no
+status" (or "no PR") rather than raising.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
+import shutil
+import subprocess
+import threading
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .i18n import _
+
+log = logging.getLogger(__name__)
 
 # Override with COLLINS_PR_STATUS_CACHE for demos and development.
 PR_STATUS_CACHE = Path(
@@ -33,6 +49,34 @@ PR_STATUS_CACHE = Path(
 
 # Guards against reading something that isn't the cache we expect.
 _MAX_CACHE_BYTES = 1024 * 1024
+
+# How long the CLI's cache is worth reading after it was last written. Only
+# FleetView refreshes it, so beyond this it is a fossil, not a cache.
+CACHE_MAX_AGE_S = 300
+
+# Our own fetched status: how long it stays fresh, and how long a *failed*
+# fetch is remembered before that PR is tried again. The footer polls every
+# second, so both intervals are what keeps `gh` off the CPU.
+_TTL_S = 60
+_ERROR_TTL_S = 300
+_GH_TIMEOUT_S = 10
+_GH_FIELDS = "state,isDraft,statusCheckRollup"
+
+# Only fetch for URLs shaped like a PR page. The URL comes out of a transcript
+# — repo content, i.e. untrusted — and lands in an argv, so this also keeps a
+# value like "--version" from ever reaching `gh`.
+_FETCHABLE = re.compile(r"https://[\w.-]+/[\w.-]+/[\w.-]+/pull/\d+$")
+
+# gh's rollup verdicts, mapped the way the CLI maps them.
+_PASSED = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
+_FAILED = frozenset({"FAILURE", "ERROR"})
+_PENDING = frozenset({"ACTION_REQUIRED", "PENDING", "EXPECTED"})
+
+_lock = threading.Lock()
+# url -> (fetched-at, cache-shaped entry or None for a failed fetch)
+_statuses: dict[str, tuple[float, dict | None]] = {}
+_inflight: set[str] = set()
+_gh_missing = False  # gh isn't on PATH; nothing to retry against this run
 
 CHECKS_PASSED = "✓"
 CHECKS_FAILED = "✗"
@@ -74,9 +118,18 @@ class PullRequest:
         return None  # a PR with zero checks configured
 
     @property
+    def merged(self) -> bool:
+        """Merged PRs get GitHub's purple git-merge mark in place of a glyph."""
+        return self.state == "MERGED"
+
+    @property
     def label(self) -> str:
-        """The footer chip's text: ``#55`` or ``#55 ✗``."""
-        glyph = self.checks_glyph
+        """The footer chip's text: ``#55`` or ``#55 ✗``.
+
+        A merged PR shows the number alone — the merge mark beside it says all
+        there is to say, and whether CI passed on the way in is history.
+        """
+        glyph = None if self.merged else self.checks_glyph
         return f"#{self.number} {glyph}" if glyph else f"#{self.number}"
 
 
@@ -157,15 +210,151 @@ def _count(checks: object, key: str) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def enrich(pr: PullRequest | None) -> PullRequest | None:
-    """Fill in *pr*'s state and check counts from the CLI's status cache.
+def _now() -> float:
+    return time.monotonic()
 
-    Returns *pr* unchanged when there's nothing cached for its URL — the chip
-    still shows the number, just without a CI glyph.
+
+def _cached_status(url: str) -> dict | None:
+    """The CLI's cached entry for *url*, but only while the cache is recent.
+
+    The whole file shares one mtime, so a refresh for any PR vouches for every
+    entry in it. That's as fine-grained as the file allows, and it errs the
+    right way: our own fetch overrides this within the minute anyway.
+    """
+    try:
+        age = time.time() - PR_STATUS_CACHE.stat().st_mtime
+    except OSError:
+        return None
+    if age > CACHE_MAX_AGE_S:
+        return None
+    entry = _load_cache().get(url)
+    return entry if isinstance(entry, dict) else None
+
+
+def _counts(rollup: object) -> dict:
+    """Tally gh's statusCheckRollup contexts into passed/failed/pending.
+
+    A context with no verdict yet, or one whose run hasn't completed, is
+    pending; anything unrecognized counts as a failure, so a state we've never
+    heard of surfaces as something to look at rather than silently passing.
+    """
+    passed = failed = pending = 0
+    for check in rollup if isinstance(rollup, list) else []:
+        if not isinstance(check, dict):
+            continue
+        verdict = str(check.get("conclusion") or check.get("state") or "").upper()
+        status = str(check.get("status") or "").upper()
+        if verdict in _PASSED:
+            passed += 1
+        elif verdict in _FAILED:
+            failed += 1
+        elif not verdict or verdict in _PENDING or status != "COMPLETED":
+            pending += 1
+        else:
+            failed += 1
+    return {"passed": passed, "failed": failed, "pending": pending}
+
+
+def _state(data: dict) -> str | None:
+    """gh reports draft-ness separately; the chip wants it as a state."""
+    state = data.get("state")
+    if not isinstance(state, str) or not state:
+        return None
+    if state in ("MERGED", "CLOSED"):
+        return state
+    return "DRAFT" if data.get("isDraft") is True else state
+
+
+def _run_gh(url: str) -> dict | None:
+    """One `gh pr view`, shaped like a CLI cache entry. None on any failure.
+
+    A URL argument means this works from anywhere — no repository cwd needed —
+    and covers GitHub Enterprise hosts the user is logged in to.
+    """
+    global _gh_missing
+    gh = shutil.which("gh")
+    if gh is None:
+        _gh_missing = True
+        log.info("prstatus: gh not on PATH; PR chips will show the number only")
+        return None
+    try:
+        result = subprocess.run(
+            [gh, "pr", "view", url, "--json", _GH_FIELDS],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except (OSError, subprocess.SubprocessError) as err:
+        log.debug("prstatus: gh pr view %s failed: %s", url, err)
+        return None
+    if result.returncode != 0:
+        log.debug(
+            "prstatus: gh pr view %s exited %s: %s",
+            url,
+            result.returncode,
+            (result.stderr or result.stdout).strip()[:200],
+        )
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {"state": _state(data), "checks": _counts(data.get("statusCheckRollup"))}
+
+
+def refresh(url: str) -> None:
+    """Fetch *url*'s status now and remember it. Never call on the main thread.
+
+    A failure is remembered too (as "no status"), so an unauthenticated or
+    offline `gh` is retried once every few minutes instead of every poll.
+    """
+    try:
+        entry = _run_gh(url)
+    except Exception:  # never leave a PR wedged as in-flight
+        log.debug("prstatus: refreshing %s failed", url, exc_info=True)
+        entry = None
+    with _lock:
+        _statuses[url] = (_now(), entry)
+        _inflight.discard(url)
+
+
+def _schedule(url: str) -> None:
+    threading.Thread(target=refresh, args=(url,), name="pr-status", daemon=True).start()
+
+
+def _own_status(url: str) -> dict | None:
+    """Our last fetched status for *url*, kicking off a refresh when it's due.
+
+    Returns what we have even when it's past its TTL: a minute-old glyph beats
+    a blank one, and the refresh lands before the next poll or two.
+    """
+    if not _FETCHABLE.match(url):
+        return None
+    with _lock:
+        stamped = _statuses.get(url)
+        entry = stamped[1] if stamped else None
+        ttl = _TTL_S if entry else _ERROR_TTL_S
+        due = stamped is None or _now() - stamped[0] >= ttl
+        fetch = due and not _gh_missing and url not in _inflight
+        if fetch:
+            _inflight.add(url)
+    if fetch:
+        _schedule(url)
+    return entry
+
+
+def enrich(pr: PullRequest | None) -> PullRequest | None:
+    """Fill in *pr*'s state and check counts, refreshing them when they're due.
+
+    Touches the filesystem and may spawn `gh` off a worker thread, so keep this
+    off the main loop. Returns *pr* unchanged when no status is known yet — the
+    chip still shows the number, just without a CI glyph.
     """
     if pr is None:
         return None
-    entry = _load_cache().get(pr.url)
+    entry = _own_status(pr.url) or _cached_status(pr.url)
     if not isinstance(entry, dict):
         return pr
     state = entry.get("state")

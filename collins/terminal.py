@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-29. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -36,6 +36,9 @@ from .transcript import TranscriptModel  # noqa: E402
 _TRANSCRIPT_DEBOUNCE_MS = 400
 _PROMPT_POLL_MS = 1000  # backstop poll for detecting the agent's prompts
 _CWD_POLL_MS = 2000  # footer refresh; only ticks while the tab is visible
+# The merge mark sits with caption-sized text, so it takes the same 12px as the
+# glyphs it replaces rather than a symbolic icon's stock 16.
+_PR_MERGED_ICON_PX = 12
 
 # PCRE2 flags for the find bar: multiline, case-insensitive.
 _PCRE2_CASELESS = 0x00000008
@@ -528,9 +531,19 @@ class TerminalTab(Gtk.Box):
         self._pr_label = Gtk.Label()
         self._pr_label.add_css_class("caption")
         self._pr_label.add_css_class("dim-label")
-        self._pr_label.set_visible(False)
+        # A merged PR trades its CI glyph for GitHub's git-merge mark, purple
+        # and undimmed: the one PR state worth spotting from across the row.
+        self._pr_merged = Gtk.Image.new_from_icon_name("git-merge-symbolic")
+        self._pr_merged.set_pixel_size(_PR_MERGED_ICON_PX)
+        self._pr_merged.add_css_class("pr-merged")
+        self._pr_merged.set_visible(False)
+        # Number and mark click as one chip, so either opens the PR.
+        self._pr_chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._pr_chip.append(self._pr_label)
+        self._pr_chip.append(self._pr_merged)
+        self._pr_chip.set_visible(False)
         enable_open_on_click(
-            self._pr_label, lambda: self._footer_pr.url if self._footer_pr else None
+            self._pr_chip, lambda: self._footer_pr.url if self._footer_pr else None
         )
         self._pr_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
         self._pr_sep.set_visible(False)
@@ -553,7 +566,7 @@ class TerminalTab(Gtk.Box):
         left.append(self._branch_seps[0])
         left.append(self._branch_label)
         left.append(self._branch_seps[1])
-        left.append(self._pr_label)
+        left.append(self._pr_chip)
         left.append(self._pr_sep)
 
         # User-configured app launchers sit just left of the panel buttons;
@@ -610,15 +623,16 @@ class TerminalTab(Gtk.Box):
         self._pr_sep.set_visible(pr)
 
     def _refresh_pr_label(self, pr: PullRequest | None) -> None:
-        """Show the session's linked PR, with its CI state when one is cached."""
+        """Show the session's linked PR, with its CI state when one is known."""
         if pr == self._footer_pr:
             return
         self._footer_pr = pr
         self._pr_label.set_text(pr.label if pr else "")
-        self._pr_label.set_tooltip_text(
+        self._pr_merged.set_visible(pr is not None and pr.merged)
+        self._pr_chip.set_tooltip_text(
             open_tooltip(describe(pr) + "\n" + pr.url) if pr else None
         )
-        self._pr_label.set_visible(pr is not None)
+        self._pr_chip.set_visible(pr is not None)
         self._sync_footer_seps()
 
     # -- graceful close ----------------------------------------------------

@@ -199,6 +199,17 @@ row.session-child.active-tab:hover {
 
 APP_ID = "com.episode6.Collins"
 
+# Colors that must follow the light/dark scheme, keyed by "is dark". GTK CSS has
+# no working prefers-color-scheme query, so these are re-applied from a second
+# provider whenever the effective scheme flips (see _apply_scheme_css).
+#
+# The footer's merged-PR mark uses GitHub's own two purples, so a merged PR
+# reads the same shade here as on its PR page in either theme.
+_SCHEME_CSS = """
+.pr-merged {{ color: {merged_purple}; }}
+"""
+_MERGED_PURPLE = {False: "#8250df", True: "#a371f7"}
+
 
 class App(Adw.Application):
     def __init__(self) -> None:
@@ -215,6 +226,16 @@ class App(Adw.Application):
         )
         if _BUNDLED_ICONS.is_dir():  # running from source; installed icons live in the system theme
             Gtk.IconTheme.get_for_display(display).add_search_path(str(_BUNDLED_ICONS))
+
+        # Scheme-dependent colors ride in their own provider so a light/dark
+        # flip only reloads these few rules, never the stylesheet above.
+        self._scheme_provider = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(
+            display, self._scheme_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+        style = Adw.StyleManager.get_default()
+        style.connect("notify::dark", lambda *_: self._apply_scheme_css())
+        self._apply_scheme_css()
 
         # Caffeine Mode: non-None while we hold a sleep/idle inhibitor.
         # The live toggle is deliberately not persisted — a restart must
@@ -237,6 +258,14 @@ class App(Adw.Application):
         new_window.connect("activate", lambda *_: self._new_window())
         self.add_action(new_window)
         self.set_accels_for_action("app.new-window", ["<Control><Shift>n"])
+
+    def _apply_scheme_css(self) -> None:
+        """Load the scheme's colors. Runs at startup and on every light/dark
+        flip, whether that came from the setting or from the system."""
+        dark = Adw.StyleManager.get_default().get_dark()
+        self._scheme_provider.load_from_data(
+            _SCHEME_CSS.format(merged_purple=_MERGED_PURPLE[dark]).encode()
+        )
 
     @property
     def caffeine_enabled(self) -> bool:
