@@ -20,7 +20,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import __version__, chats, dialogs, panelhistory
-from .bgstatus import BackgroundStatusPoller
+from .bgstatus import BackgroundStatusPoller, match_background_fork
 from .chatsessionview import ChatSessionTab
 from .formatting import blast_radius_body
 from .i18n import _
@@ -88,63 +88,6 @@ def _status_icon(status: str) -> Gio.Icon | None:
         icon = Gio.BytesIcon.new(GLib.Bytes.new(svg))
         _status_icon_cache[status] = icon
     return icon
-
-
-def _match_background_fork(
-    provider,
-    old_id: str,
-    cwd: str | None,
-    old_uuid: str | None,
-    known: set[str],
-    unique_cwd: bool = False,
-) -> str | None:
-    """Look for `old_id`'s detached agent in the provider's agent list.
-
-    Returns the fork's session id, "" when the session detached in place
-    (its own id is listed), or None when nothing there is it. Shells out to
-    the agent CLI — never call on the main thread.
-
-    Agents already listed before the /bg (`known`) can't be the new one. A
-    candidate is the same conversation when its transcript starts with the same
-    message uuid — /bg copies the conversation verbatim, uuids included — which
-    disambiguates several same-project tabs backgrounded at once (e.g. the quit
-    flow). Uuids are unavailable while the fork holds only a metadata stub, so
-    matching falls back to the working directory; `unique_cwd` makes that
-    fallback demand a single candidate in that directory, for callers with no
-    `known` set to narrow things down (see MainWindow._replay_pending_detaches).
-    """
-    agents = provider.background_agents()
-    fresh = [a for a in agents if a.session_id not in known and a.session_id != old_id]
-    if any(a.session_id == old_id for a in agents):
-        return ""  # detached in place: no fork to record
-
-    def transcript_uuid(agent) -> str | None:
-        path = next(
-            (p for p in provider.transcripts_for_cwd(agent.cwd) if p.stem == agent.session_id),
-            None,
-        )
-        return first_message_uuid(path) if path is not None else None
-
-    if old_uuid:
-        for agent in fresh:
-            if transcript_uuid(agent) == old_uuid:
-                return agent.session_id
-    if not cwd:
-        return None
-    same_cwd = [
-        a
-        for a in fresh
-        if a.cwd
-        and a.cwd == cwd
-        # A candidate whose transcript names a different conversation is not
-        # this one, however well its directory matches.
-        and not (old_uuid and (found := transcript_uuid(a)) and found != old_uuid)
-    ]
-    if unique_cwd and len(same_cwd) != 1:
-        # Ambiguous (or nothing): a wrong pairing would hide a good row and
-        # redirect it at someone else's agent, so decline to guess.
-        return None
-    return same_cwd[0].session_id if same_cwd else None
 
 
 def _app_icon_name(window: Gtk.Window) -> str:
@@ -1275,7 +1218,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         def work() -> None:
             for attempt in range(30):  # the agent entry appears within seconds of /bg
-                found = _match_background_fork(provider, old_id, cwd, old_uuid, known)
+                found = match_background_fork(provider, old_id, cwd, old_uuid, known)
                 log.debug("bg-watch: attempt %s for %s: %r", attempt, old_id, found)
                 if found is not None:
                     GLib.idle_add(self._on_backgrounded, tab, old_id, found)
@@ -1309,13 +1252,13 @@ class MainWindow(Adw.ApplicationWindow):
         # An agent some other row already forwards to is spoken for; it can't
         # be the one this record is looking for. That is all the standing in
         # for `known` there is this long after the /bg, so pairing also has to
-        # be strict: see _match_background_fork's unique_cwd.
+        # be strict: see match_background_fork's unique_cwd.
         claimed = set(self.state.session_forwards.values())
 
         def work() -> None:
             for old_id, info in pending.items():
                 provider = get_provider(info.get("provider") or "claude")
-                found = _match_background_fork(
+                found = match_background_fork(
                     provider,
                     old_id,
                     info.get("cwd") or "",
