@@ -709,6 +709,9 @@ class MainWindow(Adw.ApplicationWindow):
             saved_panel = self.state.get_panel_state(bound_id)
             if saved_panel:  # reopen the panel the way this session left it
                 tab.restore_panel_state(saved_panel)
+            # The PRs this session opened, back on the footer row before the
+            # first transcript poll (and including any that only a lookup knew).
+            tab.restore_prs(self.state.get_session_prs(bound_id))
 
     def _tab_title(self, session: Session) -> str:
         """Tab title with the session's saved emoji prefix (tabs only)."""
@@ -875,6 +878,7 @@ class MainWindow(Adw.ApplicationWindow):
         tab.connect("session-resolved", self._on_session_resolved, page)
         tab.connect("panel-size-changed", self._on_panel_size_changed)
         tab.connect("bell", self._on_bell)
+        tab.connect("prs-changed", self._on_tab_prs_changed)
         tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
         self.tab_view.set_selected_page(page)
@@ -899,17 +903,32 @@ class MainWindow(Adw.ApplicationWindow):
         self._content_header.add_css_class("bell-flash")
         self._bell_flash_source = GLib.timeout_add(_BELL_FLASH_MS, clear)
 
-    def _on_session_resolved(self, _tab: TerminalTab, session_id: str, page: Adw.TabPage) -> None:
+    def _on_session_resolved(self, tab: TerminalTab, session_id: str, page: Adw.TabPage) -> None:
         """A fresh tab (new / continue) discovered its session id: bind the tab
         to the session so the sidebar dot, open-dedup, rename and status sync
         work exactly like a tab opened from the sidebar."""
         if self._pages.get(session_id) not in (None, page):
             return  # another tab already owns this session
         self._pages[session_id] = page
+        # A `--continue` tab lands on a session that may already have PRs
+        # saved; a brand-new one has none, and this is a no-op for it.
+        tab.restore_prs(self.state.get_session_prs(session_id))
         self._pending_resolved[page] = (session_id, page.get_title())
         self._sync_status(session_id)
         self._update_active_row()  # the resolved tab may be the selected one
         self._apply_resolved_sessions()
+
+    def _on_tab_prs_changed(self, tab: TerminalTab, records: object) -> None:
+        """A tab's PR row changed: save it against that tab's session.
+
+        A fork writes nothing (its tab shares the original's session id and
+        would overwrite its list), and neither does a tab whose session isn't
+        resolved yet — it has nowhere to write, and its list is re-derived from
+        the transcript the moment it is.
+        """
+        if tab.fork or not tab.session_id:
+            return
+        self.state.set_session_prs(tab.session_id, list(records or []))
 
     def _on_panel_size_changed(self, _tab: TerminalTab, mode: str, size: int) -> None:
         """A divider was dragged: remember the size app-wide, so every panel
@@ -1949,12 +1968,13 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _forget_transcript(self, session_id: str) -> None:
         """Drop everything the app kept for a session whose transcript just
-        went away: its tab, its panel scrollback, its panel layout."""
+        went away: its tab, its panel scrollback, its panel layout, its PRs."""
         page = self._pages.get(session_id)
         if page is not None:
             self.tab_view.close_page(page)
         panelhistory.delete(session_id)
         self.state.set_panel_state(session_id, None)
+        self.state.set_session_prs(session_id, [])
 
     def _on_trash_session(self, _action, param: GLib.Variant) -> None:
         session = self._session_for(param)

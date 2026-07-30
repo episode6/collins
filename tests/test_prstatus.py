@@ -1,11 +1,13 @@
 """Tests for prstatus — parsing Claude Code's pr-link records, its gh status
-cache, the `gh pr view` refresh Collins runs when that cache is stale, and the
-branch lookup behind the footer's refresh button."""
+cache, the `gh pr view` refresh Collins runs when that cache is stale, the
+branch lookup behind the footer's refresh button, and the records a session's
+PRs are persisted as."""
 
 import json
 import os
 import subprocess
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -16,10 +18,15 @@ from collins.prstatus import (
     describe,
     discover_pr,
     enrich,
+    forget_status,
+    from_record,
+    from_records,
     invalidate,
     parse_pr_link,
     refresh,
     state_text,
+    to_record,
+    to_records,
 )
 
 URL = "https://github.com/episode6/collins/pull/55"
@@ -674,3 +681,63 @@ def test_describe_omits_zero_counts():
 
 def test_unknown_states_pass_through():
     assert state_text("SOMETHING_NEW") == "SOMETHING_NEW"
+
+
+# -- persisting a session's PRs ---------------------------------------------
+
+
+def test_record_keeps_identity_and_drops_status():
+    """Status is refetched every run; writing it down would age on disk."""
+    pr = PullRequest(55, URL, "episode6/collins", "OPEN", passed=2, failed=1, pending=0)
+    assert to_record(pr) == {"number": 55, "url": URL, "repository": "episode6/collins"}
+
+
+def test_a_merged_pr_stays_merged_on_disk():
+    """The one status that can't go stale, so the mark is up before gh answers."""
+    pr = PullRequest(55, URL, "episode6/collins", "MERGED", passed=2)
+    assert to_record(pr)["state"] == "MERGED"
+    assert from_record(to_record(pr)).merged is True
+
+
+def test_forget_status_keeps_only_the_merge():
+    pr = PullRequest(55, URL, "episode6/collins", "MERGED", passed=2, failed=1, pending=3)
+    assert forget_status(pr) == PullRequest(55, URL, "episode6/collins", "MERGED")
+    open_pr = replace(pr, state="OPEN")
+    assert forget_status(open_pr) == PullRequest(55, URL, "episode6/collins")
+
+
+def test_records_roundtrip_in_order():
+    prs = [PullRequest(n, f"https://github.com/episode6/collins/pull/{n}") for n in (40, 55, 61)]
+    assert [pr.number for pr in from_records(to_records(prs))] == [40, 55, 61]
+
+
+def test_a_pr_that_cannot_be_refreshed_is_not_written():
+    """An unfetchable URL on disk buys nothing and puts an unvalidated one there."""
+    assert to_record(PullRequest(55, "not-a-url")) is None
+    assert to_records([PullRequest(55, "not-a-url"), PullRequest(56, URL)]) == [
+        {"number": 56, "url": URL}
+    ]
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        "not a record",
+        {"url": URL},  # no number
+        {"number": "55", "url": URL},
+        {"number": True, "url": URL},  # bool is an int subclass
+        {"number": 55},  # no url
+        {"number": 55, "url": "https://github.com/episode6/collins/issues/55"},
+        {"number": 55, "url": "--version"},  # would reach a gh argv
+        {"number": 55, "url": "file:///etc/passwd"},
+    ],
+)
+def test_untrustworthy_records_are_dropped(record):
+    """Records start life in a transcript, and come back out to a browser and
+    to gh: having written them ourselves earns no shortcut."""
+    assert from_record(record) is None
+    assert from_records([record, {"number": 56, "url": URL}]) == [PullRequest(56, URL)]
+
+
+def test_from_records_tolerates_junk_in_place_of_a_list():
+    assert from_records({"number": 55, "url": URL}) == []

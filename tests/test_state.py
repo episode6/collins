@@ -202,6 +202,66 @@ def test_panel_state_ignores_corrupt_entries(app_state):
     assert fresh.get_panel_state("bad") is None
 
 
+def _pr(number):
+    return {"number": number, "url": f"https://github.com/episode6/collins/pull/{number}"}
+
+
+def test_session_prs_roundtrip(app_state):
+    state = app_state.AppState()
+    state.set_session_prs("sid", [_pr(40), _pr(55)])
+    fresh = app_state.AppState()
+    assert fresh.get_session_prs("sid") == [_pr(40), _pr(55)]  # oldest first, never sorted
+    assert fresh.get_session_prs("other") == []
+
+
+def test_session_prs_empty_removes_entry(app_state):
+    state = app_state.AppState()
+    state.set_session_prs("sid", [_pr(55)])
+    state.set_session_prs("sid", [])
+    assert app_state.AppState().get_session_prs("sid") == []
+
+
+def test_session_prs_unchanged_are_not_rewritten(app_state):
+    """Every tab re-derives its list on each transcript poll; a redundant write
+    per poll would be a state.json rewrite per second, per tab."""
+    state = app_state.AppState()
+    prs = [_pr(55)]
+    state.set_session_prs("sid", prs)
+    app_state._STATE_FILE.unlink()  # a redundant save would recreate the file
+    state.set_session_prs("sid", [dict(_pr(55))])  # identical list
+    state.set_session_prs("absent", [])  # clearing a session that has none
+    state.set_session_prs("", [_pr(61)])  # a tab whose session isn't resolved yet
+    assert not app_state._STATE_FILE.exists()
+
+
+def test_session_prs_ignore_corrupt_entries(app_state):
+    state = app_state.AppState()
+    state.set_session_prs("good", [_pr(55)])
+    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
+    data["session_prs"]["bad"] = "not-a-list"
+    app_state._STATE_FILE.write_text(json.dumps(data), encoding="utf-8")
+    fresh = app_state.AppState()
+    assert fresh.get_session_prs("good") == [_pr(55)]
+    assert fresh.get_session_prs("bad") == []
+
+
+def test_forwarding_a_session_carries_its_prs(app_state):
+    """A /bg fork continues the same conversation: the PRs it opened are its
+    own, and the fork's transcript never repeats their pr-links."""
+    state = app_state.AppState()
+    state.set_session_prs("old", [_pr(55)])
+    state.forward_session("old", "new")
+    assert app_state.AppState().get_session_prs("new") == [_pr(55)]
+
+
+def test_forwarding_does_not_clobber_the_forks_own_prs(app_state):
+    state = app_state.AppState()
+    state.set_session_prs("old", [_pr(55)])
+    state.set_session_prs("new", [_pr(61)])
+    state.forward_session("old", "new")
+    assert app_state.AppState().get_session_prs("new") == [_pr(61)]
+
+
 def test_last_active_session_roundtrip(app_state):
     state = app_state.AppState()
     assert state.get_setting("last_active_session") == ""  # default: nothing to reopen

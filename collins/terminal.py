@@ -39,7 +39,10 @@ from .prstatus import (  # noqa: E402
     describe,
     discover_pr,
     enrich,
+    forget_status,
+    from_records,
     invalidate,
+    to_records,
 )
 from .transcript import TranscriptModel  # noqa: E402
 
@@ -50,6 +53,13 @@ _CWD_POLL_MS = 2000  # footer refresh; only ticks while the tab is visible
 # glyphs it replaces rather than a symbolic icon's stock 16.
 _PR_MERGED_ICON_PX = 12
 _PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
+# A session links every PR that passes through its tool output, including ones
+# it only read, so the row is bounded: it shows (and saves, and refreshes) the
+# newest this many, and a session that busy has stopped caring about its first.
+_MAX_PR_CHIPS = 20
+# How much of the chip row survives a cramped footer: roughly two chips, which
+# is enough to show that scrolling it is what's left to do.
+_PR_CHIPS_MIN_PX = 100
 # Each CI mark is colored like its counterpart on the PR page; the shades
 # themselves follow the light/dark scheme and live in app.py.
 _PR_CHECKS_CSS = {
@@ -377,6 +387,10 @@ class TerminalTab(Gtk.Box):
         # Emitted when either of the tab's terminals rings BEL, for the
         # window's visual bell.
         "bell": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # Emitted when the PRs on the footer row change (object = their
+        # prstatus records, oldest first), so the window can save them against
+        # the session. Never fires for a tab that has nothing to say yet.
+        "prs-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
     }
 
     def __init__(
@@ -466,11 +480,13 @@ class TerminalTab(Gtk.Box):
 
         self._footer_cwd: str | None = None  # last value shown in the footer
         self._footer_branch: str | None = None
-        self._footer_pr: PullRequest | None = None
-        # The PR the refresh button last looked up by branch, and the
-        # transcript's pr-link at that moment (see _chosen_pr).
-        self._discovered_pr: PullRequest | None = None
-        self._linked_at_lookup: PullRequest | None = None
+        # Every PR this session has opened, oldest first: url -> PR without its
+        # CI status (see _collect_prs). Replaced wholesale, never mutated in
+        # place — the update thread reads it while the main loop writes it.
+        self._tracked_prs: dict[str, PullRequest] = {}
+        self._restored_prs: list[PullRequest] = []  # this session's, from a previous run
+        self._footer_prs: list[PullRequest] = []  # what the chips currently show
+        self._saved_pr_records: list[dict] = []  # last records handed to the window
         self._pr_discover = False  # a click's search, waiting for a free tick
         self._cwd_refresh_source: int | None = None
         self.append(self._build_footer())
@@ -680,34 +696,22 @@ class TerminalTab(Gtk.Box):
         self._branch_label.set_visible(False)
         enable_copy_on_click(self._branch_label, lambda: self._footer_branch, lambda b: f"⎇ {b}")
 
-        # The PR chip trails the branch, sharing its leading divider. Unlike
-        # its neighbours it opens rather than copies: the number on screen is
-        # a stand-in for the PR page, and going there is what you want next.
-        self._pr_label = Gtk.Label()
-        self._pr_label.add_css_class("caption")
-        self._pr_label.add_css_class("dim-label")
-        # The CI mark is its own label so it can carry its own color: green,
-        # red or yellow (undimmed, like the merge mark), which is what the eye
-        # picks up without reading the row.
-        self._pr_checks = Gtk.Label()
-        self._pr_checks.add_css_class("caption")
-        self._pr_checks.set_visible(False)
-        # A merged PR trades its CI glyph for GitHub's git-merge mark, purple
-        # and undimmed: the one PR state worth spotting from across the row.
-        self._pr_merged = Gtk.Image.new_from_icon_name("git-merge-symbolic")
-        self._pr_merged.set_pixel_size(_PR_MERGED_ICON_PX)
-        self._pr_merged.add_css_class("pr-merged")
-        self._pr_merged.set_visible(False)
-        # Number and marks click as one chip, so any of them opens the PR.
-        self._pr_chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self._pr_chip.append(self._pr_label)
-        self._pr_chip.append(self._pr_checks)
-        self._pr_chip.append(self._pr_merged)
-        self._pr_chip.set_visible(False)
-        enable_open_on_click(
-            self._pr_chip, lambda: self._footer_pr.url if self._footer_pr else None
-        )
-        # Sibling of the chip, never inside it: the chip opens the PR on click,
+        # The PR chips trail the branch, sharing its leading divider — one per
+        # PR the session has opened, oldest first, so the row reads in the
+        # order the work happened. Unlike their neighbours they open rather
+        # than copy: a number on screen is a stand-in for its PR page, and
+        # going there is what you want next.
+        self._pr_chips = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        # A long-lived session can out-grow the row it sits on. The chips get
+        # their natural width whenever the footer has it to give, and scroll
+        # (no scrollbar drawn — this is a 20px-tall strip) once it doesn't,
+        # rather than pushing the panel buttons off the end of the window.
+        self._pr_scroll = Gtk.ScrolledWindow(child=self._pr_chips)
+        self._pr_scroll.set_policy(Gtk.PolicyType.EXTERNAL, Gtk.PolicyType.NEVER)
+        self._pr_scroll.set_propagate_natural_width(True)
+        self._pr_scroll.set_min_content_width(_PR_CHIPS_MIN_PX)
+        self._pr_scroll.set_visible(False)
+        # Sibling of the chips, never inside them: a chip opens its PR on click,
         # and a button in there would open the browser along with itself.
         # It shows whether or not a PR does — with none, it is the way to go
         # looking for one (see _on_pr_refresh).
@@ -730,7 +734,7 @@ class TerminalTab(Gtk.Box):
         self._swap_panel_btn.set_action_name("win.swap-panel")
         self._swap_panel_btn.set_visible(False)  # only shown while a panel is open
 
-        # cwd, branch and PR sit together on the left; the wrapper box (not the
+        # cwd, branch and PRs sit together on the left; the wrapper box (not the
         # cwd label) takes the slack so the buttons stay pinned right even
         # while the branch and PR labels are hidden.
         left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
@@ -738,7 +742,7 @@ class TerminalTab(Gtk.Box):
         left.append(self._branch_seps[0])
         left.append(self._branch_label)
         left.append(self._branch_seps[1])
-        left.append(self._pr_chip)
+        left.append(self._pr_scroll)
         left.append(self._pr_refresh_btn)
         left.append(self._pr_sep)
 
@@ -781,10 +785,8 @@ class TerminalTab(Gtk.Box):
             self._branch_label.set_text(f"⎇ {branch}" if branch else "")
             self._branch_label.set_tooltip_text(copy_tooltip(branch) if branch else None)
             self._branch_label.set_visible(branch is not None)
-            # A PR found by branch belongs to that branch; a checkout retires it
-            # (and the button offers to look again).
-            self._discovered_pr = None
-            self._linked_at_lookup = None
+            # The chips are the session's history, so a checkout doesn't retire
+            # any of them; it only makes the button worth pressing again.
             self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
 
@@ -801,47 +803,119 @@ class TerminalTab(Gtk.Box):
         self._branch_seps[0].set_visible(cwd)
         self._branch_seps[1].set_visible(branch)
 
-    def _refresh_pr_label(self, pr: PullRequest | None) -> None:
-        """Show the session's linked PR, with its CI state when one is known."""
-        if pr == self._footer_pr:
+    def _build_pr_chip(self, pr: PullRequest) -> Gtk.Widget:
+        """One PR's chip: its number, its CI mark, and a merge mark if it landed.
+
+        Every part of a chip opens that PR and nothing else — the chips are
+        siblings on the row, so each number is its own link.
+        """
+        number = Gtk.Label(label=f"#{pr.number}")
+        number.add_css_class("caption")
+        number.add_css_class("dim-label")
+        chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        chip.append(number)
+        # The CI mark is its own label so it can carry its own color: green,
+        # red or yellow (undimmed, like the merge mark), which is what the eye
+        # picks up without reading the row.
+        glyph = pr.glyph
+        if glyph is not None:
+            checks = Gtk.Label(label=glyph)
+            checks.set_css_classes(["caption", _PR_CHECKS_CSS.get(glyph, "dim-label")])
+            chip.append(checks)
+        # A merged PR trades its CI glyph for GitHub's git-merge mark, purple
+        # and undimmed: the one PR state worth spotting from across the row.
+        if pr.merged:
+            merged = Gtk.Image.new_from_icon_name("git-merge-symbolic")
+            merged.set_pixel_size(_PR_MERGED_ICON_PX)
+            merged.add_css_class("pr-merged")
+            chip.append(merged)
+        chip.set_tooltip_text(open_tooltip(describe(pr) + "\n" + pr.url))
+        enable_open_on_click(chip, lambda: pr.url)
+        return chip
+
+    def _refresh_pr_chips(self, prs: list[PullRequest]) -> None:
+        """Show this session's PRs, oldest first, with the CI state each has.
+
+        The whole row is rebuilt rather than patched: a chip's parts depend on
+        its state (a glyph appears, a merge mark replaces it), and the equality
+        guard keeps the once-a-second poll from rebuilding anything unchanged.
+        """
+        if prs == self._footer_prs:
             return
-        self._footer_pr = pr
-        glyph = pr.glyph if pr else None
-        self._pr_label.set_text(f"#{pr.number}" if pr else "")
-        self._pr_checks.set_text(glyph or "")
-        self._pr_checks.set_visible(glyph is not None)
-        self._pr_checks.set_css_classes(
-            ["caption", _PR_CHECKS_CSS.get(glyph or "", "dim-label")]
-        )
-        self._pr_merged.set_visible(pr is not None and pr.merged)
-        self._pr_chip.set_tooltip_text(
-            open_tooltip(describe(pr) + "\n" + pr.url) if pr else None
-        )
-        self._pr_chip.set_visible(pr is not None)
+        self._footer_prs = list(prs)
+        while (child := self._pr_chips.get_first_child()) is not None:
+            self._pr_chips.remove(child)
+        for pr in prs:
+            self._pr_chips.append(self._build_pr_chip(pr))
+        self._pr_scroll.set_visible(bool(prs))
+        self._remember_prs(prs)
         self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
 
+    def _remember_prs(self, prs: list[PullRequest]) -> None:
+        """Hand the row's PRs to the window, which saves them for this session.
+
+        Their CI status doesn't go with them (see prstatus.to_record), so what
+        changes here is the list itself — a new PR, or one that just merged —
+        and a session that hasn't opened any never emits at all.
+        """
+        records = to_records(prs)
+        if records == self._saved_pr_records:
+            return
+        self._saved_pr_records = records
+        self.emit("prs-changed", records)
+
+    def restore_prs(self, records: object) -> None:
+        """Re-adopt the PRs saved for this session by a previous run.
+
+        The window calls this once the tab's session is known. The transcript's
+        own pr-links come back on the next poll anyway, but a PR the refresh
+        button found by branch is written down nowhere else, and a PR that was
+        already merged shows its mark before any `gh` call goes out.
+        """
+        restored = from_records(records)
+        if not restored:
+            return
+        self._restored_prs = restored
+        self._merge_restored()
+        self._request_update()
+
+    def _merge_restored(self) -> None:
+        """Put this session's restored PRs back at the head of the tracked list.
+
+        Replayed after every update lands, not just once: an update that was
+        already in flight when the window restored (opening a tab starts one
+        immediately) would otherwise finish and overwrite the restore with the
+        list it had snapshotted before it. Restored PRs lead — they are the
+        older ones — and a live copy of one keeps that place while keeping
+        whatever the row has since learned about it.
+        """
+        if not self._restored_prs:
+            return
+        merged = {pr.url: pr for pr in self._restored_prs}
+        merged.update(self._tracked_prs)
+        self._tracked_prs = merged
+
     def _sync_pr_refresh_tooltip(self, not_found: bool = False) -> None:
-        """What the button offers to do, which depends on what the chip shows.
+        """What the button offers to do, which depends on what the row shows.
 
         A search that came back empty says so until something changes, so a
         click that found nothing isn't indistinguishable from one that did.
         """
         if not_found:
             text = _("No pull request found for this branch")
-        elif self._footer_pr is not None:
-            text = _("Re-check this branch's pull request")
+        elif self._footer_prs:
+            text = _("Re-check this branch's pull requests")
         else:
             text = _("Look for this branch's pull request")
         self._pr_refresh_btn.set_tooltip_text(text)
 
     def _on_pr_refresh(self, _button: Gtk.Button) -> None:
-        """Ask the branch which PR it has, and show that one with fresh status.
+        """Ask the branch which PR it has, and refresh every chip's status.
 
-        Always the branch, whatever the chip currently shows and whatever state
-        it is in: the transcript is the *automatic* path to a PR, and a manual
-        refresh that only ever re-read it could never notice a PR opened by hand
-        or a branch that has moved on to its next one.
+        Always the branch, whatever the row currently shows: the transcript is
+        the *automatic* path to a PR, and a manual refresh that only ever
+        re-read it could never notice a PR opened by hand.
 
         The work lands on the update thread, so the click itself only asks; the
         button goes insensitive until the answer arrives.
@@ -862,7 +936,11 @@ class TerminalTab(Gtk.Box):
         self._transcript.set_path(jsonl_path)
         self._current_question_id = None
         self._handled_question_id = None
-        self._refresh_pr_label(None)  # re-read from the new transcript below
+        # Another session's PRs; re-read from the new transcript below, and
+        # restored again by the window once this tab's session is known.
+        self._tracked_prs = {}
+        self._restored_prs = []
+        self._refresh_pr_chips([])
         self._hide_card()
         if self._transcript_monitor is not None:
             self._transcript_monitor.cancel()
@@ -921,74 +999,98 @@ class TerminalTab(Gtk.Box):
                 self._transcript.update()
             except Exception:
                 pass
-            empty = looking and not self._look_up_branch_pr()
+            found = self._look_up_branch_pr() if looking else None
             try:
+                tracked = self._collect_prs(found)
                 # reads the gh status cache, so it belongs on this thread too;
                 # a session with no linked PR touches no files at all
-                pr = enrich(self._chosen_pr())
+                prs = [self._enriched(pr) for pr in tracked[-_MAX_PR_CHIPS:]]
             except Exception:
-                pr = self._footer_pr  # leave the chip as it is
-            GLib.idle_add(self._apply_update, pr, empty)
+                tracked, prs = None, self._footer_prs  # leave the chips as they are
+            GLib.idle_add(self._apply_update, prs, looking and found is None, tracked)
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _linked_pr(self) -> PullRequest | None:
-        """The PR the transcript names, if any — the automatic path."""
-        try:
-            return self._transcript.current_pr()
-        except Exception:
-            return None
+    def _collect_prs(self, found: PullRequest | None) -> list[PullRequest]:
+        """Every PR this tab knows about, oldest first. On the update thread.
 
-    def _look_up_branch_pr(self) -> bool:
+        Three sources, in the order a PR can first be known from them: the list
+        restored from a previous run, the transcript's pr-links, and whatever
+        the refresh button just found on the branch. A URL is only ever added —
+        a PR the session opened stays on the row once the branch has moved on,
+        which is the whole point of showing all of them.
+
+        Uncapped, and it must stay that way even though the row isn't: cap the
+        list here and the PRs trimmed off the front would come back from the
+        transcript on the next poll — as the *newest* entries — and the row
+        would spin.
+        """
+        collected = dict(self._tracked_prs)
+        try:
+            links = self._transcript.pull_requests()
+        except Exception:
+            links = []
+        for pr in links if found is None else [*links, found]:
+            collected.setdefault(pr.url, pr)
+        return list(collected.values())
+
+    def _enriched(self, pr: PullRequest) -> PullRequest:
+        """*pr* with its CI status, fetching it when due.
+
+        A merged PR is left alone: it has no checks left to run and shows no
+        glyph anyway, so an old chip on a long-lived session never costs
+        another `gh` call.
+        """
+        return pr if pr.merged else (enrich(pr) or pr)
+
+    def _look_up_branch_pr(self) -> PullRequest | None:
         """The refresh button's own path to a PR: whatever branch is checked out
-        right now, then gh. True when the branch had one. Runs on the update
-        thread.
+        right now, then gh. Runs on the update thread.
 
         cwd and branch are re-read here rather than taken from the footer's 2s
         poll, so a click straight after a checkout asks about the branch the user
         is actually on instead of the one the last tick happened to see.
+
+        Every chip already on the row is marked due first, so one click
+        refreshes the lot — status is the other half of what the button is for,
+        and a branch that turns up nothing still leaves the row up to date.
         """
+        for pr in self._footer_prs:
+            if not pr.merged:
+                invalidate(pr.url)
         cwd = self.current_agent_cwd()
         try:
-            found = discover_pr(cwd, current_branch(cwd))
+            return discover_pr(cwd, current_branch(cwd))
         except Exception:
-            found = None
-        if found is not None:
-            self._discovered_pr = found
-            self._linked_at_lookup = self._linked_pr()
-            return True
-        # Nothing on the branch. Blanking the chip because a lookup came back
-        # empty would be worse than leaving it, so the transcript's PR stays —
-        # but its status is still refreshed, which the click did ask for, and the
-        # tooltip owns up to where that PR came from.
-        self._discovered_pr = None
-        if self._footer_pr is not None:
-            invalidate(self._footer_pr.url)
-        return False
+            return None
 
-    def _chosen_pr(self) -> PullRequest | None:
-        """What the chip should show.
+    def _apply_update(
+        self,
+        prs: list[PullRequest] | None = None,
+        lookup_empty: bool = False,
+        tracked: list[PullRequest] | None = None,
+    ) -> bool:
+        """Land an update's results on the main loop.
 
-        A PR the button looked up outranks the transcript's `pr-link`, until the
-        transcript names a *different* one — the agent opening another PR is
-        newer news than an older click — or a checkout retires the lookup.
+        *prs* is what the row shows (the newest _MAX_PR_CHIPS, with status);
+        *tracked* is everything the tab knows about, which is what the next
+        collection starts from — None when the update failed and the row is
+        being left alone.
         """
-        linked = self._linked_pr()
-        found = self._discovered_pr
-        if found is None:
-            return linked
-        at_lookup = self._linked_at_lookup
-        if linked is not None and (at_lookup is None or linked.url != at_lookup.url):
-            self._discovered_pr = None
-            return linked
-        return found
-
-    def _apply_update(self, pr: PullRequest | None = None, lookup_empty: bool = False) -> bool:
         self._updating = False
         self._pr_refresh_btn.set_sensitive(True)
         self._check_prompt()
-        self._refresh_pr_label(pr)
-        if lookup_empty:  # even with a PR still showing: it isn't this branch's
+        if tracked is not None:
+            # The shown ones come back with status; a merge is the one part of
+            # it worth keeping, and keeping it is what stops that PR from being
+            # refetched (and re-saved) for the rest of the session.
+            shown = {pr.url: pr for pr in prs or []}
+            self._tracked_prs = {
+                pr.url: forget_status(shown.get(pr.url, pr)) for pr in tracked
+            }
+            self._merge_restored()
+        self._refresh_pr_chips(prs or [])
+        if lookup_empty:  # even with PRs still showing: none of them is this branch's
             self._sync_pr_refresh_tooltip(not_found=True)
         return GLib.SOURCE_REMOVE
 

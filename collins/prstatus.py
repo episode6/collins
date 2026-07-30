@@ -24,6 +24,12 @@ hand never shows up in it. So the footer's refresh button can also ask gh which
 PR belongs to the checked-out branch (`discover_pr`), which fills the chip in
 for a session whose transcript will never mention one.
 
+A session accumulates PRs — the footer shows every one of them — so its list
+outlives the app run: `to_record`/`from_record` reduce a PR to what is worth
+keeping (see AppState.set_session_prs). Status is deliberately not part of
+that; last week's green check says nothing about today. The one exception is
+a merged PR, which can't change back.
+
 Those gh calls are the only subprocesses here; everything else is a filesystem
 read, they always happen off the main thread, and every failure degrades to "no
 status" (or "no PR") rather than raising.
@@ -39,6 +45,7 @@ import shutil
 import subprocess
 import threading
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -203,6 +210,75 @@ def parse_pr_link(entry: dict) -> PullRequest | None:
         url=url,
         repository=repository if isinstance(repository, str) and repository else None,
     )
+
+
+def forget_status(pr: PullRequest) -> PullRequest:
+    """*pr* stripped back to its identity, keeping only a merge that happened.
+
+    What a tab remembers between polls, and the shape `to_record` writes out:
+    check counts are refetched, a merge is forever.
+    """
+    return replace(
+        pr,
+        state="MERGED" if pr.merged else None,
+        passed=None,
+        failed=None,
+        pending=None,
+    )
+
+
+def to_record(pr: PullRequest) -> dict | None:
+    """*pr* as a JSON-safe record for AppState, or None when it isn't one.
+
+    A URL that doesn't look like a PR page is dropped rather than written: it
+    can't be refreshed (see `_FETCHABLE`), so the only thing persisting it
+    would achieve is putting an unvalidated URL on disk.
+    """
+    if not _FETCHABLE.match(pr.url):
+        return None
+    record: dict = {"number": pr.number, "url": pr.url}
+    if pr.repository:
+        record["repository"] = pr.repository
+    if pr.merged:
+        record["state"] = "MERGED"
+    return record
+
+
+def to_records(prs: Iterable[PullRequest]) -> list[dict]:
+    """The persistable records for *prs*, in order, skipping any that aren't."""
+    return [record for pr in prs if (record := to_record(pr)) is not None]
+
+
+def from_record(record: object) -> PullRequest | None:
+    """A PullRequest read back from `to_record`, or None if it can't be used.
+
+    Everything is re-validated on the way in. These records started life in a
+    transcript — repo content, i.e. untrusted — and a restored PR's URL is
+    handed to a browser and to `gh`, so being the one that wrote the file
+    earns no shortcut here.
+    """
+    if not isinstance(record, dict):
+        return None
+    number = record.get("number")
+    url = record.get("url")
+    if not isinstance(number, int) or isinstance(number, bool):
+        return None
+    if not isinstance(url, str) or not _FETCHABLE.match(url):
+        return None
+    repository = record.get("repository")
+    return PullRequest(
+        number=number,
+        url=url,
+        repository=repository if isinstance(repository, str) and repository else None,
+        state="MERGED" if record.get("state") == "MERGED" else None,
+    )
+
+
+def from_records(records: object) -> list[PullRequest]:
+    """Every usable PullRequest in a saved list, in the order it was saved."""
+    if not isinstance(records, list):
+        return []
+    return [pr for record in records if (pr := from_record(record)) is not None]
 
 
 def _load_cache() -> dict:

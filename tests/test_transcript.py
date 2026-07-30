@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 import json
 
@@ -87,7 +87,7 @@ def test_missing_file(tmp_path):
     m = TranscriptModel(tmp_path / "nope.jsonl")
     assert m.update() is False
     assert m.pending_question() is None
-    assert m.current_pr() is None
+    assert m.pull_requests() == []
 
 
 # -- pr-link records --------------------------------------------------------
@@ -104,24 +104,25 @@ def _pr_line(number, repo="episode6/collins"):
     }
 
 
-def test_no_pr_link_means_no_pr(tmp_path):
+def test_no_pr_link_means_no_prs(tmp_path):
     p = tmp_path / "s.jsonl"
     _write(p, [_question_line("q1")])
     m = TranscriptModel(p)
     m.update()
-    assert m.current_pr() is None
+    assert m.pull_requests() == []
 
 
-def test_last_pr_link_wins(tmp_path):
-    """Claude re-emits pr-link on resume/compact, and a session can move to a
-    second PR; the most recent record is the one that counts."""
+def test_every_linked_pr_is_kept_oldest_first(tmp_path):
+    """A session opens PRs one after another; the footer shows all of them, in
+    the order they were opened."""
     p = tmp_path / "s.jsonl"
-    _write(p, [_pr_line(40), _question_line("q1"), _pr_line(55)])
+    _write(p, [_pr_line(40), _question_line("q1"), _pr_line(55), _pr_line(61)])
     m = TranscriptModel(p)
     m.update()
-    pr = m.current_pr()
-    assert (pr.number, pr.repository) == (55, "episode6/collins")
-    assert pr.url.endswith("/pull/55")
+    prs = m.pull_requests()
+    assert [pr.number for pr in prs] == [40, 55, 61]
+    assert prs[0].repository == "episode6/collins"
+    assert prs[2].url.endswith("/pull/61")
 
 
 def test_pr_link_is_picked_up_incrementally(tmp_path):
@@ -129,11 +130,11 @@ def test_pr_link_is_picked_up_incrementally(tmp_path):
     _write(p, [_question_line("q1")])
     m = TranscriptModel(p)
     m.update()
-    assert m.current_pr() is None
+    assert m.pull_requests() == []
     with p.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(_pr_line(55)) + "\n")
     assert m.update() is True
-    assert m.current_pr().number == 55
+    assert [pr.number for pr in m.pull_requests()] == [55]
 
 
 def test_repeated_pr_link_is_not_a_change(tmp_path):
@@ -146,23 +147,33 @@ def test_repeated_pr_link_is_not_a_change(tmp_path):
     with p.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(_pr_line(55)) + "\n")
     assert m.update() is False
-    assert m.current_pr().number == 55
+    assert [pr.number for pr in m.pull_requests()] == [55]
 
 
-def test_set_path_clears_the_pr(tmp_path):
+def test_a_re_emitted_link_does_not_reorder_the_list(tmp_path):
+    """Claude re-emits earlier links on resume/compact: the oldest PR must keep
+    its place at the head of the row rather than jumping to the end."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [_pr_line(40), _pr_line(55), _pr_line(40)])
+    m = TranscriptModel(p)
+    m.update()
+    assert [pr.number for pr in m.pull_requests()] == [40, 55]
+
+
+def test_set_path_clears_the_prs(tmp_path):
     p = tmp_path / "s.jsonl"
     _write(p, [_pr_line(55)])
     m = TranscriptModel(p)
     m.update()
     m.set_path(tmp_path / "other.jsonl")
-    assert m.current_pr() is None
+    assert m.pull_requests() == []
 
 
-def test_truncated_transcript_clears_the_pr(tmp_path):
+def test_truncated_transcript_clears_the_prs(tmp_path):
     p = tmp_path / "s.jsonl"
     _write(p, [_pr_line(55)])
     m = TranscriptModel(p)
     m.update()
     _write(p, [{"type": "mode"}])  # rewritten shorter, no pr-link
     m.update()
-    assert m.current_pr() is None
+    assert m.pull_requests() == []
