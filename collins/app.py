@@ -78,12 +78,15 @@ row.session-child:hover {
 row.session-child.running,
 row.session-child.running-attention {
   background-color: alpha(currentColor, 0.13);
-  border-color: transparent;
+  /* per side, never the border-color shorthand: the shorthand would drop the
+     guide line's color along with the outline (it did, on hover) */
+  border-top-color: transparent;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
 }
 row.session-child.running:hover,
 row.session-child.running-attention:hover {
   background-color: alpha(currentColor, 0.18);
-  border-color: transparent;
 }
 row.session-child.running { border-left-color: #2ec27e; }
 /* blue bar: a tab with output the user hasn't looked at yet */
@@ -91,7 +94,9 @@ row.session-child.running-attention { border-left-color: #3584e4; }
 /* the session shown in the currently selected tab */
 row.session-child.active-tab {
   background-color: alpha(#D97757, 0.16);
-  border-color: transparent;
+  border-top-color: transparent;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
   border-left-color: #D97757;
 }
 row.session-child.active-tab:hover {
