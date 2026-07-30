@@ -42,6 +42,7 @@ from .prstatus import (  # noqa: E402
     forget_status,
     from_records,
     invalidate,
+    merge_ordered,
     to_records,
 )
 from .transcript import TranscriptModel  # noqa: E402
@@ -54,12 +55,12 @@ _CWD_POLL_MS = 2000  # footer refresh; only ticks while the tab is visible
 _PR_MERGED_ICON_PX = 12
 _PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
 # A session links every PR that passes through its tool output, including ones
-# it only read, so the row is bounded: it shows (and saves, and refreshes) the
+# it only read, so the row is bounded: it tracks (and saves, and refreshes) the
 # newest this many, and a session that busy has stopped caring about its first.
+# How many of them are on screen is a question of width, not of this (see
+# PrChipRow).
 _MAX_PR_CHIPS = 20
-# How much of the chip row survives a cramped footer: roughly two chips, which
-# is enough to show that scrolling it is what's left to do.
-_PR_CHIPS_MIN_PX = 100
+_PR_CHIP_SPACING = 8  # between chips; their own parts sit 4 apart
 # Each CI mark is colored like its counterpart on the PR page; the shades
 # themselves follow the light/dark scheme and live in app.py.
 _PR_CHECKS_CSS = {
@@ -215,6 +216,85 @@ def _process_cwd(pid: int | None) -> str | None:
         return os.readlink(f"/proc/{pid}/cwd")
     except OSError:
         return None
+
+
+class PrChipRow(Gtk.Widget):
+    """The footer's PR chips: as many as fit, and the newest ones are the ones.
+
+    A box would insist on its full width and push the footer's buttons off the
+    end of the window; this drops whole chips off the *front* of the row when
+    it is short of room, so what's left still reads oldest-to-newest and still
+    ends with the PR the session is working on now. A dropped chip comes back
+    the moment the window is wide enough for it again.
+
+    It only ever holds a handful of small labels, so measuring them on every
+    allocation is cheaper than caching would be.
+    """
+
+    def __init__(self, spacing: int) -> None:
+        super().__init__()
+        self._spacing = spacing
+
+    def set_chips(self, chips: list[Gtk.Widget]) -> None:
+        """Replace the row's chips, oldest first."""
+        while (child := self.get_first_child()) is not None:
+            child.unparent()
+        for chip in chips:
+            chip.set_parent(self)
+
+    def _chips(self) -> list[Gtk.Widget]:
+        chips, child = [], self.get_first_child()
+        while child is not None:
+            chips.append(child)
+            child = child.get_next_sibling()
+        return chips
+
+    @staticmethod
+    def _natural(chip: Gtk.Widget, orientation: Gtk.Orientation) -> int:
+        return chip.measure(orientation, -1)[1]
+
+    def do_measure(self, orientation, _for_size):
+        chips = self._chips()
+        sizes = [self._natural(chip, orientation) for chip in chips]
+        if orientation != Gtk.Orientation.HORIZONTAL:
+            return max(sizes, default=0), max(sizes, default=0), -1, -1
+        # The newest chip alone is the least this row is worth keeping; every
+        # chip, spaced, is what it would like. Anything between is a row with
+        # its oldest chips dropped.
+        return (
+            sizes[-1] if sizes else 0,
+            sum(sizes) + self._spacing * max(len(sizes) - 1, 0),
+            -1,
+            -1,
+        )
+
+    def do_size_allocate(self, width, height, baseline):
+        chips = self._chips()
+        keep: list[Gtk.Widget] = []
+        used = 0
+        for chip in reversed(chips):  # newest first: it is the one that stays
+            needed = self._natural(chip, Gtk.Orientation.HORIZONTAL)
+            if keep:
+                needed += self._spacing
+            if keep and used + needed > width:
+                break
+            keep.append(chip)
+            used += needed
+        x = 0
+        for chip in chips:
+            chip.set_child_visible(chip in keep)
+            if chip not in keep:
+                continue
+            chip_width = self._natural(chip, Gtk.Orientation.HORIZONTAL)
+            rect = Gdk.Rectangle()
+            rect.x, rect.y, rect.width, rect.height = x, 0, chip_width, height
+            chip.size_allocate(rect, baseline)
+            x += chip_width + self._spacing
+
+    def do_dispose(self) -> None:
+        while (child := self.get_first_child()) is not None:
+            child.unparent()
+        Gtk.Widget.do_dispose(self)
 
 
 class PanelTerminal(Gtk.Box):
@@ -701,16 +781,8 @@ class TerminalTab(Gtk.Box):
         # order the work happened. Unlike their neighbours they open rather
         # than copy: a number on screen is a stand-in for its PR page, and
         # going there is what you want next.
-        self._pr_chips = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        # A long-lived session can out-grow the row it sits on. The chips get
-        # their natural width whenever the footer has it to give, and scroll
-        # (no scrollbar drawn — this is a 20px-tall strip) once it doesn't,
-        # rather than pushing the panel buttons off the end of the window.
-        self._pr_scroll = Gtk.ScrolledWindow(child=self._pr_chips)
-        self._pr_scroll.set_policy(Gtk.PolicyType.EXTERNAL, Gtk.PolicyType.NEVER)
-        self._pr_scroll.set_propagate_natural_width(True)
-        self._pr_scroll.set_min_content_width(_PR_CHIPS_MIN_PX)
-        self._pr_scroll.set_visible(False)
+        self._pr_chips = PrChipRow(_PR_CHIP_SPACING)
+        self._pr_chips.set_visible(False)
         # Sibling of the chips, never inside them: a chip opens its PR on click,
         # and a button in there would open the browser along with itself.
         # It shows whether or not a PR does — with none, it is the way to go
@@ -742,7 +814,7 @@ class TerminalTab(Gtk.Box):
         left.append(self._branch_seps[0])
         left.append(self._branch_label)
         left.append(self._branch_seps[1])
-        left.append(self._pr_scroll)
+        left.append(self._pr_chips)
         left.append(self._pr_refresh_btn)
         left.append(self._pr_sep)
 
@@ -843,11 +915,8 @@ class TerminalTab(Gtk.Box):
         if prs == self._footer_prs:
             return
         self._footer_prs = list(prs)
-        while (child := self._pr_chips.get_first_child()) is not None:
-            self._pr_chips.remove(child)
-        for pr in prs:
-            self._pr_chips.append(self._build_pr_chip(pr))
-        self._pr_scroll.set_visible(bool(prs))
+        self._pr_chips.set_chips([self._build_pr_chip(pr) for pr in prs])
+        self._pr_chips.set_visible(bool(prs))
         self._remember_prs(prs)
         self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
@@ -886,14 +955,15 @@ class TerminalTab(Gtk.Box):
         Replayed after every update lands, not just once: an update that was
         already in flight when the window restored (opening a tab starts one
         immediately) would otherwise finish and overwrite the restore with the
-        list it had snapshotted before it. Restored PRs lead — they are the
-        older ones — and a live copy of one keeps that place while keeping
-        whatever the row has since learned about it.
+        list it had snapshotted before it. The saved order decides where a PR
+        the transcript never mentions belongs; the live copy of one it does
+        mention wins on everything except its place in the row.
         """
         if not self._restored_prs:
             return
-        merged = {pr.url: pr for pr in self._restored_prs}
-        merged.update(self._tracked_prs)
+        live = list(self._tracked_prs.values())
+        merged = {pr.url: pr for pr in merge_ordered(self._restored_prs, live)}
+        merged.update({pr.url: pr for pr in live})  # positions keep, values don't
         self._tracked_prs = merged
 
     def _sync_pr_refresh_tooltip(self, not_found: bool = False) -> None:
@@ -1025,14 +1095,14 @@ class TerminalTab(Gtk.Box):
         transcript on the next poll — as the *newest* entries — and the row
         would spin.
         """
-        collected = dict(self._tracked_prs)
         try:
             links = self._transcript.pull_requests()
         except Exception:
             links = []
-        for pr in links if found is None else [*links, found]:
-            collected.setdefault(pr.url, pr)
-        return list(collected.values())
+        collected = merge_ordered(self._tracked_prs.values(), links)
+        if found is not None and all(pr.url != found.url for pr in collected):
+            collected.append(found)  # a PR nothing else knows about: it is the newest
+        return collected
 
     def _enriched(self, pr: PullRequest) -> PullRequest:
         """*pr* with its CI status, fetching it when due.

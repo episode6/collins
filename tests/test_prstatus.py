@@ -22,6 +22,7 @@ from collins.prstatus import (
     from_record,
     from_records,
     invalidate,
+    merge_ordered,
     parse_pr_link,
     refresh,
     state_text,
@@ -741,3 +742,52 @@ def test_untrustworthy_records_are_dropped(record):
 
 def test_from_records_tolerates_junk_in_place_of_a_list():
     assert from_records({"number": 55, "url": URL}) == []
+
+
+# -- merge_ordered (saved list + transcript links) --------------------------
+
+
+def _prs(*numbers, repo="episode6/collins"):
+    return [PullRequest(n, f"https://github.com/{repo}/pull/{n}") for n in numbers]
+
+
+def _numbers(prs):
+    return [pr.number for pr in prs]
+
+
+def test_merge_keeps_the_transcripts_order():
+    assert _numbers(merge_ordered([], _prs(40, 55, 61))) == [40, 55, 61]
+
+
+def test_merge_keeps_a_saved_pr_the_transcript_never_had():
+    """A PR found by branch lookup lives only in the saved list — and it was
+    found after the links around it, so it stays where it was saved."""
+    assert _numbers(merge_ordered(_prs(40, 55, 61), _prs(40, 55))) == [40, 55, 61]
+
+
+def test_merge_restores_links_that_aged_out_of_the_saved_list():
+    """The saved list is capped, the transcript isn't: the older links come
+    back ahead of the saved ones rather than after them."""
+    saved, links = _prs(3, 4, 5), _prs(1, 2, 3, 4, 5)
+    assert _numbers(merge_ordered(saved, links)) == [1, 2, 3, 4, 5]
+
+
+def test_merge_places_a_saved_only_pr_between_the_links_it_sat_between():
+    saved, links = _prs(40, 99, 61), _prs(40, 55, 61)
+    assert _numbers(merge_ordered(saved, links)) == [40, 99, 55, 61]
+
+
+def test_merge_is_idempotent():
+    """The row re-merges its own output on every poll; it must settle."""
+    once = merge_ordered(_prs(40, 99, 61), _prs(40, 55, 61))
+    assert _numbers(merge_ordered(once, _prs(40, 55, 61))) == _numbers(once)
+
+
+def test_merge_prefers_the_saved_copy_of_a_pr():
+    """Saved carries what the row has learned since — a merge, most of all."""
+    saved = [replace(_prs(55)[0], state="MERGED")]
+    assert merge_ordered(saved, _prs(55))[0].merged is True
+
+
+def test_merge_drops_duplicates_within_a_side():
+    assert _numbers(merge_ordered(_prs(55, 55), _prs(55))) == [55]

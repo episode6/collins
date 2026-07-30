@@ -212,6 +212,50 @@ def parse_pr_link(entry: dict) -> PullRequest | None:
     )
 
 
+def merge_ordered(
+    saved: Iterable[PullRequest], links: Iterable[PullRequest]
+) -> list[PullRequest]:
+    """*saved* and *links* as one list, in an order that respects both.
+
+    A transcript's pr-links are chronological and a row's saved list was built
+    the same way, but neither is the whole story: a PR found by a branch lookup
+    was never in a transcript, and a transcript can hold links that aged out of
+    what was saved. Appending one to the other therefore gets the order wrong
+    in one direction or the other.
+
+    So this walks *saved* and, for each entry the transcript also knows, first
+    emits every link that comes before it; an entry the transcript has never
+    heard of keeps the slot it had. Both orders survive, and a PR either side
+    knows about survives with them.
+
+    When both sides have a PR, *saved*'s copy is the one returned — it is the
+    one carrying whatever has been learned about it since.
+    """
+    saved, links = list(saved), list(links)
+    by_url = {pr.url: pr for pr in links}
+    by_url.update({pr.url: pr for pr in saved})
+    at = {pr.url: index for index, pr in enumerate(links)}
+    order: list[str] = []
+    seen: set[str] = set()
+    cursor = 0
+
+    def emit(url: str) -> None:
+        if url not in seen:
+            seen.add(url)
+            order.append(url)
+
+    for pr in saved:
+        index = at.get(pr.url)
+        if index is not None:
+            for link in links[cursor : index + 1]:
+                emit(link.url)
+            cursor = max(cursor, index + 1)
+        emit(pr.url)
+    for link in links[cursor:]:
+        emit(link.url)
+    return [by_url[url] for url in order]
+
+
 def forget_status(pr: PullRequest) -> PullRequest:
     """*pr* stripped back to its identity, keeping only a merge that happened.
 
