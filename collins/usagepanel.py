@@ -128,6 +128,8 @@ class UsagePanel(Gtk.Box):
         self._spinner = Gtk.Spinner()
         refresh = Gtk.Button(icon_name="view-refresh-symbolic")
         refresh.add_css_class("flat")
+        refresh.add_css_class("usage-refresh")
+        refresh.set_valign(Gtk.Align.CENTER)
         refresh.set_tooltip_text(_("Refresh usage"))
         refresh.connect("clicked", lambda *_a: self._refresh())
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)

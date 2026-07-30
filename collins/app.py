@@ -184,6 +184,17 @@ row.session-child.active-tab > box {
   padding: 8px 12px 10px 12px;
   border-top: 1px solid alpha(currentColor, 0.15);
 }
+/* The refresh button is a secondary affordance next to the "Claude usage"
+   heading: shrunk to roughly the heading's own height so it stops padding
+   out the header row and dominating the panel. */
+.usage-panel button.usage-refresh {
+  padding: 0 2px;
+  min-height: 20px;
+  min-width: 20px;
+}
+.usage-panel button.usage-refresh image {
+  -gtk-icon-size: 13px;
+}
 .usage-panel progressbar.usage-bar trough,
 .usage-panel progressbar.usage-bar progress {
   min-height: 6px;
