@@ -1,6 +1,4 @@
-import re
-
-import pytest
+from xml.etree import ElementTree
 
 from collins import licenses
 
@@ -75,15 +73,13 @@ def test_shipped_document_parses_into_sections():
 
 
 def test_shipped_document_is_valid_markup():
-    """A stray '<' or '&' in the doc would blank the About dialog's Legal page."""
-    gi = pytest.importorskip("gi")
-    gi.require_version("Pango", "1.0")
-    from gi.repository import Pango
+    """A stray '<' or '&' in the doc would blank the About dialog's Legal page.
 
+    Pango markup is XML, so an XML parser is enough to catch that — and it
+    needs no typelib, unlike Pango itself.
+    """
     for _title, markup in licenses.legal_sections():
-        # anchors are GtkLabel's extension to Pango markup; its own parser
-        # rejects them, so check what is left once they are stripped
-        Pango.parse_markup(re.sub(r"</?a[^>]*>", "", markup), -1, "\0")
+        ElementTree.fromstring(f"<span>{markup}</span>")
 
 
 def test_missing_document_degrades_to_no_sections(monkeypatch, tmp_path):
