@@ -204,13 +204,27 @@ APP_ID = "com.episode6.Collins"
 # provider whenever the effective scheme flips (see _apply_scheme_css).
 #
 # The footer's PR marks use GitHub's own pairs of shades, so a merged PR or a
-# green sweep reads here exactly as it does on the PR page, in either theme.
+# red build reads here exactly as it does on the PR page, in either theme.
 _SCHEME_CSS = """
 .pr-merged { color: %(merged_purple)s; }
 .pr-checks-passed { color: %(passed_green)s; }
+.pr-checks-failed { color: %(failed_red)s; }
+.pr-checks-pending { color: %(pending_yellow)s; }
 """
-_MERGED_PURPLE = {False: "#8250df", True: "#a371f7"}
-_PASSED_GREEN = {False: "#1a7f37", True: "#3fb950"}
+_MARK_COLORS = {
+    False: {  # light
+        "merged_purple": "#8250df",
+        "passed_green": "#1a7f37",
+        "failed_red": "#cf222e",
+        "pending_yellow": "#bf8700",
+    },
+    True: {  # dark
+        "merged_purple": "#a371f7",
+        "passed_green": "#3fb950",
+        "failed_red": "#f85149",
+        "pending_yellow": "#d29922",
+    },
+}
 
 
 class App(Adw.Application):
@@ -265,12 +279,7 @@ class App(Adw.Application):
         """Load the scheme's colors. Runs at startup and on every light/dark
         flip, whether that came from the setting or from the system."""
         dark = Adw.StyleManager.get_default().get_dark()
-        self._scheme_provider.load_from_data(
-            (
-                _SCHEME_CSS
-                % {"merged_purple": _MERGED_PURPLE[dark], "passed_green": _PASSED_GREEN[dark]}
-            ).encode()
-        )
+        self._scheme_provider.load_from_data((_SCHEME_CSS % _MARK_COLORS[dark]).encode())
 
     @property
     def caffeine_enabled(self) -> bool:

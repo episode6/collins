@@ -30,7 +30,14 @@ from .gitinfo import current_branch  # noqa: E402
 from .i18n import _  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
-from .prstatus import CHECKS_PASSED, PullRequest, describe, enrich  # noqa: E402
+from .prstatus import (  # noqa: E402
+    CHECKS_FAILED,
+    CHECKS_PASSED,
+    CHECKS_PENDING,
+    PullRequest,
+    describe,
+    enrich,
+)
 from .transcript import TranscriptModel  # noqa: E402
 
 _TRANSCRIPT_DEBOUNCE_MS = 400
@@ -39,6 +46,13 @@ _CWD_POLL_MS = 2000  # footer refresh; only ticks while the tab is visible
 # The merge mark sits with caption-sized text, so it takes the same 12px as the
 # glyphs it replaces rather than a symbolic icon's stock 16.
 _PR_MERGED_ICON_PX = 12
+# Each CI mark is colored like its counterpart on the PR page; the shades
+# themselves follow the light/dark scheme and live in app.py.
+_PR_CHECKS_CSS = {
+    CHECKS_PASSED: "pr-checks-passed",
+    CHECKS_FAILED: "pr-checks-failed",
+    CHECKS_PENDING: "pr-checks-pending",
+}
 
 # PCRE2 flags for the find bar: multiline, case-insensitive.
 _PCRE2_CASELESS = 0x00000008
@@ -531,9 +545,9 @@ class TerminalTab(Gtk.Box):
         self._pr_label = Gtk.Label()
         self._pr_label.add_css_class("caption")
         self._pr_label.add_css_class("dim-label")
-        # The CI mark is its own label so it can carry its own color: a passing
-        # sweep goes green (undimmed, like the merge mark), which is what the
-        # eye picks up without reading the row.
+        # The CI mark is its own label so it can carry its own color: green,
+        # red or yellow (undimmed, like the merge mark), which is what the eye
+        # picks up without reading the row.
         self._pr_checks = Gtk.Label()
         self._pr_checks.add_css_class("caption")
         self._pr_checks.set_visible(False)
@@ -638,10 +652,8 @@ class TerminalTab(Gtk.Box):
         self._pr_label.set_text(f"#{pr.number}" if pr else "")
         self._pr_checks.set_text(glyph or "")
         self._pr_checks.set_visible(glyph is not None)
-        # Green is reserved for a clean sweep; a failure or a run still going
-        # stays dim beside the number until there's something to celebrate.
         self._pr_checks.set_css_classes(
-            ["caption", "pr-checks-passed" if glyph == CHECKS_PASSED else "dim-label"]
+            ["caption", _PR_CHECKS_CSS.get(glyph or "", "dim-label")]
         )
         self._pr_merged.set_visible(pr is not None and pr.merged)
         self._pr_chip.set_tooltip_text(
