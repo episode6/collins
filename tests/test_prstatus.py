@@ -104,7 +104,7 @@ def test_parses_a_real_record():
     pr = parse_pr_link(_link())
     assert pr == PullRequest(number=55, url=URL, repository="episode6/collins")
     assert pr.slug == "episode6/collins#55"
-    assert pr.label == "#55"
+    assert pr.glyph is None
 
 
 def test_repository_is_optional():
@@ -134,7 +134,7 @@ def test_enrich_fills_state_and_checks(cache):
                  "checks": {"passed": 1, "failed": 1, "pending": 0}}})
     pr = enrich(parse_pr_link(_link()))
     assert (pr.state, pr.passed, pr.failed, pr.pending) == ("DRAFT", 1, 1, 0)
-    assert pr.label == "#55 ✗"
+    assert pr.glyph == "✗"
 
 
 def test_enrich_ignores_other_prs(cache):
@@ -174,13 +174,13 @@ def test_a_stale_cli_cache_is_not_trusted(cache):
           age_s=CACHE_MAX_AGE_S + 60)
     pr = enrich(parse_pr_link(_link()))
     assert (pr.state, pr.failed) == (None, None)
-    assert pr.label == "#55"
+    assert pr.glyph is None
 
 
 def test_a_recent_cli_cache_still_warms_the_chip(cache):
     cache({URL: {"state": "OPEN", "checks": {"passed": 2, "failed": 0, "pending": 0}}},
           age_s=CACHE_MAX_AGE_S - 60)
-    assert enrich(parse_pr_link(_link())).label == "#55 ✓"
+    assert enrich(parse_pr_link(_link())).glyph == "✓"
 
 
 # -- our own gh refresh -----------------------------------------------------
@@ -223,7 +223,7 @@ def test_a_stale_status_is_shown_while_its_refresh_runs(clock, gh):
     gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}})
     refresh(URL)
     clock.advance(_TTL_S * 10)
-    assert enrich(parse_pr_link(_link())).label == "#55 ✓"
+    assert enrich(parse_pr_link(_link())).glyph == "✓"
 
 
 def test_a_failed_fetch_backs_off_further(scheduled, clock, gh, cache):
@@ -233,7 +233,7 @@ def test_a_failed_fetch_backs_off_further(scheduled, clock, gh, cache):
     gh(None)
     refresh(URL)
     scheduled.clear()
-    assert enrich(parse_pr_link(_link())).label == "#55 ✓"  # from the CLI cache
+    assert enrich(parse_pr_link(_link())).glyph == "✓"  # from the CLI cache
     clock.advance(_TTL_S * 2)
     enrich(parse_pr_link(_link()))
     assert scheduled == []
@@ -244,7 +244,7 @@ def test_a_failed_fetch_backs_off_further(scheduled, clock, gh, cache):
 
 def test_nothing_is_fetched_once_gh_is_known_missing(scheduled, monkeypatch):
     monkeypatch.setattr(prstatus, "_gh_missing", True)
-    assert enrich(parse_pr_link(_link())).label == "#55"
+    assert enrich(parse_pr_link(_link())).glyph is None
     assert scheduled == []
 
 
@@ -374,32 +374,32 @@ def test_run_gh_passes_the_url_as_an_argument(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "counts,label",
+    "counts,glyph",
     [
-        ((None, None, None), "#55"),  # nothing cached
-        ((0, 0, 0), "#55"),  # a PR with no checks configured
-        ((3, 0, 0), "#55 ✓"),
-        ((2, 1, 0), "#55 ✗"),  # a failure outranks passes
-        ((2, 1, 4), "#55 ✗"),  # ...and outranks pending runs
-        ((2, 0, 1), "#55 ●"),
+        ((None, None, None), None),  # nothing cached
+        ((0, 0, 0), None),  # a PR with no checks configured
+        ((3, 0, 0), "✓"),
+        ((2, 1, 0), "✗"),  # a failure outranks passes
+        ((2, 1, 4), "✗"),  # ...and outranks pending runs
+        ((2, 0, 1), "●"),
     ],
 )
-def test_label_summarizes_checks(counts, label):
+def test_glyph_summarizes_checks(counts, glyph):
     passed, failed, pending = counts
     pr = PullRequest(55, URL, passed=passed, failed=failed, pending=pending)
-    assert pr.label == label
+    assert pr.glyph == glyph
 
 
 def test_a_merged_pr_drops_its_check_glyph():
     """The purple merge mark replaces it — how CI went on the way in is history."""
     pr = PullRequest(55, URL, state="MERGED", passed=2, failed=0, pending=0)
-    assert (pr.merged, pr.label) == (True, "#55")
+    assert (pr.merged, pr.glyph) == (True, None)
 
 
 @pytest.mark.parametrize("state", [None, "OPEN", "DRAFT", "CLOSED", "SOMETHING_NEW"])
 def test_every_other_state_keeps_the_glyph(state):
     pr = PullRequest(55, URL, state=state, passed=2, failed=0, pending=0)
-    assert (pr.merged, pr.label) == (False, "#55 ✓")
+    assert (pr.merged, pr.glyph) == (False, "✓")
 
 
 # -- describe (the tooltip's long form) -------------------------------------

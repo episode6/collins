@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-29. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -30,7 +30,7 @@ from .gitinfo import current_branch  # noqa: E402
 from .i18n import _  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
-from .prstatus import PullRequest, describe, enrich  # noqa: E402
+from .prstatus import CHECKS_PASSED, PullRequest, describe, enrich  # noqa: E402
 from .transcript import TranscriptModel  # noqa: E402
 
 _TRANSCRIPT_DEBOUNCE_MS = 400
@@ -531,15 +531,22 @@ class TerminalTab(Gtk.Box):
         self._pr_label = Gtk.Label()
         self._pr_label.add_css_class("caption")
         self._pr_label.add_css_class("dim-label")
+        # The CI mark is its own label so it can carry its own color: a passing
+        # sweep goes green (undimmed, like the merge mark), which is what the
+        # eye picks up without reading the row.
+        self._pr_checks = Gtk.Label()
+        self._pr_checks.add_css_class("caption")
+        self._pr_checks.set_visible(False)
         # A merged PR trades its CI glyph for GitHub's git-merge mark, purple
         # and undimmed: the one PR state worth spotting from across the row.
         self._pr_merged = Gtk.Image.new_from_icon_name("git-merge-symbolic")
         self._pr_merged.set_pixel_size(_PR_MERGED_ICON_PX)
         self._pr_merged.add_css_class("pr-merged")
         self._pr_merged.set_visible(False)
-        # Number and mark click as one chip, so either opens the PR.
+        # Number and marks click as one chip, so any of them opens the PR.
         self._pr_chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self._pr_chip.append(self._pr_label)
+        self._pr_chip.append(self._pr_checks)
         self._pr_chip.append(self._pr_merged)
         self._pr_chip.set_visible(False)
         enable_open_on_click(
@@ -627,7 +634,15 @@ class TerminalTab(Gtk.Box):
         if pr == self._footer_pr:
             return
         self._footer_pr = pr
-        self._pr_label.set_text(pr.label if pr else "")
+        glyph = pr.glyph if pr else None
+        self._pr_label.set_text(f"#{pr.number}" if pr else "")
+        self._pr_checks.set_text(glyph or "")
+        self._pr_checks.set_visible(glyph is not None)
+        # Green is reserved for a clean sweep; a failure or a run still going
+        # stays dim beside the number until there's something to celebrate.
+        self._pr_checks.set_css_classes(
+            ["caption", "pr-checks-passed" if glyph == CHECKS_PASSED else "dim-label"]
+        )
         self._pr_merged.set_visible(pr is not None and pr.merged)
         self._pr_chip.set_tooltip_text(
             open_tooltip(describe(pr) + "\n" + pr.url) if pr else None

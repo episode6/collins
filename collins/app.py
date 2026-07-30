@@ -203,12 +203,14 @@ APP_ID = "com.episode6.Collins"
 # no working prefers-color-scheme query, so these are re-applied from a second
 # provider whenever the effective scheme flips (see _apply_scheme_css).
 #
-# The footer's merged-PR mark uses GitHub's own two purples, so a merged PR
-# reads the same shade here as on its PR page in either theme.
+# The footer's PR marks use GitHub's own pairs of shades, so a merged PR or a
+# green sweep reads here exactly as it does on the PR page, in either theme.
 _SCHEME_CSS = """
-.pr-merged {{ color: {merged_purple}; }}
+.pr-merged { color: %(merged_purple)s; }
+.pr-checks-passed { color: %(passed_green)s; }
 """
 _MERGED_PURPLE = {False: "#8250df", True: "#a371f7"}
+_PASSED_GREEN = {False: "#1a7f37", True: "#3fb950"}
 
 
 class App(Adw.Application):
@@ -264,7 +266,10 @@ class App(Adw.Application):
         flip, whether that came from the setting or from the system."""
         dark = Adw.StyleManager.get_default().get_dark()
         self._scheme_provider.load_from_data(
-            _SCHEME_CSS.format(merged_purple=_MERGED_PURPLE[dark]).encode()
+            (
+                _SCHEME_CSS
+                % {"merged_purple": _MERGED_PURPLE[dark], "passed_green": _PASSED_GREEN[dark]}
+            ).encode()
         )
 
     @property

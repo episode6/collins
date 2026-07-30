@@ -123,14 +123,13 @@ class PullRequest:
         return self.state == "MERGED"
 
     @property
-    def label(self) -> str:
-        """The footer chip's text: ``#55`` or ``#55 ✗``.
+    def glyph(self) -> str | None:
+        """The CI mark the chip shows beside the number, if any.
 
-        A merged PR shows the number alone — the merge mark beside it says all
-        there is to say, and whether CI passed on the way in is history.
+        A merged PR shows none — the merge mark beside it says all there is to
+        say, and whether CI passed on the way in is history.
         """
-        glyph = None if self.merged else self.checks_glyph
-        return f"#{self.number} {glyph}" if glyph else f"#{self.number}"
+        return None if self.merged else self.checks_glyph
 
 
 def state_text(state: str) -> str:
