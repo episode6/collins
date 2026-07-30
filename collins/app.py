@@ -53,10 +53,10 @@ tabbar tab:not(:checked) label { opacity: 0.6; }
   font-size: 0.8em;
 }
 
-/* children connect to their group via a left guide line. Not running: an
-   empty outlined card. Running: the outline gives way to a filled card, and
-   the guide line takes the status color. Every state keeps the same 1px/2px
-   border box, so a row never shifts or resizes as its status changes.
+/* every session row is the same outlined card with a left guide line; what a
+   running session adds is a fill, and a status color on that line. The border
+   box is identical in every state, so a row never shifts or resizes as its
+   status changes.
    The left indent is a widget margin set in sidebar.py, not a CSS margin
    here: it tracks the configurable project-icon size, so the card always
    starts just past the icon of the project header above it. */
@@ -93,19 +93,16 @@ row.session-child:hover {
   background-color: alpha(currentColor, 0.1);
   border-color: alpha(currentColor, 0.3);
 }
-/* sessions running in an open tab share one filled card, so live work stands
-   out from the archive of past sessions as a group; only the left bar carries
+/* sessions running in an open tab share one fill, so live work stands out
+   from the archive of past sessions as a group; only the guide line carries
    the status color. Detached (/bg) sessions are left alone: there is no tab
-   to return to. Must stay above the active-tab rules, which take over the
-   fill for the one session the selected tab is showing. */
+   to return to. These rules must stay below the plain :hover one, whose
+   border-color shorthand would otherwise repaint the guide line, and above
+   the active-tab rules, which take over the fill for the one session the
+   selected tab is showing. */
 row.session-child.running,
 row.session-child.running-attention {
   background-color: alpha(currentColor, 0.13);
-  /* per side, never the border-color shorthand: the shorthand would drop the
-     guide line's color along with the outline (it did, on hover) */
-  border-top-color: transparent;
-  border-right-color: transparent;
-  border-bottom-color: transparent;
 }
 row.session-child.running:hover,
 row.session-child.running-attention:hover {
@@ -118,9 +115,6 @@ row.session-child.running-attention { border-left-color: #3584e4; }
    the guide line keeps saying what the session's status is */
 row.session-child.active-tab {
   background-color: alpha(#D97757, 0.16);
-  border-top-color: transparent;
-  border-right-color: transparent;
-  border-bottom-color: transparent;
 }
 row.session-child.active-tab:hover {
   background-color: alpha(#D97757, 0.22);
