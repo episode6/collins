@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 import json
 
@@ -322,6 +322,39 @@ def test_forward_session_ignores_degenerate_ids(app_state):
     state.forward_session("", "y")
     state.forward_session("x", "")
     assert state.session_forwards == {}
+
+
+def test_forward_session_appends_instead_of_dropping_a_live_fork(app_state):
+    state = app_state.AppState()
+    state.forward_session("old", "first")
+    # Backgrounding "old" again (its row still stands for the conversation)
+    # must not overwrite the first forward: that agent may still be running,
+    # and the forward is the only record of which row belongs to it.
+    state.forward_session("old", "second")
+
+    assert state.session_forwards == {"old": "first", "first": "second"}
+    assert state.resolve_forward("old") == "second"
+    assert state.resolve_forward("first") == "second"
+
+    # Re-recording the id already at the end of the chain is a no-op, so a
+    # replayed confirmation can't build a cycle out of it.
+    state.forward_session("old", "second")
+    assert state.session_forwards == {"old": "first", "first": "second"}
+
+
+def test_pending_detaches_survive_a_restart(app_state):
+    state = app_state.AppState()
+    state.set_pending_detach("old", provider="claude", cwd="/proj", uuid="u-1")
+
+    # The app can close between feeding /bg and the CLI listing the agent; the
+    # evidence for the pairing has to outlive the process that gathered it.
+    fresh = app_state.AppState()
+    assert fresh.get_pending_detaches() == {
+        "old": {"provider": "claude", "cwd": "/proj", "uuid": "u-1"}
+    }
+
+    fresh.clear_pending_detach("old")
+    assert app_state.AppState().get_pending_detaches() == {}
 
 
 def test_resolve_forward_follows_chains_and_survives_cycles(app_state):

@@ -127,6 +127,10 @@ class AppState:
         # /bg has been observed forking a backgrounded session to a fresh
         # background session id; in-place detaches add no entries here).
         self.session_forwards: dict[str, str] = {}
+        # /bg detaches whose fork hasn't been identified yet: session id -> the
+        # evidence needed to finish the pairing after a restart (see
+        # MainWindow._replay_pending_detaches).
+        self.pending_detaches: dict[str, dict] = {}
         self.settings: dict = dict(DEFAULT_SETTINGS)
         self._load()
 
@@ -165,6 +169,9 @@ class AppState:
         self.session_forwards = {
             k: v for k, v in (data.get("session_forwards") or {}).items() if isinstance(v, str)
         }
+        self.pending_detaches = {
+            k: v for k, v in (data.get("pending_detaches") or {}).items() if isinstance(v, dict)
+        }
         self.settings = {**DEFAULT_SETTINGS, **(data.get("settings") or {})}
 
     def save(self) -> None:
@@ -181,6 +188,7 @@ class AppState:
             "expanded_groups": sorted(self.expanded_groups),
             "panel_states": self.panel_states,
             "session_forwards": self.session_forwards,
+            "pending_detaches": self.pending_detaches,
             "settings": self.settings,
         }
         tmp = _STATE_FILE.with_suffix(".json.tmp")
@@ -328,10 +336,19 @@ class AppState:
         The stale original row is *not* archived here: visibility is derived
         from the forward at display time (see SessionStore), so the original
         stays in the sidebar — disabled — until the fork's row can take its
-        place, instead of vanishing for the scan-lag gap."""
+        place, instead of vanishing for the scan-lag gap.
+
+        A session that already has a forward is appended to, never overwritten:
+        the existing target may be an agent that is still running, and dropping
+        the only record of it would leave it with no row to reach it from. The
+        new fork goes on the end of the chain instead, so resolve_forward()
+        still lands on the newest id and nothing is orphaned."""
         if not old_id or not new_id or old_id == new_id:
             return
-        self.session_forwards[old_id] = new_id
+        tail = self.resolve_forward(old_id)
+        if tail == new_id:
+            return  # already the end of this chain
+        self.session_forwards[tail] = new_id  # tail == old_id when unforwarded
         if old_id in self.names and new_id not in self.names:
             self.names[new_id] = self.names[old_id]
         if old_id in self.generated_names and new_id not in self.generated_names:
@@ -343,6 +360,31 @@ class AppState:
         if old_id in self.panel_states and new_id not in self.panel_states:
             self.panel_states[new_id] = dict(self.panel_states[old_id])
         self.save()
+
+    # -- pending /bg detaches ----------------------------------------------
+
+    def set_pending_detach(
+        self, session_id: str, provider: str = "", cwd: str = "", uuid: str = ""
+    ) -> None:
+        """Remember that a /bg was fed for this session but its background
+        agent hasn't been identified yet, together with what identifying it
+        needs. Persisted so closing the app mid-handoff doesn't strand a live
+        agent with no row pointing at it."""
+        if not session_id:
+            return
+        self.pending_detaches[session_id] = {
+            "provider": provider,
+            "cwd": cwd,
+            "uuid": uuid,
+        }
+        self.save()
+
+    def clear_pending_detach(self, session_id: str) -> None:
+        if self.pending_detaches.pop(session_id, None) is not None:
+            self.save()
+
+    def get_pending_detaches(self) -> dict[str, dict]:
+        return dict(self.pending_detaches)
 
     def resolve_forward(self, session_id: str) -> str:
         """Follow the forward chain (a session may be backgrounded repeatedly)

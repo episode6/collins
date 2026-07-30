@@ -90,6 +90,63 @@ def _status_icon(status: str) -> Gio.Icon | None:
     return icon
 
 
+def _match_background_fork(
+    provider,
+    old_id: str,
+    cwd: str | None,
+    old_uuid: str | None,
+    known: set[str],
+    unique_cwd: bool = False,
+) -> str | None:
+    """Look for `old_id`'s detached agent in the provider's agent list.
+
+    Returns the fork's session id, "" when the session detached in place
+    (its own id is listed), or None when nothing there is it. Shells out to
+    the agent CLI — never call on the main thread.
+
+    Agents already listed before the /bg (`known`) can't be the new one. A
+    candidate is the same conversation when its transcript starts with the same
+    message uuid — /bg copies the conversation verbatim, uuids included — which
+    disambiguates several same-project tabs backgrounded at once (e.g. the quit
+    flow). Uuids are unavailable while the fork holds only a metadata stub, so
+    matching falls back to the working directory; `unique_cwd` makes that
+    fallback demand a single candidate in that directory, for callers with no
+    `known` set to narrow things down (see MainWindow._replay_pending_detaches).
+    """
+    agents = provider.background_agents()
+    fresh = [a for a in agents if a.session_id not in known and a.session_id != old_id]
+    if any(a.session_id == old_id for a in agents):
+        return ""  # detached in place: no fork to record
+
+    def transcript_uuid(agent) -> str | None:
+        path = next(
+            (p for p in provider.transcripts_for_cwd(agent.cwd) if p.stem == agent.session_id),
+            None,
+        )
+        return first_message_uuid(path) if path is not None else None
+
+    if old_uuid:
+        for agent in fresh:
+            if transcript_uuid(agent) == old_uuid:
+                return agent.session_id
+    if not cwd:
+        return None
+    same_cwd = [
+        a
+        for a in fresh
+        if a.cwd
+        and a.cwd == cwd
+        # A candidate whose transcript names a different conversation is not
+        # this one, however well its directory matches.
+        and not (old_uuid and (found := transcript_uuid(a)) and found != old_uuid)
+    ]
+    if unique_cwd and len(same_cwd) != 1:
+        # Ambiguous (or nothing): a wrong pairing would hide a good row and
+        # redirect it at someone else's agent, so decline to guess.
+        return None
+    return same_cwd[0].session_id if same_cwd else None
+
+
 def _app_icon_name(window: Gtk.Window) -> str:
     """The debug build (and any COLLINS_APP_ID derived from its id) wears a
     recolored icon so the two apps read apart in a dock."""
@@ -138,9 +195,14 @@ class MainWindow(Adw.ApplicationWindow):
         # their titles from the store.
         self._local_titles: set[Adw.TabPage] = set()
         self._idle_sources: dict[Adw.TabPage, int] = {}  # pending idle-notify timers
-        # Sessions whose /bg was fed but whose detach isn't confirmed yet:
-        # session id -> safety-timeout source (see _mark_backgrounding).
+        # Sessions assumed to be running detached because a /bg was fed, until
+        # the agent list reports them: session id -> safety-timeout source
+        # (see _mark_backgrounding).
         self._pending_bg: dict[str, int] = {}
+        # The subset of those whose detach isn't confirmed yet — the window in
+        # which the row must stay disabled, because neither resuming nor
+        # attaching would do the right thing.
+        self._detaching: set[str] = set()
         self._switcher: QuickSwitcher | None = None
 
         self._install_actions()
@@ -261,6 +323,8 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self._bg_status.set_polling(bool(self.state.get_setting("background_status_poll")))
         self.connect("destroy", lambda *_: self._bg_status.stop())
+        # Any /bg the last run couldn't see through to the end gets one more go.
+        self._replay_pending_detaches()
 
         self.sidebar.set_size_request(180, -1)  # minimum drag width
         self.split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
@@ -621,8 +685,11 @@ class MainWindow(Adw.ApplicationWindow):
     def open_session(self, session: Session, fork: bool = False) -> None:
         provider = get_provider(session.provider)
         fork = fork and provider.supports_fork
+        # A live /bg fork with no row of its own, which this row stands in for:
+        # the tab binds to it, so the CLI attaches to the running agent.
+        attach_id: str | None = None
         if not fork:
-            if session.session_id in self._pending_bg:
+            if self._detaching_now(session.session_id):
                 # Mid-/bg handoff: attach isn't possible until the CLI lists
                 # the agent, so opening now would resume a new foreground turn
                 # over the transcript. The sidebar row is disabled; guard the
@@ -633,19 +700,25 @@ class MainWindow(Adw.ApplicationWindow):
             # chain instead of the stale original. Forks stay on the id the
             # user picked.
             forward = self.store.forward_state(session)
+            target = self.state.resolve_forward(session.session_id)
             if forward == "moved":
-                session = self.store.get_session(
-                    self.state.resolve_forward(session.session_id)
-                )
+                session = self.store.get_session(target)
             elif forward == "syncing":
                 # The fork exists but the store hasn't scanned it yet.
                 # Its sidebar row is disabled during this window; guard
                 # the other entry paths (switcher, session restore) too
                 # rather than open the stale original.
                 return
-            # Fork transcript gone (e.g. trashed) or never a real session
-            # (dead /bg stub): stale forward — open the original normally.
-            page = self._pages.get(session.session_id)
+            elif target != session.session_id and target in self._bg_status.background_ids:
+                # The fork is running but has only a metadata stub for a
+                # transcript, so it has no row of its own and may never get
+                # one (see SessionStore.rows_representing). Bind the tab to
+                # the fork's id — resume_command attaches to the live agent —
+                # while the sidebar keeps showing the row that was clicked.
+                attach_id = target
+            # Otherwise the forward is stale (fork transcript gone, or a dead
+            # /bg stub with no live agent): open the original normally.
+            page = self._page_for(session.session_id)
             if page is not None:
                 self.tab_view.set_selected_page(page)
                 return
@@ -654,21 +727,29 @@ class MainWindow(Adw.ApplicationWindow):
         # A chat's throwaway directory may have been swept or trashed since;
         # recreate it rather than letting the terminal fall back to $HOME.
         chats.ensure_chat_dir(cwd)
+        # The tab is bound to the id the CLI actually runs, which for an
+        # attached fork is the fork's — including its (still stubby) transcript.
+        bound_id = attach_id or session.session_id
+        jsonl_path = (
+            str(Path(session.jsonl_path).parent / f"{attach_id}.jsonl")
+            if attach_id
+            else session.jsonl_path
+        )
         tab = TerminalTab(
             cwd=cwd,
-            session_id=session.session_id,
+            session_id=bound_id,
             fork=fork,
             settings=self.state.settings,
             provider=provider,
-            jsonl_path=session.jsonl_path,
+            jsonl_path=jsonl_path,
         )
         title = f"{self.store.display_name(session)} (fork)" if fork else self._tab_title(session)
         project = "Chats" if chats.is_chat_cwd(session.cwd) else session.project_name
-        page = self._add_tab(tab, title, f"{project} — {session.session_id}")
+        page = self._add_tab(tab, title, f"{project} — {bound_id}")
         if not fork:
-            self._pages[session.session_id] = page
-            self._sync_status(session.session_id)
-            saved_panel = self.state.get_panel_state(session.session_id)
+            self._pages[bound_id] = page
+            self._sync_status(bound_id)
+            saved_panel = self.state.get_panel_state(bound_id)
             if saved_panel:  # reopen the panel the way this session left it
                 tab.restore_panel_state(saved_panel)
 
@@ -874,9 +955,10 @@ class MainWindow(Adw.ApplicationWindow):
         # for sessions known to be running detached (no-op when unchanged).
         for session_id in self._bg_status.background_ids:
             self._sync_status(session_id)
-        # A pending /bg that forked stays yellow/disabled on the old row until
-        # the fork's row can take its place; once the store discovers the fork,
-        # the old row is hidden ("moved") and the pending state can go.
+        # A pending /bg that forked is assumed detached on the old row until
+        # something more solid takes over; once the store discovers the fork,
+        # the old row is hidden ("moved") and the fork's own row carries the
+        # line, so the assumption can go.
         for session_id in list(self._pending_bg):
             target = self.state.resolve_forward(session_id)
             if target != session_id and self.store.get_session(target) is not None:
@@ -1063,7 +1145,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Sidebar row buttons: exit (or detach) the session's own tab, whether
         or not it is the focused one — same no-dialog behavior as the header
         buttons. A session with no open tab has nothing to close."""
-        page = self._pages.get(session_id)
+        page = self._page_for(session_id)
         if page is None:
             return
         self._close_ok.add(page)
@@ -1184,43 +1266,20 @@ class MainWindow(Adw.ApplicationWindow):
         old_uuid = (
             first_message_uuid(old_session.jsonl_path) if old_session is not None else None
         )
+        # Remembered on disk so a restart mid-handoff can finish the pairing
+        # instead of stranding the agent (see _replay_pending_detaches).
+        self.state.set_pending_detach(
+            old_id, provider=provider.id, cwd=cwd or "", uuid=old_uuid or ""
+        )
         known = {a.session_id for a in provider.background_agents()}
-
-        def matches(agent) -> bool:
-            if agent.session_id in known or agent.session_id == old_id:
-                return False
-            # Same conversation = same copied first-message uuid. That
-            # disambiguates several same-project tabs backgrounded at once
-            # (e.g. the quit flow); fall back to cwd when uuids are
-            # unavailable (transcript not yet written / no messages).
-            path = next(
-                (
-                    p
-                    for p in provider.transcripts_for_cwd(agent.cwd)
-                    if p.stem == agent.session_id
-                ),
-                None,
-            )
-            new_uuid = first_message_uuid(path) if path is not None else None
-            if old_uuid and new_uuid:
-                return old_uuid == new_uuid
-            return bool(cwd and agent.cwd and agent.cwd == cwd)
 
         def work() -> None:
             for attempt in range(30):  # the agent entry appears within seconds of /bg
-                agents = provider.background_agents()
-                log.debug(
-                    "bg-watch: attempt %s for %s: agents %s",
-                    attempt, old_id, [a.session_id for a in agents],
-                )
-                for agent in agents:
-                    if agent.session_id == old_id:
-                        # Detached in place: no fork to record.
-                        GLib.idle_add(self._on_backgrounded, tab, old_id, "")
-                        return
-                    if matches(agent):
-                        GLib.idle_add(self._on_backgrounded, tab, old_id, agent.session_id)
-                        return
+                found = _match_background_fork(provider, old_id, cwd, old_uuid, known)
+                log.debug("bg-watch: attempt %s for %s: %r", attempt, old_id, found)
+                if found is not None:
+                    GLib.idle_add(self._on_backgrounded, tab, old_id, found)
+                    return
                 time.sleep(1)
             log.info("bg-watch: %s never appeared in the agent list; giving up", old_id)
             # Never confirmed: the detach presumably failed — drop the
@@ -1229,23 +1288,63 @@ class MainWindow(Adw.ApplicationWindow):
 
         threading.Thread(target=work, daemon=True).start()
 
+    # -- pending /bg detaches across restarts --------------------------------
+
+    def _replay_pending_detaches(self) -> None:
+        """Finish the /bg handoffs that were still in flight when the app last
+        closed. The fork watcher lives only as long as the process, so a quit
+        (or crash) during the seconds between feeding /bg and the CLI listing
+        the agent used to lose the old -> new pairing for good: the row went on
+        pointing at the frozen pre-/bg transcript, and the live agent had no row
+        to reach it from at all. Worse, resuming that row and backgrounding it
+        again spawned a second agent, so they piled up unreachable.
+
+        The evidence needed for the pairing is persisted with the pending
+        detach, so replay it once at startup against the current agent list. A
+        record that matches nothing is dropped — its agent is gone."""
+        pending = self.state.get_pending_detaches()
+        if not pending:
+            return
+        log.info("bg-replay: %s pending detach(es) to re-check", len(pending))
+
+        def work() -> None:
+            for old_id, info in pending.items():
+                provider = get_provider(info.get("provider") or "claude")
+                cwd = info.get("cwd") or ""
+                uuid = info.get("uuid") or ""
+                # No `known` set to lean on this far after the fact, so pairing
+                # has to be strict: see _match_background_fork's unique_cwd.
+                found = _match_background_fork(
+                    provider, old_id, cwd, uuid, set(), unique_cwd=True
+                )
+                GLib.idle_add(self._on_detach_replayed, old_id, found)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_detach_replayed(self, old_id: str, found: str | None) -> bool:
+        """A pending detach re-checked at startup: `found` is the fork's id, ""
+        for an in-place detach, or None when nothing in the agent list matches."""
+        if found is None:
+            log.info("bg-replay: %s matches no running agent; dropping the record", old_id)
+        else:
+            log.info("bg-replay: %s paired with %s", old_id, found or "itself (in place)")
+            if found:
+                self.store.record_forward(old_id, found)
+            self._sync_status(old_id)  # yellow line, through the forward
+        self.state.clear_pending_detach(old_id)
+        return GLib.SOURCE_REMOVE
+
     def _on_backgrounded(self, tab: TerminalTab, old_id: str, new_id: str) -> bool:
         """The tab's session is confirmed running detached (new_id is its
         fork's session id, or "" when it detached in place)."""
         log.info("bg-watch: %s confirmed detached (fork id: %s)", old_id, new_id or "none")
         if new_id:
             self.store.record_forward(old_id, new_id)
-            # The old row must stay yellow and disabled until the fork's row
-            # replaces it — the store hasn't discovered the fork's transcript
-            # yet, so clearing now would leave a dim, clickable row pointing
-            # at the stale original. _on_store_refreshed clears the pending
-            # state once the handoff completes.
-        elif old_id in self._bg_status.background_ids:
-            # In-place detach of a session already in the poll set (a reopened
-            # background session backgrounded again — its job stays listed
-            # through the attach): no membership change will ever fire, so
-            # clear pending now; the membership-backed line keeps it yellow.
-            self._clear_backgrounding(old_id, "already in the agent list")
+        self.state.clear_pending_detach(old_id)  # paired; nothing left to replay
+        # Confirmed detached: the row is clickable again — it opens the live
+        # agent, not the stale original — while _is_detached keeps it yellow
+        # through the forward for as long as the agent runs.
+        self._confirm_backgrounding(old_id)
         # The agent list already shows the detached session: refresh now so
         # the yellow line lands promptly even if the jobs-dir monitor misses it.
         self._bg_status.refresh()
@@ -1287,47 +1386,98 @@ class MainWindow(Adw.ApplicationWindow):
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
 
-    def _sync_status(self, session_id: str) -> None:
-        page = self._pages.get(session_id)
+    def _chain(self, session_id: str) -> set[str]:
+        """A row's session id together with the id its /bg fork runs under.
+        Both stand for the same conversation, so a row's tab, status and
+        pending-detach state can hang off either."""
+        return {session_id, self.state.resolve_forward(session_id)}
+
+    def _page_for(self, session_id: str) -> Adw.TabPage | None:
+        """The tab a sidebar row's session is open in. A row standing in for a
+        live /bg fork is opened by attaching to that fork, so its tab is bound
+        to the fork's id — look through the forward too."""
+        return next(
+            (page for sid in self._chain(session_id) if (page := self._pages.get(sid))),
+            None,
+        )
+
+    def _is_detached(self, session_id: str) -> bool:
+        """Whether a row's conversation is running as a background agent — under
+        its own id, or under the id its /bg fork runs as. A pending detach
+        counts: assume the /bg worked until the confirmation watch says
+        otherwise."""
+        chain = self._chain(session_id)
+        return bool(chain & self._bg_status.background_ids or chain & set(self._pending_bg))
+
+    def _detaching_now(self, session_id: str) -> bool:
+        """Whether a /bg was fed for this row's conversation and hasn't been
+        confirmed yet — the window in which the row stays disabled."""
+        return bool(self._chain(session_id) & self._detaching)
+
+    def _row_status(self, row_id: str) -> str:
+        page = self._page_for(row_id)
         if page is None:
-            # No tab — but the session may still be running detached (/bg),
-            # or be mid-detach (pending confirmation: assume it worked).
-            detached = (
-                session_id in self._bg_status.background_ids
-                or session_id in self._pending_bg
-            )
-            status = "background" if detached else ""
-        elif page.get_needs_attention():
-            status = "attention"
-        else:
-            status = "open"
-        log.debug("status: %s -> %s", session_id, status or "(none)")
-        self.store.set_status(session_id, status)
+            # No tab — but the session may still be running detached (/bg).
+            return "background" if self._is_detached(row_id) else ""
+        return "attention" if page.get_needs_attention() else "open"
+
+    def _sync_status(self, session_id: str) -> None:
+        """Recompute the status of every row this session shows up as: its own,
+        plus any row standing in for it as a /bg fork with no row of its own."""
+        for row_id in self.store.rows_representing(session_id):
+            status = self._row_status(row_id)
+            log.debug("status: %s -> %s", row_id, status or "(none)")
+            self.store.set_status(row_id, status)
         self.sidebar.update_footer()
 
     def _on_background_ids_changed(self, changed: set[str]) -> None:
-        # Confirmed detaches: membership owns the yellow line from here on,
-        # so the pre-emptive pending state (and its disabled row) can go.
-        for session_id in changed & self._bg_status.background_ids:
-            self._clear_backgrounding(session_id, "detach confirmed by the agent list")
+        # Confirmed detaches: membership owns the yellow line from here on, so
+        # the assumed-detached state can go. A /bg that forked is confirmed by
+        # its fork's id turning up, not by the row's own.
+        live = changed & self._bg_status.background_ids
+        for session_id in list(self._pending_bg):
+            if self._chain(session_id) & live:
+                self._clear_backgrounding(session_id, "detach confirmed by the agent list")
         for session_id in changed:
             self._sync_status(session_id)
 
     # -- pre-emptive /bg status ----------------------------------------------
 
+    def _set_row_backgrounding(self, session_id: str, flag: bool) -> None:
+        """Disable (or re-enable) every row standing for this session — the
+        row may be the one its /bg fork forked from, not its own."""
+        for row_id in self.store.rows_representing(session_id):
+            self.store.set_backgrounding(row_id, flag)
+
     def _mark_backgrounding(self, session_id: str) -> None:
         """A /bg was just fed: treat the session as backgrounded right away —
         yellow guide line once its tab closes, sidebar row disabled — instead of
-        waiting for the agent CLI to list it. Cleared when the poller confirms
-        the detach, when a fork's row is discovered and takes over, when the
-        confirmation watch gives up, or by the safety timeout."""
+        waiting for the agent CLI to list it. The row re-enables as soon as the
+        detach is confirmed; the assumed-detached state lasts until the agent
+        list reports it, the confirmation watch gives up, or the safety timeout
+        fires."""
         if session_id in self._pending_bg:
             return
         log.info("bg-pending: %s marked (detach fed, awaiting confirmation)", session_id)
+        self._detaching.add(session_id)
         self._pending_bg[session_id] = GLib.timeout_add_seconds(
             45, self._backgrounding_expired, session_id
         )
-        self.store.set_backgrounding(session_id, True)
+        self._set_row_backgrounding(session_id, True)
+
+    def _confirm_backgrounding(self, session_id: str) -> None:
+        """The detach is confirmed. Re-enable the row immediately: clicking it
+        now attaches to the live agent instead of resuming a stale transcript.
+        Waiting for the fork's row instead would mean waiting out the safety
+        timeout whenever the fork's agent detaches without doing any work — it
+        leaves only a metadata stub, so that row may never arrive. The
+        assumed-detached state (and with it the yellow line) stays until the
+        agent list catches up, so the line never blinks."""
+        if session_id not in self._detaching:
+            return
+        log.info("bg-pending: %s row re-enabled (detach confirmed)", session_id)
+        self._detaching.discard(session_id)
+        self._set_row_backgrounding(session_id, False)
 
     def _clear_backgrounding(self, session_id: str, reason: str = "") -> None:
         source = self._pending_bg.pop(session_id, None)
@@ -1335,15 +1485,20 @@ class MainWindow(Adw.ApplicationWindow):
             return
         log.info("bg-pending: %s cleared (%s)", session_id, reason or "unspecified")
         GLib.source_remove(source)
-        self.store.set_backgrounding(session_id, False)
-        self._sync_status(session_id)  # dot follows reality (the poll set) again
+        self.state.clear_pending_detach(session_id)
+        self._detaching.discard(session_id)
+        self._set_row_backgrounding(session_id, False)
+        self._sync_status(session_id)  # the line follows the agent list again
 
     def _backgrounding_expired(self, session_id: str) -> bool:
         # Confirmation never arrived (e.g. the agent exited right after
         # detaching): stop pretending, re-enable the row.
         log.info("bg-pending: %s expired (safety timeout, never confirmed)", session_id)
         self._pending_bg.pop(session_id, None)
-        self.store.set_backgrounding(session_id, False)
+        # Keep the persisted record: the agent may still be starting up, and
+        # the next launch gets one more chance to pair them.
+        self._detaching.discard(session_id)
+        self._set_row_backgrounding(session_id, False)
         self._sync_status(session_id)
         return GLib.SOURCE_REMOVE
 
@@ -1354,7 +1509,12 @@ class MainWindow(Adw.ApplicationWindow):
         page = self.tab_view.get_selected_page()
         row_id = None
         if page is not None:
-            row_id = self._placeholder_pages.get(page) or self._session_id_of(page)
+            row_id = self._placeholder_pages.get(page)
+            if row_id is None and (session_id := self._session_id_of(page)):
+                # A tab attached to a /bg fork runs under an id the sidebar has
+                # no row for; the row it forked from is the one to highlight.
+                rows = self.store.rows_representing(session_id)
+                row_id = rows[0] if rows else session_id
         self.sidebar.set_active_session(row_id)
 
     def _session_id_of(self, page: Adw.TabPage) -> str | None:
@@ -1451,7 +1611,7 @@ class MainWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def focus_session(self, session_id: str) -> None:
-        page = self._pages.get(session_id)
+        page = self._page_for(session_id)
         if page is not None:
             self.tab_view.set_selected_page(page)
 
@@ -1624,7 +1784,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _prompt_rename_session(self, session: Session) -> None:
         def save(name: str) -> None:
             self.store.rename(session.session_id, name)
-            page = self._pages.get(session.session_id)
+            page = self._page_for(session.session_id)
             if page is not None:
                 page.set_title(self._tab_title(session))
 
@@ -1686,7 +1846,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _archive_session(self, session_id: str) -> None:
         archived = not self.state.is_archived(session_id)
-        page = self._pages.get(session_id) if archived else None
+        page = self._page_for(session_id) if archived else None
         if page is not None:
             # Close the tab through the normal close-page flow, so a busy tab
             # still gets its confirmation dialog — and archive the session
