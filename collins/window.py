@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-29. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -56,9 +56,11 @@ class _KeepProjects(NamedTuple):
     projects: list[str]
 
 
-# Tab status dots; the same colors the sidebar puts on a running row's left
-# guide line (row.session-child.running* in app.py).
-_STATUS_COLORS = {"open": "#2ec27e", "attention": "#3584e4"}
+# Tab status dot: green for an open tab, the same color the sidebar puts on a
+# running row's left guide line (row.session-child.running in app.py). A tab
+# with unread output gets no dot of its own — AdwTabView already marks such a
+# tab, and a second marker only competed with it.
+_STATUS_COLORS = {"open": "#2ec27e"}
 _status_icon_cache: dict[str, Gio.Icon] = {}
 
 
@@ -986,7 +988,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.content_stack.set_visible_child_name("tabs")
 
     def _apply_tab_status(self, page: Adw.TabPage) -> None:
-        """Mirror the sidebar status dot onto the tab itself."""
+        """Mirror the sidebar status dot onto the tab itself.
+
+        Only an open-and-read tab carries a dot; unread output drops it
+        (_status_icon returns None), leaving the tab view's own attention
+        marker to say so on its own.
+        """
         status = "attention" if page.get_needs_attention() else "open"
         page.set_icon(_status_icon(status))
 

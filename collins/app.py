@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-29. Full change history: git log for this file.
+# fork. Last modified: 2026-07-30. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -109,8 +109,10 @@ row.session-child.running-attention:hover {
   background-color: alpha(currentColor, 0.18);
 }
 row.session-child.running { border-left-color: #2ec27e; }
-/* blue bar: a tab with output the user hasn't looked at yet */
-row.session-child.running-attention { border-left-color: #3584e4; }
+/* a tab with output the user hasn't looked at yet: the line goes neutral
+   rather than to a second status color, so unread output is a stepping-back
+   of the green, not another thing shouting for attention */
+row.session-child.running-attention { border-left-color: alpha(currentColor, 0.45); }
 /* the session shown in the currently selected tab: only the fill says so, so
    the guide line keeps saying what the session's status is */
 row.session-child.active-tab {
