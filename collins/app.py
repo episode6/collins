@@ -53,34 +53,37 @@ tabbar tab:not(:checked) label { opacity: 0.6; }
   font-size: 0.8em;
 }
 
-/* a session row is bare at rest: no card, no guide line. Only running
-   sessions (and the pointer) bring either back, so the sidebar reads as a
-   plain list with the live work marked on it. The left border stays in the
-   box as transparent, so gaining a color never shifts the title.
+/* children connect to their group via a left guide line. Not running: an
+   empty outlined card. Running: the outline gives way to a filled card, and
+   the guide line takes the status color. Every state keeps the same 1px/2px
+   border box, so a row never shifts or resizes as its status changes.
    The left indent is a widget margin set in sidebar.py, not a CSS margin
    here: it tracks the configurable project-icon size, so the card always
    starts just past the icon of the project header above it. */
 row.session-child {
   margin-right: 16px;
-  border-left: 2px solid transparent;
+  border: 1px solid alpha(currentColor, 0.15);
+  border-left: 2px solid alpha(currentColor, 0.15);
   border-radius: 0 8px 8px 0;
 }
 row.session-child:hover {
   background-color: alpha(currentColor, 0.1);
-  border-left-color: alpha(currentColor, 0.3);
+  border-color: alpha(currentColor, 0.3);
 }
-/* sessions running in an open tab share one card, so live work stands out
-   from the archive of past sessions as a group; only the left bar carries the
-   status color. Detached (/bg) sessions are left alone: there is no tab to
-   return to. Must stay above the active-tab rules, which override these for
-   the one session the selected tab is showing. */
+/* sessions running in an open tab share one filled card, so live work stands
+   out from the archive of past sessions as a group; only the left bar carries
+   the status color. Detached (/bg) sessions are left alone: there is no tab
+   to return to. Must stay above the active-tab rules, which override these
+   for the one session the selected tab is showing. */
 row.session-child.running,
 row.session-child.running-attention {
   background-color: alpha(currentColor, 0.13);
+  border-color: transparent;
 }
 row.session-child.running:hover,
 row.session-child.running-attention:hover {
   background-color: alpha(currentColor, 0.18);
+  border-color: transparent;
 }
 row.session-child.running { border-left-color: #2ec27e; }
 /* blue bar: a tab with output the user hasn't looked at yet */
@@ -88,6 +91,7 @@ row.session-child.running-attention { border-left-color: #3584e4; }
 /* the session shown in the currently selected tab */
 row.session-child.active-tab {
   background-color: alpha(#D97757, 0.16);
+  border-color: transparent;
   border-left-color: #D97757;
 }
 row.session-child.active-tab:hover {
