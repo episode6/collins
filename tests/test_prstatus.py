@@ -337,28 +337,33 @@ def gh_json(monkeypatch):
     return (lambda value: reply.__setitem__(0, value)), calls
 
 
-_DISCOVERED = {
-    "number": 74,
-    "url": "https://github.com/episode6/collins/pull/74",
-    "state": "OPEN",
-    "isDraft": False,
-    "statusCheckRollup": [
-        {"conclusion": "SUCCESS"},
-        {"conclusion": "FAILURE"},
-    ],
-}
+def _found(number=74, created="2026-07-30T02:19:00Z", **overrides):
+    """One entry of a `gh pr list --head <branch>` reply."""
+    entry = {
+        "number": number,
+        "url": f"https://github.com/episode6/collins/pull/{number}",
+        "createdAt": created,
+        "state": "OPEN",
+        "isDraft": False,
+        "statusCheckRollup": [{"conclusion": "SUCCESS"}, {"conclusion": "FAILURE"}],
+    }
+    entry.update(overrides)
+    return entry
+
+
+_DISCOVERED = [_found()]
 
 
 def test_discovers_the_branch_pr_with_its_status(gh_json):
     serve, calls = gh_json
     serve(_DISCOVERED)
     pr = discover_pr("/home/me/dev/collins", "pr-chip-status-refresh")
-    assert (pr.number, pr.url) == (74, _DISCOVERED["url"])
+    assert (pr.number, pr.url) == (74, _found()["url"])
     assert pr.repository == "episode6/collins"  # read back out of the URL
     assert (pr.state, pr.passed, pr.failed) == ("OPEN", 1, 1)
     assert pr.glyph == "✗"
     args, cwd = calls[0]
-    assert args[:3] == ["pr", "view", "pr-chip-status-refresh"]
+    assert args[:4] == ["pr", "list", "--head", "pr-chip-status-refresh"]
     assert cwd == "/home/me/dev/collins"  # the branch means nothing outside it
 
 
@@ -369,8 +374,65 @@ def test_a_discovered_status_counts_as_ours(gh_json, scheduled):
     serve(_DISCOVERED)
     pr = discover_pr("/home/me/dev/collins", "some-branch")
     scheduled.clear()
-    assert enrich(pr).glyph == "✗"
+    assert enrich(pr).glyph == "✗"  # the status the lookup itself came back with
     assert scheduled == []
+
+
+def test_the_most_recent_pr_on_the_branch_wins(gh_json):
+    """Branches get reused: a merged PR then fresh work on the same name. The
+    newest is the one being worked on now."""
+    serve, _calls = gh_json
+    serve([
+        _found(70, "2026-06-01T10:00:00Z", state="MERGED"),
+        _found(75, "2026-07-29T09:00:00Z"),
+        _found(58, "2026-05-02T10:00:00Z", state="CLOSED"),
+    ])
+    assert discover_pr("/home/me/dev/collins", "feat/x").number == 75
+
+
+def test_the_higher_number_breaks_a_tie(gh_json):
+    """gh timestamps to the second, so two PRs opened in the same second are
+    ordered by number instead of by dict order."""
+    serve, _calls = gh_json
+    serve([_found(80, "2026-07-30T02:19:00Z"), _found(81, "2026-07-30T02:19:00Z")])
+    assert discover_pr("/home/me/dev/collins", "feat/x").number == 81
+
+
+def test_a_merged_pr_is_still_a_discovery(gh_json):
+    """The branch's only PR being merged is an answer, not a failure: the chip
+    should say merged rather than say nothing."""
+    serve, _calls = gh_json
+    serve([_found(70, state="MERGED", statusCheckRollup=[])])
+    pr = discover_pr("/home/me/dev/collins", "feat/x")
+    assert (pr.number, pr.state, pr.merged) == (70, "MERGED", True)
+
+
+def test_discovery_asks_for_closed_prs_too(gh_json):
+    """--state all: a branch whose PR has landed still answers which PR it was."""
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    discover_pr("/home/me/dev/collins", "feat/x")
+    args, _cwd = calls[0]
+    assert "--state" in args and args[args.index("--state") + 1] == "all"
+    assert args[args.index("--limit") + 1] == str(prstatus._DISCOVER_LIMIT)
+
+
+def test_unusable_entries_are_skipped_not_fatal(gh_json):
+    """One malformed entry among several must not lose the good one."""
+    serve, _calls = gh_json
+    serve([
+        "not a dict",
+        _found(90, "2026-07-30T03:00:00Z", url="https://github.com/o/r/issues/90"),
+        {**_found(91, "2026-07-30T02:00:00Z"), "number": True},
+        _found(60, "2026-01-01T00:00:00Z"),
+    ])
+    assert discover_pr("/home/me/dev/collins", "feat/x").number == 60
+
+
+def test_a_missing_timestamp_sorts_last(gh_json):
+    serve, _calls = gh_json
+    serve([_found(92, created=None), _found(61, "2026-01-01T00:00:00Z")])
+    assert discover_pr("/home/me/dev/collins", "feat/x").number == 61
 
 
 @pytest.mark.parametrize(
@@ -397,22 +459,27 @@ def test_discovery_allows_the_branch_names_git_allows(gh_json):
     serve(_DISCOVERED)
     for branch in ("main", "feat/pr-chip", "release-1.2", "user.name/fix+2"):
         assert discover_pr("/home/me/dev/collins", branch) is not None
-    assert [args[2] for args, _cwd in calls] == [
+    assert [args[3] for args, _cwd in calls] == [
         "main", "feat/pr-chip", "release-1.2", "user.name/fix+2",
     ]
+
+
+_URL = "https://github.com/episode6/collins/pull/74"
 
 
 @pytest.mark.parametrize(
     "reply",
     [
-        None,  # gh failed: no PR for the branch, not logged in, not a repo
-        {},
-        {"number": 74},  # no url
-        {"url": _DISCOVERED["url"]},  # no number
-        {"number": True, "url": _DISCOVERED["url"]},  # bool is not a PR number
-        {"number": "74", "url": _DISCOVERED["url"]},
-        {"number": 74, "url": "https://github.com/episode6/collins/issues/74"},
-        {"number": 74, "url": "not a url"},
+        None,  # gh failed: not logged in, not a repo, ...
+        [],  # no PR for this branch
+        {"number": 74, "url": _URL},  # an object where a list belongs
+        [{}],
+        [{"number": 74}],  # no url
+        [{"url": _URL}],  # no number
+        [{"number": True, "url": _URL}],  # bool is not a PR number
+        [{"number": "74", "url": _URL}],
+        [{"number": 74, "url": "https://github.com/episode6/collins/issues/74"}],
+        [{"number": 74, "url": "not a url"}],
     ],
 )
 def test_discovery_degrades_to_no_pr(gh_json, reply):
@@ -430,8 +497,8 @@ def test_discovery_is_skipped_once_gh_is_known_missing(gh_json, monkeypatch):
 
 
 def test_discovery_passes_the_branch_as_an_argument(monkeypatch):
-    """The real path down to argv: no shell, and the branch trails the
-    subcommand as one word."""
+    """The real path down to argv: no shell, and the branch travels as one word
+    behind --head rather than spliced into a string."""
     seen = []
     monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
     monkeypatch.setattr(
@@ -440,7 +507,7 @@ def test_discovery_passes_the_branch_as_an_argument(monkeypatch):
     )
     assert discover_pr("/home/me/dev/collins", "main").number == 74
     argv, kwargs = seen[0]
-    assert argv[:4] == ["/usr/bin/gh", "pr", "view", "main"]
+    assert argv[:5] == ["/usr/bin/gh", "pr", "list", "--head", "main"]
     assert kwargs["cwd"] == "/home/me/dev/collins"
     assert "shell" not in kwargs
 

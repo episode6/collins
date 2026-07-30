@@ -69,8 +69,11 @@ _GH_TIMEOUT_S = 10
 # invalidate) — every interval measured against it is already over.
 _DUE = float("-inf")
 _GH_FIELDS = "state,isDraft,statusCheckRollup"
-# Discovery needs to learn which PR it found, on top of that PR's status.
-_GH_DISCOVER_FIELDS = "number,url," + _GH_FIELDS
+# A branch lookup needs to learn which PR it found, and when it was opened, on
+# top of that PR's status.
+_GH_DISCOVER_FIELDS = "number,url,createdAt," + _GH_FIELDS
+# A branch with more PRs than this behind it has no plausible "current" one.
+_DISCOVER_LIMIT = 20
 
 # Only fetch for URLs shaped like a PR page. The URL comes out of a transcript
 # — repo content, i.e. untrusted — and lands in an argv, so this also keeps a
@@ -279,8 +282,11 @@ def _state(data: dict) -> str | None:
     return "DRAFT" if data.get("isDraft") is True else state
 
 
-def _gh_json(args: list[str], cwd: str | None = None) -> dict | None:
-    """One `gh` call, returning its --json object. None on any failure.
+def _gh_json(args: list[str], cwd: str | None = None) -> object | None:
+    """One `gh` call, returning its parsed --json output. None on any failure.
+
+    An object or a list, depending on the subcommand, so callers check the shape
+    they asked for.
 
     Never a shell, and never a caller-built string: *args* trails the gh binary
     as argv, so nothing in it can become a second command.
@@ -311,10 +317,9 @@ def _gh_json(args: list[str], cwd: str | None = None) -> dict | None:
         )
         return None
     try:
-        data = json.loads(result.stdout)
+        return json.loads(result.stdout)
     except (json.JSONDecodeError, ValueError):
         return None
-    return data if isinstance(data, dict) else None
 
 
 def _entry(data: dict) -> dict:
@@ -329,7 +334,7 @@ def _run_gh(url: str) -> dict | None:
     and covers GitHub Enterprise hosts the user is logged in to.
     """
     data = _gh_json(["pr", "view", url, "--json", _GH_FIELDS])
-    return None if data is None else _entry(data)
+    return _entry(data) if isinstance(data, dict) else None
 
 
 def refresh(url: str) -> None:
@@ -388,33 +393,65 @@ def invalidate(url: str) -> None:
             _statuses[url] = (_DUE, stamped[1])
 
 
-def discover_pr(cwd: str | None, branch: str | None) -> PullRequest | None:
-    """The PR gh reports for *branch*, asked from inside *cwd*.
+def _newest(entries: object) -> dict | None:
+    """The most recently opened of gh's PRs for a branch, or None if none are
+    usable. Ties (gh has second resolution) go to the higher number."""
+    if not isinstance(entries, list):
+        return None
+    usable = []
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        number, url = item.get("number"), item.get("url")
+        if not isinstance(number, int) or isinstance(number, bool):
+            continue
+        if not isinstance(url, str) or _FETCHABLE.match(url) is None:
+            continue
+        created = item.get("createdAt")
+        usable.append(((created if isinstance(created, str) else ""), number, item))
+    if not usable:
+        return None
+    usable.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
+    return usable[0][2]
 
-    For sessions whose transcript holds no ``pr-link`` record at all — a PR
-    opened by hand, or before the agent had anything to say about it. gh
-    resolves a branch name to its PR, so one call answers both "is there one?"
-    and "how is its CI doing?"; the status is remembered as a fetch of our own,
-    because that is exactly what it was.
+
+def discover_pr(cwd: str | None, branch: str | None) -> PullRequest | None:
+    """The PR gh reports for *branch*, asked from inside *cwd*, status included.
+
+    What the footer's refresh button runs, every time and whatever the chip is
+    showing: it asks the branch rather than the transcript, so it finds a PR
+    nobody told Collins about and notices when the branch has moved on to a
+    newer one. One call answers "is there one?", "which?" and "how is its CI
+    doing?", and the status is remembered as a fetch of our own — which it is.
+
+    A branch can carry several PRs (a merged one, then fresh work on the same
+    name), so the most recently opened wins: that's the one still live.
 
     Never call on the main thread, and expect None often: no branch, no PR for
     it, or no gh to ask are all ordinary.
     """
     if not cwd or not branch or not _BRANCH.match(branch) or _gh_missing:
         return None
-    data = _gh_json(["pr", "view", branch, "--json", _GH_DISCOVER_FIELDS], cwd=cwd)
-    if data is None:
+    found = _newest(
+        _gh_json(
+            [
+                "pr", "list",
+                "--head", branch,
+                "--state", "all",  # a merged PR still answers "which branch is this?"
+                "--json", _GH_DISCOVER_FIELDS,
+                "--limit", str(_DISCOVER_LIMIT),
+            ],
+            cwd=cwd,
+        )
+    )
+    if found is None:
         return None
-    number, url = data.get("number"), data.get("url")
-    if not isinstance(number, int) or isinstance(number, bool) or not isinstance(url, str):
-        return None
-    matched = _FETCHABLE.match(url)
-    if matched is None:  # gh handed back something we wouldn't fetch from
-        return None
+    number, url = found["number"], found["url"]
     with _lock:
-        _statuses[url] = (_now(), _entry(data))
-    log.info("prstatus: discovered #%s for branch %s", number, branch)
-    return enrich(PullRequest(number=number, url=url, repository=matched.group(1)))
+        _statuses[url] = (_now(), _entry(found))
+    log.info("prstatus: branch %s -> #%s", branch, number)
+    repository = _FETCHABLE.match(url).group(1)  # _newest only keeps matching URLs
+    return enrich(PullRequest(number=number, url=url, repository=repository))
 
 
 def enrich(pr: PullRequest | None) -> PullRequest | None:
