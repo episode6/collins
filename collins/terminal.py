@@ -1015,6 +1015,29 @@ class TerminalTab(Gtk.Box):
         self._restored_prs = []
         self._refresh_pr_chips([])
         self._hide_card()
+        self._watch_transcript(jsonl_path)
+
+    @property
+    def transcript_path(self) -> str | None:
+        """The transcript this tab is tailing, or None."""
+        path = self._transcript.path
+        return str(path) if path else None
+
+    def relocate_transcript(self, jsonl_path: str | Path) -> None:
+        """Follow this tab's transcript to a new path.
+
+        Entering a git worktree makes the CLI re-key the session's transcript
+        under a project directory named for the new working directory, which
+        moves the file out from under the monitor watching it. Nothing about
+        the session changed, so unlike `set_transcript_path` this keeps the
+        chips, the pending card and everything already parsed — it only
+        re-aims the tail and the monitor at where the file lives now.
+        """
+        self._transcript.relocate(jsonl_path)
+        self._watch_transcript(jsonl_path)
+
+    def _watch_transcript(self, jsonl_path: str | Path | None) -> None:
+        """Point the file monitor at *jsonl_path* and kick off a read."""
         if self._transcript_monitor is not None:
             self._transcript_monitor.cancel()
             self._transcript_monitor = None

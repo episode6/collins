@@ -50,6 +50,21 @@ class TranscriptModel:
         self._offset = 0
         self._buf = b""
 
+    def relocate(self, jsonl_path: str | Path) -> None:
+        """Follow the *same* transcript to a new path, keeping what's parsed.
+
+        The CLI re-keys a session's transcript under a project directory named
+        for its working directory, so entering a git worktree moves the file
+        out from under whoever is reading it. It is the same file with the same
+        contents, so everything already ingested still stands and the read
+        offset still points at the same place — unlike `set_path`, which starts
+        a different session from scratch.
+
+        A file that turns out to be shorter than the offset is picked up by
+        `update`'s truncation path on the next read.
+        """
+        self.path = Path(jsonl_path)
+
     def update(self) -> bool:
         """Read newly-appended bytes and ingest them. Returns True if changed."""
         if not self.path or not self.path.exists():
