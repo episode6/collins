@@ -977,9 +977,16 @@ class TerminalTab(Gtk.Box):
             button.connect("clicked", self._on_pr_menu_row, pr.url)
             rows.append(button)
         # A session with a lot of PRs would otherwise open a popover taller
-        # than the window it is in.
+        # than the window it is in. A list that isn't that long doesn't scroll
+        # at all, though — and mustn't be allowed to: a scrollable view won't
+        # measure shorter than a usable scrolling area (44px), which a single
+        # 36px row is, so it left 8px of stray space under the only row.
         scroller = Gtk.ScrolledWindow(child=rows)
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        overflows = rows.measure(Gtk.Orientation.VERTICAL, -1).natural > _PR_MENU_MAX_PX
+        scroller.set_policy(
+            Gtk.PolicyType.NEVER,
+            Gtk.PolicyType.AUTOMATIC if overflows else Gtk.PolicyType.NEVER,
+        )
         scroller.set_propagate_natural_width(True)
         scroller.set_propagate_natural_height(True)
         scroller.set_max_content_height(_PR_MENU_MAX_PX)
