@@ -481,6 +481,13 @@ class SessionRow(Gtk.ListBoxRow):
             "notify::backgrounding", self._on_sensitive_changed
         )
         self._on_sensitive_changed(item, None)
+        # The background button has its own gate on top of the row's: a /bg is
+        # only safe once this session is registered and no other handoff is
+        # still waiting for its new id.
+        self._can_background_handler = item.connect(
+            "notify::can-background", self._on_can_background_changed
+        )
+        self._on_can_background_changed(item, None)
 
         # Status dot + state badge need CSS-class updates: plain signals,
         # detached on unroot.
@@ -581,10 +588,25 @@ class SessionRow(Gtk.ListBoxRow):
         if self._backgrounding_handler is not None:
             self.item.disconnect(self._backgrounding_handler)
             self._backgrounding_handler = None
+        if self._can_background_handler is not None:
+            self.item.disconnect(self._can_background_handler)
+            self._can_background_handler = None
         Gtk.ListBoxRow.do_unroot(self)
 
     def _on_sensitive_changed(self, item: SessionItem, _pspec) -> None:
         self.set_sensitive(not (item.syncing or item.backgrounding))
+
+    def _on_can_background_changed(self, item: SessionItem, _pspec) -> None:
+        """Grey the background button out — rather than hide it — while the
+        handoff would be unsafe, and say why: the button coming and going as a
+        session resolves would read as a glitch."""
+        self._bg_btn.set_sensitive(item.can_background)
+        self._bg_btn.set_tooltip_text(
+            _("Background session and close tab")
+            if item.can_background
+            else _("Backgrounding is unavailable until this session is registered "
+                   "and any handoff in progress finishes")
+        )
 
     def _on_status_changed(self, item: SessionItem, _pspec) -> None:
         # The card itself carries the status: the left guide line is colored by

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 """GObject view-models. UI widgets bind to SessionItem properties, so
 renames, favorites and status changes propagate without list rebuilds."""
@@ -37,6 +37,10 @@ class SessionItem(GObject.Object):
     # pre-emptively and the row is disabled until the agent CLI lists the
     # session as a background agent (or confirmation times out).
     backgrounding = GObject.Property(type=bool, default=False)
+    # Whether this row's background button can be pressed right now: it needs
+    # an open tab whose session id is registered, and no other handoff still
+    # waiting for its new id (see bgstatus.background_blocker).
+    can_background = GObject.Property(type=bool, default=False)
 
     def __init__(self, session: Session) -> None:
         super().__init__()

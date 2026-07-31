@@ -85,9 +85,12 @@ def test_rows_representing_follows_a_chain_of_forks(store):
     store.record_forward(middle, latest)
 
     # Backgrounded repeatedly without the agent ever doing any work: only the
-    # very first row exists, and it stands for the newest fork.
+    # very first row exists, and it stands for every fork in the chain — the
+    # middle one included. A second /bg runs its handoff under `middle`, and
+    # `original` is the only row there is to disable while it's in flight and
+    # to re-enable once `latest` is recorded.
     assert store.rows_representing(latest) == [original]
-    assert store.rows_representing(middle) == []  # not the end of the chain
+    assert store.rows_representing(middle) == [original]
 
 
 def test_rows_representing_is_only_the_fork_once_it_has_a_row(store):
@@ -462,3 +465,41 @@ def test_replaced_rows_are_labeled_replaced_in_the_archive_view(store):
     item = store.get_item(original)
     assert item is not None
     assert item.subtitle == "replaced"
+
+
+def test_can_background_is_off_until_a_row_is_told_otherwise(store):
+    session_id = store._last_sessions[0].session_id
+    item = store.get_item(session_id)
+    # Rows start closed: a session with no open tab has nothing to hand over.
+    assert item.can_background is False
+
+    store.set_can_background(session_id, True)
+    assert item.can_background is True
+
+    store.set_can_background(session_id, False)
+    assert item.can_background is False
+
+
+def test_set_can_background_ignores_a_session_with_no_row(store):
+    store.set_can_background(str(uuid.uuid4()), True)  # must not raise
+
+
+def test_row_ids_covers_every_row_so_the_gate_can_sweep(store):
+    # The background gate is app-wide — one handoff at a time — so closing it
+    # means re-evaluating every row, not just the one being handed over.
+    assert sorted(store.row_ids()) == sorted(s.session_id for s in store._last_sessions)
+
+
+def test_rows_representing_holds_a_mid_chain_fork_during_a_second_handoff(store):
+    original = store._last_sessions[0].session_id
+    first_fork, second_fork = str(uuid.uuid4()), str(uuid.uuid4())
+    store.record_forward(original, first_fork)
+
+    # The tab attached to first_fork is backgrounded again: the /bg is fed and
+    # marked under first_fork, then second_fork's id lands and is recorded.
+    # first_fork must keep resolving to a row across that, or the handoff has
+    # nothing to disable while it runs and nothing to re-enable afterwards.
+    assert store.rows_representing(first_fork) == [original]
+    store.record_forward(first_fork, second_fork)
+    assert store.rows_representing(first_fork) == [original]
+    assert store.rows_representing(second_fork) == [original]

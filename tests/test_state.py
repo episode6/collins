@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 import json
 
@@ -433,3 +433,28 @@ def test_migrates_legacy_names_file(app_state):
     app_state._LEGACY_NAMES_FILE.write_text(json.dumps({"old-sid": "Old name"}), encoding="utf-8")
     state = app_state.AppState()
     assert state.get_name("old-sid") == "Old name"
+
+
+def test_forward_chain_covers_every_id_including_the_middle(app_state):
+    state = app_state.AppState()
+    state.forward_session("a", "b")
+    state.forward_session("b", "c")
+
+    # The middle is what a second /bg runs its handoff under: resolving to the
+    # tail alone loses the session exactly while it's being handed over.
+    assert state.forward_chain("a") == ["a", "b", "c"]
+    assert state.forward_chain("b") == ["b", "c"]
+    assert state.forward_chain("c") == ["c"]
+    assert state.resolve_forward("a") == "c"
+
+
+def test_forward_chain_of_an_unforwarded_session_is_just_itself(app_state):
+    assert app_state.AppState().forward_chain("lonely") == ["lonely"]
+
+
+def test_forward_chain_survives_a_cycle(app_state):
+    state = app_state.AppState()
+    state.session_forwards = {"a": "b", "b": "a"}  # corrupt state on disk
+
+    assert state.forward_chain("a") == ["a", "b"]
+    assert state.resolve_forward("a") == "b"

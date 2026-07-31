@@ -240,3 +240,58 @@ def test_match_returns_none_without_a_cwd_to_compare():
     provider = FakeProvider([BackgroundAgent(session_id="fork", job_id="j1", cwd="/proj")])
     assert match_background_fork(provider, "old", "", "", set()) is None
     assert match_background_fork(provider, "old", None, None, set()) is None
+
+
+# -- the background gate ------------------------------------------------------
+
+
+def _blocker(**overrides):
+    """A tab that can be backgrounded, with individual facts overridden."""
+    facts = dict(
+        is_session=True,
+        supports_detach=True,
+        is_fork=False,
+        session_id="sess",
+        has_row=True,
+        detach_in_flight=False,
+    )
+    facts.update(overrides)
+    return bgstatus.background_blocker(**facts)
+
+
+def test_a_registered_idle_session_can_be_backgrounded():
+    assert _blocker() == ""
+
+
+def test_a_non_session_tab_cannot_be_backgrounded():
+    assert _blocker(is_session=False) == bgstatus.BLOCK_NOT_SESSION
+
+
+def test_a_provider_without_detach_cannot_be_backgrounded():
+    assert _blocker(supports_detach=False) == bgstatus.BLOCK_UNSUPPORTED
+
+
+def test_a_thread_without_a_session_id_yet_is_unregistered():
+    # The transcript resolver hasn't named it: a /bg now would detach an agent
+    # nothing could record, let alone find again.
+    assert _blocker(session_id=None) == bgstatus.BLOCK_UNREGISTERED
+
+
+def test_a_session_with_no_row_yet_is_unregistered():
+    # The id is known but the store hasn't scanned it, so there is no row to
+    # disable during the handoff or to redirect once the fork id lands.
+    assert _blocker(has_row=False) == bgstatus.BLOCK_UNREGISTERED
+
+
+def test_a_fork_tab_is_unregistered():
+    # A fork shares the original's id and writes nothing under it.
+    assert _blocker(is_fork=True) == bgstatus.BLOCK_UNREGISTERED
+
+
+def test_another_handoff_in_flight_blocks_every_session():
+    assert _blocker(detach_in_flight=True) == bgstatus.BLOCK_IN_FLIGHT
+
+
+def test_registration_is_reported_before_the_in_flight_gate():
+    # Both true: the tab-specific reason is the more useful one to show.
+    assert _blocker(session_id=None, detach_in_flight=True) == bgstatus.BLOCK_UNREGISTERED

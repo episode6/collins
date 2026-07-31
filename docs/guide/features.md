@@ -126,11 +126,18 @@ agents' own session files are never modified.
   it, the close dialog also offers to **background the session** instead
   (Claude Code's `/bg`) — the agent keeps running detached, and reopening the
   session re-attaches to it. The same option appears when closing the whole
-  window with active sessions.
+  window with active sessions, which hands the sessions over **one at a time**
+  so each is correctly paired with the background agent it becomes.
 - While a session tab is focused, two header buttons act on it directly,
   skipping the confirmation dialog: one **exits** the session and closes the
   tab, the other **backgrounds** it (shown only for agents that support
   detaching) and closes the tab.
+- Backgrounding is **greyed out until it is safe**: a brand-new thread can't be
+  backgrounded until Collins knows its session id, and no session can be
+  backgrounded while another handoff is still waiting for the id its agent
+  moved to. Both windows last a second or two; the tooltip says which one you
+  are in. Backgrounding before then would detach an agent that nothing could
+  find its way back to.
 - The **tab bar can be hidden** with a header toggle — tabs and sessions keep
   running. While it is hidden the **window title becomes the active tab's
   title**, so the header (and alt-tab, and the dock) still names the session

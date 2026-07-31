@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -352,12 +352,18 @@ class SessionStore(GObject.Object):
         then sits idle leaves nothing but a metadata-only stub behind, possibly
         for its whole life. Such a fork is never discovered, so the session it
         forked from keeps standing in for it and has to carry its status.
+
+        Any id along a row's forward chain counts, not just the newest. A
+        session backgrounded a second time is mid-handoff under the *previous*
+        fork's id at the moment the newest one is recorded; matching only the
+        tail lost the row right then, so the handoff couldn't disable it or
+        re-enable it afterwards.
         """
         rows = [session_id] if session_id in self._items else []
         rows += [
             row_id
             for row_id in self._items
-            if row_id != session_id and self.state.resolve_forward(row_id) == session_id
+            if row_id != session_id and session_id in self.state.forward_chain(row_id)
         ]
         return rows
 
@@ -558,6 +564,16 @@ class SessionStore(GObject.Object):
         item = self._items.get(session_id)
         if item is not None and item.backgrounding != flag:
             item.backgrounding = flag
+
+    def set_can_background(self, session_id: str, flag: bool) -> None:
+        item = self._items.get(session_id)
+        if item is not None and item.can_background != flag:
+            item.can_background = flag
+
+    def row_ids(self) -> list[str]:
+        """Every session id with a row, so callers can re-evaluate a property
+        across the whole list (the background gate is app-wide, not per-row)."""
+        return list(self._items)
 
     def trash(self, session_id: str) -> str | None:
         """Move the transcript to trash. Returns an error message or None."""
