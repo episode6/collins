@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-30. Full change history: git log for this file.
+fork. Last modified: 2026-07-31. Full change history: git log for this file.
 -->
 
 # Features
@@ -28,6 +28,12 @@ fork. Last modified: 2026-07-30. Full change history: git log for this file.
   project; right-click a header for *New session here* and *Archive project*.
   Projects whose sessions are all archived or favorited still show their header,
   so the folder stays reachable.
+- **Open a project's folder anywhere else** from that same right-click menu:
+  one row per app you added under Preferences → *Footer apps*, each with its
+  own icon, plus *Open in File Manager* and *Open in Terminal* for whichever
+  apps your desktop nominates for those jobs (`$TERMINAL` and
+  `xdg-terminals.list` are honoured). The Chats group has no folder of its
+  own, so its menu stays as it was.
 - A **search button** that opens a search box across the sidebar header,
   filtering by name, project, message preview, or session ID, plus a footer
   showing session, project, transcript-size, and open-tab counts.

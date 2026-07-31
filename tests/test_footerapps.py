@@ -73,3 +73,21 @@ def test_launch_app_swallows_popen_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(footerapps.subprocess, "Popen", boom)
     footerapps.launch_app(_FakeAppInfo("myapp"), str(tmp_path))  # must not raise
+
+class _FileTakingAppInfo(_FakeAppInfo):
+    """An app that advertises %u — a terminal must still be spawned in the
+    directory rather than handed it as an argument."""
+
+    def supports_uris(self) -> bool:
+        return True
+
+    def launch(self, *_args) -> None:
+        raise AssertionError("the directory must not be passed as an argument")
+
+
+def test_launch_app_can_refuse_to_pass_the_directory(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(footerapps.subprocess, "Popen", lambda *a, **kw: calls.append((a, kw)))
+    footerapps.launch_app(_FileTakingAppInfo("myterm %u"), str(tmp_path), pass_directory=False)
+    assert calls[0][0] == (["myterm"],)
+    assert calls[0][1]["cwd"] == str(tmp_path)

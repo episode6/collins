@@ -61,18 +61,22 @@ def _launch_context() -> Gio.AppLaunchContext | None:
     return display.get_app_launch_context() if display is not None else None
 
 
-def launch_app(app_info: Gio.AppInfo, cwd: str | None) -> None:
+def launch_app(app_info: Gio.AppInfo, cwd: str | None, *, pass_directory: bool = True) -> None:
     """Open ``cwd`` with the app; failures are logged, never raised.
 
     Apps whose Exec line takes a file/URI argument get the directory passed
     to them; for the rest GLib would silently drop it, so they are instead
     spawned *in* the directory (the useful semantic for terminals and IDEs
     with placeholder-less .desktop files).
+
+    ``pass_directory=False`` forces the spawn-in-place path: a terminal that
+    does advertise %u would read the directory as a command to run, not as
+    the place to start in.
     """
     if not cwd or not Path(cwd).is_dir():
         cwd = str(Path.home())
     try:
-        if app_info.supports_files() or app_info.supports_uris():
+        if pass_directory and (app_info.supports_files() or app_info.supports_uris()):
             app_info.launch([Gio.File.new_for_path(cwd)], _launch_context())
             return
         commandline = app_info.get_commandline()
