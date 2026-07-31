@@ -37,6 +37,35 @@ _MAX_SCAN_LINES = 50
 _MAX_SCAN_BYTES = 256 * 1024
 
 
+def worktree_project_root(cwd: str | None) -> str | None:
+    """The repository a Claude-managed worktree belongs to, or None.
+
+    Claude Code creates session worktrees under <repo>/.claude/worktrees/<name>,
+    and its /bg fork copies re-record the worktree as the conversation's cwd. A
+    session working in one still belongs to <repo>'s project — grouping it by
+    its cwd's basename would surface a phantom project named after the worktree
+    directory."""
+    if not cwd:
+        return None
+    parts = Path(cwd).parts
+    for i in range(1, len(parts) - 1):
+        if parts[i] == ".claude" and parts[i + 1] == "worktrees":
+            root = Path(*parts[:i])
+            if root.name:
+                return str(root)
+            break
+    return None
+
+
+def project_name_for_cwd(cwd: str) -> str:
+    """The project a working directory belongs to: the repository for
+    Claude-managed worktrees, the directory's own name otherwise."""
+    root = worktree_project_root(cwd)
+    if root:
+        return Path(root).name
+    return Path(cwd).name or cwd
+
+
 @dataclass
 class Session:
     session_id: str
@@ -52,7 +81,7 @@ class Session:
     @property
     def project_name(self) -> str:
         if self.cwd:
-            return Path(self.cwd).name or self.cwd
+            return project_name_for_cwd(self.cwd)
         return self.jsonl_path.parent.name
 
     @property

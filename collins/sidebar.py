@@ -35,6 +35,7 @@ from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .projecticons import project_icon_data
 from .providers import get_provider
 from .scrolling import offset_into_view
+from .sessions import project_name_for_cwd
 from .store import SessionStore
 from .usagepanel import UsagePanel
 
@@ -367,6 +368,10 @@ class SessionRow(Gtk.ListBoxRow):
             "clicked",
             lambda *_: self.activate_action("win.archive-session", GLib.Variant("s", item.session_id)),
         )
+        # A row a /bg fork replaced isn't archived — it's out of sight because
+        # the fork's row stands in for it — so neither archiving nor restoring
+        # it would change anything the user can see. No button.
+        archive_btn.set_visible(sidebar.store.forward_state(item.session) != "moved")
         self._archive_btn = archive_btn
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
@@ -881,7 +886,7 @@ class SessionSidebar(Gtk.Box):
         """Group a placeholder the way the store's _group_key groups sessions."""
         if is_chat_cwd(cwd):
             return CHATS_GROUP
-        return ("proj", Path(cwd).name or cwd)
+        return ("proj", project_name_for_cwd(cwd))
 
     def add_placeholder(self, placeholder_id: str, cwd: str) -> None:
         """Show a transient "New Thread" row for a tab with no session yet."""
@@ -1108,10 +1113,16 @@ class SessionSidebar(Gtk.Box):
         edit_section.append_item(item(_("Reveal transcript"), "reveal-transcript"))
 
         danger_section = Gio.Menu()
-        archive_label = (
-            _("Restore session") if self.store.state.is_archived(session_id) else _("Archive session")
-        )
-        danger_section.append_item(item(archive_label, "archive-session"))
+        # A row a /bg fork replaced is out of sight because the fork stands in
+        # for it, not because it's archived — archiving/restoring it would be
+        # a no-op, so the menu doesn't offer it (trash/delete still apply).
+        if self.store.forward_state(row.item.session) != "moved":
+            archive_label = (
+                _("Restore session")
+                if self.store.state.is_archived(session_id)
+                else _("Archive session")
+            )
+            danger_section.append_item(item(archive_label, "archive-session"))
         danger_section.append_item(item(_("Move transcript to trash…"), "trash-session"))
         danger_section.append_item(item(_("Delete permanently…"), "delete-session"))
 

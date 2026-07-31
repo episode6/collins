@@ -7,16 +7,19 @@ import json
 import pytest
 
 from collins.sessions import (
+    Session,
     configured_mcp_servers,
     discover_sessions,
     export_markdown,
     first_message_uuid,
     is_discoverable_transcript,
     parse_details,
+    project_name_for_cwd,
     read_mcp_config,
     resume_cwd,
     session_from_file,
     transcript_is_stub,
+    worktree_project_root,
 )
 
 
@@ -457,3 +460,41 @@ def test_discover_handles_missing_dir(monkeypatch, tmp_path):
 
     monkeypatch.setattr(sessions_mod, "CLAUDE_PROJECTS_DIR", tmp_path / "nope")
     assert discover_sessions() == []
+
+
+def test_worktree_project_root_maps_worktrees_to_their_repository():
+    assert (
+        worktree_project_root("/home/u/dev/repo/.claude/worktrees/fix-bug")
+        == "/home/u/dev/repo"
+    )
+    # The agent may have moved deeper inside the worktree.
+    assert (
+        worktree_project_root("/home/u/dev/repo/.claude/worktrees/fix-bug/sub/dir")
+        == "/home/u/dev/repo"
+    )
+
+
+def test_worktree_project_root_is_none_outside_worktrees():
+    assert worktree_project_root("/home/u/dev/repo") is None
+    assert worktree_project_root("/.claude/worktrees/orphan") is None  # no repo above
+    assert worktree_project_root("") is None
+    assert worktree_project_root(None) is None
+
+
+def test_project_name_for_cwd_prefers_the_repository():
+    assert project_name_for_cwd("/home/u/dev/repo/.claude/worktrees/fix-bug") == "repo"
+    assert project_name_for_cwd("/home/u/dev/repo") == "repo"
+
+
+def test_session_in_a_worktree_belongs_to_the_repository_project(tmp_path):
+    # A /bg fork's transcript copy re-records the worktree as the session's
+    # cwd; its row must stay in the repository's project group, not surface a
+    # phantom project named after the worktree directory.
+    session = Session(
+        session_id="abc",
+        jsonl_path=tmp_path / "abc.jsonl",
+        cwd="/home/u/dev/repo/.claude/worktrees/fix-bug",
+        preview="p",
+        mtime=0.0,
+    )
+    assert session.project_name == "repo"
