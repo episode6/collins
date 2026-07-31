@@ -34,6 +34,7 @@ from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .projecticons import project_icon_data
 from .providers import get_provider
+from .scrolling import offset_into_view
 from .store import SessionStore
 from .usagepanel import UsagePanel
 
@@ -522,6 +523,13 @@ class SessionSidebar(Gtk.Box):
         self._placeholders: dict[str, str] = {}  # placeholder id -> cwd
         self._placeholder_rows: dict[str, PlaceholderRow] = {}
         self._active_session_id: str | None = None
+        # Scrolling the list is deferred to an idle callback (see
+        # _schedule_scroll): the offset to restore and the row to reveal when
+        # it runs, plus the id of the pending source.
+        self._pending_offset: float | None = None
+        self._pending_row: str | None = None
+        self._scroll_source: int | None = None
+        self._activated_row_id: str | None = None
         self.show_folder_path = bool(store.state.get_setting("show_folder_path"))
 
         store.connect("refreshed", self._on_store_refreshed)
@@ -594,6 +602,7 @@ class SessionSidebar(Gtk.Box):
 
         scrolled = Gtk.ScrolledWindow(child=self.list)
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._scrolled = scrolled
 
         # No "no sessions yet" status page: the permanent Chats header means
         # the list is never empty.
@@ -674,6 +683,7 @@ class SessionSidebar(Gtk.Box):
         return int(self.store.state.get_setting("project_icon_size") or 16)
 
     def _rebuild_rows(self) -> None:
+        self._remember_scroll()
         self.list.remove_all()
         self._rows = {}
         self._header_rows = {}
@@ -766,7 +776,13 @@ class SessionSidebar(Gtk.Box):
 
     def set_active_session(self, session_id: str | None) -> None:
         """Highlight the row of the session (or new-session placeholder)
-        shown in the currently selected tab."""
+        shown in the currently selected tab, and scroll it into view."""
+        # A row activated here put the tab on screen itself, so it is already
+        # visible; anything else — the tab bar, a shortcut, a closing tab
+        # handing the selection on — may well have made a row active that sits
+        # far outside the scrolled view.
+        clicked_here = self._activated_row_id == session_id
+        self._activated_row_id = None
         if session_id == self._active_session_id:
             return
         previous = self._row_for(self._active_session_id)
@@ -776,9 +792,87 @@ class SessionSidebar(Gtk.Box):
         row = self._row_for(session_id)
         if row is not None:
             row.add_css_class("active-tab")
+        if session_id is not None and not clicked_here:
+            self._scroll_row_into_view(session_id)
 
     def _row_for(self, row_id: str | None) -> Gtk.ListBoxRow | None:
         return self._rows.get(row_id) or self._placeholder_rows.get(row_id)
+
+    # -- scrolling -------------------------------------------------------------
+
+    def _scroll_row_into_view(self, row_id: str) -> None:
+        """Ask for a row to be shown, whether or not it exists yet: a row that
+        becomes active while the store is mid-refresh is only built by the
+        rebuild that follows."""
+        self._pending_row = row_id
+        self._schedule_scroll()
+
+    def _remember_scroll(self) -> None:
+        """Note where the list stands, to be restored once it is rebuilt.
+
+        A rebuild drops every row and re-adds it, and an empty list has
+        nothing to scroll, so the offset would otherwise collapse to the top
+        on every refresh that reorders the store — yanking the list away from
+        whatever the user was looking at. Restoring the raw offset can still
+        leave the active row half off the edge when the rebuild removes a row
+        above it (exactly what archiving does), so an active row that is on
+        screen now is asked for again afterwards; the ask costs nothing when
+        it stayed put.
+        """
+        adjustment = self._scrolled.get_vadjustment()
+        self._pending_offset = adjustment.get_value()
+        if self._pending_row is None and self._row_on_screen(self._active_session_id):
+            self._pending_row = self._active_session_id
+        self._schedule_scroll()
+
+    def _schedule_scroll(self) -> None:
+        """Run _apply_scroll once the pending work settles.
+
+        Below the frame clock's redraw priority, so rows appended in this turn
+        of the loop have been laid out by the time their position is read.
+        """
+        if self._scroll_source is None:
+            self._scroll_source = GLib.idle_add(self._apply_scroll, priority=GLib.PRIORITY_LOW)
+
+    def _row_bounds(self, row_id: str | None) -> tuple[float, float] | None:
+        """(top, height) of a row within the list, or None when it has no
+        place on screen — unknown id, or filtered out by a collapsed group or
+        the search entry."""
+        row = self._row_for(row_id)
+        if row is None or not row.get_child_visible():
+            return None
+        ok, bounds = row.compute_bounds(self.list)
+        return (bounds.origin.y, bounds.size.height) if ok else None
+
+    def _row_on_screen(self, row_id: str | None) -> bool:
+        bounds = self._row_bounds(row_id)
+        if bounds is None:
+            return False
+        adjustment = self._scrolled.get_vadjustment()
+        top, height = bounds
+        return (
+            top + height > adjustment.get_value()
+            and top < adjustment.get_value() + adjustment.get_page_size()
+        )
+
+    def _apply_scroll(self) -> bool:
+        self._scroll_source = None
+        adjustment = self._scrolled.get_vadjustment()
+        if self._pending_offset is not None:
+            # Where the list was before the rebuild; clamped for us if it has
+            # since grown shorter than that.
+            adjustment.set_value(self._pending_offset)
+            self._pending_offset = None
+        bounds = self._row_bounds(self._pending_row)
+        self._pending_row = None
+        if bounds is not None:
+            top, height = bounds
+            adjustment.set_value(
+                offset_into_view(
+                    top, height, adjustment.get_value(), adjustment.get_page_size()
+                )
+            )
+        return GLib.SOURCE_REMOVE
 
     # -- new-session placeholders ---------------------------------------------
 
@@ -958,11 +1052,16 @@ class SessionSidebar(Gtk.Box):
             return
         if isinstance(row, PlaceholderRow):
             if not self._selection_mode:  # focus the still-unbound tab
+                self._activated_row_id = row.placeholder_id
                 self.emit("open-placeholder", row.placeholder_id)
             return
         if self._selection_mode:
             row.check.set_active(not row.check.get_active())
             return
+        # Remembered until the tab selection comes back around, so
+        # set_active_session can tell this row apart from one made active
+        # somewhere else and leave the list where the click found it.
+        self._activated_row_id = row.item.session_id
         self.emit("open-session", row.item, False)
 
     # -- context menu ------------------------------------------------------------
