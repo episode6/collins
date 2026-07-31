@@ -209,6 +209,21 @@ popover.pr-menu button.pr-menu-row:hover {
   background-color: alpha(currentColor, 0.1);
 }
 
+/* The "Open in <app>" rows of a project's context menu, which carry an icon
+   and so can't be menu items (GtkModelButton hides an icon that shares its
+   row with a label). Buttons instead, given the geometry of the model buttons
+   they sit between: the same height and the same side padding, so an icon row
+   lines up with the plain items above and below it. */
+popover.menu button.open-with-row {
+  padding: 0 10px;
+  min-height: 26px;
+  border-radius: 6px;
+  font-weight: inherit;
+}
+popover.menu button.open-with-row:hover {
+  background-color: alpha(currentColor, 0.1);
+}
+
 /* sidebar usage panel: subscription limit bars under the session list */
 .usage-panel {
   padding: 8px 12px 10px 12px;

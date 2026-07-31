@@ -19,7 +19,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import __version__, chats, dialogs, panelhistory
+from . import __version__, chats, dialogs, footerapps, openwith, panelhistory
 from .bgstatus import BackgroundStatusPoller, match_background_fork
 from .chatsessionview import ChatSessionTab
 from .formatting import blast_radius_body
@@ -534,11 +534,20 @@ class MainWindow(Adw.ApplicationWindow):
             "archive-project": self._on_archive_project,
             "forget-project": lambda _a, p: self.store.forget_project(p.get_string()),
             "trash-session": self._on_trash_session,
+            "open-folder": self._on_open_folder,
+            "open-folder-terminal": self._on_open_folder_terminal,
         }
         for name, callback in per_session.items():
             action = Gio.SimpleAction(name=name, parameter_type=GLib.VariantType("s"))
             action.connect("activate", callback)
             self.add_action(action)
+
+        # (desktop-file ID, folder) — the only two-part target we take.
+        open_folder_app = Gio.SimpleAction(
+            name="open-folder-app", parameter_type=GLib.VariantType("(ss)")
+        )
+        open_folder_app.connect("activate", self._on_open_folder_app)
+        self.add_action(open_folder_app)
 
         show_archived = Gio.SimpleAction.new_stateful(
             "show-archived", None, GLib.Variant.new_boolean(False)
@@ -1828,6 +1837,28 @@ class MainWindow(Adw.ApplicationWindow):
             self.state.get_name(session.session_id) or "",
             save,
         )
+
+    def _on_open_folder(self, _action, param: GLib.Variant) -> None:
+        """Show the folder in the desktop's file manager. FileLauncher is the
+        fallback: it goes through the portal, which finds a handler even when
+        nothing has registered for inode/directory."""
+        folder = param.get_string()
+        info = openwith.default_file_manager()
+        if info is not None:
+            footerapps.launch_app(info, folder)
+            return
+        Gtk.FileLauncher.new(Gio.File.new_for_path(folder)).launch(self, None, None)
+
+    def _on_open_folder_terminal(self, _action, param: GLib.Variant) -> None:
+        info = openwith.default_terminal()
+        if info is not None:
+            footerapps.launch_app(info, param.get_string(), pass_directory=False)
+
+    def _on_open_folder_app(self, _action, param: GLib.Variant) -> None:
+        app_id, folder = param.unpack()
+        info = footerapps.resolve_app(app_id)
+        if info is not None:
+            footerapps.launch_app(info, folder)
 
     def _on_reveal_transcript(self, _action, param: GLib.Variant) -> None:
         session = self._session_for(param)

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-30. Full change history: git log for this file.
+fork. Last modified: 2026-07-31. Full change history: git log for this file.
 -->
 
 # Collins
@@ -33,7 +33,7 @@ Features:
 - A **Claude usage panel** at the bottom of the sidebar shows your subscription limits (session, weekly, extra usage) as progress bars with reset countdowns — read straight from the `claude` CLI's own login, refreshed every 5 minutes (paused while the window is minimized or the screen is locked). Toggle it in Preferences.
 - **Tabs** can be renamed, given an emoji prefix, or have their session ID copied (right-click → Rename… / Set emoji… / Copy session ID); renaming a session's tab updates its name everywhere. While a session tab is focused, header buttons **exit** or **background** it and close the tab immediately — no confirmation dialog — the **tab bar can be hidden** with its own header toggle (the window title then names the active tab), and the **sidebar toggles** with the header button or `F9`. **Shift+Enter** inserts a newline in the agent's prompt.
 - Each tab has a slim **footer** showing the agent's live working directory (click to copy; worktree-aware) and the current **git branch** (⎇), plus the terminal-panel buttons.
-- **Right-click a session** for the full action set: open, open in [Ghostty](https://ghostty.org) (external window — Ghostty can't be embedded), fork (`--fork-session`), rename, regenerate name, favorite, **details** (messages/models/tokens, a peek at recent messages, and MCP servers/usage), copy session id, export as Markdown, reveal transcript, archive, move the transcript to trash, or delete permanently. **Right-click a project header** to start a new session there or archive the whole project — projects with no visible sessions still show their header (with a `+` button) so a folder stays reachable.
+- **Right-click a session** for the full action set: open, open in [Ghostty](https://ghostty.org) (external window — Ghostty can't be embedded), fork (`--fork-session`), rename, regenerate name, favorite, **details** (messages/models/tokens, a peek at recent messages, and MCP servers/usage), copy session id, export as Markdown, reveal transcript, archive, move the transcript to trash, or delete permanently. **Right-click a project header** to start a new session there, **open its folder in another app**, or archive the whole project — projects with no visible sessions still show their header (with a `+` button) so a folder stays reachable. The open-in list carries each app's own icon: one row per app added under Preferences → *Footer apps*, plus **Open in File Manager** and **Open in Terminal** using whatever your desktop nominates for those (`$TERMINAL` and `xdg-terminals.list` are honoured).
 - **Desktop notifications** when a background session goes quiet after producing output — click to jump to that tab (toggle in Preferences).
 - **Select mode** (menu → *Select multiple sessions*) for bulk actions: open, star, archive, or trash many sessions at once.
 - **New session** (tab icon in the header) starts a fresh agent session (`claude`) in the **visible session's project** — no dialog needed; with no session visible it asks for a folder. Every project header also has a **`+` button** to start a session right there, and a just-started session shows a **"New Thread"** placeholder row until the agent writes its transcript.

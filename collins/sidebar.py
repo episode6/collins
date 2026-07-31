@@ -29,7 +29,7 @@ gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import prmenu
+from . import footerapps, openwith, prmenu
 from .chats import is_chat_cwd
 from .formatting import format_size
 from .i18n import _
@@ -61,6 +61,10 @@ _IN_TAB_STATUSES = ("open", "attention")
 # theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
 _HEADER_ICON_OFFSET = 18
 
+# App icons in a project's "open in…" menu rows: symbolic-icon sized, so a row
+# is no taller than the plain menu items above and below it.
+_OPEN_WITH_ICON_PX = 16
+
 
 def _session_child_indent(icon_size: int) -> int:
     """Left margin for a session row, so its card starts right where the icon
@@ -71,6 +75,34 @@ def _session_child_indent(icon_size: int) -> int:
     header's icon offset plus the icon's width has to be matched.
     """
     return _HEADER_ICON_OFFSET + icon_size
+
+
+def _open_with_row(icon: Gio.Icon | None, label: str, action: str, target: GLib.Variant) -> Gtk.Widget:
+    """A menu row that shows an app's icon beside its name.
+
+    A menu model can't do this: GtkModelButton takes an "icon" attribute but
+    only draws it when the item has no text, so a plain Gio.MenuItem would
+    silently drop the icon. Custom widgets slotted into the popover (the same
+    trick prmenu.py's list is built from) can show both.
+    """
+    image = Gtk.Image.new_from_gicon(icon or Gio.ThemedIcon.new("application-x-executable"))
+    image.set_pixel_size(_OPEN_WITH_ICON_PX)
+    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+    box.append(image)
+    box.append(Gtk.Label(label=label, xalign=0.0, hexpand=True))
+
+    button = Gtk.Button(child=box)
+    button.add_css_class("flat")
+    button.add_css_class("open-with-row")  # menu-sized, and lit under the pointer
+    button.connect("clicked", _on_open_with_clicked, action, target)
+    return button
+
+
+def _on_open_with_clicked(button: Gtk.Button, action: str, target: GLib.Variant) -> None:
+    button.activate_action(action, target)
+    popover = button.get_ancestor(Gtk.Popover)
+    if popover is not None:
+        popover.popdown()
 
 
 def _abbreviate_path(path: str | None) -> str:
@@ -1278,11 +1310,66 @@ class SessionSidebar(Gtk.Box):
 
         menu = Gio.Menu()
         menu.append_section(None, open_section)
+        rows: list[Gtk.Widget] = []
+        if row.cwd:
+            menu.append_section(None, self._open_with_section(row.cwd, rows))
         menu.append_section(None, danger_section)
-        self._popup_menu(menu, row, x, y)
+        self._popup_menu(menu, row, x, y, rows)
 
-    def _popup_menu(self, menu: Gio.Menu, row: Gtk.ListBoxRow, x: float, y: float) -> None:
+    def _open_with_section(self, cwd: str, rows: list[Gtk.Widget]) -> Gio.Menu:
+        """Ways to hand the project's folder to another app: the user's own
+        picks (the footer apps, in their configured order), then the file
+        manager and terminal the desktop hands out.
+
+        Each is a custom widget rather than a menu item — see _open_with_row —
+        so it can show the app's own icon; the built widgets are appended to
+        *rows* for _popup_menu to slot into the popover, in order.
+        """
+        section = Gio.Menu()
+
+        def add(icon: Gio.Icon | None, label: str, action: str, target: GLib.Variant) -> None:
+            item = Gio.MenuItem.new(None, None)
+            item.set_attribute_value("custom", GLib.Variant("s", f"open-with-{len(rows)}"))
+            section.append_item(item)
+            rows.append(_open_with_row(icon, label, action, target))
+
+        configured = set()
+        for app_id, info in footerapps.resolve_apps(
+            list(self.store.state.get_setting("footer_apps") or [])
+        ):
+            configured.add(app_id)
+            add(
+                info.get_icon(),
+                _("Open in {name}").format(name=info.get_display_name()),
+                "win.open-folder-app",
+                GLib.Variant("(ss)", (app_id, cwd)),
+            )
+
+        # Role labels rather than app names for these two: what you get is
+        # whatever the desktop nominates, and the icon already says which.
+        # Skipped when the user has added that very app themselves.
+        manager = openwith.default_file_manager()
+        if manager is None or manager.get_id() not in configured:
+            icon = manager.get_icon() if manager else Gio.ThemedIcon.new("folder-symbolic")
+            add(icon, _("Open in File Manager"), "win.open-folder", GLib.Variant("s", cwd))
+
+        terminal = openwith.default_terminal()
+        if terminal is not None and terminal.get_id() not in configured:
+            icon = terminal.get_icon() or Gio.ThemedIcon.new("utilities-terminal-symbolic")
+            add(icon, _("Open in Terminal"), "win.open-folder-terminal", GLib.Variant("s", cwd))
+        return section
+
+    def _popup_menu(
+        self,
+        menu: Gio.Menu,
+        row: Gtk.ListBoxRow,
+        x: float,
+        y: float,
+        custom_rows: list[Gtk.Widget] | None = None,
+    ) -> None:
         popover = Gtk.PopoverMenu.new_from_model(menu)
+        for index, widget in enumerate(custom_rows or ()):
+            popover.add_child(widget, f"open-with-{index}")
         popover.set_parent(row)
         popover.set_has_arrow(False)
         rect = Gdk.Rectangle()
