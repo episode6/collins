@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -188,6 +188,25 @@ headerbar.bell-flash {
 .tab-footer button:hover {
   background: none;
   box-shadow: none;
+}
+
+/* ...except inside the caret's PR list, which is a menu and reads as one. A
+   popover belongs to the widget tree of the button it hangs off, so the two
+   rules above apply to its rows too: without these they sit 22px tall with
+   2px of side padding, flush against the popover's edge, and stay flat as the
+   pointer crosses them. The contents padding gives the list room on every
+   side (its longest line was reaching the frame), and each row gets menu-item
+   geometry plus a hover fill, so the pointer says what a click would open. */
+popover.pr-menu > contents {
+  padding: 6px;
+}
+popover.pr-menu button.pr-menu-row {
+  padding: 4px 8px;
+  min-height: 28px;
+  border-radius: 6px;
+}
+popover.pr-menu button.pr-menu-row:hover {
+  background-color: alpha(currentColor, 0.1);
 }
 
 /* sidebar usage panel: subscription limit bars under the session list */

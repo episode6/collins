@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -797,6 +797,10 @@ class TerminalTab(Gtk.Box):
         self._pr_menu = Gtk.Popover()
         self._pr_menu.set_position(Gtk.PositionType.TOP)  # the footer is at the bottom
         self._pr_menu.add_css_class("menu")
+        # Its own class as well: the list inside is buttons, and the footer's
+        # rules for those (tight, no hover background) would otherwise reach
+        # into it — a popover is a child of the widget it is attached to.
+        self._pr_menu.add_css_class("pr-menu")
         menu_icon = Gtk.Image.new_from_icon_name("pan-up-symbolic")
         menu_icon.set_pixel_size(_PR_REFRESH_ICON_PX)
         menu_icon.add_css_class("dim-label")
@@ -968,6 +972,7 @@ class TerminalTab(Gtk.Box):
             row.append(number)
             button = Gtk.Button(child=row)
             button.add_css_class("flat")
+            button.add_css_class("pr-menu-row")  # menu-sized, and lit under the pointer
             button.set_tooltip_text(open_tooltip(describe(pr) + "\n" + pr.url))
             button.connect("clicked", self._on_pr_menu_row, pr.url)
             rows.append(button)
