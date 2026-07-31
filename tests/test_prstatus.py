@@ -336,7 +336,7 @@ def test_invalidating_an_unknown_pr_is_harmless(scheduled):
 
 @pytest.fixture
 def gh_json(monkeypatch):
-    """Stub _gh_json; returns (setter, calls) for asserting what gh was asked."""
+    """Stub gh_json; returns (setter, calls) for asserting what gh was asked."""
     calls: list[tuple[list[str], str | None]] = []
     reply: list[object] = [None]
 
@@ -344,7 +344,7 @@ def gh_json(monkeypatch):
         calls.append((args, cwd))
         return reply[0]
 
-    monkeypatch.setattr(prstatus, "_gh_json", fake)
+    monkeypatch.setattr(prstatus, "gh_json", fake)
     return (lambda value: reply.__setitem__(0, value)), calls
 
 
@@ -630,6 +630,62 @@ def test_run_gh_passes_the_url_as_an_argument(monkeypatch):
     assert argv[:4] == ["/usr/bin/gh", "pr", "view", URL]
     assert kwargs["timeout"] == prstatus._GH_TIMEOUT_S
     assert "shell" not in kwargs
+
+
+# -- gh run for its effect (the PR menu's actions) --------------------------
+
+
+def test_gh_run_reports_success_without_a_word(monkeypatch):
+    seen = []
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(
+        prstatus.subprocess, "run",
+        lambda argv, **kw: seen.append((argv, kw)) or _completed(),
+    )
+    assert prstatus.gh_run(["pr", "ready", URL]) == (True, "")
+    argv, kwargs = seen[0]
+    assert argv == ["/usr/bin/gh", "pr", "ready", URL]
+    # A merge waits on GitHub doing the merge, so it gets longer than a status
+    # fetch — and still can't hang the thread it runs on.
+    assert kwargs["timeout"] == prstatus._GH_ACTION_TIMEOUT_S
+    assert "shell" not in kwargs
+
+
+def test_gh_run_hands_back_ghs_own_complaint(monkeypatch):
+    """The menu item the user picked has to say why nothing happened, and gh
+    already said it better than a generic message would."""
+    failed = subprocess.CompletedProcess([], 1, stdout="", stderr="Pull request is not mergeable\n")
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(prstatus.subprocess, "run", lambda *a, **kw: failed)
+    assert prstatus.gh_run(["pr", "merge", URL]) == (False, "Pull request is not mergeable")
+
+
+def test_gh_run_caps_what_github_can_put_in_a_dialog(monkeypatch):
+    noisy = subprocess.CompletedProcess([], 1, stdout="", stderr="x" * 5000)
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(prstatus.subprocess, "run", lambda *a, **kw: noisy)
+    ok, message = prstatus.gh_run(["pr", "merge", URL])
+    assert ok is False and len(message) == prstatus._MAX_GH_ERROR
+
+
+def test_gh_run_says_so_when_gh_is_missing(monkeypatch):
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: None)
+    ok, message = prstatus.gh_run(["pr", "ready", URL])
+    assert ok is False and "gh" in message
+
+
+@pytest.mark.parametrize(
+    "url,repository",
+    [
+        (URL, "episode6/collins"),
+        ("https://github.enterprise.io/team/app/pull/3", "team/app"),
+        ("https://github.com/episode6/collins/issues/55", None),
+        ("--version", None),
+        (None, None),
+    ],
+)
+def test_repository_for_is_the_gate_every_gh_call_goes_through(url, repository):
+    assert prstatus.repository_for(url) == repository
 
 
 # -- chip rendering ---------------------------------------------------------

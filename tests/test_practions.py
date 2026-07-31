@@ -1,0 +1,206 @@
+"""Tests for practions — which actions a pull request offers in the state it
+is in, and the `gh` commands the ones that talk to GitHub turn into."""
+
+import pytest
+
+from collins import practions
+from collins.practions import (
+    AUTO_MERGE,
+    CI_PROMPT,
+    FIX_CI,
+    MERGE,
+    OPEN,
+    READY,
+    REVIEW,
+    REVIEW_COMMENT,
+    actions_for,
+    checks_green,
+    merge_method,
+    perform,
+)
+from collins.prstatus import PullRequest
+
+URL = "https://github.com/episode6/collins/pull/55"
+
+
+def _pr(**overrides) -> PullRequest:
+    fields = {
+        "number": 55,
+        "url": URL,
+        "repository": "episode6/collins",
+        "title": "Give a PR its actions",
+        "state": "OPEN",
+        "passed": 3,
+        "failed": 0,
+        "pending": 0,
+    }
+    fields.update(overrides)
+    return PullRequest(**fields)
+
+
+def _keys(pr, takes_prompt=False) -> list[str]:
+    return [action.key for action in actions_for(pr, takes_prompt)]
+
+
+# -- what a PR offers -------------------------------------------------------
+
+
+def test_a_draft_is_offered_the_way_out_of_draft():
+    assert _keys(_pr(state="DRAFT")) == [OPEN, READY, REVIEW]
+
+
+def test_a_green_pr_is_offered_the_merge():
+    assert _keys(_pr()) == [OPEN, MERGE, REVIEW]
+
+
+def test_a_pending_pr_is_offered_auto_merge_instead():
+    """Merging now would be merging before the checks have spoken, so the offer
+    is the one that waits for them."""
+    assert _keys(_pr(passed=1, pending=2)) == [OPEN, AUTO_MERGE, REVIEW]
+
+
+def test_a_failing_pr_is_offered_auto_merge_too():
+    assert AUTO_MERGE in _keys(_pr(passed=1, failed=1))
+
+
+def test_a_pr_with_no_checks_at_all_counts_as_green():
+    """A repository with nothing configured reports zeroes; there is nothing to
+    wait for, so waiting would mean an auto-merge that never fires."""
+    assert MERGE in _keys(_pr(passed=0, failed=0, pending=0))
+
+
+def test_an_unfetched_pr_offers_only_its_page():
+    """No gh, no network: better a short menu than a Merge that was never going
+    to work."""
+    assert _keys(_pr(state=None, passed=None, failed=None, pending=None)) == [OPEN]
+
+
+def test_a_merged_pr_offers_only_its_page():
+    assert _keys(_pr(state="MERGED"), takes_prompt=True) == [OPEN]
+
+
+def test_a_closed_pr_offers_only_its_page():
+    assert _keys(_pr(state="CLOSED"), takes_prompt=True) == [OPEN]
+
+
+def test_addressing_ci_needs_both_a_failure_and_a_session_at_its_prompt():
+    """It sends a prompt, so a session that is closed — or mid-sentence — has
+    nowhere to send one, and a PR that is passing has nothing to say."""
+    failing = _pr(passed=1, failed=2)
+    assert FIX_CI in _keys(failing, takes_prompt=True)
+    assert FIX_CI not in _keys(failing, takes_prompt=False)
+    assert FIX_CI not in _keys(_pr(), takes_prompt=True)
+
+
+def test_only_merging_asks_first():
+    """The two irreversible, everybody-can-see-it actions confirm; opening a
+    page, a comment and a prompt sent to a session don't."""
+    asks = {a.key: a.confirm is not None for a in actions_for(_pr(passed=1, failed=1), True)}
+    assert asks == {OPEN: False, AUTO_MERGE: True, REVIEW: False, FIX_CI: False}
+    assert {a.key: a.confirm is not None for a in actions_for(_pr(), True)}[MERGE]
+
+
+def test_every_action_names_the_pr_in_its_tooltip():
+    for action in actions_for(_pr(passed=1, failed=1), takes_prompt=True):
+        assert action.label and action.tooltip
+
+
+def test_checks_green_is_unknown_status_pessimistic():
+    assert checks_green(_pr()) is True
+    assert checks_green(_pr(pending=1)) is False
+    assert checks_green(_pr(passed=None, failed=None, pending=None)) is False
+
+
+# -- what they run ----------------------------------------------------------
+
+
+@pytest.fixture
+def gh(monkeypatch):
+    """Stub gh_run; returns (calls, setter for what gh comes back with)."""
+    calls: list[list[str]] = []
+    reply: list[tuple[bool, str]] = [(True, "")]
+
+    def fake(args):
+        calls.append(args)
+        return reply[0]
+
+    monkeypatch.setattr(practions, "gh_run", fake)
+    monkeypatch.setattr(practions, "gh_json", lambda args, cwd=None: None)
+    return calls, (lambda value: reply.__setitem__(0, value))
+
+
+def test_ready_takes_the_pr_out_of_draft(gh):
+    calls, _serve = gh
+    assert perform(READY, _pr(state="DRAFT")) is None
+    assert calls == [["pr", "ready", URL]]
+
+
+def test_merge_names_a_method_and_auto_merge_adds_the_flag(gh):
+    """gh refuses to pick a merge method off a terminal, so one is always
+    named; auto-merge is the same command with --auto on the end."""
+    calls, _serve = gh
+    perform(MERGE, _pr())
+    perform(AUTO_MERGE, _pr(pending=1))
+    assert calls[0] == ["pr", "merge", URL, "--squash"]
+    assert calls[1] == ["pr", "merge", URL, "--squash", "--auto"]
+
+
+def test_review_asks_for_one_in_a_comment(gh):
+    calls, _serve = gh
+    perform(REVIEW, _pr())
+    assert calls == [["pr", "comment", URL, "--body", REVIEW_COMMENT]]
+    assert "@claude" in REVIEW_COMMENT
+
+
+def test_a_failure_comes_back_as_the_reason(gh):
+    _calls, serve = gh
+    serve((False, "Pull request is not mergeable"))
+    assert perform(MERGE, _pr()) == "Pull request is not mergeable"
+
+
+def test_a_url_that_isnt_a_pr_never_reaches_gh(gh):
+    """PR URLs come out of transcripts, i.e. out of repository content: one
+    that doesn't look like a PR page is refused rather than put in an argv."""
+    calls, _serve = gh
+    assert perform(MERGE, _pr(url="--version")) is not None
+    assert perform(READY, _pr(url="https://github.com/o/r/issues/9")) is not None
+    assert calls == []
+
+
+def test_the_prompt_ci_errors_go_into_is_left_in_english():
+    """It is read by the agent CLI, not by a person."""
+    assert CI_PROMPT == "address the ci error(s)"
+
+
+# -- which merge method ------------------------------------------------------
+
+
+def _repo_reply(monkeypatch, reply):
+    seen: list[list[str]] = []
+
+    def fake(args, cwd=None):
+        seen.append(args)
+        return reply
+
+    monkeypatch.setattr(practions, "gh_json", fake)
+    return seen
+
+
+def test_the_merge_method_is_the_first_the_repository_allows(monkeypatch):
+    _repo_reply(monkeypatch, {"squashMergeAllowed": False, "mergeCommitAllowed": True})
+    assert merge_method("episode6/collins") == "--merge"
+
+
+def test_squash_wins_where_it_is_allowed(monkeypatch):
+    seen = _repo_reply(
+        monkeypatch, {"squashMergeAllowed": True, "mergeCommitAllowed": True, "rebaseMergeAllowed": True}
+    )
+    assert merge_method("episode6/collins") == "--squash"
+    assert seen[0][:3] == ["repo", "view", "episode6/collins"]
+
+
+def test_an_unanswered_repository_falls_back_to_squash(monkeypatch):
+    """No gh, no network, or a reply in a shape we don't know: GitHub's own
+    default for a new repository is the best guess left."""
+    _repo_reply(monkeypatch, None)
+    assert merge_method("episode6/collins") == "--squash"

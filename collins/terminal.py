@@ -18,7 +18,15 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Vte", "3.91")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
-from . import apppicker, footerapps, panelhistory, prmenu, proctree, themes  # noqa: E402
+from . import (  # noqa: E402
+    apppicker,
+    footerapps,
+    panelhistory,
+    practions,
+    prmenu,
+    proctree,
+    themes,
+)
 from .copylabel import (  # noqa: E402
     copy_tooltip,
     enable_copy_on_click,
@@ -894,9 +902,29 @@ class TerminalTab(Gtk.Box):
             merged.set_pixel_size(prmenu.MERGED_ICON_PX)
             merged.add_css_class("pr-merged")
             chip.append(merged)
-        chip.set_tooltip_text(open_tooltip(describe(pr) + "\n" + pr.url))
+        chip.set_tooltip_text(
+            open_tooltip(describe(pr) + "\n" + pr.url) + "\n" + _("Right-click for actions")
+        )
         enable_open_on_click(chip, lambda: pr.url)
+        # The chip is the shortest way to a PR, so it is also the shortest way
+        # to do something about one: the same actions the caret's list offers,
+        # opened on the chip itself.
+        prmenu.attach_actions(chip, pr, self._pr_action_host())
         return chip
+
+    def _pr_action_host(self) -> prmenu.ActionHost:
+        """How a PR's actions reach this tab: it is the session they belong to.
+
+        The chips and the caret's list are the tab's own, so "can this session
+        take a prompt?" is a question the tab answers about itself — a tab
+        whose agent has exited, or whose prompt is half-written, keeps its
+        chips and its PRs, but is not somewhere to send anything.
+        """
+        return prmenu.ActionHost(
+            takes_prompt=self.takes_prompt,
+            address_ci=lambda: self.inject_prompt(practions.CI_PROMPT),
+            refresh=self._request_update,
+        )
 
     def _fill_pr_menu(self, _button: Gtk.MenuButton) -> None:
         """Build the caret's list, just before it opens.
@@ -905,7 +933,7 @@ class TerminalTab(Gtk.Box):
         footer's own poll is already refreshing every PR on the row, so what
         the tab is holding when the caret is clicked is current.
         """
-        prmenu.fill(self._pr_menu, self._footer_prs)
+        prmenu.fill(self._pr_menu, self._footer_prs, host=self._pr_action_host())
 
     def _refresh_pr_chips(self, prs: list[PullRequest]) -> None:
         """Show this session's PRs, oldest first, with the CI state each has.
@@ -1000,6 +1028,34 @@ class TerminalTab(Gtk.Box):
 
     def feed_child_text(self, text: str) -> None:
         self.terminal.feed_child(text.encode())
+
+    def inject_prompt(self, text: str) -> None:
+        """Send *text* to the agent as a prompt, and put the tab in front.
+
+        What the PR menu's "Address the CI errors" does. Typed and sent in one
+        write, which is what the CLI reads as a line the user typed and ended
+        with Return; only offered while `takes_prompt` says the input is empty,
+        so nothing of the user's is ever sent along with it.
+        """
+        self.feed_child_text(text + "\r")
+        self.grab_terminal_focus()
+
+    def takes_prompt(self) -> bool:
+        """Whether a prompt sent right now would land in an empty input box.
+
+        The provider reads that off the screen (see Provider.takes_prompt); all
+        this does is find what it reads — the line the cursor is on, and how
+        far into it the cursor sits — and rule out a terminal with no agent
+        left in it.
+        """
+        if self._child_pid is None:
+            return False
+        column, row = self.terminal.get_cursor_position()
+        line = self.terminal.get_text_range_format(
+            Vte.Format.TEXT, row, 0, row, self.terminal.get_column_count()
+        )
+        text = line[0] if isinstance(line, tuple) else line
+        return self.provider.takes_prompt(text or "", column)
 
     # -- prompt card -------------------------------------------------------
 

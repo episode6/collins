@@ -76,12 +76,16 @@ def confirm_dialog(
     on_extra: Callable[[], None] | None = None,
     extra_child: Gtk.Widget | None = None,
     keys: dict[str, str] | None = None,
+    destructive: bool = True,
 ) -> None:
     """Two-button confirmation (Cancel + a destructive `confirm_label`).
     `extra_label`/`on_extra` add a third, non-destructive choice between them;
     `extra_child` puts a widget (a check button, say) above the buttons.
     `keys` maps bare key names (e.g. "e") to response ids so the dialog can be
-    answered without reaching for the mouse."""
+    answered without reaching for the mouse.
+    `destructive=False` asks about something that isn't a loss (merging a pull
+    request), so the confirming button reads as the suggested course rather
+    than as a warning."""
     dialog = Adw.AlertDialog(heading=heading, body=body)
     if extra_child is not None:
         dialog.set_extra_child(extra_child)
@@ -89,7 +93,10 @@ def confirm_dialog(
     if extra_label is not None:
         dialog.add_response("extra", extra_label)
     dialog.add_response("confirm", confirm_label)
-    dialog.set_response_appearance("confirm", Adw.ResponseAppearance.DESTRUCTIVE)
+    dialog.set_response_appearance(
+        "confirm",
+        Adw.ResponseAppearance.DESTRUCTIVE if destructive else Adw.ResponseAppearance.SUGGESTED,
+    )
     dialog.set_default_response(default_response)
     dialog.set_close_response("cancel")
 
