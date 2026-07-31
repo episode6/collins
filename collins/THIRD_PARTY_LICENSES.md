@@ -38,7 +38,11 @@ Most icons are named icons resolved at runtime from the system icon theme, typic
 **Adwaita icon theme** — © the GNOME Project — CC-BY-SA-3.0 or LGPL-3.0 —
 [GNOME/adwaita-icon-theme](https://gitlab.gnome.org/GNOME/adwaita-icon-theme). The
 symbolic icons bundled under `data/icons` are either original artwork for this fork or
-derived from agent-session-manager (GPL-3.0); the Collins app icon is original artwork.
+derived from agent-session-manager (GPL-3.0), except `git-merge-symbolic` and
+`github-symbolic`, which are used unmodified from **Octicons** — © GitHub, Inc. — MIT
+License — [primer/octicons](https://github.com/primer/octicons), so that a merged PR and
+the button opening a session's pull requests carry the same marks here as on the site
+they came from. The Collins app icon is original artwork.
 
 ## Terminal color schemes
 

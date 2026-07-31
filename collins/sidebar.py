@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -19,6 +19,7 @@ Emits:
 from __future__ import annotations
 
 import shutil
+import threading
 from pathlib import Path
 
 import gi
@@ -28,12 +29,14 @@ gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: E402
 
+from . import prmenu
 from .chats import is_chat_cwd
 from .formatting import format_size
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .projecticons import project_icon_data
 from .providers import get_provider
+from .prstatus import PullRequest, from_records, resync, to_records
 from .scrolling import offset_into_view
 from .sessions import project_name_for_cwd
 from .store import SessionStore
@@ -374,7 +377,26 @@ class SessionRow(Gtk.ListBoxRow):
         archive_btn.set_visible(sidebar.store.forward_state(item.session) != "moved")
         self._archive_btn = archive_btn
 
+        # Leading the row's actions: the pull requests this session opened —
+        # the same list the tab footer's caret shows, from a row whose tab
+        # needn't be open (or exist) to read it. Clicking the button opens the
+        # menu and nothing else: a button consumes the click that would
+        # otherwise activate the row and open the session.
+        self._pr_menu = prmenu.new_popover(Gtk.PositionType.BOTTOM)
+        self._pr_menu.connect("closed", self._on_pr_menu_closed)
+        pr_btn = Gtk.MenuButton(
+            icon_name="github-symbolic", valign=Gtk.Align.CENTER, popover=self._pr_menu
+        )
+        pr_btn.add_css_class("flat")
+        pr_btn.set_tooltip_text(_("Pull requests from this session"))
+        pr_btn.set_create_popup_func(self._fill_pr_menu)
+        self._pr_btn = pr_btn
+        self._prs: list[PullRequest] = []
+        self._pr_fetch = 0  # generation: a slow fetch can't land on a later opening
+        self.sync_prs()
+
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        actions.append(pr_btn)
         actions.append(stop_btn)
         actions.append(bg_btn)
         actions.append(archive_btn)  # rightmost: the one action every row has
@@ -392,9 +414,10 @@ class SessionRow(Gtk.ListBoxRow):
         self._action_stack.add_named(actions, "hover")
         top.append(self._action_stack)
 
+        self._hovered = False
         hover = Gtk.EventControllerMotion()
-        hover.connect("enter", lambda *_: self._action_stack.set_visible_child_name("hover"))
-        hover.connect("leave", lambda *_: self._action_stack.set_visible_child_name("rest"))
+        hover.connect("enter", self._on_hover_enter)
+        hover.connect("leave", self._on_hover_leave)
         self.add_controller(hover)
         box.append(top)
 
@@ -437,6 +460,76 @@ class SessionRow(Gtk.ListBoxRow):
         right_click = Gtk.GestureClick(button=3)
         right_click.connect("pressed", self._on_right_click)
         self.add_controller(right_click)
+
+    def sync_prs(self) -> None:
+        """Re-read the session's saved PRs; the button is only there with one.
+
+        Called as the row is built and again whenever the session's tab reports
+        a new list, so a session that opens its first PR grows the button
+        without waiting for the sidebar to be rebuilt around it.
+        """
+        self._prs = from_records(self._sidebar.store.state.get_session_prs(self.item.session_id))
+        self._pr_btn.set_visible(bool(self._prs))
+
+    def _fill_pr_menu(self, _button: Gtk.MenuButton) -> None:
+        """Put the saved list up at once, and refresh it behind a spinner.
+
+        The footer's copy of this menu is filled from a poll that is already
+        keeping it current. This one has only what was saved for the session,
+        which is titles and merges and no CI status at all (see
+        prstatus.to_record) — a status that survived a restart would be a
+        yesterday's check, so none is kept. Opening the menu is therefore what
+        fetches: the rows go up immediately, since the titles and numbers are
+        the readable part, with a spinner in the column each status will land
+        in.
+        """
+        prmenu.fill(self._pr_menu, self._prs, loading=True)
+        self._pr_fetch += 1
+        token = self._pr_fetch
+        prs = list(self._prs)
+        threading.Thread(
+            target=self._resync_prs, args=(token, prs), name="pr-menu", daemon=True
+        ).start()
+
+    def _resync_prs(self, token: int, prs: list[PullRequest]) -> None:
+        """Fetch every PR's title and status. Runs off the main loop."""
+        refreshed = resync(prs)
+        GLib.idle_add(self._pr_menu_refreshed, token, refreshed)
+
+    def _pr_menu_refreshed(self, token: int, prs: list[PullRequest]) -> bool:
+        """Land a refresh: into the menu if it is still up, and onto disk.
+
+        Saved either way — a title learned here is worth keeping whether or not
+        anyone is still reading the menu it was fetched for, and it is what the
+        next opening (and the footer, if the session is opened in a tab) starts
+        from. A fetch overtaken by a later opening is dropped whole: that
+        opening has its own on the way.
+        """
+        if token != self._pr_fetch:
+            return GLib.SOURCE_REMOVE
+        self._prs = prs
+        self._sidebar.store.state.set_session_prs(self.item.session_id, to_records(prs))
+        if self._pr_menu.get_visible():
+            prmenu.fill(self._pr_menu, prs)
+        return GLib.SOURCE_REMOVE
+
+    def _on_hover_enter(self, *_args) -> None:
+        self._hovered = True
+        self._action_stack.set_visible_child_name("hover")
+
+    def _on_hover_leave(self, *_args) -> None:
+        # The pointer leaving isn't the whole story while the PR menu is open:
+        # a popover takes a pointer grab, and the grab arrives here as a leave.
+        # Swapping the buttons back out for the timestamp would hide the button
+        # the menu hangs off — and a popover goes down with the widget it is
+        # attached to, so the menu would close in the act of being opened.
+        self._hovered = False
+        if not self._pr_menu.get_visible():
+            self._action_stack.set_visible_child_name("rest")
+
+    def _on_pr_menu_closed(self, _popover: Gtk.Popover) -> None:
+        if not self._hovered:
+            self._action_stack.set_visible_child_name("rest")
 
     def update_folder_path(self, show: bool) -> None:
         self._path_label.set_visible(
@@ -778,6 +871,18 @@ class SessionSidebar(Gtk.Box):
         for row in self._rows.values():
             row.check.set_visible(self._selection_mode)
             row.check.set_active(row.item.session_id in self._selected)
+
+    def sync_session_prs(self, session_id: str) -> None:
+        """A session's PR list changed: re-read it on that session's row.
+
+        The window calls this whenever a tab saves a new list, so a session
+        that has just opened its first PR gains the button that opens it — the
+        rows themselves are only rebuilt when the list's order changes, which
+        opening a PR isn't.
+        """
+        row = self._rows.get(session_id)
+        if row is not None:
+            row.sync_prs()
 
     def set_active_session(self, session_id: str | None) -> None:
         """Highlight the row of the session (or new-session placeholder)
