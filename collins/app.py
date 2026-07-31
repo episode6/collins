@@ -161,6 +161,17 @@ row.session-child.active-tab > box {
   padding: 4px 8px;
 }
 
+/* visual bell: a terminal's BEL tints the header bar, fading out over the
+   animation. An inset shadow rather than background-color, so the flash
+   composites over the bar's normal background instead of replacing it. */
+@keyframes bell-flash {
+  from { box-shadow: inset 0 0 0 100px alpha(#D97757, 0.4); }
+  to   { box-shadow: inset 0 0 0 100px alpha(#D97757, 0); }
+}
+headerbar.bell-flash {
+  animation: bell-flash 400ms ease-out;
+}
+
 /* slim per-tab footer row: working directory + terminal-panel buttons */
 .tab-footer {
   padding: 1px 8px;

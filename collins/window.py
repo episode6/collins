@@ -48,6 +48,9 @@ _GHOSTTY = shutil.which("ghostty")
 
 # Quiet period before a background tab is considered "idle" / finished.
 _IDLE_NOTIFY_MS = 4000
+# Visual bell: how long .bell-flash stays on the header bar. Must outlast the
+# CSS animation in app.py, which fades the flash out on its own.
+_BELL_FLASH_MS = 450
 
 class _KeepProjects(NamedTuple):
     """The "keep the emptied projects" check button and what it applies to."""
@@ -169,6 +172,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.tab_bar.set_visible(bool(self.state.get_setting("show_tab_bar")))
 
         content_header = Adw.HeaderBar()
+        # Kept for the visual bell: a terminal's BEL flashes this bar.
+        self._content_header = content_header
+        self._bell_flash_source: int | None = None
         self.sidebar_toggle = Gtk.ToggleButton(icon_name="sidebar-show-symbolic", active=True)
         self.sidebar_toggle.set_tooltip_text(_("Toggle sidebar (F9)"))
         content_header.pack_start(self.sidebar_toggle)
@@ -860,6 +866,7 @@ class MainWindow(Adw.ApplicationWindow):
         tab.connect("process-exited", self._on_process_exited, page)
         tab.connect("session-resolved", self._on_session_resolved, page)
         tab.connect("panel-size-changed", self._on_panel_size_changed)
+        tab.connect("bell", self._on_bell)
         tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
         self.tab_view.set_selected_page(page)
@@ -867,6 +874,22 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_tab_status(page)
         GLib.idle_add(tab.grab_terminal_focus)
         return page
+
+    def _on_bell(self, _tab: TerminalTab) -> None:
+        """Visual bell: flash the header bar once (the audible bell is VTE's
+        own). A bell arriving mid-flash is folded into it — restarting the
+        CSS animation would need a frame without the class, and one flash
+        already tells the story."""
+        if self._bell_flash_source is not None:
+            return
+
+        def clear() -> bool:
+            self._bell_flash_source = None
+            self._content_header.remove_css_class("bell-flash")
+            return GLib.SOURCE_REMOVE
+
+        self._content_header.add_css_class("bell-flash")
+        self._bell_flash_source = GLib.timeout_add(_BELL_FLASH_MS, clear)
 
     def _on_session_resolved(self, _tab: TerminalTab, session_id: str, page: Adw.TabPage) -> None:
         """A fresh tab (new / continue) discovered its session id: bind the tab
