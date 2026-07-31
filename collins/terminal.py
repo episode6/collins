@@ -18,7 +18,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Vte", "3.91")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
-from . import apppicker, footerapps, panelhistory, prmenu, themes  # noqa: E402
+from . import apppicker, footerapps, panelhistory, prmenu, proctree, themes  # noqa: E402
 from .copylabel import (  # noqa: E402
     copy_tooltip,
     enable_copy_on_click,
@@ -196,15 +196,6 @@ def _has_running_command(terminal: Vte.Terminal, child_pid: int | None) -> bool:
         return False
 
 
-def _process_cwd(pid: int | None) -> str | None:
-    if not pid or pid <= 0:
-        return None
-    try:
-        return os.readlink(f"/proc/{pid}/cwd")
-    except OSError:
-        return None
-
-
 class PrChipRow(Gtk.Widget):
     """The footer's PR chips: as many as fit, and the newest ones are the ones.
 
@@ -376,7 +367,7 @@ class PanelTerminal(Gtk.Box):
             return
         if self.has_running_command():
             return  # don't interrupt whatever the user left running
-        if _process_cwd(self._child_pid) == cwd:
+        if proctree.process_cwd(self._child_pid) == cwd:
             return
         # \x15 (kill-line) clears any half-typed input before the cd.
         self.terminal.feed_child(f"\x15cd {shlex.quote(cwd)}\n".encode())
@@ -1459,7 +1450,14 @@ class TerminalTab(Gtk.Box):
     def current_agent_cwd(self) -> str | None:
         """Best-effort cwd of what's running in the agent terminal: the
         foreground process if any (the agent may have cd'd into a worktree),
-        else the shell, else the directory the tab started in."""
+        else the shell, else the directory the tab started in.
+
+        The foreground process group's leader is not always the process that
+        moves. A daemon-hosted session leaves a wrapper at the head of the
+        group and runs the agent as its child, and only the child follows the
+        session into a worktree, so each candidate's agent descendants are
+        searched before falling back to the candidate itself.
+        """
         pids = []
         pty = self.terminal.get_pty()
         if pty is not None:
@@ -1469,8 +1467,12 @@ class TerminalTab(Gtk.Box):
                 pass
         if self._child_pid is not None:
             pids.append(self._child_pid)
+        cli = getattr(self.provider, "cli", "") or ""
         for pid in pids:
-            cwd = _process_cwd(pid)
+            cwd = proctree.agent_descendant_cwd(pid, cli)
+            if cwd is not None:
+                return cwd
+            cwd = proctree.process_cwd(pid)
             if cwd is not None:
                 return cwd
         return self._cwd
