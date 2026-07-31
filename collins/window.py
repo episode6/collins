@@ -1633,17 +1633,26 @@ class MainWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_CONTINUE
 
     def _chain(self, session_id: str) -> set[str]:
-        """A row's session id together with the id its /bg fork runs under.
-        Both stand for the same conversation, so a row's tab, status and
-        pending-detach state can hang off either."""
-        return {session_id, self.state.resolve_forward(session_id)}
+        """Every id a row's conversation has run under — its own and each /bg
+        fork's. They all stand for the same conversation, so a row's tab,
+        status and pending-detach state can hang off any of them.
+
+        The whole chain, not just its ends: a session backgrounded twice is
+        mid-handoff under its previous fork's id while the newest one is being
+        recorded, and that id is in the middle."""
+        return set(self.state.forward_chain(session_id))
 
     def _page_for(self, session_id: str) -> Adw.TabPage | None:
         """The tab a sidebar row's session is open in. A row standing in for a
         live /bg fork is opened by attaching to that fork, so its tab is bound
-        to the fork's id — look through the forward too."""
+        to the fork's id — look through the forwards too, newest first, so the
+        liveliest binding wins if more than one is open."""
         return next(
-            (page for sid in self._chain(session_id) if (page := self._pages.get(sid))),
+            (
+                page
+                for sid in reversed(self.state.forward_chain(session_id))
+                if (page := self._pages.get(sid))
+            ),
             None,
         )
 
@@ -2045,7 +2054,13 @@ class MainWindow(Adw.ApplicationWindow):
             self._save_panel_state(tab)
         session_id = self._session_id_of(page)
         if session_id:
-            self._pages.pop(session_id, None)
+            # Only if this page is the one actually bound to the session.
+            # _on_session_resolved refuses to rebind an id another tab already
+            # owns, but the losing tab keeps the id on itself — popping
+            # unconditionally handed the winner's mapping away as the loser
+            # closed, leaving a live tab its row could no longer reach.
+            if self._pages.get(session_id) is page:
+                self._pages.pop(session_id)
             self._sync_status(session_id)
         view.close_page_finish(page, True)
         self._refresh_background_affordances()  # a row without a tab can't be backgrounded

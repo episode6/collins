@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -397,14 +397,26 @@ class AppState:
     def get_pending_detaches(self) -> dict[str, dict]:
         return dict(self.pending_detaches)
 
-    def resolve_forward(self, session_id: str) -> str:
-        """Follow the forward chain (a session may be backgrounded repeatedly)
-        to the latest id. Cycle-safe; returns the input when unforwarded."""
+    def forward_chain(self, session_id: str) -> list[str]:
+        """Every id this conversation has run under from `session_id` onwards,
+        oldest first and always including `session_id` itself. Cycle-safe.
+
+        The middle of the chain matters, not just its ends: a session
+        backgrounded twice is mid-handoff under its *previous* fork's id while
+        the newest one is being recorded, and callers that only knew the head
+        and the tail lost track of it exactly then."""
+        chain = [session_id]
         seen = {session_id}
         while (nxt := self.session_forwards.get(session_id)) and nxt not in seen:
             session_id = nxt
             seen.add(nxt)
-        return session_id
+            chain.append(nxt)
+        return chain
+
+    def resolve_forward(self, session_id: str) -> str:
+        """Follow the forward chain (a session may be backgrounded repeatedly)
+        to the latest id. Cycle-safe; returns the input when unforwarded."""
+        return self.forward_chain(session_id)[-1]
 
     # -- per-session panel state -------------------------------------------
 

@@ -352,12 +352,18 @@ class SessionStore(GObject.Object):
         then sits idle leaves nothing but a metadata-only stub behind, possibly
         for its whole life. Such a fork is never discovered, so the session it
         forked from keeps standing in for it and has to carry its status.
+
+        Any id along a row's forward chain counts, not just the newest. A
+        session backgrounded a second time is mid-handoff under the *previous*
+        fork's id at the moment the newest one is recorded; matching only the
+        tail lost the row right then, so the handoff couldn't disable it or
+        re-enable it afterwards.
         """
         rows = [session_id] if session_id in self._items else []
         rows += [
             row_id
             for row_id in self._items
-            if row_id != session_id and self.state.resolve_forward(row_id) == session_id
+            if row_id != session_id and session_id in self.state.forward_chain(row_id)
         ]
         return rows
 
