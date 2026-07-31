@@ -434,8 +434,9 @@ class SessionRow(Gtk.ListBoxRow):
                 self.item.status in _IN_TAB_STATUSES
                 and sidebar.takes_prompt(self.item.session_id)
             ),
-            address_ci=lambda: self.activate_action(
-                "win.address-ci", GLib.Variant("s", self.item.session_id)
+            has_changes=lambda: sidebar.has_changes(self.item.session_id),
+            send_prompt=lambda prompt: self.activate_action(
+                "win.send-prompt", GLib.Variant("(ss)", (self.item.session_id, prompt))
             ),
             refresh=self._refresh_prs,
         )
@@ -703,6 +704,10 @@ class SessionSidebar(Gtk.Box):
         # its — so it replaces this the moment it builds the sidebar; until
         # then, and for a session it has no tab for, the answer is no.
         self.takes_prompt: Callable[[str], bool] = lambda _session_id: False
+        # "Does this session's terminal have uncommitted work in front of it?",
+        # for the same rows' "Open pull request". Replaced by the window on the
+        # same terms, and no for as long as it hasn't been.
+        self.has_changes: Callable[[str], bool] = lambda _session_id: False
         # Scrolling the list is deferred to an idle callback (see
         # _schedule_scroll): the offset to restore and the row to reveal when
         # it runs, plus the id of the pending source.

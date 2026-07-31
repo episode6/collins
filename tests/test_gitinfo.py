@@ -1,8 +1,13 @@
-"""Tests for gitinfo.current_branch — pure filesystem parsing, no git needed."""
+"""Tests for gitinfo: current_branch, which is pure filesystem parsing and
+needs no git, and has_changes, which is the one call that shells out to it."""
 
+import shutil
+import subprocess
 from pathlib import Path
 
-from collins.gitinfo import current_branch
+import pytest
+
+from collins.gitinfo import current_branch, has_changes
 
 
 def make_repo(root: Path, head: str = "ref: refs/heads/main\n") -> Path:
@@ -79,3 +84,98 @@ def test_broken_pointer_file(tmp_path):
     worktree.mkdir()
     (worktree / ".git").write_text("not a gitdir line\n")
     assert current_branch(worktree) is None
+
+
+# -- has_changes ------------------------------------------------------------
+
+needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git isn't on PATH")
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+@pytest.fixture
+def repo(tmp_path):
+    """A real repository with one commit in it, and a clean tree."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "test@example.com")
+    _git(root, "config", "user.name", "Test")
+    (root / "a.txt").write_text("one\n")
+    _git(root, "add", "a.txt")
+    _git(root, "commit", "-qm", "first")
+    return root
+
+
+@needs_git
+def test_a_committed_tree_has_no_changes(repo):
+    assert has_changes(repo) is False
+
+
+@needs_git
+def test_an_edited_file_counts(repo):
+    (repo / "a.txt").write_text("two\n")
+    assert has_changes(repo) is True
+
+
+@needs_git
+def test_a_staged_file_counts(repo):
+    (repo / "b.txt").write_text("new\n")
+    _git(repo, "add", "b.txt")
+    assert has_changes(repo) is True
+
+
+@needs_git
+def test_an_untracked_file_counts(repo):
+    """It would go into the pull request too, so it counts as work to open one
+    for."""
+    (repo / "b.txt").write_text("new\n")
+    assert has_changes(repo) is True
+
+
+@needs_git
+def test_an_ignored_file_does_not(repo):
+    """git leaves it out and so would the pull request."""
+    (repo / ".gitignore").write_text("junk\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-qm", "ignore junk")
+    (repo / "junk").write_text("noise\n")
+    assert has_changes(repo) is False
+
+
+@needs_git
+def test_a_subdirectory_answers_for_its_repo(repo):
+    sub = repo / "a" / "b"
+    sub.mkdir(parents=True)
+    (sub / "c.txt").write_text("deep\n")
+    assert has_changes(sub) is True
+
+
+@needs_git
+def test_somewhere_that_isnt_a_repository(tmp_path):
+    assert has_changes(tmp_path) is False
+
+
+def test_nowhere_at_all(tmp_path):
+    assert has_changes(None) is False
+    assert has_changes("") is False
+    assert has_changes(tmp_path / "gone") is False
+
+
+def test_no_git_on_path(repo, monkeypatch):
+    """Nothing to ask, so nothing is claimed."""
+    monkeypatch.setattr("collins.gitinfo.shutil.which", lambda _name: None)
+    assert has_changes(repo) is False
+
+
+def test_a_git_that_never_answers(repo, monkeypatch):
+    """A repository slower than the timeout is treated as clean rather than
+    holding up the menu built on the answer."""
+
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired("git", 2.0)
+
+    monkeypatch.setattr("collins.gitinfo.subprocess.run", timeout)
+    assert has_changes(repo) is False

@@ -19,7 +19,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import __version__, chats, dialogs, footerapps, openwith, panelhistory, practions
+from . import __version__, chats, dialogs, footerapps, openwith, panelhistory
 from .bgstatus import (
     BLOCK_IN_FLIGHT,
     BLOCK_UNREGISTERED,
@@ -29,6 +29,7 @@ from .bgstatus import (
 )
 from .chatsessionview import ChatSessionTab
 from .formatting import blast_radius_body
+from .gitinfo import has_changes
 from .i18n import _
 from .licenses import legal_sections
 from .models import SessionItem
@@ -299,8 +300,10 @@ class MainWindow(Adw.ApplicationWindow):
         # --- sidebar ---
         self.sidebar = SessionSidebar(self.store)
         # A row's PR actions need to know whether that session is sitting at an
-        # empty prompt; only the tab knows, and only the window holds the tabs.
+        # empty prompt, and what its terminal's working tree looks like; only
+        # the tab knows either, and only the window holds the tabs.
         self.sidebar.takes_prompt = self._session_takes_prompt
+        self.sidebar.has_changes = self._session_has_changes
         self.sidebar.connect("open-session", self._on_sidebar_open)
         self.sidebar.connect("open-many", self._on_sidebar_open_many)
         self.sidebar.connect("trash-many", self._on_sidebar_trash_many)
@@ -707,7 +710,6 @@ class MainWindow(Adw.ApplicationWindow):
             "background-session": lambda _a, p: self._close_session_tab(
                 p.get_string(), background=True
             ),
-            "address-ci": lambda _a, p: self._address_ci(p.get_string()),
             "archive-session": self._on_archive_session,
             "archive-project": self._on_archive_project,
             "forget-project": lambda _a, p: self.store.forget_project(p.get_string()),
@@ -720,12 +722,19 @@ class MainWindow(Adw.ApplicationWindow):
             action.connect("activate", callback)
             self.add_action(action)
 
-        # (desktop-file ID, folder) — the only two-part target we take.
+        # The two-part targets: (desktop-file ID, folder), and the session plus
+        # the prompt a row's PR menu wants typed into it.
         open_folder_app = Gio.SimpleAction(
             name="open-folder-app", parameter_type=GLib.VariantType("(ss)")
         )
         open_folder_app.connect("activate", self._on_open_folder_app)
         self.add_action(open_folder_app)
+
+        send_prompt = Gio.SimpleAction(
+            name="send-prompt", parameter_type=GLib.VariantType("(ss)")
+        )
+        send_prompt.connect("activate", lambda _a, p: self._send_prompt(*p.unpack()))
+        self.add_action(send_prompt)
 
         show_archived = Gio.SimpleAction.new_stateful(
             "show-archived", None, GLib.Variant.new_boolean(False)
@@ -1408,17 +1417,28 @@ class MainWindow(Adw.ApplicationWindow):
     def _session_takes_prompt(self, session_id: str) -> bool:
         """Whether a prompt sent to this session would land in an empty input.
 
-        What the sidebar asks before offering a row's PR "Address the CI
-        errors" (see SessionSidebar.takes_prompt): the tab that would receive
-        it is the window's, and only it can read what its agent is waiting at.
+        What the sidebar asks before offering a row's PR prompt actions (see
+        SessionSidebar.takes_prompt): the tab that would receive one is the
+        window's, and only it can read what its agent is waiting at.
         """
         tab = self._session_tab(session_id)
         return tab is not None and tab.takes_prompt()
 
-    def _address_ci(self, session_id: str) -> None:
-        """A sidebar PR menu's "Address the CI errors": send the prompt to the
-        session's own tab, and bring that tab to the front so its answer is
-        where the user is looking.
+    def _session_has_changes(self, session_id: str) -> bool:
+        """Whether this session's terminal is sitting over uncommitted work.
+
+        The other half of what a row's PR menu asks (see
+        SessionSidebar.has_changes) — and the cwd it is asked about is the
+        tab's live one, since an agent that moved into a worktree took the
+        changes worth opening a pull request for with it.
+        """
+        tab = self._session_tab(session_id)
+        return tab is not None and has_changes(tab.current_agent_cwd())
+
+    def _send_prompt(self, session_id: str, prompt: str) -> None:
+        """A sidebar PR menu's prompt action: type it into the session's own
+        tab, and bring that tab to the front so the answer is where the user is
+        looking.
 
         Both checks again rather than assuming: rows are built long before they
         are clicked, and the tab may have been closed — or its prompt started —
@@ -1427,7 +1447,7 @@ class MainWindow(Adw.ApplicationWindow):
         if tab is None or not tab.takes_prompt():
             return
         self.tab_view.set_selected_page(self._page_for(session_id))
-        tab.inject_prompt(practions.CI_PROMPT)
+        tab.inject_prompt(prompt)
 
     def _session_tab(self, session_id: str) -> TerminalTab | None:
         """The terminal tab a session is open in, if it is open in one."""

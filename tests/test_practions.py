@@ -9,7 +9,8 @@ from collins.practions import (
     CI_PROMPT,
     FIX_CI,
     MERGE,
-    OPEN,
+    NEW_PR,
+    NEW_PR_PROMPT,
     READY,
     REVIEW,
     REVIEW_COMMENT,
@@ -38,25 +39,25 @@ def _pr(**overrides) -> PullRequest:
     return PullRequest(**fields)
 
 
-def _keys(pr, takes_prompt=False) -> list[str]:
-    return [action.key for action in actions_for(pr, takes_prompt)]
+def _keys(pr, takes_prompt=False, has_changes=False) -> list[str]:
+    return [action.key for action in actions_for(pr, takes_prompt, lambda: has_changes)]
 
 
 # -- what a PR offers -------------------------------------------------------
 
 
 def test_a_draft_is_offered_the_way_out_of_draft():
-    assert _keys(_pr(state="DRAFT")) == [OPEN, READY, REVIEW]
+    assert _keys(_pr(state="DRAFT")) == [READY, REVIEW]
 
 
 def test_a_green_pr_is_offered_the_merge():
-    assert _keys(_pr()) == [OPEN, MERGE, REVIEW]
+    assert _keys(_pr()) == [MERGE, REVIEW]
 
 
 def test_a_pending_pr_is_offered_auto_merge_instead():
     """Merging now would be merging before the checks have spoken, so the offer
     is the one that waits for them."""
-    assert _keys(_pr(passed=1, pending=2)) == [OPEN, AUTO_MERGE, REVIEW]
+    assert _keys(_pr(passed=1, pending=2)) == [AUTO_MERGE, REVIEW]
 
 
 def test_a_failing_pr_is_offered_auto_merge_too():
@@ -69,18 +70,57 @@ def test_a_pr_with_no_checks_at_all_counts_as_green():
     assert MERGE in _keys(_pr(passed=0, failed=0, pending=0))
 
 
-def test_an_unfetched_pr_offers_only_its_page():
-    """No gh, no network: better a short menu than a Merge that was never going
-    to work."""
-    assert _keys(_pr(state=None, passed=None, failed=None, pending=None)) == [OPEN]
+def test_an_unfetched_pr_offers_nothing():
+    """No gh, no network: better an empty menu than a Merge that was never
+    going to work — the PR's page is a plain click away either way."""
+    assert _keys(_pr(state=None, passed=None, failed=None, pending=None)) == []
 
 
-def test_a_merged_pr_offers_only_its_page():
-    assert _keys(_pr(state="MERGED"), takes_prompt=True) == [OPEN]
+def test_a_merged_pr_over_a_clean_tree_offers_nothing():
+    """The work landed and nothing has happened since: the session is done."""
+    assert _keys(_pr(state="MERGED"), takes_prompt=True) == []
 
 
-def test_a_closed_pr_offers_only_its_page():
-    assert _keys(_pr(state="CLOSED"), takes_prompt=True) == [OPEN]
+def test_a_merged_pr_over_a_dirty_tree_is_offered_the_next_one():
+    """The PR landed, the tree has moved on: that work wants a pull request of
+    its own, and the agent is the one who opens it."""
+    assert _keys(_pr(state="MERGED"), takes_prompt=True, has_changes=True) == [NEW_PR]
+
+
+def test_opening_the_next_pr_needs_a_session_at_its_prompt():
+    """It sends a prompt, like addressing CI does, so a session that is closed
+    or mid-sentence is nowhere to send one."""
+    assert _keys(_pr(state="MERGED"), takes_prompt=False, has_changes=True) == []
+
+
+def test_an_open_pr_is_never_offered_a_new_one():
+    """Changes in the tree while a PR is still open belong on that PR."""
+    assert NEW_PR not in _keys(_pr(), takes_prompt=True, has_changes=True)
+    assert NEW_PR not in _keys(_pr(state="DRAFT"), takes_prompt=True, has_changes=True)
+
+
+def test_a_closed_pr_offers_nothing():
+    """Closed, not merged: whatever it was for was abandoned, so there is no
+    "the next one" to offer."""
+    assert _keys(_pr(state="CLOSED"), takes_prompt=True, has_changes=True) == []
+
+
+def test_the_working_tree_is_only_consulted_when_it_could_matter():
+    """It costs a `git status`, and only a merged PR's menu can use the answer;
+    every other state must reach its menu without asking."""
+    asked = []
+
+    def has_changes():
+        asked.append(True)
+        return True
+
+    actions_for(_pr(), True, has_changes)
+    actions_for(_pr(state="DRAFT"), True, has_changes)
+    actions_for(_pr(state="CLOSED"), True, has_changes)
+    actions_for(_pr(state="MERGED"), False, has_changes)  # no session to prompt
+    assert asked == []
+    actions_for(_pr(state="MERGED"), True, has_changes)
+    assert asked == [True]
 
 
 def test_addressing_ci_needs_both_a_failure_and_a_session_at_its_prompt():
@@ -93,11 +133,23 @@ def test_addressing_ci_needs_both_a_failure_and_a_session_at_its_prompt():
 
 
 def test_only_merging_asks_first():
-    """The two irreversible, everybody-can-see-it actions confirm; opening a
-    page, a comment and a prompt sent to a session don't."""
+    """The two irreversible, everybody-can-see-it actions confirm; a comment
+    and a prompt sent to a session don't."""
     asks = {a.key: a.confirm is not None for a in actions_for(_pr(passed=1, failed=1), True)}
-    assert asks == {OPEN: False, AUTO_MERGE: True, REVIEW: False, FIX_CI: False}
+    assert asks == {AUTO_MERGE: True, REVIEW: False, FIX_CI: False}
     assert {a.key: a.confirm is not None for a in actions_for(_pr(), True)}[MERGE]
+
+
+def test_the_prompt_actions_are_the_ones_carrying_a_prompt():
+    """What the menu dispatches on: an action with text to type goes to the
+    session, and everything else goes to gh."""
+    sending = {
+        a.key: a.prompt
+        for a in actions_for(_pr(passed=1, failed=1), True)
+        + actions_for(_pr(state="MERGED"), True, lambda: True)
+        if a.prompt
+    }
+    assert sending == {FIX_CI: CI_PROMPT, NEW_PR: NEW_PR_PROMPT}
 
 
 def test_every_action_names_the_pr_in_its_tooltip():
@@ -167,9 +219,10 @@ def test_a_url_that_isnt_a_pr_never_reaches_gh(gh):
     assert calls == []
 
 
-def test_the_prompt_ci_errors_go_into_is_left_in_english():
-    """It is read by the agent CLI, not by a person."""
+def test_the_prompts_sent_to_a_session_are_left_in_english():
+    """They are read by the agent CLI, not by a person."""
     assert CI_PROMPT == "address the ci error(s)"
+    assert NEW_PR_PROMPT == "Open a pull request for your changes"
 
 
 # -- which merge method ------------------------------------------------------

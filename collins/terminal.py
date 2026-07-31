@@ -22,7 +22,6 @@ from . import (  # noqa: E402
     apppicker,
     footerapps,
     panelhistory,
-    practions,
     prmenu,
     proctree,
     themes,
@@ -34,7 +33,7 @@ from .copylabel import (  # noqa: E402
     open_tooltip,
 )
 from .formatting import display_path  # noqa: E402
-from .gitinfo import current_branch  # noqa: E402
+from .gitinfo import current_branch, has_changes  # noqa: E402
 from .i18n import _  # noqa: E402
 from .linkpatterns import URL_PATTERN  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
@@ -55,6 +54,10 @@ from .transcript import TranscriptModel  # noqa: E402
 _TRANSCRIPT_DEBOUNCE_MS = 400
 _PROMPT_POLL_MS = 1000  # backstop poll for detecting the agent's prompts
 _CWD_POLL_MS = 2000  # footer refresh; only ticks while the tab is visible
+# How long an injected prompt is left sitting in the input before the Return
+# that sends it (see inject_prompt). Long enough that the CLI has stopped
+# reading the text as a paste, short enough that nobody watching sees a pause.
+_PROMPT_SUBMIT_MS = 250
 _PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
 # A session links every PR that passes through its tool output, including ones
 # it only read, so the row is bounded: it tracks (and saves, and refreshes) the
@@ -922,7 +925,8 @@ class TerminalTab(Gtk.Box):
         """
         return prmenu.ActionHost(
             takes_prompt=self.takes_prompt,
-            address_ci=lambda: self.inject_prompt(practions.CI_PROMPT),
+            has_changes=lambda: has_changes(self.current_agent_cwd()),
+            send_prompt=self.inject_prompt,
             refresh=self._request_update,
         )
 
@@ -1030,15 +1034,25 @@ class TerminalTab(Gtk.Box):
         self.terminal.feed_child(text.encode())
 
     def inject_prompt(self, text: str) -> None:
-        """Send *text* to the agent as a prompt, and put the tab in front.
+        """Type *text* into the agent, send it, and put the tab in front.
 
-        What the PR menu's "Address the CI errors" does. Typed and sent in one
-        write, which is what the CLI reads as a line the user typed and ended
-        with Return; only offered while `takes_prompt` says the input is empty,
-        so nothing of the user's is ever sent along with it.
+        What the PR menu's prompt actions do. Only offered while
+        `takes_prompt` says the input is empty, so nothing of the user's is
+        ever sent along with it.
+
+        The Return goes in a second write, a beat later, rather than on the
+        end of the first: an agent CLI reads a chunk arriving all at once as a
+        paste, and a Return inside a paste is a newline in the box — it left
+        the prompt typed out and waiting for someone to press enter. Arriving
+        on its own, after the input has settled, it submits.
         """
-        self.feed_child_text(text + "\r")
+        self.feed_child_text(text)
+        GLib.timeout_add(_PROMPT_SUBMIT_MS, self._submit_prompt)
         self.grab_terminal_focus()
+
+    def _submit_prompt(self) -> bool:
+        self.feed_child_text("\r")
+        return GLib.SOURCE_REMOVE
 
     def takes_prompt(self) -> bool:
         """Whether a prompt sent right now would land in an empty input box.

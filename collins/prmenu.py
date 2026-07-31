@@ -70,21 +70,25 @@ _LIST = "_collins_pr_list"
 
 @dataclass(frozen=True)
 class ActionHost:
-    """The session behind a PR menu, as the three things its actions need.
+    """The session behind a PR menu, as the four things its actions need.
 
-    A PR's actions are mostly GitHub's business, but two of them are the
-    session's: whether it is somewhere a prompt can be sent (which decides if
-    "Address the CI errors" is on offer) and how to send one. The footer's
-    chips answer both from the tab they are in; a sidebar row answers them
-    through the window, whose tab that session may not even have. Hence
-    callables rather than values: a menu built once is opened much later, and
-    what a terminal is waiting at changes by the keystroke.
+    A PR's actions are mostly GitHub's business, but the ones that send a
+    prompt are the session's: whether it is somewhere a prompt can be sent,
+    whether its working tree has anything to open a pull request for, and how
+    to send one. The footer's chips answer all of that from the tab they are
+    in; a sidebar row answers it through the window, whose tab that session
+    may not even have. Hence callables rather than values: a menu built once
+    is opened much later, and what a terminal is waiting at changes by the
+    keystroke.
     """
 
     # Whether the session has a tab open, at an empty prompt (Provider.takes_prompt).
     takes_prompt: Callable[[], bool]
-    # Send practions.CI_PROMPT to that session, and put it in front.
-    address_ci: Callable[[], None]
+    # Whether its terminal's cwd is a repo with uncommitted work in it. Costs a
+    # `git status`, so practions only asks when a PR's state could use it.
+    has_changes: Callable[[], bool]
+    # Type an action's prompt into that session, send it, and put it in front.
+    send_prompt: Callable[[str], None]
     # An action changed the PR on GitHub; re-read its status.
     refresh: Callable[[], None]
 
@@ -284,8 +288,11 @@ def show_actions(
     separator.set_margin_top(3)
     separator.set_margin_bottom(3)
     rows.append(separator)
-    for action in practions.actions_for(pr, host.takes_prompt()):
+    actions = practions.actions_for(pr, host.takes_prompt(), host.has_changes)
+    for action in actions:
         rows.append(_action_row(popover, pr, action, host))
+    if not actions:
+        rows.append(_nothing_row())
     popover.set_child(rows)
 
 
@@ -342,6 +349,22 @@ def _header(pr: PullRequest, back: Callable[[], None] | None) -> Gtk.Widget:
     return button
 
 
+def _nothing_row() -> Gtk.Widget:
+    """What a PR with nothing left to do says instead of showing an empty menu.
+
+    A merged pull request over a clean tree is the ordinary end of a session's
+    work, and every action has run out by then. Saying so beats a menu that
+    opens onto a title and a gap, which reads as broken rather than finished —
+    and beats a right-click that does nothing, since the chip's tooltip has
+    already promised one.
+    """
+    label = Gtk.Label(label=_("Nothing to do from here"), xalign=0.0)
+    label.set_margin_start(MARK_COLUMN_PX + 8)
+    label.add_css_class("dim-label")
+    label.add_css_class("pr-menu-title")  # the geometry of the rows it stands in for
+    return label
+
+
 def _action_row(
     popover: Gtk.Popover, pr: PullRequest, action: practions.Action, host: ActionHost
 ) -> Gtk.Widget:
@@ -374,20 +397,16 @@ def _on_action_clicked(
 ) -> None:
     """Pick an action apart into the three kinds there are.
 
-    Opening the page and typing into the session both happen here and now, so
-    the menu goes with them. An action that asks first can't keep the menu
-    either — a dialog takes the pointer grab a popover is holding, closing it —
-    so those run with the menu already down. What is left runs under a spinner
-    in its own row, which is the only case where there is anything to watch.
+    Typing into the session happens here and now, so the menu goes with it. An
+    action that asks first can't keep the menu either — a dialog takes the
+    pointer grab a popover is holding, closing it — so those run with the menu
+    already down. What is left runs under a spinner in its own row, which is
+    the only case where there is anything to watch.
     """
     root = button.get_root()
-    if action.key == practions.OPEN:
+    if action.prompt:
         popover.popdown()
-        open_uri(button, pr.url)
-        return
-    if action.key == practions.FIX_CI:
-        popover.popdown()
-        host.address_ci()
+        host.send_prompt(action.prompt)
         return
     if action.confirm is not None:
         popover.popdown()
