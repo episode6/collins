@@ -27,6 +27,7 @@ from .bgstatus import (
     background_blocker,
     match_background_fork,
 )
+from .caffeine import DURATION_KEYS, duration_label, duration_seconds, format_remaining
 from .chatsessionview import ChatSessionTab
 from .formatting import blast_radius_body
 from .gitinfo import has_changes
@@ -188,6 +189,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._bg_queue_total = 0
         self._bg_queue_dialog: Adw.AlertDialog | None = None
         self._switcher: QuickSwitcher | None = None
+        # Set while the app pushes shared Caffeine state into this window's
+        # toggle, so the resulting "toggled" isn't mistaken for a click and
+        # bounced back at the app (which would cancel the timer it just armed).
+        self._syncing_caffeine = False
 
         self._install_actions()
         self._install_shortcuts()
@@ -278,9 +283,20 @@ class MainWindow(Adw.ApplicationWindow):
         self.caffeine_btn = Gtk.ToggleButton(
             active=bool(getattr(self.get_application(), "caffeine_enabled", False))
         )
-        self._sync_caffeine_visuals()
         self.caffeine_btn.connect("toggled", self._on_caffeine_toggled)
+        # A right-click asks how long to stay awake for; it never reaches the
+        # button itself, which only activates on a primary click.
+        caffeine_menu = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        caffeine_menu.connect("pressed", lambda *_: self._show_caffeine_menu())
+        self.caffeine_btn.add_controller(caffeine_menu)
         content_header.pack_end(self.caffeine_btn)
+        # Packed after the button, so it lands to its left: the shut-off timer
+        # counting down, hidden whenever there isn't one running.
+        self.caffeine_timer = Gtk.Label(visible=False)
+        self.caffeine_timer.add_css_class("numeric")  # tabular figures: no jitter per tick
+        self.caffeine_timer.add_css_class("dim-label")
+        content_header.pack_end(self.caffeine_timer)
+        self._sync_caffeine_visuals()
 
         placeholder = Adw.StatusPage(
             icon_name="utilities-terminal-symbolic",
@@ -729,6 +745,13 @@ class MainWindow(Adw.ApplicationWindow):
         )
         open_folder_app.connect("activate", self._on_open_folder_app)
         self.add_action(open_folder_app)
+
+        # The Caffeine button's context menu: the picked duration's key.
+        caffeine_timer = Gio.SimpleAction(
+            name="caffeine-timer", parameter_type=GLib.VariantType("s")
+        )
+        caffeine_timer.connect("activate", self._on_caffeine_timer)
+        self.add_action(caffeine_timer)
 
         send_prompt = Gio.SimpleAction(
             name="send-prompt", parameter_type=GLib.VariantType("(ss)")
@@ -1351,27 +1374,63 @@ class MainWindow(Adw.ApplicationWindow):
             self._sync_window_title()
 
     def _on_caffeine_toggled(self, button: Gtk.ToggleButton) -> None:
+        if self._syncing_caffeine:  # the app pushing its state in, not a click
+            return
         app = self.get_application()
         if hasattr(app, "set_caffeine_enabled"):
+            # A plain click is deliberately untimed: the durations are what the
+            # button's context menu is for.
             app.set_caffeine_enabled(button.get_active())
         self._sync_caffeine_visuals()
+
+    def _show_caffeine_menu(self) -> None:
+        """Right-click on the Caffeine button: how long to stay awake for."""
+        menu = Gio.Menu()
+        for key in DURATION_KEYS:
+            menu.append(duration_label(key), f"win.caffeine-timer::{key}")
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(self.caffeine_btn)
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        popover.popup()
+
+    def _on_caffeine_timer(self, _action, param: GLib.Variant) -> None:
+        """A duration was picked: turn Caffeine Mode on for that long, replacing
+        whatever timer was running before."""
+        app = self.get_application()
+        if hasattr(app, "set_caffeine_enabled"):
+            app.set_caffeine_enabled(True, seconds=duration_seconds(param.get_string()))
 
     def sync_caffeine_toggle(self) -> None:
         """Called by the app so every window's button tracks the shared state."""
         app = self.get_application()
-        self.caffeine_btn.set_active(bool(getattr(app, "caffeine_enabled", False)))
+        self._syncing_caffeine = True
+        try:
+            self.caffeine_btn.set_active(bool(getattr(app, "caffeine_enabled", False)))
+        finally:
+            self._syncing_caffeine = False
         self._sync_caffeine_visuals()
 
     def _sync_caffeine_visuals(self) -> None:
         on = self.caffeine_btn.get_active()
+        remaining = getattr(self.get_application(), "caffeine_remaining", None) if on else None
         self.caffeine_btn.set_icon_name(
             "caffeine-cup-full-symbolic" if on else "caffeine-cup-empty-symbolic"
         )
-        self.caffeine_btn.set_tooltip_text(
-            _("Caffeine Mode is on — the computer will stay awake")
-            if on
-            else _("Caffeine Mode: keep the computer awake and the screen on")
-        )
+        if remaining is None:
+            tooltip = (
+                _("Caffeine Mode is on — the computer will stay awake")
+                if on
+                else _("Caffeine Mode: keep the computer awake and the screen on")
+            )
+        else:
+            tooltip = _("Caffeine Mode turns off in {time}").format(
+                time=format_remaining(remaining)
+            )
+        self.caffeine_btn.set_tooltip_text(tooltip)
+        self.caffeine_timer.set_visible(remaining is not None)
+        if remaining is not None:
+            self.caffeine_timer.set_label(format_remaining(remaining))
+            self.caffeine_timer.set_tooltip_text(tooltip)
 
     def _close_current_tab(self) -> None:
         page = self.tab_view.get_selected_page()

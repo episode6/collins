@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -18,6 +18,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
 
 from . import apppicker, footerapps
+from .caffeine import DURATION_KEYS, INDEFINITE, duration_label
 from .i18n import LANGUAGES, N_, _
 from .state import AppState
 from .themes import DEFAULT_THEME, THEME_NAMES, get_theme
@@ -166,6 +167,23 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._caffeine_launch_row.set_active(bool(state.get_setting("caffeine_on_launch")))
         self._caffeine_launch_row.connect("notify::active", self._on_caffeine_launch_changed)
         caffeine_group.add(self._caffeine_launch_row)
+        # The same durations the button's context menu offers, so "on at
+        # launch" doesn't have to mean "on until you remember it".
+        self._caffeine_timer_row = Adw.ComboRow(
+            title=_("Turn off after"),
+            subtitle=_("How long that launch-time Caffeine Mode runs before it turns itself off"),
+        )
+        self._caffeine_timer_row.set_model(
+            Gtk.StringList.new([duration_label(key) for key in DURATION_KEYS])
+        )
+        current_timer = state.get_setting("caffeine_launch_timer") or INDEFINITE
+        self._caffeine_timer_row.set_selected(
+            DURATION_KEYS.index(current_timer) if current_timer in DURATION_KEYS
+            else DURATION_KEYS.index(INDEFINITE)
+        )
+        self._caffeine_timer_row.set_sensitive(self._caffeine_launch_row.get_active())
+        self._caffeine_timer_row.connect("notify::selected", self._on_caffeine_timer_changed)
+        caffeine_group.add(self._caffeine_timer_row)
         page.add(caffeine_group)
 
         sidebar_group = Adw.PreferencesGroup(title=_("Session list"))
@@ -297,6 +315,12 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_caffeine_launch_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("caffeine_on_launch", row.get_active())
+        # Nothing to time when nothing is turned on at launch.
+        self._caffeine_timer_row.set_sensitive(row.get_active())
+        self._on_change()
+
+    def _on_caffeine_timer_changed(self, row: Adw.ComboRow, _pspec) -> None:
+        self._state.set_setting("caffeine_launch_timer", DURATION_KEYS[row.get_selected()])
         self._on_change()
 
     def _on_easy_copy_changed(self, row: Adw.SwitchRow, _pspec) -> None:

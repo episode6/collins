@@ -254,6 +254,22 @@ card overlays it — answer with a click instead of typing a number.
   Ghostty window instead of an embedded tab (shown when `ghostty` is on your
   `PATH`).
 
+## Caffeine Mode
+
+The coffee cup at the right of the header keeps the computer awake and the
+screen on while an agent works unattended — click it to toggle, and the cup
+fills while it's on.
+
+- **Right-click it for a timer**: *1 hour*, *2 hours*, *3 hours*, *6 hours*,
+  *12 hours* or *Indefinitely*. Picking a duration turns Caffeine Mode on for
+  that long and turns it off again when the time runs out — so a long build
+  can't leave the machine awake all week because you forgot.
+- The **time left counts down** just left of the cup while a timer is running.
+  Picking another duration restarts the clock, *Indefinitely* clears it, and
+  turning Caffeine Mode off cancels it.
+- Preferences → *Turn on at launch* starts every launch with Caffeine Mode on,
+  and *Turn off after* arms one of the same durations at startup.
+
 ## Multiple windows
 
 Open additional windows from the New Session button's menu or with

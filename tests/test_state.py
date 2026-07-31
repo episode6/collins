@@ -97,6 +97,20 @@ def test_caffeine_on_launch_setting(app_state):
     assert app_state.AppState().get_setting("caffeine_on_launch") is True
 
 
+def test_caffeine_launch_timer_setting(app_state):
+    from collins.caffeine import DURATION_KEYS, duration_seconds
+
+    state = app_state.AppState()
+    # Default keeps the pre-timer behaviour: on at launch means on until told
+    # otherwise.
+    assert state.get_setting("caffeine_launch_timer") == "indefinite"
+    assert duration_seconds(state.get_setting("caffeine_launch_timer")) is None
+    state.set_setting("caffeine_launch_timer", "3h")
+    saved = app_state.AppState().get_setting("caffeine_launch_timer")
+    assert saved in DURATION_KEYS
+    assert duration_seconds(saved) == 10800
+
+
 def test_footer_apps_setting_roundtrip(app_state):
     state = app_state.AppState()
     assert state.get_setting("footer_apps") == []  # default: no extra buttons
