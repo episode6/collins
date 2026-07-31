@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -925,10 +925,15 @@ class MainWindow(Adw.ApplicationWindow):
         would overwrite its list), and neither does a tab whose session isn't
         resolved yet — it has nowhere to write, and its list is re-derived from
         the transcript the moment it is.
+
+        The sidebar reads the same saved list for its own PR button, so it is
+        told the moment one is written: a session's first PR is what puts that
+        button on its row.
         """
         if tab.fork or not tab.session_id:
             return
         self.state.set_session_prs(tab.session_id, list(records or []))
+        self.sidebar.sync_session_prs(tab.session_id)
 
     def _on_panel_size_changed(self, _tab: TerminalTab, mode: str, size: int) -> None:
         """A divider was dragged: remember the size app-wide, so every panel

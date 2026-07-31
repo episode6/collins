@@ -18,13 +18,12 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Vte", "3.91")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
-from . import apppicker, footerapps, panelhistory, themes  # noqa: E402
+from . import apppicker, footerapps, panelhistory, prmenu, themes  # noqa: E402
 from .copylabel import (  # noqa: E402
     copy_tooltip,
     enable_copy_on_click,
     enable_open_on_click,
     open_tooltip,
-    open_uri,
 )
 from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch  # noqa: E402
@@ -33,9 +32,6 @@ from .linkpatterns import URL_PATTERN  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
 from .prstatus import (  # noqa: E402
-    CHECKS_FAILED,
-    CHECKS_PASSED,
-    CHECKS_PENDING,
     PullRequest,
     describe,
     discover_pr,
@@ -43,7 +39,6 @@ from .prstatus import (  # noqa: E402
     forget_status,
     from_records,
     invalidate,
-    menu_name,
     merge_ordered,
     to_records,
 )
@@ -52,9 +47,6 @@ from .transcript import TranscriptModel  # noqa: E402
 _TRANSCRIPT_DEBOUNCE_MS = 400
 _PROMPT_POLL_MS = 1000  # backstop poll for detecting the agent's prompts
 _CWD_POLL_MS = 2000  # footer refresh; only ticks while the tab is visible
-# The merge mark sits with caption-sized text, so it takes the same 12px as the
-# glyphs it replaces rather than a symbolic icon's stock 16.
-_PR_MERGED_ICON_PX = 12
 _PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
 # A session links every PR that passes through its tool output, including ones
 # it only read, so the row is bounded: it tracks (and saves, and refreshes) the
@@ -63,19 +55,6 @@ _PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
 # PrChipRow).
 _MAX_PR_CHIPS = 20
 _PR_CHIP_SPACING = 8  # between chips; their own parts sit 4 apart
-# The caret's menu: the column its status marks share (so the titles beside
-# them line up), how wide a title gets before it ellipsizes, and how tall the
-# list gets before it scrolls.
-_PR_MARK_COLUMN_PX = 14
-_PR_MENU_MAX_CHARS = 48
-_PR_MENU_MAX_PX = 400
-# Each CI mark is colored like its counterpart on the PR page; the shades
-# themselves follow the light/dark scheme and live in app.py.
-_PR_CHECKS_CSS = {
-    CHECKS_PASSED: "pr-checks-passed",
-    CHECKS_FAILED: "pr-checks-failed",
-    CHECKS_PENDING: "pr-checks-pending",
-}
 
 # PCRE2 flags for the find bar: multiline, case-insensitive.
 _PCRE2_CASELESS = 0x00000008
@@ -794,24 +773,9 @@ class TerminalTab(Gtk.Box):
         # Leading the row, where the oldest chip would be: the caret opens the
         # full list, titles and all — including the chips that didn't fit,
         # since it takes its width from the row and so costs it one.
-        self._pr_menu = Gtk.Popover()
-        self._pr_menu.set_position(Gtk.PositionType.TOP)  # the footer is at the bottom
-        # No arrow, like the terminal's own context menu and like every
-        # GtkPopoverMenu: the tail is a separate render node from the body it
-        # points out of, and the edge they share only rasterizes cleanly when
-        # it lands on a whole device pixel. At a display scale of 1.25 it
-        # lands on a half one, both shapes anti-alias against it, and the two
-        # coverages composite to 75% — a row of background showing through the
-        # join, which reads as an arrow floating a pixel off its menu. That is
-        # GTK's own (a stock GtkPopover does it, under every GSK renderer) and
-        # no CSS of ours reaches it. A menu that opens on its button doesn't
-        # need a tail to say what it belongs to.
-        self._pr_menu.set_has_arrow(False)
-        self._pr_menu.add_css_class("menu")
-        # Its own class as well: the list inside is buttons, and the footer's
-        # rules for those (tight, no hover background) would otherwise reach
-        # into it — a popover is a child of the widget it is attached to.
-        self._pr_menu.add_css_class("pr-menu")
+        # The list itself is shared with the sidebar's own PR button (prmenu);
+        # the footer is at the bottom of the tab, so this copy opens upwards.
+        self._pr_menu = prmenu.new_popover(Gtk.PositionType.TOP)
         menu_icon = Gtk.Image.new_from_icon_name("pan-up-symbolic")
         menu_icon.set_pixel_size(_PR_REFRESH_ICON_PX)
         menu_icon.add_css_class("dim-label")
@@ -930,82 +894,27 @@ class TerminalTab(Gtk.Box):
         glyph = pr.glyph
         if glyph is not None:
             checks = Gtk.Label(label=glyph)
-            checks.set_css_classes(["caption", _PR_CHECKS_CSS.get(glyph, "dim-label")])
+            checks.set_css_classes(["caption", prmenu.CHECKS_CSS.get(glyph, "dim-label")])
             chip.append(checks)
         # A merged PR trades its CI glyph for GitHub's git-merge mark, purple
         # and undimmed: the one PR state worth spotting from across the row.
         if pr.merged:
             merged = Gtk.Image.new_from_icon_name("git-merge-symbolic")
-            merged.set_pixel_size(_PR_MERGED_ICON_PX)
+            merged.set_pixel_size(prmenu.MERGED_ICON_PX)
             merged.add_css_class("pr-merged")
             chip.append(merged)
         chip.set_tooltip_text(open_tooltip(describe(pr) + "\n" + pr.url))
         enable_open_on_click(chip, lambda: pr.url)
         return chip
 
-    def _pr_status_mark(self, pr: PullRequest) -> Gtk.Widget:
-        """A PR's status as one widget: its CI glyph, or the merge mark.
-
-        Always returns something, so titles line up down the menu even beside
-        a PR whose status hasn't been fetched yet.
-        """
-        if pr.merged:
-            mark: Gtk.Widget = Gtk.Image.new_from_icon_name("git-merge-symbolic")
-            mark.set_pixel_size(_PR_MERGED_ICON_PX)
-            mark.add_css_class("pr-merged")
-        else:
-            glyph = pr.glyph
-            mark = Gtk.Label(label=glyph or "")
-            mark.set_css_classes(["caption", _PR_CHECKS_CSS.get(glyph or "", "dim-label")])
-        mark.set_size_request(_PR_MARK_COLUMN_PX, -1)
-        return mark
-
     def _fill_pr_menu(self, _button: Gtk.MenuButton) -> None:
         """Build the caret's list, just before it opens.
 
-        Every PR the session has picked up, oldest first like the row, with the
-        titles the chips have no room for. Built per opening rather than kept
-        in sync: statuses move under it, and it is only ever on screen for as
-        long as someone is reading it.
+        Nothing to fetch here, unlike the sidebar's copy of this menu: the
+        footer's own poll is already refreshing every PR on the row, so what
+        the tab is holding when the caret is clicked is current.
         """
-        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        for pr in self._footer_prs:
-            name = Gtk.Label(label=menu_name(pr), xalign=0.0, hexpand=True)
-            name.set_ellipsize(Pango.EllipsizeMode.END)
-            name.set_max_width_chars(_PR_MENU_MAX_CHARS)
-            # Its own label, so a long title ellipsizes without taking the one
-            # thing that identifies the PR with it.
-            number = Gtk.Label(label=f"(#{pr.number})")
-            number.add_css_class("dim-label")
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            row.append(self._pr_status_mark(pr))
-            row.append(name)
-            row.append(number)
-            button = Gtk.Button(child=row)
-            button.add_css_class("flat")
-            button.add_css_class("pr-menu-row")  # menu-sized, and lit under the pointer
-            button.set_tooltip_text(open_tooltip(describe(pr) + "\n" + pr.url))
-            button.connect("clicked", self._on_pr_menu_row, pr.url)
-            rows.append(button)
-        # A session with a lot of PRs would otherwise open a popover taller
-        # than the window it is in. A list that isn't that long doesn't scroll
-        # at all, though — and mustn't be allowed to: a scrollable view won't
-        # measure shorter than a usable scrolling area (44px), which a single
-        # 36px row is, so it left 8px of stray space under the only row.
-        scroller = Gtk.ScrolledWindow(child=rows)
-        overflows = rows.measure(Gtk.Orientation.VERTICAL, -1).natural > _PR_MENU_MAX_PX
-        scroller.set_policy(
-            Gtk.PolicyType.NEVER,
-            Gtk.PolicyType.AUTOMATIC if overflows else Gtk.PolicyType.NEVER,
-        )
-        scroller.set_propagate_natural_width(True)
-        scroller.set_propagate_natural_height(True)
-        scroller.set_max_content_height(_PR_MENU_MAX_PX)
-        self._pr_menu.set_child(scroller)
-
-    def _on_pr_menu_row(self, button: Gtk.Button, url: str) -> None:
-        self._pr_menu.popdown()
-        open_uri(button, url)
+        prmenu.fill(self._pr_menu, self._footer_prs)
 
     def _refresh_pr_chips(self, prs: list[PullRequest]) -> None:
         """Show this session's PRs, oldest first, with the CI state each has.

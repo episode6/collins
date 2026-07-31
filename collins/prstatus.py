@@ -46,6 +46,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -84,6 +85,10 @@ _MAX_TITLE = 200
 _GH_DISCOVER_FIELDS = "number,url,createdAt," + _GH_FIELDS
 # A branch with more PRs than this behind it has no plausible "current" one.
 _DISCOVER_LIMIT = 20
+# How many of a session's PRs `resync` fetches at once. Each one is a `gh`
+# subprocess and someone is watching a spinner, so a session with twenty of
+# them doesn't wait twenty round trips — but it isn't a fan-out either.
+_RESYNC_WORKERS = 4
 
 # Only fetch for URLs shaped like a PR page. The URL comes out of a transcript
 # — repo content, i.e. untrusted — and lands in an argv, so this also keeps a
@@ -642,3 +647,28 @@ def enrich(pr: PullRequest | None) -> PullRequest | None:
         failed=_count(checks, "failed"),
         pending=_count(checks, "pending"),
     )
+
+
+def resync(prs: Iterable[PullRequest]) -> list[PullRequest]:
+    """*prs* with every title and check count fetched right now, in order.
+
+    `enrich` is the polling path: it hands back what it has and only goes out
+    to `gh` once a TTL is up. This is the on-demand one, for a list that is
+    being opened rather than watched — a sidebar row's PR menu has no poll
+    behind it, and what it saved last run is a title and nothing else. So each
+    PR is fetched before the list comes back, and a fetch that fails leaves
+    that PR exactly as it arrived (`enrich` reads the "no status" the failure
+    recorded, and keeps the title the saved record supplied).
+
+    A merged PR is skipped unless its title is missing: nothing else about one
+    can change (see `forget_status`), so it isn't worth a subprocess.
+
+    Never call on the main thread — this waits on `gh`, several at a time.
+    """
+    prs = list(prs)
+    due = [pr.url for pr in prs if not pr.merged or pr.title is None]
+    due = [url for url in due if _FETCHABLE.match(url)]
+    if due and not _gh_missing:
+        with ThreadPoolExecutor(max_workers=min(_RESYNC_WORKERS, len(due))) as pool:
+            list(pool.map(refresh, due))
+    return [enrich(pr) or pr for pr in prs]

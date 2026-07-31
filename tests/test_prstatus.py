@@ -6,6 +6,7 @@ PRs are persisted as."""
 import json
 import os
 import subprocess
+import threading
 import time
 from dataclasses import replace
 
@@ -26,6 +27,7 @@ from collins.prstatus import (
     merge_ordered,
     parse_pr_link,
     refresh,
+    resync,
     state_text,
     to_record,
     to_records,
@@ -861,3 +863,88 @@ def test_forget_status_keeps_the_title():
 
 def test_a_junk_title_on_disk_is_dropped():
     assert from_record({"number": 55, "url": URL, "title": ["not", "a", "title"]}).title is None
+
+
+# -- resync (what opening a sidebar row's PR menu runs) ----------------------
+
+
+@pytest.fixture
+def gh_calls(monkeypatch):
+    """Stub `gh pr view` per URL, recording every call. Returns (urls, replies):
+    put an entry (or None) in *replies* under a URL to serve it."""
+    urls: list[str] = []
+    replies: dict[str, dict | None] = {}
+    lock = threading.Lock()
+
+    def run(url):
+        with lock:  # resync fetches several at once
+            urls.append(url)
+        return replies.get(url)
+
+    monkeypatch.setattr(prstatus, "_run_gh", run)
+    return urls, replies
+
+
+def _reply(title, passed=1):
+    return {"state": "OPEN", "checks": {"passed": passed, "failed": 0, "pending": 0}, "title": title}
+
+
+OTHER_URL = "https://github.com/episode6/collins/pull/56"
+
+
+def test_resync_fetches_every_pr_and_keeps_the_order(gh_calls):
+    urls, replies = gh_calls
+    replies[URL] = _reply("Track every PR")
+    replies[OTHER_URL] = _reply("Give the list room", passed=2)
+    out = resync([PullRequest(55, URL), PullRequest(56, OTHER_URL)])
+    assert sorted(urls) == [URL, OTHER_URL]
+    assert [pr.number for pr in out] == [55, 56]
+    assert [pr.title for pr in out] == ["Track every PR", "Give the list room"]
+    assert [pr.glyph for pr in out] == ["✓", "✓"]
+
+
+def test_resync_refetches_a_status_that_is_still_fresh(gh_calls, clock):
+    """The whole point of the button: what `enrich` would call current is a
+    minute old, and someone has just asked to see it."""
+    urls, replies = gh_calls
+    replies[URL] = _reply("Track every PR")
+    refresh(URL)
+    urls.clear()
+    assert resync([PullRequest(55, URL)])[0].glyph == "✓"
+    assert urls == [URL]
+
+
+def test_resync_leaves_a_pr_alone_when_the_fetch_fails(gh_calls):
+    """Offline, and the row still reads: the title it was saved with stays."""
+    pr = PullRequest(55, URL, "episode6/collins", title="Track every PR")
+    assert resync([pr]) == [pr]
+
+
+def test_resync_does_not_spend_a_fetch_on_a_merged_pr(gh_calls):
+    urls, _replies = gh_calls
+    pr = PullRequest(55, URL, title="Track every PR", state="MERGED")
+    assert resync([pr]) == [pr]
+    assert urls == []
+
+
+def test_resync_fetches_a_merged_pr_that_never_learned_its_title(gh_calls):
+    urls, replies = gh_calls
+    replies[URL] = {"state": "MERGED", "checks": {}, "title": "Track every PR"}
+    out = resync([PullRequest(55, URL, state="MERGED")])
+    assert urls == [URL]
+    assert out[0].title == "Track every PR"
+    assert out[0].merged
+
+
+def test_resync_never_hands_an_unfetchable_url_to_gh(gh_calls):
+    urls, _replies = gh_calls
+    pr = PullRequest(55, "--version")
+    assert resync([pr]) == [pr]
+    assert urls == []
+
+
+def test_resync_fetches_nothing_once_gh_is_known_missing(gh_calls, monkeypatch):
+    urls, _replies = gh_calls
+    monkeypatch.setattr(prstatus, "_gh_missing", True)
+    assert resync([PullRequest(55, URL)]) == [PullRequest(55, URL)]
+    assert urls == []
