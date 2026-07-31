@@ -957,6 +957,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._apply_restore_session()
         if self._pending_resolved:
             self._apply_resolved_sessions()
+        self._sync_transcript_paths()
         self._refresh_tab_titles()
         # Freshly discovered rows start with no status; re-assert yellow lines
         # for sessions known to be running detached (no-op when unchanged).
@@ -970,6 +971,36 @@ class MainWindow(Adw.ApplicationWindow):
             target = self.state.resolve_forward(session_id)
             if target != session_id and self.store.get_session(target) is not None:
                 self._clear_backgrounding(session_id, "fork discovered; row handed off")
+
+    def _sync_transcript_paths(self) -> None:
+        """Re-aim tabs whose transcript moved out from under them.
+
+        The CLI keys a session's transcript by its working directory, so a
+        session that enters a git worktree has its file re-homed under a new
+        project directory. The tab resolved its path once, when the session
+        started, and would otherwise tail a path that no longer exists for the
+        rest of the run — no PR chips, no prompt cards, no status.
+
+        Only a tab whose own path has gone missing is touched, and only when
+        the store has found that same session somewhere that exists, so a tab
+        deliberately pointed at another file (an attached fork tails the
+        fork's transcript) is never dragged off it.
+        """
+        for session_id, page in list(self._pages.items()):
+            tab = page.get_child()
+            if not isinstance(tab, TerminalTab):
+                continue
+            current = tab.transcript_path
+            if not current or Path(current).exists():
+                continue
+            session = self.store.get_session(session_id)
+            if session is None:
+                continue
+            moved = str(session.jsonl_path)
+            if moved == current or not Path(moved).exists():
+                continue
+            log.info("transcript moved: %s -> %s", current, moved)
+            tab.relocate_transcript(moved)
 
     def _apply_resolved_sessions(self) -> None:
         """Finish attaching resolved tabs once the store discovers their sessions

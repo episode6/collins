@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 import json
 
@@ -177,3 +177,104 @@ def test_truncated_transcript_clears_the_prs(tmp_path):
     _write(p, [{"type": "mode"}])  # rewritten shorter, no pr-link
     m.update()
     assert m.pull_requests() == []
+
+
+# -- relocation (the CLI re-homes a transcript when the session changes dir) --
+
+
+def _move(src, dst_dir, name):
+    """What the CLI does on entering a worktree: same file, new project dir."""
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    dst = dst_dir / name
+    src.rename(dst)
+    return dst
+
+
+def test_relocate_keeps_what_was_already_parsed(tmp_path):
+    old = tmp_path / "proj-repo" / "s.jsonl"
+    old.parent.mkdir()
+    _write(old, [_pr_line(40), _question_line("q1")])
+    m = TranscriptModel(old)
+    m.update()
+    assert [pr.number for pr in m.pull_requests()] == [40]
+    assert m.pending_question() is not None
+
+    new = _move(old, tmp_path / "proj-repo-worktree", "s.jsonl")
+    m.relocate(new)
+
+    assert m.path == new
+    # Nothing re-read yet, and nothing lost.
+    assert [pr.number for pr in m.pull_requests()] == [40]
+    assert m.pending_question() is not None
+
+
+def test_relocate_reads_only_what_was_appended_after_the_move(tmp_path):
+    old = tmp_path / "proj-repo" / "s.jsonl"
+    old.parent.mkdir()
+    _write(old, [_pr_line(40)])
+    m = TranscriptModel(old)
+    m.update()
+
+    new = _move(old, tmp_path / "proj-repo-worktree", "s.jsonl")
+    m.relocate(new)
+    assert m.update() is False  # same bytes, nothing new to ingest
+
+    _write(new, [_pr_line(40), _pr_line(55)])
+    assert m.update() is True
+    assert [pr.number for pr in m.pull_requests()] == [40, 55]
+
+
+def test_relocate_keeps_tailing_across_the_move(tmp_path):
+    """The regression: a session that moves keeps reporting new PRs."""
+    old = tmp_path / "proj-repo" / "s.jsonl"
+    old.parent.mkdir()
+    _write(old, [_pr_line(40)])
+    m = TranscriptModel(old)
+    m.update()
+
+    new = _move(old, tmp_path / "proj-repo-worktree", "s.jsonl")
+    # Without relocate the model tails a path that no longer exists.
+    assert m.update() is False
+    assert m.path.exists() is False
+
+    m.relocate(new)
+    _write(new, [_pr_line(40), _pr_line(55)])
+    assert m.update() is True
+    assert [pr.number for pr in m.pull_requests()] == [40, 55]
+
+
+def test_set_path_resets_where_relocate_does_not(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_pr_line(40)])
+    m = TranscriptModel(p)
+    m.update()
+    assert [pr.number for pr in m.pull_requests()] == [40]
+
+    m.set_path(p)  # a different session's file: start clean
+    assert m.pull_requests() == []
+
+
+def test_relocate_onto_a_shorter_file_starts_over(tmp_path):
+    old = tmp_path / "proj-repo" / "s.jsonl"
+    old.parent.mkdir()
+    _write(old, [_pr_line(40), _pr_line(55), _pr_line(60)])
+    m = TranscriptModel(old)
+    m.update()
+    assert [pr.number for pr in m.pull_requests()] == [40, 55, 60]
+
+    new = tmp_path / "proj-repo-worktree" / "s.jsonl"
+    new.parent.mkdir()
+    _write(new, [_pr_line(77)])  # shorter than the read offset
+    old.unlink()
+    m.relocate(new)
+    assert m.update() is True
+    assert [pr.number for pr in m.pull_requests()] == [77]
+
+
+def test_relocate_accepts_a_string_path(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_pr_line(40)])
+    m = TranscriptModel(p)
+    m.update()
+    m.relocate(str(p))
+    assert m.path == p
