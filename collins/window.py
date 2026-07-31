@@ -49,6 +49,9 @@ _GHOSTTY = shutil.which("ghostty")
 # Quiet period before a background tab is considered "idle" / finished.
 _IDLE_NOTIFY_MS = 4000
 
+# Window (and content header) title while the tab bar is showing the tab names.
+_APP_TITLE = "Collins"
+
 class _KeepProjects(NamedTuple):
     """The "keep the emptied projects" check button and what it applies to."""
 
@@ -105,7 +108,7 @@ class MainWindow(Adw.ApplicationWindow):
         super().__init__(**kwargs)
         self.state = state
         self.store = store
-        self.set_title("Collins")
+        self.set_title(_APP_TITLE)
         self.set_icon_name(_app_icon_name(self))
         self._restore_window_geometry()
         self._pages: dict[str, Adw.TabPage] = {}  # session_id -> open tab
@@ -156,6 +159,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.tab_view.connect("close-page", self._on_close_page)
         self.tab_view.connect("notify::selected-page", self._on_selected_page_changed)
         self.tab_view.connect("setup-menu", self._on_tab_setup_menu)
+        # Window title follows the active tab while the tab bar is hidden, so
+        # every page's renames have to be watched (see _sync_window_title).
+        self._title_handlers: dict[Adw.TabPage, int] = {}
+        self.tab_view.connect("page-attached", self._on_page_attached)
+        self.tab_view.connect("page-detached", self._on_page_detached)
 
         tab_menu = Gio.Menu()
         tab_menu.append(_("Rename…"), "win.rename-tab")
@@ -1033,6 +1041,35 @@ class MainWindow(Adw.ApplicationWindow):
         show = button.get_active()
         self.tab_bar.set_visible(show)
         self.state.set_setting("show_tab_bar", show)
+        self._sync_window_title()
+
+    # -- window title --------------------------------------------------------
+
+    def _sync_window_title(self) -> None:
+        """With the tab bar hidden nothing on screen names the session you are
+        looking at, so the window title (content header, alt-tab, dock) carries
+        the active tab's title instead of the bare app name. Showing the tab
+        bar hands that job back to the tabs and restores "Collins"."""
+        page = self.tab_view.get_selected_page()
+        title = page.get_title().strip() if page is not None else ""
+        if self.tab_bar.get_visible() or not title:
+            self.set_title(_APP_TITLE)
+        else:
+            self.set_title(title)
+
+    def _on_page_attached(self, _view: Adw.TabView, page: Adw.TabPage, _pos: int) -> None:
+        # Titles are set from a dozen places (session rename, emoji, store
+        # refresh…); watching the page itself catches all of them.
+        self._title_handlers[page] = page.connect("notify::title", self._on_page_title_changed)
+
+    def _on_page_detached(self, _view: Adw.TabView, page: Adw.TabPage, _pos: int) -> None:
+        handler = self._title_handlers.pop(page, None)
+        if handler is not None:
+            page.disconnect(handler)
+
+    def _on_page_title_changed(self, page: Adw.TabPage, _pspec) -> None:
+        if page is self.tab_view.get_selected_page():
+            self._sync_window_title()
 
     def _on_caffeine_toggled(self, button: Gtk.ToggleButton) -> None:
         app = self.get_application()
@@ -1521,6 +1558,7 @@ class MainWindow(Adw.ApplicationWindow):
         page = view.get_selected_page()
         self._update_active_row()
         self._update_close_buttons(page)
+        self._sync_window_title()
         if page is None:
             return
         self._cancel_idle(page)  # foreground now; no "finished" notification
