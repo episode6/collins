@@ -31,6 +31,55 @@ log = logging.getLogger(__name__)
 _POLL_INTERVAL_S = 20
 _DEBOUNCE_MS = 1000
 
+# Why a session tab can't be handed to the background right now — the values
+# background_blocker() returns. "" means it can.
+BLOCK_NOT_SESSION = "not-session"
+BLOCK_UNSUPPORTED = "unsupported"
+BLOCK_UNREGISTERED = "unregistered"
+BLOCK_IN_FLIGHT = "in-flight"
+
+
+def background_blocker(
+    is_session: bool,
+    supports_detach: bool,
+    is_fork: bool,
+    session_id: str | None,
+    has_row: bool,
+    detach_in_flight: bool,
+) -> str:
+    """Why a tab can't be backgrounded right now, or "" when it can.
+
+    A /bg is only safe once the app can name the conversation it is handing
+    over. The handoff has to record `old id -> the id the background agent
+    forks into`, and both halves of that need a registered session: the old id
+    to key the record on, and a sidebar row to disable while it's in flight and
+    to redirect once it lands. Fed without those, the /bg still detaches the
+    agent — but nothing records it, no row survives to reach it, and the fork's
+    transcript is typically a metadata-only stub the scan skips, so the agent
+    runs on with no way back to it.
+
+    `has_row` is the real registration test, not "the store knows this id": a
+    tab attached to a live fork runs under the fork's own (stub, undiscovered)
+    id, and the row standing in for it is the one it forked from.
+
+    Only one handoff runs at a time. match_background_fork() pairs on the
+    conversation's first-message uuid and falls back to the working directory,
+    and a fork that hasn't written its copy yet has no readable uuid — so two
+    /bg handoffs in flight over the same project can be paired to each other's
+    agents, or both to the same one.
+    """
+    if not is_session:
+        return BLOCK_NOT_SESSION
+    if not supports_detach:
+        return BLOCK_UNSUPPORTED
+    # A fork tab deliberately shares the original's id and writes nothing under
+    # it, so there is no id of its own to record a handoff against.
+    if is_fork or not session_id or not has_row:
+        return BLOCK_UNREGISTERED
+    if detach_in_flight:
+        return BLOCK_IN_FLIGHT
+    return ""
+
 
 def fetch_background_ids() -> set[str]:
     """Session ids currently running as background agents, across providers.

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -155,6 +155,26 @@ def confirm_dialog(
 
     dialog.connect("response", respond)
     dialog.present(parent)
+
+
+def progress_dialog(
+    parent: Gtk.Widget,
+    heading: str,
+    body: str,
+    dismiss_label: str,
+    on_dismiss: Callable[[], None],
+) -> Adw.AlertDialog:
+    """A one-button notice for work the user has to wait through. The caller
+    owns the returned dialog: set `body` as the work advances, and close() it
+    when done. `on_dismiss` fires for the button and for Escape alike, so it
+    must be safe to call once the caller has already closed the dialog."""
+    dialog = Adw.AlertDialog(heading=heading, body=body)
+    dialog.add_response("dismiss", dismiss_label)
+    dialog.set_default_response("dismiss")
+    dialog.set_close_response("dismiss")
+    dialog.connect("response", lambda _dialog, _response: on_dismiss())
+    dialog.present(parent)
+    return dialog
 
 
 def error_dialog(parent: Gtk.Widget, heading: str, body: str) -> None:

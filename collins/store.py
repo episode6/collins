@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -558,6 +558,16 @@ class SessionStore(GObject.Object):
         item = self._items.get(session_id)
         if item is not None and item.backgrounding != flag:
             item.backgrounding = flag
+
+    def set_can_background(self, session_id: str, flag: bool) -> None:
+        item = self._items.get(session_id)
+        if item is not None and item.can_background != flag:
+            item.can_background = flag
+
+    def row_ids(self) -> list[str]:
+        """Every session id with a row, so callers can re-evaluate a property
+        across the whole list (the background gate is app-wide, not per-row)."""
+        return list(self._items)
 
     def trash(self, session_id: str) -> str | None:
         """Move the transcript to trash. Returns an error message or None."""

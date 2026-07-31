@@ -462,3 +462,26 @@ def test_replaced_rows_are_labeled_replaced_in_the_archive_view(store):
     item = store.get_item(original)
     assert item is not None
     assert item.subtitle == "replaced"
+
+
+def test_can_background_is_off_until_a_row_is_told_otherwise(store):
+    session_id = store._last_sessions[0].session_id
+    item = store.get_item(session_id)
+    # Rows start closed: a session with no open tab has nothing to hand over.
+    assert item.can_background is False
+
+    store.set_can_background(session_id, True)
+    assert item.can_background is True
+
+    store.set_can_background(session_id, False)
+    assert item.can_background is False
+
+
+def test_set_can_background_ignores_a_session_with_no_row(store):
+    store.set_can_background(str(uuid.uuid4()), True)  # must not raise
+
+
+def test_row_ids_covers_every_row_so_the_gate_can_sweep(store):
+    # The background gate is app-wide — one handoff at a time — so closing it
+    # means re-evaluating every row, not just the one being handed over.
+    assert sorted(store.row_ids()) == sorted(s.session_id for s in store._last_sessions)
