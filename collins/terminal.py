@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -796,7 +796,22 @@ class TerminalTab(Gtk.Box):
         # since it takes its width from the row and so costs it one.
         self._pr_menu = Gtk.Popover()
         self._pr_menu.set_position(Gtk.PositionType.TOP)  # the footer is at the bottom
+        # No arrow, like the terminal's own context menu and like every
+        # GtkPopoverMenu: the tail is a separate render node from the body it
+        # points out of, and the edge they share only rasterizes cleanly when
+        # it lands on a whole device pixel. At a display scale of 1.25 it
+        # lands on a half one, both shapes anti-alias against it, and the two
+        # coverages composite to 75% — a row of background showing through the
+        # join, which reads as an arrow floating a pixel off its menu. That is
+        # GTK's own (a stock GtkPopover does it, under every GSK renderer) and
+        # no CSS of ours reaches it. A menu that opens on its button doesn't
+        # need a tail to say what it belongs to.
+        self._pr_menu.set_has_arrow(False)
         self._pr_menu.add_css_class("menu")
+        # Its own class as well: the list inside is buttons, and the footer's
+        # rules for those (tight, no hover background) would otherwise reach
+        # into it — a popover is a child of the widget it is attached to.
+        self._pr_menu.add_css_class("pr-menu")
         menu_icon = Gtk.Image.new_from_icon_name("pan-up-symbolic")
         menu_icon.set_pixel_size(_PR_REFRESH_ICON_PX)
         menu_icon.add_css_class("dim-label")
@@ -968,13 +983,21 @@ class TerminalTab(Gtk.Box):
             row.append(number)
             button = Gtk.Button(child=row)
             button.add_css_class("flat")
+            button.add_css_class("pr-menu-row")  # menu-sized, and lit under the pointer
             button.set_tooltip_text(open_tooltip(describe(pr) + "\n" + pr.url))
             button.connect("clicked", self._on_pr_menu_row, pr.url)
             rows.append(button)
         # A session with a lot of PRs would otherwise open a popover taller
-        # than the window it is in.
+        # than the window it is in. A list that isn't that long doesn't scroll
+        # at all, though — and mustn't be allowed to: a scrollable view won't
+        # measure shorter than a usable scrolling area (44px), which a single
+        # 36px row is, so it left 8px of stray space under the only row.
         scroller = Gtk.ScrolledWindow(child=rows)
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        overflows = rows.measure(Gtk.Orientation.VERTICAL, -1).natural > _PR_MENU_MAX_PX
+        scroller.set_policy(
+            Gtk.PolicyType.NEVER,
+            Gtk.PolicyType.AUTOMATIC if overflows else Gtk.PolicyType.NEVER,
+        )
         scroller.set_propagate_natural_width(True)
         scroller.set_propagate_natural_height(True)
         scroller.set_max_content_height(_PR_MENU_MAX_PX)
