@@ -13,8 +13,8 @@ formats):
 - data/banner.png: modified in this fork, 2026-07-26
 - data/icons/hicolor/scalable/actions/agent-cursor-symbolic.svg: deleted in this fork, 2026-07-26
 - debian/changelog: modified in this fork, 2026-07-26
-- docs/package.json: modified in this fork, 2026-07-26
-- docs/package-lock.json: modified in this fork, 2026-07-26
+- docs/package.json: modified in this fork, 2026-07-31
+- docs/package-lock.json: modified in this fork, 2026-07-31
 - data/screenshot.png: modified in this fork, 2026-07-28
 - docs/public/img/main-window.png: modified in this fork, 2026-07-28
 - docs/public/img/mcp-servers.png: modified in this fork, 2026-07-28
