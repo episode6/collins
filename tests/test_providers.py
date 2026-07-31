@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-07-31. Full change history: git log for this file.
 
 import os
 import shutil
@@ -187,3 +187,46 @@ def test_background_watch_dir():
     assert ClaudeProvider().background_watch_dir() == Path.home() / ".claude" / "jobs"
     # Base providers have no background agents → nothing to watch.
     assert Provider().background_watch_dir() is None
+
+
+# -- is the agent's prompt free to type into? ---------------------------------
+#
+# The lines below are real Claude Code v2.1.220 screens, read back out of a VTE
+# terminal exactly as TerminalTab.takes_prompt reads them: the line the cursor
+# is on, and the column it sits at. The marker is a caret and U+00A0.
+
+
+def test_claude_prompt_is_free_when_it_is_empty():
+    claude = ClaudeProvider()
+    # Freshly drawn: a dim suggestion sits in the empty input.
+    assert claude.takes_prompt('❯\xa0Try "create a util logging.py that..."', 2) is True
+    # Just after a prompt was sent: no suggestion at all.
+    assert claude.takes_prompt("❯\xa0", 2) is True
+
+
+def test_claude_prompt_is_taken_once_anything_is_typed():
+    claude = ClaudeProvider()
+    assert claude.takes_prompt("❯\xa0fix the flaky test", 20) is False
+    assert claude.takes_prompt("❯\xa0/he", 5) is False
+
+
+def test_a_cursor_sent_home_over_typed_text_is_not_an_empty_prompt():
+    """Ctrl+A puts the cursor back at column 2 with the line still written;
+    what follows the marker is what gives it away."""
+    assert ClaudeProvider().takes_prompt("❯\xa0fix the flaky test", 2) is False
+
+
+def test_claudes_other_prompts_are_not_the_input():
+    """The trust dialog and permission prompts draw their own caret — indented,
+    and with an ordinary space. They take Enter too, which is exactly why a
+    prompt must never be sent into one."""
+    claude = ClaudeProvider()
+    assert claude.takes_prompt(" ❯ 1. Yes, I trust this folder", 1) is False
+    assert claude.takes_prompt("❯ 1. Yes, proceed", 2) is False  # ordinary space
+    assert claude.takes_prompt("", 0) is False
+    assert claude.takes_prompt("$ ", 2) is False  # a shell, the agent gone
+
+
+def test_base_providers_never_claim_a_free_prompt():
+    """An agent whose screen we can't read is the one worth not typing into."""
+    assert Provider().takes_prompt("❯\xa0", 2) is False

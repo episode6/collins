@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import shutil
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import gi
@@ -427,9 +428,12 @@ class SessionRow(Gtk.ListBoxRow):
         self._pr_fetch = 0  # generation: a slow fetch can't land on a later opening
         # What a PR's actions need of the session behind them. From a row, the
         # session is only reachable through the window — which is also the only
-        # thing that knows whether it has a tab to type into.
+        # thing holding the tab whose prompt they would go to.
         self._pr_host = prmenu.ActionHost(
-            session_active=lambda: self.item.status in _IN_TAB_STATUSES,
+            takes_prompt=lambda: (
+                self.item.status in _IN_TAB_STATUSES
+                and sidebar.takes_prompt(self.item.session_id)
+            ),
             address_ci=lambda: self.activate_action(
                 "win.address-ci", GLib.Variant("s", self.item.session_id)
             ),
@@ -694,6 +698,11 @@ class SessionSidebar(Gtk.Box):
         self._placeholders: dict[str, str] = {}  # placeholder id -> cwd
         self._placeholder_rows: dict[str, PlaceholderRow] = {}
         self._active_session_id: str | None = None
+        # "Is this session sitting at an empty prompt?", for a row's PR actions
+        # (see SessionRow._pr_host). Only the window can answer — the tab is
+        # its — so it replaces this the moment it builds the sidebar; until
+        # then, and for a session it has no tab for, the answer is no.
+        self.takes_prompt: Callable[[str], bool] = lambda _session_id: False
         # Scrolling the list is deferred to an idle callback (see
         # _schedule_scroll): the offset to restore and the row to reveal when
         # it runs, plus the id of the pending source.

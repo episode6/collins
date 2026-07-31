@@ -298,6 +298,9 @@ class MainWindow(Adw.ApplicationWindow):
 
         # --- sidebar ---
         self.sidebar = SessionSidebar(self.store)
+        # A row's PR actions need to know whether that session is sitting at an
+        # empty prompt; only the tab knows, and only the window holds the tabs.
+        self.sidebar.takes_prompt = self._session_takes_prompt
         self.sidebar.connect("open-session", self._on_sidebar_open)
         self.sidebar.connect("open-many", self._on_sidebar_open_many)
         self.sidebar.connect("trash-many", self._on_sidebar_trash_many)
@@ -1402,20 +1405,35 @@ class MainWindow(Adw.ApplicationWindow):
             self._bg_ok.add(page)
         self.tab_view.close_page(page)
 
+    def _session_takes_prompt(self, session_id: str) -> bool:
+        """Whether a prompt sent to this session would land in an empty input.
+
+        What the sidebar asks before offering a row's PR "Address the CI
+        errors" (see SessionSidebar.takes_prompt): the tab that would receive
+        it is the window's, and only it can read what its agent is waiting at.
+        """
+        tab = self._session_tab(session_id)
+        return tab is not None and tab.takes_prompt()
+
     def _address_ci(self, session_id: str) -> None:
-        """A sidebar PR menu's "Address the CI errors": hand the prompt to the
-        session's own tab, and bring that tab to the front so the typed-out
-        prompt is where the user is looking. A session with no open tab is
-        never offered the action (see prmenu.ActionHost), but rows are built
-        long before they are clicked — so this checks again rather than
-        assuming."""
-        page = self._page_for(session_id)
-        if page is None:
+        """A sidebar PR menu's "Address the CI errors": send the prompt to the
+        session's own tab, and bring that tab to the front so its answer is
+        where the user is looking.
+
+        Both checks again rather than assuming: rows are built long before they
+        are clicked, and the tab may have been closed — or its prompt started —
+        since the menu was opened."""
+        tab = self._session_tab(session_id)
+        if tab is None or not tab.takes_prompt():
             return
-        self.tab_view.set_selected_page(page)
-        tab = page.get_child()
-        if isinstance(tab, TerminalTab):
-            tab.inject_prompt(practions.CI_PROMPT)
+        self.tab_view.set_selected_page(self._page_for(session_id))
+        tab.inject_prompt(practions.CI_PROMPT)
+
+    def _session_tab(self, session_id: str) -> TerminalTab | None:
+        """The terminal tab a session is open in, if it is open in one."""
+        page = self._page_for(session_id)
+        tab = page.get_child() if page is not None else None
+        return tab if isinstance(tab, TerminalTab) else None
 
     def _close_confirmed(self, page: Adw.TabPage) -> None:
         """Force-close (terminate the child) — the graceful-close fallback."""

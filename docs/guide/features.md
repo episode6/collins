@@ -119,8 +119,11 @@ agents' own session files are never modified.
   mark a draft **ready for review**, **merge** it — or turn on **auto-merge**
   while its checks are still running — **ask Claude for a review** (a
   `@claude review` comment, for repositories running the Claude Code GitHub
-  action), and, when CI is red and the session is open in a tab, **address the
-  CI errors**: the prompt is typed into that session, ready to send.
+  action), and, when CI is red, **address the CI errors** — sent straight to
+  that session as a prompt. That last one is only offered while the session is
+  open **and sitting at an empty prompt**, so a half-written line of yours is
+  never sent along with it (and a permission dialog, which takes Enter too, is
+  never answered by it).
 - **Rename** tabs, **copy the session ID**, or **fork** a session
   (`--fork-session`) from the right-click menu.
 - **Shift+Enter** inserts a newline in the agent's prompt.

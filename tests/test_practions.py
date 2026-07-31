@@ -38,8 +38,8 @@ def _pr(**overrides) -> PullRequest:
     return PullRequest(**fields)
 
 
-def _keys(pr, session_active=False) -> list[str]:
-    return [action.key for action in actions_for(pr, session_active)]
+def _keys(pr, takes_prompt=False) -> list[str]:
+    return [action.key for action in actions_for(pr, takes_prompt)]
 
 
 # -- what a PR offers -------------------------------------------------------
@@ -76,32 +76,32 @@ def test_an_unfetched_pr_offers_only_its_page():
 
 
 def test_a_merged_pr_offers_only_its_page():
-    assert _keys(_pr(state="MERGED"), session_active=True) == [OPEN]
+    assert _keys(_pr(state="MERGED"), takes_prompt=True) == [OPEN]
 
 
 def test_a_closed_pr_offers_only_its_page():
-    assert _keys(_pr(state="CLOSED"), session_active=True) == [OPEN]
+    assert _keys(_pr(state="CLOSED"), takes_prompt=True) == [OPEN]
 
 
-def test_addressing_ci_needs_both_a_failure_and_a_session():
-    """It types into a session's prompt, so a session that isn't open has
-    nowhere to type — and a PR that is passing has nothing to say."""
+def test_addressing_ci_needs_both_a_failure_and_a_session_at_its_prompt():
+    """It sends a prompt, so a session that is closed — or mid-sentence — has
+    nowhere to send one, and a PR that is passing has nothing to say."""
     failing = _pr(passed=1, failed=2)
-    assert FIX_CI in _keys(failing, session_active=True)
-    assert FIX_CI not in _keys(failing, session_active=False)
-    assert FIX_CI not in _keys(_pr(), session_active=True)
+    assert FIX_CI in _keys(failing, takes_prompt=True)
+    assert FIX_CI not in _keys(failing, takes_prompt=False)
+    assert FIX_CI not in _keys(_pr(), takes_prompt=True)
 
 
 def test_only_merging_asks_first():
     """The two irreversible, everybody-can-see-it actions confirm; opening a
-    page, a comment and a typed prompt don't."""
+    page, a comment and a prompt sent to a session don't."""
     asks = {a.key: a.confirm is not None for a in actions_for(_pr(passed=1, failed=1), True)}
     assert asks == {OPEN: False, AUTO_MERGE: True, REVIEW: False, FIX_CI: False}
     assert {a.key: a.confirm is not None for a in actions_for(_pr(), True)}[MERGE]
 
 
 def test_every_action_names_the_pr_in_its_tooltip():
-    for action in actions_for(_pr(passed=1, failed=1), session_active=True):
+    for action in actions_for(_pr(passed=1, failed=1), takes_prompt=True):
         assert action.label and action.tooltip
 
 

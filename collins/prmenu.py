@@ -73,16 +73,17 @@ class ActionHost:
     """The session behind a PR menu, as the three things its actions need.
 
     A PR's actions are mostly GitHub's business, but two of them are the
-    session's: whether it is open at all (which decides if "Address the CI
-    errors" is on offer) and where its prompt is. The footer's chips answer
-    both from the tab they are in; a sidebar row answers them through the
-    window, whose tab that session may not even have. Hence callables rather
-    than values: a menu built once is opened much later.
+    session's: whether it is somewhere a prompt can be sent (which decides if
+    "Address the CI errors" is on offer) and how to send one. The footer's
+    chips answer both from the tab they are in; a sidebar row answers them
+    through the window, whose tab that session may not even have. Hence
+    callables rather than values: a menu built once is opened much later, and
+    what a terminal is waiting at changes by the keystroke.
     """
 
-    # Whether the session has a tab open right now.
-    session_active: Callable[[], bool]
-    # Put practions.CI_PROMPT in that session's prompt (and show it).
+    # Whether the session has a tab open, at an empty prompt (Provider.takes_prompt).
+    takes_prompt: Callable[[], bool]
+    # Send practions.CI_PROMPT to that session, and put it in front.
     address_ci: Callable[[], None]
     # An action changed the PR on GitHub; re-read its status.
     refresh: Callable[[], None]
@@ -283,7 +284,7 @@ def show_actions(
     separator.set_margin_top(3)
     separator.set_margin_bottom(3)
     rows.append(separator)
-    for action in practions.actions_for(pr, host.session_active()):
+    for action in practions.actions_for(pr, host.takes_prompt()):
         rows.append(_action_row(popover, pr, action, host))
     popover.set_child(rows)
 

@@ -915,13 +915,13 @@ class TerminalTab(Gtk.Box):
     def _pr_action_host(self) -> prmenu.ActionHost:
         """How a PR's actions reach this tab: it is the session they belong to.
 
-        The chips and the caret's list are the tab's own, so "is the session
-        open?" is really "is there still an agent in this terminal?" — a tab
-        whose agent has exited keeps its chips (and its PRs), but has nowhere
-        left to type.
+        The chips and the caret's list are the tab's own, so "can this session
+        take a prompt?" is a question the tab answers about itself — a tab
+        whose agent has exited, or whose prompt is half-written, keeps its
+        chips and its PRs, but is not somewhere to send anything.
         """
         return prmenu.ActionHost(
-            session_active=lambda: self._child_pid is not None,
+            takes_prompt=self.takes_prompt,
             address_ci=lambda: self.inject_prompt(practions.CI_PROMPT),
             refresh=self._request_update,
         )
@@ -1030,15 +1030,32 @@ class TerminalTab(Gtk.Box):
         self.terminal.feed_child(text.encode())
 
     def inject_prompt(self, text: str) -> None:
-        """Type *text* into the agent's prompt — without sending it.
+        """Send *text* to the agent as a prompt, and put the tab in front.
 
-        What the PR menu's "Address the CI errors" does. The last keystroke
-        stays the user's: the prompt is theirs to add to (which PR, which job)
-        or to think better of, and a menu item that set an agent working on a
-        press would be a heavier thing than a menu item should be.
+        What the PR menu's "Address the CI errors" does. Typed and sent in one
+        write, which is what the CLI reads as a line the user typed and ended
+        with Return; only offered while `takes_prompt` says the input is empty,
+        so nothing of the user's is ever sent along with it.
         """
-        self.feed_child_text(text)
+        self.feed_child_text(text + "\r")
         self.grab_terminal_focus()
+
+    def takes_prompt(self) -> bool:
+        """Whether a prompt sent right now would land in an empty input box.
+
+        The provider reads that off the screen (see Provider.takes_prompt); all
+        this does is find what it reads — the line the cursor is on, and how
+        far into it the cursor sits — and rule out a terminal with no agent
+        left in it.
+        """
+        if self._child_pid is None:
+            return False
+        column, row = self.terminal.get_cursor_position()
+        line = self.terminal.get_text_range_format(
+            Vte.Format.TEXT, row, 0, row, self.terminal.get_column_count()
+        )
+        text = line[0] if isinstance(line, tuple) else line
+        return self.provider.takes_prompt(text or "", column)
 
     # -- prompt card -------------------------------------------------------
 

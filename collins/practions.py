@@ -11,9 +11,9 @@ deliberately narrow: a draft is asked to come out of draft, an open PR is
 merged now or told to merge itself when its checks go green, and anything the
 repository's own Claude workflow can be asked for goes through a comment
 (`@claude review`) rather than an API Collins would have to hold a token for.
-The one action that isn't about GitHub at all is FIX_CI, which types a prompt
-into the session that opened the PR — it needs a session that is actually
-open, so its caller decides whether it is on offer.
+The one action that isn't about GitHub at all is FIX_CI, which sends a prompt
+to the session that opened the PR — it needs a session sitting at an empty
+prompt, so its caller decides whether it is on offer.
 
 Every call out is `gh`, off the main thread, and reports back as "worked" or a
 sentence explaining why not (see prstatus.gh_run) — nothing here raises at the
@@ -35,9 +35,9 @@ AUTO_MERGE = "auto-merge"
 REVIEW = "review"
 FIX_CI = "fix-ci"
 
-# What "address the CI errors" puts in the session's prompt. Read by the agent
-# CLI, not by a person, so it stays in English (and untranslated) whatever the
-# app's language is.
+# What "address the CI errors" sends to the session. Read by the agent CLI,
+# not by a person, so it stays in English (and untranslated) whatever the app's
+# language is.
 CI_PROMPT = "address the ci error(s)"
 # What asking for a review looks like on the PR: the mention the
 # `anthropics/claude-code-action` workflow triggers on. A repository without
@@ -94,13 +94,15 @@ def checks_green(pr: PullRequest) -> bool:
     return not pr.failed and not pr.pending
 
 
-def actions_for(pr: PullRequest, session_active: bool) -> list[Action]:
+def actions_for(pr: PullRequest, takes_prompt: bool) -> list[Action]:
     """The menu for *pr*: every action that makes sense for the state it is in.
 
-    *session_active* is whether the session this PR belongs to has a tab open
-    right now — the only thing here that isn't a property of the PR, and the
-    reason "address the CI errors" comes and goes: it types into a session,
-    so a closed one has nowhere to type.
+    *takes_prompt* is whether the session this PR belongs to is somewhere a
+    prompt can be sent right now — a tab open, at an empty input (see
+    Provider.takes_prompt). It is the only thing here that isn't a property of
+    the PR, and the reason "address the CI errors" comes and goes: it sends a
+    prompt, and a session that is closed, or mid-sentence, is not somewhere to
+    send one.
 
     Opening the PR is always first and always there, so the menu is never
     empty — a merged PR still has a page worth visiting. Everything past that
@@ -132,12 +134,12 @@ def actions_for(pr: PullRequest, session_active: bool) -> list[Action]:
                 _("Comment “{comment}” on {slug}").format(comment=REVIEW_COMMENT, slug=pr.slug),
             )
         )
-        if pr.failed and session_active:
+        if pr.failed and takes_prompt:
             actions.append(
                 Action(
                     FIX_CI,
                     _("Address the CI errors"),
-                    _("Put “{prompt}” in this session's prompt").format(prompt=CI_PROMPT),
+                    _("Send “{prompt}” to this session").format(prompt=CI_PROMPT),
                 )
             )
     return actions
@@ -180,7 +182,7 @@ def perform(key: str, pr: PullRequest) -> str | None:
     """Carry out action *key* on *pr*. None when it worked, else why it didn't.
 
     Only the actions that talk to GitHub land here; opening the page and
-    typing into a session are the caller's, since neither leaves the app.
+    prompting a session are the caller's, since neither leaves the app.
 
     Never call on the main thread — every branch waits on `gh`.
     """
