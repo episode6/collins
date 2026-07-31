@@ -93,11 +93,11 @@ def _setup_links(terminal: Vte.Terminal) -> None:
     except GLib.Error:
         regex = None  # VTE built without PCRE2: OSC 8 links still work
 
-    def on_launched(launcher: Gtk.UriLauncher, result) -> None:
+    def on_launched(launcher: Gtk.UriLauncher | Gtk.FileLauncher, result) -> None:
         try:
             launcher.launch_finish(result)
         except GLib.Error:
-            pass  # no handler for the scheme, or the user dismissed the chooser
+            pass  # no handler for the scheme/type, or the user dismissed the chooser
 
     def on_pressed(gesture: Gtk.GestureClick, _n_press, x: float, y: float) -> None:
         if not gesture.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
@@ -111,7 +111,15 @@ def _setup_links(terminal: Vte.Terminal) -> None:
         if not uri:
             return
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-        Gtk.UriLauncher.new(uri).launch(terminal.get_root(), None, on_launched)
+        if uri.startswith("file:"):
+            # Open the file itself in its default app (what xdg-open does).
+            # UriLauncher would hand a file: URI to the portal, which only
+            # reveals it in the file manager. Gio.File also sheds any line
+            # fragment the emitter tacked on.
+            launcher = Gtk.FileLauncher.new(Gio.File.new_for_uri(uri))
+        else:
+            launcher = Gtk.UriLauncher.new(uri)
+        launcher.launch(terminal.get_root(), None, on_launched)
 
     # Capture phase, so Ctrl+click opens the link even when the running app
     # has turned on mouse reporting (same trick as the context menu).
