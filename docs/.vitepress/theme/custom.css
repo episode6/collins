@@ -1,7 +1,7 @@
 /*
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-27. Full change history: git log for this file.
+fork. Last modified: 2026-07-31. Full change history: git log for this file.
 */
 
 /* Brand accent */
@@ -16,23 +16,33 @@ fork. Last modified: 2026-07-27. Full change history: git log for this file.
   --vp-c-brand-3: #d97757;
 }
 
-/* Let the hero screenshot render large instead of being boxed into the
-   small default logo slot. */
+/* Let the hero screenshot render large instead of being boxed into the small
+   default logo slot. The default slot is a fixed-size box with the image
+   absolutely centred inside it; we make the whole thing flow normally so the
+   screenshot can size itself. Every piece of that box has to be unwound —
+   leaving the image absolutely positioned inside a zero-height container
+   floats it up over the nav bar and the hero title. */
 .VPHero .image {
   max-width: none;
+  /* The default pulls the image up under the nav bar with a negative top
+     margin, on the assumption it sits in a 320px box that can absorb it. */
+  margin: 0 0 24px;
 }
 .VPHero .image-bg {
   display: none;
 }
 .VPHero .image-container {
-  position: relative;
+  position: static;
   transform: none;
   width: auto;
   height: auto;
   padding: 0;
 }
 .VPHero .image-container .VPImage {
+  position: static;
+  transform: none;
   max-width: 580px;
+  max-height: none;
   width: 100%;
   height: auto;
   border-radius: 12px;
@@ -41,6 +51,9 @@ fork. Last modified: 2026-07-27. Full change history: git log for this file.
 }
 
 @media (min-width: 960px) {
+  .VPHero .image {
+    margin: 0;
+  }
   .VPHero.has-image .container {
     align-items: center;
   }
