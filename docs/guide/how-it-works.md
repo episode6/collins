@@ -92,7 +92,7 @@ collins/
 ├── titles.py         # auto-generated session titles (local + haiku)
 ├── usage.py          # Claude subscription usage fetch/parse
 ├── usagepanel.py     # the sidebar usage panel widget
-├── gitinfo.py        # git branch detection for the tab footer
+├── gitinfo.py        # git branch for the tab footer; is the tree dirty?
 ├── prstatus.py       # a session's pull requests and their CI status (gh)
 ├── prmenu.py         # the PR list popover and its per-PR actions submenu
 ├── practions.py      # what a PR offers (merge, review, …) and the gh calls

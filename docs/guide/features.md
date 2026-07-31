@@ -117,13 +117,18 @@ agents' own session files are never modified.
   title — the same list a sidebar row's GitHub button opens.
 - **Right-click a chip** (or a PR in either list) for what to *do* with it:
   mark a draft **ready for review**, **merge** it — or turn on **auto-merge**
-  while its checks are still running — **ask Claude for a review** (a
+  while its checks are still running — or **ask Claude for a review** (a
   `@claude review` comment, for repositories running the Claude Code GitHub
-  action), and, when CI is red, **address the CI errors** — sent straight to
-  that session as a prompt. That last one is only offered while the session is
-  open **and sitting at an empty prompt**, so a half-written line of yours is
-  never sent along with it (and a permission dialog, which takes Enter too, is
-  never answered by it).
+  action). Left-clicking still opens the page, which is why nothing in the
+  menu does; a PR with nothing left to do says so rather than opening empty.
+- Two of those items are **sent to the session as a prompt** instead of run
+  against GitHub: **address the CI errors**, when that PR's CI is red, and
+  **open pull request**, once it has **merged** and the terminal's working
+  directory has **uncommitted changes** again — your work landed, and what is
+  in the tree now wants a PR of its own. Both are only offered while the
+  session is open **and sitting at an empty prompt**, so a half-written line
+  of yours is never sent along with it (and a permission dialog, which takes
+  Enter too, is never answered by it).
 - **Rename** tabs, **copy the session ID**, or **fork** a session
   (`--fork-session`) from the right-click menu.
 - **Shift+Enter** inserts a newline in the agent's prompt.

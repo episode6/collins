@@ -11,9 +11,13 @@ deliberately narrow: a draft is asked to come out of draft, an open PR is
 merged now or told to merge itself when its checks go green, and anything the
 repository's own Claude workflow can be asked for goes through a comment
 (`@claude review`) rather than an API Collins would have to hold a token for.
-The one action that isn't about GitHub at all is FIX_CI, which sends a prompt
-to the session that opened the PR — it needs a session sitting at an empty
-prompt, so its caller decides whether it is on offer.
+
+Two of them aren't about GitHub at all: FIX_CI and NEW_PR send a prompt to the
+session that opened the PR and let the agent do the work. Both need a session
+sitting at an empty prompt, and NEW_PR needs uncommitted work to open a pull
+request *for* — neither is a property of the PR, so the caller answers both.
+Note that nothing here opens the PR's page: the chip and the list row already
+do that on a plain click, which is what the right-click menu is a step past.
 
 Every call out is `gh`, off the main thread, and reports back as "worked" or a
 sentence explaining why not (see prstatus.gh_run) — nothing here raises at the
@@ -22,23 +26,25 @@ UI.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .i18n import _
 from .prstatus import PullRequest, gh_json, gh_run, repository_for
 
 # The actions themselves. Menu order is the order they are built in.
-OPEN = "open"
 READY = "ready"
 MERGE = "merge"
 AUTO_MERGE = "auto-merge"
 REVIEW = "review"
 FIX_CI = "fix-ci"
+NEW_PR = "new-pr"
 
-# What "address the CI errors" sends to the session. Read by the agent CLI,
-# not by a person, so it stays in English (and untranslated) whatever the app's
-# language is.
+# What the two prompt-sending actions type into the session. Read by the agent
+# CLI, not by a person, so they stay in English (and untranslated) whatever the
+# app's language is.
 CI_PROMPT = "address the ci error(s)"
+NEW_PR_PROMPT = "Open a pull request for your changes"
 # What asking for a review looks like on the PR: the mention the
 # `anthropics/claude-code-action` workflow triggers on. A repository without
 # that workflow gets a comment and nothing else, which is why the item says
@@ -70,12 +76,19 @@ class Confirm:
 
 @dataclass(frozen=True)
 class Action:
-    """One item in a PR's menu: what it says, and what picking it means."""
+    """One item in a PR's menu: what it says, and what picking it means.
+
+    An action with a *prompt* is one the agent carries out rather than `gh`:
+    picking it types that text into the session and sends it. Carrying the
+    text on the action is what keeps the menu from having to know which of
+    them is which (see prmenu._on_action_clicked).
+    """
 
     key: str
     label: str
     tooltip: str = ""
     confirm: Confirm | None = None
+    prompt: str = ""
 
 
 def checks_green(pr: PullRequest) -> bool:
@@ -94,28 +107,29 @@ def checks_green(pr: PullRequest) -> bool:
     return not pr.failed and not pr.pending
 
 
-def actions_for(pr: PullRequest, takes_prompt: bool) -> list[Action]:
+def actions_for(
+    pr: PullRequest,
+    takes_prompt: bool,
+    has_changes: Callable[[], bool] = lambda: False,
+) -> list[Action]:
     """The menu for *pr*: every action that makes sense for the state it is in.
 
-    *takes_prompt* is whether the session this PR belongs to is somewhere a
-    prompt can be sent right now — a tab open, at an empty input (see
-    Provider.takes_prompt). It is the only thing here that isn't a property of
-    the PR, and the reason "address the CI errors" comes and goes: it sends a
-    prompt, and a session that is closed, or mid-sentence, is not somewhere to
-    send one.
+    Two of the three arguments are about the session rather than the PR.
+    *takes_prompt* is whether it is somewhere a prompt can be sent right now —
+    a tab open, at an empty input (see Provider.takes_prompt) — and it is why
+    both prompt-sending actions come and go: a session that is closed, or
+    mid-sentence, is not somewhere to send one. *has_changes* is whether its
+    working tree has uncommitted work in it, asked as a callable rather than a
+    value because answering costs a `git status` (see gitinfo.has_changes) and
+    only one PR state can use the answer.
 
-    Opening the PR is always first and always there, so the menu is never
-    empty — a merged PR still has a page worth visiting. Everything past that
-    needs a state, and an unfetched PR (no gh, no network) has none: better a
-    short menu than a "Merge" that was never going to work.
+    Everything here needs a state, and an unfetched PR (no gh, no network) has
+    none: better an empty menu than a "Merge" that was never going to work.
+    Empty is a state the menu handles — the PR's page is a plain click away on
+    the chip or the row this was opened from, so there is nothing an action
+    has to be there for.
     """
-    actions = [
-        Action(
-            OPEN,
-            _("Open pull request"),
-            _("Open {slug} on GitHub").format(slug=pr.slug),
-        )
-    ]
+    actions: list[Action] = []
     if pr.state == "DRAFT":
         actions.append(
             Action(
@@ -140,8 +154,26 @@ def actions_for(pr: PullRequest, takes_prompt: bool) -> list[Action]:
                     FIX_CI,
                     _("Address the CI errors"),
                     _("Send “{prompt}” to this session").format(prompt=CI_PROMPT),
+                    prompt=CI_PROMPT,
                 )
             )
+    elif pr.merged and takes_prompt and has_changes():
+        # The PR landed and the tree has moved on since: the work in it is
+        # what the next pull request is for, so the offer is to open that one.
+        # Asked last, after the two cheap conditions, because it is the one
+        # that costs a subprocess.
+        actions.append(
+            Action(
+                NEW_PR,
+                # "Open *a* pull request", not "Open pull request": the latter
+                # is already a msgid, and it is prstatus' name for the state a
+                # PR is *in* (translated as an adjective — "Offener Pull
+                # Request"). One msgid can't be both, and this one is a verb.
+                _("Open a pull request"),
+                _("Send “{prompt}” to this session").format(prompt=NEW_PR_PROMPT),
+                prompt=NEW_PR_PROMPT,
+            )
+        )
     return actions
 
 
@@ -181,8 +213,8 @@ def _merge_action(pr: PullRequest) -> Action:
 def perform(key: str, pr: PullRequest) -> str | None:
     """Carry out action *key* on *pr*. None when it worked, else why it didn't.
 
-    Only the actions that talk to GitHub land here; opening the page and
-    prompting a session are the caller's, since neither leaves the app.
+    Only the actions that talk to GitHub land here; the ones carrying a prompt
+    are the caller's, since sending one never leaves the app.
 
     Never call on the main thread — every branch waits on `gh`.
     """
