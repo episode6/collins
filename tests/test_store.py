@@ -378,3 +378,87 @@ def test_manual_refresh_forces_a_rebuild_report(app_state, projects_dir, monkeyp
     store.refresh(force_rebuild=True)  # forced: reported anyway
     store.refresh()  # the force flag is one-shot
     assert changes == [True, False, True, False]
+
+
+def _write_worktree_session(projects_root, text="Continue in the worktree"):
+    """A discoverable session whose transcript records a Claude-managed
+    worktree of the alpha project as its cwd — the shape /bg fork copies
+    take after the agent moved into a worktree."""
+    from conftest import make_transcript_lines
+
+    cwd = "/home/user/alpha/.claude/worktrees/some-branch"
+    project_dir = projects_root / re.sub(r"[^A-Za-z0-9]", "-", cwd)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    session_id = str(uuid.uuid4())
+    lines = make_transcript_lines(cwd, text)
+    (project_dir / f"{session_id}.jsonl").write_text(
+        "\n".join(json.dumps(line) for line in lines), encoding="utf-8"
+    )
+    return session_id, cwd
+
+
+def test_worktree_sessions_group_under_their_repository(store, projects_dir):
+    root, _ids = projects_dir
+    session_id, _cwd = _write_worktree_session(root)
+    store._last_sessions = discover_sessions()
+    store._apply()
+
+    item = next(i for i in _items(store) if i.session_id == session_id)
+    assert item.group_key == ("proj", "alpha")
+    assert "some-branch" not in store.resolved_project_order
+
+
+def test_bg_fork_into_a_worktree_stays_in_the_original_project(store, projects_dir):
+    root, ids = projects_dir
+    fork_id, _cwd = _write_worktree_session(root)
+    store._last_sessions = discover_sessions()
+    store._apply()
+    original = ids["alpha1"]
+    store.record_forward(original, fork_id)
+
+    # The fork's row takes the original's place *in the same group* — the
+    # session must not vanish from the project and resurface under a phantom
+    # project named after the worktree directory.
+    assert store.forward_state(store.sessions[original]) == "moved"
+    assert store.get_item(original) is None
+    item = store.get_item(fork_id)
+    assert item is not None
+    assert item.group_key == ("proj", "alpha")
+
+
+def test_project_cwd_answers_with_the_repository_not_the_worktree(store, projects_dir):
+    root, _ids = projects_dir
+    _write_worktree_session(root)
+    store._last_sessions = discover_sessions()
+    store._apply()
+
+    assert store.project_cwd("alpha") == "/home/user/alpha"
+
+
+def test_adopt_worktree_archives_converts_phantom_project_archives(store, projects_dir):
+    root, _ids = projects_dir
+    session_id, _cwd = _write_worktree_session(root)
+    # Pre-fix state: worktree sessions grouped under a phantom project named
+    # after the worktree directory, and the user archived that whole project
+    # to get its rows out of the sidebar.
+    store.state.set_project_archived("some-branch", True)
+
+    store._last_sessions = discover_sessions()
+    store._adopt_worktree_archives()
+    store._apply()
+
+    # The session stays hidden — as its own archive now — and the phantom
+    # project entry, which no longer matches any group, is dropped.
+    assert store.state.is_archived(session_id)
+    assert not store.state.is_project_archived("some-branch")
+    assert store.get_item(session_id) is None
+
+
+def test_replaced_rows_are_labeled_replaced_in_the_archive_view(store):
+    original, fork = (s.session_id for s in store._last_sessions[:2])
+    store.record_forward(original, fork)
+    store.set_show_archived(True)
+
+    item = store.get_item(original)
+    assert item is not None
+    assert item.subtitle == "replaced"

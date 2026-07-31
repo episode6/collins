@@ -21,9 +21,15 @@ from pathlib import Path
 from gi.repository import Gio, GLib, GObject
 
 from . import chats, panelhistory
+from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .providers import available_providers
-from .sessions import Session, discover_sessions, is_discoverable_transcript
+from .sessions import (
+    Session,
+    discover_sessions,
+    is_discoverable_transcript,
+    worktree_project_root,
+)
 from .state import AppState, merge_project_order, move_in_order
 from .titles import TitleGenerator, fallback_title
 
@@ -141,10 +147,34 @@ class SessionStore(GObject.Object):
             # Trashing a chat session leaves (or fails to trash) its throwaway
             # directory; reap empty leftovers once per run.
             chats.sweep_orphan_chat_dirs({s.cwd for s in sessions if s.cwd})
+        self._adopt_worktree_archives()
         self._apply()
         self._setup_monitors()  # pick up new project dirs
         self._request_titles(sessions)
         return GLib.SOURCE_REMOVE
+
+    def _adopt_worktree_archives(self) -> None:
+        """Migration: worktree sessions used to group under phantom projects
+        named after the worktree directory, and archiving that phantom project
+        was the only way to hide their rows. Now that they group under the
+        repository's project, convert those project archives into per-session
+        archives — nothing the user hid resurfaces — and drop phantom entries
+        that no current project or kept header answers to. Idempotent: after
+        the entries are dropped, every scan is a no-op."""
+        adopted: set[str] = set()
+        for session in self._last_sessions:
+            if not session.cwd or not worktree_project_root(session.cwd):
+                continue
+            leaf = Path(session.cwd).name
+            if leaf == session.project_name or not self.state.is_project_archived(leaf):
+                continue
+            adopted.add(leaf)
+            if not self.state.is_archived(session.session_id):
+                self.state.set_archived(session.session_id, True)
+        current = {s.project_name for s in self._last_sessions}
+        for leaf in adopted:
+            if leaf not in current and leaf not in self.state.get_virtual_projects():
+                self.state.set_project_archived(leaf, False)
 
     def _backfill_names(self, sessions: list[Session]) -> None:
         """On the first scan of a run, give every unnamed pre-existing session
@@ -337,7 +367,12 @@ class SessionStore(GObject.Object):
         item.group_label = group_label
         updates = {
             "display_name": self.display_name(session),
-            "subtitle": _relative_time(session.last_active),
+            # A row a /bg fork replaced only shows while "Show archived
+            # sessions" is on; label it for what it is instead of implying
+            # it's a live, restorable session.
+            "subtitle": _("replaced")
+            if self.forward_state(session) == "moved"
+            else _relative_time(session.last_active),
             "preview": session.preview,
             "favorite": self.state.is_favorite(session.session_id),
             "state": session.state,
@@ -439,9 +474,15 @@ class SessionStore(GObject.Object):
     def project_cwd(self, project_name: str) -> str | None:
         """A project's working directory, from its most recent session that
         records one — what the group header's "new session here" button needs,
-        and what a virtual project has to remember once its sessions are gone."""
+        and what a virtual project has to remember once its sessions are gone.
+        A worktree session answers with its repository, not the worktree: new
+        sessions belong in the project proper."""
         return next(
-            (s.cwd for s in self._last_sessions if s.project_name == project_name and s.cwd),
+            (
+                worktree_project_root(s.cwd) or s.cwd
+                for s in self._last_sessions
+                if s.project_name == project_name and s.cwd
+            ),
             None,
         )
 
