@@ -28,6 +28,7 @@ from .copylabel import (  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch  # noqa: E402
 from .i18n import _  # noqa: E402
+from .linkpatterns import URL_PATTERN  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
 from .prstatus import (  # noqa: E402
@@ -61,6 +62,125 @@ _PR_CHECKS_CSS = {
 _PCRE2_CASELESS = 0x00000008
 _PCRE2_MULTILINE = 0x00000400
 _SEARCH_FLAGS = _PCRE2_CASELESS | _PCRE2_MULTILINE
+
+# Font zoom (Ctrl+scroll / Ctrl+plus/minus/0): multiplicative steps on VTE's
+# font-scale, clamped to the range Ptyxis and GNOME Terminal allow.
+_FONT_SCALE_MIN = 0.25
+_FONT_SCALE_MAX = 4.0
+_FONT_SCALE_STEP = 1.1
+# `plus` is what most layouts produce only with Shift held, so the handlers
+# key off Ctrl alone and let Shift ride along.
+_ZOOM_IN_KEYS = (Gdk.KEY_plus, Gdk.KEY_equal, Gdk.KEY_KP_Add)
+_ZOOM_OUT_KEYS = (Gdk.KEY_minus, Gdk.KEY_underscore, Gdk.KEY_KP_Subtract)
+_ZOOM_RESET_KEYS = (Gdk.KEY_0, Gdk.KEY_KP_0)
+
+
+def _setup_links(terminal: Vte.Terminal) -> None:
+    """Give links GNOME Terminal's behaviour: underline on hover, open on
+    Ctrl+click.
+
+    Covers both kinds of link a terminal shows: OSC 8 hyperlinks (what agent
+    CLIs emit for file references — VTE ignores the escape entirely until
+    allow-hyperlink is switched on) and plain URLs in the output, matched by
+    regex the way GNOME Terminal matches them.
+    """
+    terminal.set_allow_hyperlink(True)
+    try:
+        regex = Vte.Regex.new_for_match(
+            URL_PATTERN, len(URL_PATTERN.encode()), _PCRE2_MULTILINE
+        )
+        terminal.match_set_cursor_name(terminal.match_add_regex(regex, 0), "pointer")
+    except GLib.Error:
+        regex = None  # VTE built without PCRE2: OSC 8 links still work
+
+    def on_launched(launcher: Gtk.UriLauncher | Gtk.FileLauncher, result) -> None:
+        try:
+            launcher.launch_finish(result)
+        except GLib.Error:
+            pass  # no handler for the scheme/type, or the user dismissed the chooser
+
+    def on_pressed(gesture: Gtk.GestureClick, _n_press, x: float, y: float) -> None:
+        if not gesture.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
+            return
+        uri = terminal.check_hyperlink_at(x, y)
+        if uri is None and regex is not None:
+            match, _tag = terminal.check_match_at(x, y)
+            if match is not None and match.startswith("www."):
+                match = "http://" + match
+            uri = match
+        if not uri:
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        if uri.startswith("file:"):
+            # Open the file itself in its default app (what xdg-open does).
+            # UriLauncher would hand a file: URI to the portal, which only
+            # reveals it in the file manager. Gio.File also sheds any line
+            # fragment the emitter tacked on.
+            launcher = Gtk.FileLauncher.new(Gio.File.new_for_uri(uri))
+        else:
+            launcher = Gtk.UriLauncher.new(uri)
+        launcher.launch(terminal.get_root(), None, on_launched)
+
+    # Capture phase, so Ctrl+click opens the link even when the running app
+    # has turned on mouse reporting (same trick as the context menu).
+    click = Gtk.GestureClick(button=1)
+    click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+    click.connect("pressed", on_pressed)
+    terminal.add_controller(click)
+
+
+def _setup_smooth_scroll(terminal: Vte.Terminal) -> None:
+    """Scroll by pixels instead of whole lines (as Ptyxis does), so touchpad
+    flicks glide like the rest of the desktop instead of stepping."""
+    terminal.set_enable_fallback_scrolling(False)
+    terminal.set_scroll_unit_is_pixels(True)
+
+
+def _zoom_by(terminal: Vte.Terminal, factor: float | None) -> None:
+    """Multiply the terminal's font scale, clamped; None resets to 1.0."""
+    scale = 1.0
+    if factor is not None:
+        scale = max(_FONT_SCALE_MIN, min(_FONT_SCALE_MAX, terminal.get_font_scale() * factor))
+    terminal.set_font_scale(scale)
+
+
+def _handle_zoom_key(terminal: Vte.Terminal, keyval: int, ctrl: bool) -> bool:
+    """Ctrl+plus / Ctrl+minus / Ctrl+0, the zoom keys every GNOME terminal
+    claims from the shell."""
+    if not ctrl:
+        return False
+    if keyval in _ZOOM_IN_KEYS:
+        _zoom_by(terminal, _FONT_SCALE_STEP)
+        return True
+    if keyval in _ZOOM_OUT_KEYS:
+        _zoom_by(terminal, 1 / _FONT_SCALE_STEP)
+        return True
+    if keyval in _ZOOM_RESET_KEYS:
+        _zoom_by(terminal, None)
+        return True
+    return False
+
+
+def _setup_scroll_zoom(terminal: Vte.Terminal) -> None:
+    """Ctrl+scroll zooms the font, like Ptyxis's enable-zoom-scroll-ctrl.
+
+    The step is raised to the delta, so a wheel notch (|dy| = 1) is one full
+    step while a touchpad's stream of small deltas zooms smoothly instead of
+    compounding a full step per event.
+    """
+
+    def on_scroll(controller: Gtk.EventControllerScroll, _dx: float, dy: float) -> bool:
+        if not controller.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
+            return False
+        _zoom_by(terminal, _FONT_SCALE_STEP ** -dy)
+        return True
+
+    # Capture phase: the zoom must win over VTE's own scrolling (and mouse
+    # reporting) while Ctrl is down.
+    scroller = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
+    scroller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+    scroller.connect("scroll", on_scroll)
+    terminal.add_controller(scroller)
 
 
 def _has_running_command(terminal: Vte.Terminal, child_pid: int | None) -> bool:
@@ -111,6 +231,9 @@ class PanelTerminal(Gtk.Box):
         self.terminal.set_scroll_on_keystroke(True)
         self.terminal.set_mouse_autohide(True)
         self.terminal.connect("child-exited", self._on_child_exited)
+        _setup_links(self.terminal)
+        _setup_smooth_scroll(self.terminal)
+        _setup_scroll_zoom(self.terminal)
 
         scrolled = Gtk.ScrolledWindow(child=self.terminal, vexpand=True)
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -219,6 +342,8 @@ class PanelTerminal(Gtk.Box):
     def _on_key_pressed(self, _ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
         shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
+        if _handle_zoom_key(self.terminal, keyval, ctrl):
+            return True
         if self._easy_copy_paste and ctrl and not shift:
             if keyval == Gdk.KEY_c and self.terminal.get_has_selection():
                 self.terminal.copy_clipboard_format(Vte.Format.TEXT)
@@ -249,6 +374,9 @@ class TerminalTab(Gtk.Box):
         # where mode is "bottom" | "right" and size the new panel px size,
         # so the window can persist it as the app-wide default.
         "panel-size-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, int)),
+        # Emitted when either of the tab's terminals rings BEL, for the
+        # window's visual bell.
+        "bell": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(
@@ -287,6 +415,10 @@ class TerminalTab(Gtk.Box):
         self.terminal.set_scroll_on_keystroke(True)
         self.terminal.set_mouse_autohide(True)
         self.terminal.connect("child-exited", self._on_child_exited)
+        _setup_links(self.terminal)
+        _setup_smooth_scroll(self.terminal)
+        _setup_scroll_zoom(self.terminal)
+        self.terminal.connect("bell", lambda *_: self.emit("bell"))
 
         self._easy_copy_paste = False
         self._setup_context_menu()
@@ -309,6 +441,7 @@ class TerminalTab(Gtk.Box):
         self._panel = PanelTerminal()
         self._panel.set_visible(False)
         self._panel.connect("shell-exited", lambda *_: self.hide_panel())
+        self._panel.terminal.connect("bell", lambda *_: self.emit("bell"))
         panel_right = bool(settings) and settings.get("panel_position") == "right"
         self._paned = Gtk.Paned(
             orientation=Gtk.Orientation.HORIZONTAL if panel_right else Gtk.Orientation.VERTICAL,
@@ -1199,6 +1332,9 @@ class TerminalTab(Gtk.Box):
     def _on_key_pressed(self, _ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
         shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
+
+        if _handle_zoom_key(self.terminal, keyval, ctrl):
+            return True
 
         # Shift+Enter → newline. Terminals send the same byte for Enter and
         # Shift+Enter, so we emit Meta+Enter (ESC + CR), which Claude Code
