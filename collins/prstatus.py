@@ -75,7 +75,10 @@ _GH_TIMEOUT_S = 10
 # The stamp of a status that is due no matter which TTL applies to it (see
 # invalidate) — every interval measured against it is already over.
 _DUE = float("-inf")
-_GH_FIELDS = "state,isDraft,statusCheckRollup"
+_GH_FIELDS = "title,state,isDraft,statusCheckRollup"
+# Long PR titles are a thing; the menu ellipsizes them anyway, and this keeps
+# what a repository can put on screen (and on disk) bounded.
+_MAX_TITLE = 200
 # A branch lookup needs to learn which PR it found, and when it was opened, on
 # top of that PR's status.
 _GH_DISCOVER_FIELDS = "number,url,createdAt," + _GH_FIELDS
@@ -115,6 +118,11 @@ class PullRequest:
     number: int
     url: str
     repository: str | None = None
+    # What the PR is called. A transcript never says, so this arrives with the
+    # first `gh` reply — and stays with the PR from then on, saved list
+    # included: it is what the chips' menu reads, and a title doesn't go stale
+    # the way a check does.
+    title: str | None = None
     state: str | None = None  # OPEN / DRAFT / MERGED / CLOSED
     passed: int | None = None
     failed: int | None = None
@@ -172,14 +180,27 @@ def state_text(state: str) -> str:
     return known.get(state, state)
 
 
+def menu_name(pr: PullRequest) -> str:
+    """What a PR is called in the chips' menu — the middle of the line there.
+
+    The status mark that precedes it is a widget (colored, or the merge icon)
+    and the number that follows it is its own label, so that an over-long title
+    ellipsizes without taking the number with it. A PR whose title hasn't
+    arrived yet falls back to the repository it is in, which offline is still
+    better than a bare number.
+    """
+    return pr.title or pr.repository or _("Pull request")
+
+
 def describe(pr: PullRequest) -> str:
     """The chip's long form: what the PR is and how its checks are doing.
 
-    e.g. ``episode6/collins#55 · Draft pull request · 1 passed, 1 failed``.
+    e.g. ``Add the thing · episode6/collins#55 · Draft pull request · 1 passed``.
     Lives here rather than beside the widget so it stays testable without a
     Gtk namespace — CI installs PyGObject but no GTK.
     """
-    parts = [pr.slug]
+    parts = [pr.title] if pr.title else []
+    parts.append(pr.slug)
     if pr.state:
         parts.append(state_text(pr.state))
     checks = [
@@ -260,7 +281,8 @@ def forget_status(pr: PullRequest) -> PullRequest:
     """*pr* stripped back to its identity, keeping only a merge that happened.
 
     What a tab remembers between polls, and the shape `to_record` writes out:
-    check counts are refetched, a merge is forever.
+    check counts are refetched, a title is part of what the PR *is*, and a
+    merge is forever.
     """
     return replace(
         pr,
@@ -283,6 +305,8 @@ def to_record(pr: PullRequest) -> dict | None:
     record: dict = {"number": pr.number, "url": pr.url}
     if pr.repository:
         record["repository"] = pr.repository
+    if pr.title:
+        record["title"] = pr.title
     if pr.merged:
         record["state"] = "MERGED"
     return record
@@ -314,6 +338,7 @@ def from_record(record: object) -> PullRequest | None:
         number=number,
         url=url,
         repository=repository if isinstance(repository, str) and repository else None,
+        title=_title(record.get("title")),
         state="MERGED" if record.get("state") == "MERGED" else None,
     )
 
@@ -443,8 +468,25 @@ def _gh_json(args: list[str], cwd: str | None = None) -> object | None:
 
 
 def _entry(data: dict) -> dict:
-    """A gh reply reduced to the CLI cache's `{state, checks}` shape."""
-    return {"state": _state(data), "checks": _counts(data.get("statusCheckRollup"))}
+    """A gh reply reduced to the CLI cache's `{state, checks}` shape, plus the
+    title — which that cache has no room for and the chips' menu needs."""
+    return {
+        "state": _state(data),
+        "checks": _counts(data.get("statusCheckRollup")),
+        "title": _title(data.get("title")),
+    }
+
+
+def _title(value: object) -> str | None:
+    """A PR title as it is worth keeping: non-empty, one line, bounded.
+
+    Comes from a repository, so it is treated like any other repo content:
+    newlines would break the menu row it is put in, and length is capped.
+    """
+    if not isinstance(value, str):
+        return None
+    title = " ".join(value.split())
+    return title[:_MAX_TITLE] or None
 
 
 def _run_gh(url: str) -> dict | None:
@@ -575,11 +617,15 @@ def discover_pr(cwd: str | None, branch: str | None) -> PullRequest | None:
 
 
 def enrich(pr: PullRequest | None) -> PullRequest | None:
-    """Fill in *pr*'s state and check counts, refreshing them when they're due.
+    """Fill in *pr*'s title, state and check counts, refreshing them when due.
 
     Touches the filesystem and may spawn `gh` off a worker thread, so keep this
     off the main loop. Returns *pr* unchanged when no status is known yet — the
     chip still shows the number, just without a CI glyph.
+
+    A title the entry doesn't carry leaves the one *pr* already has: the CLI's
+    own cache has no title field, so a warm start from it must not blank the
+    title a `gh` reply (or the saved list) supplied.
     """
     if pr is None:
         return None
@@ -590,6 +636,7 @@ def enrich(pr: PullRequest | None) -> PullRequest | None:
     checks = entry.get("checks")
     return replace(
         pr,
+        title=_title(entry.get("title")) or pr.title,
         state=state if isinstance(state, str) and state else None,
         passed=_count(checks, "passed"),
         failed=_count(checks, "failed"),

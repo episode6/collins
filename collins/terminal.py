@@ -24,6 +24,7 @@ from .copylabel import (  # noqa: E402
     enable_copy_on_click,
     enable_open_on_click,
     open_tooltip,
+    open_uri,
 )
 from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch  # noqa: E402
@@ -42,6 +43,7 @@ from .prstatus import (  # noqa: E402
     forget_status,
     from_records,
     invalidate,
+    menu_name,
     merge_ordered,
     to_records,
 )
@@ -61,6 +63,12 @@ _PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
 # PrChipRow).
 _MAX_PR_CHIPS = 20
 _PR_CHIP_SPACING = 8  # between chips; their own parts sit 4 apart
+# The caret's menu: the column its status marks share (so the titles beside
+# them line up), how wide a title gets before it ellipsizes, and how tall the
+# list gets before it scrolls.
+_PR_MARK_COLUMN_PX = 14
+_PR_MENU_MAX_CHARS = 48
+_PR_MENU_MAX_PX = 400
 # Each CI mark is colored like its counterpart on the PR page; the shades
 # themselves follow the light/dark scheme and live in app.py.
 _PR_CHECKS_CSS = {
@@ -783,6 +791,20 @@ class TerminalTab(Gtk.Box):
         # going there is what you want next.
         self._pr_chips = PrChipRow(_PR_CHIP_SPACING)
         self._pr_chips.set_visible(False)
+        # Leading the row, where the oldest chip would be: the caret opens the
+        # full list, titles and all — including the chips that didn't fit,
+        # since it takes its width from the row and so costs it one.
+        self._pr_menu = Gtk.Popover()
+        self._pr_menu.set_position(Gtk.PositionType.TOP)  # the footer is at the bottom
+        self._pr_menu.add_css_class("menu")
+        menu_icon = Gtk.Image.new_from_icon_name("pan-up-symbolic")
+        menu_icon.set_pixel_size(_PR_REFRESH_ICON_PX)
+        menu_icon.add_css_class("dim-label")
+        self._pr_menu_btn = Gtk.MenuButton(child=menu_icon, popover=self._pr_menu)
+        self._pr_menu_btn.add_css_class("flat")
+        self._pr_menu_btn.set_tooltip_text(_("Every pull request this session has opened"))
+        self._pr_menu_btn.set_create_popup_func(self._fill_pr_menu)
+        self._pr_menu_btn.set_visible(False)
         # Sibling of the chips, never inside them: a chip opens its PR on click,
         # and a button in there would open the browser along with itself.
         # It shows whether or not a PR does — with none, it is the way to go
@@ -814,6 +836,7 @@ class TerminalTab(Gtk.Box):
         left.append(self._branch_seps[0])
         left.append(self._branch_label)
         left.append(self._branch_seps[1])
+        left.append(self._pr_menu_btn)
         left.append(self._pr_chips)
         left.append(self._pr_refresh_btn)
         left.append(self._pr_sep)
@@ -905,6 +928,62 @@ class TerminalTab(Gtk.Box):
         enable_open_on_click(chip, lambda: pr.url)
         return chip
 
+    def _pr_status_mark(self, pr: PullRequest) -> Gtk.Widget:
+        """A PR's status as one widget: its CI glyph, or the merge mark.
+
+        Always returns something, so titles line up down the menu even beside
+        a PR whose status hasn't been fetched yet.
+        """
+        if pr.merged:
+            mark: Gtk.Widget = Gtk.Image.new_from_icon_name("git-merge-symbolic")
+            mark.set_pixel_size(_PR_MERGED_ICON_PX)
+            mark.add_css_class("pr-merged")
+        else:
+            glyph = pr.glyph
+            mark = Gtk.Label(label=glyph or "")
+            mark.set_css_classes(["caption", _PR_CHECKS_CSS.get(glyph or "", "dim-label")])
+        mark.set_size_request(_PR_MARK_COLUMN_PX, -1)
+        return mark
+
+    def _fill_pr_menu(self, _button: Gtk.MenuButton) -> None:
+        """Build the caret's list, just before it opens.
+
+        Every PR the session has picked up, oldest first like the row, with the
+        titles the chips have no room for. Built per opening rather than kept
+        in sync: statuses move under it, and it is only ever on screen for as
+        long as someone is reading it.
+        """
+        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        for pr in self._footer_prs:
+            name = Gtk.Label(label=menu_name(pr), xalign=0.0, hexpand=True)
+            name.set_ellipsize(Pango.EllipsizeMode.END)
+            name.set_max_width_chars(_PR_MENU_MAX_CHARS)
+            # Its own label, so a long title ellipsizes without taking the one
+            # thing that identifies the PR with it.
+            number = Gtk.Label(label=f"(#{pr.number})")
+            number.add_css_class("dim-label")
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row.append(self._pr_status_mark(pr))
+            row.append(name)
+            row.append(number)
+            button = Gtk.Button(child=row)
+            button.add_css_class("flat")
+            button.set_tooltip_text(open_tooltip(describe(pr) + "\n" + pr.url))
+            button.connect("clicked", self._on_pr_menu_row, pr.url)
+            rows.append(button)
+        # A session with a lot of PRs would otherwise open a popover taller
+        # than the window it is in.
+        scroller = Gtk.ScrolledWindow(child=rows)
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_propagate_natural_width(True)
+        scroller.set_propagate_natural_height(True)
+        scroller.set_max_content_height(_PR_MENU_MAX_PX)
+        self._pr_menu.set_child(scroller)
+
+    def _on_pr_menu_row(self, button: Gtk.Button, url: str) -> None:
+        self._pr_menu.popdown()
+        open_uri(button, url)
+
     def _refresh_pr_chips(self, prs: list[PullRequest]) -> None:
         """Show this session's PRs, oldest first, with the CI state each has.
 
@@ -917,6 +996,7 @@ class TerminalTab(Gtk.Box):
         self._footer_prs = list(prs)
         self._pr_chips.set_chips([self._build_pr_chip(pr) for pr in prs])
         self._pr_chips.set_visible(bool(prs))
+        self._pr_menu_btn.set_visible(bool(prs))
         self._remember_prs(prs)
         self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
@@ -1105,13 +1185,15 @@ class TerminalTab(Gtk.Box):
         return collected
 
     def _enriched(self, pr: PullRequest) -> PullRequest:
-        """*pr* with its CI status, fetching it when due.
+        """*pr* with its title and CI status, fetching them when due.
 
-        A merged PR is left alone: it has no checks left to run and shows no
-        glyph anyway, so an old chip on a long-lived session never costs
-        another `gh` call.
+        A merged PR that already has a title is left alone: it has no checks
+        left to run and shows no glyph anyway, so an old chip on a long-lived
+        session never costs another `gh` call. One with no title still asks
+        once — the caret's menu has a line to fill, and a list saved before
+        Collins knew about titles has nothing in it.
         """
-        return pr if pr.merged else (enrich(pr) or pr)
+        return pr if pr.merged and pr.title else (enrich(pr) or pr)
 
     def _look_up_branch_pr(self) -> PullRequest | None:
         """The refresh button's own path to a PR: whatever branch is checked out
