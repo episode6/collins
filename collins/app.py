@@ -208,6 +208,13 @@ popover.pr-menu button.pr-menu-row {
 popover.pr-menu button.pr-menu-row:hover {
   background-color: alpha(currentColor, 0.1);
 }
+/* The actions submenu's header when there is no list to lead back to (a
+   footer chip's own menu): a plain caption naming the PR, padded like the
+   rows under it so the column of titles still lines up. */
+popover.pr-menu .pr-menu-title {
+  padding: 4px 8px;
+  min-height: 28px;
+}
 
 /* The "Open in <app>" rows of a project's context menu, which carry an icon
    and so can't be menu items (GtkModelButton hides an icon that shares its

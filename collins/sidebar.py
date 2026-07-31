@@ -425,6 +425,16 @@ class SessionRow(Gtk.ListBoxRow):
         self._pr_btn = pr_btn
         self._prs: list[PullRequest] = []
         self._pr_fetch = 0  # generation: a slow fetch can't land on a later opening
+        # What a PR's actions need of the session behind them. From a row, the
+        # session is only reachable through the window — which is also the only
+        # thing that knows whether it has a tab to type into.
+        self._pr_host = prmenu.ActionHost(
+            session_active=lambda: self.item.status in _IN_TAB_STATUSES,
+            address_ci=lambda: self.activate_action(
+                "win.address-ci", GLib.Variant("s", self.item.session_id)
+            ),
+            refresh=self._refresh_prs,
+        )
         self.sync_prs()
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
@@ -522,7 +532,16 @@ class SessionRow(Gtk.ListBoxRow):
         the readable part, with a spinner in the column each status will land
         in.
         """
-        prmenu.fill(self._pr_menu, self._prs, loading=True)
+        prmenu.fill(self._pr_menu, self._prs, loading=True, host=self._pr_host)
+        self._refresh_prs()
+
+    def _refresh_prs(self) -> None:
+        """Fetch every PR's title and status, and land them (see below).
+
+        Called as the menu opens, and again after an action changed one of
+        them on GitHub — a merge from the submenu is the one case where what
+        the list says goes stale the moment it is read.
+        """
         self._pr_fetch += 1
         token = self._pr_fetch
         prs = list(self._prs)
@@ -549,7 +568,7 @@ class SessionRow(Gtk.ListBoxRow):
         self._prs = prs
         self._sidebar.store.state.set_session_prs(self.item.session_id, to_records(prs))
         if self._pr_menu.get_visible():
-            prmenu.fill(self._pr_menu, prs)
+            prmenu.update(self._pr_menu, prs, self._pr_host)
         return GLib.SOURCE_REMOVE
 
     def _on_hover_enter(self, *_args) -> None:

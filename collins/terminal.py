@@ -18,7 +18,15 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Vte", "3.91")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
-from . import apppicker, footerapps, panelhistory, prmenu, proctree, themes  # noqa: E402
+from . import (  # noqa: E402
+    apppicker,
+    footerapps,
+    panelhistory,
+    practions,
+    prmenu,
+    proctree,
+    themes,
+)
 from .copylabel import (  # noqa: E402
     copy_tooltip,
     enable_copy_on_click,
@@ -894,9 +902,29 @@ class TerminalTab(Gtk.Box):
             merged.set_pixel_size(prmenu.MERGED_ICON_PX)
             merged.add_css_class("pr-merged")
             chip.append(merged)
-        chip.set_tooltip_text(open_tooltip(describe(pr) + "\n" + pr.url))
+        chip.set_tooltip_text(
+            open_tooltip(describe(pr) + "\n" + pr.url) + "\n" + _("Right-click for actions")
+        )
         enable_open_on_click(chip, lambda: pr.url)
+        # The chip is the shortest way to a PR, so it is also the shortest way
+        # to do something about one: the same actions the caret's list offers,
+        # opened on the chip itself.
+        prmenu.attach_actions(chip, pr, self._pr_action_host())
         return chip
+
+    def _pr_action_host(self) -> prmenu.ActionHost:
+        """How a PR's actions reach this tab: it is the session they belong to.
+
+        The chips and the caret's list are the tab's own, so "is the session
+        open?" is really "is there still an agent in this terminal?" — a tab
+        whose agent has exited keeps its chips (and its PRs), but has nowhere
+        left to type.
+        """
+        return prmenu.ActionHost(
+            session_active=lambda: self._child_pid is not None,
+            address_ci=lambda: self.inject_prompt(practions.CI_PROMPT),
+            refresh=self._request_update,
+        )
 
     def _fill_pr_menu(self, _button: Gtk.MenuButton) -> None:
         """Build the caret's list, just before it opens.
@@ -905,7 +933,7 @@ class TerminalTab(Gtk.Box):
         footer's own poll is already refreshing every PR on the row, so what
         the tab is holding when the caret is clicked is current.
         """
-        prmenu.fill(self._pr_menu, self._footer_prs)
+        prmenu.fill(self._pr_menu, self._footer_prs, host=self._pr_action_host())
 
     def _refresh_pr_chips(self, prs: list[PullRequest]) -> None:
         """Show this session's PRs, oldest first, with the CI state each has.
@@ -1000,6 +1028,17 @@ class TerminalTab(Gtk.Box):
 
     def feed_child_text(self, text: str) -> None:
         self.terminal.feed_child(text.encode())
+
+    def inject_prompt(self, text: str) -> None:
+        """Type *text* into the agent's prompt — without sending it.
+
+        What the PR menu's "Address the CI errors" does. The last keystroke
+        stays the user's: the prompt is theirs to add to (which PR, which job)
+        or to think better of, and a menu item that set an agent working on a
+        press would be a heavier thing than a menu item should be.
+        """
+        self.feed_child_text(text)
+        self.grab_terminal_focus()
 
     # -- prompt card -------------------------------------------------------
 

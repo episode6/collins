@@ -73,6 +73,14 @@ CACHE_MAX_AGE_S = 300
 _TTL_S = 60
 _ERROR_TTL_S = 300
 _GH_TIMEOUT_S = 10
+# A status fetch is one of many and nobody is waiting on any single one; an
+# action the user picked from a menu is one call they are waiting for, and
+# GitHub takes its time over a merge.
+_GH_ACTION_TIMEOUT_S = 30
+# How much of gh's complaint about a failed action is worth putting in a
+# dialog. It comes from GitHub, so it is capped like every other bit of
+# untrusted text here.
+_MAX_GH_ERROR = 500
 # The stamp of a status that is due no matter which TTL applies to it (see
 # invalidate) — every interval measured against it is already over.
 _DUE = float("-inf")
@@ -217,6 +225,17 @@ def describe(pr: PullRequest) -> str:
     if running:
         parts.append(running)
     return " · ".join(parts)
+
+
+def repository_for(url: str) -> str | None:
+    """The ``owner/name`` behind a PR URL, or None when it isn't a PR URL.
+
+    The gate every `gh` call goes through before a URL becomes an argv entry
+    (see `_FETCHABLE`), and the one way to learn which repository a PR is in
+    without trusting the ``prRepository`` a transcript claimed.
+    """
+    match = _FETCHABLE.match(url) if isinstance(url, str) else None
+    return match.group(1) if match else None
 
 
 def parse_pr_link(entry: dict) -> PullRequest | None:
@@ -432,11 +451,10 @@ def _state(data: dict) -> str | None:
     return "DRAFT" if data.get("isDraft") is True else state
 
 
-def _gh_json(args: list[str], cwd: str | None = None) -> object | None:
-    """One `gh` call, returning its parsed --json output. None on any failure.
-
-    An object or a list, depending on the subcommand, so callers check the shape
-    they asked for.
+def _gh(
+    args: list[str], cwd: str | None = None, timeout: float = _GH_TIMEOUT_S
+) -> subprocess.CompletedProcess | None:
+    """One `gh` call, run to completion. None when it couldn't be run at all.
 
     Never a shell, and never a caller-built string: *args* trails the gh binary
     as argv, so nothing in it can become a second command.
@@ -448,15 +466,26 @@ def _gh_json(args: list[str], cwd: str | None = None) -> object | None:
         log.info("prstatus: gh not on PATH; PR chips will show the number only")
         return None
     try:
-        result = subprocess.run(
+        return subprocess.run(
             [gh, *args],
             capture_output=True,
             text=True,
-            timeout=_GH_TIMEOUT_S,
+            timeout=timeout,
             cwd=cwd,
         )
     except (OSError, subprocess.SubprocessError) as err:
         log.debug("prstatus: gh %s failed: %s", " ".join(args), err)
+        return None
+
+
+def gh_json(args: list[str], cwd: str | None = None) -> object | None:
+    """One `gh` call, returning its parsed --json output. None on any failure.
+
+    An object or a list, depending on the subcommand, so callers check the shape
+    they asked for.
+    """
+    result = _gh(args, cwd)
+    if result is None:
         return None
     if result.returncode != 0:
         log.debug(
@@ -470,6 +499,30 @@ def _gh_json(args: list[str], cwd: str | None = None) -> object | None:
         return json.loads(result.stdout)
     except (json.JSONDecodeError, ValueError):
         return None
+
+
+def gh_run(args: list[str]) -> tuple[bool, str]:
+    """One `gh` call run for what it *does*: ``(it worked, what to say if not)``.
+
+    The reading half of this module can shrug a failure off — a chip without a
+    glyph is a chip — but a menu item the user picked has to say why nothing
+    happened, so this hands back gh's own complaint rather than logging it.
+    That text comes from GitHub and from a repository, i.e. is untrusted, so it
+    is capped before it is ever put in a dialog.
+
+    Given longer than a status fetch gets: a merge waits on GitHub doing the
+    merge. Never call on the main thread.
+    """
+    if shutil.which("gh") is None:
+        return False, _("The GitHub CLI (gh) isn't installed, or isn't on PATH.")
+    result = _gh(args, timeout=_GH_ACTION_TIMEOUT_S)
+    if result is None:
+        return False, _("Collins couldn't run gh.")
+    if result.returncode == 0:
+        return True, ""
+    complaint = (result.stderr or result.stdout or "").strip()[:_MAX_GH_ERROR]
+    log.info("prstatus: gh %s exited %s", " ".join(args), result.returncode)
+    return False, complaint or _("gh exited with status {code}.").format(code=result.returncode)
 
 
 def _entry(data: dict) -> dict:
@@ -500,7 +553,7 @@ def _run_gh(url: str) -> dict | None:
     A URL argument means this works from anywhere — no repository cwd needed —
     and covers GitHub Enterprise hosts the user is logged in to.
     """
-    data = _gh_json(["pr", "view", url, "--json", _GH_FIELDS])
+    data = gh_json(["pr", "view", url, "--json", _GH_FIELDS])
     return _entry(data) if isinstance(data, dict) else None
 
 
@@ -600,7 +653,7 @@ def discover_pr(cwd: str | None, branch: str | None) -> PullRequest | None:
     if not cwd or not branch or not _BRANCH.match(branch) or _gh_missing:
         return None
     found = _newest(
-        _gh_json(
+        gh_json(
             [
                 "pr", "list",
                 "--head", branch,

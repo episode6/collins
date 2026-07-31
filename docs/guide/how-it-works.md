@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-28. Full change history: git log for this file.
+fork. Last modified: 2026-07-31. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -93,6 +93,9 @@ collins/
 ├── usage.py          # Claude subscription usage fetch/parse
 ├── usagepanel.py     # the sidebar usage panel widget
 ├── gitinfo.py        # git branch detection for the tab footer
+├── prstatus.py       # a session's pull requests and their CI status (gh)
+├── prmenu.py         # the PR list popover and its per-PR actions submenu
+├── practions.py      # what a PR offers (merge, review, …) and the gh calls
 ├── panelhistory.py   # persisted panel scrollback
 ├── promptcard.py     # native option cards over the terminal
 ├── transcript.py     # tail transcripts for pending structured prompts

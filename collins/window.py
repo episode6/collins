@@ -19,7 +19,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import __version__, chats, dialogs, footerapps, openwith, panelhistory
+from . import __version__, chats, dialogs, footerapps, openwith, panelhistory, practions
 from .bgstatus import (
     BLOCK_IN_FLIGHT,
     BLOCK_UNREGISTERED,
@@ -704,6 +704,7 @@ class MainWindow(Adw.ApplicationWindow):
             "background-session": lambda _a, p: self._close_session_tab(
                 p.get_string(), background=True
             ),
+            "address-ci": lambda _a, p: self._address_ci(p.get_string()),
             "archive-session": self._on_archive_session,
             "archive-project": self._on_archive_project,
             "forget-project": lambda _a, p: self.store.forget_project(p.get_string()),
@@ -1400,6 +1401,21 @@ class MainWindow(Adw.ApplicationWindow):
         if background:
             self._bg_ok.add(page)
         self.tab_view.close_page(page)
+
+    def _address_ci(self, session_id: str) -> None:
+        """A sidebar PR menu's "Address the CI errors": hand the prompt to the
+        session's own tab, and bring that tab to the front so the typed-out
+        prompt is where the user is looking. A session with no open tab is
+        never offered the action (see prmenu.ActionHost), but rows are built
+        long before they are clicked — so this checks again rather than
+        assuming."""
+        page = self._page_for(session_id)
+        if page is None:
+            return
+        self.tab_view.set_selected_page(page)
+        tab = page.get_child()
+        if isinstance(tab, TerminalTab):
+            tab.inject_prompt(practions.CI_PROMPT)
 
     def _close_confirmed(self, page: Adw.TabPage) -> None:
         """Force-close (terminate the child) — the graceful-close fallback."""

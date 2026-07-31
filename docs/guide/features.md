@@ -111,6 +111,16 @@ agents' own session files are never modified.
   sidebar's guide line; a tab with unread output drops the dot.
 - A slim **tab footer** shows the agent's live working directory (click to
   copy) and the current **git branch** (⎇), plus the terminal-panel buttons.
+- **Pull request chips** trail the branch: one per PR the session has opened,
+  each with its **CI mark** (✓ / ✗ / ●) or GitHub's merge mark, and each
+  opening that PR on click. The caret beside them lists every one with its
+  title — the same list a sidebar row's GitHub button opens.
+- **Right-click a chip** (or a PR in either list) for what to *do* with it:
+  mark a draft **ready for review**, **merge** it — or turn on **auto-merge**
+  while its checks are still running — **ask Claude for a review** (a
+  `@claude review` comment, for repositories running the Claude Code GitHub
+  action), and, when CI is red and the session is open in a tab, **address the
+  CI errors**: the prompt is typed into that session, ready to send.
 - **Rename** tabs, **copy the session ID**, or **fork** a session
   (`--fork-session`) from the right-click menu.
 - **Shift+Enter** inserts a newline in the agent's prompt.

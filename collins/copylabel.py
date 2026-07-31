@@ -59,7 +59,10 @@ def enable_open_on_click(widget: Gtk.Widget, get_uri: Callable[[], str | None]) 
     def on_released(_gesture, _n_press, _x, _y) -> None:
         open_uri(widget, get_uri())
 
-    click = Gtk.GestureClick()
+    # Primary button only: a chip can carry a right-click menu of its own (the
+    # footer's PR chips do), and a default GtkGestureClick answers to every
+    # button — so opening the menu would open the browser along with it.
+    click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
     click.connect("released", on_released)
     widget.add_controller(click)
 
