@@ -126,7 +126,9 @@ agents' own session files are never modified.
   tab, the other **backgrounds** it (shown only for agents that support
   detaching) and closes the tab.
 - The **tab bar can be hidden** with a header toggle — tabs and sessions keep
-  running.
+  running. While it is hidden the **window title becomes the active tab's
+  title**, so the header (and alt-tab, and the dock) still names the session
+  you are looking at; showing the tab bar again restores "Collins".
 - On the next launch the app **reopens the session you had focused** when you
   closed the window, and the window comes back at its last size.
 - The sidebar is **resizable** (drag the divider) and its width is remembered.
