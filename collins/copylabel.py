@@ -27,6 +27,25 @@ def open_tooltip(text: str) -> str:
     return text + "\n" + _("Click to open")
 
 
+def open_uri(widget: Gtk.Widget, uri: str | None) -> None:
+    """Open *uri* in the user's browser, from *widget*'s window. Blank: no-op.
+
+    For anything already clickable in its own right — a button in a menu, say.
+    Plain labels and boxes want `enable_open_on_click`, which is this plus the
+    gesture and the cursor to advertise it.
+    """
+    if not uri:
+        return
+
+    def on_launched(launcher: Gtk.UriLauncher, result) -> None:
+        try:
+            launcher.launch_finish(result)
+        except GLib.Error:
+            pass  # no browser, or the user dismissed the chooser
+
+    Gtk.UriLauncher.new(uri).launch(widget.get_root(), None, on_launched)
+
+
 def enable_open_on_click(widget: Gtk.Widget, get_uri: Callable[[], str | None]) -> None:
     """Open the widget's URI in the user's browser when it is clicked.
 
@@ -37,17 +56,8 @@ def enable_open_on_click(widget: Gtk.Widget, get_uri: Callable[[], str | None]) 
     """
     widget.set_cursor(Gdk.Cursor.new_from_name("pointer"))
 
-    def on_launched(launcher: Gtk.UriLauncher, result) -> None:
-        try:
-            launcher.launch_finish(result)
-        except GLib.Error:
-            pass  # no browser, or the user dismissed the chooser
-
     def on_released(_gesture, _n_press, _x, _y) -> None:
-        uri = get_uri()
-        if not uri:
-            return
-        Gtk.UriLauncher.new(uri).launch(widget.get_root(), None, on_launched)
+        open_uri(widget, get_uri())
 
     click = Gtk.GestureClick()
     click.connect("released", on_released)

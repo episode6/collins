@@ -1,11 +1,13 @@
 """Tests for prstatus — parsing Claude Code's pr-link records, its gh status
-cache, the `gh pr view` refresh Collins runs when that cache is stale, and the
-branch lookup behind the footer's refresh button."""
+cache, the `gh pr view` refresh Collins runs when that cache is stale, the
+branch lookup behind the footer's refresh button, and the records a session's
+PRs are persisted as."""
 
 import json
 import os
 import subprocess
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -16,10 +18,17 @@ from collins.prstatus import (
     describe,
     discover_pr,
     enrich,
+    forget_status,
+    from_record,
+    from_records,
     invalidate,
+    menu_name,
+    merge_ordered,
     parse_pr_link,
     refresh,
     state_text,
+    to_record,
+    to_records,
 )
 
 URL = "https://github.com/episode6/collins/pull/55"
@@ -559,6 +568,7 @@ def _completed(stdout="", returncode=0):
 
 def test_run_gh_shapes_a_real_reply(monkeypatch):
     reply = json.dumps({
+        "title": "Keep the yellow line on a backgrounded session",
         "isDraft": True,
         "state": "OPEN",
         "statusCheckRollup": [
@@ -571,7 +581,9 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
     monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
     monkeypatch.setattr(prstatus.subprocess, "run", lambda *a, **kw: _completed(reply))
     assert prstatus._run_gh(URL) == {
-        "state": "DRAFT", "checks": {"passed": 1, "failed": 0, "pending": 1}
+        "state": "DRAFT",
+        "checks": {"passed": 1, "failed": 0, "pending": 1},
+        "title": "Keep the yellow line on a backgrounded session",
     }
 
 
@@ -654,7 +666,7 @@ def test_every_other_state_keeps_the_glyph(state):
 
 
 def test_describe_carries_slug_state_and_checks():
-    pr = PullRequest(55, URL, "episode6/collins", "DRAFT", passed=1, failed=1, pending=0)
+    pr = PullRequest(55, URL, "episode6/collins", state="DRAFT", passed=1, failed=1, pending=0)
     assert describe(pr) == "episode6/collins#55 · Draft pull request · 1 passed, 1 failed"
 
 
@@ -663,14 +675,189 @@ def test_describe_without_cached_status():
 
 
 def test_describe_lists_pending_runs():
-    pr = PullRequest(55, URL, "episode6/collins", "OPEN", passed=2, failed=0, pending=3)
+    pr = PullRequest(55, URL, "episode6/collins", state="OPEN", passed=2, failed=0, pending=3)
     assert describe(pr) == "episode6/collins#55 · Open pull request · 2 passed, 3 pending"
 
 
 def test_describe_omits_zero_counts():
-    pr = PullRequest(55, URL, None, "MERGED", passed=0, failed=0, pending=0)
+    pr = PullRequest(55, URL, None, state="MERGED", passed=0, failed=0, pending=0)
     assert describe(pr) == "#55 · Merged pull request"
 
 
 def test_unknown_states_pass_through():
     assert state_text("SOMETHING_NEW") == "SOMETHING_NEW"
+
+
+# -- persisting a session's PRs ---------------------------------------------
+
+
+def test_record_keeps_identity_and_drops_status():
+    """Status is refetched every run; writing it down would age on disk."""
+    pr = PullRequest(55, URL, "episode6/collins", state="OPEN", passed=2, failed=1, pending=0)
+    assert to_record(pr) == {"number": 55, "url": URL, "repository": "episode6/collins"}
+
+
+def test_a_merged_pr_stays_merged_on_disk():
+    """The one status that can't go stale, so the mark is up before gh answers."""
+    pr = PullRequest(55, URL, "episode6/collins", state="MERGED", passed=2)
+    assert to_record(pr)["state"] == "MERGED"
+    assert from_record(to_record(pr)).merged is True
+
+
+def test_forget_status_keeps_only_the_merge():
+    pr = PullRequest(55, URL, "episode6/collins", state="MERGED", passed=2, failed=1, pending=3)
+    assert forget_status(pr) == PullRequest(55, URL, "episode6/collins", state="MERGED")
+    open_pr = replace(pr, state="OPEN")
+    assert forget_status(open_pr) == PullRequest(55, URL, "episode6/collins")
+
+
+def test_records_roundtrip_in_order():
+    prs = [PullRequest(n, f"https://github.com/episode6/collins/pull/{n}") for n in (40, 55, 61)]
+    assert [pr.number for pr in from_records(to_records(prs))] == [40, 55, 61]
+
+
+def test_a_pr_that_cannot_be_refreshed_is_not_written():
+    """An unfetchable URL on disk buys nothing and puts an unvalidated one there."""
+    assert to_record(PullRequest(55, "not-a-url")) is None
+    assert to_records([PullRequest(55, "not-a-url"), PullRequest(56, URL)]) == [
+        {"number": 56, "url": URL}
+    ]
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        "not a record",
+        {"url": URL},  # no number
+        {"number": "55", "url": URL},
+        {"number": True, "url": URL},  # bool is an int subclass
+        {"number": 55},  # no url
+        {"number": 55, "url": "https://github.com/episode6/collins/issues/55"},
+        {"number": 55, "url": "--version"},  # would reach a gh argv
+        {"number": 55, "url": "file:///etc/passwd"},
+    ],
+)
+def test_untrustworthy_records_are_dropped(record):
+    """Records start life in a transcript, and come back out to a browser and
+    to gh: having written them ourselves earns no shortcut."""
+    assert from_record(record) is None
+    assert from_records([record, {"number": 56, "url": URL}]) == [PullRequest(56, URL)]
+
+
+def test_from_records_tolerates_junk_in_place_of_a_list():
+    assert from_records({"number": 55, "url": URL}) == []
+
+
+# -- merge_ordered (saved list + transcript links) --------------------------
+
+
+def _prs(*numbers, repo="episode6/collins"):
+    return [PullRequest(n, f"https://github.com/{repo}/pull/{n}") for n in numbers]
+
+
+def _numbers(prs):
+    return [pr.number for pr in prs]
+
+
+def test_merge_keeps_the_transcripts_order():
+    assert _numbers(merge_ordered([], _prs(40, 55, 61))) == [40, 55, 61]
+
+
+def test_merge_keeps_a_saved_pr_the_transcript_never_had():
+    """A PR found by branch lookup lives only in the saved list — and it was
+    found after the links around it, so it stays where it was saved."""
+    assert _numbers(merge_ordered(_prs(40, 55, 61), _prs(40, 55))) == [40, 55, 61]
+
+
+def test_merge_restores_links_that_aged_out_of_the_saved_list():
+    """The saved list is capped, the transcript isn't: the older links come
+    back ahead of the saved ones rather than after them."""
+    saved, links = _prs(3, 4, 5), _prs(1, 2, 3, 4, 5)
+    assert _numbers(merge_ordered(saved, links)) == [1, 2, 3, 4, 5]
+
+
+def test_merge_places_a_saved_only_pr_between_the_links_it_sat_between():
+    saved, links = _prs(40, 99, 61), _prs(40, 55, 61)
+    assert _numbers(merge_ordered(saved, links)) == [40, 99, 55, 61]
+
+
+def test_merge_is_idempotent():
+    """The row re-merges its own output on every poll; it must settle."""
+    once = merge_ordered(_prs(40, 99, 61), _prs(40, 55, 61))
+    assert _numbers(merge_ordered(once, _prs(40, 55, 61))) == _numbers(once)
+
+
+def test_merge_prefers_the_saved_copy_of_a_pr():
+    """Saved carries what the row has learned since — a merge, most of all."""
+    saved = [replace(_prs(55)[0], state="MERGED")]
+    assert merge_ordered(saved, _prs(55))[0].merged is True
+
+
+def test_merge_drops_duplicates_within_a_side():
+    assert _numbers(merge_ordered(_prs(55, 55), _prs(55))) == [55]
+
+
+# -- titles and the caret menu's lines ---------------------------------------
+
+
+def test_enrich_fills_the_title(cache):
+    cache({URL: {"state": "OPEN", "checks": {}, "title": "Track every PR"}})
+    assert enrich(parse_pr_link(_link())).title == "Track every PR"
+
+
+def test_enrich_keeps_a_title_the_entry_does_not_carry(cache):
+    """The CLI's own cache has no title field; a warm start from it must not
+    blank the title a gh reply (or the saved list) already supplied."""
+    cache({URL: {"state": "OPEN", "checks": {"passed": 1}}})
+    pr = replace(parse_pr_link(_link()), title="Track every PR")
+    assert enrich(pr).title == "Track every PR"
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("Fix  the\n spinner", "Fix the spinner"),  # a repo's text, made one line
+        ("   ", None),
+        ("", None),
+        (None, None),
+        (42, None),
+        ("x" * 500, "x" * 200),
+    ],
+)
+def test_titles_are_taken_from_a_repository_carefully(raw, expected):
+    assert prstatus._title(raw) == expected
+
+
+def test_menu_name_is_the_title():
+    pr = PullRequest(79, URL, "episode6/collins", title="Keep the yellow line")
+    assert menu_name(pr) == "Keep the yellow line"
+
+
+def test_menu_name_without_a_title_falls_back_to_the_repository():
+    assert menu_name(PullRequest(79, URL, "episode6/collins")) == "episode6/collins"
+
+
+def test_menu_name_without_anything_still_names_the_pr():
+    assert menu_name(PullRequest(79, URL)) == "Pull request"
+
+
+def test_describe_leads_with_the_title():
+    pr = PullRequest(55, URL, "episode6/collins", title="Track every PR", state="OPEN")
+    assert describe(pr) == "Track every PR · episode6/collins#55 · Open pull request"
+
+
+def test_a_title_is_saved_and_read_back():
+    """Not a status: a title doesn't go stale, and the menu wants it on the
+    first frame rather than one gh call later."""
+    pr = PullRequest(55, URL, "episode6/collins", title="Track every PR")
+    assert to_record(pr)["title"] == "Track every PR"
+    assert from_record(to_record(pr)).title == "Track every PR"
+
+
+def test_forget_status_keeps_the_title():
+    pr = PullRequest(55, URL, "episode6/collins", title="Track every PR", state="OPEN", passed=2)
+    assert forget_status(pr) == PullRequest(55, URL, "episode6/collins", title="Track every PR")
+
+
+def test_a_junk_title_on_disk_is_dropped():
+    assert from_record({"number": 55, "url": URL, "title": ["not", "a", "title"]}).title is None

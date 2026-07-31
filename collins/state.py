@@ -123,6 +123,9 @@ class AppState:
         self.virtual_projects: dict[str, str] = {}
         self.expanded_groups: set[str] = set()  # sidebar groups the user expanded
         self.panel_states: dict[str, dict] = {}  # per-session panel open/mode/sizes
+        # session id -> the PRs it has opened, oldest first, as prstatus
+        # records ({number, url, repository?, state? — see to_record}).
+        self.session_prs: dict[str, list] = {}
         # old session id -> the id its conversation continued under (Claude's
         # /bg has been observed forking a backgrounded session to a fresh
         # background session id; in-place detaches add no entries here).
@@ -166,6 +169,9 @@ class AppState:
         self.panel_states = {
             k: v for k, v in (data.get("panel_states") or {}).items() if isinstance(v, dict)
         }
+        self.session_prs = {
+            k: v for k, v in (data.get("session_prs") or {}).items() if isinstance(v, list)
+        }
         self.session_forwards = {
             k: v for k, v in (data.get("session_forwards") or {}).items() if isinstance(v, str)
         }
@@ -187,6 +193,7 @@ class AppState:
             "virtual_projects": self.virtual_projects,
             "expanded_groups": sorted(self.expanded_groups),
             "panel_states": self.panel_states,
+            "session_prs": self.session_prs,  # order is the payload — never sort
             "session_forwards": self.session_forwards,
             "pending_detaches": self.pending_detaches,
             "settings": self.settings,
@@ -359,6 +366,10 @@ class AppState:
             self.favorites.add(new_id)
         if old_id in self.panel_states and new_id not in self.panel_states:
             self.panel_states[new_id] = dict(self.panel_states[old_id])
+        if old_id in self.session_prs and new_id not in self.session_prs:
+            # The same conversation under a new id: the PRs it opened are the
+            # fork's too, and the fork's transcript doesn't repeat them.
+            self.session_prs[new_id] = list(self.session_prs[old_id])
         self.save()
 
     # -- pending /bg detaches ----------------------------------------------
@@ -412,6 +423,32 @@ class AppState:
             if session_id not in self.panel_states:
                 return
             del self.panel_states[session_id]
+        self.save()
+
+    # -- per-session pull requests -----------------------------------------
+
+    def get_session_prs(self, session_id: str) -> list:
+        """The PR records saved for a session, oldest first."""
+        return list(self.session_prs.get(session_id) or [])
+
+    def set_session_prs(self, session_id: str, prs: list) -> None:
+        """Persist a session's PRs (prstatus records); an empty list drops it.
+
+        Only their identity is saved — CI status is refetched on every run, so
+        a chip never shows a check that went stale overnight. A tab re-derives
+        this list on every transcript poll, so an unchanged one is deliberately
+        not rewritten to disk.
+        """
+        if not session_id:
+            return
+        if prs:
+            if self.session_prs.get(session_id) == prs:
+                return
+            self.session_prs[session_id] = list(prs)
+        else:
+            if session_id not in self.session_prs:
+                return
+            del self.session_prs[session_id]
         self.save()
 
     # -- settings ------------------------------------------------------------

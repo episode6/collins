@@ -24,6 +24,12 @@ hand never shows up in it. So the footer's refresh button can also ask gh which
 PR belongs to the checked-out branch (`discover_pr`), which fills the chip in
 for a session whose transcript will never mention one.
 
+A session accumulates PRs — the footer shows every one of them — so its list
+outlives the app run: `to_record`/`from_record` reduce a PR to what is worth
+keeping (see AppState.set_session_prs). Status is deliberately not part of
+that; last week's green check says nothing about today. The one exception is
+a merged PR, which can't change back.
+
 Those gh calls are the only subprocesses here; everything else is a filesystem
 read, they always happen off the main thread, and every failure degrades to "no
 status" (or "no PR") rather than raising.
@@ -39,6 +45,7 @@ import shutil
 import subprocess
 import threading
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -68,7 +75,10 @@ _GH_TIMEOUT_S = 10
 # The stamp of a status that is due no matter which TTL applies to it (see
 # invalidate) — every interval measured against it is already over.
 _DUE = float("-inf")
-_GH_FIELDS = "state,isDraft,statusCheckRollup"
+_GH_FIELDS = "title,state,isDraft,statusCheckRollup"
+# Long PR titles are a thing; the menu ellipsizes them anyway, and this keeps
+# what a repository can put on screen (and on disk) bounded.
+_MAX_TITLE = 200
 # A branch lookup needs to learn which PR it found, and when it was opened, on
 # top of that PR's status.
 _GH_DISCOVER_FIELDS = "number,url,createdAt," + _GH_FIELDS
@@ -108,6 +118,11 @@ class PullRequest:
     number: int
     url: str
     repository: str | None = None
+    # What the PR is called. A transcript never says, so this arrives with the
+    # first `gh` reply — and stays with the PR from then on, saved list
+    # included: it is what the chips' menu reads, and a title doesn't go stale
+    # the way a check does.
+    title: str | None = None
     state: str | None = None  # OPEN / DRAFT / MERGED / CLOSED
     passed: int | None = None
     failed: int | None = None
@@ -165,14 +180,27 @@ def state_text(state: str) -> str:
     return known.get(state, state)
 
 
+def menu_name(pr: PullRequest) -> str:
+    """What a PR is called in the chips' menu — the middle of the line there.
+
+    The status mark that precedes it is a widget (colored, or the merge icon)
+    and the number that follows it is its own label, so that an over-long title
+    ellipsizes without taking the number with it. A PR whose title hasn't
+    arrived yet falls back to the repository it is in, which offline is still
+    better than a bare number.
+    """
+    return pr.title or pr.repository or _("Pull request")
+
+
 def describe(pr: PullRequest) -> str:
     """The chip's long form: what the PR is and how its checks are doing.
 
-    e.g. ``episode6/collins#55 · Draft pull request · 1 passed, 1 failed``.
+    e.g. ``Add the thing · episode6/collins#55 · Draft pull request · 1 passed``.
     Lives here rather than beside the widget so it stays testable without a
     Gtk namespace — CI installs PyGObject but no GTK.
     """
-    parts = [pr.slug]
+    parts = [pr.title] if pr.title else []
+    parts.append(pr.slug)
     if pr.state:
         parts.append(state_text(pr.state))
     checks = [
@@ -203,6 +231,123 @@ def parse_pr_link(entry: dict) -> PullRequest | None:
         url=url,
         repository=repository if isinstance(repository, str) and repository else None,
     )
+
+
+def merge_ordered(
+    saved: Iterable[PullRequest], links: Iterable[PullRequest]
+) -> list[PullRequest]:
+    """*saved* and *links* as one list, in an order that respects both.
+
+    A transcript's pr-links are chronological and a row's saved list was built
+    the same way, but neither is the whole story: a PR found by a branch lookup
+    was never in a transcript, and a transcript can hold links that aged out of
+    what was saved. Appending one to the other therefore gets the order wrong
+    in one direction or the other.
+
+    So this walks *saved* and, for each entry the transcript also knows, first
+    emits every link that comes before it; an entry the transcript has never
+    heard of keeps the slot it had. Both orders survive, and a PR either side
+    knows about survives with them.
+
+    When both sides have a PR, *saved*'s copy is the one returned — it is the
+    one carrying whatever has been learned about it since.
+    """
+    saved, links = list(saved), list(links)
+    by_url = {pr.url: pr for pr in links}
+    by_url.update({pr.url: pr for pr in saved})
+    at = {pr.url: index for index, pr in enumerate(links)}
+    order: list[str] = []
+    seen: set[str] = set()
+    cursor = 0
+
+    def emit(url: str) -> None:
+        if url not in seen:
+            seen.add(url)
+            order.append(url)
+
+    for pr in saved:
+        index = at.get(pr.url)
+        if index is not None:
+            for link in links[cursor : index + 1]:
+                emit(link.url)
+            cursor = max(cursor, index + 1)
+        emit(pr.url)
+    for link in links[cursor:]:
+        emit(link.url)
+    return [by_url[url] for url in order]
+
+
+def forget_status(pr: PullRequest) -> PullRequest:
+    """*pr* stripped back to its identity, keeping only a merge that happened.
+
+    What a tab remembers between polls, and the shape `to_record` writes out:
+    check counts are refetched, a title is part of what the PR *is*, and a
+    merge is forever.
+    """
+    return replace(
+        pr,
+        state="MERGED" if pr.merged else None,
+        passed=None,
+        failed=None,
+        pending=None,
+    )
+
+
+def to_record(pr: PullRequest) -> dict | None:
+    """*pr* as a JSON-safe record for AppState, or None when it isn't one.
+
+    A URL that doesn't look like a PR page is dropped rather than written: it
+    can't be refreshed (see `_FETCHABLE`), so the only thing persisting it
+    would achieve is putting an unvalidated URL on disk.
+    """
+    if not _FETCHABLE.match(pr.url):
+        return None
+    record: dict = {"number": pr.number, "url": pr.url}
+    if pr.repository:
+        record["repository"] = pr.repository
+    if pr.title:
+        record["title"] = pr.title
+    if pr.merged:
+        record["state"] = "MERGED"
+    return record
+
+
+def to_records(prs: Iterable[PullRequest]) -> list[dict]:
+    """The persistable records for *prs*, in order, skipping any that aren't."""
+    return [record for pr in prs if (record := to_record(pr)) is not None]
+
+
+def from_record(record: object) -> PullRequest | None:
+    """A PullRequest read back from `to_record`, or None if it can't be used.
+
+    Everything is re-validated on the way in. These records started life in a
+    transcript — repo content, i.e. untrusted — and a restored PR's URL is
+    handed to a browser and to `gh`, so being the one that wrote the file
+    earns no shortcut here.
+    """
+    if not isinstance(record, dict):
+        return None
+    number = record.get("number")
+    url = record.get("url")
+    if not isinstance(number, int) or isinstance(number, bool):
+        return None
+    if not isinstance(url, str) or not _FETCHABLE.match(url):
+        return None
+    repository = record.get("repository")
+    return PullRequest(
+        number=number,
+        url=url,
+        repository=repository if isinstance(repository, str) and repository else None,
+        title=_title(record.get("title")),
+        state="MERGED" if record.get("state") == "MERGED" else None,
+    )
+
+
+def from_records(records: object) -> list[PullRequest]:
+    """Every usable PullRequest in a saved list, in the order it was saved."""
+    if not isinstance(records, list):
+        return []
+    return [pr for record in records if (pr := from_record(record)) is not None]
 
 
 def _load_cache() -> dict:
@@ -323,8 +468,25 @@ def _gh_json(args: list[str], cwd: str | None = None) -> object | None:
 
 
 def _entry(data: dict) -> dict:
-    """A gh reply reduced to the CLI cache's `{state, checks}` shape."""
-    return {"state": _state(data), "checks": _counts(data.get("statusCheckRollup"))}
+    """A gh reply reduced to the CLI cache's `{state, checks}` shape, plus the
+    title — which that cache has no room for and the chips' menu needs."""
+    return {
+        "state": _state(data),
+        "checks": _counts(data.get("statusCheckRollup")),
+        "title": _title(data.get("title")),
+    }
+
+
+def _title(value: object) -> str | None:
+    """A PR title as it is worth keeping: non-empty, one line, bounded.
+
+    Comes from a repository, so it is treated like any other repo content:
+    newlines would break the menu row it is put in, and length is capped.
+    """
+    if not isinstance(value, str):
+        return None
+    title = " ".join(value.split())
+    return title[:_MAX_TITLE] or None
 
 
 def _run_gh(url: str) -> dict | None:
@@ -455,11 +617,15 @@ def discover_pr(cwd: str | None, branch: str | None) -> PullRequest | None:
 
 
 def enrich(pr: PullRequest | None) -> PullRequest | None:
-    """Fill in *pr*'s state and check counts, refreshing them when they're due.
+    """Fill in *pr*'s title, state and check counts, refreshing them when due.
 
     Touches the filesystem and may spawn `gh` off a worker thread, so keep this
     off the main loop. Returns *pr* unchanged when no status is known yet — the
     chip still shows the number, just without a CI glyph.
+
+    A title the entry doesn't carry leaves the one *pr* already has: the CLI's
+    own cache has no title field, so a warm start from it must not blank the
+    title a `gh` reply (or the saved list) supplied.
     """
     if pr is None:
         return None
@@ -470,6 +636,7 @@ def enrich(pr: PullRequest | None) -> PullRequest | None:
     checks = entry.get("checks")
     return replace(
         pr,
+        title=_title(entry.get("title")) or pr.title,
         state=state if isinstance(state, str) and state else None,
         passed=_count(checks, "passed"),
         failed=_count(checks, "failed"),
