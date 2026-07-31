@@ -28,6 +28,7 @@ from .copylabel import (  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch  # noqa: E402
 from .i18n import _  # noqa: E402
+from .linkpatterns import URL_PATTERN  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
 from .prstatus import (  # noqa: E402
@@ -61,6 +62,52 @@ _PR_CHECKS_CSS = {
 _PCRE2_CASELESS = 0x00000008
 _PCRE2_MULTILINE = 0x00000400
 _SEARCH_FLAGS = _PCRE2_CASELESS | _PCRE2_MULTILINE
+
+
+def _setup_links(terminal: Vte.Terminal) -> None:
+    """Give links GNOME Terminal's behaviour: underline on hover, open on
+    Ctrl+click.
+
+    Covers both kinds of link a terminal shows: OSC 8 hyperlinks (what agent
+    CLIs emit for file references — VTE ignores the escape entirely until
+    allow-hyperlink is switched on) and plain URLs in the output, matched by
+    regex the way GNOME Terminal matches them.
+    """
+    terminal.set_allow_hyperlink(True)
+    try:
+        regex = Vte.Regex.new_for_match(
+            URL_PATTERN, len(URL_PATTERN.encode()), _PCRE2_MULTILINE
+        )
+        terminal.match_set_cursor_name(terminal.match_add_regex(regex, 0), "pointer")
+    except GLib.Error:
+        regex = None  # VTE built without PCRE2: OSC 8 links still work
+
+    def on_launched(launcher: Gtk.UriLauncher, result) -> None:
+        try:
+            launcher.launch_finish(result)
+        except GLib.Error:
+            pass  # no handler for the scheme, or the user dismissed the chooser
+
+    def on_pressed(gesture: Gtk.GestureClick, _n_press, x: float, y: float) -> None:
+        if not gesture.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
+            return
+        uri = terminal.check_hyperlink_at(x, y)
+        if uri is None and regex is not None:
+            match, _tag = terminal.check_match_at(x, y)
+            if match is not None and match.startswith("www."):
+                match = "http://" + match
+            uri = match
+        if not uri:
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        Gtk.UriLauncher.new(uri).launch(terminal.get_root(), None, on_launched)
+
+    # Capture phase, so Ctrl+click opens the link even when the running app
+    # has turned on mouse reporting (same trick as the context menu).
+    click = Gtk.GestureClick(button=1)
+    click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+    click.connect("pressed", on_pressed)
+    terminal.add_controller(click)
 
 
 def _has_running_command(terminal: Vte.Terminal, child_pid: int | None) -> bool:
@@ -111,6 +158,7 @@ class PanelTerminal(Gtk.Box):
         self.terminal.set_scroll_on_keystroke(True)
         self.terminal.set_mouse_autohide(True)
         self.terminal.connect("child-exited", self._on_child_exited)
+        _setup_links(self.terminal)
 
         scrolled = Gtk.ScrolledWindow(child=self.terminal, vexpand=True)
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -287,6 +335,7 @@ class TerminalTab(Gtk.Box):
         self.terminal.set_scroll_on_keystroke(True)
         self.terminal.set_mouse_autohide(True)
         self.terminal.connect("child-exited", self._on_child_exited)
+        _setup_links(self.terminal)
 
         self._easy_copy_paste = False
         self._setup_context_menu()
