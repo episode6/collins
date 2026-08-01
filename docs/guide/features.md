@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-31. Full change history: git log for this file.
+fork. Last modified: 2026-08-01. Full change history: git log for this file.
 -->
 
 # Features
@@ -31,9 +31,10 @@ fork. Last modified: 2026-07-31. Full change history: git log for this file.
 - **Open a project's folder anywhere else** from that same right-click menu:
   one row per app you added under Preferences → *Footer apps*, each with its
   own icon, plus *Open in File Manager* and *Open in Terminal* for whichever
-  apps your desktop nominates for those jobs (`$TERMINAL` and
-  `xdg-terminals.list` are honoured). The Chats group has no folder of its
-  own, so its menu stays as it was.
+  apps your desktop nominates for those jobs (`$TERMINAL`,
+  `xdg-terminals.list`, and the system's own `x-terminal-emulator` are
+  honoured, in that order). The Chats group has no folder of its own, so its
+  menu stays as it was.
 - A **search button** that opens a search box across the sidebar header,
   filtering by name, project, message preview, or session ID, plus a footer
   showing session, project, transcript-size, and open-tab counts.
@@ -175,10 +176,14 @@ lives below or beside the agent terminal:
   (screen and saved history).
 - It opens in the agent's **current working directory** (worktree-aware), and
   the swap button moves it bottom ↔ right without restarting its shell.
-- **Right-click the footer's terminal button** to open that same directory in
-  your desktop's own terminal instead — whatever `$TERMINAL` and
-  `xdg-terminals.list` nominate, the same pick the sidebar's *Open in Terminal*
-  uses — for the times a window of its own beats a panel.
+- **Right-click the footer's terminal button** to open that same directory —
+  the agent's live one, not the project root — in your desktop's own terminal
+  instead, for the times a window of its own beats a panel. The terminal is
+  whatever `$TERMINAL`, `xdg-terminals.list` or the system's
+  `x-terminal-emulator` nominate (the same pick the sidebar's *Open in
+  Terminal* uses), and the directory is handed to it on its own command line,
+  so an already-running terminal opens where you asked rather than wherever it
+  last was.
 - Its scrollback **persists across restarts** — reopen a session and the
   panel picks up where it left off, with a "restored panel history" marker.
 - Each session remembers its panel's open state, position, and size; the

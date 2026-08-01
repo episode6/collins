@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -2264,7 +2264,7 @@ class MainWindow(Adw.ApplicationWindow):
                 _("Set $TERMINAL, or install a terminal emulator, to open folders here."),
             )
             return
-        footerapps.launch_app(info, param.get_string(), pass_directory=False)
+        openwith.launch_terminal(info, param.get_string())
 
     def _on_open_folder_app(self, _action, param: GLib.Variant) -> None:
         app_id, folder = param.unpack()
