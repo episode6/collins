@@ -22,7 +22,7 @@ fork. Last modified: 2026-08-01. Full change history: git log for this file.
 | `Shift+Enter` | Insert a newline in the agent's prompt |
 | `Ctrl+J` | Show/hide the terminal panel |
 | `Ctrl+K` | Clear the terminal panel (screen and saved history) |
-| `F8` | Show/hide the editor panel |
+| `F8` | Show/hide the editor panel (brings a popped-out editor back first) |
 | `Ctrl+S` (in the editor) | Save the current file |
 | `Ctrl+F` (in the editor) | Find in the current file |
 | `F9` | Toggle the sidebar |

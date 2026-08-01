@@ -737,14 +737,17 @@ msgstr "Neu laden"
 msgid "Couldn't reload {name}: {message}"
 msgstr "„{name}“ konnte nicht neu geladen werden: {message}"
 
-msgid "Close {name} without saving?"
-msgstr "„{name}“ ohne Speichern schließen?"
+msgid "Save Changes?"
+msgstr "Änderungen speichern?"
 
-msgid "Changes since the last save will be lost."
-msgstr "Änderungen seit dem letzten Speichern gehen verloren."
+msgid "Don't Save"
+msgstr "Nicht speichern"
 
-msgid "Discard Changes"
-msgstr "Änderungen verwerfen"
+msgid "“{name}” contains unsaved changes. Changes which are not saved will be permanently lost."
+msgstr "„{name}“ enthält ungespeicherte Änderungen. Nicht gespeicherte Änderungen gehen dauerhaft verloren."
+
+msgid "{n} files contain unsaved changes. Changes which are not saved will be permanently lost."
+msgstr "{n} Dateien enthalten ungespeicherte Änderungen. Nicht gespeicherte Änderungen gehen dauerhaft verloren."
 
 msgid "Find in file…"
 msgstr "In Datei suchen…"
@@ -761,29 +764,17 @@ msgstr "Editor-Panel anzeigen"
 msgid "Hide editor panel"
 msgstr "Editor-Panel ausblenden"
 
+msgid "Move editor to its own window"
+msgstr "Editor in eigenes Fenster verschieben"
+
+msgid "Bring editor back into this tab"
+msgstr "Editor in diesen Tab zurückholen"
+
+msgid "Move editor back into its tab"
+msgstr "Editor zurück in seinen Tab verschieben"
+
 msgid "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins"
 msgstr "Editor nicht verfügbar — installiere GtkSourceView 5 (gir1.2-gtksource-5) und starte Collins neu"
-
-msgid "Close window with unsaved editor changes?"
-msgstr "Fenster mit ungespeicherten Editor-Änderungen schließen?"
-
-msgid "Unsaved changes in open editors will be lost."
-msgstr "Ungespeicherte Änderungen in geöffneten Editoren gehen verloren."
-
-msgid "{n} unsaved editor file(s) will also be lost."
-msgstr "{n} ungespeicherte Editor-Datei(en) gehen ebenfalls verloren."
-
-msgid "Close Window"
-msgstr "Fenster schließen"
-
-msgid "Close tab with unsaved changes?"
-msgstr "Tab mit ungespeicherten Änderungen schließen?"
-
-msgid "This tab's editor has unsaved changes that will be lost."
-msgstr "Der Editor dieses Tabs hat ungespeicherte Änderungen, die verloren gehen."
-
-msgid "This tab's editor also has {n} unsaved file(s) that will be lost."
-msgstr "Der Editor dieses Tabs hat außerdem {n} ungespeicherte Datei(en), die verloren gehen."
 
 msgid "Editor"
 msgstr "Editor"

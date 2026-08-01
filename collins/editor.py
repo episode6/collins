@@ -20,7 +20,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 try:
     gi.require_version("GtkSource", "5")
@@ -62,8 +62,15 @@ class _OpenFile:
 
 
 class EditorPane(Gtk.Box):
-    """One per `TerminalTab`. Hidden by default; the tab shows/hides it (and,
-    from PR 2, pops it out into its own window — not implemented here)."""
+    """One per `TerminalTab`. Hidden by default; the tab shows/hides it, and
+    can pop the live pane out into an `EditorWindow` (editorwindow.py) —
+    reparented, so buffers and dirty state travel with it."""
+
+    __gsignals__ = {
+        # The status row's detach button was clicked: whoever hosts the pane
+        # (the window, via the tab) should reparent it into its own window.
+        "request-pop-out": (GObject.SignalFlags.RUN_FIRST, None, ()),
+    }
 
     def __init__(self, root: str | Path) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -262,22 +269,57 @@ class EditorPane(Gtk.Box):
             return
         self._do_save(opened)
 
-    def _do_save(self, opened: _OpenFile) -> None:
+    def _do_save(self, opened: _OpenFile, on_done=None) -> None:
+        """`on_done(success)` runs once the async save resolves — the close
+        flows use it to only proceed past a Save that actually landed."""
         saver = GtkSource.FileSaver.new(opened.buffer, opened.gfile)
-        saver.save_async(GLib.PRIORITY_DEFAULT, None, callback=self._on_saved, user_data=opened)
+        saver.save_async(
+            GLib.PRIORITY_DEFAULT, None, callback=self._on_saved, user_data=(opened, on_done)
+        )
 
-    def _on_saved(self, saver: GtkSource.FileSaver, result: Gio.AsyncResult, opened: _OpenFile) -> None:
+    def _on_saved(self, saver: GtkSource.FileSaver, result: Gio.AsyncResult, data: tuple) -> None:
+        opened, on_done = data
         try:
             saver.save_finish(result)
         except GLib.Error as err:
             self._notify(
                 _("Couldn't save {name}: {message}").format(name=opened.path.name, message=err.message)
             )
+            if on_done is not None:
+                on_done(False)
             return
         opened.buffer.set_modified(False)
+        if on_done is not None:
+            on_done(True)
+
+    def save_all(self, on_done) -> None:
+        """Save every dirty buffer, then `on_done(all_succeeded)`. Backs the
+        Save choice in the close flows' "Save Changes?" dialog — that choice
+        is the user's explicit write consent, so unlike Ctrl+S this doesn't
+        re-ask about files the agent modified on disk underneath; a failed
+        save raises the banner naming the file instead."""
+        dirty = [opened for opened in self._open.values() if opened.buffer.get_modified()]
+        if not dirty:
+            on_done(True)
+            return
+        state = {"left": len(dirty), "ok": True}
+
+        def finish(success: bool) -> None:
+            state["ok"] = state["ok"] and success
+            state["left"] -= 1
+            if state["left"] == 0:
+                on_done(state["ok"])
+
+        for opened in dirty:
+            self._do_save(opened, finish)
 
     def dirty_count(self) -> int:
         return sum(1 for opened in self._open.values() if opened.buffer.get_modified())
+
+    def dirty_names(self) -> list[str]:
+        return [
+            opened.path.name for opened in self._open.values() if opened.buffer.get_modified()
+        ]
 
     # -- external changes ----------------------------------------------------
 
@@ -376,17 +418,21 @@ class EditorPane(Gtk.Box):
         if opened is not None and opened.buffer.get_modified() and page not in self._close_confirmed:
             view.close_page_finish(page, False)  # keep it open while we ask
 
-            def discard() -> None:
+            def close() -> None:
                 self._close_confirmed.add(page)
                 view.close_page(page)
 
-            dialogs.confirm_dialog(
+            def save_then_close() -> None:
+                self._do_save(opened, lambda ok: close() if ok else None)
+
+            dialogs.save_changes_dialog(
                 self.get_root(),
-                _("Close {name} without saving?").format(name=opened.path.name),
-                _("Changes since the last save will be lost."),
-                _("Discard Changes"),
-                discard,
-                default_response="cancel",
+                _(
+                    "“{name}” contains unsaved changes. "
+                    "Changes which are not saved will be permanently lost."
+                ).format(name=opened.path.name),
+                save_then_close,
+                close,
             )
             return True
         self._close_confirmed.discard(page)
@@ -520,13 +566,26 @@ class EditorPane(Gtk.Box):
         self._save_btn.add_css_class("flat")
         self._save_btn.set_tooltip_text(_("Save (Ctrl+S)"))
         self._save_btn.set_action_name("editor.save")
+        # Rightmost: pop the pane out into its own window. Hidden while
+        # already popped out — the EditorWindow headerbar carries the
+        # symmetric dock-back button instead.
+        self._detach_btn = Gtk.Button(icon_name="window-new-symbolic")
+        self._detach_btn.add_css_class("flat")
+        self._detach_btn.set_tooltip_text(_("Move editor to its own window"))
+        self._detach_btn.connect("clicked", lambda *_a: self.emit("request-pop-out"))
 
         row.append(self._status_path)
         row.append(self._status_lang)
         row.append(self._status_cursor)
         row.append(self._save_btn)
+        row.append(self._detach_btn)
         self._sync_status()
         return row
+
+    def set_detached(self, detached: bool) -> None:
+        """Reflect where the pane lives: the detach button only makes sense
+        while it is still inside its tab."""
+        self._detach_btn.set_visible(not detached)
 
     def _sync_status(self) -> None:
         opened = self._active_open()
@@ -601,6 +660,12 @@ class EditorPane(Gtk.Box):
             self._apply_font(opened)
 
     # -- session state ---------------------------------------------------------
+
+    @property
+    def root(self) -> Path:
+        """The project directory the file tree is rooted at (names the
+        popped-out window)."""
+        return self._root
 
     def open_paths(self) -> list[str]:
         return list(self._open.keys())

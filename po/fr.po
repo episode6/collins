@@ -737,14 +737,17 @@ msgstr "Recharger"
 msgid "Couldn't reload {name}: {message}"
 msgstr "Impossible de recharger « {name} » : {message}"
 
-msgid "Close {name} without saving?"
-msgstr "Fermer « {name} » sans enregistrer ?"
+msgid "Save Changes?"
+msgstr "Enregistrer les modifications ?"
 
-msgid "Changes since the last save will be lost."
-msgstr "Les modifications depuis le dernier enregistrement seront perdues."
+msgid "Don't Save"
+msgstr "Ne pas enregistrer"
 
-msgid "Discard Changes"
-msgstr "Ignorer les modifications"
+msgid "“{name}” contains unsaved changes. Changes which are not saved will be permanently lost."
+msgstr "« {name} » contient des modifications non enregistrées. Les modifications non enregistrées seront définitivement perdues."
+
+msgid "{n} files contain unsaved changes. Changes which are not saved will be permanently lost."
+msgstr "{n} fichiers contiennent des modifications non enregistrées. Les modifications non enregistrées seront définitivement perdues."
 
 msgid "Find in file…"
 msgstr "Rechercher dans le fichier…"
@@ -761,29 +764,17 @@ msgstr "Afficher le panneau de l’éditeur"
 msgid "Hide editor panel"
 msgstr "Masquer le panneau de l’éditeur"
 
+msgid "Move editor to its own window"
+msgstr "Déplacer l’éditeur dans sa propre fenêtre"
+
+msgid "Bring editor back into this tab"
+msgstr "Ramener l’éditeur dans cet onglet"
+
+msgid "Move editor back into its tab"
+msgstr "Ramener l’éditeur dans son onglet"
+
 msgid "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins"
 msgstr "Éditeur indisponible — installez GtkSourceView 5 (gir1.2-gtksource-5) et redémarrez Collins"
-
-msgid "Close window with unsaved editor changes?"
-msgstr "Fermer la fenêtre avec des modifications de l’éditeur non enregistrées ?"
-
-msgid "Unsaved changes in open editors will be lost."
-msgstr "Les modifications non enregistrées dans les éditeurs ouverts seront perdues."
-
-msgid "{n} unsaved editor file(s) will also be lost."
-msgstr "{n} fichier(s) de l’éditeur non enregistré(s) seront également perdus."
-
-msgid "Close Window"
-msgstr "Fermer la fenêtre"
-
-msgid "Close tab with unsaved changes?"
-msgstr "Fermer l’onglet avec des modifications non enregistrées ?"
-
-msgid "This tab's editor has unsaved changes that will be lost."
-msgstr "L’éditeur de cet onglet a des modifications non enregistrées qui seront perdues."
-
-msgid "This tab's editor also has {n} unsaved file(s) that will be lost."
-msgstr "L’éditeur de cet onglet a aussi {n} fichier(s) non enregistré(s) qui seront perdus."
 
 msgid "Editor"
 msgstr "Éditeur"

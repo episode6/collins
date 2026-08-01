@@ -234,6 +234,13 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   editor's font and whether the file tree shows hidden files.
 - Each session remembers which files were open, the cursor in each, and the
   panel's width — restored the next time you reopen it.
+- **Pop it out** to a second monitor with the status row's detach button
+  (rightmost): the whole editor — open files, cursors, unsaved changes —
+  moves into a window of its own, and the in-tab panel disappears until it
+  comes back. Dock it back with the window's headerbar button, by closing
+  the window, or with the tab's footer icon (while the editor is popped
+  out, one click means "bring it back"). One editor per tab, in one place
+  at a time; the popped-out window remembers its own size.
 
 If the footer icon is greyed out, the GtkSourceView 5 library the editor is
 built on isn't installed — the `.deb` pulls it in automatically, but a source

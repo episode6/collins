@@ -342,6 +342,24 @@ def test_window_geometry_defaults(app_state):
     assert state.get_setting("window_maximized") is False
 
 
+def test_editor_window_geometry_roundtrip(app_state):
+    state = app_state.AppState()
+    state.update_settings(
+        {"editor_window_width": 1400, "editor_window_height": 900, "editor_window_maximized": True}
+    )
+    fresh = app_state.AppState()
+    assert fresh.get_setting("editor_window_width") == 1400
+    assert fresh.get_setting("editor_window_height") == 900
+    assert fresh.get_setting("editor_window_maximized") is True
+
+
+def test_editor_window_geometry_defaults(app_state):
+    state = app_state.AppState()
+    assert state.get_setting("editor_window_width") == 1000
+    assert state.get_setting("editor_window_height") == 700
+    assert state.get_setting("editor_window_maximized") is False
+
+
 def test_clamp_window_size_fits_unchanged():
     assert clamp_window_size(1280, 800, [(1920, 1080)]) == (1280, 800)
 

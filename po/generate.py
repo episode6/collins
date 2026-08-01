@@ -297,30 +297,25 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "{name} changed on disk.": "A(z) „{name}” megváltozott a lemezen.",
         "Reload": "Újratöltés",
         "Couldn't reload {name}: {message}": "A(z) „{name}” nem tölthető újra: {message}",
-        "Close {name} without saving?": "Bezárod a(z) „{name}” fájlt mentés nélkül?",
-        "Changes since the last save will be lost.":
-            "Az utolsó mentés óta végzett módosítások elvesznek.",
-        "Discard Changes": "Módosítások elvetése",
+        "Save Changes?": "Mentsük a módosításokat?",
+        "Don't Save": "Ne mentsd",
+        "“{name}” contains unsaved changes. Changes which are not saved will be permanently lost.":
+            "A(z) „{name}” mentetlen módosításokat tartalmaz. A nem mentett "
+            "módosítások véglegesen elvesznek.",
+        "{n} files contain unsaved changes. Changes which are not saved will be permanently lost.":
+            "{n} fájl mentetlen módosításokat tartalmaz. A nem mentett "
+            "módosítások véglegesen elvesznek.",
         "Find in file…": "Keresés a fájlban…",
         "Save (Ctrl+S)": "Mentés (Ctrl+S)",
         "Plain Text": "Egyszerű szöveg",
         "Show editor panel": "Szerkesztőpanel megjelenítése",
         "Hide editor panel": "Szerkesztőpanel elrejtése",
+        "Move editor to its own window": "Szerkesztő áthelyezése saját ablakba",
+        "Bring editor back into this tab": "Szerkesztő visszahozása erre a lapra",
+        "Move editor back into its tab": "Szerkesztő visszahelyezése a lapjára",
         "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins":
             "A szerkesztő nem érhető el — telepítsd a GtkSourceView 5-öt "
             "(gir1.2-gtksource-5), majd indítsd újra a Collinst",
-        "Close window with unsaved editor changes?":
-            "Bezárod az ablakot mentetlen szerkesztői módosításokkal?",
-        "Unsaved changes in open editors will be lost.":
-            "A nyitott szerkesztőkben lévő mentetlen módosítások elvesznek.",
-        "{n} unsaved editor file(s) will also be lost.":
-            "{n} mentetlen szerkesztői fájl is elvész.",
-        "Close Window": "Ablak bezárása",
-        "Close tab with unsaved changes?": "Bezárod a lapot mentetlen módosításokkal?",
-        "This tab's editor has unsaved changes that will be lost.":
-            "Ennek a lapnak a szerkesztőjében mentetlen módosítások vannak, amelyek elvesznek.",
-        "This tab's editor also has {n} unsaved file(s) that will be lost.":
-            "Ennek a lapnak a szerkesztőjében {n} mentetlen fájl is van, amelyek szintén elvesznek.",
         "Editor": "Szerkesztő",
         "Follow app theme": "Alkalmazás témájának követése",
         "Applies to the editor panel": "A szerkesztőpanelre vonatkozik",
@@ -614,30 +609,25 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Reload": "Neu laden",
         "Couldn't reload {name}: {message}":
             "„{name}“ konnte nicht neu geladen werden: {message}",
-        "Close {name} without saving?": "„{name}“ ohne Speichern schließen?",
-        "Changes since the last save will be lost.":
-            "Änderungen seit dem letzten Speichern gehen verloren.",
-        "Discard Changes": "Änderungen verwerfen",
+        "Save Changes?": "Änderungen speichern?",
+        "Don't Save": "Nicht speichern",
+        "“{name}” contains unsaved changes. Changes which are not saved will be permanently lost.":
+            "„{name}“ enthält ungespeicherte Änderungen. Nicht gespeicherte "
+            "Änderungen gehen dauerhaft verloren.",
+        "{n} files contain unsaved changes. Changes which are not saved will be permanently lost.":
+            "{n} Dateien enthalten ungespeicherte Änderungen. Nicht gespeicherte "
+            "Änderungen gehen dauerhaft verloren.",
         "Find in file…": "In Datei suchen…",
         "Save (Ctrl+S)": "Speichern (Strg+S)",
         "Plain Text": "Reiner Text",
         "Show editor panel": "Editor-Panel anzeigen",
         "Hide editor panel": "Editor-Panel ausblenden",
+        "Move editor to its own window": "Editor in eigenes Fenster verschieben",
+        "Bring editor back into this tab": "Editor in diesen Tab zurückholen",
+        "Move editor back into its tab": "Editor zurück in seinen Tab verschieben",
         "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins":
             "Editor nicht verfügbar — installiere GtkSourceView 5 "
             "(gir1.2-gtksource-5) und starte Collins neu",
-        "Close window with unsaved editor changes?":
-            "Fenster mit ungespeicherten Editor-Änderungen schließen?",
-        "Unsaved changes in open editors will be lost.":
-            "Ungespeicherte Änderungen in geöffneten Editoren gehen verloren.",
-        "{n} unsaved editor file(s) will also be lost.":
-            "{n} ungespeicherte Editor-Datei(en) gehen ebenfalls verloren.",
-        "Close Window": "Fenster schließen",
-        "Close tab with unsaved changes?": "Tab mit ungespeicherten Änderungen schließen?",
-        "This tab's editor has unsaved changes that will be lost.":
-            "Der Editor dieses Tabs hat ungespeicherte Änderungen, die verloren gehen.",
-        "This tab's editor also has {n} unsaved file(s) that will be lost.":
-            "Der Editor dieses Tabs hat außerdem {n} ungespeicherte Datei(en), die verloren gehen.",
         "Editor": "Editor",
         "Follow app theme": "Dem App-Thema folgen",
         "Applies to the editor panel": "Gilt für das Editor-Panel",
@@ -929,30 +919,25 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "{name} changed on disk.": "«{name}» cambió en el disco.",
         "Reload": "Recargar",
         "Couldn't reload {name}: {message}": "No se pudo recargar «{name}»: {message}",
-        "Close {name} without saving?": "¿Cerrar «{name}» sin guardar?",
-        "Changes since the last save will be lost.":
-            "Se perderán los cambios desde el último guardado.",
-        "Discard Changes": "Descartar cambios",
+        "Save Changes?": "¿Guardar los cambios?",
+        "Don't Save": "No guardar",
+        "“{name}” contains unsaved changes. Changes which are not saved will be permanently lost.":
+            "«{name}» contiene cambios sin guardar. Los cambios que no se "
+            "guarden se perderán permanentemente.",
+        "{n} files contain unsaved changes. Changes which are not saved will be permanently lost.":
+            "{n} archivos contienen cambios sin guardar. Los cambios que no se "
+            "guarden se perderán permanentemente.",
         "Find in file…": "Buscar en el archivo…",
         "Save (Ctrl+S)": "Guardar (Ctrl+S)",
         "Plain Text": "Texto sin formato",
         "Show editor panel": "Mostrar el panel del editor",
         "Hide editor panel": "Ocultar el panel del editor",
+        "Move editor to its own window": "Mover el editor a su propia ventana",
+        "Bring editor back into this tab": "Devolver el editor a esta pestaña",
+        "Move editor back into its tab": "Devolver el editor a su pestaña",
         "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins":
             "Editor no disponible — instala GtkSourceView 5 "
             "(gir1.2-gtksource-5) y reinicia Collins",
-        "Close window with unsaved editor changes?":
-            "¿Cerrar la ventana con cambios del editor sin guardar?",
-        "Unsaved changes in open editors will be lost.":
-            "Se perderán los cambios sin guardar en los editores abiertos.",
-        "{n} unsaved editor file(s) will also be lost.":
-            "También se perderán {n} archivo(s) del editor sin guardar.",
-        "Close Window": "Cerrar ventana",
-        "Close tab with unsaved changes?": "¿Cerrar la pestaña con cambios sin guardar?",
-        "This tab's editor has unsaved changes that will be lost.":
-            "El editor de esta pestaña tiene cambios sin guardar que se perderán.",
-        "This tab's editor also has {n} unsaved file(s) that will be lost.":
-            "El editor de esta pestaña también tiene {n} archivo(s) sin guardar que se perderán.",
         "Editor": "Editor",
         "Follow app theme": "Seguir el tema de la aplicación",
         "Applies to the editor panel": "Se aplica al panel del editor",
@@ -1246,30 +1231,25 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "{name} changed on disk.": "« {name} » a changé sur le disque.",
         "Reload": "Recharger",
         "Couldn't reload {name}: {message}": "Impossible de recharger « {name} » : {message}",
-        "Close {name} without saving?": "Fermer « {name} » sans enregistrer ?",
-        "Changes since the last save will be lost.":
-            "Les modifications depuis le dernier enregistrement seront perdues.",
-        "Discard Changes": "Ignorer les modifications",
+        "Save Changes?": "Enregistrer les modifications ?",
+        "Don't Save": "Ne pas enregistrer",
+        "“{name}” contains unsaved changes. Changes which are not saved will be permanently lost.":
+            "« {name} » contient des modifications non enregistrées. Les "
+            "modifications non enregistrées seront définitivement perdues.",
+        "{n} files contain unsaved changes. Changes which are not saved will be permanently lost.":
+            "{n} fichiers contiennent des modifications non enregistrées. Les "
+            "modifications non enregistrées seront définitivement perdues.",
         "Find in file…": "Rechercher dans le fichier…",
         "Save (Ctrl+S)": "Enregistrer (Ctrl+S)",
         "Plain Text": "Texte brut",
         "Show editor panel": "Afficher le panneau de l’éditeur",
         "Hide editor panel": "Masquer le panneau de l’éditeur",
+        "Move editor to its own window": "Déplacer l’éditeur dans sa propre fenêtre",
+        "Bring editor back into this tab": "Ramener l’éditeur dans cet onglet",
+        "Move editor back into its tab": "Ramener l’éditeur dans son onglet",
         "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins":
             "Éditeur indisponible — installez GtkSourceView 5 "
             "(gir1.2-gtksource-5) et redémarrez Collins",
-        "Close window with unsaved editor changes?":
-            "Fermer la fenêtre avec des modifications de l’éditeur non enregistrées ?",
-        "Unsaved changes in open editors will be lost.":
-            "Les modifications non enregistrées dans les éditeurs ouverts seront perdues.",
-        "{n} unsaved editor file(s) will also be lost.":
-            "{n} fichier(s) de l’éditeur non enregistré(s) seront également perdus.",
-        "Close Window": "Fermer la fenêtre",
-        "Close tab with unsaved changes?": "Fermer l’onglet avec des modifications non enregistrées ?",
-        "This tab's editor has unsaved changes that will be lost.":
-            "L’éditeur de cet onglet a des modifications non enregistrées qui seront perdues.",
-        "This tab's editor also has {n} unsaved file(s) that will be lost.":
-            "L’éditeur de cet onglet a aussi {n} fichier(s) non enregistré(s) qui seront perdus.",
         "Editor": "Éditeur",
         "Follow app theme": "Suivre le thème de l’application",
         "Applies to the editor panel": "S’applique au panneau de l’éditeur",

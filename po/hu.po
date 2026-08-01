@@ -737,14 +737,17 @@ msgstr "Újratöltés"
 msgid "Couldn't reload {name}: {message}"
 msgstr "A(z) „{name}” nem tölthető újra: {message}"
 
-msgid "Close {name} without saving?"
-msgstr "Bezárod a(z) „{name}” fájlt mentés nélkül?"
+msgid "Save Changes?"
+msgstr "Mentsük a módosításokat?"
 
-msgid "Changes since the last save will be lost."
-msgstr "Az utolsó mentés óta végzett módosítások elvesznek."
+msgid "Don't Save"
+msgstr "Ne mentsd"
 
-msgid "Discard Changes"
-msgstr "Módosítások elvetése"
+msgid "“{name}” contains unsaved changes. Changes which are not saved will be permanently lost."
+msgstr "A(z) „{name}” mentetlen módosításokat tartalmaz. A nem mentett módosítások véglegesen elvesznek."
+
+msgid "{n} files contain unsaved changes. Changes which are not saved will be permanently lost."
+msgstr "{n} fájl mentetlen módosításokat tartalmaz. A nem mentett módosítások véglegesen elvesznek."
 
 msgid "Find in file…"
 msgstr "Keresés a fájlban…"
@@ -761,29 +764,17 @@ msgstr "Szerkesztőpanel megjelenítése"
 msgid "Hide editor panel"
 msgstr "Szerkesztőpanel elrejtése"
 
+msgid "Move editor to its own window"
+msgstr "Szerkesztő áthelyezése saját ablakba"
+
+msgid "Bring editor back into this tab"
+msgstr "Szerkesztő visszahozása erre a lapra"
+
+msgid "Move editor back into its tab"
+msgstr "Szerkesztő visszahelyezése a lapjára"
+
 msgid "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins"
 msgstr "A szerkesztő nem érhető el — telepítsd a GtkSourceView 5-öt (gir1.2-gtksource-5), majd indítsd újra a Collinst"
-
-msgid "Close window with unsaved editor changes?"
-msgstr "Bezárod az ablakot mentetlen szerkesztői módosításokkal?"
-
-msgid "Unsaved changes in open editors will be lost."
-msgstr "A nyitott szerkesztőkben lévő mentetlen módosítások elvesznek."
-
-msgid "{n} unsaved editor file(s) will also be lost."
-msgstr "{n} mentetlen szerkesztői fájl is elvész."
-
-msgid "Close Window"
-msgstr "Ablak bezárása"
-
-msgid "Close tab with unsaved changes?"
-msgstr "Bezárod a lapot mentetlen módosításokkal?"
-
-msgid "This tab's editor has unsaved changes that will be lost."
-msgstr "Ennek a lapnak a szerkesztőjében mentetlen módosítások vannak, amelyek elvesznek."
-
-msgid "This tab's editor also has {n} unsaved file(s) that will be lost."
-msgstr "Ennek a lapnak a szerkesztőjében {n} mentetlen fájl is van, amelyek szintén elvesznek."
 
 msgid "Editor"
 msgstr "Szerkesztő"

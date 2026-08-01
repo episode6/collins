@@ -1180,17 +1180,26 @@ msgstr ""
 msgid "Couldn't reload {name}: {message}"
 msgstr ""
 
-#: collins/editor.py:378
+#: collins/dialogs.py:180
+msgid "Save Changes?"
+msgstr ""
+
+#: collins/dialogs.py:182
+msgid "Don't Save"
+msgstr ""
+
+#: collins/editor.py:432 collins/window.py:610
 #, python-brace-format
-msgid "Close {name} without saving?"
+msgid ""
+"“{name}” contains unsaved changes. Changes which are not saved will be "
+"permanently lost."
 msgstr ""
 
-#: collins/editor.py:379
-msgid "Changes since the last save will be lost."
-msgstr ""
-
-#: collins/editor.py:380
-msgid "Discard Changes"
+#: collins/window.py:615
+#, python-brace-format
+msgid ""
+"{n} files contain unsaved changes. Changes which are not saved will be "
+"permanently lost."
 msgstr ""
 
 #: collins/editor.py:402
@@ -1213,40 +1222,22 @@ msgstr ""
 msgid "Hide editor panel"
 msgstr ""
 
+#: collins/editor.py:538
+msgid "Move editor to its own window"
+msgstr ""
+
+#: collins/terminal.py:1699
+msgid "Bring editor back into this tab"
+msgstr ""
+
+#: collins/editorwindow.py:73
+msgid "Move editor back into its tab"
+msgstr ""
+
 #: collins/terminal.py:905
 msgid ""
 "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and "
 "restart Collins"
-msgstr ""
-
-#: collins/window.py:540
-msgid "Close window with unsaved editor changes?"
-msgstr ""
-
-#: collins/window.py:541
-msgid "Unsaved changes in open editors will be lost."
-msgstr ""
-
-#: collins/window.py:544
-#, python-brace-format
-msgid "{n} unsaved editor file(s) will also be lost."
-msgstr ""
-
-#: collins/window.py:550
-msgid "Close Window"
-msgstr ""
-
-#: collins/window.py:1710
-msgid "Close tab with unsaved changes?"
-msgstr ""
-
-#: collins/window.py:1711
-msgid "This tab's editor has unsaved changes that will be lost."
-msgstr ""
-
-#: collins/window.py:1714
-#, python-brace-format
-msgid "This tab's editor also has {n} unsaved file(s) that will be lost."
 msgstr ""
 
 #: collins/prefs.py:302
