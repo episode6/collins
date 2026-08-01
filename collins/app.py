@@ -55,10 +55,10 @@ tabbar tab:not(:checked) label { opacity: 0.6; }
 }
 
 /* every session row is the same outlined card with a left guide line; what a
-   running session adds is a fill, and a status color on that line. The border
-   box is identical in every status, so a row never shifts or resizes as its
-   status changes; the selected tab's row is the one exception, and it changes
-   only horizontally (see .active-tab below).
+   running session adds is a fill, and (for a detached one) a status color on
+   that line. The border box is identical in every status, so a row never
+   shifts or resizes as its status changes; the selected tab's row is the one
+   exception, and it changes only horizontally (see .active-tab below).
    The left indent is a widget margin set in sidebar.py, not a CSS margin
    here: it tracks the configurable project-icon size, so the card always
    starts just past the icon of the project header above it. */
@@ -96,27 +96,20 @@ row.session-child:hover {
   border-color: alpha(currentColor, 0.3);
 }
 /* sessions running in an open tab share one fill, so live work stands out
-   from the archive of past sessions as a group; only the guide line carries
-   the status color. Detached (/bg) sessions get the line without the fill:
-   they are running, but there is no tab to return to, and the fill is what
-   marks the sessions there is one for. These rules must stay below the plain
-   :hover one, whose border-color shorthand would otherwise repaint the guide
-   line, and above the active-tab rules, which take over the fill for the one
-   session the selected tab is showing. */
-row.session-child.running,
-row.session-child.running-attention {
+   from the archive of past sessions as a group; their guide line stays the
+   neutral one every row has. Detached (/bg) sessions are the other way round:
+   a colored line and no fill. They are running, but there is no tab to return
+   to, and the fill is what marks the sessions there is one for. These rules
+   must stay below the plain :hover one, whose border-color shorthand would
+   otherwise repaint the guide line, and above the active-tab rules, which take
+   over the fill for the one session the selected tab is showing. */
+row.session-child.running {
   background-color: alpha(currentColor, 0.13);
 }
-row.session-child.running:hover,
-row.session-child.running-attention:hover {
+row.session-child.running:hover {
   background-color: alpha(currentColor, 0.18);
 }
-row.session-child.running { border-left-color: #2ec27e; }
-/* a tab with output the user hasn't looked at yet: the line goes neutral
-   rather than to a second status color, so unread output is a stepping-back
-   of the green, not another thing shouting for attention */
-row.session-child.running-attention { border-left-color: alpha(currentColor, 0.45); }
-/* running detached (/bg): the yellow the old status dot used */
+/* running detached (/bg): the one status the guide line still speaks for */
 row.session-child.detached { border-left-color: #e5a50a; }
 /* the session shown in the currently selected tab: the fill says which one it
    is, and the card runs out to the panel's right edge (square-cornered, with

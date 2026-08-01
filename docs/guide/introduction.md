@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-27. Full change history: git log for this file.
+fork. Last modified: 2026-07-31. Full change history: git log for this file.
 -->
 
 # What is Collins?
@@ -50,8 +50,8 @@ with respect to your agents' data — names, favorites, and all app state live i
   `a3b2152e…` to “JWT auth” yourself, star your daily drivers, add an emoji to
   a tab.
 - **Work in parallel.** Open several sessions as tabs, each with its own
-  secondary shell panel. Status dots and desktop notifications tell you when a
-  background session has finished — or background a session (`/bg`) and
+  secondary shell panel. Sidebar badges and desktop notifications tell you when
+  a background session has finished — or background a session (`/bg`) and
   re-attach later.
 - **Stay oriented.** Search the sidebar, search a terminal's scrollback, peek
   at a session's recent messages before resuming it, and keep an eye on your
