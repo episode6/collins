@@ -451,7 +451,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._quit_asking = False
             self._quitting = True
             # The window-level dialog already covered every tab: don't let
-            # each one ask again. Agents still get their graceful /exit
+            # each one ask again. Agents still get their graceful exit
             # (or /bg, if the user chose to background them).
             pages = [self.tab_view.get_nth_page(i) for i in range(self.tab_view.get_n_pages())]
             for page in pages:
@@ -1553,7 +1553,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _graceful_close(self, page: Adw.TabPage) -> None:
-        """Ask the agent to exit cleanly (e.g. Claude's /exit) — or to detach
+        """Ask the agent to exit cleanly (e.g. Claude's Ctrl+C Ctrl+C) — or to detach
         (e.g. /bg) if the user chose to background it — then close once the
         shell returns. Falls back to a force-close after a timeout. Agents with
         no clean-exit command are force-closed directly."""
@@ -1589,7 +1589,10 @@ class MainWindow(Adw.ApplicationWindow):
             self._close_confirmed(page)
             return
         self._closing_pages[page] = 0
-        # Enter in a raw-mode TUI is carriage return, not newline.
+        # Raw keystrokes, exactly as the provider spells them: a control byte
+        # for Claude's Ctrl+C Ctrl+C, and for a typed command like /bg the
+        # Enter that submits it — carriage return in a raw-mode TUI, not
+        # newline.
         tab.feed_child_text(exit_text)
         GLib.timeout_add(300, self._poll_graceful, page, tab)
 
@@ -1609,7 +1612,7 @@ class MainWindow(Adw.ApplicationWindow):
         Either way the CLI may keep the terminal after /bg (parked on its
         agent-list screen), which would hang the pending close until the
         force-close safety net — so once the session is confirmed running
-        detached, the CLI gets an /exit nudge if it still holds the terminal."""
+        detached, the CLI gets an exit nudge if it still holds the terminal."""
         old_id = tab.session_id
         provider = tab.provider
         if not old_id or tab.fork:
@@ -1713,11 +1716,11 @@ class MainWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _nudge_cli_exit(self, tab: TerminalTab) -> bool:
-        """The CLI was asked to leave (via /exit or /bg) yet still owns the
-        tab's terminal — typically parked on its session-list screen. Feed
-        /exit to dismiss it so the pending close can finish. A no-op when
-        the CLI already exited (then the text would only reach the shell,
-        which the close is about to end anyway)."""
+        """The CLI was asked to leave (by its exit keystroke or /bg) yet still
+        owns the tab's terminal — typically parked on its session-list screen.
+        Feed the exit keystroke to dismiss it so the pending close can finish.
+        A no-op when the CLI already exited (then the keystroke would only
+        reach the shell, which the close is about to end anyway)."""
         if tab.get_root() is not None and tab.has_running_command():
             exit_text = tab.provider.graceful_exit()
             if exit_text:
@@ -1731,13 +1734,15 @@ class MainWindow(Adw.ApplicationWindow):
             tab.feed_child_text("exit\r")  # close the shell → child-exited closes the tab
             return GLib.SOURCE_REMOVE
         self._closing_pages[page] += 1
-        # /exit and /bg sometimes drop the CLI to its session-list screen
-        # instead of exiting (seen with tabs attached to a detached session),
-        # which would hang the close until the force-close below. A CLI still
+        # One ask doesn't always land. A mid-turn agent spends the first
+        # Ctrl+C Ctrl+C interrupting itself and clearing its input box rather
+        # than exiting, and /bg sometimes drops the CLI to its session-list
+        # screen instead (seen with tabs attached to a detached session) —
+        # either would hang the close until the force-close below. A CLI still
         # owning the terminal this long after being asked to leave is the
-        # tell: nudge it with /exit again. Safe for a merely-slow exit too —
-        # the extra input queues behind the pending command and is discarded
-        # when the CLI exits.
+        # tell: ask again. Safe for a merely-slow exit too — the extra input
+        # queues behind the pending command and is discarded when the CLI
+        # exits.
         if self._closing_pages[page] in (8, 24):  # ~2.4s / ~7.2s
             self._nudge_cli_exit(tab)
         if self._closing_pages[page] >= 40:  # ~12s safety net
@@ -2132,7 +2137,7 @@ class MainWindow(Adw.ApplicationWindow):
             agent_busy = tab.has_running_command()
             panel_busy = tab.panel_has_running_command()
             if page in self._closing_pages and agent_busy:
-                # A graceful /exit is already in flight; keep the tab open
+                # A graceful exit is already in flight; keep the tab open
                 # until the shell drains.
                 view.close_page_finish(page, False)
                 return True
@@ -2143,7 +2148,7 @@ class MainWindow(Adw.ApplicationWindow):
                 if page not in self._close_asking:
                     self._ask_tab_close(page, tab)
                 return True
-            if agent_busy:  # confirmed: start a graceful /exit in the background
+            if agent_busy:  # confirmed: start a graceful exit in the background
                 self._graceful_close(page)
                 view.close_page_finish(page, False)  # keep the tab until it exits cleanly
                 return True
