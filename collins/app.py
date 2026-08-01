@@ -135,6 +135,18 @@ row.session-child.active-tab > box {
   margin-right: 17px;
 }
 
+/* The session list's scrollbar rides the panel's right edge. Stock Adwaita
+   insets its trough from that edge (4px as the thin overlay indicator, 8px
+   once the pointer nears it and it expands), which leaves the bar floating in
+   the gutter beside the row cards, reading as one more column of the list.
+   Dropping the margin puts it against the border, where it reads as chrome
+   belonging to the panel. The trough keeps its own width in both states, so
+   only its position moves, and being an overlay scrollbar it takes no width
+   from the list either way: no row reflows. */
+.sidebar-scroll > scrollbar.vertical > range > trough {
+  margin-right: 0;
+}
+
 /* interactive prompt card overlaid on the terminal */
 .chat-card {
   background-color: @window_bg_color;
