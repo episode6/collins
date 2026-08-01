@@ -2245,9 +2245,21 @@ class MainWindow(Adw.ApplicationWindow):
         Gtk.FileLauncher.new(Gio.File.new_for_path(folder)).launch(self, None, None)
 
     def _on_open_folder_terminal(self, _action, param: GLib.Variant) -> None:
+        """Open the folder in the desktop's own terminal emulator.
+
+        The sidebar only offers this when one was found; the tab footer's
+        terminal button offers it on every right-click, so a desktop with no
+        terminal at all says so rather than swallowing the click.
+        """
         info = openwith.default_terminal()
-        if info is not None:
-            footerapps.launch_app(info, param.get_string(), pass_directory=False)
+        if info is None:
+            dialogs.error_dialog(
+                self,
+                _("No terminal application found"),
+                _("Set $TERMINAL, or install a terminal emulator, to open folders here."),
+            )
+            return
+        footerapps.launch_app(info, param.get_string(), pass_directory=False)
 
     def _on_open_folder_app(self, _action, param: GLib.Variant) -> None:
         app_id, folder = param.unpack()

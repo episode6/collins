@@ -410,6 +410,15 @@ msgstr "Megnyitás a fájlkezelőben"
 msgid "Open in Terminal"
 msgstr "Megnyitás a terminálban"
 
+msgid "Right-click to open this folder in your terminal"
+msgstr "Jobb kattintással megnyithatod ezt a mappát a termináljában"
+
+msgid "No terminal application found"
+msgstr "Nem található terminálalkalmazás"
+
+msgid "Set $TERMINAL, or install a terminal emulator, to open folders here."
+msgstr "Állítsd be a $TERMINAL változót, vagy telepíts egy terminálemulátort, hogy itt nyithass meg mappákat."
+
 msgid "Move transcript to trash…"
 msgstr "Átirat kukába helyezése…"
 

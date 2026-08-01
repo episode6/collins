@@ -410,6 +410,15 @@ msgstr "Ouvrir dans le gestionnaire de fichiers"
 msgid "Open in Terminal"
 msgstr "Ouvrir dans le terminal"
 
+msgid "Right-click to open this folder in your terminal"
+msgstr "Clic droit pour ouvrir ce dossier dans votre terminal"
+
+msgid "No terminal application found"
+msgstr "Aucune application de terminal trouvée"
+
+msgid "Set $TERMINAL, or install a terminal emulator, to open folders here."
+msgstr "Définissez $TERMINAL ou installez un émulateur de terminal pour ouvrir des dossiers ici."
+
 msgid "Move transcript to trash…"
 msgstr "Mettre la transcription à la corbeille…"
 

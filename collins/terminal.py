@@ -802,8 +802,19 @@ class TerminalTab(Gtk.Box):
         # Only the selected tab is visible (and thus clickable), so routing
         # through the window's actions still targets the right tab.
         toggle_btn = Gtk.Button(icon_name="utilities-terminal-symbolic")
-        toggle_btn.set_tooltip_text(_("Show/hide terminal panel (Ctrl+J)"))
+        toggle_btn.set_tooltip_text(
+            _("Show/hide terminal panel (Ctrl+J)")
+            + "\n"
+            + _("Right-click to open this folder in your terminal")
+        )
         toggle_btn.set_action_name("win.toggle-panel")
+        # The button already means "a shell here"; a right-click asks for the
+        # same thing outside Collins, in the terminal the desktop nominates —
+        # for the times the panel isn't enough (a full-screen TUI, a second
+        # monitor). Its own gesture, so the panel never toggles on the way.
+        open_external = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        open_external.connect("pressed", self._on_open_external_terminal)
+        toggle_btn.add_controller(open_external)
         self._swap_panel_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
         self._swap_panel_btn.set_tooltip_text(_("Move terminal panel bottom/right"))
         self._swap_panel_btn.set_action_name("win.swap-panel")
@@ -1603,6 +1614,20 @@ class TerminalTab(Gtk.Box):
 
     def _on_footer_app_clicked(self, _btn, info) -> None:
         footerapps.launch_app(info, self.current_agent_cwd())
+
+    def _on_open_external_terminal(self, gesture: Gtk.GestureClick, *_args) -> None:
+        """Right-click on the panel toggle: open the agent's *current* working
+        directory (worktree-aware, like the panel itself) in the desktop's own
+        terminal.
+
+        Routed through the window's action, so the folder opens the same way it
+        does from the sidebar's Open in Terminal — the desktop's pick, resolved
+        at click time in case it has changed since the tab opened.
+        """
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        cwd = self.current_agent_cwd()
+        if cwd:
+            self.activate_action("win.open-folder-terminal", GLib.Variant("s", cwd))
 
     def feed_message(self, text: str) -> None:
         self.terminal.feed(f"\r\n\x1b[1;33m[session manager]\x1b[0m {text}\r\n".encode())
