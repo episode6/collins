@@ -138,8 +138,11 @@ agents' own session files are never modified.
   No `Ctrl+Shift` finger-twisting just because it's a terminal; the classic
   `Ctrl+Shift+C` / `Ctrl+Shift+V` always work, and the mode can be toggled
   in Preferences.
-- Closing a tab asks the agent to **exit cleanly** (Claude Code's `/exit`) in
-  the background first, rather than terminating it. For agents that support
+- Closing a tab asks the agent to **exit cleanly** (Claude Code's
+  `Ctrl+C` `Ctrl+C`) in the background first, rather than terminating it.
+  The quit keystroke rather than a typed `/exit`, because it works from
+  whatever the agent happens to be showing — a permission prompt, the trust
+  dialog, its session list — and not just from an empty prompt. For agents that support
   it, the close dialog also offers to **background the session** instead
   (Claude Code's `/bg`) — the agent keeps running detached, and reopening the
   session re-attaches to it. The same option appears when closing the whole

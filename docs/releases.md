@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-27. Full change history: git log for this file.
+fork. Last modified: 2026-07-31. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -17,7 +17,7 @@ downloads of each version, see the
 - ✅ **Core** — sidebar of all sessions, embedded terminal tabs, resume/fork
 - ✅ **Organization** — favorites, custom names, auto-generated titles, project groups (reorderable, hideable), search, quick switcher
 - ✅ **Insight** — session details, transcript peek, MCP servers & usage, waiting / interrupted badges, Claude subscription usage panel
-- ✅ **Workflow** — terminal panel per tab, session backgrounding (`/bg`) & re-attach, graceful `/exit` close, per-tab cwd + git-branch footer, idle notifications, Export as Markdown, tab emoji
+- ✅ **Workflow** — terminal panel per tab, session backgrounding (`/bg`) & re-attach, graceful `Ctrl+C` close, per-tab cwd + git-branch footer, idle notifications, Export as Markdown, tab emoji
 - ✅ **Theming** — light/dark plus selectable terminal color palettes
 - ✅ **Localization** — English, Hungarian, German, Spanish, French
 - ✅ **Multi-window**

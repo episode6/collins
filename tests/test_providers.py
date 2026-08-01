@@ -157,7 +157,10 @@ def test_get_provider_default():
 
 
 def test_graceful_exit_text():
-    assert ClaudeProvider().graceful_exit() == "/exit\r"
+    # Ctrl+C twice, in a single feed: the CLI's "Press Ctrl-C again to exit"
+    # window closes after ~2s, so the pair must not be split across writes.
+    assert ClaudeProvider().graceful_exit() == "\x03\x03"
+    assert Provider().graceful_exit() is None  # no clean exit → force-close
 
 
 def test_background_exit_text():

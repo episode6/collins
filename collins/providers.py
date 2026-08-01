@@ -180,7 +180,9 @@ class Provider:
         return None
 
     def graceful_exit(self) -> str | None:
-        """Text to feed the agent to make it exit cleanly, or None to force-close."""
+        """Keystrokes to feed the agent to make it exit cleanly, or None to
+        force-close. Fed repeatedly while a close is pending, so whatever this
+        returns has to be safe to send more than once."""
         return None
 
     def background_exit(self) -> str | None:
@@ -235,7 +237,21 @@ class ClaudeProvider(Provider):
         return sessions.CLAUDE_PROJECTS_DIR
 
     def graceful_exit(self) -> str | None:
-        return "/exit\r"
+        # Ctrl+C twice — the CLI's own quit keystroke, and the one exit that
+        # doesn't depend on which screen it is showing. A typed /exit only
+        # means anything at the prompt: on the trust dialog, a permission
+        # prompt or the session list it is just text, either garbling an
+        # answer or leaving the CLI parked there until the force-close.
+        #
+        # Both bytes go in one write on purpose. The "Press Ctrl-C again to
+        # exit" window shuts after ~2s, and a lone Ctrl+C only re-arms it, so
+        # a pair split across two feeds would never land the exit.
+        #
+        # Mid-turn the first pair spends itself interrupting the agent and
+        # clearing its input box rather than exiting; the caller's nudges
+        # re-feed the pair, and the next one exits (measured: ~2.5s, well
+        # inside _poll_graceful's window).
+        return "\x03\x03"
 
     def background_exit(self) -> str | None:
         return "/bg\r"
