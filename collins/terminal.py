@@ -1102,6 +1102,22 @@ class TerminalTab(Gtk.Box):
         text = line[0] if isinstance(line, tuple) else line
         return self.provider.takes_prompt(text or "", column)
 
+    def worktree_exit_prompt_keystrokes(self) -> str | None:
+        """Keystrokes that accept the agent's "leaving a worktree" dialog if
+        it's showing right now, or None if it isn't (see
+        Provider.worktree_exit_prompt). The whole visible screen, not just
+        the cursor's line — this dialog is a multi-line menu, not something
+        drawn at the input prompt."""
+        if self._child_pid is None:
+            return None
+        _, cursor_row = self.terminal.get_cursor_position()
+        top_row = max(0, cursor_row - self.terminal.get_row_count() + 1)
+        screen = self.terminal.get_text_range_format(
+            Vte.Format.TEXT, top_row, 0, cursor_row, self.terminal.get_column_count()
+        )
+        text = screen[0] if isinstance(screen, tuple) else screen
+        return self.provider.worktree_exit_prompt(text or "")
+
     # -- prompt card -------------------------------------------------------
 
     def set_transcript_path(self, jsonl_path: str | Path | None) -> None:

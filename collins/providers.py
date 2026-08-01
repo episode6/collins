@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -36,6 +36,19 @@ from .titles import scratch_project_dirname
 # suggestion it shows while nothing has been typed. See takes_prompt.
 _PROMPT_MARK = "❯ "
 _PROMPT_HINT = 'Try "'
+
+# Claude's own confirmation before it will leave a worktree session (with or
+# without a paired tmux session): "Keep worktree[...]" is always the first
+# item and the dialog's default selection, "Remove worktree[...]" the last.
+# The graceful-close flow that reads this never sends an arrow key, so the
+# selection marker (the same ❯ the trust and permission dialogs draw) sitting
+# right before "Keep worktree" is what's actually being detected — plain
+# substrings would also match a "Keep worktree" mentioned in scrollback
+# further up the screen, from an earlier turn that happened to discuss the
+# dialog. Requiring both close together is what `takes_prompt` does for the
+# input prompt's own marker. See ClaudeProvider.worktree_exit_prompt.
+_WORKTREE_EXIT_SELECTED_RE = re.compile(r"❯\s*Keep worktree\b")
+_WORKTREE_EXIT_OTHER_OPTION = "Remove worktree"
 
 
 @dataclass(frozen=True)
@@ -220,6 +233,16 @@ class Provider:
         screen is exactly the one worth not typing into."""
         return False
 
+    def worktree_exit_prompt(self, screen_text: str) -> str | None:
+        """Keystrokes that accept this screen's "leaving a worktree" dialog
+        if it's showing right now, or None if it isn't.
+
+        Only meant for the graceful-close flow, which never touches the
+        arrow keys — so whatever this returns has to assume the dialog's own
+        default is still selected, not pick an option itself. Base agents
+        have no such dialog to detect."""
+        return None
+
     def parse_details(self, path: Path) -> SessionDetails:
         raise NotImplementedError
 
@@ -284,6 +307,25 @@ class ClaudeProvider(Provider):
             return False
         rest = cursor_line[len(_PROMPT_MARK) :].strip()
         return not rest or rest.startswith(_PROMPT_HINT)
+
+    def worktree_exit_prompt(self, screen_text: str) -> str | None:
+        """Claude's confirmation before leaving a worktree session, read off
+        the same live screen `takes_prompt` reads — this dialog, like the
+        trust and permission dialogs, owns the terminal without writing
+        anything to the transcript, so the screen is the only place to see
+        it. Enter accepts whichever item is highlighted; the graceful-close
+        flow that calls this never sends an arrow key, so that's always
+        "Keep worktree", the dialog's own default and first item — the
+        selection marker sitting right before it is what confirms this is
+        the dialog actually showing, not just its text mentioned somewhere
+        higher up the screen. "Remove worktree" is always the dialog's other
+        option, so requiring it too costs nothing and rules out an unrelated
+        screen that merely puts something else after a bare ❯."""
+        if not _WORKTREE_EXIT_SELECTED_RE.search(screen_text):
+            return None
+        if _WORKTREE_EXIT_OTHER_OPTION not in screen_text:
+            return None
+        return "\r"
 
     def resume_command(self, session_id: str, fork: bool = False) -> str | None:
         # Attach-first: if the session is still running detached (e.g. after

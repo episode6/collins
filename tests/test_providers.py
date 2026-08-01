@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 import os
 import shutil
@@ -233,3 +233,66 @@ def test_claudes_other_prompts_are_not_the_input():
 def test_base_providers_never_claim_a_free_prompt():
     """An agent whose screen we can't read is the one worth not typing into."""
     assert Provider().takes_prompt("❯\xa0", 2) is False
+
+
+# -- the "leaving a worktree" dialog, at graceful-close time ------------------
+
+
+def test_claude_worktree_exit_dialog_is_answered_with_enter():
+    claude = ClaudeProvider()
+    screen = (
+        "You are working in a worktree. Keep it to continue working there,\n"
+        "or remove it to clean up.\n"
+        "\n"
+        "❯ Keep worktree\n"
+        "  Remove worktree\n"
+    )
+    assert claude.worktree_exit_prompt(screen) == "\r"
+
+
+def test_claude_worktree_exit_dialog_with_tmux_variant_is_still_answered():
+    """The tmux-paired dialog swaps in three longer labels, but the first is
+    still a "Keep worktree..." default — the anchored marker still matches."""
+    claude = ClaudeProvider()
+    screen = (
+        'This session was named "refactor-auth". Keep the worktree to resume\n'
+        'it later, or remove it to clean up.\n'
+        '\n'
+        '❯ Keep worktree and tmux session\n'
+        '    Stays at /repo/.claude/worktrees/refactor-auth. '
+        'Reattach with: tmux attach -t refactor-auth\n'
+        '  Keep worktree, end tmux session\n'
+        '    Keeps worktree at /repo/.claude/worktrees/refactor-auth, '
+        'terminates tmux session.\n'
+        '  Remove worktree and tmux session\n'
+        '    All changes and commits will be lost.\n'
+    )
+    assert claude.worktree_exit_prompt(screen) == "\r"
+
+
+def test_claude_other_screens_are_not_the_worktree_dialog():
+    claude = ClaudeProvider()
+    assert claude.worktree_exit_prompt("❯\xa0fix the flaky test") is None
+    assert claude.worktree_exit_prompt("") is None
+    # Only "Keep worktree" on screen (e.g. the confirmation after answering)
+    # isn't the dialog itself — Enter there would just hit whatever's next.
+    assert claude.worktree_exit_prompt("Worktree kept. Goodbye!") is None
+
+
+def test_claude_worktree_mentions_in_scrollback_are_not_the_dialog():
+    """Both labels appearing on screen isn't enough on its own — an earlier
+    turn that happened to discuss "Keep worktree" and "Remove worktree" (e.g.
+    this very PR's own diff) must not be mistaken for the dialog actually
+    showing. Only the ❯ selection marker sitting right before the label,
+    exactly as `takes_prompt` requires for the input prompt's own marker,
+    tells the two apart."""
+    claude = ClaudeProvider()
+    screen = (
+        "❯\xa0explain what \"Keep worktree\" and \"Remove worktree\" do\n"
+        "  in the exit dialog\n"
+    )
+    assert claude.worktree_exit_prompt(screen) is None
+
+
+def test_base_providers_have_no_worktree_exit_dialog():
+    assert Provider().worktree_exit_prompt("Keep worktree\nRemove worktree") is None

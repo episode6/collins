@@ -1862,6 +1862,16 @@ class MainWindow(Adw.ApplicationWindow):
             tab.feed_child_text("exit\r")  # close the shell → child-exited closes the tab
             return GLib.SOURCE_REMOVE
         self._closing_pages[page] += 1
+        accept = tab.worktree_exit_prompt_keystrokes()
+        if accept:
+            # Ctrl+C Ctrl+C landed on Claude's own "keep or remove this
+            # worktree?" dialog rather than exiting outright. Answer it —
+            # "keep", its default and first item, since a close initiated by
+            # closing the tab is never a signal to throw the worktree away —
+            # instead of re-nudging with more Ctrl+C below, which the dialog
+            # would read as a menu keystroke, not the exit it means at the
+            # terminal prompt.
+            tab.feed_child_text(accept)
         # One ask doesn't always land. A mid-turn agent spends the first
         # Ctrl+C Ctrl+C interrupting itself and clearing its input box rather
         # than exiting, and /bg sometimes drops the CLI to its session-list
@@ -1871,7 +1881,7 @@ class MainWindow(Adw.ApplicationWindow):
         # tell: ask again. Safe for a merely-slow exit too — the extra input
         # queues behind the pending command and is discarded when the CLI
         # exits.
-        if self._closing_pages[page] in (8, 24):  # ~2.4s / ~7.2s
+        elif self._closing_pages[page] in (8, 24):  # ~2.4s / ~7.2s
             self._nudge_cli_exit(tab)
         if self._closing_pages[page] >= 40:  # ~12s safety net
             self._close_confirmed(page)
