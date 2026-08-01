@@ -112,8 +112,17 @@ def match_background_fork(
     matching falls back to the working directory; `unique_cwd` makes that
     fallback demand a single candidate in that directory, for callers with no
     `known` set to narrow things down (see MainWindow._replay_pending_detaches).
+
+    Finished jobs stay in the candidate pool: the pairing records which
+    transcript a job forked from, which outlives the job. A fork that
+    finished before this caught up (a quit mid-handoff, replayed after the
+    agent ran to completion) still needs its old row forwarded to it —
+    otherwise the record is dropped and the completed work surfaces as an
+    unlinked new row next to a stale old one. Callers snapshotting `known`
+    must include finished jobs too, or a stale finished job in the same
+    directory becomes a fresh-looking candidate.
     """
-    agents = provider.background_agents()
+    agents = provider.background_agents(include_finished=True)
     fresh = [a for a in agents if a.session_id not in known and a.session_id != old_id]
     if any(a.session_id == old_id for a in agents):
         return ""  # detached in place: no fork to record

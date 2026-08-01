@@ -50,6 +50,18 @@ _PROMPT_HINT = 'Try "'
 _WORKTREE_EXIT_SELECTED_RE = re.compile(r"❯\s*Keep worktree\b")
 _WORKTREE_EXIT_OTHER_OPTION = "Remove worktree"
 
+# `claude agents --json` job-lifecycle values that mean a background agent is
+# no longer running, undocumented like the rest of that field. `state` is the
+# lifecycle (only background jobs carry it); `status` is a busy/idle activity
+# indicator — a live job merely waiting on input is idle, so it can't gate
+# this. "error" is defensive; the other three are what the CLI's internals
+# (2.1.220) test terminality as, exactly: there is no "cancelled"
+# (cancellation lands as "stopped"), and "crashed" is transient — respawned
+# or settled to "failed". An unknown value counts as still running, which
+# errs toward a stale detached marker rather than attaching to (or
+# double-resuming) a live job. See ClaudeProvider.background_agents.
+_BACKGROUND_TERMINAL_STATES = frozenset({"done", "error", "failed", "stopped"})
+
 
 @dataclass(frozen=True)
 class SessionOptions:
@@ -203,8 +215,15 @@ class Provider:
         background, or None if this agent can't be backgrounded."""
         return None
 
-    def background_agents(self) -> list[BackgroundAgent]:
-        """The agent CLI's currently-running detached sessions. Base: none."""
+    def background_agents(self, include_finished: bool = False) -> list[BackgroundAgent]:
+        """The agent CLI's currently-running detached sessions. Base: none.
+
+        `include_finished` adds jobs the CLI still lists but considers over.
+        Liveness callers (the sidebar's detached marker, attach-vs-resume)
+        want the default; /bg-handoff pairing wants them included — pairing
+        is about which transcript a job forked from, not whether it is still
+        running, and a fork that finished before the pairing caught up is
+        still the fork."""
         return []
 
     def background_watch_dir(self) -> Path | None:
@@ -345,13 +364,24 @@ class ClaudeProvider(Provider):
             return f"{shlex.quote(cli)} attach {shlex.quote(agent.job_id)}"
         return cmd
 
-    def background_agents(self) -> list[BackgroundAgent]:
+    def background_agents(self, include_finished: bool = False) -> list[BackgroundAgent]:
         """Detached sessions, per `claude agents --json`.
 
         Only `"kind": "background"` entries count — `"interactive"` ones are
         sessions open in a foreground TUI somewhere (including our own tabs),
         which attach doesn't target. Any failure (old CLI without the
         subcommand, timeout, bad JSON) means "none running" → plain resume.
+
+        A background job the CLI itself considers finished (its own agent
+        view buckets these as "Completed") keeps its process resident and
+        keeps showing up here with `"kind": "background"` regardless of
+        `--all` — only `state` says it is actually done. Left uncounted,
+        such a job never leaves `background_agents()`: the sidebar's yellow
+        "running detached" guide line has no other source and no exit path
+        ever clears it (see BackgroundStatusPoller), and resume_command()
+        would keep attaching to it — the daemon's attach screen, not a plain
+        resume — instead of continuing the transcript. `include_finished`
+        keeps them in, for the pairing callers (see the base docstring).
         """
         cli = shutil.which(self.cli)
         if cli is None:
@@ -369,6 +399,8 @@ class ClaudeProvider(Provider):
         found: list[BackgroundAgent] = []
         for a in agents if isinstance(agents, list) else []:
             if not isinstance(a, dict) or a.get("kind") != "background":
+                continue
+            if not include_finished and a.get("state") in _BACKGROUND_TERMINAL_STATES:
                 continue
             session_id = a.get("sessionId")
             job_id = a.get("id")

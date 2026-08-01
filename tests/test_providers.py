@@ -7,6 +7,8 @@ import shutil
 import time
 from pathlib import Path
 
+import pytest
+
 from collins import providers
 from collins.providers import (
     BackgroundAgent,
@@ -82,6 +84,7 @@ def test_background_agents_parses_agents_json(monkeypatch):
     payload = json.dumps(
         [
             {"sessionId": "fg-id", "kind": "interactive"},  # no job id: not detached
+            # No `state` field, as older CLIs emit: treated as still running.
             {"sessionId": "bg-id", "id": "bg-job", "kind": "background", "cwd": "/p"},
             {"sessionId": "no-job-id", "kind": "background"},
             "not-a-dict",
@@ -96,6 +99,56 @@ def test_background_agents_parses_agents_json(monkeypatch):
     # Interactive = open in a foreground TUI somewhere; attach doesn't target
     # it. A background entry without a job id can't be attached either.
     assert agents == [BackgroundAgent(session_id="bg-id", job_id="bg-job", cwd="/p")]
+
+
+def _agents_json_payload(finished_state: str) -> str:
+    import json
+
+    return json.dumps(
+        [
+            # Finished but still resident (Completed in `claude`'s own agent
+            # view) — kind alone can't tell it apart from a live job.
+            {
+                "sessionId": "finished-id",
+                "id": "finished-job",
+                "kind": "background",
+                "cwd": "/p",
+                "state": finished_state,
+            },
+            {
+                "sessionId": "live-id",
+                "id": "live-job",
+                "kind": "background",
+                "cwd": "/p",
+                "state": "working",
+            },
+        ]
+    )
+
+
+@pytest.mark.parametrize("state", sorted(providers._BACKGROUND_TERMINAL_STATES))
+def test_background_agents_excludes_finished_jobs(monkeypatch, state):
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+
+    class Result:
+        stdout = _agents_json_payload(state)
+
+    monkeypatch.setattr(providers.subprocess, "run", lambda *a, **k: Result())
+    agents = ClaudeProvider().background_agents()
+    assert agents == [BackgroundAgent(session_id="live-id", job_id="live-job", cwd="/p")]
+
+
+def test_background_agents_include_finished_keeps_finished_jobs(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+
+    class Result:
+        stdout = _agents_json_payload("done")
+
+    monkeypatch.setattr(providers.subprocess, "run", lambda *a, **k: Result())
+    # Pairing callers (match_background_fork) ask for finished jobs too: the
+    # fork a /bg created is still the fork after it runs to completion.
+    agents = ClaudeProvider().background_agents(include_finished=True)
+    assert [a.session_id for a in agents] == ["finished-id", "live-id"]
 
 
 def test_background_agents_empty_on_error(monkeypatch):
