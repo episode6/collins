@@ -20,6 +20,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import __version__, chats, dialogs, footerapps, openwith, panelhistory
+from .activity import TRANSCRIPT_POLL_MS, ActivityTracker, TranscriptActivity
 from .bgstatus import (
     BLOCK_IN_FLIGHT,
     BLOCK_UNREGISTERED,
@@ -182,6 +183,12 @@ class MainWindow(Adw.ApplicationWindow):
         # the snap-back that a real drag schedules.
         self._sorting_tabs = False
         self._sort_tabs_source: int | None = None
+        # Which sessions are producing output right now, and the poll that asks
+        # the detached ones' transcripts (they have no terminal to listen to).
+        # The poll only runs while something is detached; see _sync_bg_poll.
+        self._activity = ActivityTracker(self._on_activity_changed)
+        self._bg_activity = TranscriptActivity(self._activity.mark)
+        self._bg_poll: int | None = None
 
         self._install_actions()
         self._install_shortcuts()
@@ -328,7 +335,7 @@ class MainWindow(Adw.ApplicationWindow):
             [d for p in available_providers() if (d := p.background_watch_dir()) is not None]
         )
         self._bg_status.set_polling(bool(self.state.get_setting("background_status_poll")))
-        self.connect("destroy", lambda *_: self._bg_status.stop())
+        self.connect("destroy", lambda *_: self._stop_watchers())
         # Any /bg the last run couldn't see through to the end gets one more go.
         self._replay_pending_detaches()
 
@@ -1240,6 +1247,9 @@ class MainWindow(Adw.ApplicationWindow):
                 self._clear_backgrounding(session_id, "fork discovered; row handed off")
         # Rows just appeared or went away, and a row is what a handoff needs.
         self._refresh_background_affordances()
+        # A detached session's transcript is only pollable once the store has
+        # a session for it, which may be this very refresh.
+        self._sync_bg_poll()
 
     def _sync_transcript_paths(self) -> None:
         """Re-aim tabs whose transcript moved out from under them.
@@ -1888,6 +1898,74 @@ class MainWindow(Adw.ApplicationWindow):
                 self._clear_backgrounding(session_id, "detach confirmed by the agent list")
         for session_id in changed:
             self._sync_status(session_id)
+        # A session that stopped running detached has nothing left to be busy
+        # about — no tab, no background agent — and its pole must stop with it.
+        for session_id in changed - self._bg_status.background_ids:
+            if not self._is_detached(session_id) and self._page_for(session_id) is None:
+                self._activity.clear(session_id)
+        self._sync_bg_poll()
+
+    # -- "the agent is working right now" ------------------------------------
+
+    def _stop_watchers(self) -> None:
+        """Drop every timer that would outlive the window: the detach poller,
+        the activity sweep and the transcript poll all hold callbacks into a
+        window that is going away."""
+        self._bg_status.stop()
+        self._activity.stop()
+        if self._bg_poll is not None:
+            GLib.source_remove(self._bg_poll)
+            self._bg_poll = None
+
+    def _sync_row_busy(self, session_id: str) -> None:
+        """Push the busy flag onto every row this session shows up as.
+
+        A row is busy when *any* id along its chain is: a session handed to the
+        background runs on under its fork's id, and it is the same conversation
+        the row has always stood for."""
+        for row_id in self.store.rows_representing(session_id):
+            self.store.set_busy(row_id, bool(self._chain(row_id) & self._activity.busy()))
+
+    def _on_activity_changed(self, session_id: str, busy: bool) -> None:
+        log.debug("activity: %s -> %s", session_id, "busy" if busy else "idle")
+        self._sync_row_busy(session_id)
+
+    def _sync_bg_poll(self) -> None:
+        """Run the transcript poll only while some session is detached.
+
+        A tab's terminal pushes its own activity, so this poll exists purely
+        for the sessions with no tab; with none of those around it would be a
+        wakeup a second for nothing."""
+        wanted = bool(self._detached_transcripts())
+        if wanted and self._bg_poll is None:
+            self._bg_poll = GLib.timeout_add(TRANSCRIPT_POLL_MS, self._poll_bg_activity)
+        elif not wanted and self._bg_poll is not None:
+            GLib.source_remove(self._bg_poll)
+            self._bg_poll = None
+            self._bg_activity.forget_all_but(())
+
+    def _detached_transcripts(self) -> dict[str, Path]:
+        """Transcript per session id worth statting: every id a detached row's
+        conversation has run under, as a /bg fork writes to its own file and is
+        the one still growing."""
+        transcripts: dict[str, Path] = {}
+        for row_id in self.store.row_ids():
+            if self._page_for(row_id) is not None or not self._is_detached(row_id):
+                continue
+            for sid in self._chain(row_id):
+                session = self.store.get_session(sid)
+                if session is not None:
+                    transcripts[sid] = session.jsonl_path
+        return transcripts
+
+    def _poll_bg_activity(self) -> bool:
+        transcripts = self._detached_transcripts()
+        if not transcripts:
+            self._bg_poll = None
+            self._bg_activity.forget_all_but(())
+            return GLib.SOURCE_REMOVE
+        self._bg_activity.poll(transcripts)
+        return GLib.SOURCE_CONTINUE
 
     # -- pre-emptive /bg status ----------------------------------------------
 
@@ -1913,6 +1991,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self._set_row_backgrounding(session_id, True)
         self._refresh_background_affordances()  # the gate closes app-wide
+        self._sync_bg_poll()  # its transcript is the only sign of life from here
 
     def _confirm_backgrounding(self, session_id: str) -> None:
         """The detach is confirmed. Re-enable the row immediately: clicking it
@@ -1939,6 +2018,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._detaching.discard(session_id)
         self._set_row_backgrounding(session_id, False)
         self._sync_status(session_id)  # the line follows the agent list again
+        self._sync_bg_poll()
         self._on_detach_settled()
 
     def _backgrounding_expired(self, session_id: str) -> bool:
@@ -1976,11 +2056,17 @@ class MainWindow(Adw.ApplicationWindow):
         return None
 
     def _on_terminal_output(self, _terminal, page: Adw.TabPage) -> None:
+        # Every redraw counts as the session working, selected tab or not: the
+        # sidebar's pole is about what the agent is doing, not about which tab
+        # the user happens to be looking at. Unread output is the separate
+        # question below, and only an unselected tab can have any.
+        session_id = self._session_id_of(page)
+        if session_id:
+            self._activity.mark(session_id)
         if self.tab_view.get_selected_page() is page:
             return
         if not page.get_needs_attention():
             page.set_needs_attention(True)
-            session_id = self._session_id_of(page)
             if session_id:
                 self._sync_status(session_id)
         if self.state.get_setting("notify_idle"):
@@ -2250,6 +2336,11 @@ class MainWindow(Adw.ApplicationWindow):
             if self._pages.get(session_id) is page:
                 self._pages.pop(session_id)
             self._sync_status(session_id)
+            # The terminal that was feeding this session's pole is gone. A /bg
+            # handoff closes its tab the same way, and the transcript poll
+            # picks the pole back up under the fork's id (see _sync_bg_poll).
+            self._activity.clear(session_id)
+            self._sync_bg_poll()
         view.close_page_finish(page, True)
         self._refresh_background_affordances()  # a row without a tab can't be backgrounded
         if view.get_n_pages() == 0:

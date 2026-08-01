@@ -58,6 +58,11 @@ _STATUS_CSS = {
 }
 # The statuses that mean "this session has a tab open right now".
 _IN_TAB_STATUSES = ("open", "attention")
+# Set while the agent is producing output (see activity.py), on top of the
+# status class: it is `.running.busy` / `.detached.busy` that turn the guide
+# line into a moving barber pole, so a stale flag on a row that is no longer
+# running paints nothing.
+_BUSY_CSS = "busy"
 
 # How far a project header's icon sits from the row's own left edge: the
 # theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
@@ -505,12 +510,14 @@ class SessionRow(Gtk.ListBoxRow):
         )
         self._on_can_background_changed(item, None)
 
-        # Status highlight + state badge need CSS-class updates: plain signals,
-        # detached on unroot.
+        # Status highlight, busy pole and state badge need CSS-class updates:
+        # plain signals, detached on unroot.
         self._status_handler = item.connect("notify::status", self._on_status_changed)
         self._state_handler = item.connect("notify::state", self._on_state_changed)
+        self._busy_handler = item.connect("notify::busy", self._on_busy_changed)
         self._on_status_changed(item, None)
         self._on_state_changed(item, None)
+        self._on_busy_changed(item, None)
 
         right_click = Gtk.GestureClick(button=3)
         right_click.connect("pressed", self._on_right_click)
@@ -607,6 +614,9 @@ class SessionRow(Gtk.ListBoxRow):
         if self._state_handler is not None:
             self.item.disconnect(self._state_handler)
             self._state_handler = None
+        if self._busy_handler is not None:
+            self.item.disconnect(self._busy_handler)
+            self._busy_handler = None
         if self._syncing_handler is not None:
             self.item.disconnect(self._syncing_handler)
             self._syncing_handler = None
@@ -649,6 +659,16 @@ class SessionRow(Gtk.ListBoxRow):
         in_tab = item.status in _IN_TAB_STATUSES
         self._stop_btn.set_visible(in_tab)
         self._bg_btn.set_visible(in_tab and self._can_background)
+
+    def _on_busy_changed(self, item: SessionItem, _pspec) -> None:
+        # Only the class goes on and off here: which pole a busy row gets —
+        # blue in a tab, yellow detached — is the status class's business, so
+        # a session that backgrounds itself mid-turn keeps moving and simply
+        # changes color.
+        if item.busy:
+            self.add_css_class(_BUSY_CSS)
+        else:
+            self.remove_css_class(_BUSY_CSS)
 
     def _on_state_changed(self, item: SessionItem, _pspec) -> None:
         badge = self._state_badge

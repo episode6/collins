@@ -50,6 +50,14 @@ fork. Last modified: 2026-08-01. Full change history: git log for this file.
 - **A yellow guide line** marks a session **running detached** in the
   background (`/bg`) — no fill, because there is no tab to return to; reopen
   the row to re-attach.
+- **A moving barber pole** marks a session whose agent is **working right
+  now**: the row's guide line turns into blue stripes climbing while output is
+  flowing, and goes still a couple of seconds after the agent stops — so a
+  glance down the sidebar says which sessions are thinking and which are
+  waiting on you. A detached session poles in **yellow** instead of blue, since
+  its line is what says it has no tab. Collins reads a tab's terminal for this;
+  for a detached session, its transcript. The pole follows the desktop's
+  animation setting: with animations off, the line simply stays put.
 - **Waiting badge** — an amber **?** marks sessions where the agent's last
   message was a question awaiting your reply, so you can spot what needs you at
   a glance.

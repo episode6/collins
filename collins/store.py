@@ -560,6 +560,11 @@ class SessionStore(GObject.Object):
         if item is not None and item.status != status:
             item.status = status
 
+    def set_busy(self, session_id: str, flag: bool) -> None:
+        item = self._items.get(session_id)
+        if item is not None and item.busy != flag:
+            item.busy = flag
+
     def set_backgrounding(self, session_id: str, flag: bool) -> None:
         item = self._items.get(session_id)
         if item is not None and item.backgrounding != flag:

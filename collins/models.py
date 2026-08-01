@@ -30,6 +30,10 @@ class SessionItem(GObject.Object):
     # "" | "open" | "attention" (tab state) | "background" (running detached)
     status = GObject.Property(type=str, default="")
     state = GObject.Property(type=str, default="")  # "", "waiting", "interrupted" (transcript)
+    # Whether the agent is producing output right now (see activity.py). Rides
+    # on top of `status`, which says *where* a session runs but never whether
+    # anything is happening: the guide line only moves while this is on.
+    busy = GObject.Property(type=bool, default=False)
     # Conversation moved to a fork the store hasn't discovered yet (row is
     # kept visible but disabled until the fork's row can take its place).
     syncing = GObject.Property(type=bool, default=False)
