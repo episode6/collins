@@ -723,6 +723,10 @@ class SessionSidebar(Gtk.Box):
         self._placeholders: dict[str, str] = {}  # placeholder id -> cwd
         self._placeholder_rows: dict[str, PlaceholderRow] = {}
         self._row_order: list[str] = []  # session/placeholder ids, top to bottom
+        # Placeholders whose tab is producing output right now. Kept here
+        # rather than on the row, which any rebuild throws away — a new thread
+        # printing its first turn is exactly when rows come and go.
+        self._busy_placeholders: set[str] = set()
         self._active_session_id: str | None = None
         # "Is this session sitting at an empty prompt?", for a row's PR actions
         # (see SessionRow._pr_host). Only the window can answer — the tab is
@@ -971,6 +975,8 @@ class SessionSidebar(Gtk.Box):
                 prow.set_margin_start(child_indent)
                 if pid == self._active_session_id:
                     prow.add_css_class("active-tab")
+                if pid in self._busy_placeholders:
+                    prow.add_css_class(_BUSY_CSS)
                 self._placeholder_rows[pid] = prow
                 self._row_order.append(pid)
                 self.list.append(prow)
@@ -1128,7 +1134,30 @@ class SessionSidebar(Gtk.Box):
         self._rebuild_rows()
         self._invalidate()
 
+    def set_placeholder_busy(self, placeholder_id: str, busy: bool) -> None:
+        """Pole a "New Thread" row while its tab is working.
+
+        A placeholder stands for a session the store hasn't discovered yet, so
+        it has no SessionItem to carry the flag the way every other row does —
+        and printing its first turn is precisely when a new thread is working.
+        """
+        if busy:
+            self._busy_placeholders.add(placeholder_id)
+        else:
+            self._busy_placeholders.discard(placeholder_id)
+        row = self._placeholder_rows.get(placeholder_id)
+        if row is None:
+            return
+        if busy:
+            row.add_css_class(_BUSY_CSS)
+        else:
+            row.remove_css_class(_BUSY_CSS)
+
+    def has_placeholder(self, placeholder_id: str) -> bool:
+        return placeholder_id in self._placeholders
+
     def remove_placeholder(self, placeholder_id: str) -> None:
+        self._busy_placeholders.discard(placeholder_id)
         if self._placeholders.pop(placeholder_id, None) is None:
             return
         self._rebuild_rows()

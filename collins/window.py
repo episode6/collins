@@ -1029,6 +1029,9 @@ class MainWindow(Adw.ApplicationWindow):
     def _remove_placeholder(self, page: Adw.TabPage) -> None:
         placeholder_id = self._placeholder_pages.pop(page, None)
         if placeholder_id is not None:
+            # Drop it from the tracker too: the row it stood for is gone (the
+            # session's own row has taken over), so nothing is left to time out.
+            self._activity.clear(placeholder_id)
             self.sidebar.remove_placeholder(placeholder_id)
 
     def _placeholder_page(self, placeholder_id: str) -> Adw.TabPage | None:
@@ -1928,6 +1931,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_activity_changed(self, session_id: str, busy: bool) -> None:
         log.debug("activity: %s -> %s", session_id, "busy" if busy else "idle")
+        if self.sidebar.has_placeholder(session_id):
+            # A "New Thread" row has no session item to hang the flag on.
+            self.sidebar.set_placeholder_busy(session_id, busy)
+            return
         self._sync_row_busy(session_id)
 
     def _sync_bg_poll(self) -> None:
@@ -2060,9 +2067,16 @@ class MainWindow(Adw.ApplicationWindow):
         # sidebar's pole is about what the agent is doing, not about which tab
         # the user happens to be looking at. Unread output is the separate
         # question below, and only an unselected tab can have any.
+        #
+        # Both of a tab's ids are marked, not the first one that fits: a new
+        # thread that just resolved its session id keeps its "New Thread"
+        # placeholder row until the store discovers the session, and marking
+        # only the session id would leave that row (the only one on screen)
+        # sitting still through the turn that is writing the transcript.
         session_id = self._session_id_of(page)
-        if session_id:
-            self._activity.mark(session_id)
+        for tracked in (session_id, self._placeholder_pages.get(page)):
+            if tracked:
+                self._activity.mark(tracked)
         if self.tab_view.get_selected_page() is page:
             return
         if not page.get_needs_attention():
