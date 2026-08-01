@@ -58,6 +58,11 @@ _STATUS_CSS = {
 }
 # The statuses that mean "this session has a tab open right now".
 _IN_TAB_STATUSES = ("open", "attention")
+# Set while the agent is producing output (see activity.py), on top of the
+# status class: it is `.running.busy` / `.detached.busy` that turn the guide
+# line into a moving barber pole, so a stale flag on a row that is no longer
+# running paints nothing.
+_BUSY_CSS = "busy"
 
 # How far a project header's icon sits from the row's own left edge: the
 # theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
@@ -505,12 +510,14 @@ class SessionRow(Gtk.ListBoxRow):
         )
         self._on_can_background_changed(item, None)
 
-        # Status highlight + state badge need CSS-class updates: plain signals,
-        # detached on unroot.
+        # Status highlight, busy pole and state badge need CSS-class updates:
+        # plain signals, detached on unroot.
         self._status_handler = item.connect("notify::status", self._on_status_changed)
         self._state_handler = item.connect("notify::state", self._on_state_changed)
+        self._busy_handler = item.connect("notify::busy", self._on_busy_changed)
         self._on_status_changed(item, None)
         self._on_state_changed(item, None)
+        self._on_busy_changed(item, None)
 
         right_click = Gtk.GestureClick(button=3)
         right_click.connect("pressed", self._on_right_click)
@@ -607,6 +614,9 @@ class SessionRow(Gtk.ListBoxRow):
         if self._state_handler is not None:
             self.item.disconnect(self._state_handler)
             self._state_handler = None
+        if self._busy_handler is not None:
+            self.item.disconnect(self._busy_handler)
+            self._busy_handler = None
         if self._syncing_handler is not None:
             self.item.disconnect(self._syncing_handler)
             self._syncing_handler = None
@@ -649,6 +659,16 @@ class SessionRow(Gtk.ListBoxRow):
         in_tab = item.status in _IN_TAB_STATUSES
         self._stop_btn.set_visible(in_tab)
         self._bg_btn.set_visible(in_tab and self._can_background)
+
+    def _on_busy_changed(self, item: SessionItem, _pspec) -> None:
+        # Only the class goes on and off here: which pole a busy row gets —
+        # blue in a tab, yellow detached — is the status class's business, so
+        # a session that backgrounds itself mid-turn keeps moving and simply
+        # changes color.
+        if item.busy:
+            self.add_css_class(_BUSY_CSS)
+        else:
+            self.remove_css_class(_BUSY_CSS)
 
     def _on_state_changed(self, item: SessionItem, _pspec) -> None:
         badge = self._state_badge
@@ -703,6 +723,10 @@ class SessionSidebar(Gtk.Box):
         self._placeholders: dict[str, str] = {}  # placeholder id -> cwd
         self._placeholder_rows: dict[str, PlaceholderRow] = {}
         self._row_order: list[str] = []  # session/placeholder ids, top to bottom
+        # Placeholders whose tab is producing output right now. Kept here
+        # rather than on the row, which any rebuild throws away — a new thread
+        # printing its first turn is exactly when rows come and go.
+        self._busy_placeholders: set[str] = set()
         self._active_session_id: str | None = None
         # "Is this session sitting at an empty prompt?", for a row's PR actions
         # (see SessionRow._pr_host). Only the window can answer — the tab is
@@ -951,6 +975,8 @@ class SessionSidebar(Gtk.Box):
                 prow.set_margin_start(child_indent)
                 if pid == self._active_session_id:
                     prow.add_css_class("active-tab")
+                if pid in self._busy_placeholders:
+                    prow.add_css_class(_BUSY_CSS)
                 self._placeholder_rows[pid] = prow
                 self._row_order.append(pid)
                 self.list.append(prow)
@@ -1108,7 +1134,30 @@ class SessionSidebar(Gtk.Box):
         self._rebuild_rows()
         self._invalidate()
 
+    def set_placeholder_busy(self, placeholder_id: str, busy: bool) -> None:
+        """Pole a "New Thread" row while its tab is working.
+
+        A placeholder stands for a session the store hasn't discovered yet, so
+        it has no SessionItem to carry the flag the way every other row does —
+        and printing its first turn is precisely when a new thread is working.
+        """
+        if busy:
+            self._busy_placeholders.add(placeholder_id)
+        else:
+            self._busy_placeholders.discard(placeholder_id)
+        row = self._placeholder_rows.get(placeholder_id)
+        if row is None:
+            return
+        if busy:
+            row.add_css_class(_BUSY_CSS)
+        else:
+            row.remove_css_class(_BUSY_CSS)
+
+    def has_placeholder(self, placeholder_id: str) -> bool:
+        return placeholder_id in self._placeholders
+
     def remove_placeholder(self, placeholder_id: str) -> None:
+        self._busy_placeholders.discard(placeholder_id)
         if self._placeholders.pop(placeholder_id, None) is None:
             return
         self._rebuild_rows()
