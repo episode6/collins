@@ -51,10 +51,15 @@ _WORKTREE_EXIT_SELECTED_RE = re.compile(r"❯\s*Keep worktree\b")
 _WORKTREE_EXIT_OTHER_OPTION = "Remove worktree"
 
 # `claude agents --json` job-lifecycle values that mean a background agent is
-# no longer running, undocumented like the rest of that field. Observed on a
-# job left resident-but-finished: `"kind": "background"` never changes, only
-# `state` does, from "starting"/"working" through to one of these. See
-# ClaudeProvider.background_agents.
+# no longer running, undocumented like the rest of that field. `state` is the
+# lifecycle (only background jobs carry it); `status` is a busy/idle activity
+# indicator — a live job merely waiting on input is idle, so it can't gate
+# this. The CLI's internals (2.1.220) test terminality as exactly
+# {done, failed, stopped}: there is no "cancelled" (cancellation lands as
+# "stopped"), and "crashed" is transient — respawned or settled to "failed".
+# "error" is kept defensively; an unknown value counts as still running,
+# which errs toward a stale detached marker rather than attaching to (or
+# double-resuming) a live job. See ClaudeProvider.background_agents.
 _BACKGROUND_TERMINAL_STATES = frozenset({"done", "error", "failed", "stopped"})
 
 
