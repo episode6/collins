@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -196,6 +196,16 @@ row.session-child.active-tab > box {
    from the list either way: no row reflows. */
 .sidebar-scroll > scrollbar.vertical > range > trough {
   margin-right: 0;
+}
+
+/* ...and its slider is solid, not translucent. Stock Adwaita fills the slider
+   with currentColor mixed 20-60% into transparent (resting/hover/drag), which
+   lets the row cards bleed through the bar. This provider sits at APPLICATION
+   priority, so the one rule outranks every state variant in the theme; the
+   fade-in/out of the overlay indicator is widget opacity animated by GTK
+   itself, not a style, so idle hiding still works. */
+.sidebar-scroll > scrollbar.vertical > range > trough > slider {
+  background-color: currentColor;
 }
 
 /* interactive prompt card overlaid on the terminal */
