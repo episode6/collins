@@ -108,27 +108,32 @@ def apply_terminal_theme(terminal: Vte.Terminal, name: str | None) -> None:
             _rgba(theme["bg"]),
             [_rgba(c) for c in theme["palette"]],
         )
-    _apply_gutter_css(theme)
+    _apply_dynamic_theme_css(theme)
 
 
-# The empty space beside a width-clamped terminal (see TerminalTab's
-# Adw.Clamp) is painted through this class, kept in step with whatever
-# `apply_terminal_theme` just set on the VTE widget itself so the two
-# backgrounds match. One provider for the whole app: terminal_theme is a
-# single global setting, not per-tab.
-_gutter_provider: Gtk.CssProvider | None = None
+# Two places need to track whatever `apply_terminal_theme` just set on the
+# VTE widget itself, so they read as part of the terminal rather than a
+# mismatched frame around it: the empty space beside a width-clamped
+# terminal (.terminal-gutter, see TerminalTab's Adw.Clamp), and the selected
+# tab's row in the tab bar, which sits directly above the terminal it shows.
+# One provider for the whole app: terminal_theme is a single global setting,
+# not per-tab.
+_dynamic_theme_provider: Gtk.CssProvider | None = None
 
 
-def _apply_gutter_css(theme: dict | None) -> None:
-    global _gutter_provider
-    if _gutter_provider is None:
-        _gutter_provider = Gtk.CssProvider()
+def _apply_dynamic_theme_css(theme: dict | None) -> None:
+    global _dynamic_theme_provider
+    if _dynamic_theme_provider is None:
+        _dynamic_theme_provider = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
-            _gutter_provider,
+            _dynamic_theme_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
     # "Default" tracks the system light/dark scheme, so it has no fixed hex —
     # @window_bg_color is the same stand-in the chat-card overlay uses for it.
     bg_css = f"#{theme['bg']}" if theme else "@window_bg_color"
-    _gutter_provider.load_from_data(f".terminal-gutter {{ background-color: {bg_css}; }}".encode())
+    _dynamic_theme_provider.load_from_data(
+        f".terminal-gutter {{ background-color: {bg_css}; }}"
+        f"tabbar tab:selected {{ background-color: {bg_css}; }}".encode()
+    )
