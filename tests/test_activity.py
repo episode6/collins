@@ -200,9 +200,15 @@ def test_a_session_that_comes_back_is_baselined_again():
 GRID = (80, 24)
 
 
-def make_gate(quiet_s=0.25):
+def make_gate(quiet_s=0.25, *, armed=True):
+    # Armed by default: most tests are about telling echoes from output on a
+    # tab whose user has already sent something. The startup hold — a fresh
+    # gate counting nothing until the first submit — is tested unarmed.
     clock = FakeClock()
-    return EchoGate(quiet_s=quiet_s, clock=clock), clock
+    gate = EchoGate(quiet_s=quiet_s, clock=clock)
+    if armed:
+        gate.arm()
+    return gate, clock
 
 
 def test_output_out_of_nowhere_counts():
@@ -253,8 +259,57 @@ def test_output_at_the_new_size_counts():
     assert gate.counts((100, 30))
 
 
-def test_the_first_redraw_seen_counts():
-    # No previous size to compare against, and a tab's first redraw is its
-    # agent starting up — which is exactly the agent working.
+def test_the_first_redraw_seen_counts_once_armed():
+    # No previous size to compare against doesn't read as a reflow.
     gate, _clock = make_gate()
+    assert gate.counts(GRID)
+
+
+# -- EchoGate: the startup hold ------------------------------------------------
+
+
+def test_startup_paint_does_not_count():
+    # A freshly spawned agent CLI paints a whole welcome screen without the
+    # user having asked for anything; none of it may start a pole.
+    gate, clock = make_gate(armed=False)
+    assert not gate.counts(GRID)
+    clock.advance(5.0)  # not a timing window: it never opens on its own
+    assert not gate.counts(GRID)
+
+
+def test_a_submitted_carriage_return_arms_the_gate():
+    # An injected prompt or a question-card answer submits through the pty as
+    # a "\r"; output past the echo window is then the turn it started.
+    gate, clock = make_gate(armed=False)
+    gate.counts(GRID)
+    gate.poked("\x1b[B\x1b[B\r")
+    clock.advance(0.3)
+    assert gate.counts(GRID)
+
+
+def test_a_spawn_time_shell_command_does_not_arm():
+    # A tab that launches its CLI by feeding the shell ends the line with a
+    # newline, not a carriage return: the CLI starting is still not a turn.
+    gate, clock = make_gate(armed=False)
+    gate.counts(GRID)
+    gate.poked("claude --continue\n")
+    clock.advance(0.3)
+    assert not gate.counts(GRID)
+
+
+def test_focus_reports_and_typing_do_not_arm():
+    gate, clock = make_gate(armed=False)
+    gate.counts(GRID)
+    for text in ("\x1b[I", "h", "i", "\x1b[O"):
+        gate.poked(text)
+        clock.advance(0.3)
+    assert not gate.counts(GRID)
+
+
+def test_arm_reports_the_enter_key_directly():
+    # The window arms on the bare Enter keypress itself, independent of how
+    # VTE encodes the key for the child.
+    gate, _clock = make_gate(armed=False)
+    gate.counts(GRID)
+    gate.arm()
     assert gate.counts(GRID)
