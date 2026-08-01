@@ -1571,16 +1571,13 @@ class TerminalTab(Gtk.Box):
 
         GLib.idle_add(position)
 
-    def current_agent_cwd(self) -> str | None:
-        """Best-effort cwd of what's running in the agent terminal: the
-        foreground process if any (the agent may have cd'd into a worktree),
-        else the shell, else the directory the tab started in.
+    def _candidate_pids(self) -> list[int]:
+        """Pids worth searching for the agent process: the terminal's
+        foreground process group leader, then the child originally spawned.
 
-        The foreground process group's leader is not always the process that
-        moves. A daemon-hosted session leaves a wrapper at the head of the
-        group and runs the agent as its child, and only the child follows the
-        session into a worktree, so each candidate's agent descendants are
-        searched before falling back to the candidate itself.
+        The group leader is not always the process that moves — a
+        daemon-hosted session leaves a wrapper at its head and runs the agent
+        as its child — so both ends are worth trying.
         """
         pids = []
         pty = self.terminal.get_pty()
@@ -1591,8 +1588,18 @@ class TerminalTab(Gtk.Box):
                 pass
         if self._child_pid is not None:
             pids.append(self._child_pid)
+        return pids
+
+    def current_agent_cwd(self) -> str | None:
+        """Best-effort cwd of what's running in the agent terminal: the
+        foreground process if any (the agent may have cd'd into a worktree),
+        else the shell, else the directory the tab started in.
+
+        Each candidate's agent descendants are searched before falling back
+        to the candidate itself; see `_candidate_pids`.
+        """
         cli = getattr(self.provider, "cli", "") or ""
-        for pid in pids:
+        for pid in self._candidate_pids():
             cwd = proctree.agent_descendant_cwd(pid, cli)
             if cwd is not None:
                 return cwd
@@ -1600,6 +1607,15 @@ class TerminalTab(Gtk.Box):
             if cwd is not None:
                 return cwd
         return self._cwd
+
+    def has_background_descendant(self) -> bool:
+        """Whether the agent has something still running below it right now —
+        a tool call in flight, or a background job (a dev server, a long
+        build) it started and left running. An extra "still working" signal
+        for a session whose terminal has otherwise gone quiet; see
+        `ActivityTracker` in activity.py."""
+        cli = getattr(self.provider, "cli", "") or ""
+        return any(proctree.has_live_descendant(pid, cli) for pid in self._candidate_pids())
 
     # -- helpers -----------------------------------------------------------
 

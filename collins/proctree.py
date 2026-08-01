@@ -49,24 +49,45 @@ def is_agent_process(pid: int, cli: str) -> bool:
     return cli in cmdline
 
 
-def agent_descendant_cwd(pid: int, cli: str, depth: int = _MAX_DEPTH) -> str | None:
-    """The cwd of the deepest agent process at or below *pid*, or None when
+def _deepest_agent_pid(pid: int, cli: str, depth: int = _MAX_DEPTH) -> int | None:
+    """The pid of the deepest agent process at or below *pid*, or None when
     *pid* is not an agent process at all.
 
     The head of a terminal's foreground process group is not always the process
     that moves. A daemon-hosted session keeps a wrapper (`claude bg-pty-host`,
     `claude attach`) at the head of the group and runs the real agent as its
     child, and only that child follows the session into a git worktree —
-    reading the leader's cwd reports the directory the session started in
+    reading the leader's own state reports what the session started with
     forever.
 
     Only processes that look like the CLI are followed, so a tool call that
-    shells out and cd's somewhere else is never mistaken for the agent.
+    shells out and cd's somewhere else, or spawns something of its own, is
+    never mistaken for the agent.
     """
     if depth <= 0 or not is_agent_process(pid, cli):
         return None
     for child in process_children(pid):
-        found = agent_descendant_cwd(child, cli, depth - 1)
+        found = _deepest_agent_pid(child, cli, depth - 1)
         if found is not None:
             return found
-    return process_cwd(pid)
+    return pid
+
+
+def agent_descendant_cwd(pid: int, cli: str, depth: int = _MAX_DEPTH) -> str | None:
+    """The cwd of the deepest agent process at or below *pid*, or None when
+    *pid* is not an agent process at all. See `_deepest_agent_pid`."""
+    agent_pid = _deepest_agent_pid(pid, cli, depth)
+    return process_cwd(agent_pid) if agent_pid is not None else None
+
+
+def has_live_descendant(pid: int, cli: str) -> bool:
+    """Whether the agent process at or below *pid* has spawned anything still
+    running below it right now.
+
+    A tool call in flight looks exactly like a background job the agent
+    started and left running (a dev server, a long build): both are a live
+    child of the agent process. Used as a "the session is still working"
+    signal alongside terminal and transcript output — see `activity.py`.
+    """
+    agent_pid = _deepest_agent_pid(pid, cli)
+    return agent_pid is not None and bool(process_children(agent_pid))
