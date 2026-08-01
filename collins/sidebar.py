@@ -792,6 +792,9 @@ class SessionSidebar(Gtk.Box):
 
         scrolled = Gtk.ScrolledWindow(child=self.list)
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        # Only this list's scrollbar sits flush against the panel border (see
+        # .sidebar-scroll in app.py); every other scroller keeps stock spacing.
+        scrolled.add_css_class("sidebar-scroll")
         self._scrolled = scrolled
 
         # No "no sessions yet" status page: the permanent Chats header means
