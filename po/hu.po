@@ -761,6 +761,15 @@ msgstr "Szerkesztőpanel megjelenítése"
 msgid "Hide editor panel"
 msgstr "Szerkesztőpanel elrejtése"
 
+msgid "Move editor to its own window"
+msgstr "Szerkesztő áthelyezése saját ablakba"
+
+msgid "Bring editor back into this tab"
+msgstr "Szerkesztő visszahozása erre a lapra"
+
+msgid "Move editor back into its tab"
+msgstr "Szerkesztő visszahelyezése a lapjára"
+
 msgid "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins"
 msgstr "A szerkesztő nem érhető el — telepítsd a GtkSourceView 5-öt (gir1.2-gtksource-5), majd indítsd újra a Collinst"
 

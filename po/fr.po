@@ -761,6 +761,15 @@ msgstr "Afficher le panneau de l’éditeur"
 msgid "Hide editor panel"
 msgstr "Masquer le panneau de l’éditeur"
 
+msgid "Move editor to its own window"
+msgstr "Déplacer l’éditeur dans sa propre fenêtre"
+
+msgid "Bring editor back into this tab"
+msgstr "Ramener l’éditeur dans cet onglet"
+
+msgid "Move editor back into its tab"
+msgstr "Ramener l’éditeur dans son onglet"
+
 msgid "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins"
 msgstr "Éditeur indisponible — installez GtkSourceView 5 (gir1.2-gtksource-5) et redémarrez Collins"
 

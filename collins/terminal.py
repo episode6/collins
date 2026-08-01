@@ -471,6 +471,10 @@ class TerminalTab(Gtk.Box):
         # default. Mirrors panel-size-changed, minus the mode — the editor
         # panel only ever has the one position.
         "editor-size-changed": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
+        # The editor pane's detach button was clicked. The window owns the
+        # pop-out (it has the application and AppState the new window needs),
+        # so the tab just forwards the pane's request upward.
+        "editor-pop-out-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(
@@ -579,6 +583,7 @@ class TerminalTab(Gtk.Box):
         # the footer button that would open it hidden (see _build_footer).
         editor_root = cwd if cwd and Path(cwd).is_dir() else str(Path.home())
         self._editor = editor.EditorPane(editor_root) if editor.HAVE_GTKSOURCE else None
+        self._editor_detached = False  # pane reparented into its own EditorWindow
         self._editor_width = 0  # this tab's last-set editor width, px (0 = none yet)
         self._editor_width_lookup = None  # () -> app-wide last-set width (set by the window)
         self._editor_width_emit_source: int | None = None  # debounce for editor-size-changed
@@ -592,6 +597,9 @@ class TerminalTab(Gtk.Box):
         if self._editor is not None:
             self._editor.set_visible(False)
             self._outer.set_end_child(self._editor)
+            self._editor.connect(
+                "request-pop-out", lambda *_: self.emit("editor-pop-out-requested")
+            )
         self._outer.connect("notify::position", lambda *_: self._remember_editor_width())
         self.append(self._outer)
 
@@ -888,9 +896,9 @@ class TerminalTab(Gtk.Box):
         # The editor toggle sits between the footer apps and the panel
         # buttons — a page-with-a-folded-corner glyph, not the panel-split
         # icon `toggle_btn` uses next to it. One click means one of three
-        # things depending on state: re-attach a detached editor (PR 2),
-        # else open the panel, else close it (see _toggle_editor). PR 1 is
-        # the open/close half; the tooltip always names whichever it is.
+        # things depending on state: re-attach a detached editor, else open
+        # the panel, else close it (see the window's _toggle_editor); the
+        # tooltip always names whichever it is.
         self._editor_toggle_btn = Gtk.Button(icon_name="text-x-generic-symbolic")
         self._editor_toggle_btn.add_css_class("flat")
         self._editor_toggle_btn.set_action_name("win.toggle-editor")
@@ -1643,12 +1651,19 @@ class TerminalTab(Gtk.Box):
 
     @property
     def editor_visible(self) -> bool:
-        return self._editor is not None and self._editor.get_visible()
+        """Whether the editor panel is showing *inside this tab* — false while
+        the pane is popped out into its own window (see editor_detached)."""
+        return self._editor is not None and not self._editor_detached and self._editor.get_visible()
+
+    @property
+    def editor_detached(self) -> bool:
+        return self._editor_detached
 
     def toggle_editor(self) -> None:
-        """PR 1's half of the footer icon's behavior: open/close. Re-attaching
-        a detached editor (checked first once pop-out exists) is PR 2's."""
-        if self._editor is None:
+        """The footer icon's open/close half. The (a) branch — dock a
+        popped-out editor back — is the window's (`_toggle_editor`), which
+        checks for a live EditorWindow before falling through to this."""
+        if self._editor is None or self._editor_detached:
             return
         if self.editor_visible:
             self.hide_editor()
@@ -1656,7 +1671,7 @@ class TerminalTab(Gtk.Box):
             self.show_editor()
 
     def show_editor(self) -> None:
-        if self._editor is None or self.editor_visible:
+        if self._editor is None or self._editor_detached or self.editor_visible:
             return
         self._editor.set_visible(True)
         self._apply_editor_width()
@@ -1668,6 +1683,33 @@ class TerminalTab(Gtk.Box):
         self._remember_editor_width()
         self._editor.set_visible(False)
         self._editor_toggle_btn.set_tooltip_text(_("Show editor panel"))
+
+    def detach_editor(self):
+        """Hand the live pane over for reparenting into an EditorWindow (the
+        window builds that; see _pop_out_editor there). Returns the pane, or
+        None when there's nothing to detach. The in-tab slot stays empty —
+        and the footer icon means "bring it back" — until reattach_editor."""
+        if self._editor is None or self._editor_detached:
+            return None
+        self._remember_editor_width()  # dock-back reopens at this width
+        self._editor_detached = True
+        self._outer.set_end_child(None)
+        self._editor.set_visible(True)  # it may have been hidden along with the panel
+        self._editor.set_detached(True)
+        self._editor_toggle_btn.set_tooltip_text(_("Bring editor back into this tab"))
+        return self._editor
+
+    def reattach_editor(self) -> None:
+        """Dock the pane back where it was: same outer-paned slot, same
+        remembered width, open even if it was closed when detached (a pane
+        the user was just using in a window shouldn't dock back to nothing)."""
+        if self._editor is None or not self._editor_detached:
+            return
+        self._editor_detached = False
+        self._editor.set_detached(False)
+        self._outer.set_end_child(self._editor)
+        self._editor.set_visible(False)  # show_editor's no-op guard needs "closed"
+        self.show_editor()
 
     def editor_dirty_count(self) -> int:
         return self._editor.dirty_count() if self._editor is not None else 0
@@ -1732,10 +1774,15 @@ class TerminalTab(Gtk.Box):
         it. Forks never persist."""
         if self.fork or self._editor is None:
             return None
-        if not self.editor_visible and not self._editor.open_paths():
+        if not self.editor_visible and not self._editor_detached and not self._editor.open_paths():
             return None
         self._remember_editor_width()
-        state: dict = {"open": self.editor_visible, "files": self._editor.open_paths()}
+        # A popped-out editor counts as open: the window itself isn't
+        # persisted, so the session restores with the panel showing in-tab.
+        state: dict = {
+            "open": self.editor_visible or self._editor_detached,
+            "files": self._editor.open_paths(),
+        }
         cursors = self._editor.cursor_positions()
         if cursors:
             state["cursors"] = cursors

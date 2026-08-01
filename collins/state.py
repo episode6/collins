@@ -74,6 +74,9 @@ DEFAULT_SETTINGS = {
     "editor_font": "",  # empty = system monospace
     "editor_show_line_numbers": True,
     "editor_show_hidden_files": False,
+    "editor_window_width": 1000,  # last popped-out editor window size (floating, unmaximized)
+    "editor_window_height": 700,
+    "editor_window_maximized": False,
 }
 
 # Floor for a restored window, so a corrupt/absurd saved value can't produce

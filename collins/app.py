@@ -514,17 +514,26 @@ class App(Adw.Application):
         window.present()
         return window
 
-    def _on_focus_session(self, _action, param: GLib.Variant) -> None:
+    def _main_window(self) -> MainWindow | None:
+        """The active window, unless that's a popped-out editor window (or
+        some other non-main window): those must never be handed a main
+        window's job, so fall back to any main window that exists."""
         window = self.get_active_window()
+        if isinstance(window, MainWindow):
+            return window
+        return next((w for w in self.get_windows() if isinstance(w, MainWindow)), None)
+
+    def _on_focus_session(self, _action, param: GLib.Variant) -> None:
+        window = self._main_window()
         if window is None:
             return
         window.present()
         session_id = param.get_string()
-        if session_id and hasattr(window, "focus_session"):
+        if session_id:
             window.focus_session(session_id)
 
     def do_activate(self) -> None:
-        window = self.get_active_window()
+        window = self._main_window()
         if window is None:
             window = self._new_window()
             # Fresh launch: reopen the session that was active when the app

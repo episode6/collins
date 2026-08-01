@@ -306,6 +306,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Plain Text": "Egyszerű szöveg",
         "Show editor panel": "Szerkesztőpanel megjelenítése",
         "Hide editor panel": "Szerkesztőpanel elrejtése",
+        "Move editor to its own window": "Szerkesztő áthelyezése saját ablakba",
+        "Bring editor back into this tab": "Szerkesztő visszahozása erre a lapra",
+        "Move editor back into its tab": "Szerkesztő visszahelyezése a lapjára",
         "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins":
             "A szerkesztő nem érhető el — telepítsd a GtkSourceView 5-öt "
             "(gir1.2-gtksource-5), majd indítsd újra a Collinst",
@@ -623,6 +626,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Plain Text": "Reiner Text",
         "Show editor panel": "Editor-Panel anzeigen",
         "Hide editor panel": "Editor-Panel ausblenden",
+        "Move editor to its own window": "Editor in eigenes Fenster verschieben",
+        "Bring editor back into this tab": "Editor in diesen Tab zurückholen",
+        "Move editor back into its tab": "Editor zurück in seinen Tab verschieben",
         "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins":
             "Editor nicht verfügbar — installiere GtkSourceView 5 "
             "(gir1.2-gtksource-5) und starte Collins neu",
@@ -938,6 +944,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Plain Text": "Texto sin formato",
         "Show editor panel": "Mostrar el panel del editor",
         "Hide editor panel": "Ocultar el panel del editor",
+        "Move editor to its own window": "Mover el editor a su propia ventana",
+        "Bring editor back into this tab": "Devolver el editor a esta pestaña",
+        "Move editor back into its tab": "Devolver el editor a su pestaña",
         "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins":
             "Editor no disponible — instala GtkSourceView 5 "
             "(gir1.2-gtksource-5) y reinicia Collins",
@@ -1255,6 +1264,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Plain Text": "Texte brut",
         "Show editor panel": "Afficher le panneau de l’éditeur",
         "Hide editor panel": "Masquer le panneau de l’éditeur",
+        "Move editor to its own window": "Déplacer l’éditeur dans sa propre fenêtre",
+        "Bring editor back into this tab": "Ramener l’éditeur dans cet onglet",
+        "Move editor back into its tab": "Ramener l’éditeur dans son onglet",
         "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins":
             "Éditeur indisponible — installez GtkSourceView 5 "
             "(gir1.2-gtksource-5) et redémarrez Collins",

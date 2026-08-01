@@ -1213,6 +1213,18 @@ msgstr ""
 msgid "Hide editor panel"
 msgstr ""
 
+#: collins/editor.py:538
+msgid "Move editor to its own window"
+msgstr ""
+
+#: collins/terminal.py:1699
+msgid "Bring editor back into this tab"
+msgstr ""
+
+#: collins/editorwindow.py:73
+msgid "Move editor back into its tab"
+msgstr ""
+
 #: collins/terminal.py:905
 msgid ""
 "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and "

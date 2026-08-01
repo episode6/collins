@@ -38,6 +38,7 @@ from .bgstatus import (
 )
 from .caffeine import DURATION_KEYS, duration_label, duration_seconds, format_remaining
 from .chatsessionview import ChatSessionTab
+from .editorwindow import EditorWindow
 from .formatting import blast_radius_body
 from .gitinfo import has_changes
 from .i18n import _
@@ -165,6 +166,10 @@ class MainWindow(Adw.ApplicationWindow):
         # their titles from the store.
         self._local_titles: set[Adw.TabPage] = set()
         self._idle_sources: dict[Adw.TabPage, int] = {}  # pending idle-notify timers
+        # Tabs whose editor pane is popped out into its own window right now.
+        # One entry per tab; the pane itself still belongs to the tab, so
+        # dirty counts and state capture keep working through it.
+        self._editor_windows: dict[TerminalTab, EditorWindow] = {}
         # Sessions assumed to be running detached because a /bg was fed, until
         # the agent list reports them: session id -> safety-timeout source
         # (see _mark_backgrounding).
@@ -426,6 +431,7 @@ class MainWindow(Adw.ApplicationWindow):
             # The user insisted mid-drain: any tabs still alive skip the
             # per-tab drain, so capture their panel histories and state now
             # (a no-op for tabs that already drained through _on_close_page).
+            self._release_all_editor_windows()
             self._save_panel_data()
             self._persist_last_session()
             return False  # tabs drained (or the user insisted) — really close
@@ -434,7 +440,9 @@ class MainWindow(Adw.ApplicationWindow):
         editor_dirty = self._editor_dirty_total()
         if busy == 0 and editor_dirty == 0:
             # This close skips the per-tab drain, so capture panel histories
-            # and state here.
+            # and state here. Popped-out editors dock back first — closing
+            # the main window must not leave an orphan editor window behind.
+            self._release_all_editor_windows()
             self._save_panel_data()
             self._persist_last_session()
             return False  # nothing running or unsaved; continue with the normal close
@@ -1174,6 +1182,7 @@ class MainWindow(Adw.ApplicationWindow):
         tab.connect("session-resolved", self._on_session_resolved, page)
         tab.connect("panel-size-changed", self._on_panel_size_changed)
         tab.connect("editor-size-changed", self._on_editor_size_changed)
+        tab.connect("editor-pop-out-requested", self._pop_out_editor)
         tab.connect("bell", self._on_bell)
         tab.connect("prs-changed", self._on_tab_prs_changed)
         tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
@@ -2360,8 +2369,13 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _toggle_editor(self) -> None:
         tab = self._current_terminal_tab()
-        if tab is not None:
-            tab.toggle_editor()
+        if tab is None:
+            return
+        win = self._editor_windows.get(tab)
+        if win is not None:
+            win.close()  # (a) popped out: dock it back (close-request docks)
+            return
+        tab.toggle_editor()  # (b)/(c) open or close the in-tab panel
 
     def _editor_save(self) -> None:
         tab = self._current_terminal_tab()
@@ -2372,9 +2386,55 @@ class MainWindow(Adw.ApplicationWindow):
         tab = self._current_terminal_tab()
         if tab is None:
             return
-        if not tab.editor_visible:
+        win = self._editor_windows.get(tab)
+        if win is not None:
+            win.present()  # the editor lives in its own window right now
+        elif not tab.editor_visible:
             tab.show_editor()
         tab.focus_editor()
+
+    # -- popped-out editor windows --------------------------------------------
+
+    def _pop_out_editor(self, tab: TerminalTab) -> None:
+        """Reparent the tab's live editor pane into its own window (the pane's
+        detach button got clicked). Buffers, cursors and dirty state ride
+        along — the widget moves, nothing is serialized."""
+        existing = self._editor_windows.get(tab)
+        if existing is not None:
+            existing.present()
+            return
+        pane = tab.detach_editor()
+        if pane is None:
+            return
+        win = EditorWindow(
+            application=self.get_application(),
+            pane=pane,
+            state=self.state,
+            title=pane.root.name,
+            icon_name=self.get_icon_name(),
+            on_dock_back=lambda _pane: self._dock_editor_back(tab),
+        )
+        self._editor_windows[tab] = win
+        win.present()
+
+    def _dock_editor_back(self, tab: TerminalTab) -> None:
+        """The EditorWindow released its pane (its close-request, or a forced
+        release below): put it back in the tab, open at its old width."""
+        self._editor_windows.pop(tab, None)
+        tab.reattach_editor()
+
+    def _release_editor_window(self, tab: TerminalTab) -> None:
+        """Force a tab's popped-out editor home without going through the WM:
+        used when the tab (or this whole window) is closing, so no orphan
+        editor window outlives its tab and keeps the app running."""
+        win = self._editor_windows.pop(tab, None)
+        if win is not None:
+            win.release_pane()  # docks the pane back via _dock_editor_back
+            win.destroy()
+
+    def _release_all_editor_windows(self) -> None:
+        for tab in list(self._editor_windows):
+            self._release_editor_window(tab)
 
     def _on_selected_page_changed(self, view: Adw.TabView, _pspec) -> None:
         page = view.get_selected_page()
@@ -2543,6 +2603,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._local_titles.discard(page)
         self._cancel_idle(page)
         if isinstance(tab, TerminalTab):
+            # A popped-out editor dies with its tab: dock the pane back first
+            # so the state captured below reflects it (and the app doesn't
+            # stay alive on an orphan editor window).
+            self._release_editor_window(tab)
             tab.save_panel_history()  # before the widget (and its VTE buffer) is destroyed
             self._save_panel_state(tab)
             self._save_editor_state(tab)

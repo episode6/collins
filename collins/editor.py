@@ -20,7 +20,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 try:
     gi.require_version("GtkSource", "5")
@@ -62,8 +62,15 @@ class _OpenFile:
 
 
 class EditorPane(Gtk.Box):
-    """One per `TerminalTab`. Hidden by default; the tab shows/hides it (and,
-    from PR 2, pops it out into its own window — not implemented here)."""
+    """One per `TerminalTab`. Hidden by default; the tab shows/hides it, and
+    can pop the live pane out into an `EditorWindow` (editorwindow.py) —
+    reparented, so buffers and dirty state travel with it."""
+
+    __gsignals__ = {
+        # The status row's detach button was clicked: whoever hosts the pane
+        # (the window, via the tab) should reparent it into its own window.
+        "request-pop-out": (GObject.SignalFlags.RUN_FIRST, None, ()),
+    }
 
     def __init__(self, root: str | Path) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -520,13 +527,26 @@ class EditorPane(Gtk.Box):
         self._save_btn.add_css_class("flat")
         self._save_btn.set_tooltip_text(_("Save (Ctrl+S)"))
         self._save_btn.set_action_name("editor.save")
+        # Rightmost: pop the pane out into its own window. Hidden while
+        # already popped out — the EditorWindow headerbar carries the
+        # symmetric dock-back button instead.
+        self._detach_btn = Gtk.Button(icon_name="window-new-symbolic")
+        self._detach_btn.add_css_class("flat")
+        self._detach_btn.set_tooltip_text(_("Move editor to its own window"))
+        self._detach_btn.connect("clicked", lambda *_a: self.emit("request-pop-out"))
 
         row.append(self._status_path)
         row.append(self._status_lang)
         row.append(self._status_cursor)
         row.append(self._save_btn)
+        row.append(self._detach_btn)
         self._sync_status()
         return row
+
+    def set_detached(self, detached: bool) -> None:
+        """Reflect where the pane lives: the detach button only makes sense
+        while it is still inside its tab."""
+        self._detach_btn.set_visible(not detached)
 
     def _sync_status(self) -> None:
         opened = self._active_open()
@@ -601,6 +621,12 @@ class EditorPane(Gtk.Box):
             self._apply_font(opened)
 
     # -- session state ---------------------------------------------------------
+
+    @property
+    def root(self) -> Path:
+        """The project directory the file tree is rooted at (names the
+        popped-out window)."""
+        return self._root
 
     def open_paths(self) -> list[str]:
         return list(self._open.keys())
