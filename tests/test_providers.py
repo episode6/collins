@@ -98,6 +98,46 @@ def test_background_agents_parses_agents_json(monkeypatch):
     assert agents == [BackgroundAgent(session_id="bg-id", job_id="bg-job", cwd="/p")]
 
 
+def test_background_agents_excludes_finished_jobs(monkeypatch):
+    import json
+
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    payload = json.dumps(
+        [
+            # Finished but still resident (Completed in `claude`'s own agent
+            # view) — kind alone can't tell it apart from a live job.
+            {
+                "sessionId": "done-id",
+                "id": "done-job",
+                "kind": "background",
+                "cwd": "/p",
+                "state": "done",
+            },
+            {
+                "sessionId": "error-id",
+                "id": "error-job",
+                "kind": "background",
+                "cwd": "/p",
+                "state": "error",
+            },
+            {
+                "sessionId": "live-id",
+                "id": "live-job",
+                "kind": "background",
+                "cwd": "/p",
+                "state": "working",
+            },
+        ]
+    )
+
+    class Result:
+        stdout = payload
+
+    monkeypatch.setattr(providers.subprocess, "run", lambda *a, **k: Result())
+    agents = ClaudeProvider().background_agents()
+    assert agents == [BackgroundAgent(session_id="live-id", job_id="live-job", cwd="/p")]
+
+
 def test_background_agents_empty_on_error(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
 

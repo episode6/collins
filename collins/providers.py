@@ -50,6 +50,13 @@ _PROMPT_HINT = 'Try "'
 _WORKTREE_EXIT_SELECTED_RE = re.compile(r"❯\s*Keep worktree\b")
 _WORKTREE_EXIT_OTHER_OPTION = "Remove worktree"
 
+# `claude agents --json` job-lifecycle values that mean a background agent is
+# no longer running, undocumented like the rest of that field. Observed on a
+# job left resident-but-finished: `"kind": "background"` never changes, only
+# `state` does, from "starting"/"working" through to one of these. See
+# ClaudeProvider.background_agents.
+_BACKGROUND_TERMINAL_STATES = frozenset({"done", "error", "failed", "stopped"})
+
 
 @dataclass(frozen=True)
 class SessionOptions:
@@ -352,6 +359,16 @@ class ClaudeProvider(Provider):
         sessions open in a foreground TUI somewhere (including our own tabs),
         which attach doesn't target. Any failure (old CLI without the
         subcommand, timeout, bad JSON) means "none running" → plain resume.
+
+        A background job the CLI itself considers finished (its own agent
+        view buckets these as "Completed") keeps its process resident and
+        keeps showing up here with `"kind": "background"` regardless of
+        `--all` — only `state` says it is actually done. Left uncounted,
+        such a job never leaves `background_agents()`: the sidebar's yellow
+        "running detached" guide line has no other source and no exit path
+        ever clears it (see BackgroundStatusPoller), and resume_command()
+        would keep attaching to it — the daemon's attach screen, not a plain
+        resume — instead of continuing the transcript.
         """
         cli = shutil.which(self.cli)
         if cli is None:
@@ -369,6 +386,8 @@ class ClaudeProvider(Provider):
         found: list[BackgroundAgent] = []
         for a in agents if isinstance(agents, list) else []:
             if not isinstance(a, dict) or a.get("kind") != "background":
+                continue
+            if a.get("state") in _BACKGROUND_TERMINAL_STATES:
                 continue
             session_id = a.get("sessionId")
             job_id = a.get("id")
