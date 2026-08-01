@@ -22,6 +22,8 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 from . import __version__, chats, dialogs, footerapps, openwith, panelhistory
 from .activity import (
     DETACHED_IDLE_S,
+    PROCESS_IDLE_S,
+    PROCESS_POLL_MS,
     TRANSCRIPT_POLL_MS,
     ActivityTracker,
     EchoGate,
@@ -199,6 +201,11 @@ class MainWindow(Adw.ApplicationWindow):
             lambda sid: self._activity.mark(sid, idle_s=DETACHED_IDLE_S)
         )
         self._bg_poll: int | None = None
+        # A tab's terminal only sees output; it says nothing about a
+        # background process (a dev server, a long build) the agent started
+        # and left running with its own output going elsewhere. This poll
+        # walks each open tab's process tree for one; see _sync_process_poll.
+        self._process_poll: int | None = None
         # Per tab, the filter that keeps a terminal's answers to the app (an
         # echoed keystroke, a redraw after a tab switch or a resize) from
         # reading as the agent working.
@@ -938,6 +945,7 @@ class MainWindow(Adw.ApplicationWindow):
         page = self._add_tab(tab, title, f"{project} — {bound_id}")
         if not fork:
             self._pages[bound_id] = page
+            self._sync_process_poll()
             self._sync_status(bound_id)
             saved_panel = self.state.get_panel_state(bound_id)
             if saved_panel:  # reopen the panel the way this session left it
@@ -1220,6 +1228,7 @@ class MainWindow(Adw.ApplicationWindow):
         if self._pages.get(session_id) not in (None, page):
             return  # another tab already owns this session
         self._pages[session_id] = page
+        self._sync_process_poll()
         # A `--continue` tab lands on a session that may already have PRs
         # saved; a brand-new one has none, and this is a no-op for it.
         tab.restore_prs(self.state.get_session_prs(session_id))
@@ -1946,13 +1955,16 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _stop_watchers(self) -> None:
         """Drop every timer that would outlive the window: the detach poller,
-        the activity sweep and the transcript poll all hold callbacks into a
-        window that is going away."""
+        the activity sweep, the transcript poll and the process poll all hold
+        callbacks into a window that is going away."""
         self._bg_status.stop()
         self._activity.stop()
         if self._bg_poll is not None:
             GLib.source_remove(self._bg_poll)
             self._bg_poll = None
+        if self._process_poll is not None:
+            GLib.source_remove(self._process_poll)
+            self._process_poll = None
 
     def _sync_row_busy(self, session_id: str) -> None:
         """Push the busy flag onto every row this session shows up as.
@@ -2006,6 +2018,29 @@ class MainWindow(Adw.ApplicationWindow):
             self._bg_activity.forget_all_but(())
             return GLib.SOURCE_REMOVE
         self._bg_activity.poll(transcripts)
+        return GLib.SOURCE_CONTINUE
+
+    def _sync_process_poll(self) -> None:
+        """Run the process-tree poll only while some session has an open tab.
+
+        A session with no tab has no terminal's process tree to walk — a
+        detached agent's background jobs, if it has any, run under a process
+        this app was never the parent of and cannot see."""
+        wanted = bool(self._pages)
+        if wanted and self._process_poll is None:
+            self._process_poll = GLib.timeout_add(PROCESS_POLL_MS, self._poll_process_activity)
+        elif not wanted and self._process_poll is not None:
+            GLib.source_remove(self._process_poll)
+            self._process_poll = None
+
+    def _poll_process_activity(self) -> bool:
+        if not self._pages:
+            self._process_poll = None
+            return GLib.SOURCE_REMOVE
+        for session_id, page in list(self._pages.items()):
+            tab = page.get_child()
+            if isinstance(tab, TerminalTab) and tab.has_background_descendant():
+                self._activity.mark(session_id, idle_s=PROCESS_IDLE_S)
         return GLib.SOURCE_CONTINUE
 
     # -- pre-emptive /bg status ----------------------------------------------
@@ -2420,6 +2455,7 @@ class MainWindow(Adw.ApplicationWindow):
             # closed, leaving a live tab its row could no longer reach.
             if self._pages.get(session_id) is page:
                 self._pages.pop(session_id)
+                self._sync_process_poll()
             self._sync_status(session_id)
             # The terminal that was feeding this session's pole is gone. A /bg
             # handoff closes its tab the same way, and the transcript poll

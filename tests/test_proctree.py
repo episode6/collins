@@ -97,6 +97,26 @@ def test_depth_limit_stops_the_descent(tree):
     assert proctree.agent_descendant_cwd(proc.pid, "claude", depth=0) is None
 
 
+def test_has_live_descendant_true_when_something_runs_below_the_agent(tree):
+    """A build script the agent shelled out to (or left running) is a live
+    child of the deepest agent process — exactly what a background job left
+    running looks like."""
+    proc, _parent_dir, _child_dir = tree("claude-wrapper", "some-build-script")
+    assert proctree.has_live_descendant(proc.pid, "claude") is True
+
+
+def test_has_live_descendant_false_with_nothing_left_running(tree):
+    """The deepest agent process here is the leaf child, which has spawned
+    nothing of its own."""
+    proc, _parent_dir, _child_dir = tree("claude-wrapper", "claude-agent")
+    assert proctree.has_live_descendant(proc.pid, "claude") is False
+
+
+def test_has_live_descendant_false_when_not_the_agent(tree):
+    proc, _parent_dir, _child_dir = tree("unrelated-program", "also-unrelated")
+    assert proctree.has_live_descendant(proc.pid, "claude") is False
+
+
 def test_missing_pids_are_not_fatal():
     assert proctree.process_cwd(None) is None
     assert proctree.process_cwd(0) is None
@@ -104,6 +124,7 @@ def test_missing_pids_are_not_fatal():
     assert proctree.process_children(2**31 - 1) == []
     assert proctree.is_agent_process(2**31 - 1, "claude") is False
     assert proctree.agent_descendant_cwd(2**31 - 1, "claude") is None
+    assert proctree.has_live_descendant(2**31 - 1, "claude") is False
 
 
 def test_self_is_an_agent_process_when_the_name_is_in_the_command_line():
