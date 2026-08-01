@@ -1610,20 +1610,17 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _exit_current_tab(self) -> None:
         """Header button: exit the focused session and close its tab without
-        the confirmation dialog — the click itself is the confirmation."""
+        the session confirmation dialog — the click itself is the confirmation."""
         page = self.tab_view.get_selected_page()
         if page is not None:
-            self._close_ok.add(page)
-            self.tab_view.close_page(page)
+            self._close_tab_direct(page, background=False)
 
     def _background_current_tab(self) -> None:
         """Header button: background (detach) the focused session and close
-        its tab without the confirmation dialog."""
+        its tab without the session confirmation dialog."""
         page = self.tab_view.get_selected_page()
         if page is not None and not self._background_blocker(page):
-            self._close_ok.add(page)
-            self._bg_ok.add(page)
-            self.tab_view.close_page(page)
+            self._close_tab_direct(page, background=True)
 
     def _close_session_tab(self, session_id: str, background: bool = False) -> None:
         """Sidebar row buttons: exit (or detach) the session's own tab, whether
@@ -1634,10 +1631,36 @@ class MainWindow(Adw.ApplicationWindow):
             return
         if background and self._background_blocker(page):
             return  # the row's button is disabled; ignore the action either way
-        self._close_ok.add(page)
-        if background:
-            self._bg_ok.add(page)
-        self.tab_view.close_page(page)
+        self._close_tab_direct(page, background=background)
+
+    def _close_tab_direct(self, page: Adw.TabPage, background: bool) -> None:
+        """Shared tail of the no-dialog close paths above. The click confirmed
+        exiting (or detaching) the *session* — it said nothing about throwing
+        away unsaved editor edits, so those still get their own ask before the
+        page is waved through `_on_close_page`'s checks via `_close_ok`.
+        Popped-out editors count too: the pane still belongs to the tab."""
+
+        def proceed() -> None:
+            if not self._page_alive(page):
+                return  # the tab closed some other way while the dialog sat open
+            self._close_ok.add(page)
+            if background:
+                self._bg_ok.add(page)
+            self.tab_view.close_page(page)
+
+        tab = page.get_child()
+        dirty = tab.editor_dirty_count() if isinstance(tab, TerminalTab) else 0
+        if not dirty:
+            proceed()
+            return
+        dialogs.confirm_dialog(
+            self,
+            _("Close tab with unsaved changes?"),
+            _("This tab's editor has unsaved changes that will be lost."),
+            _("Discard Changes"),
+            proceed,
+            default_response="cancel",
+        )
 
     def _session_takes_prompt(self, session_id: str) -> bool:
         """Whether a prompt sent to this session would land in an empty input.
