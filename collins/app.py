@@ -203,14 +203,19 @@ row.session-child.active-tab > box {
   margin-right: 0;
 }
 
-/* ...and its slider is solid, not translucent. Stock Adwaita fills the slider
-   with currentColor mixed 20-60% into transparent (resting/hover/drag), which
-   lets the row cards bleed through the bar. This provider sits at APPLICATION
-   priority, so the one rule outranks every state variant in the theme; the
-   fade-in/out of the overlay indicator is widget opacity animated by GTK
-   itself, not a style, so idle hiding still works. */
+/* ...and its slider is solid, not translucent, in the same color the panel
+   border next to it appears in. That border is Adwaita's paned separator:
+   currentColor at --border-opacity composited over the window background, so
+   the same mix (against the background rather than transparent) is that
+   exact rendered color, opaque. Plain currentColor would be the full-strength
+   foreground (white in dark mode); stock Adwaita instead mixes it 20-60% into
+   transparent (resting/hover/drag), which lets the row cards bleed through
+   the bar. This provider sits at APPLICATION priority, so the one rule
+   outranks every state variant in the theme; the fade-in/out of the overlay
+   indicator is widget opacity animated by GTK itself, not a style, so idle
+   hiding still works. */
 .sidebar-scroll > scrollbar.vertical > range > trough > slider {
-  background-color: currentColor;
+  background-color: color-mix(in srgb, currentColor var(--border-opacity), var(--window-bg-color));
 }
 
 /* interactive prompt card overlaid on the terminal */
