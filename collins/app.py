@@ -18,6 +18,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
+from .caffeine import duration_seconds
 from .i18n import _
 from .prefs import apply_color_scheme
 from .state import AppState
@@ -337,6 +338,11 @@ class App(Adw.Application):
         # never silently keep the machine awake unless the user explicitly
         # opted in via the caffeine_on_launch setting.
         self._caffeine_cookie: int | None = None
+        # The optional shut-off timer: when it's running, a monotonic deadline
+        # (µs) and the once-a-second source that both drives every window's
+        # countdown and turns Caffeine Mode off on reaching it.
+        self._caffeine_deadline: int | None = None
+        self._caffeine_tick: int | None = None
 
         # Shared across all windows so scans/monitors aren't duplicated and
         # state.json writes don't race.
@@ -364,24 +370,64 @@ class App(Adw.Application):
     def caffeine_enabled(self) -> bool:
         return self._caffeine_cookie is not None
 
-    def set_caffeine_enabled(self, enabled: bool) -> None:
-        """Toggle Caffeine Mode: inhibit suspend and screen blanking app-wide."""
-        if enabled == self.caffeine_enabled:
-            return
-        if enabled:
-            # inhibit() returns 0 when the platform can't inhibit; treating
-            # that as "still off" makes every window's toggle snap back.
-            self._caffeine_cookie = (
-                self.inhibit(
-                    self.get_active_window(),
-                    Gtk.ApplicationInhibitFlags.SUSPEND | Gtk.ApplicationInhibitFlags.IDLE,
-                    _("Caffeine Mode is on"),
+    @property
+    def caffeine_remaining(self) -> int | None:
+        """Seconds left before Caffeine Mode turns itself off, or None when no
+        timer is running (it stays on until someone turns it off)."""
+        if self._caffeine_deadline is None:
+            return None
+        left = self._caffeine_deadline - GLib.get_monotonic_time()
+        return max(0, -(-left // 1_000_000))  # round up, so a 1h timer opens at 1:00:00
+
+    def set_caffeine_enabled(self, enabled: bool, seconds: int | None = None) -> None:
+        """Toggle Caffeine Mode: inhibit suspend and screen blanking app-wide.
+
+        `seconds` arms a shut-off timer that turns Caffeine Mode off again when
+        it runs out; None leaves it on indefinitely. Any timer already running
+        is cancelled either way, so re-picking a duration restarts the clock and
+        a plain toggle never leaves a stale one armed.
+        """
+        self._cancel_caffeine_timer()
+        if enabled != self.caffeine_enabled:
+            if enabled:
+                # inhibit() returns 0 when the platform can't inhibit; treating
+                # that as "still off" makes every window's toggle snap back.
+                self._caffeine_cookie = (
+                    self.inhibit(
+                        self.get_active_window(),
+                        Gtk.ApplicationInhibitFlags.SUSPEND | Gtk.ApplicationInhibitFlags.IDLE,
+                        _("Caffeine Mode is on"),
+                    )
+                    or None
                 )
-                or None
-            )
-        else:
-            self.uninhibit(self._caffeine_cookie)
-            self._caffeine_cookie = None
+            else:
+                self.uninhibit(self._caffeine_cookie)
+                self._caffeine_cookie = None
+        # Nothing to count down to if the inhibit didn't take (or was refused).
+        if seconds and self.caffeine_enabled:
+            self._caffeine_deadline = GLib.get_monotonic_time() + seconds * 1_000_000
+            self._caffeine_tick = GLib.timeout_add_seconds(1, self._on_caffeine_tick)
+        self._sync_caffeine_windows()
+
+    def _cancel_caffeine_timer(self) -> None:
+        if self._caffeine_tick is not None:
+            GLib.source_remove(self._caffeine_tick)
+        self._caffeine_tick = None
+        self._caffeine_deadline = None
+
+    def _on_caffeine_tick(self) -> bool:
+        """Once a second while a timer runs: redraw the countdowns, and turn
+        Caffeine Mode off when the deadline passes."""
+        if self.caffeine_remaining:
+            self._sync_caffeine_windows()
+            return GLib.SOURCE_CONTINUE
+        # Forget the source before turning off: this callback *is* the source,
+        # and returning REMOVE below is what disposes of it.
+        self._caffeine_tick = None
+        self.set_caffeine_enabled(False)
+        return GLib.SOURCE_REMOVE
+
+    def _sync_caffeine_windows(self) -> None:
         for window in self.get_windows():
             sync = getattr(window, "sync_caffeine_toggle", None)
             if sync is not None:
@@ -409,7 +455,10 @@ class App(Adw.Application):
             # was last closed. Extra windows (Ctrl+Shift+N) start empty.
             window.restore_last_session()
             if self.state.get_setting("caffeine_on_launch"):
-                self.set_caffeine_enabled(True)
+                self.set_caffeine_enabled(
+                    True,
+                    seconds=duration_seconds(self.state.get_setting("caffeine_launch_timer") or ""),
+                )
         window.present()
 
 
