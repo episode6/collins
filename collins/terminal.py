@@ -22,6 +22,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa:
 from . import (  # noqa: E402
     apppicker,
     editor,
+    editorfiles,
     footerapps,
     panelhistory,
     prmenu,
@@ -1355,6 +1356,9 @@ class TerminalTab(Gtk.Box):
         self._updating = False
         self._pr_refresh_btn.set_sensitive(True)
         self._check_prompt()
+        if self._editor is not None:
+            # Same pane object wherever it lives (in-tab or popped out).
+            self._editor.set_agent_files(self._transcript.touched_files())
         if tracked is not None:
             # The shown ones come back with status; a merge is the one part of
             # it worth keeping, and keeping it is what stops that PR from being
@@ -1732,6 +1736,29 @@ class TerminalTab(Gtk.Box):
     def focus_editor(self) -> None:
         if self._editor is not None:
             self._editor.focus_default()
+
+    @property
+    def editor_root(self) -> str | None:
+        """The project directory this tab's editor is rooted at (also quick
+        open's search root); None when GtkSourceView is missing."""
+        return str(self._editor.root) if self._editor is not None else None
+
+    def can_open_in_editor(self, path: str | Path) -> bool:
+        """Whether `open_in_editor(path)` would land: an editor exists and
+        *path* resolves inside its project root (the pane's own guard would
+        refuse anything outside; this lets the window pick a better tab)."""
+        return self._editor is not None and editorfiles.is_inside(self._editor.root, path)
+
+    def open_in_editor(self, path: str | Path) -> None:
+        """Open *path* in this tab's editor, revealing the panel if it is
+        closed. While the pane is popped out its window already shows it —
+        presenting that window is the caller's job (it owns the windows)."""
+        if self._editor is None:
+            return
+        if not self._editor_detached and not self.editor_visible:
+            self.show_editor()
+        self._editor.open_file(path)
+        self._editor.focus_default()
 
     def set_editor_width_lookup(self, lookup) -> None:
         """`lookup() -> px` supplies the app-wide last-set editor width, used

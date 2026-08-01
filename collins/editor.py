@@ -41,6 +41,7 @@ from .filetree import FileTree  # noqa: E402
 from .i18n import _  # noqa: E402
 
 _MAX_RECENT_FILES = 20  # cap on files a session's editor_state remembers
+_MAX_AGENT_FILES = 8  # rows in the "agent files" list pinned above the tree
 # How long after a file-monitor event to actually check the file: long
 # enough that a run of quick writes (an agent's edit tool) coalesces into one
 # check, short enough that "the editor matches disk" still feels immediate.
@@ -99,7 +100,10 @@ class EditorPane(Gtk.Box):
 
         self._tree = FileTree(self._root)
         self._tree.connect("open-file", lambda _t, path: self.open_file(path))
-        paned.set_start_child(self._tree)
+        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        left.append(self._build_agent_files())
+        left.append(self._tree)
+        paned.set_start_child(left)
         paned.set_resize_start_child(False)
         paned.set_shrink_start_child(False)
 
@@ -146,6 +150,71 @@ class EditorPane(Gtk.Box):
                 )
             )
         self.add_controller(controller)
+
+    # -- agent files ---------------------------------------------------------
+
+    def _build_agent_files(self) -> Gtk.Widget:
+        """The "recently touched by the agent" list pinned above the file
+        tree: fed by the tab's transcript tail (see set_agent_files), hidden
+        until the session's agent has actually written something."""
+        self._agent_paths: list[str] = []  # what the rows currently show
+        self._agent_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False)
+
+        header = Gtk.Label(label=_("Agent files"), xalign=0.0)
+        header.add_css_class("caption-heading")
+        header.add_css_class("dim-label")
+        header.set_margin_top(8)
+        header.set_margin_start(12)
+        header.set_margin_bottom(2)
+        self._agent_box.append(header)
+
+        self._agent_list = Gtk.ListBox()
+        self._agent_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._agent_list.add_css_class("navigation-sidebar")
+        self._agent_list.connect("row-activated", self._on_agent_row)
+        self._agent_box.append(self._agent_list)
+        self._agent_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+        return self._agent_box
+
+    def set_agent_files(self, paths: list[str]) -> None:
+        """Show *paths* (most recent first) in the agent-files list. Called on
+        every transcript update, so it must be cheap when nothing changed.
+        Drops anything outside the project or no longer a file on disk."""
+        shown = []
+        for path in paths:
+            if len(shown) >= _MAX_AGENT_FILES:
+                break
+            p = Path(path)
+            if editorfiles.is_inside(self._root, p) and p.is_file():
+                shown.append(str(p))
+        if shown == self._agent_paths:
+            return
+        self._agent_paths = shown
+        self._agent_list.remove_all()
+        for path in shown:
+            self._agent_list.append(self._make_agent_row(path))
+        self._agent_box.set_visible(bool(shown))
+
+    def _make_agent_row(self, path: str) -> Gtk.ListBoxRow:
+        row = Gtk.ListBoxRow()
+        row.file_path = path
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        icon = Gtk.Image.new_from_icon_name("document-edit-symbolic")
+        label = Gtk.Label(label=Path(path).name, xalign=0.0)
+        label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        box.append(icon)
+        box.append(label)
+        row.set_child(box)
+        try:
+            row.set_tooltip_text(str(Path(path).relative_to(self._root)))
+        except ValueError:
+            row.set_tooltip_text(path)
+        return row
+
+    def _on_agent_row(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
+        path = getattr(row, "file_path", None)
+        if path:
+            self.open_file(path)
 
     # -- opening files -----------------------------------------------------
 

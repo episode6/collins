@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 import io
 import json
@@ -69,6 +69,27 @@ def test_tool_use_chip():
                        "content_block": {"type": "tool_use", "id": "t1", "name": "Read", "input": {}}}})
     tools = [e for e in events if e.kind == "tool"]
     assert len(tools) == 1 and tools[0].tool_name == "Read"
+
+
+def test_assistant_message_yields_tool_inputs():
+    p = StreamParser()
+    events = _feed(p, {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "text", "text": "done"},
+        {"type": "tool_use", "id": "t9", "name": "Edit",
+         "input": {"file_path": "/proj/a.py", "old_string": "x", "new_string": "y"}},
+    ]}})
+    inputs = [e for e in events if e.kind == "tool_input"]
+    assert len(inputs) == 1
+    assert inputs[0].tool_name == "Edit"
+    assert inputs[0].tool_use_id == "t9"
+    assert inputs[0].tool_input["file_path"] == "/proj/a.py"
+
+
+def test_assistant_message_without_tools_yields_nothing():
+    p = StreamParser()
+    events = _feed(p, {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "text", "text": "just words"}]}})
+    assert events == []
 
 
 def test_rate_limit_event():

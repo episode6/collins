@@ -1267,3 +1267,31 @@ msgstr ""
 #: collins/prefs.py:352
 msgid "Show dotfiles in the editor's file tree"
 msgstr ""
+
+#: collins/quickopen.py:66
+msgid "Open File"
+msgstr ""
+
+#: collins/quickopen.py:76
+msgid "Open a file…"
+msgstr ""
+
+#: collins/quickopen.py:160
+msgid "Indexing project files…"
+msgstr ""
+
+#: collins/quickopen.py:162
+msgid "No files found in this project."
+msgstr ""
+
+#: collins/quickopen.py:165
+msgid "Project is large — only the first {count} files are searchable."
+msgstr ""
+
+#: collins/editor.py:168
+msgid "Agent files"
+msgstr ""
+
+#: collins/chatbubbles.py:73
+msgid "Open {name} in the editor"
+msgstr ""

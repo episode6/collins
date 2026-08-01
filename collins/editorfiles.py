@@ -11,6 +11,7 @@ GtkSource calls.
 from __future__ import annotations
 
 import enum
+from collections import deque
 from pathlib import Path
 
 # Skipped wherever a directory is listed or expanded: build output,
@@ -150,6 +151,33 @@ def is_inside(root: str | Path, path: str | Path) -> bool:
     except OSError:
         return False
     return resolved_path == resolved_root or resolved_root in resolved_path.parents
+
+
+def walk_files(
+    root: str | Path, show_hidden: bool = False, cap: int = 20_000
+) -> tuple[list[str], bool]:
+    """Every file under *root* as project-relative POSIX paths, breadth-first
+    (so shallow files land early and quick-open's ties favour them). Reuses
+    `list_dir`'s skip rules — hidden files, SKIP_DIR_NAMES, irregular nodes,
+    symlinks escaping *root* — and never descends into a symlinked directory
+    at all, exactly like the file tree's expansion rule, so a link cycle
+    can't wedge the walk. Returns `(paths, truncated)`; *truncated* is True
+    when the *cap* stopped the walk early."""
+    root = Path(root)
+    paths: list[str] = []
+    queue: deque[tuple[Path, str]] = deque([(root, "")])
+    while queue:
+        directory, prefix = queue.popleft()
+        for name, is_dir in list_dir(directory, show_hidden, root=root):
+            child = directory / name
+            if is_dir:
+                if not child.is_symlink():
+                    queue.append((child, f"{prefix}{name}/"))
+            else:
+                if len(paths) >= cap:
+                    return paths, True
+                paths.append(f"{prefix}{name}")
+    return paths, False
 
 
 def list_dir(

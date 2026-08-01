@@ -797,3 +797,24 @@ msgstr "Rejtett fájlok megjelenítése"
 msgid "Show dotfiles in the editor's file tree"
 msgstr "Rejtett fájlok megjelenítése a szerkesztő fájlfájában"
 
+msgid "Open File"
+msgstr "Fájl megnyitása"
+
+msgid "Open a file…"
+msgstr "Fájl megnyitása…"
+
+msgid "Indexing project files…"
+msgstr "Projektfájlok indexelése…"
+
+msgid "No files found in this project."
+msgstr "Nem található fájl ebben a projektben."
+
+msgid "Project is large — only the first {count} files are searchable."
+msgstr "A projekt nagy — csak az első {count} fájl kereshető."
+
+msgid "Agent files"
+msgstr "Ügynökfájlok"
+
+msgid "Open {name} in the editor"
+msgstr "A(z) {name} megnyitása a szerkesztőben"
+

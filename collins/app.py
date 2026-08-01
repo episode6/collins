@@ -350,6 +350,11 @@ popover.menu button.open-with-row:hover {
   opacity: 0.6;
   padding: 2px 4px;
 }
+/* a chip that knows its file: clickable, reads as a link */
+.chat-tool-link {
+  opacity: 0.8;
+  text-decoration-line: underline;
+}
 """
 
 

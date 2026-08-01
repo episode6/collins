@@ -220,6 +220,15 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   tab, full-height in a right-hand column.
 - A **project file tree** rooted at the tab's directory; click a file to
   open it in a tab strip of its own, with a dot marking unsaved changes.
+- **Quick open** (`Ctrl+Shift+O`): fuzzy-find any file in the project by
+  typing a few letters of its name or path — no digging through the tree.
+- An **Agent files** list pinned above the tree: the files this session's
+  agent has most recently written or edited, newest first, one click from
+  the change it just made. It appears the moment the agent first writes a
+  file.
+- In a **chat tab**, a tool chip that names a file (an edit, a write, a
+  read) becomes a link once the call's details arrive — click it to open
+  that file in the matching session tab's editor.
 - Real editing: line numbers, current-line highlight, bracket matching,
   undo/redo, and **180 languages'** worth of syntax highlighting via
   GtkSourceView, the same engine behind GNOME Text Editor and Builder.

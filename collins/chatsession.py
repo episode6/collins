@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 """Drive a headless `claude -p` session over stream-json stdio.
 
@@ -30,7 +30,9 @@ from . import chats
 
 @dataclass
 class Event:
-    kind: str  # init | text | thinking | tool | permission | turn_end | rate_limit | error | exit
+    # init | text | thinking | tool | tool_input | permission | turn_end |
+    # rate_limit | error | exit
+    kind: str
     text: str = ""
     session_id: str = ""
     tool_name: str = ""
@@ -109,6 +111,23 @@ class StreamParser(_LineParser):
                     )
                 ]
             return []
+        if etype == "assistant":
+            # The complete message, after its blocks streamed. The "tool"
+            # events above fired at content_block_start, before the tool's
+            # input had streamed in — this is where the full input finally
+            # exists, so the view can retrofit its chips with file paths.
+            out = []
+            for block in (e.get("message") or {}).get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    out.append(
+                        Event(
+                            "tool_input",
+                            tool_name=block.get("name", "") or "",
+                            tool_input=block.get("input") or {},
+                            tool_use_id=block.get("id", "") or "",
+                        )
+                    )
+            return out
         if etype == "rate_limit_event":
             info = e.get("rate_limit_info") or {}
             return [

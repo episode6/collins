@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 """A chat tab backed by a live headless `claude -p` stream-json session.
 
@@ -19,7 +19,13 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from .chatbubbles import make_bubble, make_label, make_tool_chip, set_bubble_text  # noqa: E402
+from .chatbubbles import (  # noqa: E402
+    arm_tool_chip,
+    make_bubble,
+    make_label,
+    make_tool_chip,
+    set_bubble_text,
+)
 from .chatsession import Event, make_chat_session  # noqa: E402
 from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
 from .formatting import display_path  # noqa: E402
@@ -49,6 +55,10 @@ class ChatSessionTab(Gtk.Box):
         self._ended = False
         self._always_allowed: set[str] = set()
         self._pending_card: Gtk.Widget | None = None
+        # Tool chips shown at content_block_start, before their input had
+        # streamed; the turn's full assistant message retrofits file paths
+        # onto them (see the "tool_input" event).
+        self._unarmed_chips: list[tuple[str, Gtk.Widget]] = []
 
         info = Gtk.Label(label=self._banner_text(), xalign=0.0)
         info.add_css_class("dim-label")
@@ -190,8 +200,13 @@ class ChatSessionTab(Gtk.Box):
         elif ev.kind == "tool":
             self._show_typing(False)
             self._assistant_label = None  # text after a tool starts a fresh bubble
-            self._list.append(self._tool_chip(ev.tool_name))
+            chip = self._tool_chip(ev.tool_name)
+            self._list.append(chip)
+            self._unarmed_chips.append((ev.tool_name, chip))
+            del self._unarmed_chips[:-8]  # only the current turn's chips matter
             self._queue_scroll()
+        elif ev.kind == "tool_input":
+            self._arm_chip(ev)
         elif ev.kind == "permission":
             self._on_permission(ev)
         elif ev.kind == "turn_end":
@@ -225,6 +240,34 @@ class ChatSessionTab(Gtk.Box):
         self._assistant_buf += delta
         set_bubble_text(self._assistant_label, self._assistant_buf, "assistant")
         self._queue_scroll()
+
+    def _arm_chip(self, ev: Event) -> None:
+        """A tool call's complete input arrived: if it names a file, make the
+        matching chip (the oldest unarmed one for that tool) open it in the
+        editor. Chips whose tool has no file just stop being tracked."""
+        for i, (name, chip) in enumerate(self._unarmed_chips):
+            if name == ev.tool_name:
+                del self._unarmed_chips[i]
+                path = self._chip_path(ev.tool_input or {})
+                if path:
+                    arm_tool_chip(chip, path, self._open_in_editor)
+                return
+
+    @staticmethod
+    def _chip_path(tool_input: dict) -> str:
+        """The file a tool call touches, per the same input keys the terminal
+        tabs' transcript tail reads — never bare "path", which is usually a
+        directory (Glob, Grep)."""
+        if not isinstance(tool_input, dict):
+            return ""
+        for key in ("file_path", "notebook_path"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    def _open_in_editor(self, path: str) -> None:
+        self.activate_action("win.open-in-editor", GLib.Variant("s", path))
 
     # -- permissions -----------------------------------------------------------
 
