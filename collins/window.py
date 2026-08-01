@@ -1111,7 +1111,8 @@ class MainWindow(Adw.ApplicationWindow):
         # "commit" is everything the app sends this terminal's child — the
         # keystrokes the user types, and the focus reports VTE emits on a tab
         # switch — so the redraw that answers one is not the agent working.
-        tab.terminal.connect("commit", lambda *_args: gate.poked())
+        # The text goes along so the gate can arm itself on the first submit.
+        tab.terminal.connect("commit", lambda _term, text, _size: gate.poked(text or ""))
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
         # Capture phase so the keystroke is seen even though VTE consumes it;
         # EVENT_PROPAGATE below leaves it for VTE to deliver as usual.
@@ -2103,6 +2104,10 @@ class MainWindow(Adw.ApplicationWindow):
             return Gdk.EVENT_PROPAGATE
         if state & Gtk.accelerator_get_default_mod_mask():
             return Gdk.EVENT_PROPAGATE
+        # Arm through the key itself, not just the "\r" the commit will carry:
+        # this stays right however VTE ends up encoding Enter for the child.
+        if (gate := self._echo_gates.get(page)) is not None:
+            gate.arm()
         for tracked in (self._session_id_of(page), self._placeholder_pages.get(page)):
             if tracked:
                 self._activity.mark(tracked)

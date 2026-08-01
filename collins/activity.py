@@ -156,6 +156,15 @@ class EchoGate:
     reports them with `poked`. The third shows up as a different grid size than
     the last redraw came at, which `counts` notices on its own.
 
+    The gate also starts *held*: a terminal nothing has ever been sent to has
+    no turn to be working on, yet its agent CLI paints a whole welcome screen
+    at spawn — a burst of real child output that would otherwise start a pole
+    on a tab the user only just opened. The first submit arms the gate for the
+    life of the tab: a carriage return in a commit (a typed Enter, an injected
+    prompt's send, a question card's answer — every way a turn starts goes
+    through the pty as one), or the window's own report of a bare Enter via
+    `arm`, which doesn't rely on what VTE encodes the key as.
+
     Discounting only decides whether a pole may *start*: the window still marks
     a session it already believes is working, so typing at an agent mid-turn
     can never stall its pole.
@@ -169,19 +178,31 @@ class EchoGate:
     ) -> None:
         self._quiet_s = quiet_s
         self._clock = clock
+        self._armed = False  # something has been submitted; poles may start
         self._poked_at: float | None = None
         self._grid: tuple[int, int] | None = None  # (columns, rows) at the last redraw
 
-    def poked(self) -> None:
-        """The app just sent this terminal's child something."""
+    def arm(self) -> None:
+        """A turn was just asked for; redraws may mean work from here on."""
+        self._armed = True
+
+    def poked(self, text: str = "") -> None:
+        """The app just sent this terminal's child *text*.
+
+        A carriage return in it is a submit — never part of a spawn-time
+        initial command (those end in a newline) or a focus report — so it
+        arms the gate as a side effect.
+        """
         self._poked_at = self._clock()
+        if "\r" in text:
+            self._armed = True
 
     def counts(self, grid: tuple[int, int]) -> bool:
         """Whether the redraw arriving now — at *grid* columns and rows — is
         the agent working rather than the terminal answering us."""
         reflowed = self._grid is not None and grid != self._grid
         self._grid = grid
-        if reflowed:
+        if not self._armed or reflowed:
             return False
         if self._poked_at is None:
             return True
