@@ -586,6 +586,7 @@ class TerminalTab(Gtk.Box):
         self._editor = editor.EditorPane(editor_root) if editor.HAVE_GTKSOURCE else None
         self._editor_detached = False  # pane reparented into its own EditorWindow
         self._editor_width = 0  # this tab's last-set editor width, px (0 = none yet)
+        self._editor_apply_pending = False  # a programmatic divider set is queued
         self._editor_width_lookup = None  # () -> app-wide last-set width (set by the window)
         self._editor_width_emit_source: int | None = None  # debounce for editor-size-changed
         self._outer = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
@@ -1786,7 +1787,13 @@ class TerminalTab(Gtk.Box):
         self._editor_width_lookup = lookup
 
     def _remember_editor_width(self) -> None:
-        if not self.editor_visible:
+        """Record the editor's width off the divider. Skipped while an apply
+        is still queued: revealing the pane re-lays the paned out at its
+        default fraction before `_apply_editor_width`'s idle callback runs,
+        and remembering *that* width poisons the very value the apply is
+        about to read — the settings lookup then never wins, and the
+        fraction gets persisted app-wide (the first-show width bug)."""
+        if not self.editor_visible or self._editor_apply_pending:
             return
         total = self._outer.get_width()
         if total <= 0:
@@ -1808,9 +1815,12 @@ class TerminalTab(Gtk.Box):
         """Size the editor panel once the outer paned's own size is known:
         this tab's remembered width, else the app-wide last-set width, else
         roughly a third of the paned. A simplified copy of
-        `_apply_panel_size` — one position, no per-mode bookkeeping."""
+        `_apply_panel_size` — one position, no per-mode bookkeeping, but the
+        same apply-pending gate (see `_remember_editor_width`)."""
+        self._editor_apply_pending = True
 
         def position() -> bool:
+            self._editor_apply_pending = False
             total = self._outer.get_width()
             if total <= 0:
                 return GLib.SOURCE_REMOVE
