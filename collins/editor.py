@@ -14,7 +14,6 @@ manager catches up (see `gir1.2-gtksource-5` in debian/control).
 from __future__ import annotations
 
 import logging
-
 from pathlib import Path
 
 import gi
