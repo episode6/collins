@@ -113,6 +113,33 @@ def test_sweep_only_runs_while_something_is_busy():
     assert len(timers.callbacks) == 1
 
 
+def test_a_mark_can_carry_its_own_idle_window():
+    # A detached session's transcript grows in bursts — nothing lands while a
+    # response generates or a tool runs — so its marks pass a wider window and
+    # the pole rides out the quiet in between.
+    tracker, clock, timers, changes = make_tracker(idle_s=2.0)
+    tracker.mark("a", idle_s=10.0)
+    clock.advance(8.0)
+    timers.tick()
+    assert tracker.is_busy("a")  # far past IDLE_S, still inside its own window
+    clock.advance(2.5)
+    timers.tick()
+    assert not tracker.is_busy("a")
+    assert changes == [("a", True), ("a", False)]
+
+
+def test_the_latest_mark_decides_the_window():
+    # A session that stops being detached (its tab reopened, say) is back on
+    # the terminal's short window from its next mark.
+    tracker, clock, timers, _changes = make_tracker(idle_s=2.0)
+    tracker.mark("a", idle_s=10.0)
+    clock.advance(1.0)
+    tracker.mark("a")
+    clock.advance(2.5)
+    timers.tick()
+    assert not tracker.is_busy("a")
+
+
 def test_clear_stops_it_without_waiting():
     tracker, _clock, timers, changes = make_tracker()
     tracker.mark("a")

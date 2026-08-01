@@ -16,8 +16,10 @@ There is no such signal from the agent, so both sources here are inferred:
   `TranscriptActivity` watches its transcript instead: the JSONL only grows
   while the agent is producing turns.
 
-Both funnel into one tracker, so "busy" means the same thing either way: output
-seen within the last `IDLE_S` seconds.
+Both funnel into one tracker: "busy" means output seen within the source's
+idle window — `IDLE_S` for a terminal, which redraws continuously while its
+agent works, and the wider `DETACHED_IDLE_S` for a transcript, which grows
+only in bursts.
 
 Nothing here touches GTK — the timer is injected — so the whole thing is
 testable without a display.
@@ -32,8 +34,18 @@ from pathlib import Path
 # How long output has to stop before a session reads as idle. Long enough to
 # ride out the pauses inside a turn — an agent thinking between tool calls
 # prints nothing for a beat — and short enough that a finished turn stops the
-# pole while the user is still looking at the row.
+# pole while the user is still looking at the row. This is the window for a
+# tab's terminal, which repaints continuously (spinner frames count) while
+# its agent works.
 IDLE_S = 2.0
+
+# The window for a detached session, whose only signal is its transcript. The
+# JSONL grows in bursts: nothing is appended while a response is generating or
+# a tool is running, only when the finished message or result lands, so quiet
+# gaps of several seconds are normal mid-turn. `IDLE_S` would flicker the pole
+# off inside every one of them; this rides them out. The cost of being
+# generous is only that the pole lingers this long after the final turn.
+DETACHED_IDLE_S = 10.0
 
 # How often the sweep looks for sessions that went quiet. Only the moment a
 # session stops being busy is this coarse; starting is immediate, on the first
@@ -80,15 +92,23 @@ class ActivityTracker:
         self._clock = clock
         self._add_timeout = add_timeout or _glib_add_timeout
         self._remove_timeout = remove_timeout or _glib_remove_timeout
-        self._last_seen: dict[str, float] = {}  # busy session id -> last output
+        self._deadlines: dict[str, float] = {}  # busy session id -> when it reads idle
         self._sweep: int | None = None
 
-    def mark(self, session_id: str) -> None:
-        """Record that *session_id* just produced output."""
+    def mark(self, session_id: str, *, idle_s: float | None = None) -> None:
+        """Record that *session_id* just produced output.
+
+        *idle_s* is how long this mark keeps the session busy, defaulting to
+        the tracker's window. A sparse source — a transcript that grows only
+        when a turn lands — passes a wider one than a terminal that redraws
+        continuously. The latest mark decides: a session whose signal changes
+        (its tab reopened, say) is on the new window from its next mark.
+        """
         if not session_id:
             return
-        fresh = session_id not in self._last_seen
-        self._last_seen[session_id] = self._clock()
+        fresh = session_id not in self._deadlines
+        window = self._idle_s if idle_s is None else idle_s
+        self._deadlines[session_id] = self._clock() + window
         if fresh:
             self._start_sweep()
             self._on_change(session_id, True)
@@ -97,21 +117,21 @@ class ActivityTracker:
         """Drop *session_id* now, without waiting out the idle window — its tab
         closed, or it stopped running detached, so there is nothing left to be
         busy."""
-        if self._last_seen.pop(session_id, None) is None:
+        if self._deadlines.pop(session_id, None) is None:
             return
         self._stop_sweep_if_idle()
         self._on_change(session_id, False)
 
     def is_busy(self, session_id: str) -> bool:
-        return session_id in self._last_seen
+        return session_id in self._deadlines
 
     def busy(self) -> set[str]:
-        return set(self._last_seen)
+        return set(self._deadlines)
 
     def stop(self) -> None:
         """Release the sweep timer (window teardown). Leaves no callbacks
         pointing at a window that is going away."""
-        self._last_seen.clear()
+        self._deadlines.clear()
         self._stop_sweep_if_idle()
 
     # -- the sweep ----------------------------------------------------------
@@ -121,16 +141,16 @@ class ActivityTracker:
             self._sweep = self._add_timeout(self._sweep_ms, self._on_sweep)
 
     def _stop_sweep_if_idle(self) -> None:
-        if self._sweep is not None and not self._last_seen:
+        if self._sweep is not None and not self._deadlines:
             self._remove_timeout(self._sweep)
             self._sweep = None
 
     def _on_sweep(self) -> bool:
-        cutoff = self._clock() - self._idle_s
-        for session_id in [sid for sid, seen in self._last_seen.items() if seen <= cutoff]:
-            del self._last_seen[session_id]
+        now = self._clock()
+        for session_id in [sid for sid, deadline in self._deadlines.items() if deadline <= now]:
+            del self._deadlines[session_id]
             self._on_change(session_id, False)
-        if not self._last_seen:
+        if not self._deadlines:
             self._sweep = None
             return False  # nothing left to time out; mark() starts it again
         return True

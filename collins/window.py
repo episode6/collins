@@ -20,7 +20,13 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import __version__, chats, dialogs, footerapps, openwith, panelhistory
-from .activity import TRANSCRIPT_POLL_MS, ActivityTracker, EchoGate, TranscriptActivity
+from .activity import (
+    DETACHED_IDLE_S,
+    TRANSCRIPT_POLL_MS,
+    ActivityTracker,
+    EchoGate,
+    TranscriptActivity,
+)
 from .bgstatus import (
     BLOCK_IN_FLIGHT,
     BLOCK_UNREGISTERED,
@@ -186,8 +192,12 @@ class MainWindow(Adw.ApplicationWindow):
         # Which sessions are producing output right now, and the poll that asks
         # the detached ones' transcripts (they have no terminal to listen to).
         # The poll only runs while something is detached; see _sync_bg_poll.
+        # Transcript marks carry the wider detached window: a JSONL grows in
+        # bursts, and the pole should ride out the quiet in between.
         self._activity = ActivityTracker(self._on_activity_changed)
-        self._bg_activity = TranscriptActivity(self._activity.mark)
+        self._bg_activity = TranscriptActivity(
+            lambda sid: self._activity.mark(sid, idle_s=DETACHED_IDLE_S)
+        )
         self._bg_poll: int | None = None
         # Per tab, the filter that keeps a terminal's answers to the app (an
         # echoed keystroke, a redraw after a tab switch or a resize) from
