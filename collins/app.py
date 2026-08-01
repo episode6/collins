@@ -39,13 +39,18 @@ row.drop-below { box-shadow: inset 0 -2px 0 0 @accent_bg_color; }
 .waiting-badge { color: #e5a50a; }      /* Claude asked a question */
 .interrupted-badge { color: #e01b24; }  /* user stopped Claude mid-task */
 
-/* make the active tab clearly stand out from inactive ones */
-tabbar tab:checked {
-  background-color: alpha(#D97757, 0.22);
+/* make the active tab clearly stand out from inactive ones. Its background
+   color is set dynamically, not here: themes._apply_dynamic_theme_css keeps
+   it matched to the current terminal theme's background (see themes.py), so
+   the tab reads as part of the terminal it sits above rather than a
+   mismatched frame around it. libadwaita marks the active AdwTabBar row
+   with the GTK state `:selected`, not `:checked` (`:checked` is for
+   checkbox/toggle-style widgets and silently matches nothing here). */
+tabbar tab:selected {
   box-shadow: inset 0 -3px 0 #D97757;
 }
-tabbar tab:checked label { font-weight: bold; }
-tabbar tab:not(:checked) label { opacity: 0.6; }
+tabbar tab:selected label { font-weight: bold; }
+tabbar tab:not(:selected) label { opacity: 0.6; }
 
 .count-badge {
   background-color: alpha(currentColor, 0.1);
