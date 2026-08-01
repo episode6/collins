@@ -80,7 +80,7 @@ class FileTree(Gtk.Box):
     def _fill_store(self, store: Gio.ListStore, directory: Path) -> None:
         nodes = [
             _Node(name, directory / name, is_dir)
-            for name, is_dir in editorfiles.list_dir(directory, self._show_hidden)
+            for name, is_dir in editorfiles.list_dir(directory, self._show_hidden, root=self._root)
         ]
         store.splice(0, store.get_n_items(), nodes)
 

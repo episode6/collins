@@ -183,6 +183,42 @@ def test_list_dir_skips_non_regular_nodes(tmp_path):
     assert list_dir(tmp_path) == [("real.txt", False)]
 
 
+def test_list_dir_with_root_skips_file_symlink_escaping_it(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("nope")
+    (root / "leak.txt").symlink_to(secret)
+    (root / "real.txt").write_text("x")
+    assert list_dir(root, root=root) == [("real.txt", False)]
+
+
+def test_list_dir_with_root_skips_dir_symlink_escaping_it(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "escape").symlink_to(outside)
+    assert list_dir(root, root=root) == []
+
+
+def test_list_dir_with_root_keeps_symlink_resolving_inside_it(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "real.txt").write_text("x")
+    (root / "alias.txt").symlink_to(root / "real.txt")
+    assert list_dir(root, root=root) == [("alias.txt", False), ("real.txt", False)]
+
+
+def test_list_dir_without_root_lists_symlinks(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("nope")
+    (root / "leak.txt").symlink_to(secret)
+    assert list_dir(root) == [("leak.txt", False)]
+
+
 def test_list_dir_missing_directory_is_empty(tmp_path):
     assert list_dir(tmp_path / "nope") == []
 

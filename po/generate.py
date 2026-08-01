@@ -285,6 +285,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "{name} looks like a binary file and can't be opened here.":
             "A(z) „{name}” bináris fájlnak tűnik, itt nem nyitható meg.",
         "{name} is not a file.": "A(z) „{name}” nem fájl.",
+        "{name} is outside this project and can't be opened here.":
+            "A(z) „{name}” a projekten kívül található, itt nem nyitható meg.",
         "Couldn't open {name}.": "A(z) „{name}” nem nyitható meg.",
         "{name} changed on disk": "A(z) „{name}” megváltozott a lemezen",
         "Overwrite it with the changes you made here?":
@@ -596,6 +598,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "{name} looks like a binary file and can't be opened here.":
             "„{name}“ sieht wie eine Binärdatei aus und kann hier nicht geöffnet werden.",
         "{name} is not a file.": "„{name}“ ist keine Datei.",
+        "{name} is outside this project and can't be opened here.":
+            "„{name}“ liegt außerhalb dieses Projekts und kann hier nicht geöffnet werden.",
         "Couldn't open {name}.": "„{name}“ konnte nicht geöffnet werden.",
         "{name} changed on disk": "„{name}“ wurde auf der Festplatte geändert",
         "Overwrite it with the changes you made here?":
@@ -907,6 +911,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "{name} looks like a binary file and can't be opened here.":
             "«{name}» parece un archivo binario y no se puede abrir aquí.",
         "{name} is not a file.": "«{name}» no es un archivo.",
+        "{name} is outside this project and can't be opened here.":
+            "«{name}» está fuera de este proyecto y no se puede abrir aquí.",
         "Couldn't open {name}.": "No se pudo abrir «{name}».",
         "{name} changed on disk": "«{name}» cambió en el disco",
         "Overwrite it with the changes you made here?":
@@ -1219,6 +1225,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "{name} looks like a binary file and can't be opened here.":
             "« {name} » ressemble à un fichier binaire et ne peut pas être ouvert ici.",
         "{name} is not a file.": "« {name} » n’est pas un fichier.",
+        "{name} is outside this project and can't be opened here.":
+            "« {name} » est en dehors de ce projet et ne peut pas être ouvert ici.",
         "Couldn't open {name}.": "Impossible d’ouvrir « {name} ».",
         "{name} changed on disk": "« {name} » a changé sur le disque",
         "Overwrite it with the changes you made here?":

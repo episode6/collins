@@ -707,6 +707,9 @@ msgstr "« {name} » ressemble à un fichier binaire et ne peut pas être ouvert
 msgid "{name} is not a file."
 msgstr "« {name} » n’est pas un fichier."
 
+msgid "{name} is outside this project and can't be opened here."
+msgstr "« {name} » est en dehors de ce projet et ne peut pas être ouvert ici."
+
 msgid "Couldn't open {name}."
 msgstr "Impossible d’ouvrir « {name} »."
 

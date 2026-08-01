@@ -142,6 +142,17 @@ class EditorPane(Gtk.Box):
         if existing is not None:
             self._tab_view.set_selected_page(existing)
             return
+        # Defense in depth behind the tree's own symlink filtering: every
+        # caller (tree activation, session restore, future pop-out) funnels
+        # through here, and a save would write through a symlink — so nothing
+        # resolving outside the project may ever get a buffer.
+        if not editorfiles.is_inside(self._root, path):
+            self._notify(
+                _("{name} is outside this project and can't be opened here.").format(
+                    name=path.name
+                )
+            )
+            return
         guard = editorfiles.load_guard(path)
         if guard != editorfiles.LoadGuard.OK:
             self._notify(self._guard_message(path, guard))

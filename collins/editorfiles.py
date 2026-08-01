@@ -152,13 +152,18 @@ def is_inside(root: str | Path, path: str | Path) -> bool:
     return resolved_path == resolved_root or resolved_root in resolved_path.parents
 
 
-def list_dir(path: str | Path, show_hidden: bool = False) -> list[tuple[str, bool]]:
+def list_dir(
+    path: str | Path, show_hidden: bool = False, root: str | Path | None = None
+) -> list[tuple[str, bool]]:
     """Sorted `(name, is_dir)` entries directly inside *path*: directories
     first, then case-insensitive by name. Skips dotfiles unless
     `show_hidden`, VCS/dependency directories (`SKIP_DIR_NAMES`), and
     anything that is neither a regular file nor a directory (FIFOs, sockets,
-    devices — never worth showing, never worth opening). Truncated at
-    `_MAX_DIR_ENTRIES` so a pathological directory can't stall the tree."""
+    devices — never worth showing, never worth opening). When *root* is
+    given, a symlink resolving outside it is skipped too — file symlinks
+    included, so an untrusted repo can't surface (and the editor can't write
+    through) `leak.txt -> ~/.ssh/id_rsa`. Truncated at `_MAX_DIR_ENTRIES` so
+    a pathological directory can't stall the tree."""
     try:
         entries = list(Path(path).iterdir())
     except OSError:
@@ -171,9 +176,12 @@ def list_dir(path: str | Path, show_hidden: bool = False) -> list[tuple[str, boo
         try:
             is_dir = entry.is_dir()
             is_file = entry.is_file()
+            is_symlink = entry.is_symlink()
         except OSError:
             continue
         if not is_dir and not is_file:
+            continue
+        if root is not None and is_symlink and not is_inside(root, entry):
             continue
         if is_dir and name in SKIP_DIR_NAMES:
             continue
