@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -1434,18 +1434,21 @@ class SessionSidebar(Gtk.Box):
             )
             danger_section.append_item(forget_item)
 
-        menu = Gio.Menu()
-        menu.append_section(None, open_section)
         rows: list[Gtk.Widget] = []
         if row.cwd:
-            menu.append_section(None, self._open_with_section(row.cwd, rows))
+            open_section.append_submenu(_("Open In…"), self._open_with_menu(row.cwd, rows))
+
+        menu = Gio.Menu()
+        menu.append_section(None, open_section)
         menu.append_section(None, danger_section)
         self._popup_menu(menu, row, x, y, rows)
 
-    def _open_with_section(self, cwd: str, rows: list[Gtk.Widget]) -> Gio.Menu:
-        """Ways to hand the project's folder to another app: the user's own
-        picks (the footer apps, in their configured order), then the file
-        manager and terminal the desktop hands out.
+    def _open_with_menu(self, cwd: str, rows: list[Gtk.Widget]) -> Gio.Menu:
+        """The "Open In…" submenu: ways to hand the project's folder to
+        another app — the user's own picks (the footer apps, in their
+        configured order), then the file manager and terminal the desktop
+        hands out. Each entry is just the app's name; the submenu label
+        already says what picking one does.
 
         Each is a custom widget rather than a menu item — see _open_with_row —
         so it can show the app's own icon; the built widgets are appended to
@@ -1466,7 +1469,7 @@ class SessionSidebar(Gtk.Box):
             configured.add(app_id)
             add(
                 info.get_icon(),
-                _("Open in {name}").format(name=info.get_display_name()),
+                info.get_display_name(),
                 "win.open-folder-app",
                 GLib.Variant("(ss)", (app_id, cwd)),
             )
@@ -1477,12 +1480,12 @@ class SessionSidebar(Gtk.Box):
         manager = openwith.default_file_manager()
         if manager is None or manager.get_id() not in configured:
             icon = manager.get_icon() if manager else Gio.ThemedIcon.new("folder-symbolic")
-            add(icon, _("Open in File Manager"), "win.open-folder", GLib.Variant("s", cwd))
+            add(icon, _("File Manager"), "win.open-folder", GLib.Variant("s", cwd))
 
         terminal = openwith.default_terminal()
         if terminal is not None and terminal.get_id() not in configured:
             icon = terminal.get_icon() or Gio.ThemedIcon.new("utilities-terminal-symbolic")
-            add(icon, _("Open in Terminal"), "win.open-folder-terminal", GLib.Variant("s", cwd))
+            add(icon, _("Terminal"), "win.open-folder-terminal", GLib.Variant("s", cwd))
         return section
 
     def _popup_menu(
