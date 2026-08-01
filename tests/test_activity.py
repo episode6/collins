@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from collins.activity import ActivityTracker, TranscriptActivity
+from collins.activity import ActivityTracker, EchoGate, TranscriptActivity
 
 
 class FakeClock:
@@ -193,3 +193,68 @@ def test_a_session_that_comes_back_is_baselined_again():
     stats.readings["a.jsonl"] = (200.0, 999)
     watcher.poll({"a": Path("a.jsonl")})
     assert marks == []
+
+
+# -- EchoGate: telling the agent's output from the terminal's answers ---------
+
+GRID = (80, 24)
+
+
+def make_gate(quiet_s=0.25):
+    clock = FakeClock()
+    return EchoGate(quiet_s=quiet_s, clock=clock), clock
+
+
+def test_output_out_of_nowhere_counts():
+    gate, _clock = make_gate()
+    assert gate.counts(GRID)
+
+
+def test_the_redraw_answering_a_keystroke_does_not_count():
+    # The agent renders what the user types, so a keypress comes back as real
+    # child output a few milliseconds later.
+    gate, clock = make_gate()
+    gate.counts(GRID)
+    gate.poked()
+    clock.advance(0.02)
+    assert not gate.counts(GRID)
+
+
+def test_output_after_the_echo_window_counts_again():
+    # Enter was pressed, and what follows is the turn it started.
+    gate, clock = make_gate()
+    gate.counts(GRID)
+    gate.poked()
+    clock.advance(0.3)
+    assert gate.counts(GRID)
+
+
+def test_a_burst_of_typing_keeps_the_gate_shut():
+    gate, clock = make_gate()
+    gate.counts(GRID)
+    for _ in range(5):
+        gate.poked()
+        clock.advance(0.1)
+        assert not gate.counts(GRID)
+
+
+def test_a_reflow_does_not_count():
+    # A resize (or the first time a tab is shown at its real size) repaints the
+    # whole screen with nothing having arrived from the agent.
+    gate, _clock = make_gate()
+    gate.counts(GRID)
+    assert not gate.counts((100, 30))
+
+
+def test_output_at_the_new_size_counts():
+    gate, _clock = make_gate()
+    gate.counts(GRID)
+    gate.counts((100, 30))  # the reflow itself
+    assert gate.counts((100, 30))
+
+
+def test_the_first_redraw_seen_counts():
+    # No previous size to compare against, and a tab's first redraw is its
+    # agent starting up — which is exactly the agent working.
+    gate, _clock = make_gate()
+    assert gate.counts(GRID)

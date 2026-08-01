@@ -20,7 +20,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import __version__, chats, dialogs, footerapps, openwith, panelhistory
-from .activity import TRANSCRIPT_POLL_MS, ActivityTracker, TranscriptActivity
+from .activity import TRANSCRIPT_POLL_MS, ActivityTracker, EchoGate, TranscriptActivity
 from .bgstatus import (
     BLOCK_IN_FLIGHT,
     BLOCK_UNREGISTERED,
@@ -189,6 +189,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._activity = ActivityTracker(self._on_activity_changed)
         self._bg_activity = TranscriptActivity(self._activity.mark)
         self._bg_poll: int | None = None
+        # Per tab, the filter that keeps a terminal's answers to the app (an
+        # echoed keystroke, a redraw after a tab switch or a resize) from
+        # reading as the agent working.
+        self._echo_gates: dict[Adw.TabPage, EchoGate] = {}
 
         self._install_actions()
         self._install_shortcuts()
@@ -1102,6 +1106,12 @@ class MainWindow(Adw.ApplicationWindow):
         tab.connect("bell", self._on_bell)
         tab.connect("prs-changed", self._on_tab_prs_changed)
         tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
+        gate = EchoGate()
+        self._echo_gates[page] = gate
+        # "commit" is everything the app sends this terminal's child — the
+        # keystrokes the user types, and the focus reports VTE emits on a tab
+        # switch — so the redraw that answers one is not the agent working.
+        tab.terminal.connect("commit", lambda *_args: gate.poked())
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
         self.tab_view.set_selected_page(page)
         self.content_stack.set_visible_child_name("tabs")
@@ -2062,20 +2072,29 @@ class MainWindow(Adw.ApplicationWindow):
             return tab.session_id
         return None
 
-    def _on_terminal_output(self, _terminal, page: Adw.TabPage) -> None:
-        # Every redraw counts as the session working, selected tab or not: the
-        # sidebar's pole is about what the agent is doing, not about which tab
-        # the user happens to be looking at. Unread output is the separate
-        # question below, and only an unselected tab can have any.
+    def _on_terminal_output(self, terminal, page: Adw.TabPage) -> None:
+        # A redraw counts as the session working whether or not its tab is
+        # selected: the sidebar's pole is about what the agent is doing, not
+        # about which tab the user happens to be looking at. Unread output is
+        # the separate question below, and only an unselected tab can have any.
+        #
+        # It counts unless the terminal is merely answering the app — see
+        # EchoGate. A session already known to be working is marked regardless,
+        # so typing at an agent mid-turn never stalls its pole; the gate only
+        # decides whether one may start.
         #
         # Both of a tab's ids are marked, not the first one that fits: a new
         # thread that just resolved its session id keeps its "New Thread"
         # placeholder row until the store discovers the session, and marking
         # only the session id would leave that row (the only one on screen)
         # sitting still through the turn that is writing the transcript.
+        gate = self._echo_gates.get(page)
+        agent_output = gate is None or gate.counts(
+            (terminal.get_column_count(), terminal.get_row_count())
+        )
         session_id = self._session_id_of(page)
         for tracked in (session_id, self._placeholder_pages.get(page)):
-            if tracked:
+            if tracked and (agent_output or self._activity.is_busy(tracked)):
                 self._activity.mark(tracked)
         if self.tab_view.get_selected_page() is page:
             return
@@ -2334,6 +2353,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.store.set_archived(archive_session_id, True)
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
+        self._echo_gates.pop(page, None)
         self._remove_placeholder(page)
         self._local_titles.discard(page)
         self._cancel_idle(page)
