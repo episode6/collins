@@ -1362,6 +1362,14 @@ class SessionSidebar(Gtk.Box):
             )
             open_section.append_item(chat_item)
 
+        # The session's own working directory, not the project's: a session
+        # running in a worktree or subdirectory hands that folder over. Chat
+        # sessions live in throwaway directories nobody wants opened.
+        rows: list[Gtk.Widget] = []
+        cwd = row.item.session.cwd
+        if cwd and not is_chat_cwd(cwd):
+            open_section.append_submenu(_("Open In…"), self._open_with_menu(cwd, rows))
+
         edit_section = Gio.Menu()
         edit_section.append_item(item(_("Rename…"), "rename-session"))
         edit_section.append_item(item(_("Regenerate name"), "regenerate-name"))
@@ -1393,7 +1401,7 @@ class SessionSidebar(Gtk.Box):
         menu.append_section(None, open_section)
         menu.append_section(None, edit_section)
         menu.append_section(None, danger_section)
-        self._popup_menu(menu, row, x, y)
+        self._popup_menu(menu, row, x, y, rows)
 
     def show_group_menu(self, row: GroupHeaderRow, x: float, y: float) -> None:
         if row.group_key == CHATS_GROUP:
@@ -1444,11 +1452,11 @@ class SessionSidebar(Gtk.Box):
         self._popup_menu(menu, row, x, y, rows)
 
     def _open_with_menu(self, cwd: str, rows: list[Gtk.Widget]) -> Gio.Menu:
-        """The "Open In…" submenu: ways to hand the project's folder to
-        another app — the user's own picks (the footer apps, in their
-        configured order), then the file manager and terminal the desktop
-        hands out. Each entry is just the app's name; the submenu label
-        already says what picking one does.
+        """The "Open In…" submenu: ways to hand a folder — a project's, or a
+        single session's working directory — to another app: the user's own
+        picks (the footer apps, in their configured order), then the file
+        manager and terminal the desktop hands out. Each entry is just the
+        app's name; the submenu label already says what picking one does.
 
         Each is a custom widget rather than a menu item — see _open_with_row —
         so it can show the app's own icon; the built widgets are appended to
