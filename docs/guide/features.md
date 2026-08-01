@@ -56,7 +56,9 @@ fork. Last modified: 2026-08-01. Full change history: git log for this file.
   glance down the sidebar says which sessions are thinking and which are
   waiting on you. A detached session poles in **yellow** instead of blue, since
   its line is what says it has no tab. Collins reads a tab's terminal for this;
-  for a detached session, its transcript. The pole follows the desktop's
+  for a detached session, its transcript — which only grows in bursts, so the
+  yellow pole rides out longer quiet spells (about ten seconds) before going
+  still, instead of flickering off mid-turn. The pole follows the desktop's
   animation setting: with animations off, the line simply stays put.
 - **Waiting badge** — an amber **?** marks sessions where the agent's last
   message was a question awaiting your reply, so you can spot what needs you at
