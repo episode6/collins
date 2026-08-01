@@ -1213,6 +1213,12 @@ msgstr ""
 msgid "Hide editor panel"
 msgstr ""
 
+#: collins/terminal.py:905
+msgid ""
+"Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and "
+"restart Collins"
+msgstr ""
+
 #: collins/window.py:540
 msgid "Close window with unsaved editor changes?"
 msgstr ""

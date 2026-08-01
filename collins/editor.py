@@ -5,12 +5,15 @@ project file tree, real saving, and external-change handling.
 
 Soft dependency on GtkSourceView 5: importing this module never raises even
 when the `gtksourceview5` typelib isn't installed (see HAVE_GTKSOURCE) — the
-caller (terminal.py) degrades to "no editor button" instead of an app that
-won't launch, so an existing install survives the upgrade before its package
+caller (terminal.py) degrades to a disabled editor button whose tooltip names
+the missing package, plus a startup log warning, instead of an app that won't
+launch, so an existing install survives the upgrade before its package
 manager catches up (see `gir1.2-gtksource-5` in debian/control).
 """
 
 from __future__ import annotations
+
+import logging
 
 from pathlib import Path
 
@@ -28,6 +31,11 @@ try:
 except (ValueError, ImportError):
     GtkSource = None
     HAVE_GTKSOURCE = False
+    logging.getLogger(__name__).warning(
+        "GtkSourceView 5 typelib not found — the editor panel is disabled. "
+        "Install it (Debian/Ubuntu: gir1.2-gtksource-5, Fedora/Arch: "
+        "gtksourceview5) and restart Collins to enable it."
+    )
 
 from . import dialogs, editorfiles  # noqa: E402
 from .filetree import FileTree  # noqa: E402

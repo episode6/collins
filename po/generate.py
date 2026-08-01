@@ -306,6 +306,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Plain Text": "Egyszerű szöveg",
         "Show editor panel": "Szerkesztőpanel megjelenítése",
         "Hide editor panel": "Szerkesztőpanel elrejtése",
+        "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins":
+            "A szerkesztő nem érhető el — telepítsd a GtkSourceView 5-öt "
+            "(gir1.2-gtksource-5), majd indítsd újra a Collinst",
         "Close window with unsaved editor changes?":
             "Bezárod az ablakot mentetlen szerkesztői módosításokkal?",
         "Unsaved changes in open editors will be lost.":
@@ -620,6 +623,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Plain Text": "Reiner Text",
         "Show editor panel": "Editor-Panel anzeigen",
         "Hide editor panel": "Editor-Panel ausblenden",
+        "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins":
+            "Editor nicht verfügbar — installiere GtkSourceView 5 "
+            "(gir1.2-gtksource-5) und starte Collins neu",
         "Close window with unsaved editor changes?":
             "Fenster mit ungespeicherten Editor-Änderungen schließen?",
         "Unsaved changes in open editors will be lost.":
@@ -932,6 +938,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Plain Text": "Texto sin formato",
         "Show editor panel": "Mostrar el panel del editor",
         "Hide editor panel": "Ocultar el panel del editor",
+        "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins":
+            "Editor no disponible — instala GtkSourceView 5 "
+            "(gir1.2-gtksource-5) y reinicia Collins",
         "Close window with unsaved editor changes?":
             "¿Cerrar la ventana con cambios del editor sin guardar?",
         "Unsaved changes in open editors will be lost.":
@@ -1246,6 +1255,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Plain Text": "Texte brut",
         "Show editor panel": "Afficher le panneau de l’éditeur",
         "Hide editor panel": "Masquer le panneau de l’éditeur",
+        "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins":
+            "Éditeur indisponible — installez GtkSourceView 5 "
+            "(gir1.2-gtksource-5) et redémarrez Collins",
         "Close window with unsaved editor changes?":
             "Fermer la fenêtre avec des modifications de l’éditeur non enregistrées ?",
         "Unsaved changes in open editors will be lost.":
