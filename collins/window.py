@@ -1755,7 +1755,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.state.set_pending_detach(
             old_id, provider=provider.id, cwd=cwd or "", uuid=old_uuid or ""
         )
-        known = {a.session_id for a in provider.background_agents()}
+        # Finished jobs included, to mirror the matcher's candidate pool —
+        # see match_background_fork.
+        known = {a.session_id for a in provider.background_agents(include_finished=True)}
 
         def work() -> None:
             for attempt in range(30):  # the agent entry appears within seconds of /bg
@@ -2467,6 +2469,14 @@ class MainWindow(Adw.ApplicationWindow):
                 self._pages.pop(session_id)
                 self._sync_process_poll()
             self._sync_status(session_id)
+            # That painted the row from the cached agent list, which may
+            # predate this conversation's background job finishing — nothing
+            # else in the close path re-polls, so without this a just-finished
+            # job's yellow line would outlive the tab until some unrelated
+            # refresh. Only when the cache says detached: an ordinary close
+            # has no reason to shell out to the CLI.
+            if self._chain(session_id) & self._bg_status.background_ids:
+                self._bg_status.refresh()
             # The terminal that was feeding this session's pole is gone. A /bg
             # handoff closes its tab the same way, and the transcript poll
             # picks the pole back up under the fork's id (see _sync_bg_poll).

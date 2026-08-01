@@ -123,7 +123,9 @@ class FakeProvider(Provider):
         self._agents = agents
         self._transcripts = transcripts or {}  # session id -> path
 
-    def background_agents(self):
+    def background_agents(self, include_finished=False):
+        # The handed-in list plays both roles; tests model finished jobs by
+        # simply including or omitting them.
         return self._agents
 
     def transcripts_for_cwd(self, cwd):
@@ -152,6 +154,21 @@ def test_match_detects_an_in_place_detach():
     # The session's own id in the agent list means it detached in place, so
     # there is no fork to record.
     assert match_background_fork(provider, "old", "/proj", "u-1", set()) == ""
+
+
+def test_match_asks_for_finished_jobs(tmp_path):
+    # The pairing records which transcript a job forked from, which outlives
+    # the job — a fork that ran to completion before the pairing caught up
+    # (e.g. a quit mid-handoff replayed at the next startup) is still the
+    # fork, and must not be invisible to the matcher.
+    class SpyProvider(FakeProvider):
+        def background_agents(self, include_finished=False):
+            assert include_finished, "pairing must see finished jobs"
+            return super().background_agents(include_finished)
+
+    agents = [BackgroundAgent(session_id="fork", job_id="j1", cwd="/proj")]
+    provider = SpyProvider(agents, {"fork": write_transcript(tmp_path, "fork", "u-1")})
+    assert match_background_fork(provider, "old", "/proj", "u-1", set()) == "fork"
 
 
 def test_match_pairs_a_fork_by_first_message_uuid(tmp_path):
