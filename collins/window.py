@@ -52,6 +52,7 @@ from .sessions import (
     first_message_uuid,
     resume_cwd,
     session_from_file,
+    worktree_project_root,
 )
 from .sidebar import SessionSidebar
 from .state import AppState, clamp_window_size
@@ -1012,16 +1013,21 @@ class MainWindow(Adw.ApplicationWindow):
         return providers[0] if providers else get_provider("claude")
 
     def _visible_project_dir(self) -> str | None:
-        """Project directory of the session in the visible tab: the directory
-        the session was started in, not its current working directory (which
-        may have moved into a git worktree). None when the visible tab has no
+        """Project directory of the session in the visible tab. A session's
+        recorded cwd can itself be a Claude-managed worktree (worktree-entry
+        forks rewrite every cwd in the copied transcript), so it is mapped
+        back to the repository — new sessions belong in the project proper,
+        or they cascade into the worktree. None when the visible tab has no
         bound session or the directory no longer exists."""
         session_id = self._active_session_id()
         if session_id is None:
             return None
         session = self.store.get_session(session_id)
-        if session is not None and session.cwd and Path(session.cwd).is_dir():
-            return session.cwd
+        if session is None or not session.cwd:
+            return None
+        cwd = worktree_project_root(session.cwd) or session.cwd
+        if Path(cwd).is_dir():
+            return cwd
         return None
 
     def _new_session(self, provider=None) -> None:

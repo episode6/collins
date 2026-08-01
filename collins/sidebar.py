@@ -39,7 +39,7 @@ from .projecticons import project_icon_data
 from .providers import get_provider
 from .prstatus import PullRequest, from_records, resync, to_records
 from .scrolling import offset_into_view
-from .sessions import project_name_for_cwd
+from .sessions import project_name_for_cwd, worktree_project_root
 from .store import SessionStore
 from .usagepanel import UsagePanel
 
@@ -915,7 +915,8 @@ class SessionSidebar(Gtk.Box):
 
         # Directory per project group (from its most recent session with a
         # cwd), so headers can offer a "new session here" button. Favorites
-        # mixes projects, so it never gets one.
+        # mixes projects, so it never gets one. A worktree session answers
+        # with its repository, not the worktree (matches store.project_cwd).
         items_by_group: dict[tuple, list[SessionItem]] = {}
         group_cwds: dict[tuple, str] = {}
         for i in range(self.store.model.get_n_items()):
@@ -923,7 +924,9 @@ class SessionSidebar(Gtk.Box):
             key = item.group_key
             items_by_group.setdefault(key, []).append(item)
             if key != FAV_GROUP and key not in group_cwds and item.session.cwd:
-                group_cwds[key] = item.session.cwd
+                group_cwds[key] = (
+                    worktree_project_root(item.session.cwd) or item.session.cwd
+                )
 
         # Every header in display order: favorites pinned first, then all
         # projects — with or without visible session rows (empty ones keep
@@ -951,7 +954,8 @@ class SessionSidebar(Gtk.Box):
         known_keys = {key for key, _label, _cwd in headers}
         for key, pids in placeholders_by_group.items():
             if key not in known_keys:
-                headers.append((key, key[1], self._placeholders[pids[0]]))
+                ph_cwd = self._placeholders[pids[0]]
+                headers.append((key, key[1], worktree_project_root(ph_cwd) or ph_cwd))
 
         # Expansion is persisted per group; unknown groups start collapsed.
         self._collapsed = {
