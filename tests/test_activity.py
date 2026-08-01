@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from collins.activity import ActivityTracker, EchoGate, TranscriptActivity
+from collins.activity import ActivityTracker, EchoGate, SpinnerWatch, TranscriptActivity
 
 
 class FakeClock:
@@ -340,3 +340,115 @@ def test_arm_reports_the_enter_key_directly():
     gate.counts(GRID)
     gate.arm()
     assert gate.counts(GRID)
+
+
+# -- SpinnerWatch: first-column motion is an agent working ---------------------
+
+
+def make_watch(sample_s=0.35, streak_s=1.4):
+    clock = FakeClock()
+    return SpinnerWatch(sample_s=sample_s, streak_s=streak_s, clock=clock), clock
+
+
+def column(*chars):
+    """A screen's first column: the given line-start characters, padded with
+    blank rows to the test grid's height."""
+    return tuple(chars) + ("",) * (GRID[1] - len(chars))
+
+
+def spin(watch, clock, glyph, step=0.35):
+    clock.advance(step)
+    return watch.sample(column("❯", glyph), GRID)
+
+
+def test_the_first_sample_is_a_baseline_not_motion():
+    watch, _clock = make_watch()
+    assert not watch.sample(column("❯", "✻"), GRID)
+
+
+def test_a_still_screen_is_not_motion():
+    # A prompt sitting idle redraws nothing; even sampled forever it stays quiet.
+    watch, clock = make_watch()
+    watch.sample(column("❯"), GRID)
+    for _ in range(5):
+        clock.advance(0.35)
+        assert not watch.sample(column("❯"), GRID)
+
+
+def test_a_spinner_cycling_at_a_line_start_is_motion():
+    # The one change right after the baseline could be anything; the change on
+    # its heels is what makes it an animation.
+    watch, clock = make_watch()
+    watch.sample(column("❯", "✻"), GRID)
+    assert not spin(watch, clock, "✽")
+    assert spin(watch, clock, "·")
+    assert spin(watch, clock, "✢")
+
+
+def test_a_single_repaint_is_not_motion():
+    # A submitted prompt (or a spawn-time welcome paint) redraws the screen
+    # once; nothing follows it, so no pole starts.
+    watch, clock = make_watch()
+    watch.sample(column("❯"), GRID)
+    clock.advance(0.35)
+    watch.sample(column("❯", "✻"), GRID)
+    for _ in range(5):
+        clock.advance(0.35)
+        assert not watch.sample(column("❯", "✻"), GRID)
+
+
+def test_changes_far_apart_are_unrelated_repaints():
+    watch, clock = make_watch()
+    watch.sample(column("❯"), GRID)
+    assert not spin(watch, clock, "✻")
+    assert not spin(watch, clock, "✽", step=60.0)  # a minute later: no streak
+    assert spin(watch, clock, "·")  # but it seeded one: the next change counts
+
+
+def test_motion_survives_a_coincidence_sample():
+    # Sampling can land on the same glyph twice (the cycle aliasing against
+    # the sample clock); the streak window is wider than one such miss.
+    watch, clock = make_watch()
+    watch.sample(column("❯", "✻"), GRID)
+    spin(watch, clock, "✽")
+    assert not spin(watch, clock, "✽")  # same frame again: no change seen
+    assert spin(watch, clock, "·")
+
+
+def test_scrolling_output_is_motion():
+    # Lines marching up the screen change first characters everywhere. That
+    # counts on purpose: flowing output is what the pole is for.
+    lines = ["def f():", "    pass", "ok", "$ ", "❯"]
+    watch, clock = make_watch()
+    watch.sample(column(*[line[:1] for line in lines]), GRID)
+    for _ in range(2):
+        clock.advance(0.35)
+        lines = lines[1:] + [lines[0]]
+        motion = watch.sample(column(*[line[:1] for line in lines]), GRID)
+    assert motion
+
+
+def test_a_reflow_resets_the_baseline():
+    # A resize rewraps every line; comparing across it would read the whole
+    # screen as motion. The streak dies with it, so the next real change has
+    # to earn a new one.
+    watch, clock = make_watch()
+    watch.sample(column("❯", "✻"), GRID)
+    spin(watch, clock, "✽")
+    clock.advance(0.35)
+    assert not watch.sample(column("❯", "·"), (100, 30))
+    clock.advance(0.35)
+    assert not watch.sample(column("❯", "✢"), (100, 30))
+    clock.advance(0.35)
+    assert watch.sample(column("❯", "✻"), (100, 30))
+
+
+def test_due_throttles_the_screen_reads():
+    watch, clock = make_watch()
+    assert watch.due()  # nothing sampled yet
+    watch.sample(column("❯"), GRID)
+    assert not watch.due()
+    clock.advance(0.2)
+    assert not watch.due()
+    clock.advance(0.2)
+    assert watch.due()
