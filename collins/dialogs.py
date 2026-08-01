@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -159,6 +159,39 @@ def confirm_dialog(
             on_extra()
         elif on_dismiss is not None:
             on_dismiss()
+
+    dialog.connect("response", respond)
+    dialog.present(parent)
+
+
+def save_changes_dialog(
+    parent: Gtk.Widget,
+    body: str,
+    on_save: Callable[[], None],
+    on_discard: Callable[[], None],
+    on_cancel: Callable[[], None] | None = None,
+) -> None:
+    """The GNOME "Save Changes?" triad — Cancel / Don't Save / Save — asked
+    before closing something that holds unsaved editor buffers. Save is the
+    suggested default; Cancel (and Escape) aborts the *whole* action that
+    asked — closing the tab, backgrounding the session, quitting — never just
+    the save part of it."""
+    dialog = Adw.AlertDialog(heading=_("Save Changes?"), body=body)
+    dialog.add_response("cancel", _("Cancel"))
+    dialog.add_response("discard", _("Don't Save"))
+    dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
+    dialog.add_response("save", _("Save"))
+    dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+    dialog.set_default_response("save")
+    dialog.set_close_response("cancel")
+
+    def respond(_dialog, response: str) -> None:
+        if response == "save":
+            on_save()
+        elif response == "discard":
+            on_discard()
+        elif on_cancel is not None:
+            on_cancel()
 
     dialog.connect("response", respond)
     dialog.present(parent)

@@ -1714,6 +1714,17 @@ class TerminalTab(Gtk.Box):
     def editor_dirty_count(self) -> int:
         return self._editor.dirty_count() if self._editor is not None else 0
 
+    def editor_dirty_names(self) -> list[str]:
+        return self._editor.dirty_names() if self._editor is not None else []
+
+    def editor_save_all(self, on_done) -> None:
+        """Save every dirty editor buffer; `on_done(all_succeeded)` when the
+        async saves resolve (immediately, when nothing is dirty)."""
+        if self._editor is None:
+            on_done(True)
+            return
+        self._editor.save_all(on_done)
+
     def editor_save(self) -> None:
         if self._editor is not None:
             self._editor.save_current()

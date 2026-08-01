@@ -146,7 +146,11 @@ class MainWindow(Adw.ApplicationWindow):
         # really closes (page -> session id).
         self._archive_on_close: dict[Adw.TabPage, str] = {}
         self._quitting = False  # window close confirmed; draining tabs
-        self._quit_asking = False  # the single quit-confirmation dialog is open
+        self._quit_asking = False  # a quit dialog (editor save or session confirm) is open
+        # One-shot pass for the reissued close after the quit flow's editor
+        # dialog: the user saved (or agreed to lose) the buffers, so the next
+        # close-request must not ask about them again.
+        self._editor_quit_ok = False
         # Active tab's session at the first close request, before the tab
         # drain disturbs the selection ("" = none); persisted when the last
         # window really closes so the next launch can reopen it.
@@ -437,8 +441,9 @@ class MainWindow(Adw.ApplicationWindow):
             return False  # tabs drained (or the user insisted) — really close
         self._last_active_session = self._active_session_id() or ""
         busy = self._busy_tab_count()
-        editor_dirty = self._editor_dirty_total()
-        if busy == 0 and editor_dirty == 0:
+        editor_ok = self._editor_quit_ok  # one-shot: granted by _begin_quit_flow
+        self._editor_quit_ok = False
+        if busy == 0 and (editor_ok or self._editor_dirty_total() == 0):
             # This close skips the per-tab drain, so capture panel histories
             # and state here. Popped-out editors dock back first — closing
             # the main window must not leave an orphan editor window behind.
@@ -446,8 +451,8 @@ class MainWindow(Adw.ApplicationWindow):
             self._save_panel_data()
             self._persist_last_session()
             return False  # nothing running or unsaved; continue with the normal close
-        if not self._quit_asking:  # one dialog for however many sessions are busy
-            self._confirm_quit(busy, editor_dirty)
+        if not self._quit_asking:  # one flow for however many sessions/buffers
+            self._begin_quit_flow()
         return True
 
     def _active_session_id(self) -> str | None:
@@ -505,8 +510,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _editor_dirty_total(self) -> int:
         """Unsaved editor buffers across every tab — counted separately from
         `_busy_tab_count` (which is about running commands) so its number
-        keeps meaning "active sessions"; the two are folded into one dialog
-        in `_confirm_quit` rather than getting a dialog each."""
+        keeps meaning "active sessions". Each concern gets its own dialog:
+        the editor's Save Changes? first, then the sessions confirm."""
         total = 0
         for i in range(self.tab_view.get_n_pages()):
             tab = self.tab_view.get_nth_page(i).get_child()
@@ -514,7 +519,75 @@ class MainWindow(Adw.ApplicationWindow):
                 total += tab.editor_dirty_count()
         return total
 
-    def _confirm_quit(self, busy: int, editor_dirty: int = 0) -> None:
+    def _ask_save_editors(self, tabs: list[TerminalTab], on_proceed, on_cancel=None) -> None:
+        """Gate a close on the dirty editor buffers in `tabs` with the Save /
+        Don't Save / Cancel dialog. Nothing dirty proceeds straight through.
+        Cancel aborts the whole action that asked — the close, exit, detach
+        or quit — never just the save. Save proceeds only once every buffer
+        has actually written out; a failed save cancels instead, with the
+        pane's banner naming the file that refused."""
+        dirty_tabs = [tab for tab in tabs if tab.editor_dirty_count()]
+        names = [name for tab in dirty_tabs for name in tab.editor_dirty_names()]
+        if not names:
+            on_proceed()
+            return
+        if len(names) == 1:
+            body = _(
+                "“{name}” contains unsaved changes. "
+                "Changes which are not saved will be permanently lost."
+            ).format(name=names[0])
+        else:
+            body = _(
+                "{n} files contain unsaved changes. "
+                "Changes which are not saved will be permanently lost."
+            ).format(n=len(names))
+
+        def save_all() -> None:
+            state = {"left": len(dirty_tabs), "ok": True}
+
+            def done(success: bool) -> None:
+                state["ok"] = state["ok"] and success
+                state["left"] -= 1
+                if state["left"] == 0:
+                    if state["ok"]:
+                        on_proceed()
+                    elif on_cancel is not None:
+                        on_cancel()
+
+            for tab in dirty_tabs:
+                tab.editor_save_all(done)
+
+        dialogs.save_changes_dialog(self, body, save_all, on_proceed, on_cancel)
+
+    def _begin_quit_flow(self) -> None:
+        """Window close with something to lose. The editor's Save Changes?
+        question comes first, as its own dialog (Save / Don't Save / Cancel);
+        the active-sessions confirm follows only if agents are still busy.
+        Cancelling either dialog keeps the window open."""
+        self._quit_asking = True
+        tabs = []
+        for i in range(self.tab_view.get_n_pages()):
+            tab = self.tab_view.get_nth_page(i).get_child()
+            if isinstance(tab, TerminalTab):
+                tabs.append(tab)
+
+        def after_editor() -> None:
+            busy = self._busy_tab_count()
+            if busy:
+                self._confirm_quit(busy)
+                return
+            # Nothing running, and the buffers are saved or their loss agreed
+            # to: reissue the close, waving it past the editor check once.
+            self._quit_asking = False
+            self._editor_quit_ok = True
+            self.close()
+
+        def cancelled() -> None:
+            self._quit_asking = False
+
+        self._ask_save_editors(tabs, after_editor, cancelled)
+
+    def _confirm_quit(self, busy: int) -> None:
         self._quit_asking = True
 
         def do_quit(background: bool = False) -> None:
@@ -523,7 +596,8 @@ class MainWindow(Adw.ApplicationWindow):
             # The window-level dialog already covered every tab: don't let
             # each one ask again. Agents still get their graceful exit
             # (or /bg, if the user chose to background them); unsaved editor
-            # buffers are simply lost, as agreed to here.
+            # buffers were already saved — or given up — in _begin_quit_flow's
+            # Save Changes? step before this dialog appeared.
             pages = [self.tab_view.get_nth_page(i) for i in range(self.tab_view.get_n_pages())]
             for page in pages:
                 self._close_ok.add(page)
@@ -536,27 +610,19 @@ class MainWindow(Adw.ApplicationWindow):
 
         can_background = any(self._quit_backgroundable(self.tab_view.get_nth_page(i))
                              for i in range(self.tab_view.get_n_pages()))
-        if busy:
-            heading = _("Close window with {n} active session(s)?").format(n=busy)
-            body = _("Agents are asked to exit cleanly first; "
-                     "other running commands will be terminated.")
-            if can_background:
-                body = _("Agents are asked to exit cleanly first; other running "
-                         "commands will be terminated. Backgrounding instead keeps "
-                         "the agents running detached — reopen a session later to "
-                         "re-attach.")
-        else:
-            heading = _("Close window with unsaved editor changes?")
-            body = _("Unsaved changes in open editors will be lost.")
-        if editor_dirty and busy:
-            body += " " + _(
-                "{n} unsaved editor file(s) will also be lost."
-            ).format(n=editor_dirty)
+        heading = _("Close window with {n} active session(s)?").format(n=busy)
+        body = _("Agents are asked to exit cleanly first; "
+                 "other running commands will be terminated.")
+        if can_background:
+            body = _("Agents are asked to exit cleanly first; other running "
+                     "commands will be terminated. Backgrounding instead keeps "
+                     "the agents running detached — reopen a session later to "
+                     "re-attach.")
         dialogs.confirm_dialog(
             self,
             heading,
             body,
-            _("Exit Sessions") if busy else _("Close Window"),
+            _("Exit Sessions"),
             do_quit,
             on_dismiss=lambda: setattr(self, "_quit_asking", False),
             default_response="confirm",
@@ -1635,10 +1701,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _close_tab_direct(self, page: Adw.TabPage, background: bool) -> None:
         """Shared tail of the no-dialog close paths above. The click confirmed
-        exiting (or detaching) the *session* — it said nothing about throwing
-        away unsaved editor edits, so those still get their own ask before the
-        page is waved through `_on_close_page`'s checks via `_close_ok`.
-        Popped-out editors count too: the pane still belongs to the tab."""
+        exiting (or detaching) the *session* — it said nothing about unsaved
+        editor edits, so those still get the Save Changes? ask before the page
+        is waved through `_on_close_page`'s checks via `_close_ok`. Cancelling
+        that dialog cancels the exit/detach along with it. Popped-out editors
+        count too: the pane still belongs to the tab."""
 
         def proceed() -> None:
             if not self._page_alive(page):
@@ -1649,18 +1716,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.tab_view.close_page(page)
 
         tab = page.get_child()
-        dirty = tab.editor_dirty_count() if isinstance(tab, TerminalTab) else 0
-        if not dirty:
-            proceed()
-            return
-        dialogs.confirm_dialog(
-            self,
-            _("Close tab with unsaved changes?"),
-            _("This tab's editor has unsaved changes that will be lost."),
-            _("Discard Changes"),
-            proceed,
-            default_response="cancel",
-        )
+        self._ask_save_editors([tab] if isinstance(tab, TerminalTab) else [], proceed)
 
     def _session_takes_prompt(self, session_id: str) -> bool:
         """Whether a prompt sent to this session would land in an empty input.
@@ -1713,13 +1769,37 @@ class MainWindow(Adw.ApplicationWindow):
             self.tab_view.get_nth_page(i) is page for i in range(self.tab_view.get_n_pages())
         )
 
+    def _ask_editor_then_tab_close(self, page: Adw.TabPage, tab: TerminalTab) -> None:
+        """Two separate questions, in order: the editor's Save Changes? dialog
+        first (when it has dirty buffers), then the session/panel confirm
+        (when anything is busy). Cancelling either one leaves the tab open."""
+        self._close_asking.add(page)
+
+        def after_editor() -> None:
+            if not self._page_alive(page):
+                self._close_asking.discard(page)
+                return
+            if tab.has_running_command() or tab.panel_has_running_command():
+                self._ask_tab_close(page, tab)  # manages _close_asking itself
+                return
+            self._close_asking.discard(page)
+            self._close_ok.add(page)
+            self.tab_view.close_page(page)
+
+        def cancelled() -> None:
+            self._close_asking.discard(page)
+            self._archive_on_close.pop(page, None)  # cancelled: keep the session visible
+
+        self._ask_save_editors([tab], after_editor, cancelled)
+
     def _ask_tab_close(self, page: Adw.TabPage, tab: TerminalTab) -> None:
-        """Confirm closing a tab with an active agent session, a command
-        running in its panel shell, and/or unsaved editor buffers."""
+        """Confirm closing a tab with an active agent session and/or a command
+        running in its panel shell. Unsaved editor buffers are not this
+        dialog's concern — `_ask_editor_then_tab_close` already settled them
+        with the Save Changes? dialog before asking here."""
         self._close_asking.add(page)
         agent_busy = tab.has_running_command()
         panel_busy = tab.panel_has_running_command()
-        editor_dirty = tab.editor_dirty_count()
         if panel_busy:
             tab.show_panel()  # reveal what's about to be killed (a busy shell is never cd'd)
 
@@ -1731,6 +1811,12 @@ class MainWindow(Adw.ApplicationWindow):
             if self._page_alive(page):  # continue: graceful agent close, then teardown
                 self.tab_view.close_page(page)
 
+        if not agent_busy and not panel_busy:
+            # Everything finished while the editor dialog sat open: nothing
+            # left to confirm.
+            do_close()
+            return
+
         blocker = self._background_blocker(page)
         can_background = agent_busy and not blocker
         if agent_busy and panel_busy:
@@ -1740,17 +1826,10 @@ class MainWindow(Adw.ApplicationWindow):
         elif agent_busy:
             heading = _("Close tab with an active session?")
             body = _("The agent is asked to exit cleanly first.")
-        elif panel_busy:
+        else:
             heading = _("Close tab with a running command?")
             body = _("A command is still running in this tab's terminal panel "
                      "and will be terminated.")
-        else:  # editor_dirty only — the sole reason this dialog is asking
-            heading = _("Close tab with unsaved changes?")
-            body = _("This tab's editor has unsaved changes that will be lost.")
-        if editor_dirty and (agent_busy or panel_busy):
-            body += " " + _(
-                "This tab's editor also has {n} unsaved file(s) that will be lost."
-            ).format(n=editor_dirty)
         if can_background:
             body += " " + _("Backgrounding instead keeps the agent running "
                             "detached — reopen the session later to re-attach.")
@@ -2605,7 +2684,7 @@ class MainWindow(Adw.ApplicationWindow):
                 # editor has unsaved changes: ask before losing any of it.
                 view.close_page_finish(page, False)  # keep the tab while we ask
                 if page not in self._close_asking:
-                    self._ask_tab_close(page, tab)
+                    self._ask_editor_then_tab_close(page, tab)
                 return True
             if agent_busy:  # confirmed: start a graceful exit in the background
                 self._graceful_close(page)

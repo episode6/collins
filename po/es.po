@@ -737,14 +737,17 @@ msgstr "Recargar"
 msgid "Couldn't reload {name}: {message}"
 msgstr "No se pudo recargar «{name}»: {message}"
 
-msgid "Close {name} without saving?"
-msgstr "¿Cerrar «{name}» sin guardar?"
+msgid "Save Changes?"
+msgstr "¿Guardar los cambios?"
 
-msgid "Changes since the last save will be lost."
-msgstr "Se perderán los cambios desde el último guardado."
+msgid "Don't Save"
+msgstr "No guardar"
 
-msgid "Discard Changes"
-msgstr "Descartar cambios"
+msgid "“{name}” contains unsaved changes. Changes which are not saved will be permanently lost."
+msgstr "«{name}» contiene cambios sin guardar. Los cambios que no se guarden se perderán permanentemente."
+
+msgid "{n} files contain unsaved changes. Changes which are not saved will be permanently lost."
+msgstr "{n} archivos contienen cambios sin guardar. Los cambios que no se guarden se perderán permanentemente."
 
 msgid "Find in file…"
 msgstr "Buscar en el archivo…"
@@ -772,27 +775,6 @@ msgstr "Devolver el editor a su pestaña"
 
 msgid "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins"
 msgstr "Editor no disponible — instala GtkSourceView 5 (gir1.2-gtksource-5) y reinicia Collins"
-
-msgid "Close window with unsaved editor changes?"
-msgstr "¿Cerrar la ventana con cambios del editor sin guardar?"
-
-msgid "Unsaved changes in open editors will be lost."
-msgstr "Se perderán los cambios sin guardar en los editores abiertos."
-
-msgid "{n} unsaved editor file(s) will also be lost."
-msgstr "También se perderán {n} archivo(s) del editor sin guardar."
-
-msgid "Close Window"
-msgstr "Cerrar ventana"
-
-msgid "Close tab with unsaved changes?"
-msgstr "¿Cerrar la pestaña con cambios sin guardar?"
-
-msgid "This tab's editor has unsaved changes that will be lost."
-msgstr "El editor de esta pestaña tiene cambios sin guardar que se perderán."
-
-msgid "This tab's editor also has {n} unsaved file(s) that will be lost."
-msgstr "El editor de esta pestaña también tiene {n} archivo(s) sin guardar que se perderán."
 
 msgid "Editor"
 msgstr "Editor"
