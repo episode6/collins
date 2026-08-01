@@ -761,6 +761,9 @@ msgstr "Mostrar el panel del editor"
 msgid "Hide editor panel"
 msgstr "Ocultar el panel del editor"
 
+msgid "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins"
+msgstr "Editor no disponible — instala GtkSourceView 5 (gir1.2-gtksource-5) y reinicia Collins"
+
 msgid "Close window with unsaved editor changes?"
 msgstr "¿Cerrar la ventana con cambios del editor sin guardar?"
 

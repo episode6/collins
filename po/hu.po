@@ -761,6 +761,9 @@ msgstr "Szerkesztőpanel megjelenítése"
 msgid "Hide editor panel"
 msgstr "Szerkesztőpanel elrejtése"
 
+msgid "Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and restart Collins"
+msgstr "A szerkesztő nem érhető el — telepítsd a GtkSourceView 5-öt (gir1.2-gtksource-5), majd indítsd újra a Collinst"
+
 msgid "Close window with unsaved editor changes?"
 msgstr "Bezárod az ablakot mentetlen szerkesztői módosításokkal?"
 

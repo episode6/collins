@@ -235,6 +235,12 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 - Each session remembers which files were open, the cursor in each, and the
   panel's width — restored the next time you reopen it.
 
+If the footer icon is greyed out, the GtkSourceView 5 library the editor is
+built on isn't installed — the `.deb` pulls it in automatically, but a source
+checkout needs it installed by hand (Debian/Ubuntu: `gir1.2-gtksource-5`,
+Fedora: `gtksourceview5`, Arch: `gtksourceview5`). Install it and restart
+Collins; the button's tooltip says the same.
+
 ## Claude usage panel
 
 Below the session list, a **Claude usage** panel shows your subscription

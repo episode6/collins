@@ -893,9 +893,20 @@ class TerminalTab(Gtk.Box):
         # the open/close half; the tooltip always names whichever it is.
         self._editor_toggle_btn = Gtk.Button(icon_name="text-x-generic-symbolic")
         self._editor_toggle_btn.add_css_class("flat")
-        self._editor_toggle_btn.set_tooltip_text(_("Show editor panel"))
         self._editor_toggle_btn.set_action_name("win.toggle-editor")
-        self._editor_toggle_btn.set_visible(self._editor is not None)
+        if self._editor is not None:
+            self._editor_toggle_btn.set_tooltip_text(_("Show editor panel"))
+        else:
+            # Missing gtksourceview5 typelib: the window disables the
+            # win.toggle-editor action, which greys this button out — keep it
+            # visible so the tooltip can say what to install (per the GNOME
+            # HIG, an insensitive control's tooltip explains why).
+            self._editor_toggle_btn.set_tooltip_text(
+                _(
+                    "Editor unavailable — install GtkSourceView 5 "
+                    "(gir1.2-gtksource-5) and restart Collins"
+                )
+            )
 
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         footer.add_css_class("tab-footer")
