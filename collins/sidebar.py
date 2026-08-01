@@ -681,6 +681,9 @@ class SessionSidebar(Gtk.Box):
         "archive-many": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "open-placeholder": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "close-placeholder": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # The rows were rebuilt, so row_order() may read differently: the tab
+        # bar follows the list, and this is what tells it to catch up.
+        "rows-reordered": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(self, store: SessionStore) -> None:
@@ -699,6 +702,7 @@ class SessionSidebar(Gtk.Box):
         self._header_rows: dict[tuple, GroupHeaderRow] = {}
         self._placeholders: dict[str, str] = {}  # placeholder id -> cwd
         self._placeholder_rows: dict[str, PlaceholderRow] = {}
+        self._row_order: list[str] = []  # session/placeholder ids, top to bottom
         self._active_session_id: str | None = None
         # "Is this session sitting at an empty prompt?", for a row's PR actions
         # (see SessionRow._pr_host). Only the window can answer — the tab is
@@ -874,6 +878,7 @@ class SessionSidebar(Gtk.Box):
         self._rows = {}
         self._header_rows = {}
         self._placeholder_rows = {}
+        self._row_order = []
 
         # Directory per project group (from its most recent session with a
         # cwd), so headers can offer a "new session here" button. Favorites
@@ -944,6 +949,7 @@ class SessionSidebar(Gtk.Box):
                 if pid == self._active_session_id:
                     prow.add_css_class("active-tab")
                 self._placeholder_rows[pid] = prow
+                self._row_order.append(pid)
                 self.list.append(prow)
             for item in items_by_group.get(key, []):
                 row = SessionRow(item, self)
@@ -951,9 +957,21 @@ class SessionSidebar(Gtk.Box):
                 if item.session_id == self._active_session_id:
                     row.add_css_class("active-tab")
                 self._rows[item.session_id] = row
+                self._row_order.append(item.session_id)
                 self.list.append(row)
         self._apply_selection_to_rows()
         self._update_collapse_button()
+        self.emit("rows-reordered")
+
+    def row_order(self) -> list[str]:
+        """Every session and placeholder row's id, top to bottom.
+
+        Rows a collapsed group or the search filter is hiding are in here too:
+        this is what the list holds, not what is on screen. The tab bar orders
+        itself by this, and a tab has no business moving because a group was
+        folded away or a search narrowed the list.
+        """
+        return list(self._row_order)
 
     def _apply_selection_to_rows(self) -> None:
         for row in self._rows.values():

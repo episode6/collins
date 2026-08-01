@@ -48,6 +48,7 @@ from .sidebar import SessionSidebar
 from .state import AppState, clamp_window_size
 from .store import SessionStore, emptied_projects
 from .switcher import QuickSwitcher
+from .taborder import tab_order
 from .terminal import TerminalTab
 
 log = logging.getLogger(__name__)
@@ -176,6 +177,11 @@ class MainWindow(Adw.ApplicationWindow):
         # toggle, so the resulting "toggled" isn't mistaken for a click and
         # bounced back at the app (which would cancel the timer it just armed).
         self._syncing_caffeine = False
+        # Set while _sort_tabs moves pages around, so the "page-reordered" it
+        # provokes isn't mistaken for the user dragging a tab; the source id is
+        # the snap-back that a real drag schedules.
+        self._sorting_tabs = False
+        self._sort_tabs_source: int | None = None
 
         self._install_actions()
         self._install_shortcuts()
@@ -190,6 +196,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._title_handlers: dict[Adw.TabPage, int] = {}
         self.tab_view.connect("page-attached", self._on_page_attached)
         self.tab_view.connect("page-detached", self._on_page_detached)
+        # The tab bar's own drag-to-reorder would put the two panes out of step
+        # (see _on_page_reordered).
+        self.tab_view.connect("page-reordered", self._on_page_reordered)
 
         tab_menu = Gio.Menu()
         tab_menu.append(_("Rename…"), "win.rename-tab")
@@ -309,6 +318,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("archive-many", self._on_sidebar_archive_many)
         self.sidebar.connect("open-placeholder", self._on_sidebar_open_placeholder)
         self.sidebar.connect("close-placeholder", self._on_sidebar_close_placeholder)
+        self.sidebar.connect("rows-reordered", lambda *_: self._sort_tabs())
         self.store.connect("refreshed", self._on_store_refreshed)
 
         # Yellow "running detached" guide lines: keep the set of backgrounded session
@@ -1085,8 +1095,70 @@ class MainWindow(Adw.ApplicationWindow):
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
         self.tab_view.set_selected_page(page)
         self.content_stack.set_visible_child_name("tabs")
+        self._sort_tabs()  # appended at the end; slot it in beside its row
         GLib.idle_add(tab.grab_terminal_focus)
         return page
+
+    # -- tab order mirrors the sidebar ---------------------------------------
+
+    def _tab_row_id(self, page: Adw.TabPage, rows_by_session: dict[str, str]) -> str | None:
+        """The sidebar row a tab belongs under, or None for a tab no row stands
+        for — a chat, a replay, or a session archived out of the list while its
+        tab stayed open."""
+        placeholder_id = self._placeholder_pages.get(page)
+        if placeholder_id is not None:
+            return placeholder_id
+        tab = page.get_child()
+        if not isinstance(tab, TerminalTab) or not tab.session_id:
+            return None
+        return rows_by_session.get(tab.session_id)
+
+    def _sort_tabs(self) -> None:
+        """Put the tab bar back in the sidebar's order, left to right.
+
+        Every path that opens a tab appends it, and the sidebar reshuffles
+        itself whenever a project moves or a session appears, so this runs
+        after both. Tabs are moved into place one at a time from the left: each
+        page already sitting at its target index stays put, so a bar that is
+        already in order does no work at all.
+        """
+        if self._sorting_tabs:
+            return
+        pages = [self.tab_view.get_nth_page(i) for i in range(self.tab_view.get_n_pages())]
+        if len(pages) < 2:
+            return
+        order = self.sidebar.row_order()
+        # A tab is bound to the id the CLI runs, which after a /bg is a fork's;
+        # the row it belongs under is the one further up that chain. Topmost
+        # row wins if two claim the same id.
+        rows_by_session: dict[str, str] = {}
+        for row_id in order:
+            for session_id in self.state.forward_chain(row_id):
+                rows_by_session.setdefault(session_id, row_id)
+        row_ids = [self._tab_row_id(page, rows_by_session) for page in pages]
+        wanted = tab_order(row_ids, order)
+        if wanted == list(range(len(pages))):
+            return
+        self._sorting_tabs = True
+        try:
+            for position, index in enumerate(wanted):
+                self.tab_view.reorder_page(pages[index], position)
+        finally:
+            self._sorting_tabs = False
+
+    def _on_page_reordered(self, _view, _page: Adw.TabPage, _position: int) -> None:
+        """A tab dragged to a new spot snaps back: the bar's order is the
+        sidebar's, and the sidebar is where it can be changed (drag a project
+        header there instead). Deferred to an idle so the snap lands after the
+        tab bar has finished settling the drag."""
+        if self._sorting_tabs or self._sort_tabs_source is not None:
+            return
+        self._sort_tabs_source = GLib.idle_add(self._snap_tabs_back)
+
+    def _snap_tabs_back(self) -> bool:
+        self._sort_tabs_source = None
+        self._sort_tabs()
+        return GLib.SOURCE_REMOVE
 
     def _on_bell(self, _tab: TerminalTab) -> None:
         """Visual bell: flash the header bar once (the audible bell is VTE's

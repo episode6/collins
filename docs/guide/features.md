@@ -108,6 +108,12 @@ agents' own session files are never modified.
   resuming a copy.
 - A tab with **unread output** is marked by the tab bar itself; tabs carry no
   status dot of their own.
+- **Tabs sit in the sidebar's order** — left to right is exactly the session
+  list read top to bottom, whatever order you opened them in, and they
+  re-arrange when the list does (a project dragged to a new spot takes its
+  tabs with it). Chats and replays, which have no row in the list, collect at
+  the right-hand end. The tab bar can't be dragged into a different order for
+  that reason: reorder the projects in the sidebar instead.
 - A slim **tab footer** shows the agent's live working directory (click to
   copy) and the current **git branch** (⎇), plus the terminal-panel buttons.
 - **Pull request chips** trail the branch: one per PR the session has opened,
