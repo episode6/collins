@@ -20,6 +20,12 @@ There is no such signal from the agent, so every source here is inferred:
   produces no terminal output of its own. The window polls each open tab's
   process tree (`proctree.has_live_descendant`) and marks the session for as
   long as one is found.
+- a tab's screen also shows the agent's own **thinking spinner** while it
+  works, and `SpinnerWatch` reads it — not by matching its glyphs, but by
+  noticing first-column motion between samples of the visible screen. It is
+  the one tab source that needs no gate: it can start a pole `EchoGate`
+  would have to wave through first, such as a freshly attached background
+  agent mid-turn that nothing was ever typed at.
 
 All three funnel into one tracker: "busy" means output seen within the
 source's idle window — `IDLE_S` for a terminal, which redraws continuously
@@ -73,6 +79,21 @@ PROCESS_POLL_MS = 2000
 # PROCESS_POLL_MS so ordinary scheduling jitter never closes the gap between
 # two sightings of the same still-running process.
 PROCESS_IDLE_S = 5.0
+
+# How often a tab's screen is read for spinner motion, at most. Sampling hangs
+# off ``contents-changed``, so an idle terminal is never read at all; while the
+# agent works its spinner repaints roughly every 100ms, and this decides which
+# of those repaints get compared. Deliberately not a clean multiple of that
+# frame clock: sampling exactly one glyph-cycle apart would see the same frame
+# every time and read a live spinner as still.
+SPINNER_SAMPLE_S = 0.35
+
+# Two first-column changes at most this far apart read as animation; farther
+# apart they are unrelated one-off repaints — a prompt redrawn now, a scroll a
+# minute later — and starting a pole on those would undo what EchoGate is for.
+# Wide enough (four samples) to ride out a coincidence sample: two frames of a
+# live spinner that happened to show the same glyph.
+SPINNER_STREAK_S = 4 * SPINNER_SAMPLE_S
 
 # How long a redraw goes on counting as the answer to something the app sent.
 # Measured on a live agent TUI, its reply lands 10-30ms after the bytes leave
@@ -244,6 +265,74 @@ class EchoGate:
         if self._poked_at is None:
             return True
         return self._clock() - self._poked_at >= self._quiet_s
+
+
+class SpinnerWatch:
+    """One terminal's "is something animating at a line start?" detector.
+
+    While the agent works, its CLI draws a status line whose *text* is a
+    moving target — the verb is random and user-configurable, the trailing
+    hint configurable too — but whose animated indicator is always the first
+    character of its line. So nothing here matches glyphs: the window samples
+    the first character of every visible screen row, and a row that keeps
+    changing between recent samples is an animation, which is an agent
+    working. That covers the spinner sitting still on an otherwise quiet
+    screen and, just as deliberately, output scrolling through — flowing
+    output is exactly what the pole shows.
+
+    The first column is what makes the signal echo-proof without a gate:
+    keystrokes echo after the prompt marker, mid-line; a focus repaint
+    redraws the same text; and a reflow arrives at a different grid, which
+    resets the baseline instead of comparing across it.
+
+    One change alone is not animation — a submitted prompt repaints the
+    screen once, and so does a spawn-time welcome paint. `sample` only
+    reports motion when the *previous* change was recent (`SPINNER_STREAK_S`),
+    which a live spinner refreshes every sample and a one-off repaint never
+    does. The cost is one extra sample (~`SPINNER_SAMPLE_S`) of latency on a
+    pole this watch starts; poles the gate starts are as immediate as ever.
+
+    `due` is the throttle, split from `sample` so the caller can skip the
+    screen read entirely between samples — reading text out of VTE is the
+    expensive half of the job.
+    """
+
+    def __init__(
+        self,
+        *,
+        sample_s: float = SPINNER_SAMPLE_S,
+        streak_s: float = SPINNER_STREAK_S,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._sample_s = sample_s
+        self._streak_s = streak_s
+        self._clock = clock
+        self._sampled_at: float | None = None
+        self._changed_at: float | None = None  # when a sample last saw a change
+        self._column: tuple[str, ...] | None = None  # first chars at the last sample
+        self._grid: tuple[int, int] | None = None  # (columns, rows) it was read at
+
+    def due(self) -> bool:
+        """Whether enough time has passed that a fresh sample is worth taking."""
+        return self._sampled_at is None or self._clock() - self._sampled_at >= self._sample_s
+
+    def sample(self, first_column: Iterable[str], grid: tuple[int, int]) -> bool:
+        """Record the screen's first column as read now, at *grid* columns and
+        rows, and say whether it shows animation — this sample changed, and on
+        the heels of another change."""
+        column = tuple(first_column)
+        now = self._clock()
+        self._sampled_at = now
+        reflowed = grid != self._grid
+        previous, self._column, self._grid = self._column, column, grid
+        if reflowed:  # rewrapped text moves every line; nothing comparable
+            self._changed_at = None
+            return False
+        if previous is None or column == previous:
+            return False
+        streak = self._changed_at is not None and now - self._changed_at <= self._streak_s
+        self._changed_at = now
+        return streak
 
 
 class TranscriptActivity:

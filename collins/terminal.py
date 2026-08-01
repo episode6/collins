@@ -1179,6 +1179,26 @@ class TerminalTab(Gtk.Box):
         text = screen[0] if isinstance(screen, tuple) else screen
         return self.provider.worktree_exit_prompt(text or "")
 
+    def screen_first_column(self) -> tuple[tuple[str, ...], tuple[int, int]] | None:
+        """The first character of each visible screen row ("" for a blank
+        one), with the (columns, rows) grid it was read at — what the
+        window's SpinnerWatch compares between samples — or None with no
+        child to be busy. Anchored to the cursor like the other screen
+        readers, so the user scrolling back never changes what is read."""
+        if self._child_pid is None:
+            return None
+        rows = self.terminal.get_row_count()
+        columns = self.terminal.get_column_count()
+        _, cursor_row = self.terminal.get_cursor_position()
+        top_row = max(0, cursor_row - rows + 1)
+        screen = self.terminal.get_text_range_format(
+            Vte.Format.TEXT, top_row, 0, cursor_row, columns
+        )
+        text = screen[0] if isinstance(screen, tuple) else screen
+        first = [line[:1] for line in (text or "").split("\n")][:rows]
+        first += [""] * (rows - len(first))
+        return tuple(first), (columns, rows)
+
     # -- prompt card -------------------------------------------------------
 
     def set_transcript_path(self, jsonl_path: str | Path | None) -> None:

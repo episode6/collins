@@ -27,6 +27,7 @@ from .activity import (
     TRANSCRIPT_POLL_MS,
     ActivityTracker,
     EchoGate,
+    SpinnerWatch,
     TranscriptActivity,
 )
 from .bgstatus import (
@@ -222,6 +223,9 @@ class MainWindow(Adw.ApplicationWindow):
         # echoed keystroke, a redraw after a tab switch or a resize) from
         # reading as the agent working.
         self._echo_gates: dict[Adw.TabPage, EchoGate] = {}
+        # Each tab's spinner-motion detector, sampled alongside the gate in
+        # _on_terminal_output (see SpinnerWatch).
+        self._spinner_watches: dict[Adw.TabPage, SpinnerWatch] = {}
 
         self._install_actions()
         self._install_shortcuts()
@@ -1260,6 +1264,7 @@ class MainWindow(Adw.ApplicationWindow):
         tab.set_editor_width_lookup(lambda: int(self.state.get_setting("editor_width") or 0))
         gate = EchoGate()
         self._echo_gates[page] = gate
+        self._spinner_watches[page] = SpinnerWatch()
         # "commit" is everything the app sends this terminal's child — the
         # keystrokes the user types, and the focus reports VTE emits on a tab
         # switch — so the redraw that answers one is not the agent working.
@@ -1605,6 +1610,10 @@ class MainWindow(Adw.ApplicationWindow):
         handler = self._title_handlers.pop(page, None)
         if handler is not None:
             page.disconnect(handler)
+        # Closed or dragged to another window either way: this window's
+        # per-page trackers are done with it.
+        self._echo_gates.pop(page, None)
+        self._spinner_watches.pop(page, None)
 
     def _on_page_title_changed(self, page: Adw.TabPage, _pspec) -> None:
         if page is self.tab_view.get_selected_page():
@@ -2374,6 +2383,16 @@ class MainWindow(Adw.ApplicationWindow):
         agent_output = gate is None or gate.counts(
             (terminal.get_column_count(), terminal.get_row_count())
         )
+        # Second opinion, gate or no gate: motion in the screen's first column
+        # is the agent's own spinner (or its output scrolling through), however
+        # the redraw showing it was caused — see SpinnerWatch. Sampled even
+        # when the gate already said yes, so the watch always has a fresh
+        # baseline to compare the next redraw against.
+        watch = self._spinner_watches.get(page)
+        if watch is not None and watch.due():
+            tab = page.get_child()
+            if isinstance(tab, TerminalTab) and (reading := tab.screen_first_column()) is not None:
+                agent_output = watch.sample(*reading) or agent_output
         session_id = self._session_id_of(page)
         for tracked in (session_id, self._placeholder_pages.get(page)):
             if tracked and (agent_output or self._activity.is_busy(tracked)):
