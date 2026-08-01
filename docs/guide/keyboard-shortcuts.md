@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-30. Full change history: git log for this file.
+fork. Last modified: 2026-08-01. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -22,6 +22,9 @@ fork. Last modified: 2026-07-30. Full change history: git log for this file.
 | `Shift+Enter` | Insert a newline in the agent's prompt |
 | `Ctrl+J` | Show/hide the terminal panel |
 | `Ctrl+K` | Clear the terminal panel (screen and saved history) |
+| `F8` | Show/hide the editor panel |
+| `Ctrl+S` (in the editor) | Save the current file |
+| `Ctrl+F` (in the editor) | Find in the current file |
 | `F9` | Toggle the sidebar |
 | `Ctrl+,` | Preferences |
 

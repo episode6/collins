@@ -12,7 +12,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: collins\n"
 "Report-Msgid-Bugs-To: matemiller992@gmail.com\n"
-"POT-Creation-Date: 2026-07-28 09:03-0400\n"
+"POT-Creation-Date: 2026-08-01 12:00-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1111,4 +1111,157 @@ msgid ""
 "Manage and resume your AI coding agent sessions.\n"
 "\n"
 "Unofficial community tool — not affiliated with or endorsed by Anthropic."
+msgstr ""
+
+#: collins/editor.py:196
+#, python-brace-format
+msgid "Couldn't open {name}: {message}"
+msgstr ""
+
+#: collins/editor.py:219
+#, python-brace-format
+msgid "{name} is too large to open in the editor."
+msgstr ""
+
+#: collins/editor.py:221
+#, python-brace-format
+msgid "{name} looks like a binary file and can't be opened here."
+msgstr ""
+
+#: collins/editor.py:223
+#, python-brace-format
+msgid "{name} is not a file."
+msgstr ""
+
+#: collins/editor.py:224
+#, python-brace-format
+msgid "Couldn't open {name}."
+msgstr ""
+
+#: collins/editor.py:238
+#, python-brace-format
+msgid "{name} changed on disk"
+msgstr ""
+
+#: collins/editor.py:239
+msgid "Overwrite it with the changes you made here?"
+msgstr ""
+
+#: collins/editor.py:240
+msgid "Overwrite"
+msgstr ""
+
+#: collins/editor.py:256
+#, python-brace-format
+msgid "Couldn't save {name}: {message}"
+msgstr ""
+
+#: collins/editor.py:289
+#, python-brace-format
+msgid "{name} was deleted."
+msgstr ""
+
+#: collins/editor.py:293
+#, python-brace-format
+msgid "{name} changed on disk."
+msgstr ""
+
+#: collins/editor.py:294
+msgid "Reload"
+msgstr ""
+
+#: collins/editor.py:313
+#, python-brace-format
+msgid "Couldn't reload {name}: {message}"
+msgstr ""
+
+#: collins/editor.py:367
+#, python-brace-format
+msgid "Close {name} without saving?"
+msgstr ""
+
+#: collins/editor.py:368
+msgid "Changes since the last save will be lost."
+msgstr ""
+
+#: collins/editor.py:369
+msgid "Discard Changes"
+msgstr ""
+
+#: collins/editor.py:391
+msgid "Find in file…"
+msgstr ""
+
+#: collins/editor.py:503
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: collins/editor.py:523
+msgid "Plain Text"
+msgstr ""
+
+#: collins/terminal.py:896 collins/terminal.py:1643
+msgid "Show editor panel"
+msgstr ""
+
+#: collins/terminal.py:1636
+msgid "Hide editor panel"
+msgstr ""
+
+#: collins/window.py:540
+msgid "Close window with unsaved editor changes?"
+msgstr ""
+
+#: collins/window.py:541
+msgid "Unsaved changes in open editors will be lost."
+msgstr ""
+
+#: collins/window.py:544
+#, python-brace-format
+msgid "{n} unsaved editor file(s) will also be lost."
+msgstr ""
+
+#: collins/window.py:550
+msgid "Close Window"
+msgstr ""
+
+#: collins/window.py:1710
+msgid "Close tab with unsaved changes?"
+msgstr ""
+
+#: collins/window.py:1711
+msgid "This tab's editor has unsaved changes that will be lost."
+msgstr ""
+
+#: collins/window.py:1714
+#, python-brace-format
+msgid "This tab's editor also has {n} unsaved file(s) that will be lost."
+msgstr ""
+
+#: collins/prefs.py:302
+msgid "Editor"
+msgstr ""
+
+#: collins/prefs.py:310 collins/prefs.py:364
+msgid "Follow app theme"
+msgstr ""
+
+#: collins/prefs.py:330
+msgid "Applies to the editor panel"
+msgstr ""
+
+#: collins/prefs.py:340
+msgid "Reset to system monospace"
+msgstr ""
+
+#: collins/prefs.py:345
+msgid "Show line numbers"
+msgstr ""
+
+#: collins/prefs.py:351
+msgid "Show hidden files"
+msgstr ""
+
+#: collins/prefs.py:352
+msgid "Show dotfiles in the editor's file tree"
 msgstr ""

@@ -19,7 +19,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import __version__, chats, dialogs, footerapps, openwith, panelhistory
+from . import __version__, chats, dialogs, editor, footerapps, openwith, panelhistory
 from .activity import (
     DETACHED_IDLE_S,
     PROCESS_IDLE_S,
@@ -430,14 +430,15 @@ class MainWindow(Adw.ApplicationWindow):
             return False  # tabs drained (or the user insisted) — really close
         self._last_active_session = self._active_session_id() or ""
         busy = self._busy_tab_count()
-        if busy == 0:
+        editor_dirty = self._editor_dirty_total()
+        if busy == 0 and editor_dirty == 0:
             # This close skips the per-tab drain, so capture panel histories
             # and state here.
             self._save_panel_data()
             self._persist_last_session()
-            return False  # nothing running; continue with the normal close
+            return False  # nothing running or unsaved; continue with the normal close
         if not self._quit_asking:  # one dialog for however many sessions are busy
-            self._confirm_quit(busy)
+            self._confirm_quit(busy, editor_dirty)
         return True
 
     def _active_session_id(self) -> str | None:
@@ -462,6 +463,7 @@ class MainWindow(Adw.ApplicationWindow):
             if isinstance(tab, TerminalTab):
                 tab.save_panel_history()
                 self._save_panel_state(tab)
+                self._save_editor_state(tab)
 
     def _save_panel_state(self, tab: TerminalTab) -> None:
         """Persist the tab's panel open/mode/size for its session. A tab that
@@ -471,6 +473,15 @@ class MainWindow(Adw.ApplicationWindow):
         state = tab.capture_panel_state()
         if state is not None:
             self.state.set_panel_state(tab.session_id, state)
+
+    def _save_editor_state(self, tab: TerminalTab) -> None:
+        """Persist the tab's editor open/width/files for its session. A tab
+        that never used the editor leaves the session's saved state alone."""
+        if tab.fork or not tab.session_id:
+            return
+        state = tab.capture_editor_state()
+        if state is not None:
+            self.state.set_editor_state(tab.session_id, state)
 
     def _busy_tab_count(self) -> int:
         count = 0
@@ -482,7 +493,19 @@ class MainWindow(Adw.ApplicationWindow):
                 count += 1
         return count
 
-    def _confirm_quit(self, busy: int) -> None:
+    def _editor_dirty_total(self) -> int:
+        """Unsaved editor buffers across every tab — counted separately from
+        `_busy_tab_count` (which is about running commands) so its number
+        keeps meaning "active sessions"; the two are folded into one dialog
+        in `_confirm_quit` rather than getting a dialog each."""
+        total = 0
+        for i in range(self.tab_view.get_n_pages()):
+            tab = self.tab_view.get_nth_page(i).get_child()
+            if isinstance(tab, TerminalTab):
+                total += tab.editor_dirty_count()
+        return total
+
+    def _confirm_quit(self, busy: int, editor_dirty: int = 0) -> None:
         self._quit_asking = True
 
         def do_quit(background: bool = False) -> None:
@@ -490,7 +513,8 @@ class MainWindow(Adw.ApplicationWindow):
             self._quitting = True
             # The window-level dialog already covered every tab: don't let
             # each one ask again. Agents still get their graceful exit
-            # (or /bg, if the user chose to background them).
+            # (or /bg, if the user chose to background them); unsaved editor
+            # buffers are simply lost, as agreed to here.
             pages = [self.tab_view.get_nth_page(i) for i in range(self.tab_view.get_n_pages())]
             for page in pages:
                 self._close_ok.add(page)
@@ -503,18 +527,27 @@ class MainWindow(Adw.ApplicationWindow):
 
         can_background = any(self._quit_backgroundable(self.tab_view.get_nth_page(i))
                              for i in range(self.tab_view.get_n_pages()))
-        body = _("Agents are asked to exit cleanly first; "
-                 "other running commands will be terminated.")
-        if can_background:
-            body = _("Agents are asked to exit cleanly first; other running "
-                     "commands will be terminated. Backgrounding instead keeps "
-                     "the agents running detached — reopen a session later to "
-                     "re-attach.")
+        if busy:
+            heading = _("Close window with {n} active session(s)?").format(n=busy)
+            body = _("Agents are asked to exit cleanly first; "
+                     "other running commands will be terminated.")
+            if can_background:
+                body = _("Agents are asked to exit cleanly first; other running "
+                         "commands will be terminated. Backgrounding instead keeps "
+                         "the agents running detached — reopen a session later to "
+                         "re-attach.")
+        else:
+            heading = _("Close window with unsaved editor changes?")
+            body = _("Unsaved changes in open editors will be lost.")
+        if editor_dirty and busy:
+            body += " " + _(
+                "{n} unsaved editor file(s) will also be lost."
+            ).format(n=editor_dirty)
         dialogs.confirm_dialog(
             self,
-            _("Close window with {n} active session(s)?").format(n=busy),
+            heading,
             body,
-            _("Exit Sessions"),
+            _("Exit Sessions") if busy else _("Close Window"),
             do_quit,
             on_dismiss=lambda: setattr(self, "_quit_asking", False),
             default_response="confirm",
@@ -706,6 +739,9 @@ class MainWindow(Adw.ApplicationWindow):
             "toggle-panel": lambda *_: self._toggle_panel(),
             "swap-panel": lambda *_: self._swap_panel(),
             "clear-panel": lambda *_: self._clear_panel(),
+            "toggle-editor": lambda *_: self._toggle_editor(),
+            "editor-save": lambda *_: self._editor_save(),
+            "focus-editor": lambda *_: self._focus_editor(),
             "toggle-sidebar": lambda *_: self.sidebar.set_visible(
                 not self.sidebar.get_visible()
             ),
@@ -721,6 +757,12 @@ class MainWindow(Adw.ApplicationWindow):
         # every store refresh (archiving/restoring goes through one).
         self._trash_archived_action = self.lookup_action("trash-archived")
         self._sync_trash_archived_action()
+
+        # Soft dependency: no gtksourceview5 typelib means no editor pane in
+        # any tab (see TerminalTab.__init__), so these have nothing to act on.
+        if not editor.HAVE_GTKSOURCE:
+            for name in ("toggle-editor", "editor-save", "focus-editor"):
+                self.lookup_action(name).set_enabled(False)
 
         per_session = {
             "new-session-provider": lambda _a, p: self._choose_new_session_folder(
@@ -808,6 +850,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control>j", "win.toggle-panel"),
             ("<Control>k", "win.clear-panel"),
             ("F9", "win.toggle-sidebar"),
+            ("F8", "win.toggle-editor"),
         ):
             controller.add_shortcut(
                 Gtk.Shortcut.new(
@@ -950,6 +993,9 @@ class MainWindow(Adw.ApplicationWindow):
             saved_panel = self.state.get_panel_state(bound_id)
             if saved_panel:  # reopen the panel the way this session left it
                 tab.restore_panel_state(saved_panel)
+            saved_editor = self.state.get_editor_state(bound_id)
+            if saved_editor:  # reopen the editor's files the way this session left them
+                tab.restore_editor_state(saved_editor)
             # The PRs this session opened, back on the footer row before the
             # first transcript poll (and including any that only a lookup knew).
             tab.restore_prs(self.state.get_session_prs(bound_id))
@@ -1121,9 +1167,11 @@ class MainWindow(Adw.ApplicationWindow):
         tab.connect("process-exited", self._on_process_exited, page)
         tab.connect("session-resolved", self._on_session_resolved, page)
         tab.connect("panel-size-changed", self._on_panel_size_changed)
+        tab.connect("editor-size-changed", self._on_editor_size_changed)
         tab.connect("bell", self._on_bell)
         tab.connect("prs-changed", self._on_tab_prs_changed)
         tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
+        tab.set_editor_width_lookup(lambda: int(self.state.get_setting("editor_width") or 0))
         gate = EchoGate()
         self._echo_gates[page] = gate
         # "commit" is everything the app sends this terminal's child — the
@@ -1263,6 +1311,12 @@ class MainWindow(Adw.ApplicationWindow):
         key = f"panel_size_{mode}"
         if self.state.get_setting(key) != size:
             self.state.set_setting(key, size)
+
+    def _on_editor_size_changed(self, _tab: TerminalTab, size: int) -> None:
+        """A divider was dragged: remember the width app-wide, so every
+        editor panel opened from now on (in any tab) defaults to it."""
+        if self.state.get_setting("editor_width") != size:
+            self.state.set_setting("editor_width", size)
 
     def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
         self._sync_trash_archived_action()
@@ -1622,11 +1676,12 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _ask_tab_close(self, page: Adw.TabPage, tab: TerminalTab) -> None:
-        """Confirm closing a tab with an active agent session and/or a command
-        running in its panel shell."""
+        """Confirm closing a tab with an active agent session, a command
+        running in its panel shell, and/or unsaved editor buffers."""
         self._close_asking.add(page)
         agent_busy = tab.has_running_command()
         panel_busy = tab.panel_has_running_command()
+        editor_dirty = tab.editor_dirty_count()
         if panel_busy:
             tab.show_panel()  # reveal what's about to be killed (a busy shell is never cd'd)
 
@@ -1647,10 +1702,17 @@ class MainWindow(Adw.ApplicationWindow):
         elif agent_busy:
             heading = _("Close tab with an active session?")
             body = _("The agent is asked to exit cleanly first.")
-        else:
+        elif panel_busy:
             heading = _("Close tab with a running command?")
             body = _("A command is still running in this tab's terminal panel "
                      "and will be terminated.")
+        else:  # editor_dirty only — the sole reason this dialog is asking
+            heading = _("Close tab with unsaved changes?")
+            body = _("This tab's editor has unsaved changes that will be lost.")
+        if editor_dirty and (agent_busy or panel_busy):
+            body += " " + _(
+                "This tab's editor also has {n} unsaved file(s) that will be lost."
+            ).format(n=editor_dirty)
         if can_background:
             body += " " + _("Backgrounding instead keeps the agent running "
                             "detached — reopen the session later to re-attach.")
@@ -2278,6 +2340,24 @@ class MainWindow(Adw.ApplicationWindow):
         if tab is not None:
             tab.clear_panel_history()
 
+    def _toggle_editor(self) -> None:
+        tab = self._current_terminal_tab()
+        if tab is not None:
+            tab.toggle_editor()
+
+    def _editor_save(self) -> None:
+        tab = self._current_terminal_tab()
+        if tab is not None:
+            tab.editor_save()
+
+    def _focus_editor(self) -> None:
+        tab = self._current_terminal_tab()
+        if tab is None:
+            return
+        if not tab.editor_visible:
+            tab.show_editor()
+        tab.focus_editor()
+
     def _on_selected_page_changed(self, view: Adw.TabView, _pspec) -> None:
         page = view.get_selected_page()
         self._update_active_row()
@@ -2413,14 +2493,15 @@ class MainWindow(Adw.ApplicationWindow):
         if isinstance(tab, TerminalTab) and page not in self._confirmed_closes:
             agent_busy = tab.has_running_command()
             panel_busy = tab.panel_has_running_command()
+            editor_dirty = tab.editor_dirty_count()
             if page in self._closing_pages and agent_busy:
                 # A graceful exit is already in flight; keep the tab open
                 # until the shell drains.
                 view.close_page_finish(page, False)
                 return True
-            if (agent_busy or panel_busy) and page not in self._close_ok:
-                # The agent session and/or the panel shell is busy: ask before
-                # ending the session or killing the panel job.
+            if (agent_busy or panel_busy or editor_dirty) and page not in self._close_ok:
+                # The agent session and/or the panel shell is busy, or the
+                # editor has unsaved changes: ask before losing any of it.
                 view.close_page_finish(page, False)  # keep the tab while we ask
                 if page not in self._close_asking:
                     self._ask_tab_close(page, tab)
@@ -2446,6 +2527,7 @@ class MainWindow(Adw.ApplicationWindow):
         if isinstance(tab, TerminalTab):
             tab.save_panel_history()  # before the widget (and its VTE buffer) is destroyed
             self._save_panel_state(tab)
+            self._save_editor_state(tab)
         session_id = self._session_id_of(page)
         if session_id:
             # Only if this page is the one actually bound to the session.
@@ -2700,12 +2782,14 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _forget_transcript(self, session_id: str) -> None:
         """Drop everything the app kept for a session whose transcript just
-        went away: its tab, its panel scrollback, its panel layout, its PRs."""
+        went away: its tab, its panel scrollback, its panel and editor
+        layout, its PRs."""
         page = self._pages.get(session_id)
         if page is not None:
             self.tab_view.close_page(page)
         panelhistory.delete(session_id)
         self.state.set_panel_state(session_id, None)
+        self.state.set_editor_state(session_id, None)
         self.state.set_session_prs(session_id, [])
 
     def _on_trash_session(self, _action, param: GLib.Variant) -> None:

@@ -17,7 +17,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
 
-from . import apppicker, footerapps
+from . import apppicker, editor, footerapps
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label
 from .i18n import LANGUAGES, N_, _
 from .state import AppState
@@ -153,6 +153,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
             self._theme_expander.add_row(row)
         terminal_group.add(self._theme_expander)
         page.add(terminal_group)
+
+        if editor.HAVE_GTKSOURCE:
+            self._build_editor_group(state, page)
 
         appearance_group = Adw.PreferencesGroup(title=_("Appearance"))
         scheme_row = Adw.ComboRow(title=_("Color scheme"))
@@ -294,6 +297,90 @@ class PreferencesDialog(Adw.PreferencesDialog):
         page.add(bg_group)
 
         self.add(page)
+
+    def _build_editor_group(self, state: AppState, page: Adw.PreferencesPage) -> None:
+        editor_group = Adw.PreferencesGroup(title=_("Editor"))
+
+        scheme_ids = [""] + sorted(editor.GtkSource.StyleSchemeManager.get_default().get_scheme_ids())
+        current_editor_scheme = state.get_setting("editor_style_scheme") or ""
+        if current_editor_scheme not in scheme_ids:
+            current_editor_scheme = ""
+
+        def scheme_label(scheme_id: str) -> str:
+            return scheme_id or _("Follow app theme")
+
+        self._editor_scheme_expander = Adw.ExpanderRow(
+            title=_("Color scheme"), subtitle=scheme_label(current_editor_scheme)
+        )
+        scheme_radio_group = None
+        for scheme_id in scheme_ids:
+            row = Adw.ActionRow(title=scheme_label(scheme_id))
+            radio = Gtk.CheckButton()
+            if scheme_radio_group is None:
+                scheme_radio_group = radio
+            else:
+                radio.set_group(scheme_radio_group)
+            radio.set_active(scheme_id == current_editor_scheme)
+            radio.connect("toggled", self._on_editor_scheme_radio, scheme_id)
+            row.add_prefix(radio)
+            row.set_activatable_widget(radio)
+            self._editor_scheme_expander.add_row(row)
+        editor_group.add(self._editor_scheme_expander)
+
+        font_row = Adw.ActionRow(title=_("Font"), subtitle=_("Applies to the editor panel"))
+        self._editor_font_button = Gtk.FontDialogButton(dialog=Gtk.FontDialog(), valign=Gtk.Align.CENTER)
+        current_editor_font = state.get_setting("editor_font") or ""
+        if current_editor_font:
+            self._editor_font_button.set_font_desc(Pango.FontDescription.from_string(current_editor_font))
+        self._editor_font_button.connect("notify::font-desc", self._on_editor_font_changed)
+        font_row.add_suffix(self._editor_font_button)
+
+        reset_editor_font = Gtk.Button(icon_name="edit-clear-symbolic", valign=Gtk.Align.CENTER)
+        reset_editor_font.add_css_class("flat")
+        reset_editor_font.set_tooltip_text(_("Reset to system monospace"))
+        reset_editor_font.connect("clicked", self._on_editor_font_reset)
+        font_row.add_suffix(reset_editor_font)
+        editor_group.add(font_row)
+
+        self._editor_line_numbers_row = Adw.SwitchRow(title=_("Show line numbers"))
+        self._editor_line_numbers_row.set_active(bool(state.get_setting("editor_show_line_numbers")))
+        self._editor_line_numbers_row.connect("notify::active", self._on_editor_line_numbers_changed)
+        editor_group.add(self._editor_line_numbers_row)
+
+        self._editor_hidden_files_row = Adw.SwitchRow(
+            title=_("Show hidden files"),
+            subtitle=_("Show dotfiles in the editor's file tree"),
+        )
+        self._editor_hidden_files_row.set_active(bool(state.get_setting("editor_show_hidden_files")))
+        self._editor_hidden_files_row.connect("notify::active", self._on_editor_hidden_files_changed)
+        editor_group.add(self._editor_hidden_files_row)
+
+        page.add(editor_group)
+
+    def _on_editor_scheme_radio(self, radio: Gtk.CheckButton, scheme_id: str) -> None:
+        if not radio.get_active():
+            return
+        self._state.set_setting("editor_style_scheme", scheme_id)
+        self._editor_scheme_expander.set_subtitle(scheme_id or _("Follow app theme"))
+        self._on_change()
+
+    def _on_editor_font_changed(self, button: Gtk.FontDialogButton, _pspec) -> None:
+        desc = button.get_font_desc()
+        self._state.set_setting("editor_font", desc.to_string() if desc else "")
+        self._on_change()
+
+    def _on_editor_font_reset(self, _button: Gtk.Button) -> None:
+        self._editor_font_button.set_font_desc(None)
+        self._state.set_setting("editor_font", "")
+        self._on_change()
+
+    def _on_editor_line_numbers_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("editor_show_line_numbers", row.get_active())
+        self._on_change()
+
+    def _on_editor_hidden_files_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("editor_show_hidden_files", row.get_active())
+        self._on_change()
 
     def _on_font_changed(self, button: Gtk.FontDialogButton, _pspec) -> None:
         desc = button.get_font_desc()

@@ -21,6 +21,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa:
 
 from . import (  # noqa: E402
     apppicker,
+    editor,
     footerapps,
     panelhistory,
     prmenu,
@@ -465,6 +466,11 @@ class TerminalTab(Gtk.Box):
         # prstatus records, oldest first), so the window can save them against
         # the session. Never fires for a tab that has nothing to say yet.
         "prs-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
+        # Emitted (debounced) when the editor panel's divider is moved: the
+        # new panel px size, so the window can persist it as the app-wide
+        # default. Mirrors panel-size-changed, minus the mode — the editor
+        # panel only ever has the one position.
+        "editor-size-changed": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
     }
 
     def __init__(
@@ -565,7 +571,29 @@ class TerminalTab(Gtk.Box):
         self._paned.set_shrink_start_child(False)
         self._paned.set_resize_end_child(False)
         self._paned.set_shrink_end_child(False)
-        self.append(self._paned)
+
+        # Editor panel: a full-height right column beside the terminal↔shell
+        # split above, in a new outer paned. Built now (but hidden) rather
+        # than on first toggle, so per-session restore can reopen it without
+        # a construct-on-demand race; HAVE_GTKSOURCE false leaves it None and
+        # the footer button that would open it hidden (see _build_footer).
+        editor_root = cwd if cwd and Path(cwd).is_dir() else str(Path.home())
+        self._editor = editor.EditorPane(editor_root) if editor.HAVE_GTKSOURCE else None
+        self._editor_width = 0  # this tab's last-set editor width, px (0 = none yet)
+        self._editor_width_lookup = None  # () -> app-wide last-set width (set by the window)
+        self._editor_width_emit_source: int | None = None  # debounce for editor-size-changed
+        self._outer = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
+        self._outer.set_wide_handle(True)
+        self._outer.set_resize_start_child(True)
+        self._outer.set_shrink_start_child(False)
+        self._outer.set_resize_end_child(False)
+        self._outer.set_shrink_end_child(False)
+        self._outer.set_start_child(self._paned)
+        if self._editor is not None:
+            self._editor.set_visible(False)
+            self._outer.set_end_child(self._editor)
+        self._outer.connect("notify::position", lambda *_: self._remember_editor_width())
+        self.append(self._outer)
 
         self._footer_cwd: str | None = None  # last value shown in the footer
         self._footer_branch: str | None = None
@@ -857,10 +885,23 @@ class TerminalTab(Gtk.Box):
         # populated from settings via _set_footer_apps.
         self._footer_apps_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
 
+        # The editor toggle sits between the footer apps and the panel
+        # buttons — a page-with-a-folded-corner glyph, not the panel-split
+        # icon `toggle_btn` uses next to it. One click means one of three
+        # things depending on state: re-attach a detached editor (PR 2),
+        # else open the panel, else close it (see _toggle_editor). PR 1 is
+        # the open/close half; the tooltip always names whichever it is.
+        self._editor_toggle_btn = Gtk.Button(icon_name="text-x-generic-symbolic")
+        self._editor_toggle_btn.add_css_class("flat")
+        self._editor_toggle_btn.set_tooltip_text(_("Show editor panel"))
+        self._editor_toggle_btn.set_action_name("win.toggle-editor")
+        self._editor_toggle_btn.set_visible(self._editor is not None)
+
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         footer.add_css_class("tab-footer")
         footer.append(left)
         footer.append(self._footer_apps_box)
+        footer.append(self._editor_toggle_btn)
         for btn in (toggle_btn, self._swap_panel_btn):
             btn.add_css_class("flat")
             footer.append(btn)
@@ -1571,6 +1612,129 @@ class TerminalTab(Gtk.Box):
 
         GLib.idle_add(position)
 
+    # -- editor panel --------------------------------------------------------
+
+    @property
+    def editor_visible(self) -> bool:
+        return self._editor is not None and self._editor.get_visible()
+
+    def toggle_editor(self) -> None:
+        """PR 1's half of the footer icon's behavior: open/close. Re-attaching
+        a detached editor (checked first once pop-out exists) is PR 2's."""
+        if self._editor is None:
+            return
+        if self.editor_visible:
+            self.hide_editor()
+        else:
+            self.show_editor()
+
+    def show_editor(self) -> None:
+        if self._editor is None or self.editor_visible:
+            return
+        self._editor.set_visible(True)
+        self._apply_editor_width()
+        self._editor_toggle_btn.set_tooltip_text(_("Hide editor panel"))
+
+    def hide_editor(self) -> None:
+        if self._editor is None or not self.editor_visible:
+            return
+        self._remember_editor_width()
+        self._editor.set_visible(False)
+        self._editor_toggle_btn.set_tooltip_text(_("Show editor panel"))
+
+    def editor_dirty_count(self) -> int:
+        return self._editor.dirty_count() if self._editor is not None else 0
+
+    def editor_save(self) -> None:
+        if self._editor is not None:
+            self._editor.save_current()
+
+    def focus_editor(self) -> None:
+        if self._editor is not None:
+            self._editor.focus_default()
+
+    def set_editor_width_lookup(self, lookup) -> None:
+        """`lookup() -> px` supplies the app-wide last-set editor width, used
+        for tabs that haven't sized their own editor yet."""
+        self._editor_width_lookup = lookup
+
+    def _remember_editor_width(self) -> None:
+        if not self.editor_visible:
+            return
+        total = self._outer.get_width()
+        if total <= 0:
+            return
+        width = total - self._outer.get_position()
+        if width <= 0 or width == self._editor_width:
+            return
+        self._editor_width = width
+        if self._editor_width_emit_source is not None:
+            GLib.source_remove(self._editor_width_emit_source)
+        self._editor_width_emit_source = GLib.timeout_add(500, self._emit_editor_width_changed)
+
+    def _emit_editor_width_changed(self) -> bool:
+        self._editor_width_emit_source = None
+        self.emit("editor-size-changed", self._editor_width)
+        return GLib.SOURCE_REMOVE
+
+    def _apply_editor_width(self) -> None:
+        """Size the editor panel once the outer paned's own size is known:
+        this tab's remembered width, else the app-wide last-set width, else
+        roughly a third of the paned. A simplified copy of
+        `_apply_panel_size` — one position, no per-mode bookkeeping."""
+
+        def position() -> bool:
+            total = self._outer.get_width()
+            if total <= 0:
+                return GLib.SOURCE_REMOVE
+            width = self._editor_width or 0
+            if width <= 0 and self._editor_width_lookup is not None:
+                width = self._editor_width_lookup() or 0
+            if 0 < width < total:
+                self._outer.set_position(total - width)
+            else:
+                self._outer.set_position(int(total * 0.62))
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(position)
+
+    def capture_editor_state(self) -> dict | None:
+        """Snapshot the editor's open/width/files for per-session persistence,
+        mirroring capture_panel_state. None when the editor was never used in
+        this tab, so a session's saved state survives tabs that never touched
+        it. Forks never persist."""
+        if self.fork or self._editor is None:
+            return None
+        if not self.editor_visible and not self._editor.open_paths():
+            return None
+        self._remember_editor_width()
+        state: dict = {"open": self.editor_visible, "files": self._editor.open_paths()}
+        cursors = self._editor.cursor_positions()
+        if cursors:
+            state["cursors"] = cursors
+        active = self._editor.active_path()
+        if active:
+            state["active"] = active
+        if self._editor_width:
+            state["width"] = self._editor_width
+        return state
+
+    def restore_editor_state(self, state: dict) -> None:
+        """Re-apply a session's saved editor snapshot, mirroring
+        restore_panel_state. Width lands in this tab's own memory — restoring
+        a session must not disturb the app-wide default for new tabs."""
+        if self._editor is None:
+            return
+        width = state.get("width")
+        if isinstance(width, int) and width > 0:
+            self._editor_width = width
+        files = state.get("files")
+        if isinstance(files, list) and files:
+            cursors = state.get("cursors")
+            self._editor.restore(files, state.get("active"), cursors if isinstance(cursors, dict) else {})
+        if state.get("open"):
+            self.show_editor()
+
     def _candidate_pids(self) -> list[int]:
         """Pids worth searching for the agent process: the terminal's
         foreground process group leader, then the child originally spawned.
@@ -1636,6 +1800,8 @@ class TerminalTab(Gtk.Box):
         self._apply_terminal_max_width(settings)
         self._set_footer_apps(settings.get("footer_apps") or [])
         self._panel.apply_settings(settings)
+        if self._editor is not None:
+            self._editor.apply_settings(settings)
 
     def _apply_terminal_max_width(self, settings: dict) -> None:
         try:

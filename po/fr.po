@@ -695,3 +695,108 @@ msgstr "{n} échouée(s)"
 msgid "{n} pending"
 msgstr "{n} en attente"
 
+msgid "Couldn't open {name}: {message}"
+msgstr "Impossible d’ouvrir « {name} » : {message}"
+
+msgid "{name} is too large to open in the editor."
+msgstr "« {name} » est trop volumineux pour être ouvert dans l’éditeur."
+
+msgid "{name} looks like a binary file and can't be opened here."
+msgstr "« {name} » ressemble à un fichier binaire et ne peut pas être ouvert ici."
+
+msgid "{name} is not a file."
+msgstr "« {name} » n’est pas un fichier."
+
+msgid "Couldn't open {name}."
+msgstr "Impossible d’ouvrir « {name} »."
+
+msgid "{name} changed on disk"
+msgstr "« {name} » a changé sur le disque"
+
+msgid "Overwrite it with the changes you made here?"
+msgstr "L’écraser avec les modifications faites ici ?"
+
+msgid "Overwrite"
+msgstr "Écraser"
+
+msgid "Couldn't save {name}: {message}"
+msgstr "Impossible d’enregistrer « {name} » : {message}"
+
+msgid "{name} was deleted."
+msgstr "« {name} » a été supprimé."
+
+msgid "{name} changed on disk."
+msgstr "« {name} » a changé sur le disque."
+
+msgid "Reload"
+msgstr "Recharger"
+
+msgid "Couldn't reload {name}: {message}"
+msgstr "Impossible de recharger « {name} » : {message}"
+
+msgid "Close {name} without saving?"
+msgstr "Fermer « {name} » sans enregistrer ?"
+
+msgid "Changes since the last save will be lost."
+msgstr "Les modifications depuis le dernier enregistrement seront perdues."
+
+msgid "Discard Changes"
+msgstr "Ignorer les modifications"
+
+msgid "Find in file…"
+msgstr "Rechercher dans le fichier…"
+
+msgid "Save (Ctrl+S)"
+msgstr "Enregistrer (Ctrl+S)"
+
+msgid "Plain Text"
+msgstr "Texte brut"
+
+msgid "Show editor panel"
+msgstr "Afficher le panneau de l’éditeur"
+
+msgid "Hide editor panel"
+msgstr "Masquer le panneau de l’éditeur"
+
+msgid "Close window with unsaved editor changes?"
+msgstr "Fermer la fenêtre avec des modifications de l’éditeur non enregistrées ?"
+
+msgid "Unsaved changes in open editors will be lost."
+msgstr "Les modifications non enregistrées dans les éditeurs ouverts seront perdues."
+
+msgid "{n} unsaved editor file(s) will also be lost."
+msgstr "{n} fichier(s) de l’éditeur non enregistré(s) seront également perdus."
+
+msgid "Close Window"
+msgstr "Fermer la fenêtre"
+
+msgid "Close tab with unsaved changes?"
+msgstr "Fermer l’onglet avec des modifications non enregistrées ?"
+
+msgid "This tab's editor has unsaved changes that will be lost."
+msgstr "L’éditeur de cet onglet a des modifications non enregistrées qui seront perdues."
+
+msgid "This tab's editor also has {n} unsaved file(s) that will be lost."
+msgstr "L’éditeur de cet onglet a aussi {n} fichier(s) non enregistré(s) qui seront perdus."
+
+msgid "Editor"
+msgstr "Éditeur"
+
+msgid "Follow app theme"
+msgstr "Suivre le thème de l’application"
+
+msgid "Applies to the editor panel"
+msgstr "S’applique au panneau de l’éditeur"
+
+msgid "Reset to system monospace"
+msgstr "Réinitialiser à la police à chasse fixe du système"
+
+msgid "Show line numbers"
+msgstr "Afficher les numéros de ligne"
+
+msgid "Show hidden files"
+msgstr "Afficher les fichiers cachés"
+
+msgid "Show dotfiles in the editor's file tree"
+msgstr "Afficher les fichiers cachés dans l’arborescence de l’éditeur"
+
