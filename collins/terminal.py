@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -13,10 +13,11 @@ from pathlib import Path
 
 import gi
 
+gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Vte", "3.91")
-from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import (  # noqa: E402
     apppicker,
@@ -82,6 +83,10 @@ _FONT_SCALE_STEP = 1.1
 _ZOOM_IN_KEYS = (Gdk.KEY_plus, Gdk.KEY_equal, Gdk.KEY_KP_Add)
 _ZOOM_OUT_KEYS = (Gdk.KEY_minus, Gdk.KEY_underscore, Gdk.KEY_KP_Subtract)
 _ZOOM_RESET_KEYS = (Gdk.KEY_0, Gdk.KEY_KP_0)
+
+# Adw.Clamp's maximum-size when "terminal_max_width" is 0 (no limit): larger
+# than any real window, so the clamp never actually constrains the terminal.
+_UNLIMITED_CLAMP_WIDTH = 1_000_000
 
 
 def _setup_links(terminal: Vte.Terminal) -> None:
@@ -512,11 +517,26 @@ class TerminalTab(Gtk.Box):
         scrolled = Gtk.ScrolledWindow(child=self.terminal, vexpand=True)
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
 
+        # Past "terminal_max_width", the clamp stops growing the terminal and
+        # centers it instead; see _apply_terminal_max_width. Unset until
+        # apply_settings runs, so it must start unconstrained rather than at
+        # Adw.Clamp's own default (600px).
+        self._width_clamp = Adw.Clamp(
+            child=scrolled,
+            hexpand=True,
+            vexpand=True,
+            maximum_size=_UNLIMITED_CLAMP_WIDTH,
+            tightening_threshold=_UNLIMITED_CLAMP_WIDTH,
+        )
+
         # The terminal is the single live view. When the agent asks a structured
         # question (detected from the transcript), a native card overlays it.
+        # The "terminal-gutter" class paints the space the clamp leaves beside
+        # the terminal, kept in step with the terminal's own theme (themes.py).
         self._overlay = Gtk.Overlay()
         self._overlay.set_vexpand(True)
-        self._overlay.set_child(scrolled)
+        self._overlay.add_css_class("terminal-gutter")
+        self._overlay.set_child(self._width_clamp)
 
         # Secondary plain-shell panel, below or beside the agent terminal.
         # Swapping bottom↔right only flips the paned's orientation, so the
@@ -1597,8 +1617,18 @@ class TerminalTab(Gtk.Box):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
+        self._apply_terminal_max_width(settings)
         self._set_footer_apps(settings.get("footer_apps") or [])
         self._panel.apply_settings(settings)
+
+    def _apply_terminal_max_width(self, settings: dict) -> None:
+        try:
+            max_width = int(settings.get("terminal_max_width") or 0)
+        except (TypeError, ValueError):
+            max_width = 0
+        width = max_width if max_width > 0 else _UNLIMITED_CLAMP_WIDTH
+        self._width_clamp.set_maximum_size(width)
+        self._width_clamp.set_tightening_threshold(width)
 
     def _set_footer_apps(self, app_ids: list) -> None:
         """(Re)build the footer's app-launcher buttons; uninstalled desktop

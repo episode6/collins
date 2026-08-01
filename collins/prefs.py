@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -109,6 +109,15 @@ class PreferencesDialog(Adw.PreferencesDialog):
         scroll_row.set_value(int(state.get_setting("scrollback") or 10_000))
         scroll_row.connect("notify::value", self._on_scrollback_changed)
         terminal_group.add(scroll_row)
+
+        max_width_row = Adw.SpinRow.new_with_range(0, 6_000, 20)
+        max_width_row.set_title(_("Max width"))
+        max_width_row.set_subtitle(
+            _("Stop growing past this width and center in the tab instead (0 = no limit)")
+        )
+        max_width_row.set_value(int(state.get_setting("terminal_max_width") or 0))
+        max_width_row.connect("notify::value", self._on_terminal_max_width_changed)
+        terminal_group.add(max_width_row)
 
         # use_markup off, and set before the title: the bare "&" in the title
         # is not valid Pango markup.
@@ -298,6 +307,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_scrollback_changed(self, row: Adw.SpinRow, _pspec) -> None:
         self._state.set_setting("scrollback", int(row.get_value()))
+        self._on_change()
+
+    def _on_terminal_max_width_changed(self, row: Adw.SpinRow, _pspec) -> None:
+        self._state.set_setting("terminal_max_width", int(row.get_value()))
         self._on_change()
 
     def _on_theme_radio(self, radio: Gtk.CheckButton, name: str) -> None:

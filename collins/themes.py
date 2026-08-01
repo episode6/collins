@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 """Built-in terminal color palettes for the VTE terminal."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Vte", "3.91")
-from gi.repository import Gdk, Vte  # noqa: E402
+from gi.repository import Gdk, Gtk, Vte  # noqa: E402
 
 # Each theme: foreground, background, and 16 ANSI colors (hex without '#').
 # "Default" follows the system / app light-dark scheme (no custom colors).
@@ -102,9 +102,33 @@ def apply_terminal_theme(terminal: Vte.Terminal, name: str | None) -> None:
     theme = _THEMES.get(name or DEFAULT_THEME)
     if not theme:  # "Default" / unknown → follow the system colors
         terminal.set_default_colors()
-        return
-    terminal.set_colors(
-        _rgba(theme["fg"]),
-        _rgba(theme["bg"]),
-        [_rgba(c) for c in theme["palette"]],
-    )
+    else:
+        terminal.set_colors(
+            _rgba(theme["fg"]),
+            _rgba(theme["bg"]),
+            [_rgba(c) for c in theme["palette"]],
+        )
+    _apply_gutter_css(theme)
+
+
+# The empty space beside a width-clamped terminal (see TerminalTab's
+# Adw.Clamp) is painted through this class, kept in step with whatever
+# `apply_terminal_theme` just set on the VTE widget itself so the two
+# backgrounds match. One provider for the whole app: terminal_theme is a
+# single global setting, not per-tab.
+_gutter_provider: Gtk.CssProvider | None = None
+
+
+def _apply_gutter_css(theme: dict | None) -> None:
+    global _gutter_provider
+    if _gutter_provider is None:
+        _gutter_provider = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
+            _gutter_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
+    # "Default" tracks the system light/dark scheme, so it has no fixed hex —
+    # @window_bg_color is the same stand-in the chat-card overlay uses for it.
+    bg_css = f"#{theme['bg']}" if theme else "@window_bg_color"
+    _gutter_provider.load_from_data(f".terminal-gutter {{ background-color: {bg_css}; }}".encode())
