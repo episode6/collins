@@ -1113,6 +1113,12 @@ class MainWindow(Adw.ApplicationWindow):
         # switch — so the redraw that answers one is not the agent working.
         tab.terminal.connect("commit", lambda *_args: gate.poked())
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
+        # Capture phase so the keystroke is seen even though VTE consumes it;
+        # EVENT_PROPAGATE below leaves it for VTE to deliver as usual.
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self._on_terminal_key_pressed, page)
+        tab.terminal.add_controller(keys)
         self.tab_view.set_selected_page(page)
         self.content_stack.set_visible_child_name("tabs")
         self._sort_tabs()  # appended at the end; slot it in beside its row
@@ -1310,6 +1316,13 @@ class MainWindow(Adw.ApplicationWindow):
                 self._local_titles.add(page)
             page.set_tooltip(f"{session.project_name} — {session.session_id}")
             self._sync_status(session_id)
+            # The busy flag needs the same handoff. Mid-first-turn the tracker
+            # marked this session busy while the store had no row for it, so
+            # that transition landed on nothing — and it won't fire again while
+            # the turn keeps the session continuously busy. Push it onto the
+            # row that exists now, or the pole dies with the placeholder and
+            # stays down for the rest of the turn.
+            self._sync_row_busy(session_id)
         self._update_active_row()  # hand the highlight from placeholder to real row
 
     def _refresh_tab_titles(self) -> None:
@@ -2071,6 +2084,29 @@ class MainWindow(Adw.ApplicationWindow):
         if isinstance(tab, TerminalTab) and tab.session_id and not tab.fork:
             return tab.session_id
         return None
+
+    def _on_terminal_key_pressed(
+        self, _controller, keyval: int, _keycode: int, state: Gdk.ModifierType, page: Adw.TabPage
+    ) -> bool:
+        """Start the pole on the Enter that sends a prompt, pre-emptively.
+
+        The turn's first output is the honest busy signal, but it arrives a
+        beat after the keystroke — model latency plus the echo gate's quiet
+        window — and that beat is exactly when the user glances at the sidebar
+        to see their prompt land. A bare Enter is read as "a turn just
+        started"; modified Enters are excluded because Shift/Alt+Enter insert
+        a newline into the agent's prompt rather than send it. A wrong guess
+        (Enter at an empty prompt, Enter inside a menu) costs nothing visible:
+        a pole no output follows goes back down when the idle window runs out.
+        """
+        if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            return Gdk.EVENT_PROPAGATE
+        if state & Gtk.accelerator_get_default_mod_mask():
+            return Gdk.EVENT_PROPAGATE
+        for tracked in (self._session_id_of(page), self._placeholder_pages.get(page)):
+            if tracked:
+                self._activity.mark(tracked)
+        return Gdk.EVENT_PROPAGATE
 
     def _on_terminal_output(self, terminal, page: Adw.TabPage) -> None:
         # A redraw counts as the session working whether or not its tab is
