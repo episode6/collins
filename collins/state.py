@@ -48,7 +48,7 @@ DEFAULT_SETTINGS = {
     "scrollback": 10_000,
     "color_scheme": "system",  # system | light | dark
     "terminal_theme": "Default",  # VTE color palette (see themes.py)
-    "terminal_max_width": 0,  # px; terminal stops growing past this and centers (0 = no limit)
+    "terminal_max_width": 1200,  # px; terminal stops growing past this and centers (0 = no limit)
     "easy_copy_paste": True,  # Ctrl+C copies the selection (else SIGINT), Ctrl+V pastes, right-click menu
     "language": "",  # UI language code; "" = follow the system locale
     "notify_idle": False,  # notify when a background session goes quiet
