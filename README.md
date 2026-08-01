@@ -63,6 +63,9 @@ Features:
 | `Ctrl+Shift+E` | Toggle 😊 marker on the current tab |
 | `Ctrl+J` | Show/hide the terminal panel |
 | `Ctrl+K` | Clear the terminal panel (screen and saved history) |
+| `F8` | Show/hide the editor panel |
+| `Ctrl+S` (in the editor) | Save the current file |
+| `Ctrl+F` (in the editor) | Find in file |
 | `F9` | Toggle sidebar |
 | `Ctrl+,` | Preferences |
 
@@ -72,13 +75,13 @@ Python ≥ 3.10, GTK 4, libadwaita ≥ 1.5, VTE (GTK 4 build), PyGObject — fro
 
 ```bash
 # Ubuntu / Debian
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5
 
 # Fedora
-sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4
+sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5
 
 # Arch
-sudo pacman -S python-gobject gtk4 libadwaita vte4
+sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5
 ```
 
 Plus the [`claude` CLI](https://claude.com/claude-code) on your `PATH` — Collins is a tool for Claude specifically.

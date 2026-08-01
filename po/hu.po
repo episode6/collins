@@ -695,3 +695,111 @@ msgstr "{n} sikertelen"
 msgid "{n} pending"
 msgstr "{n} folyamatban"
 
+msgid "Couldn't open {name}: {message}"
+msgstr "A(z) „{name}” nem nyitható meg: {message}"
+
+msgid "{name} is too large to open in the editor."
+msgstr "A(z) „{name}” túl nagy a szerkesztőben való megnyitáshoz."
+
+msgid "{name} looks like a binary file and can't be opened here."
+msgstr "A(z) „{name}” bináris fájlnak tűnik, itt nem nyitható meg."
+
+msgid "{name} is not a file."
+msgstr "A(z) „{name}” nem fájl."
+
+msgid "{name} is outside this project and can't be opened here."
+msgstr "A(z) „{name}” a projekten kívül található, itt nem nyitható meg."
+
+msgid "Couldn't open {name}."
+msgstr "A(z) „{name}” nem nyitható meg."
+
+msgid "{name} changed on disk"
+msgstr "A(z) „{name}” megváltozott a lemezen"
+
+msgid "Overwrite it with the changes you made here?"
+msgstr "Felülírod az itt végzett módosításokkal?"
+
+msgid "Overwrite"
+msgstr "Felülírás"
+
+msgid "Couldn't save {name}: {message}"
+msgstr "A(z) „{name}” nem menthető: {message}"
+
+msgid "{name} was deleted."
+msgstr "A(z) „{name}” törölve lett."
+
+msgid "{name} changed on disk."
+msgstr "A(z) „{name}” megváltozott a lemezen."
+
+msgid "Reload"
+msgstr "Újratöltés"
+
+msgid "Couldn't reload {name}: {message}"
+msgstr "A(z) „{name}” nem tölthető újra: {message}"
+
+msgid "Close {name} without saving?"
+msgstr "Bezárod a(z) „{name}” fájlt mentés nélkül?"
+
+msgid "Changes since the last save will be lost."
+msgstr "Az utolsó mentés óta végzett módosítások elvesznek."
+
+msgid "Discard Changes"
+msgstr "Módosítások elvetése"
+
+msgid "Find in file…"
+msgstr "Keresés a fájlban…"
+
+msgid "Save (Ctrl+S)"
+msgstr "Mentés (Ctrl+S)"
+
+msgid "Plain Text"
+msgstr "Egyszerű szöveg"
+
+msgid "Show editor panel"
+msgstr "Szerkesztőpanel megjelenítése"
+
+msgid "Hide editor panel"
+msgstr "Szerkesztőpanel elrejtése"
+
+msgid "Close window with unsaved editor changes?"
+msgstr "Bezárod az ablakot mentetlen szerkesztői módosításokkal?"
+
+msgid "Unsaved changes in open editors will be lost."
+msgstr "A nyitott szerkesztőkben lévő mentetlen módosítások elvesznek."
+
+msgid "{n} unsaved editor file(s) will also be lost."
+msgstr "{n} mentetlen szerkesztői fájl is elvész."
+
+msgid "Close Window"
+msgstr "Ablak bezárása"
+
+msgid "Close tab with unsaved changes?"
+msgstr "Bezárod a lapot mentetlen módosításokkal?"
+
+msgid "This tab's editor has unsaved changes that will be lost."
+msgstr "Ennek a lapnak a szerkesztőjében mentetlen módosítások vannak, amelyek elvesznek."
+
+msgid "This tab's editor also has {n} unsaved file(s) that will be lost."
+msgstr "Ennek a lapnak a szerkesztőjében {n} mentetlen fájl is van, amelyek szintén elvesznek."
+
+msgid "Editor"
+msgstr "Szerkesztő"
+
+msgid "Follow app theme"
+msgstr "Alkalmazás témájának követése"
+
+msgid "Applies to the editor panel"
+msgstr "A szerkesztőpanelre vonatkozik"
+
+msgid "Reset to system monospace"
+msgstr "Visszaállítás a rendszer monospace betűtípusára"
+
+msgid "Show line numbers"
+msgstr "Sorszámok megjelenítése"
+
+msgid "Show hidden files"
+msgstr "Rejtett fájlok megjelenítése"
+
+msgid "Show dotfiles in the editor's file tree"
+msgstr "Rejtett fájlok megjelenítése a szerkesztő fájlfájában"
+

@@ -695,3 +695,111 @@ msgstr "{n} fehlgeschlagen"
 msgid "{n} pending"
 msgstr "{n} ausstehend"
 
+msgid "Couldn't open {name}: {message}"
+msgstr "„{name}“ konnte nicht geöffnet werden: {message}"
+
+msgid "{name} is too large to open in the editor."
+msgstr "„{name}“ ist zu groß, um im Editor geöffnet zu werden."
+
+msgid "{name} looks like a binary file and can't be opened here."
+msgstr "„{name}“ sieht wie eine Binärdatei aus und kann hier nicht geöffnet werden."
+
+msgid "{name} is not a file."
+msgstr "„{name}“ ist keine Datei."
+
+msgid "{name} is outside this project and can't be opened here."
+msgstr "„{name}“ liegt außerhalb dieses Projekts und kann hier nicht geöffnet werden."
+
+msgid "Couldn't open {name}."
+msgstr "„{name}“ konnte nicht geöffnet werden."
+
+msgid "{name} changed on disk"
+msgstr "„{name}“ wurde auf der Festplatte geändert"
+
+msgid "Overwrite it with the changes you made here?"
+msgstr "Mit den hier vorgenommenen Änderungen überschreiben?"
+
+msgid "Overwrite"
+msgstr "Überschreiben"
+
+msgid "Couldn't save {name}: {message}"
+msgstr "„{name}“ konnte nicht gespeichert werden: {message}"
+
+msgid "{name} was deleted."
+msgstr "„{name}“ wurde gelöscht."
+
+msgid "{name} changed on disk."
+msgstr "„{name}“ wurde auf der Festplatte geändert."
+
+msgid "Reload"
+msgstr "Neu laden"
+
+msgid "Couldn't reload {name}: {message}"
+msgstr "„{name}“ konnte nicht neu geladen werden: {message}"
+
+msgid "Close {name} without saving?"
+msgstr "„{name}“ ohne Speichern schließen?"
+
+msgid "Changes since the last save will be lost."
+msgstr "Änderungen seit dem letzten Speichern gehen verloren."
+
+msgid "Discard Changes"
+msgstr "Änderungen verwerfen"
+
+msgid "Find in file…"
+msgstr "In Datei suchen…"
+
+msgid "Save (Ctrl+S)"
+msgstr "Speichern (Strg+S)"
+
+msgid "Plain Text"
+msgstr "Reiner Text"
+
+msgid "Show editor panel"
+msgstr "Editor-Panel anzeigen"
+
+msgid "Hide editor panel"
+msgstr "Editor-Panel ausblenden"
+
+msgid "Close window with unsaved editor changes?"
+msgstr "Fenster mit ungespeicherten Editor-Änderungen schließen?"
+
+msgid "Unsaved changes in open editors will be lost."
+msgstr "Ungespeicherte Änderungen in geöffneten Editoren gehen verloren."
+
+msgid "{n} unsaved editor file(s) will also be lost."
+msgstr "{n} ungespeicherte Editor-Datei(en) gehen ebenfalls verloren."
+
+msgid "Close Window"
+msgstr "Fenster schließen"
+
+msgid "Close tab with unsaved changes?"
+msgstr "Tab mit ungespeicherten Änderungen schließen?"
+
+msgid "This tab's editor has unsaved changes that will be lost."
+msgstr "Der Editor dieses Tabs hat ungespeicherte Änderungen, die verloren gehen."
+
+msgid "This tab's editor also has {n} unsaved file(s) that will be lost."
+msgstr "Der Editor dieses Tabs hat außerdem {n} ungespeicherte Datei(en), die verloren gehen."
+
+msgid "Editor"
+msgstr "Editor"
+
+msgid "Follow app theme"
+msgstr "Dem App-Thema folgen"
+
+msgid "Applies to the editor panel"
+msgstr "Gilt für das Editor-Panel"
+
+msgid "Reset to system monospace"
+msgstr "Auf System-Monospace zurücksetzen"
+
+msgid "Show line numbers"
+msgstr "Zeilennummern anzeigen"
+
+msgid "Show hidden files"
+msgstr "Versteckte Dateien anzeigen"
+
+msgid "Show dotfiles in the editor's file tree"
+msgstr "Versteckte Dateien im Dateibaum des Editors anzeigen"
+

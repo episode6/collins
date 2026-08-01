@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 import json
 
@@ -216,6 +216,49 @@ def test_panel_state_ignores_corrupt_entries(app_state):
     assert fresh.get_panel_state("bad") is None
 
 
+def test_editor_state_roundtrip(app_state):
+    state = app_state.AppState()
+    snap = {
+        "open": True,
+        "width": 320,
+        "files": ["/proj/a.py", "/proj/b.py"],
+        "active": "/proj/b.py",
+        "cursors": {"/proj/a.py": [4, 2]},
+    }
+    state.set_editor_state("sid", snap)
+    fresh = app_state.AppState()
+    assert fresh.get_editor_state("sid") == snap
+    assert fresh.get_editor_state("other") is None
+
+
+def test_editor_state_none_removes_entry(app_state):
+    state = app_state.AppState()
+    state.set_editor_state("sid", {"open": False, "files": []})
+    state.set_editor_state("sid", None)
+    assert app_state.AppState().get_editor_state("sid") is None
+
+
+def test_editor_state_unchanged_is_not_rewritten(app_state):
+    state = app_state.AppState()
+    snap = {"open": True, "files": ["/proj/a.py"]}
+    state.set_editor_state("sid", snap)
+    app_state._STATE_FILE.unlink()  # a redundant save would recreate the file
+    state.set_editor_state("sid", dict(snap))  # identical snapshot
+    state.set_editor_state("absent", None)  # removing a missing entry
+    assert not app_state._STATE_FILE.exists()
+
+
+def test_editor_state_ignores_corrupt_entries(app_state):
+    state = app_state.AppState()
+    state.set_editor_state("good", {"open": True, "files": []})
+    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
+    data["editor_states"]["bad"] = "not-a-dict"
+    app_state._STATE_FILE.write_text(json.dumps(data), encoding="utf-8")
+    fresh = app_state.AppState()
+    assert fresh.get_editor_state("good") == {"open": True, "files": []}
+    assert fresh.get_editor_state("bad") is None
+
+
 def _pr(number):
     return {"number": number, "url": f"https://github.com/episode6/collins/pull/{number}"}
 
@@ -367,6 +410,7 @@ def test_forward_session_carries_metadata_without_archiving_original(app_state):
     state.set_emoji("old", "🚀")
     state.toggle_favorite("old")
     state.set_panel_state("old", {"open": True, "mode": "bottom"})
+    state.set_editor_state("old", {"open": True, "files": ["/proj/a.py"]})
     state.forward_session("old", "new")
 
     fresh = app_state.AppState()
@@ -375,6 +419,7 @@ def test_forward_session_carries_metadata_without_archiving_original(app_state):
     assert fresh.get_emoji("new") == "🚀"
     assert fresh.is_favorite("new")
     assert fresh.get_panel_state("new") == {"open": True, "mode": "bottom"}
+    assert fresh.get_editor_state("new") == {"open": True, "files": ["/proj/a.py"]}
     # The stale original is NOT flagged archived here: the store derives its
     # row's fate from the forward (visible-but-disabled until the fork is
     # discovered, replaced afterwards).

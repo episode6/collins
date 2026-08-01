@@ -69,6 +69,11 @@ DEFAULT_SETTINGS = {
     "window_height": 800,
     "window_maximized": False,
     "last_active_session": "",  # session in the active tab when the last window closed
+    "editor_width": 0,  # last-set editor panel width in px (0 = default fraction)
+    "editor_style_scheme": "",  # GtkSource style scheme id; "" = follow the app's light/dark scheme
+    "editor_font": "",  # empty = system monospace
+    "editor_show_line_numbers": True,
+    "editor_show_hidden_files": False,
 }
 
 # Floor for a restored window, so a corrupt/absurd saved value can't produce
@@ -125,6 +130,7 @@ class AppState:
         self.virtual_projects: dict[str, str] = {}
         self.expanded_groups: set[str] = set()  # sidebar groups the user expanded
         self.panel_states: dict[str, dict] = {}  # per-session panel open/mode/sizes
+        self.editor_states: dict[str, dict] = {}  # per-session editor open/width/files/cursors
         # session id -> the PRs it has opened, oldest first, as prstatus
         # records ({number, url, repository?, state? — see to_record}).
         self.session_prs: dict[str, list] = {}
@@ -171,6 +177,9 @@ class AppState:
         self.panel_states = {
             k: v for k, v in (data.get("panel_states") or {}).items() if isinstance(v, dict)
         }
+        self.editor_states = {
+            k: v for k, v in (data.get("editor_states") or {}).items() if isinstance(v, dict)
+        }
         self.session_prs = {
             k: v for k, v in (data.get("session_prs") or {}).items() if isinstance(v, list)
         }
@@ -195,6 +204,7 @@ class AppState:
             "virtual_projects": self.virtual_projects,
             "expanded_groups": sorted(self.expanded_groups),
             "panel_states": self.panel_states,
+            "editor_states": self.editor_states,
             "session_prs": self.session_prs,  # order is the payload — never sort
             "session_forwards": self.session_forwards,
             "pending_detaches": self.pending_detaches,
@@ -368,6 +378,8 @@ class AppState:
             self.favorites.add(new_id)
         if old_id in self.panel_states and new_id not in self.panel_states:
             self.panel_states[new_id] = dict(self.panel_states[old_id])
+        if old_id in self.editor_states and new_id not in self.editor_states:
+            self.editor_states[new_id] = dict(self.editor_states[old_id])
         if old_id in self.session_prs and new_id not in self.session_prs:
             # The same conversation under a new id: the PRs it opened are the
             # fork's too, and the fork's transcript doesn't repeat them.
@@ -437,6 +449,26 @@ class AppState:
             if session_id not in self.panel_states:
                 return
             del self.panel_states[session_id]
+        self.save()
+
+    # -- per-session editor state --------------------------------------------
+
+    def get_editor_state(self, session_id: str) -> dict | None:
+        return self.editor_states.get(session_id)
+
+    def set_editor_state(self, session_id: str, state: dict | None) -> None:
+        """Persist a session's editor snapshot ({"open", "width", "files",
+        "active", "cursors"}); None or empty removes the entry. Tabs
+        snapshot on every close, so an unchanged snapshot is deliberately
+        not rewritten to disk."""
+        if state:
+            if self.editor_states.get(session_id) == state:
+                return
+            self.editor_states[session_id] = state
+        else:
+            if session_id not in self.editor_states:
+                return
+            del self.editor_states[session_id]
         self.save()
 
     # -- per-session pull requests -----------------------------------------

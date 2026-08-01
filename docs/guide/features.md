@@ -210,6 +210,31 @@ lives below or beside the agent terminal:
 
 ![The terminal panel below an agent session](/img/terminal-panel.png)
 
+## Editor panel
+
+A syntax-highlighted code editor lives beside the agent terminal — the
+"read and fix what the agent just did" surface, not a general-purpose IDE:
+
+- Toggle it with `F8` or the footer icon (a page with a folded corner,
+  between the footer apps and the terminal-panel button) — one editor per
+  tab, full-height in a right-hand column.
+- A **project file tree** rooted at the tab's directory; click a file to
+  open it in a tab strip of its own, with a dot marking unsaved changes.
+- Real editing: line numbers, current-line highlight, bracket matching,
+  undo/redo, and **180 languages'** worth of syntax highlighting via
+  GtkSourceView, the same engine behind GNOME Text Editor and Builder.
+- **Save** with `Ctrl+S` or the status row's save button; **find** in the
+  current file with `Ctrl+F`.
+- **External changes are the normal case**, not the edge case — the agent is
+  rewriting these files while you look at them. A clean buffer reloads
+  silently, cursor and scroll preserved; a buffer with your own edits gets a
+  banner instead, so nothing is overwritten without asking.
+- The color scheme **follows the app's light/dark setting** by default, or
+  pick one of GtkSourceView's bundled schemes in Preferences, along with the
+  editor's font and whether the file tree shows hidden files.
+- Each session remembers which files were open, the cursor in each, and the
+  panel's width — restored the next time you reopen it.
+
 ## Claude usage panel
 
 Below the session list, a **Claude usage** panel shows your subscription
@@ -307,10 +332,11 @@ and live updates stay consistent across them.
 
 Terminal **font**, **scrollback** size, **easy copy & paste** (on by default),
 a **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin,
-Tokyo Night, Monokai, One Dark…), the **color scheme** (system / light /
-dark), the **language** (English, Magyar, Deutsch, Español, Français), the
-sidebar's **Show folder path**, **Show Claude usage**, and **Auto-generate
-session titles** toggles, and the idle-notification toggle — reachable from
-the sidebar menu or `Ctrl+,`.
+Tokyo Night, Monokai, One Dark…), the editor's **color scheme**, **font**,
+and **line numbers**/**hidden files** toggles, the app's **color scheme**
+(system / light / dark), the **language** (English, Magyar, Deutsch,
+Español, Français), the sidebar's **Show folder path**, **Show Claude
+usage**, and **Auto-generate session titles** toggles, and the
+idle-notification toggle — reachable from the sidebar menu or `Ctrl+,`.
 
 ![Preferences dialog](/img/preferences.png)

@@ -279,6 +279,53 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "{n} passed": "{n} sikeres",
         "{n} failed": "{n} sikertelen",
         "{n} pending": "{n} folyamatban",
+        "Couldn't open {name}: {message}": "A(z) „{name}” nem nyitható meg: {message}",
+        "{name} is too large to open in the editor.":
+            "A(z) „{name}” túl nagy a szerkesztőben való megnyitáshoz.",
+        "{name} looks like a binary file and can't be opened here.":
+            "A(z) „{name}” bináris fájlnak tűnik, itt nem nyitható meg.",
+        "{name} is not a file.": "A(z) „{name}” nem fájl.",
+        "{name} is outside this project and can't be opened here.":
+            "A(z) „{name}” a projekten kívül található, itt nem nyitható meg.",
+        "Couldn't open {name}.": "A(z) „{name}” nem nyitható meg.",
+        "{name} changed on disk": "A(z) „{name}” megváltozott a lemezen",
+        "Overwrite it with the changes you made here?":
+            "Felülírod az itt végzett módosításokkal?",
+        "Overwrite": "Felülírás",
+        "Couldn't save {name}: {message}": "A(z) „{name}” nem menthető: {message}",
+        "{name} was deleted.": "A(z) „{name}” törölve lett.",
+        "{name} changed on disk.": "A(z) „{name}” megváltozott a lemezen.",
+        "Reload": "Újratöltés",
+        "Couldn't reload {name}: {message}": "A(z) „{name}” nem tölthető újra: {message}",
+        "Close {name} without saving?": "Bezárod a(z) „{name}” fájlt mentés nélkül?",
+        "Changes since the last save will be lost.":
+            "Az utolsó mentés óta végzett módosítások elvesznek.",
+        "Discard Changes": "Módosítások elvetése",
+        "Find in file…": "Keresés a fájlban…",
+        "Save (Ctrl+S)": "Mentés (Ctrl+S)",
+        "Plain Text": "Egyszerű szöveg",
+        "Show editor panel": "Szerkesztőpanel megjelenítése",
+        "Hide editor panel": "Szerkesztőpanel elrejtése",
+        "Close window with unsaved editor changes?":
+            "Bezárod az ablakot mentetlen szerkesztői módosításokkal?",
+        "Unsaved changes in open editors will be lost.":
+            "A nyitott szerkesztőkben lévő mentetlen módosítások elvesznek.",
+        "{n} unsaved editor file(s) will also be lost.":
+            "{n} mentetlen szerkesztői fájl is elvész.",
+        "Close Window": "Ablak bezárása",
+        "Close tab with unsaved changes?": "Bezárod a lapot mentetlen módosításokkal?",
+        "This tab's editor has unsaved changes that will be lost.":
+            "Ennek a lapnak a szerkesztőjében mentetlen módosítások vannak, amelyek elvesznek.",
+        "This tab's editor also has {n} unsaved file(s) that will be lost.":
+            "Ennek a lapnak a szerkesztőjében {n} mentetlen fájl is van, amelyek szintén elvesznek.",
+        "Editor": "Szerkesztő",
+        "Follow app theme": "Alkalmazás témájának követése",
+        "Applies to the editor panel": "A szerkesztőpanelre vonatkozik",
+        "Reset to system monospace": "Visszaállítás a rendszer monospace betűtípusára",
+        "Show line numbers": "Sorszámok megjelenítése",
+        "Show hidden files": "Rejtett fájlok megjelenítése",
+        "Show dotfiles in the editor's file tree":
+            "Rejtett fájlok megjelenítése a szerkesztő fájlfájában",
     },
     "de": {
         "── restored panel history ──": "── wiederhergestellter Panel-Verlauf ──",
@@ -545,6 +592,54 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "{n} passed": "{n} erfolgreich",
         "{n} failed": "{n} fehlgeschlagen",
         "{n} pending": "{n} ausstehend",
+        "Couldn't open {name}: {message}": "„{name}“ konnte nicht geöffnet werden: {message}",
+        "{name} is too large to open in the editor.":
+            "„{name}“ ist zu groß, um im Editor geöffnet zu werden.",
+        "{name} looks like a binary file and can't be opened here.":
+            "„{name}“ sieht wie eine Binärdatei aus und kann hier nicht geöffnet werden.",
+        "{name} is not a file.": "„{name}“ ist keine Datei.",
+        "{name} is outside this project and can't be opened here.":
+            "„{name}“ liegt außerhalb dieses Projekts und kann hier nicht geöffnet werden.",
+        "Couldn't open {name}.": "„{name}“ konnte nicht geöffnet werden.",
+        "{name} changed on disk": "„{name}“ wurde auf der Festplatte geändert",
+        "Overwrite it with the changes you made here?":
+            "Mit den hier vorgenommenen Änderungen überschreiben?",
+        "Overwrite": "Überschreiben",
+        "Couldn't save {name}: {message}": "„{name}“ konnte nicht gespeichert werden: {message}",
+        "{name} was deleted.": "„{name}“ wurde gelöscht.",
+        "{name} changed on disk.": "„{name}“ wurde auf der Festplatte geändert.",
+        "Reload": "Neu laden",
+        "Couldn't reload {name}: {message}":
+            "„{name}“ konnte nicht neu geladen werden: {message}",
+        "Close {name} without saving?": "„{name}“ ohne Speichern schließen?",
+        "Changes since the last save will be lost.":
+            "Änderungen seit dem letzten Speichern gehen verloren.",
+        "Discard Changes": "Änderungen verwerfen",
+        "Find in file…": "In Datei suchen…",
+        "Save (Ctrl+S)": "Speichern (Strg+S)",
+        "Plain Text": "Reiner Text",
+        "Show editor panel": "Editor-Panel anzeigen",
+        "Hide editor panel": "Editor-Panel ausblenden",
+        "Close window with unsaved editor changes?":
+            "Fenster mit ungespeicherten Editor-Änderungen schließen?",
+        "Unsaved changes in open editors will be lost.":
+            "Ungespeicherte Änderungen in geöffneten Editoren gehen verloren.",
+        "{n} unsaved editor file(s) will also be lost.":
+            "{n} ungespeicherte Editor-Datei(en) gehen ebenfalls verloren.",
+        "Close Window": "Fenster schließen",
+        "Close tab with unsaved changes?": "Tab mit ungespeicherten Änderungen schließen?",
+        "This tab's editor has unsaved changes that will be lost.":
+            "Der Editor dieses Tabs hat ungespeicherte Änderungen, die verloren gehen.",
+        "This tab's editor also has {n} unsaved file(s) that will be lost.":
+            "Der Editor dieses Tabs hat außerdem {n} ungespeicherte Datei(en), die verloren gehen.",
+        "Editor": "Editor",
+        "Follow app theme": "Dem App-Thema folgen",
+        "Applies to the editor panel": "Gilt für das Editor-Panel",
+        "Reset to system monospace": "Auf System-Monospace zurücksetzen",
+        "Show line numbers": "Zeilennummern anzeigen",
+        "Show hidden files": "Versteckte Dateien anzeigen",
+        "Show dotfiles in the editor's file tree":
+            "Versteckte Dateien im Dateibaum des Editors anzeigen",
     },
     "es": {
         "── restored panel history ──": "── historial del panel restaurado ──",
@@ -810,6 +905,53 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "{n} passed": "{n} superada(s)",
         "{n} failed": "{n} fallida(s)",
         "{n} pending": "{n} pendiente(s)",
+        "Couldn't open {name}: {message}": "No se pudo abrir «{name}»: {message}",
+        "{name} is too large to open in the editor.":
+            "«{name}» es demasiado grande para abrirlo en el editor.",
+        "{name} looks like a binary file and can't be opened here.":
+            "«{name}» parece un archivo binario y no se puede abrir aquí.",
+        "{name} is not a file.": "«{name}» no es un archivo.",
+        "{name} is outside this project and can't be opened here.":
+            "«{name}» está fuera de este proyecto y no se puede abrir aquí.",
+        "Couldn't open {name}.": "No se pudo abrir «{name}».",
+        "{name} changed on disk": "«{name}» cambió en el disco",
+        "Overwrite it with the changes you made here?":
+            "¿Sobrescribirlo con los cambios que hiciste aquí?",
+        "Overwrite": "Sobrescribir",
+        "Couldn't save {name}: {message}": "No se pudo guardar «{name}»: {message}",
+        "{name} was deleted.": "«{name}» se eliminó.",
+        "{name} changed on disk.": "«{name}» cambió en el disco.",
+        "Reload": "Recargar",
+        "Couldn't reload {name}: {message}": "No se pudo recargar «{name}»: {message}",
+        "Close {name} without saving?": "¿Cerrar «{name}» sin guardar?",
+        "Changes since the last save will be lost.":
+            "Se perderán los cambios desde el último guardado.",
+        "Discard Changes": "Descartar cambios",
+        "Find in file…": "Buscar en el archivo…",
+        "Save (Ctrl+S)": "Guardar (Ctrl+S)",
+        "Plain Text": "Texto sin formato",
+        "Show editor panel": "Mostrar el panel del editor",
+        "Hide editor panel": "Ocultar el panel del editor",
+        "Close window with unsaved editor changes?":
+            "¿Cerrar la ventana con cambios del editor sin guardar?",
+        "Unsaved changes in open editors will be lost.":
+            "Se perderán los cambios sin guardar en los editores abiertos.",
+        "{n} unsaved editor file(s) will also be lost.":
+            "También se perderán {n} archivo(s) del editor sin guardar.",
+        "Close Window": "Cerrar ventana",
+        "Close tab with unsaved changes?": "¿Cerrar la pestaña con cambios sin guardar?",
+        "This tab's editor has unsaved changes that will be lost.":
+            "El editor de esta pestaña tiene cambios sin guardar que se perderán.",
+        "This tab's editor also has {n} unsaved file(s) that will be lost.":
+            "El editor de esta pestaña también tiene {n} archivo(s) sin guardar que se perderán.",
+        "Editor": "Editor",
+        "Follow app theme": "Seguir el tema de la aplicación",
+        "Applies to the editor panel": "Se aplica al panel del editor",
+        "Reset to system monospace": "Restablecer a la monoespaciada del sistema",
+        "Show line numbers": "Mostrar números de línea",
+        "Show hidden files": "Mostrar archivos ocultos",
+        "Show dotfiles in the editor's file tree":
+            "Mostrar archivos ocultos en el árbol de archivos del editor",
     },
     "fr": {
         "── restored panel history ──": "── historique du panneau restauré ──",
@@ -1077,6 +1219,53 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "{n} passed": "{n} réussie(s)",
         "{n} failed": "{n} échouée(s)",
         "{n} pending": "{n} en attente",
+        "Couldn't open {name}: {message}": "Impossible d’ouvrir « {name} » : {message}",
+        "{name} is too large to open in the editor.":
+            "« {name} » est trop volumineux pour être ouvert dans l’éditeur.",
+        "{name} looks like a binary file and can't be opened here.":
+            "« {name} » ressemble à un fichier binaire et ne peut pas être ouvert ici.",
+        "{name} is not a file.": "« {name} » n’est pas un fichier.",
+        "{name} is outside this project and can't be opened here.":
+            "« {name} » est en dehors de ce projet et ne peut pas être ouvert ici.",
+        "Couldn't open {name}.": "Impossible d’ouvrir « {name} ».",
+        "{name} changed on disk": "« {name} » a changé sur le disque",
+        "Overwrite it with the changes you made here?":
+            "L’écraser avec les modifications faites ici ?",
+        "Overwrite": "Écraser",
+        "Couldn't save {name}: {message}": "Impossible d’enregistrer « {name} » : {message}",
+        "{name} was deleted.": "« {name} » a été supprimé.",
+        "{name} changed on disk.": "« {name} » a changé sur le disque.",
+        "Reload": "Recharger",
+        "Couldn't reload {name}: {message}": "Impossible de recharger « {name} » : {message}",
+        "Close {name} without saving?": "Fermer « {name} » sans enregistrer ?",
+        "Changes since the last save will be lost.":
+            "Les modifications depuis le dernier enregistrement seront perdues.",
+        "Discard Changes": "Ignorer les modifications",
+        "Find in file…": "Rechercher dans le fichier…",
+        "Save (Ctrl+S)": "Enregistrer (Ctrl+S)",
+        "Plain Text": "Texte brut",
+        "Show editor panel": "Afficher le panneau de l’éditeur",
+        "Hide editor panel": "Masquer le panneau de l’éditeur",
+        "Close window with unsaved editor changes?":
+            "Fermer la fenêtre avec des modifications de l’éditeur non enregistrées ?",
+        "Unsaved changes in open editors will be lost.":
+            "Les modifications non enregistrées dans les éditeurs ouverts seront perdues.",
+        "{n} unsaved editor file(s) will also be lost.":
+            "{n} fichier(s) de l’éditeur non enregistré(s) seront également perdus.",
+        "Close Window": "Fermer la fenêtre",
+        "Close tab with unsaved changes?": "Fermer l’onglet avec des modifications non enregistrées ?",
+        "This tab's editor has unsaved changes that will be lost.":
+            "L’éditeur de cet onglet a des modifications non enregistrées qui seront perdues.",
+        "This tab's editor also has {n} unsaved file(s) that will be lost.":
+            "L’éditeur de cet onglet a aussi {n} fichier(s) non enregistré(s) qui seront perdus.",
+        "Editor": "Éditeur",
+        "Follow app theme": "Suivre le thème de l’application",
+        "Applies to the editor panel": "S’applique au panneau de l’éditeur",
+        "Reset to system monospace": "Réinitialiser à la police à chasse fixe du système",
+        "Show line numbers": "Afficher les numéros de ligne",
+        "Show hidden files": "Afficher les fichiers cachés",
+        "Show dotfiles in the editor's file tree":
+            "Afficher les fichiers cachés dans l’arborescence de l’éditeur",
     },
 }
 
