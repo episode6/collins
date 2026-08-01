@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 import json
 
@@ -278,3 +278,83 @@ def test_relocate_accepts_a_string_path(tmp_path):
     m.update()
     m.relocate(str(p))
     assert m.path == p
+
+
+# -- agent-touched files -------------------------------------------------------
+
+
+def _touch_line(tool, key, path):
+    return {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "t1", "name": tool,
+                         "input": {key: path}}],
+        },
+    }
+
+
+def test_touched_files_records_write_tools_newest_first(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [
+        _touch_line("Write", "file_path", "/proj/a.py"),
+        _touch_line("Edit", "file_path", "/proj/b.py"),
+        _touch_line("NotebookEdit", "notebook_path", "/proj/c.ipynb"),
+    ])
+    m = TranscriptModel(p)
+    assert m.update() is True
+    assert m.touched_files() == ["/proj/c.ipynb", "/proj/b.py", "/proj/a.py"]
+
+
+def test_touched_files_ignores_reads_and_other_tools(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [
+        _touch_line("Read", "file_path", "/proj/read.py"),
+        _touch_line("Glob", "path", "/proj"),
+        _touch_line("Bash", "command", "ls"),
+    ])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.touched_files() == []
+
+
+def test_retouching_a_file_moves_it_to_the_front(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [
+        _touch_line("Write", "file_path", "/proj/a.py"),
+        _touch_line("Write", "file_path", "/proj/b.py"),
+        _touch_line("Edit", "file_path", "/proj/a.py"),
+    ])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.touched_files() == ["/proj/a.py", "/proj/b.py"]
+
+
+def test_retouching_the_most_recent_file_is_not_a_change(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_touch_line("Edit", "file_path", "/proj/a.py")])
+    m = TranscriptModel(p)
+    m.update()
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_touch_line("Edit", "file_path", "/proj/a.py")) + "\n")
+    assert m.update() is False
+    assert m.touched_files() == ["/proj/a.py"]
+
+
+def test_touched_files_capped_at_30(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_touch_line("Write", "file_path", f"/proj/f{i}.py") for i in range(40)])
+    m = TranscriptModel(p)
+    m.update()
+    touched = m.touched_files()
+    assert len(touched) == 30
+    assert touched[0] == "/proj/f39.py"
+
+
+def test_set_path_clears_touched_files(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_touch_line("Write", "file_path", "/proj/a.py")])
+    m = TranscriptModel(p)
+    m.update()
+    m.set_path(None)
+    assert m.touched_files() == []

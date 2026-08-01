@@ -11,6 +11,7 @@ from collins.editorfiles import (
     list_dir,
     load_guard,
     should_highlight,
+    walk_files,
 )
 
 # -- guess_language_id --------------------------------------------------------
@@ -227,3 +228,74 @@ def test_list_dir_file_path_is_empty(tmp_path):
     f = tmp_path / "a.txt"
     f.write_text("x")
     assert list_dir(f) == []
+
+
+# -- walk_files ---------------------------------------------------------------
+
+
+def _touch(root, rel):
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("x")
+
+
+def test_walk_files_breadth_first_relative_posix(tmp_path):
+    _touch(tmp_path, "top.py")
+    _touch(tmp_path, "pkg/mod.py")
+    _touch(tmp_path, "pkg/sub/deep.py")
+    paths, truncated = walk_files(tmp_path)
+    assert paths == ["top.py", "pkg/mod.py", "pkg/sub/deep.py"]
+    assert truncated is False
+
+
+def test_walk_files_skips_hidden_and_skip_dirs(tmp_path):
+    _touch(tmp_path, "keep.py")
+    _touch(tmp_path, ".hidden.py")
+    _touch(tmp_path, ".git/config")
+    _touch(tmp_path, "node_modules/dep.js")
+    _touch(tmp_path, "__pycache__/keep.cpython-312.pyc")
+    paths, _ = walk_files(tmp_path)
+    assert paths == ["keep.py"]
+
+
+def test_walk_files_show_hidden_includes_dotfiles_not_skip_dirs(tmp_path):
+    _touch(tmp_path, ".env")
+    _touch(tmp_path, ".git/config")
+    paths, _ = walk_files(tmp_path, show_hidden=True)
+    assert paths == [".env"]
+
+
+def test_walk_files_never_descends_symlinked_directories(tmp_path):
+    # Neither an escaping link nor an in-project one: link cycles must not
+    # wedge the walk, so the rule matches the file tree's (no expansion at all).
+    root = tmp_path / "project"
+    _touch(root, "real/a.py")
+    (root / "loop").symlink_to(root)
+    outside = tmp_path / "outside"
+    _touch(outside, "secret.py")
+    (root / "escape").symlink_to(outside)
+    paths, _ = walk_files(root)
+    assert paths == ["real/a.py"]
+
+
+def test_walk_files_skips_file_symlink_escaping_root(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("nope")
+    (root / "leak.txt").symlink_to(secret)
+    _touch(root, "ok.txt")
+    paths, _ = walk_files(root)
+    assert paths == ["ok.txt"]
+
+
+def test_walk_files_cap_truncates(tmp_path):
+    for i in range(5):
+        _touch(tmp_path, f"f{i}.txt")
+    paths, truncated = walk_files(tmp_path, cap=3)
+    assert len(paths) == 3
+    assert truncated is True
+
+
+def test_walk_files_missing_root_is_empty(tmp_path):
+    assert walk_files(tmp_path / "nope") == ([], False)

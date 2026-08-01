@@ -797,3 +797,24 @@ msgstr "Versteckte Dateien anzeigen"
 msgid "Show dotfiles in the editor's file tree"
 msgstr "Versteckte Dateien im Dateibaum des Editors anzeigen"
 
+msgid "Open File"
+msgstr "Datei öffnen"
+
+msgid "Open a file…"
+msgstr "Datei öffnen…"
+
+msgid "Indexing project files…"
+msgstr "Projektdateien werden indiziert…"
+
+msgid "No files found in this project."
+msgstr "Keine Dateien in diesem Projekt gefunden."
+
+msgid "Project is large — only the first {count} files are searchable."
+msgstr "Großes Projekt — nur die ersten {count} Dateien sind durchsuchbar."
+
+msgid "Agent files"
+msgstr "Agent-Dateien"
+
+msgid "Open {name} in the editor"
+msgstr "{name} im Editor öffnen"
+

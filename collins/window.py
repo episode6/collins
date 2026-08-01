@@ -46,6 +46,7 @@ from .licenses import legal_sections
 from .models import SessionItem
 from .prefs import PreferencesDialog
 from .providers import available_providers, get_provider
+from .quickopen import QuickOpenDialog
 from .replayview import ReplayTab
 from .sessions import (
     Session,
@@ -192,6 +193,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._bg_queue_total = 0
         self._bg_queue_dialog: Adw.AlertDialog | None = None
         self._switcher: QuickSwitcher | None = None
+        self._quickopen: QuickOpenDialog | None = None
         # Set while the app pushes shared Caffeine state into this window's
         # toggle, so the resulting "toggled" isn't mistaken for a click and
         # bounced back at the app (which would cancel the timer it just armed).
@@ -817,6 +819,7 @@ class MainWindow(Adw.ApplicationWindow):
             "toggle-editor": lambda *_: self._toggle_editor(),
             "editor-save": lambda *_: self._editor_save(),
             "focus-editor": lambda *_: self._focus_editor(),
+            "quick-open": lambda *_: self._quick_open_file(),
             "toggle-sidebar": lambda *_: self.sidebar.set_visible(
                 not self.sidebar.get_visible()
             ),
@@ -836,7 +839,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Soft dependency: no gtksourceview5 typelib means no editor pane in
         # any tab (see TerminalTab.__init__), so these have nothing to act on.
         if not editor.HAVE_GTKSOURCE:
-            for name in ("toggle-editor", "editor-save", "focus-editor"):
+            for name in ("toggle-editor", "editor-save", "focus-editor", "quick-open"):
                 self.lookup_action(name).set_enabled(False)
 
         per_session = {
@@ -870,6 +873,7 @@ class MainWindow(Adw.ApplicationWindow):
             "trash-session": self._on_trash_session,
             "open-folder": self._on_open_folder,
             "open-folder-terminal": self._on_open_folder_terminal,
+            "open-in-editor": lambda _a, p: self._open_in_editor(p.get_string()),
         }
         for name, callback in per_session.items():
             action = Gio.SimpleAction(name=name, parameter_type=GLib.VariantType("s"))
@@ -926,6 +930,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control>k", "win.clear-panel"),
             ("F9", "win.toggle-sidebar"),
             ("F8", "win.toggle-editor"),
+            ("<Control><Shift>o", "win.quick-open"),
         ):
             controller.add_shortcut(
                 Gtk.Shortcut.new(
@@ -2494,6 +2499,46 @@ class MainWindow(Adw.ApplicationWindow):
         elif not tab.editor_visible:
             tab.show_editor()
         tab.focus_editor()
+
+    def _quick_open_file(self) -> None:
+        """Ctrl+Shift+O: fuzzy-find a file in the current tab's project and
+        open it in that tab's editor."""
+        if self._quickopen is not None:  # already open — don't stack another
+            return
+        tab = self._current_terminal_tab()
+        if tab is None or tab.editor_root is None:
+            return
+        self._quickopen = QuickOpenDialog(
+            tab.editor_root,
+            lambda path: self._open_in_tab_editor(tab, path),
+            show_hidden=bool(self.state.get_setting("editor_show_hidden_files")),
+        )
+        self._quickopen.connect("closed", lambda *_: setattr(self, "_quickopen", None))
+        self._quickopen.present(self)
+
+    def _open_in_editor(self, path: str) -> None:
+        """win.open-in-editor(path): the current terminal tab's editor when the
+        file belongs to its project, else whichever tab's project it does
+        belong to (chat tabs have no editor, but their tool chips fire this).
+        Nowhere to open it → quietly nothing, like the other editor actions."""
+        tab = self._current_terminal_tab()
+        if tab is None or not tab.can_open_in_editor(path):
+            tab = None
+            for i in range(self.tab_view.get_n_pages()):
+                candidate = self.tab_view.get_nth_page(i).get_child()
+                if isinstance(candidate, TerminalTab) and candidate.can_open_in_editor(path):
+                    tab = candidate
+                    break
+            if tab is None:
+                return
+            self.tab_view.set_selected_page(self.tab_view.get_page(tab))
+        self._open_in_tab_editor(tab, path)
+
+    def _open_in_tab_editor(self, tab: TerminalTab, path: str) -> None:
+        win = self._editor_windows.get(tab)
+        if win is not None:
+            win.present()  # the pane lives in its own window right now
+        tab.open_in_editor(path)
 
     # -- popped-out editor windows --------------------------------------------
 

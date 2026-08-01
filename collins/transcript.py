@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 """Detect an agent's pending structured prompt by tailing its JSONL transcript.
 
@@ -23,6 +23,18 @@ from pathlib import Path
 
 from .prstatus import PullRequest, parse_pr_link
 
+# Write-tools whose input names the file they touch, and the input key that
+# carries it. This is what feeds the editor panel's "agent files" list — reads
+# are deliberately absent (a session Reads far more than it changes, and the
+# list is for "look at what the agent just wrote").
+_TOUCH_TOOLS = {
+    "Edit": "file_path",
+    "MultiEdit": "file_path",
+    "Write": "file_path",
+    "NotebookEdit": "notebook_path",
+}
+_MAX_TOUCHED = 30  # most-recent-first; plenty for a list that shows a handful
+
 
 @dataclass
 class Question:
@@ -37,6 +49,7 @@ class TranscriptModel:
         self._order: list[str] = []  # question ids, arrival order
         self._resolved: set[str] = set()  # tool_use_ids that have a tool_result
         self._prs: dict[str, PullRequest] = {}  # url -> PR, first-seen order
+        self._touched: list[str] = []  # files written by the agent, newest first
         self._offset = 0
         self._buf = b""
 
@@ -47,6 +60,7 @@ class TranscriptModel:
         self._order = []
         self._resolved = set()
         self._prs = {}
+        self._touched = []
         self._offset = 0
         self._buf = b""
 
@@ -76,6 +90,7 @@ class TranscriptModel:
         if size < self._offset:  # rewritten/truncated → start over
             self._questions, self._order, self._resolved = {}, [], set()
             self._prs = {}
+            self._touched = []
             self._offset, self._buf = 0, b""
         if size <= self._offset:
             return False
@@ -123,12 +138,36 @@ class TranscriptModel:
                     self._questions[qid] = (block.get("input") or {}).get("questions", [])
                     self._order.append(qid)
                     changed = True
+            elif btype == "tool_use" and block.get("name") in _TOUCH_TOOLS:
+                key = _TOUCH_TOOLS[block.get("name")]
+                path = (block.get("input") or {}).get(key)
+                if isinstance(path, str) and path.strip() and self._record_touch(path.strip()):
+                    changed = True
             elif btype == "tool_result":
                 rid = block.get("tool_use_id")
                 if rid and rid not in self._resolved:
                     self._resolved.add(rid)
                     changed = True
         return changed
+
+    def _record_touch(self, path: str) -> bool:
+        """Move *path* to the front of the touched list. False when it was
+        already the most recent one — no reorder, nothing to redraw."""
+        if self._touched and self._touched[0] == path:
+            return False
+        try:
+            self._touched.remove(path)
+        except ValueError:
+            pass
+        self._touched.insert(0, path)
+        del self._touched[_MAX_TOUCHED:]
+        return True
+
+    def touched_files(self) -> list[str]:
+        """Files the agent has written (Edit/Write/NotebookEdit), most recent
+        first, as the transcript recorded them — absolute paths, unchecked
+        against disk or project root; the editor pane does that filtering."""
+        return list(self._touched)
 
     def pull_requests(self) -> list[PullRequest]:
         """Every pull request this session has linked, oldest first.

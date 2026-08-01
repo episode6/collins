@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 """Shared chat-bubble widgets: message bubbles and tool chips.
 
 Used by both the live streaming chat (`chatsessionview`) and the session replay
@@ -10,12 +10,17 @@ lives in `formatting`, which stays free of GTK.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
+
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk, Pango  # noqa: E402
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from .formatting import md_to_pango  # noqa: E402
+from .i18n import _  # noqa: E402
 
 
 def make_label(role: str) -> Gtk.Label:
@@ -57,3 +62,17 @@ def make_tool_chip(text: str) -> Gtk.Widget:
     chip.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
     chip.add_css_class("chat-tool")
     return chip
+
+
+def arm_tool_chip(chip: Gtk.Widget, path: str, on_open: Callable[[str], None]) -> None:
+    """Upgrade a tool chip that turned out to name a file: show the file name
+    and open it in the editor on click. Safe to call once per chip only —
+    the caller stops tracking a chip the moment it is armed."""
+    name = Path(path).name
+    chip.set_label(f"{chip.get_label()} — {name}")
+    chip.set_tooltip_text(_("Open {name} in the editor").format(name=name))
+    chip.add_css_class("chat-tool-link")
+    chip.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+    click = Gtk.GestureClick()
+    click.connect("released", lambda *_a: on_open(path))
+    chip.add_controller(click)

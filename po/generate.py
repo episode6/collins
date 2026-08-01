@@ -324,6 +324,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show hidden files": "Rejtett fájlok megjelenítése",
         "Show dotfiles in the editor's file tree":
             "Rejtett fájlok megjelenítése a szerkesztő fájlfájában",
+        "Open File": "Fájl megnyitása",
+        "Open a file…": "Fájl megnyitása…",
+        "Indexing project files…": "Projektfájlok indexelése…",
+        "No files found in this project.": "Nem található fájl ebben a projektben.",
+        "Project is large — only the first {count} files are searchable.":
+            "A projekt nagy — csak az első {count} fájl kereshető.",
+        "Agent files": "Ügynökfájlok",
+        "Open {name} in the editor": "A(z) {name} megnyitása a szerkesztőben",
     },
     "de": {
         "── restored panel history ──": "── wiederhergestellter Panel-Verlauf ──",
@@ -636,6 +644,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show hidden files": "Versteckte Dateien anzeigen",
         "Show dotfiles in the editor's file tree":
             "Versteckte Dateien im Dateibaum des Editors anzeigen",
+        "Open File": "Datei öffnen",
+        "Open a file…": "Datei öffnen…",
+        "Indexing project files…": "Projektdateien werden indiziert…",
+        "No files found in this project.": "Keine Dateien in diesem Projekt gefunden.",
+        "Project is large — only the first {count} files are searchable.":
+            "Großes Projekt — nur die ersten {count} Dateien sind durchsuchbar.",
+        "Agent files": "Agent-Dateien",
+        "Open {name} in the editor": "{name} im Editor öffnen",
     },
     "es": {
         "── restored panel history ──": "── historial del panel restaurado ──",
@@ -946,6 +962,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show hidden files": "Mostrar archivos ocultos",
         "Show dotfiles in the editor's file tree":
             "Mostrar archivos ocultos en el árbol de archivos del editor",
+        "Open File": "Abrir archivo",
+        "Open a file…": "Abrir un archivo…",
+        "Indexing project files…": "Indexando archivos del proyecto…",
+        "No files found in this project.": "No se encontraron archivos en este proyecto.",
+        "Project is large — only the first {count} files are searchable.":
+            "El proyecto es grande — solo se puede buscar entre los primeros {count} archivos.",
+        "Agent files": "Archivos del agente",
+        "Open {name} in the editor": "Abrir {name} en el editor",
     },
     "fr": {
         "── restored panel history ──": "── historique du panneau restauré ──",
@@ -1258,6 +1282,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show hidden files": "Afficher les fichiers cachés",
         "Show dotfiles in the editor's file tree":
             "Afficher les fichiers cachés dans l’arborescence de l’éditeur",
+        "Open File": "Ouvrir un fichier",
+        "Open a file…": "Ouvrir un fichier…",
+        "Indexing project files…": "Indexation des fichiers du projet…",
+        "No files found in this project.": "Aucun fichier trouvé dans ce projet.",
+        "Project is large — only the first {count} files are searchable.":
+            "Le projet est volumineux — seuls les premiers {count} fichiers sont consultables.",
+        "Agent files": "Fichiers de l’agent",
+        "Open {name} in the editor": "Ouvrir {name} dans l’éditeur",
     },
 }
 
