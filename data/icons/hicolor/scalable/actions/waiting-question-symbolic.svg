@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="16px" viewBox="0 0 16 16" width="16px" xmlns="http://www.w3.org/2000/svg">
+    <!-- Filled paths only: GTK recolors symbolic icons by overriding fill on
+         every shape, so stroked outlines collapse into silhouettes. The ring
+         is a 1.25px-stroke outline expanded into an evenodd fill, matching
+         the archive/tab-close icons' weight. -->
+    <g fill="#2e3436">
+        <path fill-rule="evenodd" d="M 1 8 A 7 7 0 1 1 15 8 A 7 7 0 1 1 1 8 Z M 2.25 8 A 5.75 5.75 0 1 0 13.75 8 A 5.75 5.75 0 1 0 2.25 8 Z"/>
+        <path fill-rule="evenodd" d="M 8 3.85 C 6.44 3.85 5.35 4.85 5.28 6.24 L 6.66 6.32 C 6.7 5.6 7.18 5.1 8 5.1 C 8.77 5.1 9.28 5.55 9.28 6.18 C 9.28 6.66 9.04 6.98 8.42 7.38 C 7.62 7.9 7.28 8.37 7.3 9.15 L 7.31 9.55 L 8.66 9.55 L 8.66 9.22 C 8.66 8.72 8.85 8.47 9.53 8.03 C 10.29 7.53 10.68 6.94 10.68 6.11 C 10.68 4.75 9.57 3.85 8 3.85 Z"/>
+        <circle cx="8" cy="11.35" r="0.85"/>
+    </g>
+</svg>

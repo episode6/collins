@@ -72,6 +72,10 @@ _HEADER_ICON_OFFSET = 18
 # is no taller than the plain menu items above and below it.
 _OPEN_WITH_ICON_PX = 16
 
+# The waiting/interrupted state badge: matches the row's other symbolic icons
+# (project icon, action buttons), which all render at 16px.
+_STATE_BADGE_ICON_PX = 16
+
 
 def _session_child_indent(icon_size: int) -> int:
     """Left margin for a session row, so its card starts right where the icon
@@ -364,6 +368,8 @@ class SessionRow(Gtk.ListBoxRow):
         top.append(name_label)
 
         self._state_badge = Gtk.Image(valign=Gtk.Align.CENTER)
+        self._state_badge.set_pixel_size(_STATE_BADGE_ICON_PX)
+        self._state_badge.set_margin_start(2)
         top.append(self._state_badge)
 
         time_label = Gtk.Label(valign=Gtk.Align.CENTER)
@@ -675,7 +681,7 @@ class SessionRow(Gtk.ListBoxRow):
         for css in ("waiting-badge", "interrupted-badge"):
             badge.remove_css_class(css)
         if item.state == "waiting":
-            badge.set_from_icon_name("dialog-question-symbolic")
+            badge.set_from_icon_name("waiting-question-symbolic")
             badge.add_css_class("waiting-badge")
             badge.set_tooltip_text(_("Claude is waiting for your reply"))
             badge.set_visible(True)
