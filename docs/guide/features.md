@@ -42,11 +42,10 @@ fork. Last modified: 2026-07-31. Full change history: git log for this file.
   placeholder row until the agent writes its transcript.
 - **Quick switcher** (`Ctrl+Shift+K`) — a type-ahead dialog to jump to any
   session by name, project, preview, or ID.
-- **Running sessions are filled in**: a session with a tab open gets a fill and
-  a green left guide line, so live work stands out from the archive of past
-  sessions. A tab with output you haven't looked at yet keeps the fill and
-  turns its guide line neutral grey. The session shown in the selected tab
-  takes the peach highlight.
+- **Running sessions are filled in**: a session with a tab open gets a fill, so
+  live work stands out from the archive of past sessions — read or unread, the
+  fill is the same. The session shown in the selected tab takes the peach
+  highlight.
 - **A yellow guide line** marks a session **running detached** in the
   background (`/bg`) — no fill, because there is no tab to return to; reopen
   the row to re-attach.
@@ -107,8 +106,8 @@ agents' own session files are never modified.
 - If the session is still **running detached** (e.g. after backgrounding it),
   Collins **re-attaches** to the live process (`claude attach`) instead of
   resuming a copy.
-- A **green dot** marks a tab whose output you're caught up on, matching the
-  sidebar's guide line; a tab with unread output drops the dot.
+- A tab with **unread output** is marked by the tab bar itself; tabs carry no
+  status dot of their own.
 - A slim **tab footer** shows the agent's live working directory (click to
   copy) and the current **git branch** (⎇), plus the terminal-panel buttons.
 - **Pull request chips** trail the branch: one per PR the session has opened,

@@ -89,12 +89,9 @@ class _KeepProjects(NamedTuple):
     projects: list[str]
 
 
-# Tab status dot: green for an open tab, the same color the sidebar puts on a
-# running row's left guide line (row.session-child.running in app.py). A tab
-# with unread output gets no dot of its own — AdwTabView already marks such a
-# tab, and a second marker only competed with it.
-_STATUS_COLORS = {"open": "#2ec27e"}
-_status_icon_cache: dict[str, Gio.Icon] = {}
+# Tabs carry no status dot of their own: AdwTabView already marks a tab with
+# unread output, and the dot it competed with said only "this tab is open",
+# which the tab being there says already.
 
 
 def _monitor_sizes() -> list[tuple[int, int]]:
@@ -107,20 +104,6 @@ def _monitor_sizes() -> list[tuple[int, int]]:
         geometry = monitors.get_item(i).get_geometry()
         sizes.append((geometry.width, geometry.height))
     return sizes
-
-
-def _status_icon(status: str) -> Gio.Icon | None:
-    if status not in _STATUS_COLORS:
-        return None
-    icon = _status_icon_cache.get(status)
-    if icon is None:
-        svg = (
-            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">'
-            f'<circle cx="8" cy="8" r="4" fill="{_STATUS_COLORS[status]}"/></svg>'
-        ).encode()
-        icon = Gio.BytesIcon.new(GLib.Bytes.new(svg))
-        _status_icon_cache[status] = icon
-    return icon
 
 
 def _app_icon_name(window: Gtk.Window) -> str:
@@ -328,7 +311,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("close-placeholder", self._on_sidebar_close_placeholder)
         self.store.connect("refreshed", self._on_store_refreshed)
 
-        # Yellow "running detached" dots: keep the set of backgrounded session
+        # Yellow "running detached" guide lines: keep the set of backgrounded session
         # ids fresh (see bgstatus.py for the trigger strategy).
         self._bg_status = BackgroundStatusPoller(on_change=self._on_background_ids_changed)
         self._bg_status.start(
@@ -1102,7 +1085,6 @@ class MainWindow(Adw.ApplicationWindow):
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
         self.tab_view.set_selected_page(page)
         self.content_stack.set_visible_child_name("tabs")
-        self._apply_tab_status(page)
         GLib.idle_add(tab.grab_terminal_focus)
         return page
 
@@ -1124,7 +1106,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_session_resolved(self, tab: TerminalTab, session_id: str, page: Adw.TabPage) -> None:
         """A fresh tab (new / continue) discovered its session id: bind the tab
-        to the session so the sidebar dot, open-dedup, rename and status sync
+        to the session so the sidebar highlight, open-dedup, rename and status sync
         work exactly like a tab opened from the sidebar."""
         if self._pages.get(session_id) not in (None, page):
             return  # another tab already owns this session
@@ -1287,7 +1269,6 @@ class MainWindow(Adw.ApplicationWindow):
         page = self.tab_view.append(tab)
         page.set_title(_("Chat — {dir}").format(dir=GLib.path_get_basename(cwd)))
         page.set_tooltip(f"{provider.name} chat — {cwd}")
-        page.set_icon(_status_icon("open"))
         self.tab_view.set_selected_page(page)
         self.content_stack.set_visible_child_name("tabs")
 
@@ -1308,7 +1289,6 @@ class MainWindow(Adw.ApplicationWindow):
         page = self.tab_view.append(tab)
         page.set_title(_("Chat — {name}").format(name=self.store.display_name(session)))
         page.set_tooltip(f"{provider.name} chat — {session.session_id}")
-        page.set_icon(_status_icon("open"))
         self.tab_view.set_selected_page(page)
         self.content_stack.set_visible_child_name("tabs")
 
@@ -1324,19 +1304,8 @@ class MainWindow(Adw.ApplicationWindow):
         page = self.tab_view.append(tab)
         page.set_title(_("Replay — {name}").format(name=self.store.display_name(session)))
         page.set_tooltip(f"replay — {session.project_name} — {session.session_id}")
-        page.set_icon(_status_icon("open"))
         self.tab_view.set_selected_page(page)
         self.content_stack.set_visible_child_name("tabs")
-
-    def _apply_tab_status(self, page: Adw.TabPage) -> None:
-        """Mirror the sidebar status dot onto the tab itself.
-
-        Only an open-and-read tab carries a dot; unread output drops it
-        (_status_icon returns None), leaving the tab view's own attention
-        marker to say so on its own.
-        """
-        status = "attention" if page.get_needs_attention() else "open"
-        page.set_icon(_status_icon(status))
 
     def _on_tab_bar_toggled(self, button: Gtk.ToggleButton) -> None:
         """Purely visual: the tabs (and their sessions) keep running underneath."""
@@ -1934,7 +1903,6 @@ class MainWindow(Adw.ApplicationWindow):
             return
         if not page.get_needs_attention():
             page.set_needs_attention(True)
-            self._apply_tab_status(page)
             session_id = self._session_id_of(page)
             if session_id:
                 self._sync_status(session_id)
@@ -2038,7 +2006,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._cancel_idle(page)  # foreground now; no "finished" notification
         if page.get_needs_attention():
             page.set_needs_attention(False)
-            self._apply_tab_status(page)
             session_id = self._session_id_of(page)
             if session_id:
                 self._sync_status(session_id)

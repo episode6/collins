@@ -47,12 +47,13 @@ _GHOSTTY = shutil.which("ghostty")
 _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
 _ELLIPSIZE_START = 1  # Pango.EllipsizeMode.START
 
-# Row highlight per session status. The two tab statuses add a fill on top of
-# their guide line (see row.session-child.running* in app.py); "background",
-# i.e. running detached, colors the line only — there is no tab to return to.
+# Row highlight per session status. Both tab statuses share one fill (see
+# row.session-child.running in app.py) — read or unread, the session has a tab
+# open; "background", i.e. running detached, colors the guide line instead, as
+# there is no tab to return to.
 _STATUS_CSS = {
     "open": "running",
-    "attention": "running-attention",
+    "attention": "running",
     "background": "detached",
 }
 # The statuses that mean "this session has a tab open right now".
@@ -504,7 +505,7 @@ class SessionRow(Gtk.ListBoxRow):
         )
         self._on_can_background_changed(item, None)
 
-        # Status dot + state badge need CSS-class updates: plain signals,
+        # Status highlight + state badge need CSS-class updates: plain signals,
         # detached on unroot.
         self._status_handler = item.connect("notify::status", self._on_status_changed)
         self._state_handler = item.connect("notify::state", self._on_state_changed)
@@ -633,9 +634,9 @@ class SessionRow(Gtk.ListBoxRow):
         )
 
     def _on_status_changed(self, item: SessionItem, _pspec) -> None:
-        # The card itself carries the status: the left guide line is colored by
-        # what the session is doing, and a session running in a tab adds a
-        # brighter background on top.
+        # The card itself carries the status: a session running in a tab gets a
+        # brighter background, and one running detached colors its left guide
+        # line instead.
         for css in _STATUS_CSS.values():
             self.remove_css_class(css)
         status_css = _STATUS_CSS.get(item.status)
