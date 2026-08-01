@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -48,6 +48,7 @@ DEFAULT_SETTINGS = {
     "scrollback": 10_000,
     "color_scheme": "system",  # system | light | dark
     "terminal_theme": "Default",  # VTE color palette (see themes.py)
+    "terminal_max_width": 0,  # px; terminal stops growing past this and centers (0 = no limit)
     "easy_copy_paste": True,  # Ctrl+C copies the selection (else SIGINT), Ctrl+V pastes, right-click menu
     "language": "",  # UI language code; "" = follow the system locale
     "notify_idle": False,  # notify when a background session goes quiet
