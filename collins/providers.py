@@ -40,10 +40,15 @@ _PROMPT_HINT = 'Try "'
 # Claude's own confirmation before it will leave a worktree session (with or
 # without a paired tmux session): "Keep worktree[...]" is always the first
 # item and the dialog's default selection, "Remove worktree[...]" the last.
-# Both together, verbatim, are distinctive enough that the graceful-close
-# flow can key off them without needing the exact screen layout. See
-# ClaudeProvider.worktree_exit_prompt.
-_WORKTREE_EXIT_MARKERS = ("Keep worktree", "Remove worktree")
+# The graceful-close flow that reads this never sends an arrow key, so the
+# selection marker (the same ❯ the trust and permission dialogs draw) sitting
+# right before "Keep worktree" is what's actually being detected — plain
+# substrings would also match a "Keep worktree" mentioned in scrollback
+# further up the screen, from an earlier turn that happened to discuss the
+# dialog. Requiring both close together is what `takes_prompt` does for the
+# input prompt's own marker. See ClaudeProvider.worktree_exit_prompt.
+_WORKTREE_EXIT_SELECTED_RE = re.compile(r"❯\s*Keep worktree\b")
+_WORKTREE_EXIT_OTHER_OPTION = "Remove worktree"
 
 
 @dataclass(frozen=True)
@@ -310,10 +315,17 @@ class ClaudeProvider(Provider):
         anything to the transcript, so the screen is the only place to see
         it. Enter accepts whichever item is highlighted; the graceful-close
         flow that calls this never sends an arrow key, so that's always
-        "Keep worktree", the dialog's own default and first item."""
-        if all(marker in screen_text for marker in _WORKTREE_EXIT_MARKERS):
-            return "\r"
-        return None
+        "Keep worktree", the dialog's own default and first item — the
+        selection marker sitting right before it is what confirms this is
+        the dialog actually showing, not just its text mentioned somewhere
+        higher up the screen. "Remove worktree" is always the dialog's other
+        option, so requiring it too costs nothing and rules out an unrelated
+        screen that merely puts something else after a bare ❯."""
+        if not _WORKTREE_EXIT_SELECTED_RE.search(screen_text):
+            return None
+        if _WORKTREE_EXIT_OTHER_OPTION not in screen_text:
+            return None
+        return "\r"
 
     def resume_command(self, session_id: str, fork: bool = False) -> str | None:
         # Attach-first: if the session is still running detached (e.g. after

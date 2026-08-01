@@ -252,7 +252,7 @@ def test_claude_worktree_exit_dialog_is_answered_with_enter():
 
 def test_claude_worktree_exit_dialog_with_tmux_variant_is_still_answered():
     """The tmux-paired dialog swaps in three longer labels, but the first is
-    still a "Keep worktree..." default — the plain markers still match."""
+    still a "Keep worktree..." default — the anchored marker still matches."""
     claude = ClaudeProvider()
     screen = (
         'This session was named "refactor-auth". Keep the worktree to resume\n'
@@ -277,6 +277,21 @@ def test_claude_other_screens_are_not_the_worktree_dialog():
     # Only "Keep worktree" on screen (e.g. the confirmation after answering)
     # isn't the dialog itself — Enter there would just hit whatever's next.
     assert claude.worktree_exit_prompt("Worktree kept. Goodbye!") is None
+
+
+def test_claude_worktree_mentions_in_scrollback_are_not_the_dialog():
+    """Both labels appearing on screen isn't enough on its own — an earlier
+    turn that happened to discuss "Keep worktree" and "Remove worktree" (e.g.
+    this very PR's own diff) must not be mistaken for the dialog actually
+    showing. Only the ❯ selection marker sitting right before the label,
+    exactly as `takes_prompt` requires for the input prompt's own marker,
+    tells the two apart."""
+    claude = ClaudeProvider()
+    screen = (
+        "❯\xa0explain what \"Keep worktree\" and \"Remove worktree\" do\n"
+        "  in the exit dialog\n"
+    )
+    assert claude.worktree_exit_prompt(screen) is None
 
 
 def test_base_providers_have_no_worktree_exit_dialog():
