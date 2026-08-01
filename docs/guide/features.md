@@ -172,6 +172,10 @@ lives below or beside the agent terminal:
   (screen and saved history).
 - It opens in the agent's **current working directory** (worktree-aware), and
   the swap button moves it bottom ↔ right without restarting its shell.
+- **Right-click the footer's terminal button** to open that same directory in
+  your desktop's own terminal instead — whatever `$TERMINAL` and
+  `xdg-terminals.list` nominate, the same pick the sidebar's *Open in Terminal*
+  uses — for the times a window of its own beats a panel.
 - Its scrollback **persists across restarts** — reopen a session and the
   panel picks up where it left off, with a "restored panel history" marker.
 - Each session remembers its panel's open state, position, and size; the

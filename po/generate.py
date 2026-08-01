@@ -161,6 +161,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open in {name}": "Megnyitás ezzel: {name}",
         "Open in File Manager": "Megnyitás a fájlkezelőben",
         "Open in Terminal": "Megnyitás a terminálban",
+        "Right-click to open this folder in your terminal":
+            "Jobb kattintással megnyithatod ezt a mappát a termináljában",
+        "No terminal application found": "Nem található terminálalkalmazás",
+        "Set $TERMINAL, or install a terminal emulator, to open folders here.":
+            "Állítsd be a $TERMINAL változót, vagy telepíts egy terminálemulátort, "
+            "hogy itt nyithass meg mappákat.",
         "Move transcript to trash…": "Átirat kukába helyezése…",
         "All": "Mind",
         "Select all (filtered) sessions": "Az összes (szűrt) munkamenet kijelölése",
@@ -417,6 +423,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open in {name}": "In {name} öffnen",
         "Open in File Manager": "Im Dateimanager öffnen",
         "Open in Terminal": "Im Terminal öffnen",
+        "Right-click to open this folder in your terminal":
+            "Rechtsklick öffnet diesen Ordner in deinem Terminal",
+        "No terminal application found": "Keine Terminal-Anwendung gefunden",
+        "Set $TERMINAL, or install a terminal emulator, to open folders here.":
+            "Setze $TERMINAL oder installiere einen Terminal-Emulator, "
+            "um Ordner hier zu öffnen.",
         "Move transcript to trash…": "Transkript in den Papierkorb verschieben…",
         "All": "Alle",
         "Select all (filtered) sessions": "Alle (gefilterten) Sitzungen auswählen",
@@ -677,6 +689,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open in {name}": "Abrir en {name}",
         "Open in File Manager": "Abrir en el gestor de archivos",
         "Open in Terminal": "Abrir en la terminal",
+        "Right-click to open this folder in your terminal":
+            "Clic derecho para abrir esta carpeta en tu terminal",
+        "No terminal application found": "No se encontró ninguna aplicación de terminal",
+        "Set $TERMINAL, or install a terminal emulator, to open folders here.":
+            "Define $TERMINAL o instala un emulador de terminal "
+            "para abrir carpetas aquí.",
         "Move transcript to trash…": "Mover transcripción a la papelera…",
         "All": "Todas",
         "Select all (filtered) sessions": "Seleccionar todas las sesiones (filtradas)",
@@ -936,6 +954,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open in {name}": "Ouvrir dans {name}",
         "Open in File Manager": "Ouvrir dans le gestionnaire de fichiers",
         "Open in Terminal": "Ouvrir dans le terminal",
+        "Right-click to open this folder in your terminal":
+            "Clic droit pour ouvrir ce dossier dans votre terminal",
+        "No terminal application found": "Aucune application de terminal trouvée",
+        "Set $TERMINAL, or install a terminal emulator, to open folders here.":
+            "Définissez $TERMINAL ou installez un émulateur de terminal "
+            "pour ouvrir des dossiers ici.",
         "Move transcript to trash…": "Mettre la transcription à la corbeille…",
         "All": "Tout",
         "Select all (filtered) sessions": "Sélectionner toutes les sessions (filtrées)",
