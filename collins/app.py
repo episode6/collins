@@ -67,6 +67,10 @@ row.session-child {
   border: 1px solid alpha(currentColor, 0.15);
   border-left: 2px solid alpha(currentColor, 0.15);
   border-radius: 0 8px 8px 0;
+  /* Adwaita's own row padding, restated so it is ours: the barber pole below
+     is positioned by counting back over the border and this padding, and a
+     theme with a different value would slide the pole off the guide line. */
+  padding-left: 8px;
   /* smaller text than a stock sidebar row, and shorter: 34px of content plus
      the 1px borders puts the row at 36px, with the project headers keeping the
      coarser rhythm above it */
@@ -119,26 +123,35 @@ row.session-child.detached { border-left-color: #e5a50a; }
 
    The pole is painted, never laid out: the row keeps its 2px border-left (made
    transparent so the stripes show through it) and the gradient is a background
-   layer 4px wide, pulled 2px left of the padding box by its background-position
-   so it starts at the card's edge and covers the border. Nothing in the row
-   moves as it starts or stops (only the paint changes), and the extra 2px of
-   width is what makes the diagonal readable at all at this size.
+   layer exactly as wide as that border and sitting right on it, so a row's
+   guide line reads as the same line whether it is still or moving, and nothing
+   shifts as the pole starts or stops.
 
-   The tile is 4x12px and repeats down the line; the stripe period is 8.485px
+   Landing it there takes two properties, because GTK does not place a
+   background where the CSS spec says. It ignores background-origin: the layer
+   starts inside the border *and* the padding, 10px in for this row (2px border
+   + 8px padding, pinned above), so background-position counts that whole
+   distance back. And its default clip stops at the padding edge, which would
+   throw the shifted layer away entirely, so the clip is widened to the border
+   box. Both are load-bearing; drop either and the pole either sits 10px inside
+   the card or vanishes.
+
+   The tile is 2x12px and repeats down the line; the stripe period is 8.485px
    (12 / sqrt 2), the one value at which a 135deg gradient meets itself across
    a 12px vertical seam. Any other period leaves a visible cut where the tiles
    stack. One animation cycle travels exactly one tile, so the loop is
    seamless too. GTK stops all CSS animation when the desktop's animations are
    off, which is the reduced-motion behavior we want for free. */
 @keyframes barber-pole {
-  from { background-position: -2px 12px; }
-  to   { background-position: -2px 0; }
+  from { background-position: -10px 12px; }
+  to   { background-position: -10px 0; }
 }
 row.session-child.running.busy,
 row.session-child.detached.busy {
   border-left-color: transparent;
+  background-clip: border-box;
   background-repeat: repeat-y;
-  background-size: 4px 12px;
+  background-size: 2px 12px;
   animation: barber-pole 900ms linear infinite;
 }
 row.session-child.running.busy {
