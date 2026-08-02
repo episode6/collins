@@ -1,3 +1,8 @@
+# Original to the ghackett fork of agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0): this file has no
+# upstream version, so it carries no modification notice. Licensed GPL-3.0
+# with the rest of the project.
+
 """Which sessions are working *right now*, so the sidebar can say so.
 
 A session's status says where it is running — in a tab, or detached — but not
