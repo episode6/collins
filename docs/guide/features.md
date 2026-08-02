@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-01. Full change history: git log for this file.
+fork. Last modified: 2026-08-02. Full change history: git log for this file.
 -->
 
 # Features
@@ -183,13 +183,17 @@ agents' own session files are never modified.
 
 ## Terminal panel
 
-Every tab has a second, plain-shell terminal — no agent auto-launched — that
-lives below or beside the agent terminal:
+Every tab has a second, plain-shell terminal area — no agent auto-launched —
+that lives below or beside the agent terminal, with **tabs of its own**:
 
 - Toggle it with `Ctrl+J` or the buttons in the tab footer; `Ctrl+K` clears it
   (screen and saved history).
-- It opens in the agent's **current working directory** (worktree-aware), and
-  the swap button moves it bottom ↔ right without restarting its shell.
+- The panel's tab row has a **+ button** that opens another shell tab and
+  switches to it; each tab's **✕** closes it (and deletes its saved history).
+  Closing the last tab hides the panel — the footer's terminal button brings
+  it back with a fresh tab.
+- Shells open in the agent's **current working directory** (worktree-aware),
+  and the swap button moves the panel bottom ↔ right without restarting them.
 - **Right-click the footer's terminal button** to open that same directory —
   the agent's live one, not the project root — in your desktop's own terminal
   instead, for the times a window of its own beats a panel. The terminal is
@@ -198,13 +202,16 @@ lives below or beside the agent terminal:
   Terminal* uses), and the directory is handed to it on its own command line,
   so an already-running terminal opens where you asked rather than wherever it
   last was.
-- Its scrollback **persists across restarts** — reopen a session and the
-  panel picks up where it left off, with a "restored panel history" marker.
+- Scrollback **persists across restarts, per panel tab** — reopen a session
+  and the panel picks up where it left off, every tab in place, with a
+  "restored panel history" marker.
 - Each session remembers its panel's open state, position, and size; the
   last-used position and size also become the default for new panels.
-- Typing `exit` in the panel hides it.
-- Closing a tab while a command is running in its panel — even a hidden one —
-  asks for confirmation before the command is killed.
+- Typing `exit` in a panel tab closes that tab (closing the last one hides
+  the panel).
+- Closing a session tab while a command is running in any of its panel's
+  shells — even a hidden panel's — asks for confirmation before the command
+  is killed.
 
 ![The terminal panel below an agent session](/img/terminal-panel.png)
 

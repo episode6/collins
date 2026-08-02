@@ -11,6 +11,12 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+msgid "New terminal tab"
+msgstr "Nouvel onglet de terminal"
+
+msgid "Terminal {number}"
+msgstr "Terminal {number}"
+
 msgid "── restored panel history ──"
 msgstr "── historique du panneau restauré ──"
 

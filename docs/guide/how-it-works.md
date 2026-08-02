@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-31. Full change history: git log for this file.
+fork. Last modified: 2026-08-02. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -55,9 +55,9 @@ while the window is minimized or the screen is locked.
 Custom names, generated titles, emoji, favorites, archived sessions, project
 order, panel layouts, window geometry, and preferences are stored separately
 in `~/.config/collins/state.json`. The terminal panel's per-session scrollback
-lives in `~/.local/state/collins/panel_history/`. This keeps the app's data
-fully decoupled from the agents' own — you can delete both at any time without
-affecting a single session.
+lives in `~/.local/state/collins/panel_history/` (one file per panel tab).
+This keeps the app's data fully decoupled from the agents' own — you can
+delete both at any time without affecting a single session.
 
 ## Terminals
 

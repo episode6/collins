@@ -854,6 +854,15 @@ msgstr ""
 msgid "Move terminal panel bottom/right"
 msgstr ""
 
+#: collins/terminal.py:521
+msgid "New terminal tab"
+msgstr ""
+
+#: collins/terminal.py:576
+#, python-brace-format
+msgid "Terminal {number}"
+msgstr ""
+
 #: collins/usagepanel.py:35
 msgid "Not logged in to Claude"
 msgstr ""
