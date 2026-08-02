@@ -12,6 +12,8 @@ from collins.practions import (
     NEW_PR,
     NEW_PR_PROMPT,
     READY,
+    REBASE,
+    REBASE_PROMPT,
     REVIEW,
     REVIEW_COMMENT,
     actions_for,
@@ -103,6 +105,41 @@ def test_a_closed_pr_offers_nothing():
     """Closed, not merged: whatever it was for was abandoned, so there is no
     "the next one" to offer."""
     assert _keys(_pr(state="CLOSED"), takes_prompt=True, has_changes=True) == []
+
+
+def test_a_conflicting_pr_trades_its_merge_for_a_rebase():
+    """Merging now would only relay GitHub's refusal, and auto-merge can't be
+    enabled on a branch GitHub can't merge — resolving is what makes either
+    offerable, so the rebase action stands where the merge would have."""
+    keys = _keys(_pr(mergeable="CONFLICTING"), takes_prompt=True)
+    assert MERGE not in keys
+    assert AUTO_MERGE not in keys
+    assert keys[0] == REBASE
+
+
+def test_rebasing_needs_a_session_at_its_prompt():
+    """It sends a prompt; a conflicted PR whose session is closed offers
+    neither the rebase nor the merge it stands in for."""
+    keys = _keys(_pr(mergeable="CONFLICTING"), takes_prompt=False)
+    assert REBASE not in keys
+    assert MERGE not in keys
+
+
+def test_a_conflicted_draft_still_offers_ready_before_the_rebase():
+    keys = _keys(_pr(state="DRAFT", mergeable="CONFLICTING"), takes_prompt=True)
+    assert keys[:2] == [READY, REBASE]
+
+
+def test_rebase_is_only_offered_to_a_conflicted_live_pr():
+    assert REBASE not in _keys(_pr(), takes_prompt=True)
+    merged = _pr(state="MERGED", mergeable="CONFLICTING")
+    assert REBASE not in _keys(merged, takes_prompt=True, has_changes=True)
+
+
+def test_the_rebase_prompt_names_the_pr():
+    actions = actions_for(_pr(mergeable="CONFLICTING"), True)
+    action = next(a for a in actions if a.key == REBASE)
+    assert action.prompt == "rebase PR #55 and resolve the conflicts"
 
 
 def test_the_working_tree_is_only_consulted_when_it_could_matter():
@@ -222,6 +259,7 @@ def test_a_url_that_isnt_a_pr_never_reaches_gh(gh):
 def test_the_prompts_sent_to_a_session_are_left_in_english():
     """They are read by the agent CLI, not by a person."""
     assert CI_PROMPT == "Address the ci error(s) on PR #{number}"
+    assert REBASE_PROMPT == "rebase PR #{number} and resolve the conflicts"
     assert NEW_PR_PROMPT == "Open a pull request for your changes"
 
 

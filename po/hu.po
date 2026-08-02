@@ -704,6 +704,12 @@ msgstr "Jobb kattintás a megnyitáshoz"
 msgid "Open on GitHub"
 msgstr "Megnyitás GitHubon"
 
+msgid "Rebase / resolve conflicts"
+msgstr "Rebase / konfliktusok feloldása"
+
+msgid "Has merge conflicts"
+msgstr "Beolvasztási konfliktusai vannak"
+
 msgid "Open pull request"
 msgstr "Nyitott pull request"
 

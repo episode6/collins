@@ -139,6 +139,14 @@ msgstr ""
 msgid "Open on GitHub"
 msgstr ""
 
+#: collins/practions.py:158
+msgid "Rebase / resolve conflicts"
+msgstr ""
+
+#: collins/prstatus.py:239
+msgid "Has merge conflicts"
+msgstr ""
+
 #: collins/dialogs.py:30
 msgid "Rename session"
 msgstr ""

@@ -76,6 +76,7 @@ _ACTION_ICONS = {
     practions.READY: ("git-pull-request-symbolic", "pr-open"),
     practions.MERGE: ("git-merge-symbolic", "pr-merged"),
     practions.AUTO_MERGE: ("git-merge-symbolic", "pr-merged"),
+    practions.REBASE: ("agent-claude-symbolic", None),
     practions.REVIEW: ("agent-claude-symbolic", None),
     practions.FIX_CI: ("agent-claude-symbolic", None),
     practions.NEW_PR: ("agent-claude-symbolic", None),
@@ -133,15 +134,23 @@ def new_popover(position: Gtk.PositionType) -> Gtk.Popover:
 
 
 def status_mark(pr: PullRequest) -> Gtk.Widget:
-    """A PR's status as one widget: its CI glyph, or the merge mark.
+    """A PR's status as one widget: its CI glyph, the conflict alert, or the
+    merge mark.
 
     Always returns something, so titles line up down the menu even beside a PR
-    whose status hasn't been fetched yet.
+    whose status hasn't been fetched yet. A conflict outranks the CI glyph:
+    the column has room for one mark, and green checks on a branch GitHub
+    can't merge are the less actionable half of the story (the tooltip still
+    carries both, via describe).
     """
     if pr.merged:
         mark: Gtk.Widget = Gtk.Image.new_from_icon_name("git-merge-symbolic")
         mark.set_pixel_size(MERGED_ICON_PX)
         mark.add_css_class("pr-merged")
+    elif pr.conflicting:
+        mark = Gtk.Image.new_from_icon_name("alert-symbolic")
+        mark.set_pixel_size(MERGED_ICON_PX)
+        mark.add_css_class("pr-conflict")
     else:
         glyph = pr.glyph
         mark = Gtk.Label(label=glyph or "")

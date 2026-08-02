@@ -1033,6 +1033,16 @@ class TerminalTab(Gtk.Box):
             checks = Gtk.Label(label=glyph)
             checks.set_css_classes(["caption", prmenu.CHECKS_CSS.get(glyph, "dim-label")])
             chip.append(checks)
+        # A conflicted PR adds GitHub's alert triangle beside the CI mark
+        # rather than replacing it: both are true at once (checks can pass on
+        # a branch GitHub can't merge), and unlike the menu's one-mark column
+        # the chip has room for the pair. Yellow, not red — a rebase fixes it
+        # without any check being wrong.
+        if pr.conflicting:
+            alert = Gtk.Image.new_from_icon_name("alert-symbolic")
+            alert.set_pixel_size(prmenu.MERGED_ICON_PX)
+            alert.add_css_class("pr-conflict")
+            chip.append(alert)
         # A merged PR trades its CI glyph for GitHub's git-merge mark, purple
         # and undimmed: the one PR state worth spotting from across the row.
         if pr.merged:
