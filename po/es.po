@@ -11,6 +11,9 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+msgid "A command is still running in this terminal tab and will be terminated."
+msgstr "Todavía se está ejecutando un comando en esta pestaña de terminal y se terminará."
+
 msgid "New terminal tab"
 msgstr "Nueva pestaña de terminal"
 

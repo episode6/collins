@@ -189,9 +189,10 @@ that lives below or beside the agent terminal, with **tabs of its own**:
 - Toggle it with `Ctrl+J` or the buttons in the tab footer; `Ctrl+K` clears it
   (screen and saved history).
 - The panel's tab row has a **+ button** that opens another shell tab and
-  switches to it; each tab's **✕** closes it (and deletes its saved history).
-  Closing the last tab hides the panel — the footer's terminal button brings
-  it back with a fresh tab.
+  switches to it; each tab's **✕** closes it (and deletes its saved history),
+  asking first if a command is still running in it. Closing the last tab
+  hides the panel — the footer's terminal button brings it back with a
+  fresh tab.
 - Shells open in the agent's **current working directory** (worktree-aware),
   and the swap button moves the panel bottom ↔ right without restarting them.
 - **Right-click the footer's terminal button** to open that same directory —

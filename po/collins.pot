@@ -854,6 +854,10 @@ msgstr ""
 msgid "Move terminal panel bottom/right"
 msgstr ""
 
+#: collins/terminal.py:633
+msgid "A command is still running in this terminal tab and will be terminated."
+msgstr ""
+
 #: collins/terminal.py:521
 msgid "New terminal tab"
 msgstr ""

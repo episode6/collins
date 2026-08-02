@@ -21,6 +21,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa:
 
 from . import (  # noqa: E402
     apppicker,
+    dialogs,
     editor,
     editorfiles,
     footerapps,
@@ -505,6 +506,8 @@ class PanelTabs(Gtk.Box):
         self._ever_spawned = False
         self._next_number = 1  # "Terminal N" titles; resets when the strip empties
         self._cwd_lookup = None  # () -> agent cwd, set by the owning tab
+        self._close_ok: set[Adw.TabPage] = set()  # busy closes the user confirmed
+        self._close_asking: set[Adw.TabPage] = set()  # a confirm dialog is up
 
         self._view = Adw.TabView(vexpand=True)
         self._view.connect("close-page", self._on_close_page)
@@ -597,11 +600,42 @@ class PanelTabs(Gtk.Box):
             self._view.close_page(page)
 
     def _on_close_page(self, view: Adw.TabView, page: Adw.TabPage) -> bool:
+        panel = page.get_child()
+        if page not in self._close_ok and panel.has_running_command():
+            # The X on a busy shell asks first, mirroring the session tab's
+            # own close protection — a build shouldn't die to a stray click.
+            view.close_page_finish(page, False)  # keep the tab while we ask
+            if page not in self._close_asking:
+                self._ask_close_busy(page)
+            return True
+        self._close_ok.discard(page)
         view.close_page_finish(page, True)
         if view.get_n_pages() == 0:
             self._next_number = 1  # an empty strip restarts the numbering
             self.emit("last-tab-closed")
         return True  # close_page_finish already ran
+
+    def _ask_close_busy(self, page: Adw.TabPage) -> None:
+        self._close_asking.add(page)
+        self._view.set_selected_page(page)  # show what's about to be killed
+
+        def do_close() -> None:
+            self._close_asking.discard(page)
+            # The tab may have emptied on its own while the dialog sat open
+            # (the command finished and the user typed `exit`).
+            if self._find_page(page.get_child()) is page:
+                self._close_ok.add(page)
+                self._view.close_page(page)
+
+        dialogs.confirm_dialog(
+            self,
+            _("Close tab with a running command?"),
+            _("A command is still running in this terminal tab and will be terminated."),
+            _("Close Tab"),
+            do_close,
+            on_dismiss=lambda: self._close_asking.discard(page),
+            default_response="confirm",
+        )
 
     def _on_selected(self, *_args) -> None:
         panel = self.selected_tab()
