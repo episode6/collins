@@ -32,6 +32,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: 
 
 from . import footerapps, openwith, prmenu
 from .chats import is_chat_cwd
+from .flash import flash
 from .formatting import format_size
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
@@ -1071,6 +1072,14 @@ class SessionSidebar(Gtk.Box):
             row.add_css_class("active-tab")
         if session_id is not None and not clicked_here:
             self._scroll_row_into_view(session_id)
+
+    def flash_row(self, row_id: str) -> None:
+        """Visual bell relay: flash the row standing for a ringing session (or
+        placeholder). Nothing to do when the search filter or an archive has
+        taken the row out of the list."""
+        row = self._row_for(row_id)
+        if row is not None:
+            flash(row)
 
     def _row_for(self, row_id: str | None) -> Gtk.ListBoxRow | None:
         return self._rows.get(row_id) or self._placeholder_rows.get(row_id)

@@ -240,14 +240,20 @@ row.session-child.active-tab > box {
   padding: 4px 8px;
 }
 
-/* visual bell: a terminal's BEL tints the header bar, fading out over the
-   animation. An inset shadow rather than background-color, so the flash
-   composites over the bar's normal background instead of replacing it. */
+/* visual bell: a terminal's BEL tints the header bar, plus the ringing
+   session's tab header and sidebar row, all fading out over the animation.
+   An inset shadow rather than background-color, so the flash composites over
+   each widget's normal background instead of replacing it. The spread must
+   exceed the widget's width: GSK fills an inset spread from the center out,
+   not from the edges in, so a smaller spread tints a band in the middle of
+   the widget instead of all of it. */
 @keyframes bell-flash {
-  from { box-shadow: inset 0 0 0 100px alpha(#D97757, 0.4); }
-  to   { box-shadow: inset 0 0 0 100px alpha(#D97757, 0); }
+  from { box-shadow: inset 0 0 0 9999px alpha(#D97757, 0.4); }
+  to   { box-shadow: inset 0 0 0 9999px alpha(#D97757, 0); }
 }
-headerbar.bell-flash {
+headerbar.bell-flash,
+tabbar tab.bell-flash,
+row.session-child.bell-flash {
   animation: bell-flash 400ms ease-out;
 }
 
