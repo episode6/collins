@@ -641,6 +641,7 @@ class TerminalTab(Gtk.Box):
             self._editor.connect(
                 "request-pop-out", lambda *_: self.emit("editor-pop-out-requested")
             )
+            self._editor.connect("add-to-chat", self._on_editor_add_to_chat)
         self._outer.connect("notify::position", lambda *_: self._remember_editor_width())
         self.append(self._outer)
 
@@ -1177,6 +1178,27 @@ class TerminalTab(Gtk.Box):
 
     def feed_child_text(self, text: str) -> None:
         self.terminal.feed_child(text.encode())
+
+    def _on_editor_add_to_chat(self, _pane, path: str, start_line: int, end_line: int) -> None:
+        """The editor's "Add to chat" (a right-clicked selection or file):
+        type the agent's mention token for it into the input box — typed,
+        never submitted, so the user says what they want done with it. The
+        trailing space both terminates the CLI's mention token and leaves
+        the cursor ready for that sentence.
+
+        The path resolves against the agent's cwd right now, not the
+        directory the tab started in — an agent that has cd'd into a
+        worktree reads relative paths from there (see file_reference for
+        the fallback when the file isn't under it). Unlike inject_prompt
+        this isn't gated on takes_prompt: nothing is sent, and half-written
+        input is exactly where a reference gets added mid-sentence."""
+        reference = self.provider.file_reference(
+            path, self.current_agent_cwd(), start_line, end_line
+        )
+        if reference is None:
+            return
+        self.feed_child_text(reference + " ")
+        self.grab_terminal_focus()
 
     def inject_prompt(self, text: str) -> None:
         """Type *text* into the agent, send it, and put the tab in front.

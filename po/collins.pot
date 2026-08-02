@@ -1404,3 +1404,7 @@ msgid ""
 "This session is already its own background agent. Opening it attaches to "
 "that agent."
 msgstr ""
+
+#: collins/editor.py:164 collins/editor.py:281 collins/filetree.py:203
+msgid "Add to chat"
+msgstr ""

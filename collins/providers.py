@@ -262,6 +262,16 @@ class Provider:
         have no such dialog to detect."""
         return None
 
+    def file_reference(
+        self, path: str, cwd: str | None, start_line: int = 0, end_line: int = 0
+    ) -> str | None:
+        """The token that, typed into this agent's input box, makes it read
+        *path* — narrowed to `start_line`..`end_line` (1-based, inclusive;
+        0 = the whole file) when the agent's syntax can carry a range.
+        None when there is no such syntax: base agents have no input box
+        Collins knows how to write a file mention into."""
+        return None
+
     def parse_details(self, path: Path) -> SessionDetails:
         raise NotImplementedError
 
@@ -326,6 +336,40 @@ class ClaudeProvider(Provider):
             return False
         rest = cursor_line[len(_PROMPT_MARK) :].strip()
         return not rest or rest.startswith(_PROMPT_HINT)
+
+    def file_reference(
+        self, path: str, cwd: str | None, start_line: int = 0, end_line: int = 0
+    ) -> str | None:
+        """Claude Code's @-mention, with its native line-range suffix.
+
+        Verified against the CLI (2026-08-02): `@path#L2-4` and `@path#L5`
+        attach exactly those lines, but a column suffix (`#L2C3-L4C6`) is
+        not parsed — the whole file gets attached and the range is silently
+        lost — so callers must round a partial-line selection outward to
+        whole lines before calling. A path containing whitespace only
+        survives the mention tokenizer quoted (`@"my file.txt"#L2-4`);
+        backslash-escaping the space does not work.
+
+        Relative paths resolve against the CLI's cwd *now*, not where the
+        session started, so the path is shown relative to *cwd* when it sits
+        inside it and absolute otherwise — an agent that has cd'd into a
+        worktree still gets a working reference to a file outside it.
+        """
+        p = Path(path)
+        if cwd:
+            try:
+                p = p.relative_to(cwd)
+            except ValueError:
+                pass
+        token = str(p)
+        if any(ch.isspace() for ch in token):
+            token = f'"{token}"'
+        reference = f"@{token}"
+        if start_line > 0:
+            reference += f"#L{start_line}"
+            if end_line > start_line:
+                reference += f"-{end_line}"
+        return reference
 
     def worktree_exit_prompt(self, screen_text: str) -> str | None:
         """Claude's confirmation before leaving a worktree session, read off

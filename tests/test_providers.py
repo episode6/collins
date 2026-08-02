@@ -369,3 +369,33 @@ def test_claude_worktree_mentions_in_scrollback_are_not_the_dialog():
 
 def test_base_providers_have_no_worktree_exit_dialog():
     assert Provider().worktree_exit_prompt("Keep worktree\nRemove worktree") is None
+
+
+# -- file references (the editor's "Add to chat") -----------------------------
+
+
+def test_claude_file_reference_whole_file_is_a_bare_mention():
+    assert ClaudeProvider().file_reference("/home/user/proj/app.py", "/home/user/proj") == "@app.py"
+
+
+def test_claude_file_reference_line_ranges():
+    claude = ClaudeProvider()
+    assert claude.file_reference("/p/a.py", "/p", 2, 4) == "@a.py#L2-4"
+    assert claude.file_reference("/p/a.py", "/p", 5, 5) == "@a.py#L5"
+
+
+def test_claude_file_reference_outside_cwd_falls_back_to_absolute():
+    """The agent cd'd into a worktree; the editor's file lives outside it."""
+    worktree = "/home/user/proj/.claude/worktrees/wt"
+    ref = ClaudeProvider().file_reference("/home/user/proj/app.py", worktree, 1, 3)
+    assert ref == "@/home/user/proj/app.py#L1-3"
+    assert ClaudeProvider().file_reference("/p/a.py", None) == "@/p/a.py"
+
+
+def test_claude_file_reference_quotes_a_path_with_spaces():
+    """The CLI's mention tokenizer stops at whitespace unless quoted."""
+    assert ClaudeProvider().file_reference("/p/my file.txt", "/p", 2, 4) == '@"my file.txt"#L2-4'
+
+
+def test_base_providers_have_no_file_reference():
+    assert Provider().file_reference("/p/a.py", "/p", 1, 2) is None
