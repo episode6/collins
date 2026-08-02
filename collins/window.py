@@ -361,7 +361,9 @@ class MainWindow(Adw.ApplicationWindow):
         new_btn.connect("clicked", lambda *_: self._new_session())
         content_header.pack_start(new_btn)
 
-        self.exit_btn = Gtk.Button(icon_name="tab-close-symbolic", visible=False)
+        # A stop square, not an X: exiting a session isn't deleting anything,
+        # and the close-style X read like it was.
+        self.exit_btn = Gtk.Button(icon_name="media-playback-stop-symbolic", visible=False)
         self.exit_btn.set_tooltip_text(_("Exit session and close tab"))
         self.exit_btn.connect("clicked", lambda *_: self._exit_current_tab())
         content_header.pack_start(self.exit_btn)

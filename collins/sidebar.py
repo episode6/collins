@@ -387,7 +387,11 @@ class SessionRow(Gtk.ListBoxRow):
         # two operations as the header buttons, for a row that isn't
         # necessarily the focused tab. Hidden unless a tab is actually open on
         # the session (see _on_status_changed).
-        stop_btn = Gtk.Button(icon_name="tab-close-symbolic", valign=Gtk.Align.CENTER)
+        # A stop square, not an X: exiting a session isn't deleting anything,
+        # and the close-style X read like it was.
+        stop_btn = Gtk.Button(
+            icon_name="media-playback-stop-symbolic", valign=Gtk.Align.CENTER
+        )
         stop_btn.add_css_class("flat")
         stop_btn.set_tooltip_text(_("Exit session and close tab"))
         stop_btn.connect(
