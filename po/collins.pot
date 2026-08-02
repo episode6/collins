@@ -1480,3 +1480,21 @@ msgstr ""
 #: collins/sidebar.py:1549
 msgid "New sessions use a worktree"
 msgstr ""
+
+#: collins/sidebar.py:1541
+msgid "New session here (no worktree)"
+msgstr ""
+
+#: collins/sidebar.py:1542
+msgid "New session here (in a worktree)"
+msgstr ""
+
+#: collins/window.py:1230
+#, python-brace-format
+msgid "New session in {project} (no worktree)"
+msgstr ""
+
+#: collins/window.py:1232
+#, python-brace-format
+msgid "New session in {project} (in a worktree)"
+msgstr ""

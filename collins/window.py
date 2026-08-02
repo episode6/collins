@@ -324,6 +324,13 @@ class MainWindow(Adw.ApplicationWindow):
                 _("New {name} session…").format(name=provider.name),
                 f"win.new-session-provider::{provider.id}",
             )
+        # A one-off launch in the visible project with the *opposite* of its
+        # effective worktree choice. Label and target depend on which tab is
+        # visible, so the item is rebuilt every time the dropdown opens (see
+        # _refresh_alt_new_session_item); this records where it goes.
+        self._new_menu = new_menu
+        self._alt_new_pos = new_menu.get_n_items()
+        self._alt_new_present = False
         # The sidebar's Chats project: a session in a throwaway directory
         # ("chat" here ≠ the native streaming chat entries below).
         new_menu.append(_("New chat (scratch folder)"), "win.new-session-in-chats")
@@ -349,6 +356,9 @@ class MainWindow(Adw.ApplicationWindow):
         new_btn = Adw.SplitButton(icon_name="tab-new-symbolic")
         new_btn.set_tooltip_text(_("New session (Ctrl+Shift+T)"))
         new_btn.set_menu_model(new_menu)
+        popover = new_btn.get_popover()
+        if popover is not None:
+            popover.connect("show", lambda *_: self._refresh_alt_new_session_item())
         self.tab_bar_toggle = Gtk.ToggleButton(
             icon_name="view-paged-symbolic",
             active=self.tab_bar.get_visible(),
@@ -923,6 +933,12 @@ class MainWindow(Adw.ApplicationWindow):
                 get_provider(p.get_string())
             ),
             "new-session-in": lambda _a, p: self._start_new_session(p.get_string()),
+            # One-off launch the other way around: whatever the target
+            # project's effective worktree choice is, use the opposite —
+            # without touching the setting or the project's pin.
+            "new-session-in-inverted": lambda _a, p: self._start_new_session(
+                p.get_string(), worktree=not self._worktree_for_new_session(p.get_string())
+            ),
             "new-chat-provider": lambda _a, p: self._new_chat_session_target(p.get_string()),
             "new-session-advanced": lambda _a, p: self._new_session_advanced(get_provider(p.get_string())),
             "continue-session": lambda _a, p: self._continue_session(get_provider(p.get_string())),
@@ -1199,6 +1215,29 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self._choose_new_session_folder(provider)
 
+    def _refresh_alt_new_session_item(self) -> None:
+        """Rebuild the header dropdown's one-off worktree entry for the visible
+        project: launch there with the opposite of its effective choice. Hidden
+        when there's no visible git project to invert for (chats included)."""
+        if self._alt_new_present:
+            self._new_menu.remove(self._alt_new_pos)
+            self._alt_new_present = False
+        cwd = self._visible_project_dir()
+        if not cwd or chats.is_chat_cwd(cwd) or not (Path(cwd) / ".git").exists():
+            return
+        project = project_name_for_cwd(cwd)
+        label = (
+            _("New session in {project} (no worktree)").format(project=project)
+            if self._worktree_for_new_session(cwd)
+            else _("New session in {project} (in a worktree)").format(project=project)
+        )
+        item = Gio.MenuItem.new(label, None)
+        item.set_action_and_target_value(
+            "win.new-session-in-inverted", GLib.Variant("s", cwd)
+        )
+        self._new_menu.insert_item(self._alt_new_pos, item)
+        self._alt_new_present = True
+
     def _new_session_in_chats(self, provider=None) -> None:
         """A session in the virtual Chats project: launched in a fresh
         throwaway directory instead of a real project folder."""
@@ -1241,9 +1280,17 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         return self.state.worktree_for_project(project_name_for_cwd(cwd))
 
-    def _start_new_session(self, cwd: str, provider=None, options=None) -> None:
+    def _start_new_session(
+        self, cwd: str, provider=None, options=None, worktree: bool | None = None
+    ) -> None:
+        """`worktree` forces this one launch on/off (still never outside a git
+        checkout); None resolves the project's effective value as usual."""
         provider = provider or self._default_provider()
-        if self._worktree_for_new_session(cwd):
+        if worktree is None:
+            worktree = self._worktree_for_new_session(cwd)
+        else:
+            worktree = worktree and (Path(cwd) / ".git").exists()
+        if worktree:
             options = replace(options or SessionOptions(), worktree=True)
         tab = TerminalTab(
             cwd=cwd, session_id=None, settings=self.state.settings, provider=provider,

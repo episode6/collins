@@ -1525,6 +1525,7 @@ class SessionSidebar(Gtk.Box):
         project_name = row.group_key[1]
 
         open_section = Gio.Menu()
+        is_git = bool(row.cwd) and (Path(row.cwd) / ".git").exists()
         if row.cwd:
             new_item = Gio.MenuItem.new(_("New session here"), None)
             new_item.set_action_and_target_value(
@@ -1532,14 +1533,25 @@ class SessionSidebar(Gtk.Box):
             )
             open_section.append_item(new_item)
 
+        # One-off launch the other way around from the project's effective
+        # worktree choice — for trying the other method without touching the
+        # default or the project's pin.
+        if is_git:
+            alt_label = (
+                _("New session here (no worktree)")
+                if self.store.state.worktree_for_project(project_name)
+                else _("New session here (in a worktree)")
+            )
+            alt_item = Gio.MenuItem.new(alt_label, None)
+            alt_item.set_action_and_target_value(
+                "win.new-session-in-inverted", GLib.Variant("s", row.cwd)
+            )
+            open_section.append_item(alt_item)
+
         # Worktree launches only mean something in a git checkout (`.git` is a
         # file in worktree checkouts, so either form counts) — elsewhere the
         # checkbox is omitted rather than left to silently do nothing.
-        if (
-            row.cwd
-            and not self.store.state.is_virtual_project(project_name)
-            and (Path(row.cwd) / ".git").exists()
-        ):
+        if is_git and not self.store.state.is_virtual_project(project_name):
             self._worktree_menu_project = project_name
             self._project_worktree_action.set_state(
                 GLib.Variant.new_boolean(
