@@ -368,6 +368,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.background_btn.set_tooltip_text(_("Background session and close tab"))
         self.background_btn.connect("clicked", lambda *_: self._background_current_tab())
         content_header.pack_start(self.background_btn)
+        self.archive_btn = Gtk.Button(icon_name="archive-symbolic", visible=False)
+        self.archive_btn.connect("clicked", lambda *_: self._archive_current_session())
+        content_header.pack_start(self.archive_btn)
 
         # Caffeine Mode: first pack_end child, so it sits immediately left of
         # the window controls (minimize/maximize/close).
@@ -2687,9 +2690,9 @@ class MainWindow(Adw.ApplicationWindow):
     # -- terminal panel ------------------------------------------------------
 
     def _update_close_buttons(self, page: Adw.TabPage | None) -> None:
-        """The header exit/background buttons act on the focused session, so
-        they show only while a session tab is selected — and backgrounding
-        only for providers that support detaching.
+        """The header exit/background/archive buttons act on the focused
+        session, so they show only while a session tab is selected — and
+        backgrounding only for providers that support detaching.
 
         The background button additionally greys out whenever the handoff
         couldn't be tracked (see _background_blocker). Greyed rather than
@@ -2704,6 +2707,20 @@ class MainWindow(Adw.ApplicationWindow):
         blocker = self._background_blocker(page)
         self.background_btn.set_sensitive(not blocker)
         self.background_btn.set_tooltip_text(_BG_TOOLTIPS.get(blocker, _BG_TOOLTIPS[""]))
+        # A brand-new tab has no session id until the store discovers it; the
+        # refresh that delivers the id re-runs this via
+        # _refresh_background_affordances, which also keeps the icon in step
+        # when the session's archived state flips while its tab stays open.
+        session_id = tab.session_id if is_session else None
+        self.archive_btn.set_visible(bool(session_id))
+        if session_id and self.state.is_archived(session_id):
+            self.archive_btn.set_icon_name("unarchive-symbolic")
+            self.archive_btn.set_tooltip_text(_("Restore session (Ctrl+Shift+A)"))
+        else:
+            self.archive_btn.set_icon_name("archive-symbolic")
+            self.archive_btn.set_tooltip_text(
+                _("Archive session and close tab (Ctrl+Shift+A)")
+            )
 
     # -- the background gate ---------------------------------------------------
 

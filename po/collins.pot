@@ -997,6 +997,14 @@ msgstr ""
 msgid "Background session and close tab"
 msgstr ""
 
+#: collins/window.py:2718
+msgid "Restore session (Ctrl+Shift+A)"
+msgstr ""
+
+#: collins/window.py:2722
+msgid "Archive session and close tab (Ctrl+Shift+A)"
+msgstr ""
+
 #: collins/window.py:217
 msgid "No session open"
 msgstr ""
