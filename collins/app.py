@@ -121,6 +121,14 @@ row.session-child.running:hover {
 /* running detached (/bg): the one status the guide line still speaks for */
 row.session-child.detached { border-left-color: #e5a50a; }
 
+/* a finished run nobody has looked at yet (see SessionItem.unread): the guide
+   line holds solid blue, the color of the pole that was just climbing it,
+   until the user returns to the tab. Below the .detached rule so blue wins
+   the line while a formerly-detached row still reads as such, and beaten by
+   the .busy pole rules (their selectors carry one more class), so a session
+   sent straight back to work moves again instead of sitting on a stale flag. */
+row.session-child.unread { border-left-color: #3584e4; }
+
 /* An agent producing output right now (see activity.py) turns its row's guide
    line into a barber pole: stripes climbing while work is happening, still the
    moment it stops. The class rides on top of the status one, so a session in a

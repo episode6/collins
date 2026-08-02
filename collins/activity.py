@@ -112,12 +112,18 @@ class ActivityTracker:
 
     *on_change* is called with (session_id, busy) on each transition, never for
     a repeat mark.
+
+    *on_finished* is called (after on_change) only when a session's idle window
+    runs out — the agent's output genuinely stopped coming. An explicit clear()
+    is teardown, not a finish: its tab closed or its detach ended, and neither
+    should read as "a run just completed".
     """
 
     def __init__(
         self,
         on_change: Callable[[str, bool], None],
         *,
+        on_finished: Callable[[str], None] | None = None,
         idle_s: float = IDLE_S,
         sweep_ms: int = SWEEP_MS,
         clock: Callable[[], float] = time.monotonic,
@@ -125,6 +131,7 @@ class ActivityTracker:
         remove_timeout: Callable[[int], None] | None = None,
     ) -> None:
         self._on_change = on_change
+        self._on_finished = on_finished
         self._idle_s = idle_s
         self._sweep_ms = sweep_ms
         self._clock = clock
@@ -188,6 +195,8 @@ class ActivityTracker:
         for session_id in [sid for sid, deadline in self._deadlines.items() if deadline <= now]:
             del self._deadlines[session_id]
             self._on_change(session_id, False)
+            if self._on_finished is not None:
+                self._on_finished(session_id)
         if not self._deadlines:
             self._sweep = None
             return False  # nothing left to time out; mark() starts it again

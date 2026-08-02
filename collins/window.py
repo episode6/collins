@@ -86,6 +86,22 @@ _BG_QUEUE_WAIT_MS = 5000
 _BG_QUEUE_POLL_MS = 500
 _BG_QUEUE_ITEM_TIMEOUT_S = 20
 
+# Bare modifiers and locks: presses VTE sends nothing to the child for. They
+# don't count as "typing into the terminal" when a keystroke clears the
+# selected tab's unread flag — half of them are the first half of a shortcut
+# aimed elsewhere (a Ctrl held for Ctrl+PgDn is leaving the tab, not reading
+# it).
+_MODIFIER_KEYVALS = frozenset((
+    Gdk.KEY_Shift_L, Gdk.KEY_Shift_R,
+    Gdk.KEY_Control_L, Gdk.KEY_Control_R,
+    Gdk.KEY_Alt_L, Gdk.KEY_Alt_R,
+    Gdk.KEY_Super_L, Gdk.KEY_Super_R,
+    Gdk.KEY_Meta_L, Gdk.KEY_Meta_R,
+    Gdk.KEY_Hyper_L, Gdk.KEY_Hyper_R,
+    Gdk.KEY_ISO_Level3_Shift, Gdk.KEY_ISO_Level5_Shift,
+    Gdk.KEY_Caps_Lock, Gdk.KEY_Num_Lock, Gdk.KEY_Scroll_Lock,
+))
+
 # The header background button's tooltip, per reason it's unavailable.
 _BG_TOOLTIPS = {
     "": _("Background session and close tab"),
@@ -209,7 +225,12 @@ class MainWindow(Adw.ApplicationWindow):
         # The poll only runs while something is detached; see _sync_bg_poll.
         # Transcript marks carry the wider detached window: a JSONL grows in
         # bursts, and the pole should ride out the quiet in between.
-        self._activity = ActivityTracker(self._on_activity_changed)
+        # on_finished fires only when a run's output stops on its own — the
+        # edge that flags a row unread; a clear() (tab closed, detach torn
+        # down) goes through on_change alone and flags nothing.
+        self._activity = ActivityTracker(
+            self._on_activity_changed, on_finished=self._on_session_finished
+        )
         self._bg_activity = TranscriptActivity(
             lambda sid: self._activity.mark(sid, idle_s=DETACHED_IDLE_S)
         )
@@ -1474,6 +1495,9 @@ class MainWindow(Adw.ApplicationWindow):
             if session is None:
                 continue  # not scanned yet; retried on the next store refresh
             del self._pending_resolved[page]
+            # A first turn that finished before this rescan landed flagged the
+            # placeholder unread; the flag must outlive the row it sat on.
+            unread = self.sidebar.placeholder_unread(self._placeholder_pages.get(page, ""))
             self._remove_placeholder(page)  # the real sidebar row exists now
             if page.get_title() == title:  # keep any manual rename/emoji
                 page.set_title(self._tab_title(session))
@@ -1488,6 +1512,8 @@ class MainWindow(Adw.ApplicationWindow):
             # row that exists now, or the pole dies with the placeholder and
             # stays down for the rest of the turn.
             self._sync_row_busy(session_id)
+            if unread:
+                self.store.set_unread(session_id, True)
         self._update_active_row()  # hand the highlight from placeholder to real row
 
     def _refresh_tab_titles(self) -> None:
@@ -2188,6 +2214,35 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._sync_row_busy(session_id)
 
+    def _on_session_finished(self, session_id: str) -> None:
+        """A run's output stopped coming on its own: flag its rows unread.
+
+        The selected tab's row is flagged like any other — a finish is a
+        finish whether or not the user was looking, and they may not have
+        been — and its flag falls to the next keystroke into its terminal, or
+        to leaving the tab and coming back (both through _clear_unread).
+        Every other row's falls to selecting its tab.
+        """
+        if self.sidebar.has_placeholder(session_id):
+            self.sidebar.set_placeholder_unread(session_id, True)
+            return
+        for row_id in self.store.rows_representing(session_id):
+            # A row whose conversation still runs under another of its ids —
+            # a /bg fork mid-turn, say — hasn't finished; its own edge comes.
+            if not (self._chain(row_id) & self._activity.busy()):
+                self.store.set_unread(row_id, True)
+
+    def _clear_unread(self, page: Adw.TabPage) -> None:
+        """The user is at this tab (selected it, or typed into it): whatever
+        finished in it has been seen, on every row standing for it."""
+        placeholder_id = self._placeholder_pages.get(page)
+        if placeholder_id is not None:
+            self.sidebar.set_placeholder_unread(placeholder_id, False)
+        session_id = self._session_id_of(page)
+        if session_id:
+            for row_id in self.store.rows_representing(session_id):
+                self.store.set_unread(row_id, False)
+
     def _sync_bg_poll(self) -> None:
         """Run the transcript poll only while some session is detached.
 
@@ -2350,6 +2405,10 @@ class MainWindow(Adw.ApplicationWindow):
         (Enter at an empty prompt, Enter inside a menu) costs nothing visible:
         a pole no output follows goes back down when the idle window runs out.
         """
+        # Any real keystroke first: the user is typing at this tab, so a
+        # finished run it was flagged with has been seen (see _clear_unread).
+        if keyval not in _MODIFIER_KEYVALS:
+            self._clear_unread(page)
         if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             return Gdk.EVENT_PROPAGATE
         if state & Gtk.accelerator_get_default_mod_mask():
@@ -2610,6 +2669,7 @@ class MainWindow(Adw.ApplicationWindow):
         if page is None:
             return
         self._cancel_idle(page)  # foreground now; no "finished" notification
+        self._clear_unread(page)  # switching here is what reads a finished run
         if page.get_needs_attention():
             page.set_needs_attention(False)
             session_id = self._session_id_of(page)

@@ -63,6 +63,11 @@ _IN_TAB_STATUSES = ("open", "attention")
 # line into a moving barber pole, so a stale flag on a row that is no longer
 # running paints nothing.
 _BUSY_CSS = "busy"
+# A finished run nobody has looked at yet: paints the guide line blue until
+# the user returns to the session's tab (see SessionItem.unread). The busy
+# pole outranks it in CSS, so a session that starts a new turn unread moves
+# again and shows blue once more when that turn also runs out.
+_UNREAD_CSS = "unread"
 
 # How far a project header's icon sits from the row's own left edge: the
 # theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
@@ -521,9 +526,11 @@ class SessionRow(Gtk.ListBoxRow):
         self._status_handler = item.connect("notify::status", self._on_status_changed)
         self._state_handler = item.connect("notify::state", self._on_state_changed)
         self._busy_handler = item.connect("notify::busy", self._on_busy_changed)
+        self._unread_handler = item.connect("notify::unread", self._on_unread_changed)
         self._on_status_changed(item, None)
         self._on_state_changed(item, None)
         self._on_busy_changed(item, None)
+        self._on_unread_changed(item, None)
 
         right_click = Gtk.GestureClick(button=3)
         right_click.connect("pressed", self._on_right_click)
@@ -623,6 +630,9 @@ class SessionRow(Gtk.ListBoxRow):
         if self._busy_handler is not None:
             self.item.disconnect(self._busy_handler)
             self._busy_handler = None
+        if self._unread_handler is not None:
+            self.item.disconnect(self._unread_handler)
+            self._unread_handler = None
         if self._syncing_handler is not None:
             self.item.disconnect(self._syncing_handler)
             self._syncing_handler = None
@@ -675,6 +685,12 @@ class SessionRow(Gtk.ListBoxRow):
             self.add_css_class(_BUSY_CSS)
         else:
             self.remove_css_class(_BUSY_CSS)
+
+    def _on_unread_changed(self, item: SessionItem, _pspec) -> None:
+        if item.unread:
+            self.add_css_class(_UNREAD_CSS)
+        else:
+            self.remove_css_class(_UNREAD_CSS)
 
     def _on_state_changed(self, item: SessionItem, _pspec) -> None:
         badge = self._state_badge
@@ -733,6 +749,9 @@ class SessionSidebar(Gtk.Box):
         # rather than on the row, which any rebuild throws away — a new thread
         # printing its first turn is exactly when rows come and go.
         self._busy_placeholders: set[str] = set()
+        # Placeholders whose tab finished a run nobody has looked at, on the
+        # same terms (see SessionItem.unread for the flag's meaning).
+        self._unread_placeholders: set[str] = set()
         self._active_session_id: str | None = None
         # "Is this session sitting at an empty prompt?", for a row's PR actions
         # (see SessionRow._pr_host). Only the window can answer — the tab is
@@ -987,6 +1006,8 @@ class SessionSidebar(Gtk.Box):
                     prow.add_css_class("active-tab")
                 if pid in self._busy_placeholders:
                     prow.add_css_class(_BUSY_CSS)
+                if pid in self._unread_placeholders:
+                    prow.add_css_class(_UNREAD_CSS)
                 self._placeholder_rows[pid] = prow
                 self._row_order.append(pid)
                 self.list.append(prow)
@@ -1163,11 +1184,31 @@ class SessionSidebar(Gtk.Box):
         else:
             row.remove_css_class(_BUSY_CSS)
 
+    def set_placeholder_unread(self, placeholder_id: str, unread: bool) -> None:
+        """Flag (or clear) a "New Thread" row's finished-and-unseen state, the
+        way set_placeholder_busy carries the busy flag: the row has no
+        SessionItem yet, so the sidebar holds it across rebuilds."""
+        if unread:
+            self._unread_placeholders.add(placeholder_id)
+        else:
+            self._unread_placeholders.discard(placeholder_id)
+        row = self._placeholder_rows.get(placeholder_id)
+        if row is None:
+            return
+        if unread:
+            row.add_css_class(_UNREAD_CSS)
+        else:
+            row.remove_css_class(_UNREAD_CSS)
+
     def has_placeholder(self, placeholder_id: str) -> bool:
         return placeholder_id in self._placeholders
 
+    def placeholder_unread(self, placeholder_id: str) -> bool:
+        return placeholder_id in self._unread_placeholders
+
     def remove_placeholder(self, placeholder_id: str) -> None:
         self._busy_placeholders.discard(placeholder_id)
+        self._unread_placeholders.discard(placeholder_id)
         if self._placeholders.pop(placeholder_id, None) is None:
             return
         self._rebuild_rows()
