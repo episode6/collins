@@ -573,6 +573,7 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
         "title": "Keep the yellow line on a backgrounded session",
         "isDraft": True,
         "state": "OPEN",
+        "mergeable": "MERGEABLE",
         "statusCheckRollup": [
             {"__typename": "CheckRun", "conclusion": "SUCCESS", "status": "COMPLETED",
              "name": "lint"},
@@ -586,6 +587,7 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
         "state": "DRAFT",
         "checks": {"passed": 1, "failed": 0, "pending": 1},
         "title": "Keep the yellow line on a backgrounded session",
+        "mergeable": "MERGEABLE",
     }
 
 
@@ -1004,3 +1006,58 @@ def test_resync_fetches_nothing_once_gh_is_known_missing(gh_calls, monkeypatch):
     monkeypatch.setattr(prstatus, "_gh_missing", True)
     assert resync([PullRequest(55, URL)]) == [PullRequest(55, URL)]
     assert urls == []
+
+
+# -- mergeability ------------------------------------------------------------
+
+
+def test_a_definite_mergeable_verdict_is_kept():
+    entry = prstatus._entry({"state": "OPEN", "mergeable": "CONFLICTING"})
+    assert entry["mergeable"] == "CONFLICTING"
+
+
+@pytest.mark.parametrize("value", ["UNKNOWN", "", None, 7])
+def test_an_indefinite_mergeable_verdict_is_no_answer(value):
+    """GitHub computes mergeability lazily; gh says UNKNOWN until it lands.
+    That is "not known yet", never a state to show."""
+    assert prstatus._entry({"state": "OPEN", "mergeable": value})["mergeable"] is None
+
+
+def test_enrich_fills_mergeability(gh):
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0},
+        "mergeable": "CONFLICTING"})
+    refresh(URL)
+    pr = enrich(parse_pr_link(_link()))
+    assert pr.mergeable == "CONFLICTING"
+    assert pr.conflicting is True
+
+
+def test_the_cli_cache_carries_no_mergeability(cache):
+    """Its entries predate the field, so a warm start says "not known yet"."""
+    cache({URL: {"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}}})
+    pr = enrich(parse_pr_link(_link()))
+    assert pr.mergeable is None
+    assert pr.conflicting is False
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED", None])
+def test_only_a_live_pr_counts_as_conflicting(state):
+    """Whatever gh reports, a PR that is going nowhere has no conflict worth
+    showing."""
+    pr = PullRequest(55, URL, state=state, mergeable="CONFLICTING")
+    assert pr.conflicting is False
+
+
+def test_describe_names_a_conflict():
+    pr = PullRequest(55, URL, "episode6/collins", state="OPEN",
+                     mergeable="CONFLICTING", passed=2, failed=0, pending=0)
+    assert describe(pr) == (
+        "episode6/collins#55 · Open pull request · Has merge conflicts · 2 passed"
+    )
+
+
+def test_forget_status_drops_mergeability():
+    """Whether a branch still merges goes stale with every push to either
+    side, so it is refetched, never remembered."""
+    pr = PullRequest(55, URL, "episode6/collins", state="OPEN", mergeable="CONFLICTING")
+    assert forget_status(pr).mergeable is None

@@ -12,10 +12,11 @@ merged now or told to merge itself when its checks go green, and anything the
 repository's own Claude workflow can be asked for goes through a comment
 (`@claude review`) rather than an API Collins would have to hold a token for.
 
-Two of them aren't about GitHub at all: FIX_CI and NEW_PR send a prompt to the
-session that opened the PR and let the agent do the work. Both need a session
-sitting at an empty prompt, and NEW_PR needs uncommitted work to open a pull
-request *for* — neither is a property of the PR, so the caller answers both.
+Three of them aren't about GitHub at all: FIX_CI, REBASE and NEW_PR send a
+prompt to the session that opened the PR and let the agent do the work. All
+need a session sitting at an empty prompt, and NEW_PR needs uncommitted work
+to open a pull request *for* — neither is a property of the PR, so the caller
+answers both.
 Note that nothing here opens the PR's page: the menu carries its own "Open on
 GitHub" row ahead of these actions, built beside the widgets (prmenu) because
 opening a browser is Gtk's business and this module stays importable without
@@ -38,15 +39,17 @@ from .prstatus import PullRequest, gh_json, gh_run, repository_for
 READY = "ready"
 MERGE = "merge"
 AUTO_MERGE = "auto-merge"
+REBASE = "rebase"
 REVIEW = "review"
 FIX_CI = "fix-ci"
 NEW_PR = "new-pr"
 
-# What the two prompt-sending actions type into the session. Read by the agent
+# What the prompt-sending actions type into the session. Read by the agent
 # CLI, not by a person, so they stay in English (and untranslated) whatever the
-# app's language is. The CI one names its PR: a session can have opened
+# app's language is. Two of them name their PR: a session can have opened
 # several, and a bare "the ci error(s)" would leave the agent to guess whose.
 CI_PROMPT = "Address the ci error(s) on PR #{number}"
+REBASE_PROMPT = "rebase PR #{number} and resolve the conflicts"
 NEW_PR_PROMPT = "Open a pull request for your changes"
 # What asking for a review looks like on the PR: the mention the
 # `anthropics/claude-code-action` workflow triggers on. A repository without
@@ -120,7 +123,7 @@ def actions_for(
     Two of the three arguments are about the session rather than the PR.
     *takes_prompt* is whether it is somewhere a prompt can be sent right now —
     a tab open, at an empty input (see Provider.takes_prompt) — and it is why
-    both prompt-sending actions come and go: a session that is closed, or
+    the prompt-sending actions come and go: a session that is closed, or
     mid-sentence, is not somewhere to send one. *has_changes* is whether its
     working tree has uncommitted work in it, asked as a callable rather than a
     value because answering costs a `git status` (see gitinfo.has_changes) and
@@ -141,8 +144,22 @@ def actions_for(
                 _("Take {slug} out of draft").format(slug=pr.slug),
             )
         )
-    elif pr.state == "OPEN":
+    elif pr.state == "OPEN" and not pr.conflicting:
+        # A conflicting PR gets no merge item at all: merging now would only
+        # come back with GitHub's refusal, and auto-merge can't be enabled on
+        # a branch GitHub can't merge. The rebase action below stands where
+        # the merge would have — resolving is what makes merging offerable.
         actions.append(_merge_action(pr))
+    if pr.state in _LIVE and pr.conflicting and takes_prompt:
+        rebase_prompt = REBASE_PROMPT.format(number=pr.number)
+        actions.append(
+            Action(
+                REBASE,
+                _("Rebase / resolve conflicts"),
+                _("Send “{prompt}” to this session").format(prompt=rebase_prompt),
+                prompt=rebase_prompt,
+            )
+        )
     if pr.state in _LIVE:
         actions.append(
             Action(

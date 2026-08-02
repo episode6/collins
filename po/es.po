@@ -704,6 +704,12 @@ msgstr "Haz clic derecho para abrir"
 msgid "Open on GitHub"
 msgstr "Abrir en GitHub"
 
+msgid "Rebase / resolve conflicts"
+msgstr "Rebase / resolver conflictos"
+
+msgid "Has merge conflicts"
+msgstr "Tiene conflictos de fusión"
+
 msgid "Open pull request"
 msgstr "Pull request abierto"
 

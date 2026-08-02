@@ -371,8 +371,12 @@ APP_ID = "com.episode6.Collins"
 _SCHEME_CSS = """
 .pr-merged { color: %(merged_purple)s; }
 /* GitHub's open-PR green is the same shade as its checks-passed green, so the
-   menu's pull-request mark shares the pair rather than carrying its own. */
+   menu's pull-request mark shares the pair rather than carrying its own; the
+   conflict alert borrows the pending yellow the same way — attention-colored,
+   but not the red of a failed check, since a rebase fixes it without a CI
+   run being wrong. */
 .pr-open { color: %(passed_green)s; }
+.pr-conflict { color: %(pending_yellow)s; }
 .pr-checks-passed { color: %(passed_green)s; }
 .pr-checks-failed { color: %(failed_red)s; }
 .pr-checks-pending { color: %(pending_yellow)s; }

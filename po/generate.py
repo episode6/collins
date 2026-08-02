@@ -286,6 +286,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Click for actions": "Kattintson a műveletekhez",
         "Right-click to open": "Jobb kattintás a megnyitáshoz",
         "Open on GitHub": "Megnyitás GitHubon",
+        "Rebase / resolve conflicts": "Rebase / konfliktusok feloldása",
+        "Has merge conflicts": "Beolvasztási konfliktusai vannak",
         # pull request footer chip
         "Open pull request": "Nyitott pull request",
         "Draft pull request": "Piszkozat pull request",
@@ -620,6 +622,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Click for actions": "Für Aktionen klicken",
         "Right-click to open": "Zum Öffnen rechtsklicken",
         "Open on GitHub": "Auf GitHub öffnen",
+        "Rebase / resolve conflicts": "Rebase / Konflikte auflösen",
+        "Has merge conflicts": "Hat Merge-Konflikte",
         # pull request footer chip
         "Open pull request": "Offener Pull Request",
         "Draft pull request": "Pull-Request-Entwurf",
@@ -954,6 +958,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Click for actions": "Haz clic para ver las acciones",
         "Right-click to open": "Haz clic derecho para abrir",
         "Open on GitHub": "Abrir en GitHub",
+        "Rebase / resolve conflicts": "Rebase / resolver conflictos",
+        "Has merge conflicts": "Tiene conflictos de fusión",
         # pull request footer chip
         "Open pull request": "Pull request abierto",
         "Draft pull request": "Pull request en borrador",
@@ -1289,6 +1295,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Click for actions": "Cliquer pour les actions",
         "Right-click to open": "Clic droit pour ouvrir",
         "Open on GitHub": "Ouvrir sur GitHub",
+        "Rebase / resolve conflicts": "Rebase / résoudre les conflits",
+        "Has merge conflicts": "A des conflits de fusion",
         # pull request footer chip
         "Open pull request": "Pull request ouverte",
         "Draft pull request": "Brouillon de pull request",

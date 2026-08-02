@@ -84,7 +84,12 @@ _MAX_GH_ERROR = 500
 # The stamp of a status that is due no matter which TTL applies to it (see
 # invalidate) — every interval measured against it is already over.
 _DUE = float("-inf")
-_GH_FIELDS = "title,state,isDraft,statusCheckRollup"
+_GH_FIELDS = "title,state,isDraft,statusCheckRollup,mergeable"
+# What gh may say in the mergeable field. GitHub works the answer out lazily —
+# the first fetch after a push routinely says UNKNOWN while a background job
+# recomputes — so only a definite verdict is kept and UNKNOWN is stored as "no
+# answer", to be corrected by the refresh after the next TTL.
+_MERGEABLE_STATES = frozenset({"MERGEABLE", "CONFLICTING"})
 # Long PR titles are a thing; the menu ellipsizes them anyway, and this keeps
 # what a repository can put on screen (and on disk) bounded.
 _MAX_TITLE = 200
@@ -140,6 +145,11 @@ class PullRequest:
     passed: int | None = None
     failed: int | None = None
     pending: int | None = None
+    # MERGEABLE / CONFLICTING, or None while GitHub hasn't said (an unfetched
+    # PR, gh's transient UNKNOWN, or a warm start from the CLI cache — which
+    # has no such field). Like the check counts, never persisted: whether a
+    # branch still merges goes stale with every push to either side.
+    mergeable: str | None = None
 
     @property
     def slug(self) -> str:
@@ -167,6 +177,15 @@ class PullRequest:
     def merged(self) -> bool:
         """Merged PRs get GitHub's purple git-merge mark in place of a glyph."""
         return self.state == "MERGED"
+
+    @property
+    def conflicting(self) -> bool:
+        """Whether GitHub has said this PR can't merge as it stands.
+
+        Only a live PR can conflict in any sense worth showing: a merged or
+        closed one isn't going anywhere, whatever gh reports for it.
+        """
+        return self.state in ("OPEN", "DRAFT") and self.mergeable == "CONFLICTING"
 
     @property
     def glyph(self) -> str | None:
@@ -216,6 +235,8 @@ def describe(pr: PullRequest) -> str:
     parts.append(pr.slug)
     if pr.state:
         parts.append(state_text(pr.state))
+    if pr.conflicting:
+        parts.append(_("Has merge conflicts"))
     checks = [
         _("{n} passed").format(n=pr.passed) if pr.passed else None,
         _("{n} failed").format(n=pr.failed) if pr.failed else None,
@@ -314,6 +335,7 @@ def forget_status(pr: PullRequest) -> PullRequest:
         passed=None,
         failed=None,
         pending=None,
+        mergeable=None,
     )
 
 
@@ -527,11 +549,14 @@ def gh_run(args: list[str]) -> tuple[bool, str]:
 
 def _entry(data: dict) -> dict:
     """A gh reply reduced to the CLI cache's `{state, checks}` shape, plus the
-    title — which that cache has no room for and the chips' menu needs."""
+    title and mergeability — which that cache has no room for and the chips'
+    menu needs."""
+    mergeable = data.get("mergeable")
     return {
         "state": _state(data),
         "checks": _counts(data.get("statusCheckRollup")),
         "title": _title(data.get("title")),
+        "mergeable": mergeable if mergeable in _MERGEABLE_STATES else None,
     }
 
 
@@ -692,6 +717,7 @@ def enrich(pr: PullRequest | None) -> PullRequest | None:
         return pr
     state = entry.get("state")
     checks = entry.get("checks")
+    mergeable = entry.get("mergeable")
     return replace(
         pr,
         title=_title(entry.get("title")) or pr.title,
@@ -699,6 +725,7 @@ def enrich(pr: PullRequest | None) -> PullRequest | None:
         passed=_count(checks, "passed"),
         failed=_count(checks, "failed"),
         pending=_count(checks, "pending"),
+        mergeable=mergeable if mergeable in _MERGEABLE_STATES else None,
     )
 
 
