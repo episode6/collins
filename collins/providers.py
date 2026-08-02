@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -353,11 +353,24 @@ class ClaudeProvider(Provider):
         # accepts the daemon's short job id — the full session id gets
         # "No job matching". Forks always resume: attach can't create a
         # new session.
+        #
+        # Finished jobs count too: the daemon refuses `--resume` for ANY
+        # session id it still lists ("Session … is currently running as a
+        # background agent"), and a finished job stays listed — process
+        # resident, state "done" — indefinitely (observed on 2.1.220). Until
+        # the daemon lets go of the id, attach is the only door back into the
+        # conversation, and it does work on finished jobs (the CLI's own
+        # error message recommends it).
         cmd = super().resume_command(session_id, fork=fork)
         if cmd is None or fork:
             return cmd
         agent = next(
-            (a for a in self.background_agents() if a.session_id == session_id), None
+            (
+                a
+                for a in self.background_agents(include_finished=True)
+                if a.session_id == session_id
+            ),
+            None,
         )
         if agent is not None:
             cli = shutil.which(self.cli)
@@ -378,10 +391,11 @@ class ClaudeProvider(Provider):
         `--all` — only `state` says it is actually done. Left uncounted,
         such a job never leaves `background_agents()`: the sidebar's yellow
         "running detached" guide line has no other source and no exit path
-        ever clears it (see BackgroundStatusPoller), and resume_command()
-        would keep attaching to it — the daemon's attach screen, not a plain
-        resume — instead of continuing the transcript. `include_finished`
-        keeps them in, for the pairing callers (see the base docstring).
+        ever clears it (see BackgroundStatusPoller). `include_finished`
+        keeps them in, for the callers where finished-but-listed still
+        matters: /bg-handoff pairing (see the base docstring) and
+        resume_command()'s attach-vs-resume choice, since the daemon refuses
+        a plain `--resume` for as long as it lists the job, done or not.
         """
         cli = shutil.which(self.cli)
         if cli is None:

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -217,10 +217,17 @@ def progress_dialog(
     return dialog
 
 
-def error_dialog(parent: Gtk.Widget, heading: str, body: str) -> None:
+def info_dialog(parent: Gtk.Widget, heading: str, body: str) -> None:
+    """A one-button notice for outcomes that aren't failures (e.g. a repair
+    that found nothing to change). Same shape as error_dialog — the split is
+    purely so call sites say what they mean."""
     dialog = Adw.AlertDialog(heading=heading, body=body)
     dialog.add_response("ok", _("OK"))
     dialog.present(parent)
+
+
+def error_dialog(parent: Gtk.Widget, heading: str, body: str) -> None:
+    info_dialog(parent, heading, body)
 
 
 def new_session_options_dialog(

@@ -1371,3 +1371,36 @@ msgstr ""
 #: collins/chatbubbles.py:73
 msgid "Open {name} in the editor"
 msgstr ""
+
+#: collins/sidebar.py:1439
+msgid "Repair session link"
+msgstr ""
+
+#: collins/window.py:2137
+msgid "No matching agent"
+msgstr ""
+
+#: collins/window.py:2138
+msgid ""
+"No background agent matches this session — either its agent is gone, or "
+"more than one candidate matched and guessing would link the wrong one. The "
+"transcript itself is intact."
+msgstr ""
+
+#: collins/window.py:2158
+msgid "Session linked"
+msgstr ""
+
+#: collins/window.py:2159
+msgid "Linked to its running background agent."
+msgstr ""
+
+#: collins/window.py:2164
+msgid "Nothing to repair"
+msgstr ""
+
+#: collins/window.py:2165
+msgid ""
+"This session is already its own background agent. Opening it attaches to "
+"that agent."
+msgstr ""
