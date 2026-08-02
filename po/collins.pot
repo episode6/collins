@@ -1442,7 +1442,7 @@ msgstr ""
 msgid "Add to chat isn't available for this file"
 msgstr ""
 
-#: collins/window.py:374 collins/window.py:2758
+#: collins/window.py:377 collins/window.py:2761
 msgid "Attach file to chat"
 msgstr ""
 
