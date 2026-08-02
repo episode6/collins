@@ -35,9 +35,10 @@ from . import dialogs, practions  # noqa: E402
 from .copylabel import open_tooltip, open_uri  # noqa: E402
 from .i18n import _  # noqa: E402
 from .prstatus import (  # noqa: E402
-    CHECKS_FAILED,
-    CHECKS_PASSED,
-    CHECKS_PENDING,
+    BADGE_CONFLICT,
+    BADGE_FAILED,
+    BADGE_PASSED,
+    BADGE_PENDING,
     PullRequest,
     describe,
     invalidate,
@@ -46,21 +47,38 @@ from .prstatus import (  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-# The merge mark sits with caption-sized text, so it takes the same 12px as the
-# glyphs it replaces rather than a symbolic icon's stock 16.
+# The marks sit with caption-sized text, so the base icon takes 12px rather
+# than a symbolic icon's stock 16.
 MERGED_ICON_PX = 12
-# The column the status marks share, so the titles beside them line up; how
-# wide a title gets before it ellipsizes; and how tall the list gets before it
-# scrolls.
-MARK_COLUMN_PX = 14
+# The status badge and how far it hangs off the base's bottom-left corner:
+# small enough to read as a satellite of the base, offset enough that most of
+# it sits over the corner rather than over the drawing.
+BADGE_PX = 8
+BADGE_OVERHANG_PX = 3
+# The column the status marks share (a base icon plus its overhang), so the
+# titles beside them line up; how wide a title gets before it ellipsizes; and
+# how tall the list gets before it scrolls.
+MARK_COLUMN_PX = MERGED_ICON_PX + BADGE_OVERHANG_PX
 MAX_CHARS = 48
 MAX_HEIGHT_PX = 400
-# Each CI mark is colored like its counterpart on the PR page; the shades
-# themselves follow the light/dark scheme and live in app.py.
-CHECKS_CSS = {
-    CHECKS_PASSED: "pr-checks-passed",
-    CHECKS_FAILED: "pr-checks-failed",
-    CHECKS_PENDING: "pr-checks-pending",
+# Every PR mark is GitHub's own iconography, colored as on the PR page (the
+# shades follow the light/dark scheme and live in app.py). The base icon says
+# what the PR *is*: grey while it's a draft — or while nothing has been
+# fetched, where grey reads as "nothing known" rather than a wrongly green
+# all-clear — green once it's ready for review, purple when it lands.
+_BASE_ICONS = {
+    "MERGED": ("git-merge-symbolic", "pr-merged"),
+    "OPEN": ("git-pull-request-symbolic", "pr-open"),
+    "DRAFT": ("git-pull-request-draft-symbolic", "pr-draft"),
+}
+_BASE_FALLBACK = ("git-pull-request-symbolic", "pr-draft")  # unfetched or closed
+# The badge says how the PR's checks stand: the same marks GitHub puts on a
+# failed check, a conflicting branch, a run still going and a clean sweep.
+_BADGE_ICONS = {
+    BADGE_FAILED: ("x-circle-fill-symbolic", "pr-checks-failed"),
+    BADGE_CONFLICT: ("alert-fill-symbolic", "pr-conflict"),
+    BADGE_PENDING: ("circle-fill-symbolic", "pr-checks-pending"),
+    BADGE_PASSED: ("check-circle-fill-symbolic", "pr-checks-passed"),
 }
 # What a popover is currently showing: the PR whose actions are up (None while
 # it is the list), and the list itself — the contents a submenu leads back to,
@@ -133,28 +151,42 @@ def new_popover(position: Gtk.PositionType) -> Gtk.Popover:
     return popover
 
 
-def status_mark(pr: PullRequest) -> Gtk.Widget:
-    """A PR's status as one widget: its CI glyph, the conflict alert, or the
-    merge mark.
+def status_icon(pr: PullRequest) -> Gtk.Widget:
+    """A PR's state and status as one two-icon mark.
 
-    Always returns something, so titles line up down the menu even beside a PR
-    whose status hasn't been fetched yet. A conflict outranks the CI glyph:
-    the column has room for one mark, and green checks on a branch GitHub
-    can't merge are the less actionable half of the story (the tooltip still
-    carries both, via describe).
+    The base icon carries the PR's own state (see `_BASE_ICONS`); the one
+    status worth acting on rides its bottom-left corner as a smaller badge
+    (see `PullRequest.badge` for which wins the slot — the tooltip still
+    carries everything, via describe). The base always keeps room for the
+    overhang, badge or no badge, so bases line up down a column of marks
+    and a chip doesn't shift when a badge comes or goes.
     """
-    if pr.merged:
-        mark: Gtk.Widget = Gtk.Image.new_from_icon_name("git-merge-symbolic")
-        mark.set_pixel_size(MERGED_ICON_PX)
-        mark.add_css_class("pr-merged")
-    elif pr.conflicting:
-        mark = Gtk.Image.new_from_icon_name("alert-symbolic")
-        mark.set_pixel_size(MERGED_ICON_PX)
-        mark.add_css_class("pr-conflict")
-    else:
-        glyph = pr.glyph
-        mark = Gtk.Label(label=glyph or "")
-        mark.set_css_classes(["caption", CHECKS_CSS.get(glyph or "", "dim-label")])
+    name, css_class = _BASE_ICONS.get(pr.state or "", _BASE_FALLBACK)
+    base = Gtk.Image.new_from_icon_name(name)
+    base.set_pixel_size(MERGED_ICON_PX)
+    base.add_css_class(css_class)
+    base.set_margin_start(BADGE_OVERHANG_PX)
+    base.set_margin_bottom(BADGE_OVERHANG_PX)
+    mark = Gtk.Overlay(child=base)
+    badge = _BADGE_ICONS.get(pr.badge or "")
+    if badge is not None:
+        name, css_class = badge
+        image = Gtk.Image.new_from_icon_name(name)
+        image.set_pixel_size(BADGE_PX)
+        image.add_css_class(css_class)
+        image.set_halign(Gtk.Align.START)
+        image.set_valign(Gtk.Align.END)
+        mark.add_overlay(image)
+    return mark
+
+
+def status_mark(pr: PullRequest) -> Gtk.Widget:
+    """`status_icon`, sized for the menus' mark column.
+
+    Always returns something — every PR has a base icon, fetched status or not
+    — so titles line up down the menu.
+    """
+    mark = status_icon(pr)
     mark.set_size_request(MARK_COLUMN_PX, -1)
     return mark
 
@@ -162,7 +194,7 @@ def status_mark(pr: PullRequest) -> Gtk.Widget:
 def loading_mark() -> Gtk.Widget:
     """The mark column while a row's status is being fetched.
 
-    A spinner in the slot the glyph will land in: the list is readable the
+    A spinner in the slot the mark will land in: the list is readable the
     moment it opens (the titles and numbers are already known), and the one
     part of it that is still coming says so where it will appear.
     """

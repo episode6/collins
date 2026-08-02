@@ -14,7 +14,7 @@ CI status is the harder half. Claude Code keeps a URL-keyed cache of PR state
 and check counts at ``~/.claude/gh-pr-status-cache.json``, but as of CLI 2.1.220
 only FleetView refreshes it — an ordinary session never does, so the file can
 sit untouched for days while its entries rot. Trusting it wholesale means
-showing a red ✗ on a PR that has long since gone green. So the cache is used
+badging a PR as failed when it has long since gone green. So the cache is used
 only while the file itself is recent (a free warm start for the first seconds
 after launch), and Collins otherwise refreshes status itself with a short
 ``gh pr view`` per linked PR, at most once a minute.
@@ -124,9 +124,13 @@ _statuses: dict[str, tuple[float, dict | None]] = {}
 _inflight: set[str] = set()
 _gh_missing = False  # gh isn't on PATH; nothing to retry against this run
 
-CHECKS_PASSED = "✓"
-CHECKS_FAILED = "✗"
-CHECKS_PENDING = "●"
+# What a PR's badge — the small status mark riding its base icon — can say.
+# Pure names rather than icon names: which icon and color each one gets is the
+# chips' business (see prmenu), and this module stays importable without Gtk.
+BADGE_FAILED = "failed"
+BADGE_CONFLICT = "conflict"
+BADGE_PENDING = "pending"
+BADGE_PASSED = "passed"
 
 
 @dataclass(frozen=True)
@@ -157,25 +161,8 @@ class PullRequest:
         return f"{self.repository}#{self.number}" if self.repository else f"#{self.number}"
 
     @property
-    def checks_glyph(self) -> str | None:
-        """One character summarizing CI, or None when no status is cached.
-
-        Failures outrank pending runs, which outrank a clean sweep — the chip
-        has room for one glyph, so it shows the one worth acting on.
-        """
-        if self.passed is None and self.failed is None and self.pending is None:
-            return None
-        if self.failed:
-            return CHECKS_FAILED
-        if self.pending:
-            return CHECKS_PENDING
-        if self.passed:
-            return CHECKS_PASSED
-        return None  # a PR with zero checks configured
-
-    @property
     def merged(self) -> bool:
-        """Merged PRs get GitHub's purple git-merge mark in place of a glyph."""
+        """Merged PRs get GitHub's purple git-merge mark as their base icon."""
         return self.state == "MERGED"
 
     @property
@@ -188,13 +175,30 @@ class PullRequest:
         return self.state in ("OPEN", "DRAFT") and self.mergeable == "CONFLICTING"
 
     @property
-    def glyph(self) -> str | None:
-        """The CI mark the chip shows beside the number, if any.
+    def badge(self) -> str | None:
+        """The one status worth acting on, or None when there is nothing to do.
 
-        A merged PR shows none — the merge mark beside it says all there is to
-        say, and whether CI passed on the way in is history.
+        The chips show it as a small badge over the PR's base icon, and the
+        slot holds one mark, so these outrank each other: a failed check needs
+        fixing whatever else is true; a conflict blocks the merge even when
+        every check is green; pending runs beat the all-clear that some checks
+        already gave; and a clean sweep gets GitHub's green check.
+
+        A merged PR carries none: the purple base says all there is to say,
+        and whether CI passed on the way in is history. So does a PR with no
+        checks at all — a green check it never earned would be a lie.
         """
-        return None if self.merged else self.checks_glyph
+        if self.merged:
+            return None
+        if self.failed:
+            return BADGE_FAILED
+        if self.conflicting:
+            return BADGE_CONFLICT
+        if self.pending:
+            return BADGE_PENDING
+        if self.passed:
+            return BADGE_PASSED
+        return None
 
 
 def state_text(state: str) -> str:
@@ -527,7 +531,7 @@ def gh_run(args: list[str]) -> tuple[bool, str]:
     """One `gh` call run for what it *does*: ``(it worked, what to say if not)``.
 
     The reading half of this module can shrug a failure off — a chip without a
-    glyph is a chip — but a menu item the user picked has to say why nothing
+    status is a chip — but a menu item the user picked has to say why nothing
     happened, so this hands back gh's own complaint rather than logging it.
     That text comes from GitHub and from a repository, i.e. is untrusted, so it
     is capped before it is ever put in a dialog.
@@ -605,7 +609,7 @@ def _schedule(url: str) -> None:
 def _own_status(url: str) -> dict | None:
     """Our last fetched status for *url*, kicking off a refresh when it's due.
 
-    Returns what we have even when it's past its TTL: a minute-old glyph beats
+    Returns what we have even when it's past its TTL: a minute-old status beats
     a blank one, and the refresh lands before the next poll or two.
     """
     if not _FETCHABLE.match(url):
@@ -629,7 +633,7 @@ def invalidate(url: str) -> None:
     The chip's refresh button, when a PR is already showing. The click only
     invalidates — the fetch belongs to the poll that follows, off the main
     thread like every other one — and the entry stays put rather than being
-    dropped, so `enrich` keeps handing back the glyph it has while the refetch
+    dropped, so `enrich` keeps handing back the status it has while the refetch
     runs. Clicking refresh must not blank the chip on its way to updating it.
     """
     with _lock:
@@ -704,7 +708,7 @@ def enrich(pr: PullRequest | None) -> PullRequest | None:
 
     Touches the filesystem and may spawn `gh` off a worker thread, so keep this
     off the main loop. Returns *pr* unchanged when no status is known yet — the
-    chip still shows the number, just without a CI glyph.
+    chip still shows the number, just with nothing on its mark.
 
     A title the entry doesn't carry leaves the one *pr* already has: the CLI's
     own cache has no title field, so a warm start from it must not blank the

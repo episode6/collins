@@ -1210,7 +1210,12 @@ class TerminalTab(Gtk.Box):
         self._branch_seps[1].set_visible(branch)
 
     def _build_pr_chip(self, pr: PullRequest) -> Gtk.Widget:
-        """One PR's chip: its number, its CI mark, and a merge mark if it landed.
+        """One PR's chip: its state-and-status mark, then its number.
+
+        The mark is the same two-icon overlay the menus use (see
+        prmenu.status_icon) — the base icon's color is what the eye picks up
+        without reading the row, and the badge on its corner is the one thing
+        the PR needs doing. Icon before number, the way GitHub writes a PR.
 
         Every part of a chip answers for that PR and nothing else — the chips
         are siblings on the row, so each number carries its own menu (on a
@@ -1220,32 +1225,8 @@ class TerminalTab(Gtk.Box):
         number.add_css_class("caption")
         number.add_css_class("dim-label")
         chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        chip.append(prmenu.status_icon(pr))
         chip.append(number)
-        # The CI mark is its own label so it can carry its own color: green,
-        # red or yellow (undimmed, like the merge mark), which is what the eye
-        # picks up without reading the row.
-        glyph = pr.glyph
-        if glyph is not None:
-            checks = Gtk.Label(label=glyph)
-            checks.set_css_classes(["caption", prmenu.CHECKS_CSS.get(glyph, "dim-label")])
-            chip.append(checks)
-        # A conflicted PR adds GitHub's alert triangle beside the CI mark
-        # rather than replacing it: both are true at once (checks can pass on
-        # a branch GitHub can't merge), and unlike the menu's one-mark column
-        # the chip has room for the pair. Yellow, not red — a rebase fixes it
-        # without any check being wrong.
-        if pr.conflicting:
-            alert = Gtk.Image.new_from_icon_name("alert-symbolic")
-            alert.set_pixel_size(prmenu.MERGED_ICON_PX)
-            alert.add_css_class("pr-conflict")
-            chip.append(alert)
-        # A merged PR trades its CI glyph for GitHub's git-merge mark, purple
-        # and undimmed: the one PR state worth spotting from across the row.
-        if pr.merged:
-            merged = Gtk.Image.new_from_icon_name("git-merge-symbolic")
-            merged.set_pixel_size(prmenu.MERGED_ICON_PX)
-            merged.add_css_class("pr-merged")
-            chip.append(merged)
         chip.set_tooltip_text(
             describe(pr) + "\n" + pr.url + "\n"
             + _("Click for actions") + "\n" + _("Right-click to open")
@@ -1284,8 +1265,9 @@ class TerminalTab(Gtk.Box):
         """Show this session's PRs, oldest first, with the CI state each has.
 
         The whole row is rebuilt rather than patched: a chip's parts depend on
-        its state (a glyph appears, a merge mark replaces it), and the equality
-        guard keeps the once-a-second poll from rebuilding anything unchanged.
+        its state (a badge appears, the base icon changes color), and the
+        equality guard keeps the once-a-second poll from rebuilding anything
+        unchanged.
         """
         if prs == self._footer_prs:
             return
@@ -1609,7 +1591,7 @@ class TerminalTab(Gtk.Box):
         """*pr* with its title and CI status, fetching them when due.
 
         A merged PR that already has a title is left alone: it has no checks
-        left to run and shows no glyph anyway, so an old chip on a long-lived
+        left to run and shows no badge anyway, so an old chip on a long-lived
         session never costs another `gh` call. One with no title still asks
         once — the caret's menu has a line to fill, and a list saved before
         Collins knew about titles has nothing in it.

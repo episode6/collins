@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Drawn for Collins: GitHub's pending-checks dot at badge weight. Octicons'
+     dot-fill-16 keeps its dot to half the canvas, which vanishes at the 8px
+     the chips render badges at — this one fills the canvas so it carries the
+     same visual weight as x-circle-fill-symbolic beside it. Licensed with the
+     rest of Collins (GPL-3.0-or-later). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Z"/></svg>
