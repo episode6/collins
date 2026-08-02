@@ -66,9 +66,12 @@ _IN_TAB_STATUSES = ("open", "attention")
 # activity source and keeps its still yellow line.
 _BUSY_CSS = "busy"
 # A finished run nobody has looked at yet: paints the guide line green until
-# the user returns to the session's tab (see SessionItem.unread). The busy
-# pole outranks it in CSS, so a session that starts a new turn unread moves
-# again and shows green once more when that turn also runs out.
+# the user returns to the session's tab (see SessionItem.unread). A tab-only
+# signal: window._sync_status drops the flag from any row whose tab is gone,
+# and the detached yellow outranks it in CSS besides, so a backgrounded
+# session never reads green. The busy pole outranks it too, so a session that
+# starts a new turn unread moves again and shows green once more when that
+# turn also runs out.
 _UNREAD_CSS = "unread"
 # The user stopped Claude mid-task and nothing has happened since (see
 # sessions.py's transcript scan): paints the guide line red, the same channel

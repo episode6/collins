@@ -2355,6 +2355,12 @@ class MainWindow(Adw.ApplicationWindow):
             status = self._row_status(row_id)
             log.debug("status: %s -> %s", row_id, status or "(none)")
             self.store.set_status(row_id, status)
+            # Unread means "a finished run waits in this session's tab" — a
+            # row whose tab is gone (closed, or handed to the background) has
+            # no tab to return to, so the green flag has nothing left to say
+            # and must not outlive the tab it spoke for.
+            if status not in ("open", "attention"):
+                self.store.set_unread(row_id, False)
         self.sidebar.update_footer()
         # A row's background button appears with its tab; whether it's pressable
         # is the gate's call.
@@ -2415,8 +2421,16 @@ class MainWindow(Adw.ApplicationWindow):
         for row_id in self.store.rows_representing(session_id):
             # A row whose conversation still runs under another of its ids —
             # a /bg fork mid-turn, say — hasn't finished; its own edge comes.
-            if not (self._chain(row_id) & self._activity.busy()):
-                self.store.set_unread(row_id, True)
+            if self._chain(row_id) & self._activity.busy():
+                continue
+            # A detaching session's CLI clears its progress hint on the way
+            # out, which lands here as a finish — but the run is being handed
+            # to the background, not completing, and a detached row's line
+            # belongs to the yellow of its status (see _sync_status, which
+            # keeps the flag off rows with no tab).
+            if self._is_detached(row_id):
+                continue
+            self.store.set_unread(row_id, True)
 
     def _clear_unread(self, page: Adw.TabPage) -> None:
         """The user is at this tab (selected it, or typed into it): whatever

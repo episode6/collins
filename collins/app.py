@@ -117,20 +117,23 @@ row.session-child.running {
 row.session-child.running:hover {
   background-color: alpha(currentColor, 0.18);
 }
-/* running detached (/bg): the one status the guide line still speaks for */
-row.session-child.detached { border-left-color: #e5a50a; }
-
 /* a finished run nobody has looked at yet (see SessionItem.unread): the guide
    line holds solid green -- the run is done and its result is waiting --
-   until the user returns to the tab. Below the .detached rule so green wins
-   the line while a formerly-detached row still reads as such, and beaten by
-   the .busy pole rule (its selector carries one more class), so a session
-   sent straight back to work moves again instead of sitting on a stale flag. */
+   until the user returns to the tab. Beaten by the .busy pole rule (its
+   selector carries one more class), so a session sent straight back to work
+   moves again instead of sitting on a stale flag. */
 row.session-child.unread { border-left-color: #2ec27e; }
+
+/* running detached (/bg): the one status the guide line still speaks for.
+   Below the .unread rule so yellow wins the line: a detached session is
+   running, not sitting on a result -- green is a tab-only signal, and
+   window.py keeps the flag itself off tabless rows (see _sync_status), so
+   this order is the paint-level backstop for the same rule. */
+row.session-child.detached { border-left-color: #e5a50a; }
 
 /* the user stopped Claude mid-task and nothing has happened since (see
    SessionItem.state): the guide line turns red. Deliberately last of the
-   equal-specificity line colors (.detached, .unread), so the interruption,
+   equal-specificity line colors (.unread, .detached), so the interruption,
    the most actionable "needs you" signal, takes the line when the stopped
    run is also detached or unseen -- state is scanned for every session, so
    a /bg row whose transcript ends in an interruption is a reachable
