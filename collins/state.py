@@ -60,6 +60,10 @@ DEFAULT_SETTINGS = {
     # the env half only takes effect for tabs opened after a change.
     "progress_termprop": True,
     "auto_title_sessions": True,  # summarize each new session's first prompt into a short title
+    # What to do instead of the confirmation dialog when a running session's
+    # tab has to close: ask (the dialog, as before) | exit | background.
+    "archive_running_session": "ask",  # archiving a session whose tab is busy
+    "quit_with_running_sessions": "ask",  # closing a window while sessions run
     "show_tab_bar": True,  # tab bar visibility (tabs keep working underneath)
     "show_folder_path": False,  # show each session's project folder path in the sidebar
     "project_icon_size": 16,  # px size of the sidebar's project/folder (and group) icons

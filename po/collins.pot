@@ -421,6 +421,36 @@ msgstr ""
 msgid "Restart now"
 msgstr ""
 
+#: collins/prefs.py:74
+msgid "Ask"
+msgstr ""
+
+#: collins/prefs.py:285
+msgid "Running sessions"
+msgstr ""
+
+#: collins/prefs.py:287
+msgid ""
+"Ask keeps the confirmation dialog; the other choices skip it and exit the "
+"session(s) cleanly or keep them running detached"
+msgstr ""
+
+#: collins/prefs.py:293
+msgid "When archiving a running session"
+msgstr ""
+
+#: collins/prefs.py:294
+msgid "Archiving a session that is still running also closes its tab"
+msgstr ""
+
+#: collins/prefs.py:299
+msgid "When quitting with running sessions"
+msgstr ""
+
+#: collins/prefs.py:300
+msgid "Closing a window while agent sessions are still running"
+msgstr ""
+
 #: collins/prefs.py:213
 msgid "Notifications"
 msgstr ""
