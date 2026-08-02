@@ -125,14 +125,15 @@ row.session-child.detached { border-left-color: #e5a50a; }
    line holds solid blue, the color of the pole that was just climbing it,
    until the user returns to the tab. Below the .detached rule so blue wins
    the line while a formerly-detached row still reads as such, and beaten by
-   the .busy pole rules (their selectors carry one more class), so a session
+   the .busy pole rule (its selector carries one more class), so a session
    sent straight back to work moves again instead of sitting on a stale flag. */
 row.session-child.unread { border-left-color: #3584e4; }
 
 /* An agent producing output right now (see activity.py) turns its row's guide
    line into a barber pole: stripes climbing while work is happening, still the
-   moment it stops. The class rides on top of the status one, so a session in a
-   tab poles in blue and a detached one in its own yellow.
+   moment it stops. Only sessions in a tab pole: a detached (/bg) one has no
+   terminal to listen to, so it keeps the still yellow line of the .detached
+   rule above whatever its agent is doing.
 
    The pole is painted, never laid out: the row keeps its 2px border-left (made
    transparent so the stripes show through it) and the gradient is a background
@@ -159,21 +160,14 @@ row.session-child.unread { border-left-color: #3584e4; }
   from { background-position: -10px 12px; }
   to   { background-position: -10px 0; }
 }
-row.session-child.running.busy,
-row.session-child.detached.busy {
+row.session-child.running.busy {
   border-left-color: transparent;
   background-clip: border-box;
   background-repeat: repeat-y;
   background-size: 2px 12px;
   animation: barber-pole 900ms linear infinite;
-}
-row.session-child.running.busy {
   background-image: repeating-linear-gradient(135deg,
     #1c71d8 0px, #1c71d8 4.243px, #99c1f1 4.243px, #99c1f1 8.485px);
-}
-row.session-child.detached.busy {
-  background-image: repeating-linear-gradient(135deg,
-    #e5a50a 0px, #e5a50a 4.243px, #f9f06b 4.243px, #f9f06b 8.485px);
 }
 /* the session shown in the currently selected tab: the fill says which one it
    is, and the card runs out to the panel's right edge (square-cornered, with

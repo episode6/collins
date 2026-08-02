@@ -17,9 +17,6 @@ There is no such signal from the agent, so every source here is inferred:
   frame counts — but silence is what matters, and a prompt sitting idle is
   silent. `EchoGate` throws out the redraws the *app* caused, which are
   otherwise indistinguishable from a working agent.
-- a **detached** (`/bg`) session has no terminal to listen to, so
-  `TranscriptActivity` watches its transcript instead: the JSONL only grows
-  while the agent is producing turns.
 - an open tab whose terminal has gone quiet may still have a **background
   process** running below the agent — a dev server, a long build — that
   produces no terminal output of its own. The window polls each open tab's
@@ -32,10 +29,12 @@ There is no such signal from the agent, so every source here is inferred:
   would have to wave through first, such as a freshly attached background
   agent mid-turn that nothing was ever typed at.
 
-All three funnel into one tracker: "busy" means output seen within the
+All of them funnel into one tracker: "busy" means output seen within the
 source's idle window — `IDLE_S` for a terminal, which redraws continuously
-while its agent works, the wider `DETACHED_IDLE_S` for a transcript, which
-grows only in bursts, and `PROCESS_IDLE_S` for a process-tree sighting.
+while its agent works, and `PROCESS_IDLE_S` for a process-tree sighting.
+Detached (`/bg`) sessions have no source at all: their only signal would be
+transcript growth, and the pole that once rode it is gone — a detached row
+shows its still yellow guide line whatever the agent is doing.
 
 Nothing here touches GTK — the timer is injected — so the whole thing is
 testable without a display.
@@ -44,8 +43,7 @@ testable without a display.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable, Mapping
-from pathlib import Path
+from collections.abc import Callable, Iterable
 
 # How long output has to stop before a session reads as idle. Long enough to
 # ride out the pauses inside a turn — an agent thinking between tool calls
@@ -55,29 +53,16 @@ from pathlib import Path
 # its agent works.
 IDLE_S = 2.0
 
-# The window for a detached session, whose only signal is its transcript. The
-# JSONL grows in bursts: nothing is appended while a response is generating or
-# a tool is running, only when the finished message or result lands, so quiet
-# gaps of several seconds are normal mid-turn. `IDLE_S` would flicker the pole
-# off inside every one of them; this rides them out. The cost of being
-# generous is only that the pole lingers this long after the final turn.
-DETACHED_IDLE_S = 15.0
-
 # How often the sweep looks for sessions that went quiet. Only the moment a
 # session stops being busy is this coarse; starting is immediate, on the first
 # byte of output.
 SWEEP_MS = 250
 
-# How often a detached session's transcript is stat'ed. Coarser than the sweep
-# because it costs a syscall per detached session, and because a background
-# agent's turns are seconds apart, not milliseconds.
-TRANSCRIPT_POLL_MS = 1000
-
 # How often an open tab's process tree is checked for something the agent left
 # running below it — a background job (a dev server, a long build) that keeps
 # no output flowing to the terminal, and so would otherwise read as idle the
-# moment its last line scrolled by. Coarser than the sweep for the same reason
-# as the transcript poll: it costs a handful of /proc reads per open tab.
+# moment its last line scrolled by. Coarser than the sweep because it costs a
+# handful of /proc reads per open tab.
 PROCESS_POLL_MS = 2000
 
 # The window a live descendant keeps a session's pole up for. Wider than
@@ -347,57 +332,6 @@ class SpinnerWatch:
         streak = self._changed_at is not None and now - self._changed_at <= self._streak_s
         self._changed_at = now
         return streak
-
-
-class TranscriptActivity:
-    """Turns transcript growth into activity marks, for sessions with no tab.
-
-    A detached agent's only visible sign of life is its JSONL getting longer,
-    so each poll compares (mtime, size) against the last one. The *first* sight
-    of a session is a baseline, never a mark: without a previous reading there
-    is no way to tell a session that just wrote a turn from one whose file has
-    sat untouched for a week.
-    """
-
-    def __init__(
-        self,
-        mark: Callable[[str], None],
-        *,
-        stat: Callable[[Path], tuple[float, int] | None] | None = None,
-    ) -> None:
-        self._mark = mark
-        self._stat = stat or _stat_transcript
-        self._seen: dict[str, tuple[float, int]] = {}
-
-    def poll(self, transcripts: Mapping[str, Path]) -> None:
-        """Stat every given transcript, marking the ones that grew.
-
-        *transcripts* maps session id to file, and is expected to shrink as
-        sessions stop running detached; readings for sessions no longer in it
-        are dropped, so one that comes back is baselined afresh rather than
-        compared against a stale size.
-        """
-        for session_id, path in transcripts.items():
-            reading = self._stat(path)
-            if reading is None:  # never written, or gone: nothing to compare
-                continue
-            previous = self._seen.get(session_id)
-            self._seen[session_id] = reading
-            if previous is not None and reading != previous:
-                self._mark(session_id)
-        self.forget_all_but(transcripts)
-
-    def forget_all_but(self, keep: Iterable[str]) -> None:
-        for session_id in set(self._seen) - set(keep):
-            del self._seen[session_id]
-
-
-def _stat_transcript(path: Path) -> tuple[float, int] | None:
-    try:
-        info = path.stat()
-    except OSError:
-        return None
-    return info.st_mtime, info.st_size
 
 
 def _glib_add_timeout(interval_ms: int, callback: Callable[[], bool]) -> int:
