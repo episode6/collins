@@ -32,6 +32,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: 
 
 from . import footerapps, openwith, prmenu
 from .chats import is_chat_cwd
+from .flash import FLASH_MS, flash
 from .formatting import format_size
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
@@ -774,6 +775,11 @@ class SessionSidebar(Gtk.Box):
         self._pending_row: str | None = None
         self._scroll_source: int | None = None
         self._activated_row_id: str | None = None
+        # The row mid-bell-flash and when its flash expires (monotonic µs).
+        # Kept here rather than on the row, which any rebuild throws away —
+        # and a bell often rides in with the very state change that triggers
+        # one (see _rebuild_rows, which re-flashes the replacement row).
+        self._flashing_row: tuple[str, int] | None = None
         self.show_folder_path = bool(store.state.get_setting("show_folder_path"))
 
         store.connect("refreshed", self._on_store_refreshed)
@@ -1026,6 +1032,15 @@ class SessionSidebar(Gtk.Box):
                 self.list.append(row)
         self._apply_selection_to_rows()
         self._update_collapse_button()
+        # A rebuild inside the flash window replaced the flashing row with a
+        # fresh widget that never got the CSS class — and bells often ride in
+        # with the very state change (new session, archive, reorder) that
+        # forces a rebuild. Give the replacement the flash still owed to it.
+        if self._flashing_row is not None:
+            row_id, deadline = self._flashing_row
+            self._flashing_row = None
+            if GLib.get_monotonic_time() < deadline:
+                self.flash_row(row_id)
         self.emit("rows-reordered")
 
     def row_order(self) -> list[str]:
@@ -1075,6 +1090,15 @@ class SessionSidebar(Gtk.Box):
             row.add_css_class("active-tab")
         if session_id is not None and not clicked_here:
             self._scroll_row_into_view(session_id)
+
+    def flash_row(self, row_id: str) -> None:
+        """Visual bell relay: flash the row standing for a ringing session (or
+        placeholder). Nothing to do when the search filter or an archive has
+        taken the row out of the list."""
+        row = self._row_for(row_id)
+        if row is not None:
+            flash(row)
+            self._flashing_row = (row_id, GLib.get_monotonic_time() + FLASH_MS * 1000)
 
     def _row_for(self, row_id: str | None) -> Gtk.ListBoxRow | None:
         return self._rows.get(row_id) or self._placeholder_rows.get(row_id)

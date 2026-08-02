@@ -39,6 +39,7 @@ from .bgstatus import (
 from .caffeine import DURATION_KEYS, duration_label, duration_seconds, format_remaining
 from .chatsessionview import ChatSessionTab
 from .editorwindow import EditorWindow
+from .flash import flash
 from .formatting import blast_radius_body
 from .gitinfo import has_changes
 from .i18n import _
@@ -69,9 +70,6 @@ _GHOSTTY = shutil.which("ghostty")
 
 # Quiet period before a background tab is considered "idle" / finished.
 _IDLE_NOTIFY_MS = 4000
-# Visual bell: how long .bell-flash stays on the header bar. Must outlast the
-# CSS animation in app.py, which fades the flash out on its own.
-_BELL_FLASH_MS = 450
 
 # Window (and content header) title while the tab bar is showing the tab names.
 _APP_TITLE = "Collins"
@@ -314,7 +312,6 @@ class MainWindow(Adw.ApplicationWindow):
         content_header = Adw.HeaderBar()
         # Kept for the visual bell: a terminal's BEL flashes this bar.
         self._content_header = content_header
-        self._bell_flash_source: int | None = None
         self.sidebar_toggle = Gtk.ToggleButton(icon_name="sidebar-show-symbolic", active=True)
         self.sidebar_toggle.set_tooltip_text(_("Toggle sidebar (F9)"))
         content_header.pack_start(self.sidebar_toggle)
@@ -1383,6 +1380,17 @@ class MainWindow(Adw.ApplicationWindow):
             return None
         return rows_by_session.get(tab.session_id)
 
+    def _rows_by_session(self) -> dict[str, str]:
+        """Which sidebar row stands for each session id. A tab is bound to the
+        id the CLI runs, which after a /bg is a fork's; the row it belongs
+        under is the one further up that chain. Topmost row wins if two claim
+        the same id."""
+        rows_by_session: dict[str, str] = {}
+        for row_id in self.sidebar.row_order():
+            for session_id in self.state.forward_chain(row_id):
+                rows_by_session.setdefault(session_id, row_id)
+        return rows_by_session
+
     def _sort_tabs(self) -> None:
         """Put the tab bar back in the sidebar's order, left to right.
 
@@ -1398,13 +1406,7 @@ class MainWindow(Adw.ApplicationWindow):
         if len(pages) < 2:
             return
         order = self.sidebar.row_order()
-        # A tab is bound to the id the CLI runs, which after a /bg is a fork's;
-        # the row it belongs under is the one further up that chain. Topmost
-        # row wins if two claim the same id.
-        rows_by_session: dict[str, str] = {}
-        for row_id in order:
-            for session_id in self.state.forward_chain(row_id):
-                rows_by_session.setdefault(session_id, row_id)
+        rows_by_session = self._rows_by_session()
         row_ids = [self._tab_row_id(page, rows_by_session) for page in pages]
         wanted = tab_order(row_ids, order)
         if wanted == list(range(len(pages))):
@@ -1430,21 +1432,49 @@ class MainWindow(Adw.ApplicationWindow):
         self._sort_tabs()
         return GLib.SOURCE_REMOVE
 
-    def _on_bell(self, _tab: TerminalTab) -> None:
-        """Visual bell: flash the header bar once (the audible bell is VTE's
-        own). A bell arriving mid-flash is folded into it — restarting the
-        CSS animation would need a frame without the class, and one flash
-        already tells the story."""
-        if self._bell_flash_source is not None:
+    def _on_bell(self, tab: TerminalTab) -> None:
+        """Visual bell (the audible bell is VTE's own): flash the header bar,
+        and the ringing session's tab header and sidebar row — the two places
+        that say which session wants attention when the bell isn't the
+        selected tab's."""
+        flash(self._content_header)
+        page = self.tab_view.get_page(tab)
+        if page is None:
             return
+        tab_widget = self._tab_widget(page)
+        if tab_widget is not None:
+            flash(tab_widget)
+        row_id = self._tab_row_id(page, self._rows_by_session())
+        if row_id is not None:
+            self.sidebar.flash_row(row_id)
 
-        def clear() -> bool:
-            self._bell_flash_source = None
-            self._content_header.remove_css_class("bell-flash")
-            return GLib.SOURCE_REMOVE
+    def _tab_widget(self, page: Adw.TabPage) -> Gtk.Widget | None:
+        """The tab bar's header widget for a page, or None while the bar is
+        hidden. AdwTabBar doesn't expose its tabs, so this walks its internal
+        tree for the AdwTab holding this page. Matched through the tab's page
+        property, never by position: the tabs sit in creation order in the
+        tree, which _sort_tabs's reordering leaves behind.
 
-        self._content_header.add_css_class("bell-flash")
-        self._bell_flash_source = GLib.timeout_add(_BELL_FLASH_MS, clear)
+        "AdwTab" is a private libadwaita type, not API — a libadwaita bump
+        could rename it and the walk would find nothing. That fails soft
+        (no tab flash, header and row still flash), so tolerated."""
+        if not self.tab_bar.get_visible():
+            return None
+
+        def walk(widget: Gtk.Widget) -> Gtk.Widget | None:
+            child = widget.get_first_child()
+            while child is not None:
+                if child.__gtype__.name == "AdwTab":
+                    if child.get_property("page") == page:
+                        return child
+                else:
+                    found = walk(child)
+                    if found is not None:
+                        return found
+                child = child.get_next_sibling()
+            return None
+
+        return walk(self.tab_bar)
 
     def _on_session_resolved(self, tab: TerminalTab, session_id: str, page: Adw.TabPage) -> None:
         """A fresh tab (new / continue) discovered its session id: bind the tab
