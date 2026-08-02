@@ -129,11 +129,14 @@ row.session-child.detached { border-left-color: #e5a50a; }
 row.session-child.unread { border-left-color: #3584e4; }
 
 /* the user stopped Claude mid-task and nothing has happened since (see
-   SessionItem.state): the guide line turns red. Below .unread so the
-   interruption, the more specific "needs you" signal, wins the line when a
-   stopped run is also unseen, and beaten by the .busy pole rule (one more
-   class on its selector) for the same reason unread is: a resumed session
-   should move, not sit on a stale interruption. */
+   SessionItem.state): the guide line turns red. Deliberately last of the
+   equal-specificity line colors (.detached, .unread), so the interruption,
+   the most actionable "needs you" signal, takes the line when the stopped
+   run is also detached or unseen -- state is scanned for every session, so
+   a /bg row whose transcript ends in an interruption is a reachable
+   combination, not a hypothetical. The .busy pole rule still beats it (one
+   more class on its selector) for the same reason it beats unread: a
+   resumed session should move, not sit on a stale interruption. */
 row.session-child.interrupted { border-left-color: #e01b24; }
 
 /* An agent producing output right now (see activity.py) turns its row's guide
