@@ -74,7 +74,7 @@ DEFAULT_SETTINGS = {
     "editor_font": "",  # empty = system monospace
     "editor_show_line_numbers": True,
     "editor_show_hidden_files": False,
-    "editor_pop_out_screen_width": 1536,  # scaled px; this wide or narrower opens popped out (0 = never)
+    "editor_pop_out_screen_width": 1600,  # scaled px; this wide or narrower opens popped out (0 = never)
     "editor_window_width": 1000,  # last popped-out editor window size (floating, unmaximized)
     "editor_window_height": 700,
     "editor_window_maximized": False,
