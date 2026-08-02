@@ -35,9 +35,8 @@ _CSS = b"""
 row.drop-above { box-shadow: inset 0 2px 0 0 @accent_bg_color; }
 row.drop-below { box-shadow: inset 0 -2px 0 0 @accent_bg_color; }
 
-/* session-row state badges */
+/* session-row state badge */
 .waiting-badge { color: #e5a50a; }      /* Claude asked a question */
-.interrupted-badge { color: #e01b24; }  /* user stopped Claude mid-task */
 
 /* make the active tab clearly stand out from inactive ones. Its background
    color is set dynamically, not here: themes._apply_dynamic_theme_css keeps
@@ -128,6 +127,17 @@ row.session-child.detached { border-left-color: #e5a50a; }
    the .busy pole rule (its selector carries one more class), so a session
    sent straight back to work moves again instead of sitting on a stale flag. */
 row.session-child.unread { border-left-color: #3584e4; }
+
+/* the user stopped Claude mid-task and nothing has happened since (see
+   SessionItem.state): the guide line turns red. Deliberately last of the
+   equal-specificity line colors (.detached, .unread), so the interruption,
+   the most actionable "needs you" signal, takes the line when the stopped
+   run is also detached or unseen -- state is scanned for every session, so
+   a /bg row whose transcript ends in an interruption is a reachable
+   combination, not a hypothetical. The .busy pole rule still beats it (one
+   more class on its selector) for the same reason it beats unread: a
+   resumed session should move, not sit on a stale interruption. */
+row.session-child.interrupted { border-left-color: #e01b24; }
 
 /* An agent producing output right now (see activity.py) turns its row's guide
    line into a barber pole: stripes climbing while work is happening, still the
