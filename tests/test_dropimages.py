@@ -5,6 +5,7 @@ import time
 from collins.dropimages import (
     PRUNE_AFTER_SECONDS,
     default_directory,
+    mention_text,
     prune_stale,
     save_png,
 )
@@ -13,6 +14,33 @@ from collins.dropimages import (
 # irrelevant, only that every test agrees on it.
 _NOW = time.mktime((2026, 8, 2, 12, 30, 15, 0, 0, -1))
 _STEM = time.strftime("drop-%Y%m%d-%H%M%S", time.localtime(_NOW))
+
+# -- mention_text -------------------------------------------------------------
+
+# Stands in for Provider.file_reference: quotes like the Claude provider,
+# refuses names with control characters like every provider must.
+def _fake_reference(path):
+    if any(ord(ch) < 0x20 for ch in path):
+        return None
+    return f'@"{path}"' if " " in path else f"@{path}"
+
+
+def test_mention_text_one_token_per_path_with_trailing_spaces():
+    text, failed = mention_text(["a.png", "my pic.jpg"], _fake_reference)
+    assert text == '@a.png @"my pic.jpg" '
+    assert failed == 0
+
+
+def test_mention_text_counts_refused_names_and_keeps_the_rest():
+    text, failed = mention_text(["ok.png", "bad\x0dname.png", "also.png"], _fake_reference)
+    assert text == "@ok.png @also.png "
+    assert failed == 1
+
+
+def test_mention_text_all_refused_or_empty():
+    assert mention_text(["\x1b.png"], _fake_reference) == ("", 1)
+    assert mention_text([], _fake_reference) == ("", 0)
+
 
 # -- default_directory --------------------------------------------------------
 

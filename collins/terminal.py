@@ -1493,20 +1493,27 @@ class TerminalTab(Gtk.Box):
     def _mention_dropped_paths(self, paths: list[str]) -> bool:
         """Type a mention token for each path into the input box — typed,
         never submitted, mirroring "Add to chat" (see _on_editor_add_to_chat
-        for why the trailing space and the missing takes_prompt gate). The
-        focus grab is immediate rather than idle-deferred: a drop has no
-        popover to hand focus back anywhere."""
+        for why the trailing space and the missing takes_prompt gate). Paths
+        the provider refuses to reference (a control character in the name —
+        see file_reference) are reported by count, not echoed: those names
+        are exactly the untrusted bytes feed_message must not write to the
+        tty. The focus grab is immediate rather than idle-deferred: a drop
+        has no popover to hand focus back anywhere."""
         cwd = self.current_agent_cwd()
-        references = [
-            reference
-            for path in paths
-            if (reference := self.provider.file_reference(path, cwd)) is not None
-        ]
-        if not references:
-            if paths:
-                self.feed_message(_("the dropped file names can't be referenced"))
+        text, failed = dropimages.mention_text(
+            paths, lambda path: self.provider.file_reference(path, cwd)
+        )
+        if failed:
+            self.feed_message(
+                ngettext(
+                    "couldn't reference {n} dropped file name",
+                    "couldn't reference {n} dropped file names",
+                    failed,
+                ).format(n=failed)
+            )
+        if not text:
             return False
-        self.feed_child_text("".join(reference + " " for reference in references))
+        self.feed_child_text(text)
         self.grab_terminal_focus()
         return True
 

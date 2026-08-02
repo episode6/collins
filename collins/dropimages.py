@@ -1,15 +1,15 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
-"""GTK-free helpers for images dropped onto an agent terminal.
+"""GTK-free helpers for drops onto an agent terminal.
 
 An image dragged in as raw data (from a browser, a screenshot tool, an
 image viewer) has no path an @-mention could name, so a copy is written
-here and the mention points at the copy. Dropped *files* never pass
-through this module — their reference points at the original.
+here and the mention points at the copy. Dropped *files* are mentioned in
+place — only the text built for them (mention_text) lives here.
 
 Kept GTK-free (like editorfiles.py/gitinfo.py) so this stays unit-testable
 headless; terminal.py owns the drop target and turns Gdk values into the
-bytes saved here.
+paths and bytes handled here.
 
 The copies live under the user's cache directory rather than /tmp: the
 mention only gets *read* when the user submits the prompt — maybe minutes
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 PRUNE_AFTER_SECONDS = 7 * 24 * 60 * 60  # a week: past any plausible submit
@@ -31,6 +32,25 @@ PRUNE_AFTER_SECONDS = 7 * 24 * 60 * 60  # a week: past any plausible submit
 # hitting it means something is wrong (a clock stuck at one value), and
 # failing beats spinning.
 _MAX_NAME_ATTEMPTS = 1000
+
+
+def mention_text(paths: list[str], file_reference: Callable[[str], str | None]) -> tuple[str, int]:
+    """The text to type for dropped *paths*: one mention token per path
+    *file_reference* can name, each with a trailing space (it terminates
+    the CLI's mention token and leaves the cursor ready for the next one —
+    or for the user's sentence). Also returns how many paths got no token
+    (a None from *file_reference*, e.g. a control character in the name),
+    so the caller can say some were dropped instead of silently thinning
+    the mention."""
+    tokens = []
+    failed = 0
+    for path in paths:
+        reference = file_reference(path)
+        if reference is None:
+            failed += 1
+        else:
+            tokens.append(reference + " ")
+    return "".join(tokens), failed
 
 
 def default_directory() -> Path:
