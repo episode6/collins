@@ -371,6 +371,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.archive_btn = Gtk.Button(icon_name="archive-symbolic", visible=False)
         self.archive_btn.connect("clicked", lambda *_: self._archive_current_session())
         content_header.pack_start(self.archive_btn)
+        # The file-dialog twin of the editor's "Add to chat": pick a file,
+        # type its mention into the focused agent's input box.
+        self.attach_btn = Gtk.Button(icon_name="mail-attachment-symbolic", visible=False)
+        self.attach_btn.set_tooltip_text(_("Attach file to chat"))
+        self.attach_btn.connect("clicked", lambda *_: self._attach_file_to_chat())
+        content_header.pack_start(self.attach_btn)
 
         # Caffeine Mode: first pack_end child, so it sits immediately left of
         # the window controls (minimize/maximize/close).
@@ -2721,6 +2727,12 @@ class MainWindow(Adw.ApplicationWindow):
         blocker = self._background_blocker(page)
         self.background_btn.set_sensitive(not blocker)
         self.background_btn.set_tooltip_text(_BG_TOOLTIPS.get(blocker, _BG_TOOLTIPS[""]))
+        # Attach only where a mention can be typed: providers with a file
+        # mention syntax (base agents return None). Whether the agent is
+        # actually running is checked at click time, like "Add to chat".
+        self.attach_btn.set_visible(
+            is_session and tab.provider.file_reference("image.png", None) is not None
+        )
         # A brand-new tab has no session id until the store discovers it; the
         # refresh that delivers the id re-runs this via
         # _refresh_background_affordances, which also keeps the icon in step
@@ -2735,6 +2747,36 @@ class MainWindow(Adw.ApplicationWindow):
             self.archive_btn.set_tooltip_text(
                 _("Archive session and close tab (Ctrl+Shift+A)")
             )
+
+    def _attach_file_to_chat(self) -> None:
+        """The header attach button: pick a file, reference it in the focused
+        agent's chat (typed, never submitted — see TerminalTab.add_file_to_chat).
+
+        The dialog starts in the agent's cwd right now, not the directory the
+        tab started in, matching where the mention it produces will resolve."""
+        page = self.tab_view.get_selected_page()
+        tab = page.get_child() if page is not None else None
+        if not isinstance(tab, TerminalTab):
+            return
+        dialog = Gtk.FileDialog(title=_("Attach file to chat"))
+        cwd = tab.current_agent_cwd()
+        if cwd:
+            dialog.set_initial_folder(Gio.File.new_for_path(cwd))
+        dialog.open(self, None, lambda d, r: self._on_attach_file_chosen(d, r, tab))
+
+    def _on_attach_file_chosen(self, dialog: Gtk.FileDialog, result, tab: TerminalTab) -> None:
+        try:
+            gfile = dialog.open_finish(result)
+        except GLib.Error:
+            return  # cancelled
+        # The tab can close while the dialog is up; a mention typed into a
+        # dead terminal goes nowhere, so just drop it.
+        if tab.get_root() is None:
+            return
+        path = gfile.get_path()
+        if path is None:
+            return  # a remote location — nothing the CLI could read
+        tab.add_file_to_chat(path)
 
     # -- the background gate ---------------------------------------------------
 
