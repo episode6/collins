@@ -53,6 +53,12 @@ DEFAULT_SETTINGS = {
     "language": "",  # UI language code; "" = follow the system locale
     "notify_idle": False,  # notify when a background session goes quiet
     "background_status_poll": False,  # timed-poll fallback for the yellow "running detached" lines
+    # Experimental: drive the sidebar's busy pole from the agent CLI's own
+    # OSC 9;4 progress announcements (see activity.ProgressWatch), coaxed out
+    # of it with two env vars on each agent tab's shell (see terminal.py's
+    # _agent_tab_environment). Off = the inferred sources alone, as before;
+    # the env half only takes effect for tabs opened after a change.
+    "progress_termprop": True,
     "auto_title_sessions": True,  # summarize each new session's first prompt into a short title
     "show_tab_bar": True,  # tab bar visibility (tabs keep working underneath)
     "show_folder_path": False,  # show each session's project folder path in the sidebar

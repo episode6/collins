@@ -2401,8 +2401,14 @@ class MainWindow(Adw.ApplicationWindow):
         instant, honest turn-end — finish(), which also flags the row unread,
         where the sweep would have taken IDLE_S to notice. Both of a tab's
         tracked ids get the treatment, same as _on_terminal_output.
+
+        Checked against the experimental setting live, so switching it off
+        silences existing tabs at once — their shells still carry the spawn
+        env, but nothing acts on what the CLI announces.
         """
         if name != PROGRESS_HINT_TERMPROP:
+            return
+        if not self.state.get_setting("progress_termprop"):
             return
         watch = self._progress_watches.get(page)
         if watch is None:

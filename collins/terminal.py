@@ -532,6 +532,9 @@ class TerminalTab(Gtk.Box):
         self.provider = provider or get_provider("claude")
         self._options = options
         self._command_override = command_override
+        # Decided at spawn time, so a toggle mid-session can't half-apply to
+        # a shell that inherited the other choice; new tabs pick up a change.
+        self._progress_env = bool((settings or {}).get("progress_termprop", True))
         self._child_pid: int | None = None
         self._transcript_monitor: Gio.FileMonitor | None = None
         self._transcript_refresh_source: int | None = None
@@ -706,7 +709,9 @@ class TerminalTab(Gtk.Box):
             Vte.PtyFlags.DEFAULT,
             cwd,
             argv,
-            _agent_tab_environment(),  # inherit, plus the progress-OSC coaxing
+            # Inherit, plus the progress-OSC coaxing — unless the experimental
+            # setting is off, in which case a plain inherited environment.
+            _agent_tab_environment() if self._progress_env else None,
             GLib.SpawnFlags.DEFAULT,
             None,  # child_setup
             None,  # child_setup_data
