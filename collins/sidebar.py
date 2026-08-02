@@ -1449,13 +1449,13 @@ class SessionSidebar(Gtk.Box):
 
         # The session's own working directory, not the project's: a session
         # running in a worktree or subdirectory hands that folder over. Chat
-        # sessions live in throwaway directories nobody wants opened.
+        # sessions live in throwaway directories nobody wants opened — but the
+        # gate is on the *resolved* directory, so a chat that moved into a real
+        # worktree (which resume_cwd deliberately honors) still gets the menu.
         rows: list[Gtk.Widget] = []
-        session = row.item.session
-        if not (session.cwd and is_chat_cwd(session.cwd)):
-            cwd = self._session_cwd(session)
-            if cwd:
-                open_section.append_submenu(_("Open In…"), self._open_with_menu(cwd, rows))
+        cwd = self._session_cwd(row.item.session)
+        if cwd and not is_chat_cwd(cwd):
+            open_section.append_submenu(_("Open In…"), self._open_with_menu(cwd, rows))
 
         edit_section = Gio.Menu()
         edit_section.append_item(item(_("Rename…"), "rename-session"))
