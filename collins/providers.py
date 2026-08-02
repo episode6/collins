@@ -354,6 +354,13 @@ class ClaudeProvider(Provider):
         session started, so the path is shown relative to *cwd* when it sits
         inside it and absolute otherwise — an agent that has cd'd into a
         worktree still gets a working reference to a file outside it.
+
+        A name carrying control characters gets None instead of a token:
+        the tty acts on those bytes before any tokenizer sees them — a
+        CR/LF would submit whatever is sitting in the input box, an ESC
+        could open a terminal control sequence — and no quoting defuses
+        that. Repo content is untrusted at first contact (the standing
+        rule), and file names are repo content.
         """
         p = Path(path)
         if cwd:
@@ -362,6 +369,8 @@ class ClaudeProvider(Provider):
             except ValueError:
                 pass
         token = str(p)
+        if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in token):
+            return None
         if any(ch.isspace() for ch in token):
             token = f'"{token}"'
         reference = f"@{token}"

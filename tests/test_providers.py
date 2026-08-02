@@ -399,3 +399,12 @@ def test_claude_file_reference_quotes_a_path_with_spaces():
 
 def test_base_providers_have_no_file_reference():
     assert Provider().file_reference("/p/a.py", "/p", 1, 2) is None
+
+
+def test_claude_file_reference_refuses_control_characters():
+    """The tty acts on control bytes before any tokenizer sees them — a CR
+    would submit the input box — so names carrying them get no token at all."""
+    claude = ClaudeProvider()
+    assert claude.file_reference("/p/evil\nname.py", "/p") is None
+    assert claude.file_reference("/p/evil\rname.py", "/p", 1, 2) is None
+    assert claude.file_reference("/p/evil\x1b]0;x\x07.py", "/p") is None
