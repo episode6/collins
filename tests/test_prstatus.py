@@ -697,11 +697,11 @@ def test_repository_for_is_the_gate_every_gh_call_goes_through(url, repository):
     "counts,badge",
     [
         ((None, None, None), None),  # nothing cached
-        ((0, 0, 0), None),  # a PR with no checks configured
-        ((3, 0, 0), None),  # all green: on a chip, healthy is unadorned
+        ((0, 0, 0), None),  # a PR with no checks configured earns no check mark
+        ((3, 0, 0), "passed"),
         ((2, 1, 0), "failed"),  # a failure outranks passes
         ((2, 1, 4), "failed"),  # ...and outranks pending runs
-        ((2, 0, 1), "pending"),
+        ((2, 0, 1), "pending"),  # runs still going outrank the passes so far
     ],
 )
 def test_badge_summarizes_checks(counts, badge):

@@ -391,6 +391,7 @@ _SCHEME_CSS = """
 .pr-open { color: %(passed_green)s; }
 .pr-draft { color: %(draft_grey)s; }
 .pr-conflict { color: %(pending_yellow)s; }
+.pr-checks-passed { color: %(passed_green)s; }
 .pr-checks-failed { color: %(failed_red)s; }
 .pr-checks-pending { color: %(pending_yellow)s; }
 """

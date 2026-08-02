@@ -130,6 +130,7 @@ _gh_missing = False  # gh isn't on PATH; nothing to retry against this run
 BADGE_FAILED = "failed"
 BADGE_CONFLICT = "conflict"
 BADGE_PENDING = "pending"
+BADGE_PASSED = "passed"
 
 
 @dataclass(frozen=True)
@@ -180,12 +181,12 @@ class PullRequest:
         The chips show it as a small badge over the PR's base icon, and the
         slot holds one mark, so these outrank each other: a failed check needs
         fixing whatever else is true; a conflict blocks the merge even when
-        every check is green; pending runs are only worth a mark while neither
-        of those is up. Checks that all passed show nothing — on a chip,
-        healthy is unadorned.
+        every check is green; pending runs beat the all-clear that some checks
+        already gave; and a clean sweep gets GitHub's green check.
 
-        A merged PR carries none either: the purple base says all there is to
-        say, and whether CI passed on the way in is history.
+        A merged PR carries none: the purple base says all there is to say,
+        and whether CI passed on the way in is history. So does a PR with no
+        checks at all — a green check it never earned would be a lie.
         """
         if self.merged:
             return None
@@ -195,6 +196,8 @@ class PullRequest:
             return BADGE_CONFLICT
         if self.pending:
             return BADGE_PENDING
+        if self.passed:
+            return BADGE_PASSED
         return None
 
 

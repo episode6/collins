@@ -37,6 +37,7 @@ from .i18n import _  # noqa: E402
 from .prstatus import (  # noqa: E402
     BADGE_CONFLICT,
     BADGE_FAILED,
+    BADGE_PASSED,
     BADGE_PENDING,
     PullRequest,
     describe,
@@ -71,12 +72,13 @@ _BASE_ICONS = {
     "DRAFT": ("git-pull-request-draft-symbolic", "pr-draft"),
 }
 _BASE_FALLBACK = ("git-pull-request-symbolic", "pr-draft")  # unfetched or closed
-# The badge says what the PR *needs*: the same marks GitHub puts on a failed
-# check, a conflicting branch and a run still going.
+# The badge says how the PR's checks stand: the same marks GitHub puts on a
+# failed check, a conflicting branch, a run still going and a clean sweep.
 _BADGE_ICONS = {
     BADGE_FAILED: ("x-circle-fill-symbolic", "pr-checks-failed"),
     BADGE_CONFLICT: ("alert-fill-symbolic", "pr-conflict"),
     BADGE_PENDING: ("circle-fill-symbolic", "pr-checks-pending"),
+    BADGE_PASSED: ("check-circle-fill-symbolic", "pr-checks-passed"),
 }
 # What a popover is currently showing: the PR whose actions are up (None while
 # it is the list), and the list itself — the contents a submenu leads back to,
