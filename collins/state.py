@@ -74,6 +74,7 @@ DEFAULT_SETTINGS = {
     "editor_font": "",  # empty = system monospace
     "editor_show_line_numbers": True,
     "editor_show_hidden_files": False,
+    "editor_pop_out_screen_width": 3072,  # screens this wide (physical px) or narrower open the editor popped out (0 = always docked)
     "editor_window_width": 1000,  # last popped-out editor window size (floating, unmaximized)
     "editor_window_height": 700,
     "editor_window_maximized": False,
@@ -116,6 +117,17 @@ def clamp_window_size(width: int, height: int, monitor_sizes: list[tuple[int, in
         width = min(width, max(w for w, _h in monitor_sizes))
         height = min(height, max(h for _w, h in monitor_sizes))
     return max(width, _MIN_WINDOW_SIZE[0]), max(height, _MIN_WINDOW_SIZE[1])
+
+
+def editor_pops_out(monitor_width: int, limit: int) -> bool:
+    """Whether the editor should open popped out rather than docked: true on
+    monitors at most `limit` physical px wide (the pop-out threshold setting).
+
+    A `limit` of 0 means always dock; a `monitor_width` of 0 means the
+    monitor couldn't be determined, which also docks — the docked panel is
+    the recoverable default (its pop-out button is one click away).
+    """
+    return 0 < monitor_width <= limit
 
 
 class AppState:

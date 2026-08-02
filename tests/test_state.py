@@ -4,7 +4,7 @@
 
 import json
 
-from collins.state import clamp_window_size, merge_project_order, move_in_order
+from collins.state import clamp_window_size, editor_pops_out, merge_project_order, move_in_order
 
 
 def test_roundtrip(app_state):
@@ -358,6 +358,28 @@ def test_editor_window_geometry_defaults(app_state):
     assert state.get_setting("editor_window_width") == 1000
     assert state.get_setting("editor_window_height") == 700
     assert state.get_setting("editor_window_maximized") is False
+
+
+def test_editor_pop_out_threshold_default(app_state):
+    state = app_state.AppState()
+    assert state.get_setting("editor_pop_out_screen_width") == 3072
+
+
+def test_editor_pops_out_at_or_below_threshold():
+    assert editor_pops_out(1920, 3072)
+    assert editor_pops_out(3072, 3072)
+
+
+def test_editor_pops_out_not_above_threshold():
+    assert not editor_pops_out(3840, 3072)
+
+
+def test_editor_pops_out_zero_threshold_always_docks():
+    assert not editor_pops_out(1920, 0)
+
+
+def test_editor_pops_out_unknown_monitor_docks():
+    assert not editor_pops_out(0, 3072)
 
 
 def test_clamp_window_size_fits_unchanged():
