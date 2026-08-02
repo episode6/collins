@@ -39,6 +39,7 @@ from .bgstatus import (
 from .caffeine import DURATION_KEYS, duration_label, duration_seconds, format_remaining
 from .chatsessionview import ChatSessionTab
 from .editorwindow import EditorWindow
+from .flash import flash
 from .formatting import blast_radius_body
 from .gitinfo import has_changes
 from .i18n import _
@@ -56,7 +57,6 @@ from .sessions import (
     session_from_file,
     worktree_project_root,
 )
-from .flash import flash
 from .sidebar import SessionSidebar
 from .state import AppState, clamp_window_size, editor_pops_out
 from .store import SessionStore, emptied_projects
