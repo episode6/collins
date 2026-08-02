@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -79,7 +79,7 @@ DEFAULT_SETTINGS = {
     "editor_style_scheme": "",  # GtkSource style scheme id; "" = follow the app's light/dark scheme
     "editor_font": "",  # empty = system monospace
     "editor_show_line_numbers": True,
-    "editor_show_hidden_files": False,
+    "editor_show_hidden_files": True,
     "editor_pop_out_screen_width": 1600,  # scaled px; this wide or narrower opens popped out (0 = never)
     "editor_window_width": 1000,  # last popped-out editor window size (floating, unmaximized)
     "editor_window_height": 700,
