@@ -53,6 +53,7 @@ from .prstatus import (  # noqa: E402
     merge_ordered,
     to_records,
 )
+from .sessions import worktree_project_root  # noqa: E402
 from .transcript import TranscriptModel  # noqa: E402
 
 _TRANSCRIPT_DEBOUNCE_MS = 400
@@ -744,6 +745,7 @@ class TerminalTab(Gtk.Box):
         self._resolver_source: int | None = None
         self._resolver_attempts = 0
         self._resolver_cwd: str | None = None  # set iff this tab resolves its own transcript
+        self._baselined_dirs: set[str] = set()  # dirs whose pre-existing transcripts are excluded
         self._known_transcripts: set[Path] = set()  # transcripts predating this tab
         self._updating = False  # an off-thread transcript parse is in flight
         self._current_question_id: str | None = None  # question the card is showing
@@ -1864,6 +1866,7 @@ class TerminalTab(Gtk.Box):
             if self._command_override is None
             else set()
         )
+        self._baselined_dirs = {self._resolver_cwd}
         self._resolver_source = GLib.timeout_add(1500, self._resolve_transcript)
 
     def _resolve_transcript(self) -> bool:
@@ -1875,6 +1878,34 @@ class TerminalTab(Gtk.Box):
             for p in self.provider.transcripts_for_cwd(self._resolver_cwd)
             if p not in self._known_transcripts
         ]
+        # A worktree launch (claude -w) moves the agent into a worktree under
+        # the launch dir before the first prompt, and its transcript is keyed
+        # by the *worktree's* cwd — the launch dir's key never sees it. Follow
+        # the agent into any worktree of this tab's own project, with the same
+        # baseline discipline as the launch dir: the CLI recycles unchanged
+        # worktrees, so a transcript already present when we first see the
+        # worktree belongs to an older session (observed live — a leftover
+        # would otherwise attach the instant the cwd moved, before this
+        # session's own transcript exists). We see the cwd move within one
+        # poll of the CLI starting, long before a first prompt can land, so
+        # the baseline can't swallow our own transcript.
+        live = self.current_agent_cwd()
+        if live and live != self._resolver_cwd:
+            root = worktree_project_root(live)
+            if root is not None and os.path.realpath(root) == os.path.realpath(
+                self._resolver_cwd
+            ):
+                if live not in self._baselined_dirs:
+                    self._baselined_dirs.add(live)
+                    if self._command_override is None:
+                        self._known_transcripts |= set(
+                            self.provider.transcripts_for_cwd(live)
+                        )
+                cands += [
+                    p
+                    for p in self.provider.transcripts_for_cwd(live)
+                    if p not in self._known_transcripts
+                ]
         try:
             path = max(cands, key=lambda p: p.stat().st_mtime, default=None)
         except OSError:

@@ -281,6 +281,20 @@ class PreferencesDialog(Adw.PreferencesDialog):
         lang_group.add(self._lang_expander)
         page.add(lang_group)
 
+        new_sessions_group = Adw.PreferencesGroup(title=_("New sessions"))
+        self._worktree_row = Adw.SwitchRow(
+            title=_("Start new sessions in a git worktree"),
+            subtitle=_(
+                "Git projects only; each new session works in its own fresh "
+                "worktree, so it won't see uncommitted local changes. "
+                "Right-click a project header to override per project"
+            ),
+        )
+        self._worktree_row.set_active(bool(state.get_setting("worktree_new_sessions")))
+        self._worktree_row.connect("notify::active", self._on_worktree_changed)
+        new_sessions_group.add(self._worktree_row)
+        page.add(new_sessions_group)
+
         running_group = Adw.PreferencesGroup(
             title=_("Running sessions"),
             description=_(
@@ -528,6 +542,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_auto_title_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("auto_title_sessions", row.get_active())
+        self._on_change()
+
+    def _on_worktree_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("worktree_new_sessions", row.get_active())
         self._on_change()
 
     # -- footer apps ---------------------------------------------------------

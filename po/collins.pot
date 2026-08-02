@@ -1465,3 +1465,40 @@ msgstr[1] ""
 #: collins/terminal.py:1112
 msgid "Open this folder in your file manager"
 msgstr ""
+
+#: collins/prefs.py:284
+msgid "New sessions"
+msgstr ""
+
+#: collins/prefs.py:286
+msgid "Start new sessions in a git worktree"
+msgstr ""
+
+#: collins/prefs.py:288
+msgid ""
+"Git projects only; each new session works in its own fresh worktree, so it "
+"won't see uncommitted local changes. Right-click a project header to "
+"override per project"
+msgstr ""
+
+#: collins/sidebar.py:1549
+msgid "New sessions use a worktree"
+msgstr ""
+
+#: collins/sidebar.py:1541
+msgid "New session here (no worktree)"
+msgstr ""
+
+#: collins/sidebar.py:1542
+msgid "New session here (in a worktree)"
+msgstr ""
+
+#: collins/window.py:1230
+#, python-brace-format
+msgid "New session in {project} (no worktree)"
+msgstr ""
+
+#: collins/window.py:1232
+#, python-brace-format
+msgid "New session in {project} (in a worktree)"
+msgstr ""
