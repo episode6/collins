@@ -11,6 +11,15 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+msgid "A command is still running in this terminal tab and will be terminated."
+msgstr "In diesem Terminal-Tab läuft noch ein Befehl, der beendet wird."
+
+msgid "New terminal tab"
+msgstr "Neuer Terminal-Tab"
+
+msgid "Terminal {number}"
+msgstr "Terminal {number}"
+
 msgid "── restored panel history ──"
 msgstr "── wiederhergestellter Panel-Verlauf ──"
 

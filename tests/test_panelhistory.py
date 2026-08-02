@@ -76,3 +76,67 @@ def test_trim_multibyte_safe(history, monkeypatch):
     loaded = history.load("sid-1")
     assert loaded  # decodes cleanly even when the cut splits a code point
     assert "a" not in loaded
+
+
+# -- multi-tab (save_all / load_all) ----------------------------------------
+
+
+def test_save_all_roundtrip(history):
+    history.save_all("sid-1", ["tab one", "tab two", "tab three"])
+    assert history.load_all("sid-1") == ["tab one", "tab two", "tab three"]
+
+
+def test_load_all_missing_session(history):
+    assert history.load_all("nope") == []
+
+
+def test_first_tab_keeps_legacy_filename(history):
+    # History saved before the panel grew tabs restores into the first tab.
+    history.save("sid-1", "old single-panel history")
+    assert history.load_all("sid-1") == ["old single-panel history"]
+    history.save_all("sid-1", ["updated"])
+    assert history.load("sid-1") == "updated"
+
+
+def test_save_all_drops_closed_tabs(history):
+    history.save_all("sid-1", ["one", "two", "three"])
+    history.save_all("sid-1", ["one"])
+    assert history.load_all("sid-1") == ["one"]
+
+
+def test_save_all_empty_clears_everything(history):
+    history.save_all("sid-1", ["one", "two"])
+    history.save_all("sid-1", [])
+    assert history.load_all("sid-1") == []
+
+
+def test_save_all_skips_blank_tabs(history):
+    history.save_all("sid-1", ["one", " \n ", "three"])
+    assert history.load_all("sid-1") == ["one", "three"]
+
+
+def test_delete_removes_all_tabs(history):
+    history.save_all("sid-1", ["one", "two"])
+    history.delete("sid-1")
+    assert history.load_all("sid-1") == []
+
+
+def test_copy_copies_all_tabs(history):
+    history.save_all("old", ["one", "two"])
+    history.copy("old", "new")
+    assert history.load_all("new") == ["one", "two"]
+    assert history.load_all("old") == ["one", "two"]  # source untouched
+
+
+def test_copy_noop_when_target_has_any_tab(history):
+    history.save_all("old", ["one", "two"])
+    history.save("new", "already here", index=1)
+    history.copy("old", "new")
+    assert history.load_all("new") == ["already here"]
+
+
+def test_tab_files_never_leak_across_sessions(history):
+    # "sid-1.2.txt" belongs to sid-1's third tab, not to a session that
+    # happens to share the filename prefix.
+    history.save_all("sid-1", ["one", "two", "three"])
+    assert history.load_all("sid-11") == []

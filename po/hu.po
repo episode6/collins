@@ -11,6 +11,15 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+msgid "A command is still running in this terminal tab and will be terminated."
+msgstr "Ezen a terminállapon még fut egy parancs, amely le lesz állítva."
+
+msgid "New terminal tab"
+msgstr "Új terminállap"
+
+msgid "Terminal {number}"
+msgstr "{number}. terminál"
+
 msgid "── restored panel history ──"
 msgstr "── visszaállított panelelőzmények ──"
 

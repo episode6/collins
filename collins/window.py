@@ -1951,6 +1951,7 @@ class MainWindow(Adw.ApplicationWindow):
         panel_busy = tab.panel_has_running_command()
         if panel_busy:
             tab.show_panel()  # reveal what's about to be killed (a busy shell is never cd'd)
+            tab.select_busy_panel_tab()  # ...including fronting its inner tab
 
         def do_close(background: bool = False) -> None:
             self._close_asking.discard(page)
