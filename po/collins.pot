@@ -1437,3 +1437,17 @@ msgstr ""
 #: collins/terminal.py:1205
 msgid "Add to chat isn't available for this file"
 msgstr ""
+
+#: collins/terminal.py:1470
+msgid "couldn't save a copy of the dropped image"
+msgstr ""
+
+#: collins/terminal.py:1483
+msgid "skipped {n} dropped item that isn't a local file"
+msgid_plural "skipped {n} dropped items that aren't local files"
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/terminal.py:1505
+msgid "the dropped file names can't be referenced"
+msgstr ""
