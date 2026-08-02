@@ -296,6 +296,27 @@ msgstr "Idioma"
 msgid "Restart to apply"
 msgstr "Reinicia para aplicar"
 
+msgid "Running sessions"
+msgstr "Sesiones en ejecución"
+
+msgid "Ask keeps the confirmation dialog; the other choices skip it and exit the session(s) cleanly or keep them running detached"
+msgstr "«Preguntar» mantiene el diálogo de confirmación; las demás opciones lo omiten y salen limpiamente de las sesiones o las mantienen en ejecución desacopladas"
+
+msgid "When archiving a running session"
+msgstr "Al archivar una sesión en ejecución"
+
+msgid "Archiving a session that is still running also closes its tab"
+msgstr "Archivar una sesión que sigue en ejecución también cierra su pestaña"
+
+msgid "When quitting with running sessions"
+msgstr "Al salir con sesiones en ejecución"
+
+msgid "Closing a window while agent sessions are still running"
+msgstr "Cerrar una ventana mientras las sesiones del agente siguen en ejecución"
+
+msgid "Ask"
+msgstr "Preguntar"
+
 msgid "Notifications"
 msgstr "Notificaciones"
 

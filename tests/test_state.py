@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 
 import json
 
@@ -109,6 +109,18 @@ def test_caffeine_launch_timer_setting(app_state):
     saved = app_state.AppState().get_setting("caffeine_launch_timer")
     assert saved in DURATION_KEYS
     assert duration_seconds(saved) == 10800
+
+
+def test_running_session_behavior_settings(app_state):
+    state = app_state.AppState()
+    # Both default to today's behaviour: the confirmation dialog asks.
+    assert state.get_setting("archive_running_session") == "ask"
+    assert state.get_setting("quit_with_running_sessions") == "ask"
+    state.set_setting("archive_running_session", "background")
+    state.set_setting("quit_with_running_sessions", "exit")
+    fresh = app_state.AppState()
+    assert fresh.get_setting("archive_running_session") == "background"
+    assert fresh.get_setting("quit_with_running_sessions") == "exit"
 
 
 def test_footer_apps_setting_roundtrip(app_state):

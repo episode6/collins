@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -66,6 +66,14 @@ _SCHEMES = [
     ("system", N_("Follow system"), Adw.ColorScheme.DEFAULT),
     ("light", N_("Light"), Adw.ColorScheme.FORCE_LIGHT),
     ("dark", N_("Dark"), Adw.ColorScheme.FORCE_DARK),
+]
+
+# What closing a running session's tab does when a setting stands in for the
+# confirmation dialog. The labels match the dialog buttons they replace.
+_RUNNING_BEHAVIORS = [
+    ("ask", N_("Ask")),
+    ("exit", N_("Exit Session")),
+    ("background", N_("Background Session")),
 ]
 
 
@@ -273,6 +281,27 @@ class PreferencesDialog(Adw.PreferencesDialog):
         lang_group.add(self._lang_expander)
         page.add(lang_group)
 
+        running_group = Adw.PreferencesGroup(
+            title=_("Running sessions"),
+            description=_(
+                "Ask keeps the confirmation dialog; the other choices skip it "
+                "and exit the session(s) cleanly or keep them running detached"
+            ),
+        )
+        self._add_running_behavior_row(
+            running_group,
+            _("When archiving a running session"),
+            _("Archiving a session that is still running also closes its tab"),
+            "archive_running_session",
+        )
+        self._add_running_behavior_row(
+            running_group,
+            _("When quitting with running sessions"),
+            _("Closing a window while agent sessions are still running"),
+            "quit_with_running_sessions",
+        )
+        page.add(running_group)
+
         notif_group = Adw.PreferencesGroup(title=_("Notifications"))
         self._notify_row = Adw.SwitchRow(
             title=_("Notify when a session goes idle"),
@@ -456,6 +485,21 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_easy_copy_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("easy_copy_paste", row.get_active())
+        self._on_change()
+
+    def _add_running_behavior_row(
+        self, group: Adw.PreferencesGroup, title: str, subtitle: str, key: str
+    ) -> None:
+        row = Adw.ComboRow(title=title, subtitle=subtitle)
+        row.set_model(Gtk.StringList.new([_(label) for _v, label in _RUNNING_BEHAVIORS]))
+        values = [value for value, _l in _RUNNING_BEHAVIORS]
+        current = self._state.get_setting(key)
+        row.set_selected(values.index(current) if current in values else 0)
+        row.connect("notify::selected", self._on_running_behavior_changed, key)
+        group.add(row)
+
+    def _on_running_behavior_changed(self, row: Adw.ComboRow, _pspec, key: str) -> None:
+        self._state.set_setting(key, _RUNNING_BEHAVIORS[row.get_selected()][0])
         self._on_change()
 
     def _on_notify_changed(self, row: Adw.SwitchRow, _pspec) -> None:

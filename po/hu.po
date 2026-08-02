@@ -296,6 +296,27 @@ msgstr "Nyelv"
 msgid "Restart to apply"
 msgstr "Újraindítás szükséges"
 
+msgid "Running sessions"
+msgstr "Futó munkamenetek"
+
+msgid "Ask keeps the confirmation dialog; the other choices skip it and exit the session(s) cleanly or keep them running detached"
+msgstr "A „Rákérdezés” megtartja a megerősítő párbeszédablakot; a többi lehetőség kihagyja, és tisztán kilép a munkamenet(ek)ből, vagy leválasztva futni hagyja őket"
+
+msgid "When archiving a running session"
+msgstr "Futó munkamenet archiválásakor"
+
+msgid "Archiving a session that is still running also closes its tab"
+msgstr "A még futó munkamenet archiválása a lapját is bezárja"
+
+msgid "When quitting with running sessions"
+msgstr "Kilépéskor futó munkamenetekkel"
+
+msgid "Closing a window while agent sessions are still running"
+msgstr "Ablak bezárása, miközben ügynök-munkamenetek még futnak"
+
+msgid "Ask"
+msgstr "Rákérdezés"
+
 msgid "Notifications"
 msgstr "Értesítések"
 

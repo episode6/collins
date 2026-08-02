@@ -658,6 +658,17 @@ class MainWindow(Adw.ApplicationWindow):
 
         can_background = any(self._quit_backgroundable(self.tab_view.get_nth_page(i))
                              for i in range(self.tab_view.get_n_pages()))
+        behavior = self.state.get_setting("quit_with_running_sessions")
+        if behavior == "exit":
+            do_quit()
+            return
+        if behavior == "background":
+            # Background what can be handed off; anything that can't gets the
+            # normal graceful exit — exactly what the dialog's Background
+            # Sessions button does, so no backgroundable tabs means the same
+            # exit-all the button would have produced.
+            do_quit(background=can_background)
+            return
         heading = _("Close window with {n} active session(s)?").format(n=busy)
         body = _("Agents are asked to exit cleanly first; "
                  "other running commands will be terminated.")
@@ -1786,8 +1797,11 @@ class MainWindow(Adw.ApplicationWindow):
                 self._bg_ok.add(page)
             self.tab_view.close_page(page)
 
+        def cancelled() -> None:
+            self._archive_on_close.pop(page, None)  # cancelled: keep the session visible
+
         tab = page.get_child()
-        self._ask_save_editors([tab] if isinstance(tab, TerminalTab) else [], proceed)
+        self._ask_save_editors([tab] if isinstance(tab, TerminalTab) else [], proceed, cancelled)
 
     def _session_takes_prompt(self, session_id: str) -> bool:
         """Whether a prompt sent to this session would land in an empty input.
@@ -3076,6 +3090,17 @@ class MainWindow(Adw.ApplicationWindow):
             # only once the tab really closes: cancelling the dialog keeps it
             # visible.
             self._archive_on_close[page] = session_id
+            behavior = self.state.get_setting("archive_running_session")
+            if behavior == "exit":
+                # The setting stands in for the dialog's Exit Session button;
+                # unsaved editor edits still get their Save Changes? ask.
+                self._close_tab_direct(page, background=False)
+                return
+            if behavior == "background" and not self._background_blocker(page):
+                self._close_tab_direct(page, background=True)
+                return
+            # "ask" — or backgrounding was chosen but isn't available for this
+            # tab right now: the dialog says why and offers the alternatives.
             self.tab_view.close_page(page)
             return
         self.store.set_archived(session_id, archived)

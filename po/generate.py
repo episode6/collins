@@ -122,6 +122,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Color scheme": "Színséma",
         "Language": "Nyelv",
         "Restart to apply": "Újraindítás szükséges",
+        "Running sessions": "Futó munkamenetek",
+        "Ask keeps the confirmation dialog; the other choices skip it and exit the "
+        "session(s) cleanly or keep them running detached":
+            "A „Rákérdezés” megtartja a megerősítő párbeszédablakot; a többi lehetőség "
+            "kihagyja, és tisztán kilép a munkamenet(ek)ből, vagy leválasztva futni hagyja őket",
+        "When archiving a running session": "Futó munkamenet archiválásakor",
+        "Archiving a session that is still running also closes its tab":
+            "A még futó munkamenet archiválása a lapját is bezárja",
+        "When quitting with running sessions": "Kilépéskor futó munkamenetekkel",
+        "Closing a window while agent sessions are still running":
+            "Ablak bezárása, miközben ügynök-munkamenetek még futnak",
+        "Ask": "Rákérdezés",
         "Notifications": "Értesítések",
         "Notify when a session goes idle": "Értesítés, ha egy munkamenet tétlenné válik",
         "Desktop notification when a background tab stops producing output":
@@ -437,6 +449,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Color scheme": "Farbschema",
         "Language": "Sprache",
         "Restart to apply": "Neustart erforderlich",
+        "Running sessions": "Laufende Sitzungen",
+        "Ask keeps the confirmation dialog; the other choices skip it and exit the "
+        "session(s) cleanly or keep them running detached":
+            "„Nachfragen“ behält den Bestätigungsdialog; die anderen Optionen überspringen "
+            "ihn und beenden die Sitzung(en) sauber oder lassen sie abgekoppelt weiterlaufen",
+        "When archiving a running session": "Beim Archivieren einer laufenden Sitzung",
+        "Archiving a session that is still running also closes its tab":
+            "Das Archivieren einer noch laufenden Sitzung schließt auch ihren Tab",
+        "When quitting with running sessions": "Beim Beenden mit laufenden Sitzungen",
+        "Closing a window while agent sessions are still running":
+            "Schließen eines Fensters, während Agenten-Sitzungen noch laufen",
+        "Ask": "Nachfragen",
         "Notifications": "Benachrichtigungen",
         "Notify when a session goes idle": "Benachrichtigen, wenn eine Sitzung untätig wird",
         "Desktop notification when a background tab stops producing output":
@@ -757,6 +781,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Color scheme": "Esquema de color",
         "Language": "Idioma",
         "Restart to apply": "Reinicia para aplicar",
+        "Running sessions": "Sesiones en ejecución",
+        "Ask keeps the confirmation dialog; the other choices skip it and exit the "
+        "session(s) cleanly or keep them running detached":
+            "«Preguntar» mantiene el diálogo de confirmación; las demás opciones lo omiten "
+            "y salen limpiamente de las sesiones o las mantienen en ejecución desacopladas",
+        "When archiving a running session": "Al archivar una sesión en ejecución",
+        "Archiving a session that is still running also closes its tab":
+            "Archivar una sesión que sigue en ejecución también cierra su pestaña",
+        "When quitting with running sessions": "Al salir con sesiones en ejecución",
+        "Closing a window while agent sessions are still running":
+            "Cerrar una ventana mientras las sesiones del agente siguen en ejecución",
+        "Ask": "Preguntar",
         "Notifications": "Notificaciones",
         "Notify when a session goes idle": "Notificar cuando una sesión quede inactiva",
         "Desktop notification when a background tab stops producing output":
@@ -1075,6 +1111,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Color scheme": "Schéma de couleurs",
         "Language": "Langue",
         "Restart to apply": "Redémarrer pour appliquer",
+        "Running sessions": "Sessions en cours",
+        "Ask keeps the confirmation dialog; the other choices skip it and exit the "
+        "session(s) cleanly or keep them running detached":
+            "« Demander » conserve la boîte de dialogue de confirmation ; les autres choix "
+            "la sautent et quittent proprement la ou les sessions, ou les laissent tourner détachées",
+        "When archiving a running session": "Lors de l’archivage d’une session en cours",
+        "Archiving a session that is still running also closes its tab":
+            "Archiver une session encore en cours ferme aussi son onglet",
+        "When quitting with running sessions": "À la fermeture avec des sessions en cours",
+        "Closing a window while agent sessions are still running":
+            "Fermer une fenêtre alors que des sessions d’agent sont encore en cours",
+        "Ask": "Demander",
         "Notifications": "Notifications",
         "Notify when a session goes idle": "Notifier lorsqu’une session devient inactive",
         "Desktop notification when a background tab stops producing output":
