@@ -370,6 +370,9 @@ APP_ID = "com.episode6.Collins"
 # red build reads here exactly as it does on the PR page, in either theme.
 _SCHEME_CSS = """
 .pr-merged { color: %(merged_purple)s; }
+/* GitHub's open-PR green is the same shade as its checks-passed green, so the
+   menu's pull-request mark shares the pair rather than carrying its own. */
+.pr-open { color: %(passed_green)s; }
 .pr-checks-passed { color: %(passed_green)s; }
 .pr-checks-failed { color: %(failed_red)s; }
 .pr-checks-pending { color: %(pending_yellow)s; }

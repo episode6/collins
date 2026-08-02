@@ -67,6 +67,19 @@ CHECKS_CSS = {
 # which a refresh can replace without disturbing the submenu on top of it.
 _ACTIONS = "_collins_actions_pr"
 _LIST = "_collins_pr_list"
+# Each action's mark, by key: the icon says who carries the action out —
+# GitHub's own glyphs (colored as on the PR page: merge purple, open green)
+# for the actions gh runs, Claude's mark for the ones that send the session a
+# prompt or summon the review workflow. Lives here rather than on the Action
+# because icons are the menu's business and practions stays Gtk-free.
+_ACTION_ICONS = {
+    practions.READY: ("git-pull-request-symbolic", "pr-open"),
+    practions.MERGE: ("git-merge-symbolic", "pr-merged"),
+    practions.AUTO_MERGE: ("git-merge-symbolic", "pr-merged"),
+    practions.REVIEW: ("agent-claude-symbolic", None),
+    practions.FIX_CI: ("agent-claude-symbolic", None),
+    practions.NEW_PR: ("agent-claude-symbolic", None),
+}
 
 
 @dataclass(frozen=True)
@@ -369,11 +382,12 @@ def _open_row(popover: Gtk.Popover, pr: PullRequest) -> Gtk.Widget:
     Built here rather than in practions because opening a browser is a Gtk
     affair, and practions stays importable without one.
     """
-    label = Gtk.Label(label=_("Open on GitHub"), xalign=0.0, hexpand=True)
-    # Under the header's title rather than under its arrow, like every action
-    # row: the indent says this is about the PR named up there.
-    label.set_margin_start(MARK_COLUMN_PX + 8)
-    button = Gtk.Button(child=label)
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    # GitHub's own mark in the column the header's status mark sits in, so the
+    # label lines up under the title; uncolored, like the sidebar's button.
+    row.append(_mark_icon("github-symbolic", None))
+    row.append(Gtk.Label(label=_("Open on GitHub"), xalign=0.0, hexpand=True))
+    button = Gtk.Button(child=row)
     button.add_css_class("flat")
     button.add_css_class("pr-menu-row")
     button.set_tooltip_text(open_tooltip(pr.url))
@@ -381,17 +395,33 @@ def _open_row(popover: Gtk.Popover, pr: PullRequest) -> Gtk.Widget:
     return button
 
 
+def _mark_icon(icon_name: str, css_class: str | None) -> Gtk.Widget:
+    """An action row's mark, sized and slotted like the header's status mark."""
+    icon = Gtk.Image.new_from_icon_name(icon_name)
+    icon.set_pixel_size(MERGED_ICON_PX)
+    icon.set_size_request(MARK_COLUMN_PX, -1)
+    if css_class is not None:
+        icon.add_css_class(css_class)
+    return icon
+
+
 def _action_row(
     popover: Gtk.Popover, pr: PullRequest, action: practions.Action, host: ActionHost
 ) -> Gtk.Widget:
-    """One action as a row: what it does, and a spinner for while it is doing it."""
+    """One action as a row: its mark, what it does, and a spinner for while it
+    is doing it."""
     label = Gtk.Label(label=action.label, xalign=0.0, hexpand=True)
-    # Under the header's title rather than under its arrow: the actions are
-    # about the PR named up there, and the indent says so.
-    label.set_margin_start(MARK_COLUMN_PX + 8)
     spinner = Gtk.Spinner()
     spinner.set_visible(False)
     row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    # The mark keeps the label under the header's title, where the plain
+    # indent used to; an action the map doesn't know keeps the indent, so a
+    # future action without a mark still lines up rather than jutting out.
+    mark = _ACTION_ICONS.get(action.key)
+    if mark is not None:
+        row.append(_mark_icon(*mark))
+    else:
+        label.set_margin_start(MARK_COLUMN_PX + 8)
     row.append(label)
     row.append(spinner)
     button = Gtk.Button(child=row)
