@@ -14,7 +14,7 @@ CI status is the harder half. Claude Code keeps a URL-keyed cache of PR state
 and check counts at ``~/.claude/gh-pr-status-cache.json``, but as of CLI 2.1.220
 only FleetView refreshes it — an ordinary session never does, so the file can
 sit untouched for days while its entries rot. Trusting it wholesale means
-showing a red ✗ on a PR that has long since gone green. So the cache is used
+badging a PR as failed when it has long since gone green. So the cache is used
 only while the file itself is recent (a free warm start for the first seconds
 after launch), and Collins otherwise refreshes status itself with a short
 ``gh pr view`` per linked PR, at most once a minute.
