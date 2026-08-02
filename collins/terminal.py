@@ -1138,8 +1138,8 @@ class TerminalTab(Gtk.Box):
         # populated from settings via _set_footer_apps.
         self._footer_apps_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
 
-        # The editor toggle sits between the footer apps and the panel
-        # buttons — a page-with-a-folded-corner glyph, not the panel-split
+        # The editor toggle closes the row, right of the terminal toggle — a
+        # page-with-a-folded-corner glyph, not the panel-split
         # icon `toggle_btn` uses next to it. One click means one of three
         # things depending on state: re-attach a detached editor, else open
         # the panel, else close it (see the window's _toggle_editor); the
@@ -1165,9 +1165,9 @@ class TerminalTab(Gtk.Box):
         footer.add_css_class("tab-footer")
         footer.append(left)
         footer.append(self._footer_apps_box)
-        footer.append(self._editor_toggle_btn)
         toggle_btn.add_css_class("flat")
         footer.append(toggle_btn)
+        footer.append(self._editor_toggle_btn)
         # Poll only while on screen; refresh immediately on every tab switch.
         self.connect("map", lambda *_: self._start_cwd_refresh())
         return footer
