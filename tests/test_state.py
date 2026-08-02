@@ -362,24 +362,24 @@ def test_editor_window_geometry_defaults(app_state):
 
 def test_editor_pop_out_threshold_default(app_state):
     state = app_state.AppState()
-    assert state.get_setting("editor_pop_out_screen_width") == 3072
+    assert state.get_setting("editor_pop_out_screen_width") == 1536
 
 
 def test_editor_pops_out_at_or_below_threshold():
-    assert editor_pops_out(1920, 3072)
-    assert editor_pops_out(3072, 3072)
+    assert editor_pops_out(1280, 1536)
+    assert editor_pops_out(1536, 1536)
 
 
 def test_editor_pops_out_not_above_threshold():
-    assert not editor_pops_out(3840, 3072)
+    assert not editor_pops_out(1920, 1536)
 
 
 def test_editor_pops_out_zero_threshold_always_docks():
-    assert not editor_pops_out(1920, 0)
+    assert not editor_pops_out(1280, 0)
 
 
 def test_editor_pops_out_unknown_monitor_docks():
-    assert not editor_pops_out(0, 3072)
+    assert not editor_pops_out(0, 1536)
 
 
 def test_clamp_window_size_fits_unchanged():

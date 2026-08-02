@@ -359,8 +359,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
         pop_out_row.set_title(_("Open in a window on small screens"))
         pop_out_row.set_subtitle(
             _(
-                "On screens this many pixels wide or narrower, the editor opens "
-                "in its own window instead of a panel (0 = always open as a panel)"
+                "On screens this many pixels wide or narrower (after display "
+                "scaling), the editor opens in its own window instead of a "
+                "panel (0 = always open as a panel)"
             )
         )
         pop_out_row.set_value(int(state.get_setting("editor_pop_out_screen_width") or 0))

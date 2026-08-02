@@ -120,14 +120,15 @@ def _monitor_sizes() -> list[tuple[int, int]]:
     return sizes
 
 
-def _monitor_physical_width(window: Gtk.Window) -> int:
-    """Physical px width of the monitor `window` is currently on (0 when it
+def _monitor_logical_width(window: Gtk.Window) -> int:
+    """Scaled px width of the monitor `window` is currently on (0 when it
     can't be determined, e.g. the window isn't realized yet).
 
-    GTK monitor geometry is in logical "application pixels"; multiplying by
-    the integer scale factor recovers the resolution a spec sheet (or
-    xrandr) quotes — 3072, not 1536 at 2× scale. That's the number the
-    pop-out threshold setting is compared against, so it must be physical.
+    GTK monitor geometry is in logical "application pixels" — the physical
+    resolution divided by the display scale, e.g. 1536 for a 3072-px panel
+    at 2×. That's deliberately what the pop-out threshold compares against:
+    it's the same unit windows are laid out in, so it measures the space a
+    terminal-plus-editor split actually has, not what the spec sheet says.
     """
     surface = window.get_surface()
     display = window.get_display()
@@ -136,7 +137,7 @@ def _monitor_physical_width(window: Gtk.Window) -> int:
     monitor = display.get_monitor_at_surface(surface)
     if monitor is None:
         return 0
-    return monitor.get_geometry().width * monitor.get_scale_factor()
+    return monitor.get_geometry().width
 
 
 def _app_icon_name(window: Gtk.Window) -> str:
@@ -2591,10 +2592,10 @@ class MainWindow(Adw.ApplicationWindow):
     def _editor_opens_popped_out(self) -> bool:
         """Whether opening the editor right now should skip the docked panel
         and go straight to its own window: the monitor this window is on at
-        this moment is at most `editor_pop_out_screen_width` physical px
+        this moment is at most `editor_pop_out_screen_width` scaled px
         wide. Small screens don't fit a useful terminal-plus-editor split."""
         limit = int(self.state.get_setting("editor_pop_out_screen_width") or 0)
-        return editor_pops_out(_monitor_physical_width(self), limit)
+        return editor_pops_out(_monitor_logical_width(self), limit)
 
     def _pop_out_editor(self, tab: TerminalTab) -> None:
         """Reparent the tab's live editor pane into its own window (the pane's

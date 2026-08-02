@@ -1274,8 +1274,9 @@ msgstr ""
 
 #: collins/prefs.py:360
 msgid ""
-"On screens this many pixels wide or narrower, the editor opens in its own "
-"window instead of a panel (0 = always open as a panel)"
+"On screens this many pixels wide or narrower (after display scaling), the "
+"editor opens in its own window instead of a panel (0 = always open as a "
+"panel)"
 msgstr ""
 
 #: collins/quickopen.py:66
