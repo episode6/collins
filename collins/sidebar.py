@@ -703,7 +703,7 @@ class SessionRow(Gtk.ListBoxRow):
             badge.set_tooltip_text(_("Claude is waiting for your reply"))
             badge.set_visible(True)
         elif item.state == "interrupted":
-            badge.set_from_icon_name("process-stop-symbolic")
+            badge.set_from_icon_name("interrupted-stop-symbolic")
             badge.add_css_class("interrupted-badge")
             badge.set_tooltip_text(_("You interrupted Claude here"))
             badge.set_visible(True)
