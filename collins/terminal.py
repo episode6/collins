@@ -1362,11 +1362,15 @@ class TerminalTab(Gtk.Box):
         self.terminal.feed_child(text.encode())
 
     def _on_editor_add_to_chat(self, _pane, path: str, start_line: int, end_line: int) -> None:
-        """The editor's "Add to chat" (a right-clicked selection or file):
-        type the agent's mention token for it into the input box — typed,
-        never submitted, so the user says what they want done with it. The
-        trailing space both terminates the CLI's mention token and leaves
-        the cursor ready for that sentence.
+        self.add_file_to_chat(path, start_line, end_line)
+
+    def add_file_to_chat(self, path: str, start_line: int = 0, end_line: int = 0) -> None:
+        """The editor's "Add to chat" (a right-clicked selection or file)
+        and the header's attach-file button: type the agent's mention token
+        for *path* into the input box — typed, never submitted, so the user
+        says what they want done with it. The trailing space both
+        terminates the CLI's mention token and leaves the cursor ready for
+        that sentence.
 
         The path resolves against the agent's cwd right now, not the
         directory the tab started in — an agent that has cd'd into a

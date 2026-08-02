@@ -1442,6 +1442,10 @@ msgstr ""
 msgid "Add to chat isn't available for this file"
 msgstr ""
 
+#: collins/window.py:374 collins/window.py:2758
+msgid "Attach file to chat"
+msgstr ""
+
 #: collins/terminal.py:1472
 msgid "couldn't save a copy of the dropped image"
 msgstr ""
