@@ -326,11 +326,11 @@ class MainWindow(Adw.ApplicationWindow):
         for provider in available_providers():
             for variant in provider.chat_variants():  # native streaming chat
                 if variant.label:
-                    text = _("New {name} chat ({mode})").format(
+                    text = _("New {name} chat ({mode}) (experimental)").format(
                         name=provider.name, mode=_(variant.label)
                     )
                 else:
-                    text = _("New {name} chat…").format(name=provider.name)
+                    text = _("New {name} chat (experimental)…").format(name=provider.name)
                 new_menu.append(text, f"win.new-chat-provider::{provider.id}:{variant.key}")
         new_menu.append(_("New window"), "app.new-window")
         new_btn = Adw.SplitButton(icon_name="tab-new-symbolic")

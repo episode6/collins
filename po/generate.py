@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -197,10 +197,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "This prompt needs the terminal to answer.":
             "Ezt a kérdést a terminálban kell megválaszolni.",
         "Answer in terminal": "Válasz a terminálban",
-        "New {name} chat…": "Új {name} csevegés…",
+        "New {name} chat (experimental)…": "Új {name} csevegés (kísérleti)…",
         "Chat with {name} — every file edit and command asks your permission first.":
             "Csevegés a {name}-tal — minden fájlmódosítás és parancs előbb az engedélyedet kéri.",
-        "New {name} chat ({mode})": "Új {name} csevegés ({mode})",
+        "New {name} chat ({mode}) (experimental)": "Új {name} csevegés ({mode}) (kísérleti)",
         "Read-only chat with {name} — analyses and answers, never edits.":
             "Csak olvasható csevegés a {name}-tal — elemez és válaszol, soha nem szerkeszt.",
         "Chat with {name} — ⚠ runs edits and commands automatically, without asking.":
@@ -228,8 +228,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Nothing to replay yet.": "Még nincs mit visszajátszani.",
         "Chat — {dir}": "Csevegés — {dir}",
         "Chat — {name}": "Csevegés — {name}",
-        "Continue in chat": "Folytatás csevegésben",
-        "Continue in chat ({mode})": "Folytatás csevegésben ({mode})",
+        "Continue in chat (experimental)": "Folytatás csevegésben (kísérleti)",
+        "Continue in chat ({mode}) (experimental)": "Folytatás csevegésben ({mode}) (kísérleti)",
         "Continuing the previous session — earlier messages aren't shown here.":
             "A korábbi munkamenet folytatása — a régebbi üzenetek itt nem jelennek meg.",
         "Exit session and close tab": "Kilépés a munkamenetből és a lap bezárása",
@@ -513,10 +513,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "This prompt needs the terminal to answer.":
             "Diese Eingabe muss im Terminal beantwortet werden.",
         "Answer in terminal": "Im Terminal antworten",
-        "New {name} chat…": "Neuer {name}-Chat…",
+        "New {name} chat (experimental)…": "Neuer {name}-Chat (experimentell)…",
         "Chat with {name} — every file edit and command asks your permission first.":
             "Chat mit {name} — jede Dateiänderung und jeder Befehl fragt zuerst um Erlaubnis.",
-        "New {name} chat ({mode})": "Neuer {name}-Chat ({mode})",
+        "New {name} chat ({mode}) (experimental)": "Neuer {name}-Chat ({mode}) (experimentell)",
         "Read-only chat with {name} — analyses and answers, never edits.":
             "Schreibgeschützter Chat mit {name} — analysiert und antwortet, bearbeitet nie.",
         "Chat with {name} — ⚠ runs edits and commands automatically, without asking.":
@@ -544,8 +544,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Nothing to replay yet.": "Noch nichts abzuspielen.",
         "Chat — {dir}": "Chat — {dir}",
         "Chat — {name}": "Chat — {name}",
-        "Continue in chat": "Im Chat fortsetzen",
-        "Continue in chat ({mode})": "Im Chat fortsetzen ({mode})",
+        "Continue in chat (experimental)": "Im Chat fortsetzen (experimentell)",
+        "Continue in chat ({mode}) (experimental)": "Im Chat fortsetzen ({mode}) (experimentell)",
         "Continuing the previous session — earlier messages aren't shown here.":
             "Frühere Sitzung wird fortgesetzt — ältere Nachrichten werden hier nicht angezeigt.",
         "Exit session and close tab": "Sitzung beenden und Tab schließen",
@@ -833,10 +833,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "This prompt needs the terminal to answer.":
             "Esta petición debe responderse en la terminal.",
         "Answer in terminal": "Responder en la terminal",
-        "New {name} chat…": "Nuevo chat de {name}…",
+        "New {name} chat (experimental)…": "Nuevo chat de {name} (experimental)…",
         "Chat with {name} — every file edit and command asks your permission first.":
             "Chat con {name}: cada edición de archivo y comando pide tu permiso primero.",
-        "New {name} chat ({mode})": "Nuevo chat de {name} ({mode})",
+        "New {name} chat ({mode}) (experimental)": "Nuevo chat de {name} ({mode}) (experimental)",
         "Read-only chat with {name} — analyses and answers, never edits.":
             "Chat de solo lectura con {name}: analiza y responde, nunca edita.",
         "Chat with {name} — ⚠ runs edits and commands automatically, without asking.":
@@ -864,8 +864,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Nothing to replay yet.": "Aún no hay nada que reproducir.",
         "Chat — {dir}": "Chat — {dir}",
         "Chat — {name}": "Chat — {name}",
-        "Continue in chat": "Continuar en el chat",
-        "Continue in chat ({mode})": "Continuar en el chat ({mode})",
+        "Continue in chat (experimental)": "Continuar en el chat (experimental)",
+        "Continue in chat ({mode}) (experimental)": "Continuar en el chat ({mode}) (experimental)",
         "Continuing the previous session — earlier messages aren't shown here.":
             "Continuando la sesión anterior: los mensajes anteriores no se muestran aquí.",
         "Exit session and close tab": "Salir de la sesión y cerrar la pestaña",
@@ -1151,11 +1151,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "This prompt needs the terminal to answer.":
             "Cette invite doit être traitée dans le terminal.",
         "Answer in terminal": "Répondre dans le terminal",
-        "New {name} chat…": "Nouvelle discussion {name}…",
+        "New {name} chat (experimental)…": "Nouvelle discussion {name} (expérimental)…",
         "Chat with {name} — every file edit and command asks your permission first.":
             "Discussion avec {name} — chaque modification de fichier et commande "
             "demande d'abord votre permission.",
-        "New {name} chat ({mode})": "Nouvelle discussion {name} ({mode})",
+        "New {name} chat ({mode}) (experimental)": "Nouvelle discussion {name} ({mode}) (expérimental)",
         "Read-only chat with {name} — analyses and answers, never edits.":
             "Discussion en lecture seule avec {name} — analyse et répond, ne modifie jamais.",
         "Chat with {name} — ⚠ runs edits and commands automatically, without asking.":
@@ -1184,8 +1184,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Nothing to replay yet.": "Rien à rejouer pour l’instant.",
         "Chat — {dir}": "Discussion — {dir}",
         "Chat — {name}": "Discussion — {name}",
-        "Continue in chat": "Continuer dans la discussion",
-        "Continue in chat ({mode})": "Continuer dans la discussion ({mode})",
+        "Continue in chat (experimental)": "Continuer dans la discussion (expérimental)",
+        "Continue in chat ({mode}) (experimental)": "Continuer dans la discussion ({mode}) (expérimental)",
         "Continuing the previous session — earlier messages aren't shown here.":
             "Reprise de la session précédente — les messages antérieurs ne sont pas affichés ici.",
         "Exit session and close tab": "Quitter la session et fermer l’onglet",
@@ -1296,7 +1296,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 _HEADER = (
     "# Modified from the original agent-session-manager\n"
     "# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett\n"
-    "# fork. Last modified: 2026-08-01. Full change history: git log for this file.\n"
+    "# fork. Last modified: 2026-08-02. Full change history: git log for this file.\n"
     "# Generated by po/generate.py — do not edit by hand.\n"
     'msgid ""\n'
     'msgstr ""\n'
