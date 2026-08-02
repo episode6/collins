@@ -11,15 +11,6 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgid "A command is still running in this terminal tab and will be terminated."
-msgstr "Todavía se está ejecutando un comando en esta pestaña de terminal y se terminará."
-
-msgid "New terminal tab"
-msgstr "Nueva pestaña de terminal"
-
-msgid "Terminal {number}"
-msgstr "Terminal {number}"
-
 msgid "── restored panel history ──"
 msgstr "── historial del panel restaurado ──"
 
@@ -268,6 +259,15 @@ msgstr "Fuente"
 
 msgid "Applies to all terminal tabs"
 msgstr "Se aplica a todas las pestañas de terminal"
+
+msgid "New terminal tab"
+msgstr "Nueva pestaña de terminal"
+
+msgid "Terminal {number}"
+msgstr "Terminal {number}"
+
+msgid "A command is still running in this terminal tab and will be terminated."
+msgstr "Todavía se está ejecutando un comando en esta pestaña de terminal y se terminará."
 
 msgid "Reset to default font"
 msgstr "Restablecer la fuente predeterminada"
@@ -718,6 +718,9 @@ msgstr "Rebase / resolver conflictos"
 
 msgid "Has merge conflicts"
 msgstr "Tiene conflictos de fusión"
+
+msgid "Has unresolved comments"
+msgstr "Tiene comentarios sin responder"
 
 msgid "Open pull request"
 msgstr "Pull request abierto"

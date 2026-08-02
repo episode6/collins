@@ -147,6 +147,10 @@ msgstr ""
 msgid "Has merge conflicts"
 msgstr ""
 
+#: collins/prstatus.py:241
+msgid "Has unresolved comments"
+msgstr ""
+
 #: collins/dialogs.py:30
 msgid "Rename session"
 msgstr ""

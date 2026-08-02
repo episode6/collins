@@ -12,11 +12,11 @@ merged now or told to merge itself when its checks go green, and anything the
 repository's own Claude workflow can be asked for goes through a comment
 (`@claude review`) rather than an API Collins would have to hold a token for.
 
-Three of them aren't about GitHub at all: FIX_CI, REBASE and NEW_PR send a
-prompt to the session that opened the PR and let the agent do the work. All
-need a session sitting at an empty prompt, and NEW_PR needs uncommitted work
-to open a pull request *for* — neither is a property of the PR, so the caller
-answers both.
+Four of them aren't about GitHub at all: FIX_CI, REBASE, COMMENTS and NEW_PR
+send a prompt to the session that opened the PR and let the agent do the work.
+All need a session sitting at an empty prompt, and NEW_PR needs uncommitted
+work to open a pull request *for* — neither is a property of the PR, so the
+caller answers both.
 Note that nothing here opens the PR's page: the menu carries its own "Open on
 GitHub" row ahead of these actions, built beside the widgets (prmenu) because
 opening a browser is Gtk's business and this module stays importable without
@@ -42,6 +42,7 @@ AUTO_MERGE = "auto-merge"
 REBASE = "rebase"
 REVIEW = "review"
 FIX_CI = "fix-ci"
+COMMENTS = "comments"
 NEW_PR = "new-pr"
 
 # What the prompt-sending actions type into the session. Read by the agent
@@ -50,6 +51,7 @@ NEW_PR = "new-pr"
 # several, and a bare "the ci error(s)" would leave the agent to guess whose.
 CI_PROMPT = "Address the ci error(s) on PR #{number}"
 REBASE_PROMPT = "rebase PR #{number} and resolve the conflicts"
+COMMENTS_PROMPT = "Address unresolved comments on PR #{number}"
 NEW_PR_PROMPT = "Open a pull request for your changes"
 # What asking for a review looks like on the PR: the mention the
 # `anthropics/claude-code-action` workflow triggers on. A repository without
@@ -176,6 +178,18 @@ def actions_for(
                     _("Address the CI errors"),
                     _("Send “{prompt}” to this session").format(prompt=ci_prompt),
                     prompt=ci_prompt,
+                )
+            )
+        if pr.awaiting_reply and takes_prompt:
+            # Offered whenever someone else has the last word, not only when
+            # the chip badges it — answering a reviewer doesn't wait on CI.
+            comments_prompt = COMMENTS_PROMPT.format(number=pr.number)
+            actions.append(
+                Action(
+                    COMMENTS,
+                    _("Address unresolved comments"),
+                    _("Send “{prompt}” to this session").format(prompt=comments_prompt),
+                    prompt=comments_prompt,
                 )
             )
     elif pr.merged and takes_prompt and has_changes():

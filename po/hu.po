@@ -11,15 +11,6 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgid "A command is still running in this terminal tab and will be terminated."
-msgstr "Ezen a terminállapon még fut egy parancs, amely le lesz állítva."
-
-msgid "New terminal tab"
-msgstr "Új terminállap"
-
-msgid "Terminal {number}"
-msgstr "{number}. terminál"
-
 msgid "── restored panel history ──"
 msgstr "── visszaállított panelelőzmények ──"
 
@@ -268,6 +259,15 @@ msgstr "Betűtípus"
 
 msgid "Applies to all terminal tabs"
 msgstr "Minden terminállapra érvényes"
+
+msgid "New terminal tab"
+msgstr "Új terminállap"
+
+msgid "Terminal {number}"
+msgstr "{number}. terminál"
+
+msgid "A command is still running in this terminal tab and will be terminated."
+msgstr "Ezen a terminállapon még fut egy parancs, amely le lesz állítva."
 
 msgid "Reset to default font"
 msgstr "Visszaállítás az alapértelmezett betűtípusra"
@@ -718,6 +718,9 @@ msgstr "Rebase / konfliktusok feloldása"
 
 msgid "Has merge conflicts"
 msgstr "Beolvasztási konfliktusai vannak"
+
+msgid "Has unresolved comments"
+msgstr "Megválaszolatlan hozzászólásai vannak"
 
 msgid "Open pull request"
 msgstr "Nyitott pull request"

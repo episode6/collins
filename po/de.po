@@ -11,15 +11,6 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgid "A command is still running in this terminal tab and will be terminated."
-msgstr "In diesem Terminal-Tab läuft noch ein Befehl, der beendet wird."
-
-msgid "New terminal tab"
-msgstr "Neuer Terminal-Tab"
-
-msgid "Terminal {number}"
-msgstr "Terminal {number}"
-
 msgid "── restored panel history ──"
 msgstr "── wiederhergestellter Panel-Verlauf ──"
 
@@ -268,6 +259,15 @@ msgstr "Schriftart"
 
 msgid "Applies to all terminal tabs"
 msgstr "Gilt für alle Terminal-Tabs"
+
+msgid "New terminal tab"
+msgstr "Neuer Terminal-Tab"
+
+msgid "Terminal {number}"
+msgstr "Terminal {number}"
+
+msgid "A command is still running in this terminal tab and will be terminated."
+msgstr "In diesem Terminal-Tab läuft noch ein Befehl, der beendet wird."
 
 msgid "Reset to default font"
 msgstr "Auf Standardschriftart zurücksetzen"
@@ -718,6 +718,9 @@ msgstr "Rebase / Konflikte auflösen"
 
 msgid "Has merge conflicts"
 msgstr "Hat Merge-Konflikte"
+
+msgid "Has unresolved comments"
+msgstr "Hat unbeantwortete Kommentare"
 
 msgid "Open pull request"
 msgstr "Offener Pull Request"

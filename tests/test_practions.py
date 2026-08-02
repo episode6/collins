@@ -7,6 +7,7 @@ from collins import practions
 from collins.practions import (
     AUTO_MERGE,
     CI_PROMPT,
+    COMMENTS,
     FIX_CI,
     MERGE,
     NEW_PR,
@@ -167,6 +168,33 @@ def test_addressing_ci_needs_both_a_failure_and_a_session_at_its_prompt():
     assert FIX_CI in _keys(failing, takes_prompt=True)
     assert FIX_CI not in _keys(failing, takes_prompt=False)
     assert FIX_CI not in _keys(_pr(), takes_prompt=True)
+
+
+def test_unresolved_comments_offer_the_agent_a_reply():
+    commented = _pr(unresolved=True)
+    assert COMMENTS in _keys(commented, takes_prompt=True)
+    assert COMMENTS not in _keys(commented, takes_prompt=False)
+    assert COMMENTS not in _keys(_pr(), takes_prompt=True)
+
+
+def test_the_comments_prompt_names_the_pr():
+    actions = actions_for(_pr(unresolved=True), True)
+    action = next(a for a in actions if a.key == COMMENTS)
+    assert action.prompt == "Address unresolved comments on PR #55"
+
+
+def test_addressing_comments_does_not_wait_on_ci():
+    """The badge holds the triangle back until checks pass; the menu doesn't —
+    answering a reviewer and fixing a red build are separate errands."""
+    keys = _keys(_pr(passed=1, failed=1, unresolved=True), takes_prompt=True)
+    assert FIX_CI in keys
+    assert COMMENTS in keys
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED", None])
+def test_only_a_live_pr_offers_the_reply(state):
+    pr = _pr(state=state, unresolved=True)
+    assert COMMENTS not in _keys(pr, takes_prompt=True, has_changes=True)
 
 
 def test_only_merging_asks_first():
