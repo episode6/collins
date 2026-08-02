@@ -10,7 +10,11 @@ whether the agent is doing anything. That is what the barber pole on a row's
 guide line answers, and it needs a signal that says "output is flowing" and,
 harder, "output stopped".
 
-There is no such signal from the agent, so every source here is inferred:
+One source is the agent's own word — Claude Code announces its busy state
+through the terminal as ConEmu-style OSC 9;4 progress sequences, which VTE
+parses into a *termprop* on the tab's terminal (see `ProgressWatch`). Every
+other source is inferred, and stays wired as the fallback for a CLI (or a
+configuration) that doesn't speak progress:
 
 - a **tab**'s terminal emits ``contents-changed`` on every redraw, which the
   window feeds to `ActivityTracker.mark`. It is noisy by design — a spinner
@@ -85,6 +89,23 @@ SPINNER_SAMPLE_S = 0.35
 # live spinner that happened to show the same glyph.
 SPINNER_STREAK_S = 4 * SPINNER_SAMPLE_S
 
+# The idle window for a progress-termprop mark. The termprop is edge-triggered
+# — one busy hint as a turn starts, one clear as it ends — not a heartbeat, so
+# the window has to be able to ride out a long turn on its own. It is a safety
+# net rather than the signal: the clear is what normally ends the pole, and
+# this only catches a CLI killed too abruptly to send one (SIGKILL emits no
+# final OSC). In practice redraw marks keep arriving alongside and refresh the
+# deadline far more often than this anyway.
+PROGRESS_IDLE_S = 60.0
+
+# How long after a termprop finish a redraw may not *start* a new pole. The
+# CLI announces a turn's end before its screen goes still — the prompt box
+# repaints, the working indicator fades out — and those trailing redraws pass
+# an armed EchoGate, which would blip the pole back up for IDLE_S right after
+# the honest instant-down. A genuinely new turn is never held back: the Enter
+# pre-mark and the next busy hint both bypass this window.
+PROGRESS_QUIET_S = IDLE_S
+
 # How long a redraw goes on counting as the answer to something the app sent.
 # Measured on a live agent TUI, its reply lands 10-30ms after the bytes leave
 # the terminal; a quarter second is slack for a loaded machine. Nothing real is
@@ -156,6 +177,20 @@ class ActivityTracker:
             return
         self._stop_sweep_if_idle()
         self._on_change(session_id, False)
+
+    def finish(self, session_id: str) -> None:
+        """Drop *session_id* now *as a completed run*: the agent itself said
+        the turn is over (a progress termprop clear), so this is the sweep's
+        timeout finish without the wait — on_change, then on_finished — where
+        clear() is teardown and reports no finish at all. A session that
+        isn't busy has no run to complete: no-op, so the CLI's repeated
+        shutdown clears can't flag anything twice."""
+        if self._deadlines.pop(session_id, None) is None:
+            return
+        self._stop_sweep_if_idle()
+        self._on_change(session_id, False)
+        if self._on_finished is not None:
+            self._on_finished(session_id)
 
     def is_busy(self, session_id: str) -> bool:
         return session_id in self._deadlines
@@ -332,6 +367,73 @@ class SpinnerWatch:
         streak = self._changed_at is not None and now - self._changed_at <= self._streak_s
         self._changed_at = now
         return streak
+
+
+# Vte.ProgressHint values, spelled out so this module stays GTK-free. VTE maps
+# ConEmu's OSC 9;4 states onto these one-to-one; every state but INACTIVE means
+# the agent calls itself mid-turn. A cleared property (the CLI sent state 0)
+# reads back from VTE as *no value*, not as INACTIVE — callers pass that as
+# None, and reading() treats the two identically.
+PROGRESS_HINT_INACTIVE = 0
+_BUSY_HINTS = frozenset({1, 2, 3, 4})  # ACTIVE, ERROR, INDETERMINATE, PAUSED
+
+
+class ProgressWatch:
+    """One terminal's progress-termprop interpreter: the agent's own word.
+
+    Claude Code announces its busy state through the terminal as ConEmu-style
+    OSC 9;4 progress sequences — a busy hint as a turn starts, a clear as it
+    ends — which VTE parses into the ``vte.progress.hint`` termprop the window
+    forwards here. Unlike every other tab source this is not inference, so it
+    gets the one power no inferred source can be trusted with: ending the pole
+    the instant the agent says the turn is over, instead of waiting out an
+    idle window.
+
+    `reading` maps each hint change to the pole action it asks for: ``"mark"``
+    for a busy hint (with the wide `PROGRESS_IDLE_S` window — the termprop is
+    edge-triggered, and only its own clear normally ends the pole), ``"finish"``
+    for a clear, or None. The finish is gated on this tab having spoken a busy
+    hint before — a tab whose CLI never emits progress keeps its inferred
+    poles untouched, and one whose CLI stops emitting mid-session (a version
+    downgrade, say) falls back to inference rather than fighting it.
+
+    `quiet` is the finish's shadow: for a beat after the agent calls a turn
+    over, its trailing repaints — the prompt box returning, the working
+    indicator fading — must not read as a new turn starting, or the honest
+    instant-down would blip right back up for `IDLE_S`. Only redraw-inferred
+    pole *starts* defer to it; a real new turn arrives by other roads (the
+    Enter pre-mark, the next busy hint) and is never held back.
+    """
+
+    def __init__(
+        self,
+        *,
+        quiet_s: float = PROGRESS_QUIET_S,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._quiet_s = quiet_s
+        self._clock = clock
+        self._spoken = False  # a busy hint has been seen; clears mean something
+        self._finished_at: float | None = None
+
+    def reading(self, hint: int | None) -> str | None:
+        """The pole action a hint change asks for: "mark", "finish", or None.
+
+        *hint* is the termprop's new value — None for cleared, which is how
+        VTE reports the CLI's "remove progress" state.
+        """
+        if hint in _BUSY_HINTS:
+            self._spoken = True
+            return "mark"
+        if not self._spoken:
+            return None
+        self._finished_at = self._clock()
+        return "finish"
+
+    def quiet(self) -> bool:
+        """Whether a turn just ended here, so a redraw arriving now is its
+        trailing repaint rather than evidence of a new one."""
+        return self._finished_at is not None and self._clock() - self._finished_at < self._quiet_s
 
 
 def _glib_add_timeout(interval_ms: int, callback: Callable[[], bool]) -> int:

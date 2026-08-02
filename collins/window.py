@@ -23,8 +23,10 @@ from . import __version__, chats, dialogs, editor, footerapps, openwith, panelhi
 from .activity import (
     PROCESS_IDLE_S,
     PROCESS_POLL_MS,
+    PROGRESS_IDLE_S,
     ActivityTracker,
     EchoGate,
+    ProgressWatch,
     SpinnerWatch,
 )
 from .bgstatus import (
@@ -59,7 +61,7 @@ from .state import AppState, clamp_window_size, editor_pops_out
 from .store import SessionStore, emptied_projects
 from .switcher import QuickSwitcher
 from .taborder import tab_order
-from .terminal import TerminalTab
+from .terminal import PROGRESS_HINT_TERMPROP, TerminalTab
 
 log = logging.getLogger(__name__)
 
@@ -258,6 +260,9 @@ class MainWindow(Adw.ApplicationWindow):
         # Each tab's spinner-motion detector, sampled alongside the gate in
         # _on_terminal_output (see SpinnerWatch).
         self._spinner_watches: dict[Adw.TabPage, SpinnerWatch] = {}
+        # Each tab's progress-termprop interpreter — the agent's own busy
+        # signal, fed by _on_progress_termprop (see ProgressWatch).
+        self._progress_watches: dict[Adw.TabPage, ProgressWatch] = {}
 
         self._install_actions()
         self._install_shortcuts()
@@ -1303,6 +1308,12 @@ class MainWindow(Adw.ApplicationWindow):
         # The text goes along so the gate can arm itself on the first submit.
         tab.terminal.connect("commit", lambda _term, text, _size: gate.poked(text or ""))
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
+        # The agent's own busy signal, where the CLI and VTE both speak it —
+        # see ProgressWatch (and _agent_tab_environment for how it's coaxed
+        # out of the CLI). Skipped on a VTE too old for termprops.
+        if PROGRESS_HINT_TERMPROP is not None:
+            self._progress_watches[page] = ProgressWatch()
+            tab.terminal.connect("termprop-changed", self._on_progress_termprop, page)
         # Capture phase so the keystroke is seen even though VTE consumes it;
         # EVENT_PROPAGATE below leaves it for VTE to deliver as usual.
         keys = Gtk.EventControllerKey()
@@ -1648,6 +1659,7 @@ class MainWindow(Adw.ApplicationWindow):
         # per-page trackers are done with it.
         self._echo_gates.pop(page, None)
         self._spinner_watches.pop(page, None)
+        self._progress_watches.pop(page, None)
 
     def _on_page_title_changed(self, page: Adw.TabPage, _pspec) -> None:
         if page is self.tab_view.get_selected_page():
@@ -2382,6 +2394,31 @@ class MainWindow(Adw.ApplicationWindow):
                 self._activity.mark(tracked)
         return Gdk.EVENT_PROPAGATE
 
+    def _on_progress_termprop(self, terminal, name: str, page: Adw.TabPage) -> None:
+        """The agent's own busy signal: VTE parsed an OSC 9;4 progress change.
+
+        A busy hint marks with the wide termprop window; a clear is the one
+        instant, honest turn-end — finish(), which also flags the row unread,
+        where the sweep would have taken IDLE_S to notice. Both of a tab's
+        tracked ids get the treatment, same as _on_terminal_output.
+        """
+        if name != PROGRESS_HINT_TERMPROP:
+            return
+        watch = self._progress_watches.get(page)
+        if watch is None:
+            return
+        ok, hint = terminal.get_termprop_int(name)
+        action = watch.reading(hint if ok else None)
+        if action is None:
+            return
+        for tracked in (self._session_id_of(page), self._placeholder_pages.get(page)):
+            if not tracked:
+                continue
+            if action == "mark":
+                self._activity.mark(tracked, idle_s=PROGRESS_IDLE_S)
+            else:
+                self._activity.finish(tracked)
+
     def _on_terminal_output(self, terminal, page: Adw.TabPage) -> None:
         # A redraw counts as the session working whether or not its tab is
         # selected: the sidebar's pole is about what the agent is doing, not
@@ -2412,6 +2449,13 @@ class MainWindow(Adw.ApplicationWindow):
             tab = page.get_child()
             if isinstance(tab, TerminalTab) and (reading := tab.screen_first_column()) is not None:
                 agent_output = watch.sample(*reading) or agent_output
+        # Unless the agent itself just called the turn over: these redraws are
+        # its trailing repaints (the prompt box returning, the indicator
+        # fading), and starting a pole on them would blip the instant-down the
+        # termprop finish just delivered. See ProgressWatch.quiet.
+        progress = self._progress_watches.get(page)
+        if progress is not None and progress.quiet():
+            agent_output = False
         session_id = self._session_id_of(page)
         for tracked in (session_id, self._placeholder_pages.get(page)):
             if tracked and (agent_output or self._activity.is_busy(tracked)):

@@ -1,4 +1,4 @@
-from collins.activity import ActivityTracker, EchoGate, SpinnerWatch
+from collins.activity import ActivityTracker, EchoGate, ProgressWatch, SpinnerWatch
 
 
 class FakeClock:
@@ -177,6 +177,73 @@ def test_stop_reports_no_finishes():
     tracker.mark("a")
     tracker.stop()
     assert finished == []
+
+
+def test_finish_is_the_sweeps_finish_without_the_wait():
+    # The agent said the turn is over (progress termprop clear): pole down
+    # now, and the run flagged complete — no idle window to wait out.
+    tracker, _clock, _timers, changes, finished = make_finish_tracker()
+    tracker.mark("a")
+    tracker.finish("a")
+    assert changes == [("a", True), ("a", False)]
+    assert finished == ["a"]
+
+
+def test_finish_on_an_idle_session_is_a_no_op():
+    # The CLI clears progress repeatedly at shutdown; only the first one that
+    # actually ends a run may flag anything.
+    tracker, _clock, _timers, changes, finished = make_finish_tracker()
+    tracker.finish("a")
+    tracker.mark("a")
+    tracker.finish("a")
+    tracker.finish("a")
+    assert changes == [("a", True), ("a", False)]
+    assert finished == ["a"]
+
+
+# -- ProgressWatch --------------------------------------------------------
+
+
+def make_progress_watch(quiet_s=2.0):
+    clock = FakeClock()
+    return ProgressWatch(quiet_s=quiet_s, clock=clock), clock
+
+
+def test_every_busy_hint_asks_for_a_mark():
+    # ACTIVE, ERROR, INDETERMINATE, PAUSED — the agent calls all of them
+    # mid-turn (a permission prompt reports a clear instead, observed).
+    watch, _clock = make_progress_watch()
+    for hint in (1, 2, 3, 4):
+        assert watch.reading(hint) == "mark"
+
+
+def test_a_clear_before_any_busy_hint_means_nothing():
+    # A tab whose CLI never spoke progress keeps its inferred poles: a stray
+    # clear (or VTE reporting the property unset) may not cut them down.
+    watch, _clock = make_progress_watch()
+    assert watch.reading(None) is None
+    assert watch.reading(0) is None
+
+
+def test_a_clear_after_a_busy_hint_is_a_finish():
+    watch, _clock = make_progress_watch()
+    watch.reading(3)
+    assert watch.reading(None) == "finish"
+    # VTE reports the CLI's "remove progress" as no value, but an explicit
+    # INACTIVE reads the same.
+    watch.reading(1)
+    assert watch.reading(0) == "finish"
+
+
+def test_quiet_covers_the_beat_after_a_finish():
+    watch, clock = make_progress_watch(quiet_s=2.0)
+    assert not watch.quiet()  # nothing has finished yet
+    watch.reading(3)
+    assert not watch.quiet()  # mid-turn: redraws count as ever
+    watch.reading(None)
+    assert watch.quiet()  # trailing repaints may not restart the pole
+    clock.advance(2.5)
+    assert not watch.quiet()  # the beat passed; inference is back in charge
 
 
 def test_clear_stops_it_without_waiting():
