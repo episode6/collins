@@ -596,9 +596,11 @@ def _unresolved(comments: object) -> bool:
     gh hands the PR's comments back oldest-first, each stamped with
     ``viewerDidAuthor``; the last word being anyone else's means there is
     plausibly something to answer. Minimized comments are skipped — GitHub
-    collapses those as spam or off-topic, so they demand nothing. Anything
-    malformed reads as "nothing to answer": this bit decorates a chip, it
-    doesn't gate one.
+    collapses those as spam or off-topic, so they demand nothing — and so is
+    anything that isn't a comment-shaped dict at all, like the whole field
+    when it isn't a list: no comments, nothing to answer. A comment that *is*
+    one but is missing its authorship stamp reads as someone else's, though —
+    erring toward "look at it" beats silently swallowing a reply.
     """
     if not isinstance(comments, list):
         return False
