@@ -528,7 +528,7 @@ class PanelTabs(Gtk.Box):
         swap_btn.add_css_class("flat")
         swap_btn.set_tooltip_text(_("Move terminal panel bottom/right"))
         swap_btn.set_action_name("win.swap-panel")
-        end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         end_box.append(add_btn)
         end_box.append(swap_btn)
         bar.set_end_action_widget(end_box)
