@@ -256,6 +256,13 @@ tabbar tab.bell-flash,
 row.session-child.bell-flash {
   animation: bell-flash 400ms ease-out;
 }
+/* a busy row's barber pole also claims the animation property, with one more
+   class on its selector, which would silently drop the flash exactly when a
+   bell is most likely (the agent is mid-turn): the row that is busy while its
+   bell rings must carry both animations in one declaration. */
+row.session-child.running.busy.bell-flash {
+  animation: barber-pole 900ms linear infinite, bell-flash 400ms ease-out;
+}
 
 /* slim per-tab footer row: working directory + terminal-panel buttons */
 .tab-footer {
