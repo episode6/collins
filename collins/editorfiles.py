@@ -11,6 +11,7 @@ GtkSource calls.
 from __future__ import annotations
 
 import enum
+import urllib.parse
 from collections import deque
 from pathlib import Path
 
@@ -22,6 +23,27 @@ SKIP_DIR_NAMES = {".git", "node_modules", "__pycache__", ".venv", "target", "dis
 _BINARY_SNIFF_BYTES = 8192
 _MAX_HIGHLIGHT_BYTES = 512 * 1024  # opened normally below this...
 _MAX_OPEN_BYTES = 5 * 1024 * 1024  # ...refused outright above this
+# Images get their own, far larger cap (screenshots of 4K monitors are
+# routinely multi-MB): this only guards the image viewer against decoding
+# something absurd, not against ordinary photos.
+_MAX_IMAGE_BYTES = 50 * 1024 * 1024
+
+# What the image viewer (lightbox + editor image pages) will try to display:
+# the formats a stock gdk-pixbuf install decodes. Anything else keeps the
+# regular open path (external app / text buffer).
+IMAGE_SUFFIXES = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".bmp",
+    ".ico",
+    ".tiff",
+    ".tif",
+    ".avif",
+}
 # A directory this size is either a build artifact that slipped past
 # SKIP_DIR_NAMES or a mistake; either way the tree stops rather than stalling
 # on it. Sorted first, so what's dropped is always the tail, alphabetically.
@@ -129,6 +151,85 @@ def load_guard(path: str | Path) -> LoadGuard:
     if b"\x00" in head:
         return LoadGuard.BINARY
     return LoadGuard.OK
+
+
+def is_image_path(path: str | Path) -> bool:
+    """Whether *path* names a displayable image, by suffix. Content sniffing
+    is left to the actual decode (Gdk.Texture), whose failure the viewers
+    already handle — this only routes the open."""
+    return Path(path).suffix.lower() in IMAGE_SUFFIXES
+
+
+def image_guard(path: str | Path) -> LoadGuard:
+    """`load_guard`'s sibling for the image viewers: images are binary by
+    nature, so only existence, readability and (a much larger) size cap are
+    checked — never BINARY."""
+    p = Path(path)
+    try:
+        if not p.is_file():
+            return LoadGuard.NOT_A_FILE
+        size = p.stat().st_size
+    except OSError:
+        return LoadGuard.UNREADABLE
+    if size > _MAX_IMAGE_BYTES:
+        return LoadGuard.TOO_LARGE
+    try:
+        with p.open("rb") as f:
+            f.read(1)
+    except OSError:
+        return LoadGuard.UNREADABLE
+    return LoadGuard.OK
+
+
+LIGHTBOX_WINDOW_FRACTION = 0.85  # the lightbox never grows past this much of the window
+LIGHTBOX_MIN_W = 240  # floors, so a tiny icon doesn't produce a sliver of a
+LIGHTBOX_MIN_H = 240  # dialog the button strip can't fit into
+LIGHTBOX_BUTTON_STRIP = 112  # px reserved for the captioned buttons on their side
+# Margin around the dialog's content: the image's drop shadow renders inside
+# the dialog (whose sheet clips at its bounds), so without this inset the
+# shadow would be clipped away entirely.
+LIGHTBOX_SHADOW_PAD = 24
+_LIGHTBOX_FALLBACK_WINDOW = (1200, 800)  # sizing when the window isn't realized yet
+
+
+def lightbox_layout(
+    image_w: int, image_h: int, window_w: int, window_h: int
+) -> tuple[str, int, int]:
+    """Which side of the lightbox image the button strip goes on, and the
+    dialog's content size: ("right" | "below", width, height).
+
+    The strip takes whichever side of the fitted image has more spare screen
+    space; the image shows 1:1 when it fits inside the window fraction minus
+    the strip, scaled down (aspect kept by the picture's CONTAIN fit) when it
+    doesn't. GTK-free on purpose — the dialog itself (lightbox.py) can't be
+    imported in headless tests."""
+    if window_w <= 0 or window_h <= 0:
+        window_w, window_h = _LIGHTBOX_FALLBACK_WINDOW
+    avail_w = int(window_w * LIGHTBOX_WINDOW_FRACTION)
+    avail_h = int(window_h * LIGHTBOX_WINDOW_FRACTION)
+    # The spare space around the image as it would fit strip-less decides the
+    # side; the image is then refitted with the strip and the shadow inset
+    # taken out.
+    plain = min(1.0, avail_w / max(image_w, 1), avail_h / max(image_h, 1))
+    side = "right" if window_w - image_w * plain >= window_h - image_h * plain else "below"
+    pad = 2 * LIGHTBOX_SHADOW_PAD
+    img_w = avail_w - pad - (LIGHTBOX_BUTTON_STRIP if side == "right" else 0)
+    img_h = avail_h - pad - (LIGHTBOX_BUTTON_STRIP if side == "below" else 0)
+    scale = min(1.0, img_w / max(image_w, 1), img_h / max(image_h, 1))
+    width = round(image_w * scale) + pad + (LIGHTBOX_BUTTON_STRIP if side == "right" else 0)
+    height = round(image_h * scale) + pad + (LIGHTBOX_BUTTON_STRIP if side == "below" else 0)
+    return side, max(width, LIGHTBOX_MIN_W), max(height, LIGHTBOX_MIN_H)
+
+
+def path_from_file_uri(uri: str) -> str | None:
+    """The local filesystem path a `file:` URI points at, or None when it
+    isn't one (other scheme, or a remote host). Sheds any query/fragment —
+    agent CLIs tack `#L10`-style line fragments onto file references."""
+    parsed = urllib.parse.urlsplit(uri)
+    if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
+        return None
+    path = urllib.parse.unquote(parsed.path)
+    return path or None
 
 
 def should_highlight(path: str | Path) -> bool:

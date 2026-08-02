@@ -4,12 +4,21 @@ import os
 
 from collins.editorfiles import (
     _MAX_HIGHLIGHT_BYTES,
+    _MAX_IMAGE_BYTES,
     _MAX_OPEN_BYTES,
+    LIGHTBOX_BUTTON_STRIP,
+    LIGHTBOX_MIN_H,
+    LIGHTBOX_MIN_W,
+    LIGHTBOX_SHADOW_PAD,
     LoadGuard,
     guess_language_id,
+    image_guard,
+    is_image_path,
     is_inside,
+    lightbox_layout,
     list_dir,
     load_guard,
+    path_from_file_uri,
     should_highlight,
     walk_files,
 )
@@ -91,6 +100,134 @@ def test_load_guard_unreadable(tmp_path):
         assert load_guard(f) == LoadGuard.UNREADABLE
     finally:
         os.chmod(f, 0o644)
+
+
+# -- is_image_path ----------------------------------------------------------------
+
+
+def test_is_image_path_by_suffix():
+    assert is_image_path("shot.png")
+    assert is_image_path("/a/b/photo.JPEG")  # case-insensitive suffix
+    assert is_image_path("icon.svg")
+    assert is_image_path("anim.webp")
+
+
+def test_is_image_path_non_images():
+    assert not is_image_path("a.py")
+    assert not is_image_path("png")  # no suffix at all
+    assert not is_image_path("archive.png.gz")
+
+
+# -- image_guard ------------------------------------------------------------------
+
+
+def test_image_guard_ok(tmp_path):
+    f = tmp_path / "a.png"
+    f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)  # NUL bytes are fine here
+    assert image_guard(f) == LoadGuard.OK
+
+
+def test_image_guard_missing_and_directory(tmp_path):
+    assert image_guard(tmp_path / "missing.png") == LoadGuard.NOT_A_FILE
+    assert image_guard(tmp_path) == LoadGuard.NOT_A_FILE
+
+
+def test_image_guard_too_large(tmp_path):
+    f = tmp_path / "huge.png"
+    with f.open("wb") as fh:
+        fh.seek(_MAX_IMAGE_BYTES)
+        fh.write(b"x")
+    assert image_guard(f) == LoadGuard.TOO_LARGE
+
+
+def test_image_guard_unreadable(tmp_path):
+    f = tmp_path / "noperm.png"
+    f.write_bytes(b"x")
+    os.chmod(f, 0o000)
+    try:
+        if os.access(f, os.R_OK):  # root in the test environment: skip
+            return
+        assert image_guard(f) == LoadGuard.UNREADABLE
+    finally:
+        os.chmod(f, 0o644)
+
+
+# -- path_from_file_uri -------------------------------------------------------------
+
+
+def test_path_from_file_uri_plain():
+    assert path_from_file_uri("file:///home/u/shot.png") == "/home/u/shot.png"
+
+
+def test_path_from_file_uri_sheds_fragment_and_query():
+    assert path_from_file_uri("file:///a/b.png#L10") == "/a/b.png"
+    assert path_from_file_uri("file:///a/b.png#L2-4") == "/a/b.png"
+    assert path_from_file_uri("file:///a/b.png?raw=1") == "/a/b.png"
+
+
+def test_path_from_file_uri_percent_decodes():
+    assert path_from_file_uri("file:///a/with%20space.png") == "/a/with space.png"
+
+
+def test_path_from_file_uri_localhost_ok_remote_rejected():
+    assert path_from_file_uri("file://localhost/a.png") == "/a.png"
+    assert path_from_file_uri("file://nas/share/a.png") is None
+
+
+def test_path_from_file_uri_other_schemes_rejected():
+    assert path_from_file_uri("https://example.com/a.png") is None
+    assert path_from_file_uri("/a/b.png") is None  # not a URI at all
+
+
+# -- lightbox_layout ----------------------------------------------------------------
+
+
+_PAD = 2 * LIGHTBOX_SHADOW_PAD  # the shadow inset, both sides
+
+
+def test_lightbox_layout_wide_window_puts_buttons_right_at_one_to_one():
+    side, w, h = lightbox_layout(800, 500, 1920, 1080)
+    assert side == "right"
+    assert (w, h) == (800 + LIGHTBOX_BUTTON_STRIP + _PAD, 500 + _PAD)
+
+
+def test_lightbox_layout_tall_window_puts_buttons_below():
+    side, w, h = lightbox_layout(1600, 600, 800, 1000)
+    assert side == "below"
+    assert w == int(800 * 0.85)  # image scaled to the width cap
+    scale = (int(800 * 0.85) - _PAD) / 1600
+    assert h == round(600 * scale) + LIGHTBOX_BUTTON_STRIP + _PAD
+
+
+def test_lightbox_layout_large_image_scales_down_keeping_aspect():
+    side, w, h = lightbox_layout(4000, 2000, 1920, 1080)
+    assert side == "right"
+    assert w <= int(1920 * 0.85)
+    assert h <= int(1080 * 0.85)
+    # aspect preserved by the fit itself (picture CONTAIN handles the rest)
+    assert abs(((w - LIGHTBOX_BUTTON_STRIP - _PAD) / (h - _PAD)) - 2.0) < 0.02
+
+
+def test_lightbox_layout_never_upscales():
+    side, w, h = lightbox_layout(400, 300, 3840, 2160)
+    assert side == "right"
+    assert (w, h) == (400 + LIGHTBOX_BUTTON_STRIP + _PAD, 300 + _PAD)
+
+
+def test_lightbox_layout_tiny_image_clamped_to_minimum():
+    side, w, h = lightbox_layout(16, 16, 1920, 1080)
+    assert (w, h) == (LIGHTBOX_MIN_W, LIGHTBOX_MIN_H)
+
+
+def test_lightbox_layout_unrealized_window_uses_fallback():
+    side, w, h = lightbox_layout(800, 500, 0, 0)
+    assert side == "right"
+    assert (w, h) == (800 + LIGHTBOX_BUTTON_STRIP + _PAD, 500 + _PAD)
+
+
+def test_lightbox_layout_zero_size_image_does_not_divide_by_zero():
+    side, w, h = lightbox_layout(0, 0, 1920, 1080)
+    assert (w, h) == (LIGHTBOX_MIN_W, LIGHTBOX_MIN_H)
 
 
 # -- should_highlight -----------------------------------------------------------

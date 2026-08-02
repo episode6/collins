@@ -31,6 +31,51 @@ _BUNDLED_ICONS = Path(__file__).resolve().parent.parent / "data" / "icons"
 _CSS = b"""
 .group-header { padding: 10px 10px 4px 10px; }
 
+/* the image lightbox (lightbox.py): the widget itself is the shade, floated
+   over the whole window in MainWindow.lightbox_overlay */
+.lightbox-shade {
+  background-color: alpha(black, 0.6);
+}
+/* a light image would blend into a light app behind the shade; the classic
+   lightbox drop shadow keeps its edge readable. On the slot, not the
+   picture: the slot's scrolled view would clip a child's shadow. */
+.lightbox-shade .lightbox-slot {
+  box-shadow: 0 4px 24px alpha(black, 0.45);
+}
+/* big captioned actions; flat buttons would disappear against the shade, so
+   a faint plate that brightens on hover keeps them reading as clickable.
+   The shade is dark in both themes, so the plate and its text are too. */
+.lightbox-shade button.lightbox-action {
+  padding: 12px;
+  border-radius: 12px;
+  color: white;
+  background-color: alpha(white, 0.12);
+}
+.lightbox-shade button.lightbox-action:hover {
+  background-color: alpha(white, 0.22);
+}
+/* the -/+ zoom bar floating over the image's bottom edge: a dark pill so
+   the round buttons stay readable over any image content */
+.lightbox-shade .lightbox-zoombar {
+  background-color: alpha(black, 0.35);
+  border-radius: 999px;
+  padding: 6px;
+}
+/* the round -/+ zoom buttons in that bar */
+.lightbox-shade button.lightbox-zoom {
+  color: white;
+  background-color: alpha(white, 0.12);
+  border-radius: 999px;
+  min-width: 34px;
+  min-height: 34px;
+}
+.lightbox-shade button.lightbox-zoom:hover {
+  background-color: alpha(white, 0.22);
+}
+.lightbox-shade button.lightbox-zoom:disabled {
+  color: alpha(white, 0.4);
+}
+
 /* insertion line while dragging a project header to a new position */
 row.drop-above { box-shadow: inset 0 2px 0 0 @accent_bg_color; }
 row.drop-below { box-shadow: inset 0 -2px 0 0 @accent_bg_color; }

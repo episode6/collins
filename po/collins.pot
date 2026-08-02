@@ -1512,3 +1512,31 @@ msgstr ""
 #, python-brace-format
 msgid "New session in {project} (in a worktree)"
 msgstr ""
+
+#: collins/editor.py:376
+msgid "{name} couldn't be decoded as an image."
+msgstr ""
+
+#: collins/editor.py:774
+msgid "Image"
+msgstr ""
+
+#: collins/lightbox.py:67
+msgid "Open in Editor"
+msgstr ""
+
+#: collins/lightbox.py:77
+msgid "Open With…"
+msgstr ""
+
+#: collins/lightbox.py:88
+msgid "Couldn't display image"
+msgstr ""
+
+#: collins/lightbox.py:107
+msgid "Zoom out"
+msgstr ""
+
+#: collins/lightbox.py:108
+msgid "Zoom in"
+msgstr ""
