@@ -31,7 +31,10 @@ configuration) that doesn't speak progress:
   noticing first-column motion between samples of the visible screen. It is
   the one tab source that needs no gate: it can start a pole `EchoGate`
   would have to wave through first, such as a freshly attached background
-  agent mid-turn that nothing was ever typed at.
+  agent mid-turn that nothing was ever typed at. (On a tab whose CLI was
+  *spawned* rather than attached, no such agent can exist, and the window
+  holds the ungated sources through the startup paint — see
+  `EchoGate.armed`.)
 
 All of them funnel into one tracker: "busy" means output seen within the
 source's idle window — `IDLE_S` for a terminal, which redraws continuously
@@ -277,6 +280,19 @@ class EchoGate:
     def arm(self) -> None:
         """A turn was just asked for; redraws may mean work from here on."""
         self._armed = True
+
+    @property
+    def armed(self) -> bool:
+        """Whether anything has ever been submitted to this terminal.
+
+        The window reads this to extend the startup hold beyond redraws: on a
+        tab whose CLI was spawned fresh — where no agent can already be
+        mid-turn — even the ungated pole starters (spinner motion, the CLI's
+        own progress hint) wait for the first submit, because a spawning CLI
+        animates its welcome paint and blips its progress hint with no turn
+        anywhere in sight.
+        """
+        return self._armed
 
     def poked(self, text: str = "") -> None:
         """The app just sent this terminal's child *text*.

@@ -395,6 +395,17 @@ def test_arm_reports_the_enter_key_directly():
     assert gate.counts(GRID)
 
 
+def test_armed_is_readable_for_the_fresh_spawn_hold():
+    # On a freshly spawned CLI the window holds even the ungated pole
+    # starters until the first submit, by reading the gate's state directly.
+    gate, _clock = make_gate(armed=False)
+    assert not gate.armed
+    gate.poked("h")  # typing alone is not a submit
+    assert not gate.armed
+    gate.poked("\r")
+    assert gate.armed
+
+
 # -- SpinnerWatch: first-column motion is an agent working ---------------------
 
 
