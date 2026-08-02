@@ -85,6 +85,19 @@ _BG_QUEUE_WAIT_MS = 5000
 _BG_QUEUE_POLL_MS = 500
 _BG_QUEUE_ITEM_TIMEOUT_S = 20
 
+# Graceful-close poll: how often to check whether the CLI has released the
+# terminal, when to re-ask it to leave (see _poll_graceful), and how many
+# ticks to allow before the force-close safety net. A plain exit gets a short
+# budget — the user already said to end the session, so a CLI that hasn't
+# gone by then gets terminated rather than holding the tab (or a quit)
+# hostage. A /bg handoff keeps a much longer one: forking the background
+# agent takes real time, and force-closing mid-handoff risks stranding it.
+_CLOSE_POLL_MS = 300
+_EXIT_NUDGE_TICKS = (5,)  # ~1.5s
+_EXIT_FORCE_TICKS = 10  # ~3s
+_BG_NUDGE_TICKS = (8, 24)  # ~2.4s / ~7.2s
+_BG_FORCE_TICKS = 40  # ~12s
+
 # Bare modifiers and locks: presses VTE sends nothing to the child for. They
 # don't count as "typing into the terminal" when a keystroke clears the
 # selected tab's unread flag — half of them are the first half of a shortcut
@@ -176,6 +189,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._pages: dict[str, Adw.TabPage] = {}  # session_id -> open tab
         self._confirmed_closes: set[Adw.TabPage] = set()
         self._closing_pages: dict[Adw.TabPage, int] = {}  # graceful close in progress -> attempts
+        self._bg_closing: set[Adw.TabPage] = set()  # closing page is a /bg handoff, not an exit
         self._close_asking: set[Adw.TabPage] = set()  # busy-tab confirm dialog open
         self._close_ok: set[Adw.TabPage] = set()  # user okayed closing the busy tab
         self._bg_ok: set[Adw.TabPage] = set()  # user chose to background the agent instead
@@ -1976,12 +1990,14 @@ class MainWindow(Adw.ApplicationWindow):
             else:
                 exit_text = tab.provider.background_exit()
         if exit_text:
+            self._bg_closing.add(page)  # a handoff: _poll_graceful allows it more time
             self._watch_background_fork(tab)
             # Show the yellow guide line as soon as the tab closes, and keep the
             # row unopenable until the detach is confirmed (or times out). The
             # gate guarantees a session id here.
             self._mark_backgrounding(tab.session_id)
         else:
+            self._bg_closing.discard(page)
             exit_text = tab.provider.graceful_exit()
         if not exit_text:
             self._close_confirmed(page)
@@ -1992,7 +2008,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Enter that submits it — carriage return in a raw-mode TUI, not
         # newline.
         tab.feed_child_text(exit_text)
-        GLib.timeout_add(300, self._poll_graceful, page, tab)
+        GLib.timeout_add(_CLOSE_POLL_MS, self._poll_graceful, page, tab)
 
     def _watch_background_fork(self, tab: TerminalTab) -> None:
         """Confirm the session is running detached, and record its successor
@@ -2134,6 +2150,7 @@ class MainWindow(Adw.ApplicationWindow):
             tab.feed_child_text("exit\r")  # close the shell → child-exited closes the tab
             return GLib.SOURCE_REMOVE
         self._closing_pages[page] += 1
+        backgrounding = page in self._bg_closing
         accept = tab.worktree_exit_prompt_keystrokes()
         if accept:
             # Ctrl+C Ctrl+C landed on Claude's own "keep or remove this
@@ -2150,12 +2167,13 @@ class MainWindow(Adw.ApplicationWindow):
         # screen instead (seen with tabs attached to a detached session) —
         # either would hang the close until the force-close below. A CLI still
         # owning the terminal this long after being asked to leave is the
-        # tell: ask again. Safe for a merely-slow exit too — the extra input
-        # queues behind the pending command and is discarded when the CLI
-        # exits.
-        elif self._closing_pages[page] in (8, 24):  # ~2.4s / ~7.2s
+        # tell: ask again — early enough on the exit path to still beat its
+        # shorter force-close budget. Safe for a merely-slow exit too — the
+        # extra input queues behind the pending command and is discarded when
+        # the CLI exits.
+        elif self._closing_pages[page] in (_BG_NUDGE_TICKS if backgrounding else _EXIT_NUDGE_TICKS):
             self._nudge_cli_exit(tab)
-        if self._closing_pages[page] >= 40:  # ~12s safety net
+        if self._closing_pages[page] >= (_BG_FORCE_TICKS if backgrounding else _EXIT_FORCE_TICKS):
             self._close_confirmed(page)
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
@@ -2910,6 +2928,7 @@ class MainWindow(Adw.ApplicationWindow):
                 return True
         self._confirmed_closes.discard(page)
         self._closing_pages.pop(page, None)
+        self._bg_closing.discard(page)
         self._close_asking.discard(page)
         self._close_ok.discard(page)
         self._bg_ok.discard(page)
