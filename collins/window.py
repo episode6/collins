@@ -411,6 +411,7 @@ class MainWindow(Adw.ApplicationWindow):
         # the tab knows either, and only the window holds the tabs.
         self.sidebar.takes_prompt = self._session_takes_prompt
         self.sidebar.has_changes = self._session_has_changes
+        self.sidebar.live_cwd = self._session_live_cwd
         self.sidebar.connect("open-session", self._on_sidebar_open)
         self.sidebar.connect("open-many", self._on_sidebar_open_many)
         self.sidebar.connect("trash-many", self._on_sidebar_trash_many)
@@ -1876,6 +1877,16 @@ class MainWindow(Adw.ApplicationWindow):
         """
         tab = self._session_tab(session_id)
         return tab is not None and has_changes(tab.current_agent_cwd())
+
+    def _session_live_cwd(self, session_id: str) -> str | None:
+        """Where this session's terminal is right now, if it is open in a tab.
+
+        What the sidebar asks before building a row's "Open In…" (see
+        SessionSidebar.live_cwd): an open tab's agent may have moved since the
+        transcript last recorded a cwd, and only the tab can see that.
+        """
+        tab = self._session_tab(session_id)
+        return tab.current_agent_cwd() if tab is not None else None
 
     def _send_prompt(self, session_id: str, prompt: str) -> None:
         """A sidebar PR menu's prompt action: type it into the session's own

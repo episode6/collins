@@ -40,7 +40,7 @@ from .projecticons import project_icon_data
 from .providers import get_provider
 from .prstatus import PullRequest, from_records, resync, to_records
 from .scrolling import offset_into_view
-from .sessions import project_name_for_cwd, worktree_project_root
+from .sessions import Session, project_name_for_cwd, resume_cwd, worktree_project_root
 from .store import SessionStore
 from .usagepanel import UsagePanel
 
@@ -768,6 +768,11 @@ class SessionSidebar(Gtk.Box):
         # for the same rows' "Open pull request". Replaced by the window on the
         # same terms, and no for as long as it hasn't been.
         self.has_changes: Callable[[str], bool] = lambda _session_id: False
+        # "Where is this session's terminal right now?", for a row's
+        # "Open In…" — the live answer only an open tab can give. Replaced by
+        # the window on the same terms; None means no tab, and the transcript
+        # answers instead (see _session_cwd).
+        self.live_cwd: Callable[[str], str | None] = lambda _session_id: None
         # Scrolling the list is deferred to an idle callback (see
         # _schedule_scroll): the offset to restore and the row to reveal when
         # it runs, plus the id of the pending source.
@@ -1446,9 +1451,11 @@ class SessionSidebar(Gtk.Box):
         # running in a worktree or subdirectory hands that folder over. Chat
         # sessions live in throwaway directories nobody wants opened.
         rows: list[Gtk.Widget] = []
-        cwd = row.item.session.cwd
-        if cwd and not is_chat_cwd(cwd):
-            open_section.append_submenu(_("Open In…"), self._open_with_menu(cwd, rows))
+        session = row.item.session
+        if not (session.cwd and is_chat_cwd(session.cwd)):
+            cwd = self._session_cwd(session)
+            if cwd:
+                open_section.append_submenu(_("Open In…"), self._open_with_menu(cwd, rows))
 
         edit_section = Gio.Menu()
         edit_section.append_item(item(_("Rename…"), "rename-session"))
@@ -1533,6 +1540,17 @@ class SessionSidebar(Gtk.Box):
         menu.append_section(None, open_section)
         menu.append_section(None, danger_section)
         self._popup_menu(menu, row, x, y, rows)
+
+    def _session_cwd(self, session: Session) -> str | None:
+        """Where the session is working right now, for its row's "Open In…".
+
+        The session's recorded cwd is only where it *started* — an agent that
+        moved into a worktree or subdirectory left it behind long ago. An open
+        tab knows its live directory (see live_cwd); for everything else the
+        transcript's tail holds the last cwd the agent recorded, which is also
+        what resuming and "Open in Ghostty" use.
+        """
+        return self.live_cwd(session.session_id) or resume_cwd(session)
 
     def _open_with_menu(self, cwd: str, rows: list[Gtk.Widget]) -> Gio.Menu:
         """The "Open In…" submenu: ways to hand a folder — a project's, or a
