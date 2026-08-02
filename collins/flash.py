@@ -13,8 +13,9 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk  # noqa: E402
 
 # How long .bell-flash stays on a widget. Must outlast the CSS animation in
-# app.py, which fades the flash out on its own.
-_BELL_FLASH_MS = 450
+# app.py, which fades the flash out on its own. Public so a caller that
+# replaces a mid-flash widget can tell whether a flash is still owed.
+FLASH_MS = 450
 
 # Widgets mid-flash, each with the timeout source that ends its flash.
 _active: dict[Gtk.Widget, int] = {}
@@ -33,4 +34,4 @@ def flash(widget: Gtk.Widget) -> None:
         return GLib.SOURCE_REMOVE
 
     widget.add_css_class("bell-flash")
-    _active[widget] = GLib.timeout_add(_BELL_FLASH_MS, clear)
+    _active[widget] = GLib.timeout_add(FLASH_MS, clear)
