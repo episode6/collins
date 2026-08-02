@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -2439,13 +2439,18 @@ class MainWindow(Adw.ApplicationWindow):
         watch = self._progress_watches.get(page)
         if watch is None:
             return
-        if self._startup_held(page):
-            # A spawning CLI blips its progress hint with no turn in sight;
-            # the watch stays deaf (not even _spoken_) until the first
-            # submit, so the blip's clear can't finish-and-flag the row.
-            return
         ok, hint = terminal.get_termprop_int(name)
         action = watch.reading(hint if ok else None)
+        if self._startup_held(page):
+            # A spawning CLI blips its progress hint with no turn in sight,
+            # so whatever action the blip asks for is dropped — its clear
+            # can't finish-and-flag the row. The watch still listens, though
+            # (mirroring how SpinnerWatch keeps sampling under the hold):
+            # the blip counts as the tab having _spoken_, so even if its
+            # hint were somehow still busy at the first submit, the real
+            # turn's clear lands as a finish instead of being dismissed as
+            # the first clear ever heard.
+            return
         if action is None:
             return
         for tracked in (self._session_id_of(page), self._placeholder_pages.get(page)):
