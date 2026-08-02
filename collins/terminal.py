@@ -1104,6 +1104,14 @@ class TerminalTab(Gtk.Box):
         self._sync_pr_refresh_tooltip()
         self._pr_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
 
+        # The same folder the cwd label names, one click away in the desktop's
+        # file manager. Left of the panel toggles: it opens something outside
+        # Collins, while everything to its right rearranges the tab itself.
+        files_btn = Gtk.Button(icon_name="folder-symbolic")
+        files_btn.add_css_class("flat")
+        files_btn.set_tooltip_text(_("Open this folder in your file manager"))
+        files_btn.connect("clicked", self._on_open_file_manager)
+
         # Only the selected tab is visible (and thus clickable), so routing
         # through the window's actions still targets the right tab.
         toggle_btn = Gtk.Button(icon_name="utilities-terminal-symbolic")
@@ -1165,6 +1173,7 @@ class TerminalTab(Gtk.Box):
         footer.add_css_class("tab-footer")
         footer.append(left)
         footer.append(self._footer_apps_box)
+        footer.append(files_btn)
         toggle_btn.add_css_class("flat")
         footer.append(toggle_btn)
         footer.append(self._editor_toggle_btn)
@@ -2374,6 +2383,14 @@ class TerminalTab(Gtk.Box):
 
     def _on_footer_app_clicked(self, _btn, info) -> None:
         footerapps.launch_app(info, self.current_agent_cwd())
+
+    def _on_open_file_manager(self, _btn) -> None:
+        """Open the agent's *current* working directory (worktree-aware, like
+        the cwd label beside the button) in the desktop's file manager, via the
+        same window action the sidebar's Open in File Manager uses."""
+        cwd = self.current_agent_cwd()
+        if cwd:
+            self.activate_action("win.open-folder", GLib.Variant("s", cwd))
 
     def _on_open_external_terminal(self, gesture: Gtk.GestureClick, *_args) -> None:
         """Right-click on the panel toggle: open the agent's *current* working

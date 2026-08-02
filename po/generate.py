@@ -179,6 +179,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "File Manager": "Fájlkezelő",
         "Right-click to open this folder in your terminal":
             "Jobb kattintással megnyithatod ezt a mappát a termináljában",
+        "Open this folder in your file manager":
+            "A mappa megnyitása a fájlkezelőben",
         "No terminal application found": "Nem található terminálalkalmazás",
         "Set $TERMINAL, or install a terminal emulator, to open folders here.":
             "Állítsd be a $TERMINAL változót, vagy telepíts egy terminálemulátort, "
@@ -516,6 +518,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "File Manager": "Dateimanager",
         "Right-click to open this folder in your terminal":
             "Rechtsklick öffnet diesen Ordner in deinem Terminal",
+        "Open this folder in your file manager":
+            "Diesen Ordner in deinem Dateimanager öffnen",
         "No terminal application found": "Keine Terminal-Anwendung gefunden",
         "Set $TERMINAL, or install a terminal emulator, to open folders here.":
             "Setze $TERMINAL oder installiere einen Terminal-Emulator, "
@@ -859,6 +863,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "File Manager": "Gestor de archivos",
         "Right-click to open this folder in your terminal":
             "Clic derecho para abrir esta carpeta en tu terminal",
+        "Open this folder in your file manager":
+            "Abrir esta carpeta en tu gestor de archivos",
         "No terminal application found": "No se encontró ninguna aplicación de terminal",
         "Set $TERMINAL, or install a terminal emulator, to open folders here.":
             "Define $TERMINAL o instala un emulador de terminal "
@@ -1200,6 +1206,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "File Manager": "Gestionnaire de fichiers",
         "Right-click to open this folder in your terminal":
             "Clic droit pour ouvrir ce dossier dans votre terminal",
+        "Open this folder in your file manager":
+            "Ouvrir ce dossier dans votre gestionnaire de fichiers",
         "No terminal application found": "Aucune application de terminal trouvée",
         "Set $TERMINAL, or install a terminal emulator, to open folders here.":
             "Définissez $TERMINAL ou installez un émulateur de terminal "
