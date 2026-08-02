@@ -432,12 +432,12 @@ def test_expanded_groups_roundtrip(app_state):
     assert fresh.is_group_expanded("fav:")
 
 
-def test_merge_project_order_keeps_saved_order_and_appends_new_alphabetically():
+def test_merge_project_order_keeps_saved_order_and_prepends_new_alphabetically():
     assert merge_project_order(["zeta", "alpha"], ["alpha", "Beta", "gamma", "zeta"]) == [
-        "zeta",
-        "alpha",
         "Beta",
         "gamma",
+        "zeta",
+        "alpha",
     ]
 
 
