@@ -1268,6 +1268,17 @@ msgstr ""
 msgid "Show dotfiles in the editor's file tree"
 msgstr ""
 
+#: collins/prefs.py:359
+msgid "Open in a window on small screens"
+msgstr ""
+
+#: collins/prefs.py:360
+msgid ""
+"On screens this many pixels wide or narrower (after display scaling), the "
+"editor opens in its own window instead of a panel (0 = always open as a "
+"panel)"
+msgstr ""
+
 #: collins/quickopen.py:66
 msgid "Open File"
 msgstr ""

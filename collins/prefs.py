@@ -355,6 +355,19 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._editor_hidden_files_row.connect("notify::active", self._on_editor_hidden_files_changed)
         editor_group.add(self._editor_hidden_files_row)
 
+        pop_out_row = Adw.SpinRow.new_with_range(0, 30_000, 100)
+        pop_out_row.set_title(_("Open in a window on small screens"))
+        pop_out_row.set_subtitle(
+            _(
+                "On screens this many pixels wide or narrower (after display "
+                "scaling), the editor opens in its own window instead of a "
+                "panel (0 = always open as a panel)"
+            )
+        )
+        pop_out_row.set_value(int(state.get_setting("editor_pop_out_screen_width") or 0))
+        pop_out_row.connect("notify::value", self._on_editor_pop_out_width_changed)
+        editor_group.add(pop_out_row)
+
         page.add(editor_group)
 
     def _on_editor_scheme_radio(self, radio: Gtk.CheckButton, scheme_id: str) -> None:
@@ -380,6 +393,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_editor_hidden_files_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("editor_show_hidden_files", row.get_active())
+        self._on_change()
+
+    def _on_editor_pop_out_width_changed(self, row: Adw.SpinRow, _pspec) -> None:
+        self._state.set_setting("editor_pop_out_screen_width", int(row.get_value()))
         self._on_change()
 
     def _on_font_changed(self, button: Gtk.FontDialogButton, _pspec) -> None:

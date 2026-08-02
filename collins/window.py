@@ -58,7 +58,7 @@ from .sessions import (
     worktree_project_root,
 )
 from .sidebar import SessionSidebar
-from .state import AppState, clamp_window_size
+from .state import AppState, clamp_window_size, editor_pops_out
 from .store import SessionStore, emptied_projects
 from .switcher import QuickSwitcher
 from .taborder import tab_order
@@ -118,6 +118,26 @@ def _monitor_sizes() -> list[tuple[int, int]]:
         geometry = monitors.get_item(i).get_geometry()
         sizes.append((geometry.width, geometry.height))
     return sizes
+
+
+def _monitor_logical_width(window: Gtk.Window) -> int:
+    """Scaled px width of the monitor `window` is currently on (0 when it
+    can't be determined, e.g. the window isn't realized yet).
+
+    GTK monitor geometry is in logical "application pixels" — the physical
+    resolution divided by the display scale, e.g. 1536 for a 3072-px panel
+    at 2×. That's deliberately what the pop-out threshold compares against:
+    it's the same unit windows are laid out in, so it measures the space a
+    terminal-plus-editor split actually has, not what the spec sheet says.
+    """
+    surface = window.get_surface()
+    display = window.get_display()
+    if surface is None or display is None:
+        return 0
+    monitor = display.get_monitor_at_surface(surface)
+    if monitor is None:
+        return 0
+    return monitor.get_geometry().width
 
 
 def _app_icon_name(window: Gtk.Window) -> str:
@@ -2501,6 +2521,9 @@ class MainWindow(Adw.ApplicationWindow):
         if win is not None:
             win.close()  # (a) popped out: dock it back (close-request docks)
             return
+        if not tab.editor_visible and self._editor_opens_popped_out():
+            self._pop_out_editor(tab)  # (b) on a small screen: open undocked
+            return
         tab.toggle_editor()  # (b)/(c) open or close the in-tab panel
 
     def _editor_save(self) -> None:
@@ -2516,7 +2539,10 @@ class MainWindow(Adw.ApplicationWindow):
         if win is not None:
             win.present()  # the editor lives in its own window right now
         elif not tab.editor_visible:
-            tab.show_editor()
+            if self._editor_opens_popped_out():
+                self._pop_out_editor(tab)
+            else:
+                tab.show_editor()
         tab.focus_editor()
 
     def _quick_open_file(self) -> None:
@@ -2557,9 +2583,19 @@ class MainWindow(Adw.ApplicationWindow):
         win = self._editor_windows.get(tab)
         if win is not None:
             win.present()  # the pane lives in its own window right now
+        elif not tab.editor_visible and self._editor_opens_popped_out():
+            self._pop_out_editor(tab)
         tab.open_in_editor(path)
 
     # -- popped-out editor windows --------------------------------------------
+
+    def _editor_opens_popped_out(self) -> bool:
+        """Whether opening the editor right now should skip the docked panel
+        and go straight to its own window: the monitor this window is on at
+        this moment is at most `editor_pop_out_screen_width` scaled px
+        wide. Small screens don't fit a useful terminal-plus-editor split."""
+        limit = int(self.state.get_setting("editor_pop_out_screen_width") or 0)
+        return editor_pops_out(_monitor_logical_width(self), limit)
 
     def _pop_out_editor(self, tab: TerminalTab) -> None:
         """Reparent the tab's live editor pane into its own window (the pane's
