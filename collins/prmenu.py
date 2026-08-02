@@ -175,8 +175,9 @@ def fill(
     than kept in sync: statuses move under it, and it is only ever on screen
     for as long as someone is reading it.
 
-    With a *host*, every row also carries that PR's actions on a right-click —
-    and the list this call built is what the submenu's header leads back to.
+    With a *host*, every row leads into that PR's actions on a plain click
+    (its page moves to the right-click) — and the list this call built is what
+    the submenu's header leads back to.
     """
     prs = list(prs)  # closed over by the rows' way back from the submenu
     rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -342,7 +343,7 @@ def _header(pr: PullRequest, back: Callable[[], None] | None) -> Gtk.Widget:
     """Which PR the actions below belong to, and the way back to the list.
 
     Same shape as a list row — mark column, title, number — so stepping into
-    the submenu reads as the row you right-clicked moving to the top, with the
+    the submenu reads as the row you clicked moving to the top, with the
     status mark it had swapped for the arrow that leads back.
     """
     name = Gtk.Label(label=menu_name(pr), xalign=0.0, hexpand=True)

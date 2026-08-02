@@ -127,15 +127,15 @@ msgstr ""
 msgid "Copied to clipboard"
 msgstr ""
 
-#: collins/prmenu.py:192 collins/terminal.py:1045
+#: collins/prmenu.py:206 collins/terminal.py:1045
 msgid "Click for actions"
 msgstr ""
 
-#: collins/prmenu.py:192 collins/terminal.py:1045
+#: collins/prmenu.py:206 collins/terminal.py:1045
 msgid "Right-click to open"
 msgstr ""
 
-#: collins/prmenu.py:372
+#: collins/prmenu.py:390
 msgid "Open on GitHub"
 msgstr ""
 
