@@ -149,7 +149,7 @@ def test_the_prompt_actions_are_the_ones_carrying_a_prompt():
         + actions_for(_pr(state="MERGED"), True, lambda: True)
         if a.prompt
     }
-    assert sending == {FIX_CI: CI_PROMPT, NEW_PR: NEW_PR_PROMPT}
+    assert sending == {FIX_CI: "Address the ci error(s) on PR #55", NEW_PR: NEW_PR_PROMPT}
 
 
 def test_every_action_names_the_pr_in_its_tooltip():
@@ -221,7 +221,7 @@ def test_a_url_that_isnt_a_pr_never_reaches_gh(gh):
 
 def test_the_prompts_sent_to_a_session_are_left_in_english():
     """They are read by the agent CLI, not by a person."""
-    assert CI_PROMPT == "address the ci error(s)"
+    assert CI_PROMPT == "Address the ci error(s) on PR #{number}"
     assert NEW_PR_PROMPT == "Open a pull request for your changes"
 
 

@@ -44,8 +44,9 @@ NEW_PR = "new-pr"
 
 # What the two prompt-sending actions type into the session. Read by the agent
 # CLI, not by a person, so they stay in English (and untranslated) whatever the
-# app's language is.
-CI_PROMPT = "address the ci error(s)"
+# app's language is. The CI one names its PR: a session can have opened
+# several, and a bare "the ci error(s)" would leave the agent to guess whose.
+CI_PROMPT = "Address the ci error(s) on PR #{number}"
 NEW_PR_PROMPT = "Open a pull request for your changes"
 # What asking for a review looks like on the PR: the mention the
 # `anthropics/claude-code-action` workflow triggers on. A repository without
@@ -151,12 +152,13 @@ def actions_for(
             )
         )
         if pr.failed and takes_prompt:
+            ci_prompt = CI_PROMPT.format(number=pr.number)
             actions.append(
                 Action(
                     FIX_CI,
                     _("Address the CI errors"),
-                    _("Send “{prompt}” to this session").format(prompt=CI_PROMPT),
-                    prompt=CI_PROMPT,
+                    _("Send “{prompt}” to this session").format(prompt=ci_prompt),
+                    prompt=ci_prompt,
                 )
             )
     elif pr.merged and takes_prompt and has_changes():
