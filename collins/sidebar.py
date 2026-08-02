@@ -65,10 +65,10 @@ _IN_TAB_STATUSES = ("open", "attention")
 # nothing. Only tab sessions ever get it — a detached (/bg) row has no
 # activity source and keeps its still yellow line.
 _BUSY_CSS = "busy"
-# A finished run nobody has looked at yet: paints the guide line blue until
+# A finished run nobody has looked at yet: paints the guide line green until
 # the user returns to the session's tab (see SessionItem.unread). The busy
 # pole outranks it in CSS, so a session that starts a new turn unread moves
-# again and shows blue once more when that turn also runs out.
+# again and shows green once more when that turn also runs out.
 _UNREAD_CSS = "unread"
 
 # How far a project header's icon sits from the row's own left edge: the

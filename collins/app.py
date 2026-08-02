@@ -122,12 +122,12 @@ row.session-child.running:hover {
 row.session-child.detached { border-left-color: #e5a50a; }
 
 /* a finished run nobody has looked at yet (see SessionItem.unread): the guide
-   line holds solid blue, the color of the pole that was just climbing it,
-   until the user returns to the tab. Below the .detached rule so blue wins
+   line holds solid green -- the run is done and its result is waiting --
+   until the user returns to the tab. Below the .detached rule so green wins
    the line while a formerly-detached row still reads as such, and beaten by
    the .busy pole rule (its selector carries one more class), so a session
    sent straight back to work moves again instead of sitting on a stale flag. */
-row.session-child.unread { border-left-color: #3584e4; }
+row.session-child.unread { border-left-color: #2ec27e; }
 
 /* An agent producing output right now (see activity.py) turns its row's guide
    line into a barber pole: stripes climbing while work is happening, still the
