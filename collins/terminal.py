@@ -1385,7 +1385,26 @@ class TerminalTab(Gtk.Box):
             self.feed_message(_("Add to chat isn't available for this file"))
             return
         self.feed_child_text(reference + " ")
+        GLib.idle_add(self._focus_terminal_after_add_to_chat)
+
+    def _focus_terminal_after_add_to_chat(self) -> bool:
+        """Move focus to the agent terminal once the "Add to chat" menu is
+        gone. Deferred to idle because the grab must outlive the context
+        menu that triggered it: the popover closes right after its action
+        runs and hands focus back to the widget that opened it (the editor
+        view), which undid an immediate grab. With the editor popped out
+        the grab alone can't cross windows either — first re-select this
+        tab's page (the main window may be showing another tab while the
+        editor floats) and present its window, then grab."""
+        view = self.get_ancestor(Adw.TabView)
+        page = view.get_page(self) if view is not None else None
+        if page is not None:
+            view.set_selected_page(page)
+        root = self.get_root()
+        if isinstance(root, Gtk.Window):
+            root.present()
         self.grab_terminal_focus()
+        return GLib.SOURCE_REMOVE
 
     def inject_prompt(self, text: str) -> None:
         """Type *text* into the agent, send it, and put the tab in front.
