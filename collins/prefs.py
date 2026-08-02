@@ -296,6 +296,20 @@ class PreferencesDialog(Adw.PreferencesDialog):
         bg_group.add(self._bg_poll_row)
         page.add(bg_group)
 
+        experimental_group = Adw.PreferencesGroup(title=_("Experimental"))
+        self._progress_termprop_row = Adw.SwitchRow(
+            title=_("Exact busy tracking from the agent"),
+            subtitle=_(
+                "Read Claude Code's own progress announcements for the "
+                "sidebar's working indicator, instead of only inferring from "
+                "terminal output (fully applies to newly opened tabs)"
+            ),
+        )
+        self._progress_termprop_row.set_active(bool(state.get_setting("progress_termprop")))
+        self._progress_termprop_row.connect("notify::active", self._on_progress_termprop_changed)
+        experimental_group.add(self._progress_termprop_row)
+        page.add(experimental_group)
+
         self.add(page)
 
     def _build_editor_group(self, state: AppState, page: Adw.PreferencesPage) -> None:
@@ -450,6 +464,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_bg_poll_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("background_status_poll", row.get_active())
+        self._on_change()
+
+    def _on_progress_termprop_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("progress_termprop", row.get_active())
         self._on_change()
 
     def _on_folder_path_changed(self, row: Adw.SwitchRow, _pspec) -> None:

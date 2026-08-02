@@ -447,6 +447,21 @@ msgid ""
 "lines stop updating on their own"
 msgstr ""
 
+#: collins/prefs.py:299
+msgid "Experimental"
+msgstr ""
+
+#: collins/prefs.py:301
+msgid "Exact busy tracking from the agent"
+msgstr ""
+
+#: collins/prefs.py:303
+msgid ""
+"Read Claude Code's own progress announcements for the sidebar's working "
+"indicator, instead of only inferring from terminal output (fully applies "
+"to newly opened tabs)"
+msgstr ""
+
 #: collins/promptcard.py:46 collins/replayview.py:92
 msgid "Question"
 msgstr ""

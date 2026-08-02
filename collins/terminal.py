@@ -90,6 +90,43 @@ _ZOOM_RESET_KEYS = (Gdk.KEY_0, Gdk.KEY_KP_0)
 # than any real window, so the clamp never actually constrains the terminal.
 _UNLIMITED_CLAMP_WIDTH = 1_000_000
 
+# The termprop VTE parses ConEmu-style OSC 9;4 progress sequences into — the
+# agent CLI's own busy/idle announcement, which the window turns into the
+# sidebar's pole (see activity.ProgressWatch). None on a VTE too old to have
+# termprops at all (pre-0.82), which also lacks the termprop-changed signal:
+# the wiring is skipped and the inferred sources carry the pole alone.
+PROGRESS_HINT_TERMPROP: str | None = getattr(Vte, "TERMPROP_PROGRESS_HINT", None)
+
+
+def _agent_tab_environment() -> list[str]:
+    """The environment an agent tab's shell spawns with: the app's own, plus
+    what makes Claude Code announce its progress to a VTE terminal.
+
+    The CLI (verified on 2.1.220 by reading the bundle) only emits its OSC 9;4
+    progress sequences for terminals it recognizes — ConEmu env vars, ghostty,
+    iTerm2 — and VTE announces itself through none of those, so a stock tab
+    gets no progress at all. Worse, it terminates the sequence with BEL for
+    every terminal but kitty, and VTE deliberately parses only ST-terminated
+    OSC 9;4. Two declarations bridge that:
+
+    - ``ConEmuANSI=ON`` — the announcement ConEmu's own docs define for "this
+      terminal speaks ConEmu's OSC extensions", which OSC 9;4 is. The CLI's
+      terminal-name detection checks VTE_VERSION first, so it still knows it
+      is in a VTE terminal; this flips only the emission gate.
+    - ``TERM_PROGRAM=kitty`` — the sole thing the CLI conditions on kitty is
+      the OSC terminator (ST, the one VTE accepts). TERM is untouched, so
+      terminfo, shell integration, and the tools that probe for real kitty
+      (KITTY_WINDOW_ID, TERM=xterm-kitty) all see an ordinary xterm.
+
+    Both are spoofs of terminal *detection*, not of behaviour, and they fail
+    soft: a CLI update that stops honoring them just stops emitting progress,
+    and the inferred activity sources carry the pole exactly as before.
+    See specs/collins/progress-termprop-activity.md for the full findings.
+    """
+    env = dict(os.environ)
+    env.update(ConEmuANSI="ON", TERM_PROGRAM="kitty")
+    return [f"{k}={v}" for k, v in env.items()]
+
 
 def _setup_links(terminal: Vte.Terminal) -> None:
     """Give links GNOME Terminal's behaviour: underline on hover, open on
@@ -495,6 +532,9 @@ class TerminalTab(Gtk.Box):
         self.provider = provider or get_provider("claude")
         self._options = options
         self._command_override = command_override
+        # Decided at spawn time, so a toggle mid-session can't half-apply to
+        # a shell that inherited the other choice; new tabs pick up a change.
+        self._progress_env = bool((settings or {}).get("progress_termprop", True))
         self._child_pid: int | None = None
         self._transcript_monitor: Gio.FileMonitor | None = None
         self._transcript_refresh_source: int | None = None
@@ -669,7 +709,9 @@ class TerminalTab(Gtk.Box):
             Vte.PtyFlags.DEFAULT,
             cwd,
             argv,
-            None,  # envv: inherit
+            # Inherit, plus the progress-OSC coaxing — unless the experimental
+            # setting is off, in which case a plain inherited environment.
+            _agent_tab_environment() if self._progress_env else None,
             GLib.SpawnFlags.DEFAULT,
             None,  # child_setup
             None,  # child_setup_data

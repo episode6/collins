@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -23,8 +23,10 @@ from . import __version__, chats, dialogs, editor, footerapps, openwith, panelhi
 from .activity import (
     PROCESS_IDLE_S,
     PROCESS_POLL_MS,
+    PROGRESS_IDLE_S,
     ActivityTracker,
     EchoGate,
+    ProgressWatch,
     SpinnerWatch,
 )
 from .bgstatus import (
@@ -59,7 +61,7 @@ from .state import AppState, clamp_window_size, editor_pops_out
 from .store import SessionStore, emptied_projects
 from .switcher import QuickSwitcher
 from .taborder import tab_order
-from .terminal import TerminalTab
+from .terminal import PROGRESS_HINT_TERMPROP, TerminalTab
 
 log = logging.getLogger(__name__)
 
@@ -258,6 +260,14 @@ class MainWindow(Adw.ApplicationWindow):
         # Each tab's spinner-motion detector, sampled alongside the gate in
         # _on_terminal_output (see SpinnerWatch).
         self._spinner_watches: dict[Adw.TabPage, SpinnerWatch] = {}
+        # Each tab's progress-termprop interpreter — the agent's own busy
+        # signal, fed by _on_progress_termprop (see ProgressWatch).
+        self._progress_watches: dict[Adw.TabPage, ProgressWatch] = {}
+        # Tabs that spawned their CLI fresh instead of attaching to an
+        # existing session: no agent can be mid-turn in one before its first
+        # submit, so even the ungated pole starters hold through the startup
+        # paint. See _startup_held.
+        self._fresh_spawns: set[Adw.TabPage] = set()
 
         self._install_actions()
         self._install_shortcuts()
@@ -1297,12 +1307,23 @@ class MainWindow(Adw.ApplicationWindow):
         gate = EchoGate()
         self._echo_gates[page] = gate
         self._spinner_watches[page] = SpinnerWatch()
+        if tab.session_id is None:
+            # A new session or a --continue: the CLI is being spawned right
+            # now, so nothing can be mid-turn behind it (unlike a tab bound
+            # to an existing id, which may be attaching to a live agent).
+            self._fresh_spawns.add(page)
         # "commit" is everything the app sends this terminal's child — the
         # keystrokes the user types, and the focus reports VTE emits on a tab
         # switch — so the redraw that answers one is not the agent working.
         # The text goes along so the gate can arm itself on the first submit.
         tab.terminal.connect("commit", lambda _term, text, _size: gate.poked(text or ""))
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
+        # The agent's own busy signal, where the CLI and VTE both speak it —
+        # see ProgressWatch (and _agent_tab_environment for how it's coaxed
+        # out of the CLI). Skipped on a VTE too old for termprops.
+        if PROGRESS_HINT_TERMPROP is not None:
+            self._progress_watches[page] = ProgressWatch()
+            tab.terminal.connect("termprop-changed", self._on_progress_termprop, page)
         # Capture phase so the keystroke is seen even though VTE consumes it;
         # EVENT_PROPAGATE below leaves it for VTE to deliver as usual.
         keys = Gtk.EventControllerKey()
@@ -1648,6 +1669,8 @@ class MainWindow(Adw.ApplicationWindow):
         # per-page trackers are done with it.
         self._echo_gates.pop(page, None)
         self._spinner_watches.pop(page, None)
+        self._progress_watches.pop(page, None)
+        self._fresh_spawns.discard(page)
 
     def _on_page_title_changed(self, page: Adw.TabPage, _pspec) -> None:
         if page is self.tab_view.get_selected_page():
@@ -2382,6 +2405,62 @@ class MainWindow(Adw.ApplicationWindow):
                 self._activity.mark(tracked)
         return Gdk.EVENT_PROPAGATE
 
+    def _startup_held(self, page: Adw.TabPage) -> bool:
+        """Whether this tab's ungated pole starters are still held.
+
+        SpinnerWatch and ProgressWatch skip the echo gate so that attaching
+        to a live background agent mid-turn can start a pole nothing was
+        ever typed at. A tab that spawned its CLI fresh has no such agent —
+        yet the spawning CLI animates its startup paint and blips its own
+        progress hint, which would put a pole (and, when it settles, an
+        unread flag) on a row the user has not said a word to. So on fresh
+        spawns those sources wait for the gate too; the first submit arms it
+        for the life of the tab, releasing them for good.
+        """
+        gate = self._echo_gates.get(page)
+        return page in self._fresh_spawns and gate is not None and not gate.armed
+
+    def _on_progress_termprop(self, terminal, name: str, page: Adw.TabPage) -> None:
+        """The agent's own busy signal: VTE parsed an OSC 9;4 progress change.
+
+        A busy hint marks with the wide termprop window; a clear is the one
+        instant, honest turn-end — finish(), which also flags the row unread,
+        where the sweep would have taken IDLE_S to notice. Both of a tab's
+        tracked ids get the treatment, same as _on_terminal_output.
+
+        Checked against the experimental setting live, so switching it off
+        silences existing tabs at once — their shells still carry the spawn
+        env, but nothing acts on what the CLI announces.
+        """
+        if name != PROGRESS_HINT_TERMPROP:
+            return
+        if not self.state.get_setting("progress_termprop"):
+            return
+        watch = self._progress_watches.get(page)
+        if watch is None:
+            return
+        ok, hint = terminal.get_termprop_int(name)
+        action = watch.reading(hint if ok else None)
+        if self._startup_held(page):
+            # A spawning CLI blips its progress hint with no turn in sight,
+            # so whatever action the blip asks for is dropped — its clear
+            # can't finish-and-flag the row. The watch still listens, though
+            # (mirroring how SpinnerWatch keeps sampling under the hold):
+            # the blip counts as the tab having _spoken_, so even if its
+            # hint were somehow still busy at the first submit, the real
+            # turn's clear lands as a finish instead of being dismissed as
+            # the first clear ever heard.
+            return
+        if action is None:
+            return
+        for tracked in (self._session_id_of(page), self._placeholder_pages.get(page)):
+            if not tracked:
+                continue
+            if action == "mark":
+                self._activity.mark(tracked, idle_s=PROGRESS_IDLE_S)
+            else:
+                self._activity.finish(tracked)
+
     def _on_terminal_output(self, terminal, page: Adw.TabPage) -> None:
         # A redraw counts as the session working whether or not its tab is
         # selected: the sidebar's pole is about what the agent is doing, not
@@ -2406,12 +2485,22 @@ class MainWindow(Adw.ApplicationWindow):
         # is the agent's own spinner (or its output scrolling through), however
         # the redraw showing it was caused — see SpinnerWatch. Sampled even
         # when the gate already said yes, so the watch always has a fresh
-        # baseline to compare the next redraw against.
+        # baseline to compare the next redraw against — and even while a
+        # fresh spawn's startup hold discounts the verdict (_startup_held):
+        # a spawning CLI's welcome paint animates too, and it is no turn.
         watch = self._spinner_watches.get(page)
         if watch is not None and watch.due():
             tab = page.get_child()
             if isinstance(tab, TerminalTab) and (reading := tab.screen_first_column()) is not None:
-                agent_output = watch.sample(*reading) or agent_output
+                spinning = watch.sample(*reading) and not self._startup_held(page)
+                agent_output = spinning or agent_output
+        # Unless the agent itself just called the turn over: these redraws are
+        # its trailing repaints (the prompt box returning, the indicator
+        # fading), and starting a pole on them would blip the instant-down the
+        # termprop finish just delivered. See ProgressWatch.quiet.
+        progress = self._progress_watches.get(page)
+        if progress is not None and progress.quiet():
+            agent_output = False
         session_id = self._session_id_of(page)
         for tracked in (session_id, self._placeholder_pages.get(page)):
             if tracked and (agent_output or self._activity.is_busy(tracked)):
