@@ -140,6 +140,47 @@ def test_the_latest_mark_decides_the_window():
     assert not tracker.is_busy("a")
 
 
+def make_finish_tracker(idle_s=2.0):
+    clock, timers, changes, finished = FakeClock(), FakeTimers(), [], []
+    tracker = ActivityTracker(
+        lambda sid, busy: changes.append((sid, busy)),
+        on_finished=finished.append,
+        idle_s=idle_s,
+        clock=clock,
+        add_timeout=timers.add,
+        remove_timeout=timers.remove,
+    )
+    return tracker, clock, timers, changes, finished
+
+
+def test_output_running_out_on_its_own_is_a_finish():
+    tracker, clock, timers, changes, finished = make_finish_tracker(idle_s=2.0)
+    tracker.mark("a")
+    clock.advance(2.5)
+    timers.tick()
+    # The busy transition lands first, so a finish handler sees the pole
+    # already down when it flags the row.
+    assert changes == [("a", True), ("a", False)]
+    assert finished == ["a"]
+
+
+def test_an_explicit_clear_is_teardown_not_a_finish():
+    # clear() means the tab closed or the detach ended — nothing completed,
+    # so nothing should be flagged as freshly done.
+    tracker, _clock, _timers, changes, finished = make_finish_tracker()
+    tracker.mark("a")
+    tracker.clear("a")
+    assert changes == [("a", True), ("a", False)]
+    assert finished == []
+
+
+def test_stop_reports_no_finishes():
+    tracker, _clock, _timers, _changes, finished = make_finish_tracker()
+    tracker.mark("a")
+    tracker.stop()
+    assert finished == []
+
+
 def test_clear_stops_it_without_waiting():
     tracker, _clock, timers, changes = make_tracker()
     tracker.mark("a")

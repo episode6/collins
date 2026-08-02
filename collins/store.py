@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-01. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -564,6 +564,11 @@ class SessionStore(GObject.Object):
         item = self._items.get(session_id)
         if item is not None and item.busy != flag:
             item.busy = flag
+
+    def set_unread(self, session_id: str, flag: bool) -> None:
+        item = self._items.get(session_id)
+        if item is not None and item.unread != flag:
+            item.unread = flag
 
     def set_backgrounding(self, session_id: str, flag: bool) -> None:
         item = self._items.get(session_id)

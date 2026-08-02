@@ -484,6 +484,28 @@ def test_set_can_background_ignores_a_session_with_no_row(store):
     store.set_can_background(str(uuid.uuid4()), True)  # must not raise
 
 
+def test_unread_survives_a_store_refresh(store):
+    session_id = store._last_sessions[0].session_id
+    item = store.get_item(session_id)
+    assert item.unread is False
+
+    store.set_unread(session_id, True)
+    assert item.unread is True
+
+    # A rescan updates items in place rather than rebuilding them, so the
+    # flag (and the blue line it paints) rides out unrelated refreshes.
+    store._apply()
+    assert store.get_item(session_id) is item
+    assert item.unread is True
+
+    store.set_unread(session_id, False)
+    assert item.unread is False
+
+
+def test_set_unread_ignores_a_session_with_no_row(store):
+    store.set_unread(str(uuid.uuid4()), True)  # must not raise
+
+
 def test_row_ids_covers_every_row_so_the_gate_can_sweep(store):
     # The background gate is app-wide — one handoff at a time — so closing it
     # means re-evaluating every row, not just the one being handed over.
