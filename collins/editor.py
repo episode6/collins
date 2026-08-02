@@ -20,7 +20,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 try:
     gi.require_version("GtkSource", "5")
@@ -71,6 +71,13 @@ class EditorPane(Gtk.Box):
         # The status row's detach button was clicked: whoever hosts the pane
         # (the window, via the tab) should reparent it into its own window.
         "request-pop-out": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # "Add to chat" was picked somewhere in the pane: reference this file
+        # in the tab's agent chat. Payload is (absolute path, start line,
+        # end line) — 1-based inclusive lines, (0, 0) meaning the whole file.
+        # The tab turns it into the agent's mention token and types it (see
+        # TerminalTab._on_editor_add_to_chat); the pane deliberately knows
+        # nothing about any agent's syntax.
+        "add-to-chat": (GObject.SignalFlags.RUN_FIRST, None, (str, int, int)),
     }
 
     def __init__(self, root: str | Path) -> None:
@@ -100,6 +107,7 @@ class EditorPane(Gtk.Box):
 
         self._tree = FileTree(self._root)
         self._tree.connect("open-file", lambda _t, path: self.open_file(path))
+        self._tree.connect("add-to-chat", lambda _t, path: self.emit("add-to-chat", path, 0, 0))
         left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         left.append(self._build_agent_files())
         left.append(self._tree)
@@ -139,7 +147,21 @@ class EditorPane(Gtk.Box):
         find_action = Gio.SimpleAction.new("find", None)
         find_action.connect("activate", lambda *_a: self.toggle_search())
         actions.add_action(find_action)
+        add_to_chat = Gio.SimpleAction.new("add-to-chat", None)
+        add_to_chat.connect("activate", lambda *_a: self._add_selection_to_chat())
+        actions.add_action(add_to_chat)
+        # The agent-files rows' context-menu action; the clicked row's path
+        # is stashed by the right-click handler just before its popover opens.
+        self._menu_file_path = ""
+        add_file = Gio.SimpleAction.new("add-file-to-chat", None)
+        add_file.connect("activate", lambda *_a: self._add_menu_file_to_chat())
+        actions.add_action(add_file)
         self.insert_action_group("editor", actions)
+
+        # Appended by GtkTextView to every source view's built-in context
+        # menu (see open_file); one model shared by all of them.
+        self._view_extra_menu = Gio.Menu()
+        self._view_extra_menu.append(_("Add to chat"), "editor.add-to-chat")
 
         controller = Gtk.ShortcutController()
         controller.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
@@ -150,6 +172,35 @@ class EditorPane(Gtk.Box):
                 )
             )
         self.add_controller(controller)
+
+    # -- add to chat ---------------------------------------------------------
+
+    def _add_selection_to_chat(self) -> None:
+        """The source view context menu's "Add to chat": reference the
+        selection, or the whole file when nothing is selected.
+
+        A partial-line selection is rounded outward to whole lines — the
+        agent's range syntax has no column precision, and a column suffix is
+        worse than none (see ClaudeProvider.file_reference: the range would
+        be silently dropped). One trim on the way out: a selection ending at
+        column 0 stops short of that line, so dragging through a trailing
+        newline doesn't pull the next line into the reference."""
+        opened = self._active_open()
+        if opened is None:
+            return
+        start_line = end_line = 0
+        bounds = opened.buffer.get_selection_bounds()
+        if bounds:
+            start, end = bounds
+            start_line = start.get_line() + 1
+            end_line = end.get_line() + 1
+            if end.get_line_offset() == 0 and end_line > start_line:
+                end_line -= 1
+        self.emit("add-to-chat", str(opened.path), start_line, end_line)
+
+    def _add_menu_file_to_chat(self) -> None:
+        if self._menu_file_path:
+            self.emit("add-to-chat", self._menu_file_path, 0, 0)
 
     # -- agent files ---------------------------------------------------------
 
@@ -209,7 +260,33 @@ class EditorPane(Gtk.Box):
             row.set_tooltip_text(str(Path(path).relative_to(self._root)))
         except ValueError:
             row.set_tooltip_text(path)
+        right_click = Gtk.GestureClick(button=3)
+        right_click.connect("pressed", self._on_agent_row_right_click, row)
+        row.add_controller(right_click)
         return row
+
+    def _on_agent_row_right_click(
+        self, gesture: Gtk.GestureClick, _n_press: int, x: float, y: float, row: Gtk.ListBoxRow
+    ) -> None:
+        """Same one-item menu the file tree's rows get (see FileTree
+        `_on_row_right_click`) — these rows are files too, and a right-click
+        working below the separator but not above it would read as broken."""
+        path = getattr(row, "file_path", None)
+        if not path:
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self._menu_file_path = path
+
+        menu = Gio.Menu()
+        menu.append(_("Add to chat"), "editor.add-file-to-chat")
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(row)
+        popover.set_has_arrow(False)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        popover.popup()
 
     def _on_agent_row(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         path = getattr(row, "file_path", None)
@@ -257,6 +334,7 @@ class EditorPane(Gtk.Box):
         view.set_highlight_current_line(True)
         view.set_monospace(True)
         view.set_auto_indent(True)
+        view.set_extra_menu(self._view_extra_menu)
 
         gfile = GtkSource.File(location=Gio.File.new_for_path(key))
         opened = _OpenFile(path, buffer, view, gfile)

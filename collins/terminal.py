@@ -641,6 +641,7 @@ class TerminalTab(Gtk.Box):
             self._editor.connect(
                 "request-pop-out", lambda *_: self.emit("editor-pop-out-requested")
             )
+            self._editor.connect("add-to-chat", self._on_editor_add_to_chat)
         self._outer.connect("notify::position", lambda *_: self._remember_editor_width())
         self.append(self._outer)
 
@@ -1177,6 +1178,34 @@ class TerminalTab(Gtk.Box):
 
     def feed_child_text(self, text: str) -> None:
         self.terminal.feed_child(text.encode())
+
+    def _on_editor_add_to_chat(self, _pane, path: str, start_line: int, end_line: int) -> None:
+        """The editor's "Add to chat" (a right-clicked selection or file):
+        type the agent's mention token for it into the input box — typed,
+        never submitted, so the user says what they want done with it. The
+        trailing space both terminates the CLI's mention token and leaves
+        the cursor ready for that sentence.
+
+        The path resolves against the agent's cwd right now, not the
+        directory the tab started in — an agent that has cd'd into a
+        worktree reads relative paths from there (see file_reference for
+        the fallback when the file isn't under it). Unlike inject_prompt
+        this isn't gated on takes_prompt: nothing is sent, and half-written
+        input is exactly where a reference gets added mid-sentence. It IS
+        gated on the agent actually being in the terminal, though — typed
+        at a plain shell prompt the token isn't a mention, it's shell
+        syntax, and the file name inside it is untrusted repo content."""
+        if not self._agent_is_running():
+            self.feed_message(_("Add to chat: the agent isn't running in this tab"))
+            return
+        reference = self.provider.file_reference(
+            path, self.current_agent_cwd(), start_line, end_line
+        )
+        if reference is None:
+            self.feed_message(_("Add to chat isn't available for this file"))
+            return
+        self.feed_child_text(reference + " ")
+        self.grab_terminal_focus()
 
     def inject_prompt(self, text: str) -> None:
         """Type *text* into the agent, send it, and put the tab in front.
@@ -1965,6 +1994,16 @@ class TerminalTab(Gtk.Box):
             if cwd is not None:
                 return cwd
         return self._cwd
+
+    def _agent_is_running(self) -> bool:
+        """Whether the provider's CLI is alive in this terminal right now —
+        the same descendant search current_agent_cwd runs, minus its
+        shell-cwd fallbacks. False means whatever is at the prompt is not
+        the agent (a plain shell, or something the user launched)."""
+        cli = getattr(self.provider, "cli", "") or ""
+        return any(
+            proctree.agent_descendant_cwd(pid, cli) is not None for pid in self._candidate_pids()
+        )
 
     def has_background_descendant(self) -> bool:
         """Whether the agent has something still running below it right now —

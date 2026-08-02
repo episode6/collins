@@ -15,9 +15,10 @@ from pathlib import Path
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gio, GLib, GObject, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from . import editorfiles
+from .i18n import _
 
 # How long after the last change in an expanded directory its row list is
 # rebuilt — long enough that an agent mid-rewrite (many quick saves) coalesces
@@ -44,6 +45,9 @@ class FileTree(Gtk.Box):
 
     __gsignals__ = {
         "open-file": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # A file row's context menu asked for the file to be referenced in
+        # the tab's agent chat. Payload is the absolute path.
+        "add-to-chat": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(self, root: str | Path, show_hidden: bool = False) -> None:
@@ -70,6 +74,15 @@ class FileTree(Gtk.Box):
         self._list_view = Gtk.ListView(model=self._selection, factory=factory)
         self._list_view.add_css_class("navigation-sidebar")
         self._list_view.connect("activate", self._on_activate)
+
+        # The context menu's action; the clicked row's path is stashed here
+        # by the right-click handler just before the popover opens.
+        self._menu_path = ""
+        actions = Gio.SimpleActionGroup()
+        add_to_chat = Gio.SimpleAction.new("add-to-chat", None)
+        add_to_chat.connect("activate", self._on_add_to_chat)
+        actions.add_action(add_to_chat)
+        self.insert_action_group("tree", actions)
 
         scrolled = Gtk.ScrolledWindow(child=self._list_view, vexpand=True, hexpand=True)
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -144,6 +157,11 @@ class FileTree(Gtk.Box):
         box.append(label)
         expander.set_child(box)
         list_item.set_child(expander)
+        # One gesture per recycled row widget; the closure's list_item
+        # yields whatever node is bound to the row at click time.
+        right_click = Gtk.GestureClick(button=3)
+        right_click.connect("pressed", self._on_row_right_click, list_item)
+        expander.add_controller(right_click)
 
     def _on_bind(self, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem) -> None:
         row: Gtk.TreeListRow = list_item.get_item()
@@ -163,3 +181,35 @@ class FileTree(Gtk.Box):
             row.set_expanded(not row.get_expanded())
         else:
             self.emit("open-file", str(node.path))
+
+    # -- context menu --------------------------------------------------------
+
+    def _on_row_right_click(
+        self, gesture: Gtk.GestureClick, _n_press: int, x: float, y: float, list_item: Gtk.ListItem
+    ) -> None:
+        """Right-clicking a file row: a one-item menu referencing the file in
+        the chat. Directory rows get nothing — the agent's mention syntax is
+        for files, and a silent no-op menu would read as broken."""
+        row: Gtk.TreeListRow | None = list_item.get_item()
+        if row is None:
+            return
+        node: _Node = row.get_item()
+        if node.is_dir:
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self._menu_path = str(node.path)
+
+        menu = Gio.Menu()
+        menu.append(_("Add to chat"), "tree.add-to-chat")
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(gesture.get_widget())
+        popover.set_has_arrow(False)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        popover.popup()
+
+    def _on_add_to_chat(self, _action: Gio.SimpleAction, _param) -> None:
+        if self._menu_path:
+            self.emit("add-to-chat", self._menu_path)
