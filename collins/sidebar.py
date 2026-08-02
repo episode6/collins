@@ -1405,9 +1405,9 @@ class SessionSidebar(Gtk.Box):
             open_section.append_item(item(_("Fork session"), "fork-session"))
         for cv in provider.chat_variants():
             if cv.label:
-                label = _("Continue in chat ({mode}) (experimental)").format(mode=_(cv.label))
+                label = _("Continue in native chat ({mode}) (experimental)").format(mode=_(cv.label))
             else:
-                label = _("Continue in chat (experimental)")
+                label = _("Continue in native chat (experimental)")
             chat_item = Gio.MenuItem.new(label, None)
             chat_item.set_action_and_target_value(
                 "win.resume-chat", GLib.Variant("s", f"{cv.key}:{session_id}")

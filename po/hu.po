@@ -500,14 +500,14 @@ msgstr "Ezt a kérdést a terminálban kell megválaszolni."
 msgid "Answer in terminal"
 msgstr "Válasz a terminálban"
 
-msgid "New {name} chat (experimental)…"
-msgstr "Új {name} csevegés (kísérleti)…"
+msgid "New {name} native chat (experimental)…"
+msgstr "Új natív {name} csevegés (kísérleti)…"
 
 msgid "Chat with {name} — every file edit and command asks your permission first."
 msgstr "Csevegés a {name}-tal — minden fájlmódosítás és parancs előbb az engedélyedet kéri."
 
-msgid "New {name} chat ({mode}) (experimental)"
-msgstr "Új {name} csevegés ({mode}) (kísérleti)"
+msgid "New {name} native chat ({mode}) (experimental)"
+msgstr "Új natív {name} csevegés ({mode}) (kísérleti)"
 
 msgid "Read-only chat with {name} — analyses and answers, never edits."
 msgstr "Csak olvasható csevegés a {name}-tal — elemez és válaszol, soha nem szerkeszt."
@@ -584,11 +584,11 @@ msgstr "Csevegés — {dir}"
 msgid "Chat — {name}"
 msgstr "Csevegés — {name}"
 
-msgid "Continue in chat (experimental)"
-msgstr "Folytatás csevegésben (kísérleti)"
+msgid "Continue in native chat (experimental)"
+msgstr "Folytatás natív csevegésben (kísérleti)"
 
-msgid "Continue in chat ({mode}) (experimental)"
-msgstr "Folytatás csevegésben ({mode}) (kísérleti)"
+msgid "Continue in native chat ({mode}) (experimental)"
+msgstr "Folytatás natív csevegésben ({mode}) (kísérleti)"
 
 msgid "Continuing the previous session — earlier messages aren't shown here."
 msgstr "A korábbi munkamenet folytatása — a régebbi üzenetek itt nem jelennek meg."

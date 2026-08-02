@@ -654,11 +654,11 @@ msgstr ""
 
 #: collins/sidebar.py:768
 #, python-brace-format
-msgid "Continue in chat ({mode}) (experimental)"
+msgid "Continue in native chat ({mode}) (experimental)"
 msgstr ""
 
 #: collins/sidebar.py:770
-msgid "Continue in chat (experimental)"
+msgid "Continue in native chat (experimental)"
 msgstr ""
 
 #: collins/sidebar.py:778 collins/window.py:152
@@ -906,12 +906,12 @@ msgstr ""
 
 #: collins/window.py:185
 #, python-brace-format
-msgid "New {name} chat ({mode}) (experimental)"
+msgid "New {name} native chat ({mode}) (experimental)"
 msgstr ""
 
 #: collins/window.py:189
 #, python-brace-format
-msgid "New {name} chat (experimental)…"
+msgid "New {name} native chat (experimental)…"
 msgstr ""
 
 #: collins/window.py:191

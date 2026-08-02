@@ -197,10 +197,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "This prompt needs the terminal to answer.":
             "Ezt a kérdést a terminálban kell megválaszolni.",
         "Answer in terminal": "Válasz a terminálban",
-        "New {name} chat (experimental)…": "Új {name} csevegés (kísérleti)…",
+        "New {name} native chat (experimental)…": "Új natív {name} csevegés (kísérleti)…",
         "Chat with {name} — every file edit and command asks your permission first.":
             "Csevegés a {name}-tal — minden fájlmódosítás és parancs előbb az engedélyedet kéri.",
-        "New {name} chat ({mode}) (experimental)": "Új {name} csevegés ({mode}) (kísérleti)",
+        "New {name} native chat ({mode}) (experimental)": "Új natív {name} csevegés ({mode}) (kísérleti)",
         "Read-only chat with {name} — analyses and answers, never edits.":
             "Csak olvasható csevegés a {name}-tal — elemez és válaszol, soha nem szerkeszt.",
         "Chat with {name} — ⚠ runs edits and commands automatically, without asking.":
@@ -228,8 +228,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Nothing to replay yet.": "Még nincs mit visszajátszani.",
         "Chat — {dir}": "Csevegés — {dir}",
         "Chat — {name}": "Csevegés — {name}",
-        "Continue in chat (experimental)": "Folytatás csevegésben (kísérleti)",
-        "Continue in chat ({mode}) (experimental)": "Folytatás csevegésben ({mode}) (kísérleti)",
+        "Continue in native chat (experimental)": "Folytatás natív csevegésben (kísérleti)",
+        "Continue in native chat ({mode}) (experimental)": "Folytatás natív csevegésben ({mode}) (kísérleti)",
         "Continuing the previous session — earlier messages aren't shown here.":
             "A korábbi munkamenet folytatása — a régebbi üzenetek itt nem jelennek meg.",
         "Exit session and close tab": "Kilépés a munkamenetből és a lap bezárása",
@@ -513,10 +513,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "This prompt needs the terminal to answer.":
             "Diese Eingabe muss im Terminal beantwortet werden.",
         "Answer in terminal": "Im Terminal antworten",
-        "New {name} chat (experimental)…": "Neuer {name}-Chat (experimentell)…",
+        "New {name} native chat (experimental)…": "Neuer nativer {name}-Chat (experimentell)…",
         "Chat with {name} — every file edit and command asks your permission first.":
             "Chat mit {name} — jede Dateiänderung und jeder Befehl fragt zuerst um Erlaubnis.",
-        "New {name} chat ({mode}) (experimental)": "Neuer {name}-Chat ({mode}) (experimentell)",
+        "New {name} native chat ({mode}) (experimental)": "Neuer nativer {name}-Chat ({mode}) (experimentell)",
         "Read-only chat with {name} — analyses and answers, never edits.":
             "Schreibgeschützter Chat mit {name} — analysiert und antwortet, bearbeitet nie.",
         "Chat with {name} — ⚠ runs edits and commands automatically, without asking.":
@@ -544,8 +544,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Nothing to replay yet.": "Noch nichts abzuspielen.",
         "Chat — {dir}": "Chat — {dir}",
         "Chat — {name}": "Chat — {name}",
-        "Continue in chat (experimental)": "Im Chat fortsetzen (experimentell)",
-        "Continue in chat ({mode}) (experimental)": "Im Chat fortsetzen ({mode}) (experimentell)",
+        "Continue in native chat (experimental)": "Im nativen Chat fortsetzen (experimentell)",
+        "Continue in native chat ({mode}) (experimental)": "Im nativen Chat fortsetzen ({mode}) (experimentell)",
         "Continuing the previous session — earlier messages aren't shown here.":
             "Frühere Sitzung wird fortgesetzt — ältere Nachrichten werden hier nicht angezeigt.",
         "Exit session and close tab": "Sitzung beenden und Tab schließen",
@@ -833,10 +833,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "This prompt needs the terminal to answer.":
             "Esta petición debe responderse en la terminal.",
         "Answer in terminal": "Responder en la terminal",
-        "New {name} chat (experimental)…": "Nuevo chat de {name} (experimental)…",
+        "New {name} native chat (experimental)…": "Nuevo chat nativo de {name} (experimental)…",
         "Chat with {name} — every file edit and command asks your permission first.":
             "Chat con {name}: cada edición de archivo y comando pide tu permiso primero.",
-        "New {name} chat ({mode}) (experimental)": "Nuevo chat de {name} ({mode}) (experimental)",
+        "New {name} native chat ({mode}) (experimental)": "Nuevo chat nativo de {name} ({mode}) (experimental)",
         "Read-only chat with {name} — analyses and answers, never edits.":
             "Chat de solo lectura con {name}: analiza y responde, nunca edita.",
         "Chat with {name} — ⚠ runs edits and commands automatically, without asking.":
@@ -864,8 +864,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Nothing to replay yet.": "Aún no hay nada que reproducir.",
         "Chat — {dir}": "Chat — {dir}",
         "Chat — {name}": "Chat — {name}",
-        "Continue in chat (experimental)": "Continuar en el chat (experimental)",
-        "Continue in chat ({mode}) (experimental)": "Continuar en el chat ({mode}) (experimental)",
+        "Continue in native chat (experimental)": "Continuar en el chat nativo (experimental)",
+        "Continue in native chat ({mode}) (experimental)": "Continuar en el chat nativo ({mode}) (experimental)",
         "Continuing the previous session — earlier messages aren't shown here.":
             "Continuando la sesión anterior: los mensajes anteriores no se muestran aquí.",
         "Exit session and close tab": "Salir de la sesión y cerrar la pestaña",
@@ -1151,11 +1151,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "This prompt needs the terminal to answer.":
             "Cette invite doit être traitée dans le terminal.",
         "Answer in terminal": "Répondre dans le terminal",
-        "New {name} chat (experimental)…": "Nouvelle discussion {name} (expérimental)…",
+        "New {name} native chat (experimental)…": "Nouvelle discussion native {name} (expérimental)…",
         "Chat with {name} — every file edit and command asks your permission first.":
             "Discussion avec {name} — chaque modification de fichier et commande "
             "demande d'abord votre permission.",
-        "New {name} chat ({mode}) (experimental)": "Nouvelle discussion {name} ({mode}) (expérimental)",
+        "New {name} native chat ({mode}) (experimental)": "Nouvelle discussion native {name} ({mode}) (expérimental)",
         "Read-only chat with {name} — analyses and answers, never edits.":
             "Discussion en lecture seule avec {name} — analyse et répond, ne modifie jamais.",
         "Chat with {name} — ⚠ runs edits and commands automatically, without asking.":
@@ -1184,8 +1184,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Nothing to replay yet.": "Rien à rejouer pour l’instant.",
         "Chat — {dir}": "Discussion — {dir}",
         "Chat — {name}": "Discussion — {name}",
-        "Continue in chat (experimental)": "Continuer dans la discussion (expérimental)",
-        "Continue in chat ({mode}) (experimental)": "Continuer dans la discussion ({mode}) (expérimental)",
+        "Continue in native chat (experimental)": "Continuer dans la discussion native (expérimental)",
+        "Continue in native chat ({mode}) (experimental)": "Continuer dans la discussion native ({mode}) (expérimental)",
         "Continuing the previous session — earlier messages aren't shown here.":
             "Reprise de la session précédente — les messages antérieurs ne sont pas affichés ici.",
         "Exit session and close tab": "Quitter la session et fermer l’onglet",
