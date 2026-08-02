@@ -46,23 +46,30 @@ def open_uri(widget: Gtk.Widget, uri: str | None) -> None:
     Gtk.UriLauncher.new(uri).launch(widget.get_root(), None, on_launched)
 
 
-def enable_open_on_click(widget: Gtk.Widget, get_uri: Callable[[], str | None]) -> None:
-    """Open the widget's URI in the user's browser when it is clicked.
+def enable_open_on_click(
+    widget: Gtk.Widget,
+    get_uri: Callable[[], str | None],
+    button: int = Gdk.BUTTON_PRIMARY,
+) -> None:
+    """Open the widget's URI in the user's browser when *button* clicks it.
 
     What's on screen is usually a short stand-in for the link (a PR number and
     its state mark, say), so the URI comes from `get_uri` rather than the
     widget — and a chip built from several widgets can hand over the box, so
     every part of it opens the same link.
+
+    One button only, never a default GtkGestureClick answering to all of them:
+    a chip can put a different meaning on its other button (the footer's PR
+    chips open their actions menu on the primary and the browser on the
+    secondary), and both firing on one click would open the browser along
+    with the menu.
     """
     widget.set_cursor(Gdk.Cursor.new_from_name("pointer"))
 
     def on_released(_gesture, _n_press, _x, _y) -> None:
         open_uri(widget, get_uri())
 
-    # Primary button only: a chip can carry a right-click menu of its own (the
-    # footer's PR chips do), and a default GtkGestureClick answers to every
-    # button — so opening the menu would open the browser along with it.
-    click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
+    click = Gtk.GestureClick(button=button)
     click.connect("released", on_released)
     widget.add_controller(click)
 

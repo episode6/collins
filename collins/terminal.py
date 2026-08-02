@@ -33,7 +33,6 @@ from .copylabel import (  # noqa: E402
     copy_tooltip,
     enable_copy_on_click,
     enable_open_on_click,
-    open_tooltip,
 )
 from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch, has_changes  # noqa: E402
@@ -867,9 +866,9 @@ class TerminalTab(Gtk.Box):
 
         # The PR chips trail the branch, sharing its leading divider — one per
         # PR the session has opened, oldest first, so the row reads in the
-        # order the work happened. Unlike their neighbours they open rather
-        # than copy: a number on screen is a stand-in for its PR page, and
-        # going there is what you want next.
+        # order the work happened. Unlike their neighbours they act rather
+        # than copy: a click opens the PR's actions, and its page on GitHub
+        # is a right-click (or the menu's own "Open on GitHub" row) away.
         self._pr_chips = PrChipRow(_PR_CHIP_SPACING)
         self._pr_chips.set_visible(False)
         # Leading the row, where the oldest chip would be: the caret opens the
@@ -886,8 +885,8 @@ class TerminalTab(Gtk.Box):
         self._pr_menu_btn.set_tooltip_text(_("Every pull request this session has opened"))
         self._pr_menu_btn.set_create_popup_func(self._fill_pr_menu)
         self._pr_menu_btn.set_visible(False)
-        # Sibling of the chips, never inside them: a chip opens its PR on click,
-        # and a button in there would open the browser along with itself.
+        # Sibling of the chips, never inside them: a chip opens its menu on
+        # click, and a button in there would open the menu along with itself.
         # It shows whether or not a PR does — with none, it is the way to go
         # looking for one (see _on_pr_refresh).
         refresh_icon = Gtk.Image.new_from_icon_name("view-refresh-symbolic")
@@ -1017,8 +1016,9 @@ class TerminalTab(Gtk.Box):
     def _build_pr_chip(self, pr: PullRequest) -> Gtk.Widget:
         """One PR's chip: its number, its CI mark, and a merge mark if it landed.
 
-        Every part of a chip opens that PR and nothing else — the chips are
-        siblings on the row, so each number is its own link.
+        Every part of a chip answers for that PR and nothing else — the chips
+        are siblings on the row, so each number carries its own menu (on a
+        click) and its own link (on a right-click).
         """
         number = Gtk.Label(label=f"#{pr.number}")
         number.add_css_class("caption")
@@ -1041,12 +1041,12 @@ class TerminalTab(Gtk.Box):
             merged.add_css_class("pr-merged")
             chip.append(merged)
         chip.set_tooltip_text(
-            open_tooltip(describe(pr) + "\n" + pr.url) + "\n" + _("Right-click for actions")
+            describe(pr) + "\n" + pr.url + "\n"
+            + _("Click for actions") + "\n" + _("Right-click to open")
         )
-        enable_open_on_click(chip, lambda: pr.url)
-        # The chip is the shortest way to a PR, so it is also the shortest way
-        # to do something about one: the same actions the caret's list offers,
-        # opened on the chip itself.
+        enable_open_on_click(chip, lambda: pr.url, button=Gdk.BUTTON_SECONDARY)
+        # The chip is the shortest way to do something about a PR: the same
+        # actions the caret's list offers, opened on the chip itself.
         prmenu.attach_actions(chip, pr, self._pr_action_host())
         return chip
 

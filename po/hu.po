@@ -695,6 +695,15 @@ msgstr "Kattintson a másoláshoz"
 msgid "Click to open"
 msgstr "Kattintson a megnyitáshoz"
 
+msgid "Click for actions"
+msgstr "Kattintson a műveletekhez"
+
+msgid "Right-click to open"
+msgstr "Jobb kattintás a megnyitáshoz"
+
+msgid "Open on GitHub"
+msgstr "Megnyitás GitHubon"
+
 msgid "Open pull request"
 msgstr "Nyitott pull request"
 

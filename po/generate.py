@@ -283,6 +283,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "A fájl a kukába kerül, és visszaállítható.",
         "Click to copy": "Kattintson a másoláshoz",
         "Click to open": "Kattintson a megnyitáshoz",
+        "Click for actions": "Kattintson a műveletekhez",
+        "Right-click to open": "Jobb kattintás a megnyitáshoz",
+        "Open on GitHub": "Megnyitás GitHubon",
         # pull request footer chip
         "Open pull request": "Nyitott pull request",
         "Draft pull request": "Piszkozat pull request",
@@ -614,6 +617,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Die Datei wird in den Papierkorb verschoben und kann wiederhergestellt werden.",
         "Click to copy": "Zum Kopieren klicken",
         "Click to open": "Zum Öffnen klicken",
+        "Click for actions": "Für Aktionen klicken",
+        "Right-click to open": "Zum Öffnen rechtsklicken",
+        "Open on GitHub": "Auf GitHub öffnen",
         # pull request footer chip
         "Open pull request": "Offener Pull Request",
         "Draft pull request": "Pull-Request-Entwurf",
@@ -945,6 +951,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "El archivo se mueve a la papelera y se puede restaurar.",
         "Click to copy": "Haz clic para copiar",
         "Click to open": "Haz clic para abrir",
+        "Click for actions": "Haz clic para ver las acciones",
+        "Right-click to open": "Haz clic derecho para abrir",
+        "Open on GitHub": "Abrir en GitHub",
         # pull request footer chip
         "Open pull request": "Pull request abierto",
         "Draft pull request": "Pull request en borrador",
@@ -1277,6 +1286,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Le fichier est mis à la corbeille et peut être restauré.",
         "Click to copy": "Cliquer pour copier",
         "Click to open": "Cliquer pour ouvrir",
+        "Click for actions": "Cliquer pour les actions",
+        "Right-click to open": "Clic droit pour ouvrir",
+        "Open on GitHub": "Ouvrir sur GitHub",
         # pull request footer chip
         "Open pull request": "Pull request ouverte",
         "Draft pull request": "Brouillon de pull request",

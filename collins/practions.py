@@ -16,8 +16,10 @@ Two of them aren't about GitHub at all: FIX_CI and NEW_PR send a prompt to the
 session that opened the PR and let the agent do the work. Both need a session
 sitting at an empty prompt, and NEW_PR needs uncommitted work to open a pull
 request *for* — neither is a property of the PR, so the caller answers both.
-Note that nothing here opens the PR's page: the chip and the list row already
-do that on a plain click, which is what the right-click menu is a step past.
+Note that nothing here opens the PR's page: the menu carries its own "Open on
+GitHub" row ahead of these actions, built beside the widgets (prmenu) because
+opening a browser is Gtk's business and this module stays importable without
+one — and a right-click on the chip or the list row goes straight there too.
 
 Every call out is `gh`, off the main thread, and reports back as "worked" or a
 sentence explaining why not (see prstatus.gh_run) — nothing here raises at the
@@ -124,10 +126,10 @@ def actions_for(
     only one PR state can use the answer.
 
     Everything here needs a state, and an unfetched PR (no gh, no network) has
-    none: better an empty menu than a "Merge" that was never going to work.
-    Empty is a state the menu handles — the PR's page is a plain click away on
-    the chip or the row this was opened from, so there is nothing an action
-    has to be there for.
+    none: better an empty list than a "Merge" that was never going to work.
+    Empty is fine for the menu — it puts its own "Open on GitHub" row ahead of
+    whatever this returns, so even a PR with nothing left to do opens onto a
+    menu that does something.
     """
     actions: list[Action] = []
     if pr.state == "DRAFT":

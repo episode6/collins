@@ -10,11 +10,12 @@ The widgets live here rather than beside either caller so both get the same
 menu: the same mark column, the same ellipsizing title, the same click that
 opens the PR page and closes the menu behind it.
 
-Left-clicking a PR opens it; right-clicking one asks what to *do* with it.
-That submenu is the same list of actions wherever it is opened from (practions
-decides what a PR offers), so it is built here too: from a row it slides in
-over the list and leads back with a header row, and from a footer chip — which
-has no list behind it — it opens on the chip as a menu of its own.
+Left-clicking a PR asks what to *do* with it; right-clicking one opens its
+page. That submenu is the same list of actions wherever it is opened from
+(practions decides what a PR offers, under an "Open on GitHub" row every PR
+has), so it is built here too: from a row it slides in over the list and leads
+back with a header row, and from a footer chip — which has no list behind it —
+it opens on the chip as a menu of its own.
 """
 
 from __future__ import annotations
@@ -181,13 +182,23 @@ def fill(
         button = Gtk.Button(child=row)
         button.add_css_class("flat")
         button.add_css_class("pr-menu-row")  # menu-sized, and lit under the pointer
-        hint = "\n" + _("Right-click for actions") if host is not None else ""
-        button.set_tooltip_text(open_tooltip(describe(pr) + "\n" + pr.url) + hint)
-        button.connect("clicked", _on_row_clicked, popover, pr.url)
-        if host is not None:
-            _on_secondary_click(
+        detail = describe(pr) + "\n" + pr.url
+        if host is None:
+            # No actions to offer, so the click keeps opening the page.
+            button.set_tooltip_text(open_tooltip(detail))
+            button.connect("clicked", _on_row_clicked, popover, pr.url)
+        else:
+            button.set_tooltip_text(
+                detail + "\n" + _("Click for actions") + "\n" + _("Right-click to open")
+            )
+            button.connect(
+                "clicked",
+                lambda _b, pr=pr: show_actions(popover, pr, host, back=lambda: refill(popover)),
+            )
+            _on_click(
                 button,
-                lambda pr=pr: show_actions(popover, pr, host, back=lambda: refill(popover)),
+                Gdk.BUTTON_SECONDARY,
+                lambda button=button, pr=pr: _on_row_clicked(button, popover, pr.url),
             )
         rows.append(button)
     # A session with a lot of PRs would otherwise open a popover taller than
@@ -240,18 +251,19 @@ def _on_row_clicked(button: Gtk.Button, popover: Gtk.Popover, url: str) -> None:
     open_uri(button, url)
 
 
-def _on_secondary_click(widget: Gtk.Widget, callback: Callable[[], None]) -> None:
-    """Call *callback* when *widget* is right-clicked, and only then.
+def _on_click(widget: Gtk.Widget, button: int, callback: Callable[[], None]) -> None:
+    """Call *callback* when *widget* is clicked with *button*, and only then.
 
-    The gesture claims the click, so a chip that opens its PR on a plain one
-    doesn't also go to the browser on the way to its menu.
+    The gesture claims the click, so it never doubles up with whatever else
+    the widget answers a click with — a row that opens its actions on a plain
+    click mustn't also step into the submenu on the way to the browser.
     """
 
     def pressed(gesture: Gtk.GestureClick, _n_press: int, _x: float, _y: float) -> None:
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         callback()
 
-    gesture = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+    gesture = Gtk.GestureClick(button=button)
     gesture.connect("pressed", pressed)
     widget.add_controller(gesture)
 
@@ -288,16 +300,14 @@ def show_actions(
     separator.set_margin_top(3)
     separator.set_margin_bottom(3)
     rows.append(separator)
-    actions = practions.actions_for(pr, host.takes_prompt(), host.has_changes)
-    for action in actions:
+    rows.append(_open_row(popover, pr))
+    for action in practions.actions_for(pr, host.takes_prompt(), host.has_changes):
         rows.append(_action_row(popover, pr, action, host))
-    if not actions:
-        rows.append(_nothing_row())
     popover.set_child(rows)
 
 
 def attach_actions(chip: Gtk.Widget, pr: PullRequest, host: ActionHost) -> None:
-    """Give a footer chip *pr*'s actions on a right-click.
+    """Give a footer chip *pr*'s actions on a plain click.
 
     The list's submenu has a popover to borrow; a chip has none, so each
     opening builds one on the chip and lets go of it when it closes — the
@@ -312,7 +322,7 @@ def attach_actions(chip: Gtk.Widget, pr: PullRequest, host: ActionHost) -> None:
         show_actions(popover, pr, host)
         popover.popup()
 
-    _on_secondary_click(chip, open_menu)
+    _on_click(chip, Gdk.BUTTON_PRIMARY, open_menu)
 
 
 def _header(pr: PullRequest, back: Callable[[], None] | None) -> Gtk.Widget:
@@ -349,20 +359,26 @@ def _header(pr: PullRequest, back: Callable[[], None] | None) -> Gtk.Widget:
     return button
 
 
-def _nothing_row() -> Gtk.Widget:
-    """What a PR with nothing left to do says instead of showing an empty menu.
+def _open_row(popover: Gtk.Popover, pr: PullRequest) -> Gtk.Widget:
+    """The one action every PR offers: its page on GitHub, in the browser.
 
-    A merged pull request over a clean tree is the ordinary end of a session's
-    work, and every action has run out by then. Saying so beats a menu that
-    opens onto a title and a gap, which reads as broken rather than finished —
-    and beats a right-click that does nothing, since the chip's tooltip has
-    already promised one.
+    First in the menu, ahead of whatever practions has for this PR's state,
+    and there whatever that state is — a merged pull request over a clean tree
+    has run out of things Collins can do to it, but its page is still worth a
+    visit, and a menu with this row in it never opens onto a title and a gap.
+    Built here rather than in practions because opening a browser is a Gtk
+    affair, and practions stays importable without one.
     """
-    label = Gtk.Label(label=_("Nothing to do from here"), xalign=0.0)
+    label = Gtk.Label(label=_("Open on GitHub"), xalign=0.0, hexpand=True)
+    # Under the header's title rather than under its arrow, like every action
+    # row: the indent says this is about the PR named up there.
     label.set_margin_start(MARK_COLUMN_PX + 8)
-    label.add_css_class("dim-label")
-    label.add_css_class("pr-menu-title")  # the geometry of the rows it stands in for
-    return label
+    button = Gtk.Button(child=label)
+    button.add_css_class("flat")
+    button.add_css_class("pr-menu-row")
+    button.set_tooltip_text(open_tooltip(pr.url))
+    button.connect("clicked", _on_row_clicked, popover, pr.url)
+    return button
 
 
 def _action_row(

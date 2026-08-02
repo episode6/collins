@@ -695,6 +695,15 @@ msgstr "Haz clic para copiar"
 msgid "Click to open"
 msgstr "Haz clic para abrir"
 
+msgid "Click for actions"
+msgstr "Haz clic para ver las acciones"
+
+msgid "Right-click to open"
+msgstr "Haz clic derecho para abrir"
+
+msgid "Open on GitHub"
+msgstr "Abrir en GitHub"
+
 msgid "Open pull request"
 msgstr "Pull request abierto"
 
