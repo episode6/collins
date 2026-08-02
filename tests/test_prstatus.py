@@ -573,6 +573,7 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
         "title": "Keep the yellow line on a backgrounded session",
         "isDraft": True,
         "state": "OPEN",
+        "mergeable": "MERGEABLE",
         "statusCheckRollup": [
             {"__typename": "CheckRun", "conclusion": "SUCCESS", "status": "COMPLETED",
              "name": "lint"},
@@ -586,6 +587,7 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
         "state": "DRAFT",
         "checks": {"passed": 1, "failed": 0, "pending": 1},
         "title": "Keep the yellow line on a backgrounded session",
+        "mergeable": "MERGEABLE",
     }
 
 
