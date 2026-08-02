@@ -16,8 +16,10 @@ Two of them aren't about GitHub at all: FIX_CI and NEW_PR send a prompt to the
 session that opened the PR and let the agent do the work. Both need a session
 sitting at an empty prompt, and NEW_PR needs uncommitted work to open a pull
 request *for* — neither is a property of the PR, so the caller answers both.
-Note that nothing here opens the PR's page: the chip and the list row already
-do that on a plain click, which is what the right-click menu is a step past.
+Note that nothing here opens the PR's page: the menu carries its own "Open on
+GitHub" row ahead of these actions, built beside the widgets (prmenu) because
+opening a browser is Gtk's business and this module stays importable without
+one — and a right-click on the chip or the list row goes straight there too.
 
 Every call out is `gh`, off the main thread, and reports back as "worked" or a
 sentence explaining why not (see prstatus.gh_run) — nothing here raises at the
@@ -42,8 +44,9 @@ NEW_PR = "new-pr"
 
 # What the two prompt-sending actions type into the session. Read by the agent
 # CLI, not by a person, so they stay in English (and untranslated) whatever the
-# app's language is.
-CI_PROMPT = "address the ci error(s)"
+# app's language is. The CI one names its PR: a session can have opened
+# several, and a bare "the ci error(s)" would leave the agent to guess whose.
+CI_PROMPT = "Address the ci error(s) on PR #{number}"
 NEW_PR_PROMPT = "Open a pull request for your changes"
 # What asking for a review looks like on the PR: the mention the
 # `anthropics/claude-code-action` workflow triggers on. A repository without
@@ -124,10 +127,10 @@ def actions_for(
     only one PR state can use the answer.
 
     Everything here needs a state, and an unfetched PR (no gh, no network) has
-    none: better an empty menu than a "Merge" that was never going to work.
-    Empty is a state the menu handles — the PR's page is a plain click away on
-    the chip or the row this was opened from, so there is nothing an action
-    has to be there for.
+    none: better an empty list than a "Merge" that was never going to work.
+    Empty is fine for the menu — it puts its own "Open on GitHub" row ahead of
+    whatever this returns, so even a PR with nothing left to do opens onto a
+    menu that does something.
     """
     actions: list[Action] = []
     if pr.state == "DRAFT":
@@ -149,12 +152,13 @@ def actions_for(
             )
         )
         if pr.failed and takes_prompt:
+            ci_prompt = CI_PROMPT.format(number=pr.number)
             actions.append(
                 Action(
                     FIX_CI,
                     _("Address the CI errors"),
-                    _("Send “{prompt}” to this session").format(prompt=CI_PROMPT),
-                    prompt=CI_PROMPT,
+                    _("Send “{prompt}” to this session").format(prompt=ci_prompt),
+                    prompt=ci_prompt,
                 )
             )
     elif pr.merged and takes_prompt and has_changes():
