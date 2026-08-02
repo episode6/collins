@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 
 import os
 import shutil
@@ -55,7 +55,9 @@ def test_available_providers_gating(monkeypatch):
 
 def test_resume_and_new_commands(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
-    monkeypatch.setattr(ClaudeProvider, "background_agents", lambda self: [])
+    monkeypatch.setattr(
+        ClaudeProvider, "background_agents", lambda self, include_finished=False: []
+    )
     claude = ClaudeProvider()
     assert claude.resume_command("abc") == "/usr/bin/claude --resume abc"
     assert claude.resume_command("abc", fork=True) == "/usr/bin/claude --resume abc --fork-session"
@@ -66,7 +68,9 @@ def test_resume_attaches_to_running_background_session(monkeypatch):
     monkeypatch.setattr(
         ClaudeProvider,
         "background_agents",
-        lambda self: [BackgroundAgent(session_id="abc", job_id="abc12345", cwd="/p")],
+        lambda self, include_finished=False: [
+            BackgroundAgent(session_id="abc", job_id="abc12345", cwd="/p")
+        ],
     )
     claude = ClaudeProvider()
     # Attach takes the daemon's short job id — the session id gets "No job matching".
@@ -75,6 +79,22 @@ def test_resume_attaches_to_running_background_session(monkeypatch):
     assert claude.resume_command("abc", fork=True) == "/usr/bin/claude --resume abc --fork-session"
     # A session with no live background agent falls back to a plain resume.
     assert claude.resume_command("other") == "/usr/bin/claude --resume other"
+
+
+def test_resume_attaches_to_finished_resident_background_job(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+
+    class Result:
+        stdout = _agents_json_payload("done")
+
+    monkeypatch.setattr(providers.subprocess, "run", lambda *a, **k: Result())
+    # The daemon refuses a plain --resume for any session id it still lists,
+    # and a finished job stays listed (process resident, state "done") — so
+    # opening one has to attach, exactly like a live job.
+    assert (
+        ClaudeProvider().resume_command("finished-id")
+        == "/usr/bin/claude attach finished-job"
+    )
 
 
 def test_background_agents_parses_agents_json(monkeypatch):

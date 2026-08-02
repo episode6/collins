@@ -1434,6 +1434,9 @@ class SessionSidebar(Gtk.Box):
         edit_section.append_item(item(_("Copy session ID"), "copy-session-id"))
         edit_section.append_item(item(_("Export as Markdown…"), "export-session"))
         edit_section.append_item(item(_("Reveal transcript"), "reveal-transcript"))
+        # Recovery for a row whose background agent it lost track of (e.g. a
+        # /bg handoff the app never got to pair): find the agent and link it.
+        edit_section.append_item(item(_("Repair session link"), "repair-session"))
 
         danger_section = Gio.Menu()
         # A row a /bg fork replaced is out of sight because the fork stands in

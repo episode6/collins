@@ -914,6 +914,7 @@ class MainWindow(Adw.ApplicationWindow):
             "delete-session": self._on_delete_session,
             "open-ghostty": self._on_open_ghostty,
             "rename-session": self._on_rename_action,
+            "repair-session": self._on_repair_action,
             "regenerate-name": lambda _a, p: self.store.regenerate_name(p.get_string()),
             "toggle-favorite": lambda _a, p: self.store.toggle_favorite(p.get_string()),
             "copy-session-id": lambda _a, p: self.get_clipboard().set(p.get_string()),
@@ -2088,6 +2089,84 @@ class MainWindow(Adw.ApplicationWindow):
                 self.store.record_forward(old_id, found)
             self._sync_status(old_id)  # yellow line, through the forward
         self.state.clear_pending_detach(old_id)
+        return GLib.SOURCE_REMOVE
+
+    def _on_repair_action(self, _action, param: GLib.Variant) -> None:
+        """The row's "Repair session link" item: look for the background agent
+        this row should reach, and link the row to it. Recovers the pairings
+        the automatic paths can miss — a fork watcher that died with the app
+        before the CLI listed the agent, a startup replay that declined an
+        ambiguous match, a restart-respawned job — where the row goes on
+        pointing at a frozen transcript while its agent runs (or sits
+        finished) with no row leading to it."""
+        session_id = param.get_string()
+        session = self.store.get_session(session_id)
+        if session is None:
+            return
+        provider = get_provider(session.provider)
+        # Repair the end of the forward chain: a row forwarded once may have
+        # been backgrounded again from the fork. The fork copies the
+        # conversation verbatim, so when the tail has no transcript of its
+        # own (a stub), the clicked row's transcript still carries the
+        # first-message uuid the matcher pairs on.
+        old_id = self.state.resolve_forward(session_id)
+        old_session = self.store.get_session(old_id) or session
+        cwd = old_session.cwd or session.cwd
+        old_uuid = first_message_uuid(old_session.jsonl_path)
+        # Agents other rows already forward to are spoken for. That is the
+        # same stand-in for `known` as the startup replay's, and the pairing
+        # is just as much a guess here, so it is strict the same way: see
+        # match_background_fork's unique_cwd.
+        claimed = set(self.state.session_forwards.values())
+
+        def work() -> None:
+            found = match_background_fork(
+                provider, old_id, cwd, old_uuid, claimed, unique_cwd=True
+            )
+            GLib.idle_add(self._on_repair_matched, session_id, old_id, found)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_repair_matched(self, session_id: str, old_id: str, found: str | None) -> bool:
+        """A repair's match, back on the main thread: `found` is the agent's
+        session id, "" when this session is itself the listed agent, or None
+        when nothing in the agent list matches."""
+        if found is None:
+            dialogs.error_dialog(
+                self,
+                _("No matching agent"),
+                _(
+                    "No background agent matches this session — either its "
+                    "agent is gone, or more than one candidate matched and "
+                    "guessing would link the wrong one. The transcript "
+                    "itself is intact."
+                ),
+            )
+            return GLib.SOURCE_REMOVE
+        if found:
+            log.info("repair: %s linked to background agent %s", old_id, found)
+            self.store.record_forward(old_id, found)
+        else:
+            log.info("repair: %s is itself the listed background agent", old_id)
+        # Either way the agent list is the fresher truth now: re-sync the
+        # yellow line (through the forward) and the poller's id set.
+        self._sync_status(session_id)
+        self._bg_status.refresh()
+        if found:
+            dialogs.error_dialog(
+                self,
+                _("Session linked"),
+                _("Linked to its running background agent."),
+            )
+        else:
+            dialogs.error_dialog(
+                self,
+                _("Nothing to repair"),
+                _(
+                    "This session is already its own background agent. "
+                    "Opening it attaches to that agent."
+                ),
+            )
         return GLib.SOURCE_REMOVE
 
     def _on_backgrounded(self, tab: TerminalTab, old_id: str, new_id: str) -> bool:
