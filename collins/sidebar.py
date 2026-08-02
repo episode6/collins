@@ -70,6 +70,11 @@ _BUSY_CSS = "busy"
 # pole outranks it in CSS, so a session that starts a new turn unread moves
 # again and shows blue once more when that turn also runs out.
 _UNREAD_CSS = "unread"
+# The user stopped Claude mid-task and nothing has happened since (see
+# sessions.py's transcript scan): paints the guide line red, the same channel
+# the detached and unread colors use. The busy pole outranks it too, so a
+# resumed session moves instead of sitting on a stale interruption.
+_INTERRUPTED_CSS = "interrupted"
 
 # How far a project header's icon sits from the row's own left edge: the
 # theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
@@ -79,8 +84,8 @@ _HEADER_ICON_OFFSET = 18
 # is no taller than the plain menu items above and below it.
 _OPEN_WITH_ICON_PX = 16
 
-# The waiting/interrupted state badge: matches the row's other symbolic icons
-# (project icon, action buttons), which all render at 16px.
+# The waiting state badge: matches the row's other symbolic icons (project
+# icon, action buttons), which all render at 16px.
 _STATE_BADGE_ICON_PX = 16
 
 
@@ -374,7 +379,13 @@ class SessionRow(Gtk.ListBoxRow):
         name_label.set_ellipsize(_ELLIPSIZE_END)
         top.append(name_label)
 
+        # Only the waiting state badges the row (interrupted colors the guide
+        # line instead — see _on_state_changed), so the badge is fixed here
+        # and only its visibility ever changes.
         self._state_badge = Gtk.Image(valign=Gtk.Align.CENTER)
+        self._state_badge.set_from_icon_name("waiting-question-symbolic")
+        self._state_badge.add_css_class("waiting-badge")
+        self._state_badge.set_tooltip_text(_("Claude is waiting for your reply"))
         self._state_badge.set_pixel_size(_STATE_BADGE_ICON_PX)
         self._state_badge.set_margin_start(2)
         top.append(self._state_badge)
@@ -699,21 +710,14 @@ class SessionRow(Gtk.ListBoxRow):
             self.remove_css_class(_UNREAD_CSS)
 
     def _on_state_changed(self, item: SessionItem, _pspec) -> None:
-        badge = self._state_badge
-        for css in ("waiting-badge", "interrupted-badge"):
-            badge.remove_css_class(css)
-        if item.state == "waiting":
-            badge.set_from_icon_name("waiting-question-symbolic")
-            badge.add_css_class("waiting-badge")
-            badge.set_tooltip_text(_("Claude is waiting for your reply"))
-            badge.set_visible(True)
-        elif item.state == "interrupted":
-            badge.set_from_icon_name("interrupted-stop-symbolic")
-            badge.add_css_class("interrupted-badge")
-            badge.set_tooltip_text(_("You interrupted Claude here"))
-            badge.set_visible(True)
+        # Waiting is a question to answer, so it stays an icon at the row's
+        # right edge; interrupted is a status, so it speaks through the guide
+        # line like the other statuses that color it (detached, unread).
+        self._state_badge.set_visible(item.state == "waiting")
+        if item.state == "interrupted":
+            self.add_css_class(_INTERRUPTED_CSS)
         else:
-            badge.set_visible(False)
+            self.remove_css_class(_INTERRUPTED_CSS)
 
     def _on_right_click(self, _gesture, _n_press: int, x: float, y: float) -> None:
         self._sidebar.show_row_menu(self, x, y)
