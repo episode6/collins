@@ -487,7 +487,8 @@ class PanelTerminal(Gtk.Box):
 class PanelTabs(Gtk.Box):
     """The secondary panel's inner tab strip: one PanelTerminal per tab.
 
-    The tab row carries a + button (new shell tab, selected immediately) and
+    The tab row carries a + button (new shell tab, selected immediately), a
+    bottom/right swap button for the whole panel (win.swap-panel), and
     each tab an X; shells survive hide/show and die with their tab. When the
     last tab closes there is nothing left to show, so the owning TerminalTab
     hides the whole panel (see "last-tab-closed")."""
@@ -523,7 +524,14 @@ class PanelTabs(Gtk.Box):
         add_btn.add_css_class("flat")
         add_btn.set_tooltip_text(_("New terminal tab"))
         add_btn.connect("clicked", lambda *_: self.new_tab())
-        bar.set_end_action_widget(add_btn)
+        swap_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
+        swap_btn.add_css_class("flat")
+        swap_btn.set_tooltip_text(_("Move terminal panel bottom/right"))
+        swap_btn.set_action_name("win.swap-panel")
+        end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        end_box.append(add_btn)
+        end_box.append(swap_btn)
+        bar.set_end_action_widget(end_box)
 
         self.append(bar)
         self.append(self._view)
@@ -1110,10 +1118,6 @@ class TerminalTab(Gtk.Box):
         open_external = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
         open_external.connect("pressed", self._on_open_external_terminal)
         toggle_btn.add_controller(open_external)
-        self._swap_panel_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
-        self._swap_panel_btn.set_tooltip_text(_("Move terminal panel bottom/right"))
-        self._swap_panel_btn.set_action_name("win.swap-panel")
-        self._swap_panel_btn.set_visible(False)  # only shown while a panel is open
 
         # cwd, branch and PRs sit together on the left; the wrapper box (not the
         # cwd label) takes the slack so the buttons stay pinned right even
@@ -1160,9 +1164,8 @@ class TerminalTab(Gtk.Box):
         footer.append(left)
         footer.append(self._footer_apps_box)
         footer.append(self._editor_toggle_btn)
-        for btn in (toggle_btn, self._swap_panel_btn):
-            btn.add_css_class("flat")
-            footer.append(btn)
+        toggle_btn.add_css_class("flat")
+        footer.append(toggle_btn)
         # Poll only while on screen; refresh immediately on every tab switch.
         self.connect("map", lambda *_: self._start_cwd_refresh())
         return footer
@@ -1773,7 +1776,6 @@ class TerminalTab(Gtk.Box):
         if not self.panel_visible:
             self._panel.set_visible(True)
             self._apply_panel_size()
-            self._swap_panel_btn.set_visible(True)
         if focus:
             GLib.idle_add(self._panel.grab_terminal_focus)
 
@@ -1783,7 +1785,6 @@ class TerminalTab(Gtk.Box):
         self._remember_panel_size()
         refocus = self._panel.has_terminal_focus()
         self._panel.set_visible(False)
-        self._swap_panel_btn.set_visible(False)
         if refocus:
             self.grab_terminal_focus()
 
