@@ -1431,7 +1431,11 @@ class MainWindow(Adw.ApplicationWindow):
         hidden. AdwTabBar doesn't expose its tabs, so this walks its internal
         tree for the AdwTab holding this page. Matched through the tab's page
         property, never by position: the tabs sit in creation order in the
-        tree, which _sort_tabs's reordering leaves behind."""
+        tree, which _sort_tabs's reordering leaves behind.
+
+        "AdwTab" is a private libadwaita type, not API — a libadwaita bump
+        could rename it and the walk would find nothing. That fails soft
+        (no tab flash, header and row still flash), so tolerated."""
         if not self.tab_bar.get_visible():
             return None
 
