@@ -118,7 +118,7 @@ def test_parses_a_real_record():
     pr = parse_pr_link(_link())
     assert pr == PullRequest(number=55, url=URL, repository="episode6/collins")
     assert pr.slug == "episode6/collins#55"
-    assert pr.glyph is None
+    assert pr.badge is None
 
 
 def test_repository_is_optional():
@@ -148,7 +148,7 @@ def test_enrich_fills_state_and_checks(cache):
                  "checks": {"passed": 1, "failed": 1, "pending": 0}}})
     pr = enrich(parse_pr_link(_link()))
     assert (pr.state, pr.passed, pr.failed, pr.pending) == ("DRAFT", 1, 1, 0)
-    assert pr.glyph == "✗"
+    assert pr.badge == "failed"
 
 
 def test_enrich_ignores_other_prs(cache):
@@ -183,18 +183,18 @@ def test_enrich_skips_junk_check_counts(cache):
 
 def test_a_stale_cli_cache_is_not_trusted(cache):
     """Only FleetView refreshes that file, so an old one can be days out of
-    date — better a bare number than a wrong glyph."""
+    date — better a bare number than a wrong mark."""
     cache({URL: {"state": "OPEN", "checks": {"passed": 0, "failed": 1, "pending": 0}}},
           age_s=CACHE_MAX_AGE_S + 60)
     pr = enrich(parse_pr_link(_link()))
     assert (pr.state, pr.failed) == (None, None)
-    assert pr.glyph is None
+    assert pr.badge is None
 
 
 def test_a_recent_cli_cache_still_warms_the_chip(cache):
     cache({URL: {"state": "OPEN", "checks": {"passed": 2, "failed": 0, "pending": 0}}},
           age_s=CACHE_MAX_AGE_S - 60)
-    assert enrich(parse_pr_link(_link())).glyph == "✓"
+    assert enrich(parse_pr_link(_link())).passed == 2
 
 
 # -- our own gh refresh -----------------------------------------------------
@@ -233,11 +233,11 @@ def test_a_fresh_status_is_not_refetched(scheduled, clock, gh):
 
 
 def test_a_stale_status_is_shown_while_its_refresh_runs(clock, gh):
-    """A minute-old glyph beats a blank one; the refresh lands a poll later."""
+    """A minute-old status beats a blank one; the refresh lands a poll later."""
     gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}})
     refresh(URL)
     clock.advance(_TTL_S * 10)
-    assert enrich(parse_pr_link(_link())).glyph == "✓"
+    assert enrich(parse_pr_link(_link())).passed == 1
 
 
 def test_a_failed_fetch_backs_off_further(scheduled, clock, gh, cache):
@@ -247,7 +247,7 @@ def test_a_failed_fetch_backs_off_further(scheduled, clock, gh, cache):
     gh(None)
     refresh(URL)
     scheduled.clear()
-    assert enrich(parse_pr_link(_link())).glyph == "✓"  # from the CLI cache
+    assert enrich(parse_pr_link(_link())).passed == 3  # from the CLI cache
     clock.advance(_TTL_S * 2)
     enrich(parse_pr_link(_link()))
     assert scheduled == []
@@ -258,7 +258,7 @@ def test_a_failed_fetch_backs_off_further(scheduled, clock, gh, cache):
 
 def test_nothing_is_fetched_once_gh_is_known_missing(scheduled, monkeypatch):
     monkeypatch.setattr(prstatus, "_gh_missing", True)
-    assert enrich(parse_pr_link(_link())).glyph is None
+    assert enrich(parse_pr_link(_link())).state is None
     assert scheduled == []
 
 
@@ -294,13 +294,13 @@ def test_invalidating_makes_the_next_enrich_refetch(scheduled, clock, gh):
     assert scheduled == [URL]
 
 
-def test_invalidating_keeps_the_glyph_until_the_new_one_lands(scheduled, clock, gh):
+def test_invalidating_keeps_the_status_until_the_new_one_lands(scheduled, clock, gh):
     """A click must refresh the chip in place, not blank it for a poll: the
     status we have stands until the refetch replaces it."""
     gh({"state": "OPEN", "checks": {"passed": 2, "failed": 0, "pending": 0}})
     refresh(URL)
     invalidate(URL)
-    assert enrich(parse_pr_link(_link())).glyph == "✓"  # still ✓, refetch pending
+    assert enrich(parse_pr_link(_link())).passed == 2  # still there, refetch pending
     assert scheduled == [URL]
 
 
@@ -372,7 +372,7 @@ def test_discovers_the_branch_pr_with_its_status(gh_json):
     assert (pr.number, pr.url) == (74, _found()["url"])
     assert pr.repository == "episode6/collins"  # read back out of the URL
     assert (pr.state, pr.passed, pr.failed) == ("OPEN", 1, 1)
-    assert pr.glyph == "✗"
+    assert pr.badge == "failed"
     args, cwd = calls[0]
     assert args[:4] == ["pr", "list", "--head", "pr-chip-status-refresh"]
     assert cwd == "/home/me/dev/collins"  # the branch means nothing outside it
@@ -385,7 +385,7 @@ def test_a_discovered_status_counts_as_ours(gh_json, scheduled):
     serve(_DISCOVERED)
     pr = discover_pr("/home/me/dev/collins", "some-branch")
     scheduled.clear()
-    assert enrich(pr).glyph == "✗"  # the status the lookup itself came back with
+    assert enrich(pr).badge == "failed"  # the status the lookup itself came back with
     assert scheduled == []
 
 
@@ -694,32 +694,53 @@ def test_repository_for_is_the_gate_every_gh_call_goes_through(url, repository):
 
 
 @pytest.mark.parametrize(
-    "counts,glyph",
+    "counts,badge",
     [
         ((None, None, None), None),  # nothing cached
         ((0, 0, 0), None),  # a PR with no checks configured
-        ((3, 0, 0), "✓"),
-        ((2, 1, 0), "✗"),  # a failure outranks passes
-        ((2, 1, 4), "✗"),  # ...and outranks pending runs
-        ((2, 0, 1), "●"),
+        ((3, 0, 0), None),  # all green: on a chip, healthy is unadorned
+        ((2, 1, 0), "failed"),  # a failure outranks passes
+        ((2, 1, 4), "failed"),  # ...and outranks pending runs
+        ((2, 0, 1), "pending"),
     ],
 )
-def test_glyph_summarizes_checks(counts, glyph):
+def test_badge_summarizes_checks(counts, badge):
     passed, failed, pending = counts
     pr = PullRequest(55, URL, passed=passed, failed=failed, pending=pending)
-    assert pr.glyph == glyph
+    assert pr.badge == badge
 
 
-def test_a_merged_pr_drops_its_check_glyph():
-    """The purple merge mark replaces it — how CI went on the way in is history."""
-    pr = PullRequest(55, URL, state="MERGED", passed=2, failed=0, pending=0)
-    assert (pr.merged, pr.glyph) == (True, None)
+def test_a_conflict_takes_the_badge_from_pending_runs():
+    """One badge slot: a branch GitHub can't merge is the thing to act on,
+    whatever the runs still going come back with."""
+    pr = PullRequest(55, URL, state="OPEN", passed=1, failed=0, pending=2,
+                     mergeable="CONFLICTING")
+    assert pr.badge == "conflict"
+
+
+def test_a_failed_check_takes_the_badge_from_a_conflict():
+    """A red build needs fixing whichever way the branch gets remerged."""
+    pr = PullRequest(55, URL, state="OPEN", passed=1, failed=1, pending=0,
+                     mergeable="CONFLICTING")
+    assert pr.badge == "failed"
+
+
+def test_a_clean_conflict_still_badges():
+    pr = PullRequest(55, URL, state="DRAFT", passed=3, failed=0, pending=0,
+                     mergeable="CONFLICTING")
+    assert pr.badge == "conflict"
+
+
+def test_a_merged_pr_drops_its_badge():
+    """The purple base mark says it all — how CI went on the way in is history."""
+    pr = PullRequest(55, URL, state="MERGED", passed=2, failed=1, pending=0)
+    assert (pr.merged, pr.badge) == (True, None)
 
 
 @pytest.mark.parametrize("state", [None, "OPEN", "DRAFT", "CLOSED", "SOMETHING_NEW"])
-def test_every_other_state_keeps_the_glyph(state):
-    pr = PullRequest(55, URL, state=state, passed=2, failed=0, pending=0)
-    assert (pr.merged, pr.glyph) == (False, "✓")
+def test_every_other_state_keeps_the_badge(state):
+    pr = PullRequest(55, URL, state=state, passed=2, failed=1, pending=0)
+    assert (pr.merged, pr.badge) == (False, "failed")
 
 
 # -- describe (the tooltip's long form) -------------------------------------
@@ -958,7 +979,7 @@ def test_resync_fetches_every_pr_and_keeps_the_order(gh_calls):
     assert sorted(urls) == [URL, OTHER_URL]
     assert [pr.number for pr in out] == [55, 56]
     assert [pr.title for pr in out] == ["Track every PR", "Give the list room"]
-    assert [pr.glyph for pr in out] == ["✓", "✓"]
+    assert [(pr.state, pr.passed) for pr in out] == [("OPEN", 1), ("OPEN", 2)]
 
 
 def test_resync_refetches_a_status_that_is_still_fresh(gh_calls, clock):
@@ -968,7 +989,7 @@ def test_resync_refetches_a_status_that_is_still_fresh(gh_calls, clock):
     replies[URL] = _reply("Track every PR")
     refresh(URL)
     urls.clear()
-    assert resync([PullRequest(55, URL)])[0].glyph == "✓"
+    assert resync([PullRequest(55, URL)])[0].passed == 1
     assert urls == [URL]
 
 

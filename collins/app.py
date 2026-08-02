@@ -383,14 +383,14 @@ APP_ID = "com.episode6.Collins"
 # red build reads here exactly as it does on the PR page, in either theme.
 _SCHEME_CSS = """
 .pr-merged { color: %(merged_purple)s; }
-/* GitHub's open-PR green is the same shade as its checks-passed green, so the
-   menu's pull-request mark shares the pair rather than carrying its own; the
-   conflict alert borrows the pending yellow the same way — attention-colored,
-   but not the red of a failed check, since a rebase fixes it without a CI
-   run being wrong. */
+/* GitHub's open-PR green is its checks-passed green, so the open base icon
+   shares the shade; a draft (and a PR nothing is known about) takes GitHub's
+   muted grey; the conflict badge borrows the pending yellow — attention-
+   colored, but not the red of a failed check, since a rebase fixes it
+   without a CI run being wrong. */
 .pr-open { color: %(passed_green)s; }
+.pr-draft { color: %(draft_grey)s; }
 .pr-conflict { color: %(pending_yellow)s; }
-.pr-checks-passed { color: %(passed_green)s; }
 .pr-checks-failed { color: %(failed_red)s; }
 .pr-checks-pending { color: %(pending_yellow)s; }
 """
@@ -400,12 +400,14 @@ _MARK_COLORS = {
         "passed_green": "#1a7f37",
         "failed_red": "#cf222e",
         "pending_yellow": "#bf8700",
+        "draft_grey": "#59636e",
     },
     True: {  # dark
         "merged_purple": "#a371f7",
         "passed_green": "#3fb950",
         "failed_red": "#f85149",
         "pending_yellow": "#d29922",
+        "draft_grey": "#9198a1",
     },
 }
 
