@@ -2153,13 +2153,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._sync_status(session_id)
         self._bg_status.refresh()
         if found:
-            dialogs.error_dialog(
+            dialogs.info_dialog(
                 self,
                 _("Session linked"),
                 _("Linked to its running background agent."),
             )
         else:
-            dialogs.error_dialog(
+            dialogs.info_dialog(
                 self,
                 _("Nothing to repair"),
                 _(
