@@ -569,3 +569,31 @@ def test_forward_chain_survives_a_cycle(app_state):
 
     assert state.forward_chain("a") == ["a", "b"]
     assert state.resolve_forward("a") == "b"
+
+
+def test_project_worktree_override_roundtrip(app_state):
+    state = app_state.AppState()
+    assert state.project_worktree_override("alpha") is None
+    assert state.worktree_for_project("alpha") is False  # app default: off
+
+    state.set_setting("worktree_new_sessions", True)
+    assert state.worktree_for_project("alpha") is True
+
+    state.set_project_worktree("alpha", False)
+    state.set_project_worktree("beta", True)
+    fresh = app_state.AppState()
+    assert fresh.project_worktree_override("alpha") is False
+    assert fresh.project_worktree_override("beta") is True
+    assert fresh.project_worktree_override("gamma") is None
+    assert fresh.worktree_for_project("alpha") is False
+    assert fresh.worktree_for_project("beta") is True
+
+
+def test_project_worktree_pin_survives_app_default_flip(app_state):
+    state = app_state.AppState()
+    # Pinning a project to the value the app setting already has still records
+    # the override: a project pinned "off" stays off when the app default is
+    # later flipped on.
+    state.set_project_worktree("alpha", False)
+    state.set_setting("worktree_new_sessions", True)
+    assert state.worktree_for_project("alpha") is False

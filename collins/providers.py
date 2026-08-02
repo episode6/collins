@@ -65,12 +65,15 @@ _BACKGROUND_TERMINAL_STATES = frozenset({"done", "error", "failed", "stopped"})
 
 @dataclass(frozen=True)
 class SessionOptions:
-    """Optional CLI flags chosen in the advanced new-session dialog. Each provider
-    translates these into the flags it actually supports (unknowns are dropped)."""
+    """Optional CLI flags for a new session — chosen in the advanced new-session
+    dialog, plus the worktree launch decision the window resolves per project.
+    Each provider translates these into the flags it actually supports (unknowns
+    are dropped)."""
 
     model: str = ""
     permission_mode: str = ""
     add_dirs: tuple[str, ...] = ()
+    worktree: bool = False  # start the session in a fresh git worktree
 
 
 @dataclass(frozen=True)
@@ -505,6 +508,8 @@ class ClaudeProvider(Provider):
             out += ["--permission-mode", shlex.quote(options.permission_mode)]
         for d in options.add_dirs:
             out += ["--add-dir", shlex.quote(d)]
+        if options.worktree:
+            out.append("-w")
         return out
 
     def chat_variants(self) -> list[ChatVariant]:

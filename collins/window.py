@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -46,13 +47,14 @@ from .i18n import _
 from .licenses import legal_sections
 from .models import SessionItem
 from .prefs import PreferencesDialog
-from .providers import available_providers, get_provider
+from .providers import SessionOptions, available_providers, get_provider
 from .quickopen import QuickOpenDialog
 from .replayview import ReplayTab
 from .sessions import (
     Session,
     export_markdown,
     first_message_uuid,
+    project_name_for_cwd,
     resume_cwd,
     session_from_file,
     worktree_project_root,
@@ -1230,8 +1232,19 @@ class MainWindow(Adw.ApplicationWindow):
         cwd = folder.get_path()
         self._start_new_session(cwd, getattr(self, "_new_session_provider", None))
 
+    def _worktree_for_new_session(self, cwd: str) -> bool:
+        """Whether a new session in `cwd` should launch with the worktree flag:
+        the project's pinned choice, else the app setting — and never outside a
+        git checkout (`.git` is a file in worktree checkouts, so either form
+        counts), where the flag has no meaning."""
+        if not (Path(cwd) / ".git").exists():
+            return False
+        return self.state.worktree_for_project(project_name_for_cwd(cwd))
+
     def _start_new_session(self, cwd: str, provider=None, options=None) -> None:
         provider = provider or self._default_provider()
+        if self._worktree_for_new_session(cwd):
+            options = replace(options or SessionOptions(), worktree=True)
         tab = TerminalTab(
             cwd=cwd, session_id=None, settings=self.state.settings, provider=provider,
             options=options,

@@ -408,3 +408,11 @@ def test_claude_file_reference_refuses_control_characters():
     assert claude.file_reference("/p/evil\nname.py", "/p") is None
     assert claude.file_reference("/p/evil\rname.py", "/p", 1, 2) is None
     assert claude.file_reference("/p/evil\x1b]0;x\x07.py", "/p") is None
+
+
+def test_new_command_worktree_flag(monkeypatch):
+    from collins.providers import SessionOptions
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    claude = ClaudeProvider()
+    assert claude.new_command(SessionOptions(worktree=True)) == "/usr/bin/claude -w"
+    assert claude.new_command(SessionOptions()) == "/usr/bin/claude"

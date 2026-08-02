@@ -794,6 +794,20 @@ class SessionSidebar(Gtk.Box):
         self._flashing_row: tuple[str, int] | None = None
         self.show_folder_path = bool(store.state.get_setting("show_folder_path"))
 
+        # The group menu's "New sessions use a worktree" checkbox. Gio renders
+        # a checkbox only for a stateful boolean action, and those can't carry
+        # a per-project target (string-param + state renders as radios) — but
+        # only one group menu is ever open, so show_group_menu re-arms this
+        # one action with the project it is about before each popup.
+        self._worktree_menu_project = ""
+        self._project_worktree_action = Gio.SimpleAction.new_stateful(
+            "project-worktree", None, GLib.Variant.new_boolean(False)
+        )
+        self._project_worktree_action.connect("change-state", self._on_project_worktree)
+        actions = Gio.SimpleActionGroup()
+        actions.add_action(self._project_worktree_action)
+        self.insert_action_group("sidebar", actions)
+
         store.connect("refreshed", self._on_store_refreshed)
 
         # -- header ---------------------------------------------------------
@@ -1518,6 +1532,22 @@ class SessionSidebar(Gtk.Box):
             )
             open_section.append_item(new_item)
 
+        # Worktree launches only mean something in a git checkout (`.git` is a
+        # file in worktree checkouts, so either form counts) — elsewhere the
+        # checkbox is omitted rather than left to silently do nothing.
+        if (
+            row.cwd
+            and not self.store.state.is_virtual_project(project_name)
+            and (Path(row.cwd) / ".git").exists()
+        ):
+            self._worktree_menu_project = project_name
+            self._project_worktree_action.set_state(
+                GLib.Variant.new_boolean(
+                    self.store.state.worktree_for_project(project_name)
+                )
+            )
+            open_section.append(_("New sessions use a worktree"), "sidebar.project-worktree")
+
         danger_section = Gio.Menu()
         archive_label = (
             _("Restore project")
@@ -1547,6 +1577,15 @@ class SessionSidebar(Gtk.Box):
         menu.append_section(None, open_section)
         menu.append_section(None, danger_section)
         self._popup_menu(menu, row, x, y, rows)
+
+    def _on_project_worktree(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
+        """The group menu's checkbox: pin the choice for the project the menu
+        was armed with (see __init__)."""
+        action.set_state(value)
+        if self._worktree_menu_project:
+            self.store.state.set_project_worktree(
+                self._worktree_menu_project, value.get_boolean()
+            )
 
     def _session_cwd(self, session: Session) -> str | None:
         """Where the session is working right now, for its row's "Open In…".

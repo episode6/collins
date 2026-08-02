@@ -60,6 +60,10 @@ DEFAULT_SETTINGS = {
     # the env half only takes effect for tabs opened after a change.
     "progress_termprop": True,
     "auto_title_sessions": True,  # summarize each new session's first prompt into a short title
+    # Launch new sessions with the agent CLI's worktree flag (claude -w) in
+    # git projects, isolating their edits from the live checkout. Per-project
+    # overrides live in AppState.project_worktree.
+    "worktree_new_sessions": False,
     # What to do instead of the confirmation dialog when a running session's
     # tab has to close: ask (the dialog, as before) | exit | background.
     "archive_running_session": "ask",  # archiving a session whose tab is busy
@@ -152,6 +156,9 @@ class AppState:
         self.favorites: set[str] = set()
         self.archived: set[str] = set()
         self.archived_projects: set[str] = set()  # by project name (the group identity)
+        # Per-project "new sessions use a worktree" choices, by project name.
+        # Absent key = follow the worktree_new_sessions setting.
+        self.project_worktree: dict[str, bool] = {}
         self.project_order: list[str] = []  # user-arranged sidebar order, by project name
         # Projects kept in the sidebar after their last session went away
         # (project name -> working directory, "" when it was never known), so
@@ -198,6 +205,9 @@ class AppState:
         self.archived_projects = set(
             data.get("archived_projects") or data.get("hidden_projects") or []
         )
+        self.project_worktree = {
+            k: v for k, v in (data.get("project_worktree") or {}).items() if isinstance(v, bool)
+        }
         self.project_order = list(data.get("project_order") or [])
         self.virtual_projects = {
             k: v for k, v in (data.get("virtual_projects") or {}).items() if isinstance(v, str)
@@ -229,6 +239,7 @@ class AppState:
             "favorites": sorted(self.favorites),
             "archived": sorted(self.archived),
             "archived_projects": sorted(self.archived_projects),
+            "project_worktree": self.project_worktree,
             "project_order": self.project_order,  # order is the payload — never sort
             "virtual_projects": self.virtual_projects,
             "expanded_groups": sorted(self.expanded_groups),
@@ -324,6 +335,27 @@ class AppState:
         else:
             self.archived_projects.discard(project_name)
         self.save()
+
+    # -- per-project worktree launches --------------------------------------
+
+    def project_worktree_override(self, project_name: str) -> bool | None:
+        """The project's own "new sessions use a worktree" choice, or None to
+        follow the app-wide setting."""
+        return self.project_worktree.get(project_name)
+
+    def set_project_worktree(self, project_name: str, use_worktree: bool) -> None:
+        """Pin a project's choice. Deliberately kept even when it matches the
+        app setting, so a project pinned "off" stays off if the app default is
+        later flipped on."""
+        self.project_worktree[project_name] = use_worktree
+        self.save()
+
+    def worktree_for_project(self, project_name: str) -> bool:
+        """Effective "new sessions use a worktree" value for a project."""
+        override = self.project_worktree.get(project_name)
+        if override is not None:
+            return override
+        return bool(self.get_setting("worktree_new_sessions"))
 
     # -- virtual projects --------------------------------------------------
 
