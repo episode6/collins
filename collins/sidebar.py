@@ -59,9 +59,10 @@ _STATUS_CSS = {
 # The statuses that mean "this session has a tab open right now".
 _IN_TAB_STATUSES = ("open", "attention")
 # Set while the agent is producing output (see activity.py), on top of the
-# status class: it is `.running.busy` / `.detached.busy` that turn the guide
-# line into a moving barber pole, so a stale flag on a row that is no longer
-# running paints nothing.
+# status class: it is `.running.busy` that turns the guide line into a moving
+# barber pole, so a stale flag on a row that is no longer running paints
+# nothing. Only tab sessions ever get it — a detached (/bg) row has no
+# activity source and keeps its still yellow line.
 _BUSY_CSS = "busy"
 # A finished run nobody has looked at yet: paints the guide line blue until
 # the user returns to the session's tab (see SessionItem.unread). The busy

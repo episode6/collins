@@ -1,6 +1,4 @@
-from pathlib import Path
-
-from collins.activity import ActivityTracker, EchoGate, SpinnerWatch, TranscriptActivity
+from collins.activity import ActivityTracker, EchoGate, SpinnerWatch
 
 
 class FakeClock:
@@ -208,59 +206,6 @@ def test_empty_session_id_is_ignored():
     tracker, _clock, _timers, changes = make_tracker()
     tracker.mark("")
     assert changes == []
-
-
-class FakeStats:
-    def __init__(self, readings: dict[str, tuple[float, int] | None]) -> None:
-        self.readings = readings
-
-    def __call__(self, path: Path):
-        return self.readings.get(path.name)
-
-
-def test_first_sighting_is_a_baseline_not_activity():
-    # Without a previous reading, a transcript written a week ago looks exactly
-    # like one written a moment ago.
-    marks: list[str] = []
-    stats = FakeStats({"a.jsonl": (100.0, 10)})
-    watcher = TranscriptActivity(marks.append, stat=stats)
-    watcher.poll({"a": Path("a.jsonl")})
-    assert marks == []
-
-
-def test_growth_marks_the_session_busy():
-    marks: list[str] = []
-    stats = FakeStats({"a.jsonl": (100.0, 10)})
-    watcher = TranscriptActivity(marks.append, stat=stats)
-    watcher.poll({"a": Path("a.jsonl")})
-    stats.readings["a.jsonl"] = (101.0, 40)
-    watcher.poll({"a": Path("a.jsonl")})
-    assert marks == ["a"]
-    watcher.poll({"a": Path("a.jsonl")})  # unchanged since
-    assert marks == ["a"]
-
-
-def test_unreadable_transcript_is_skipped():
-    # A /bg fork whose transcript is still a stub the CLI hasn't written.
-    marks: list[str] = []
-    stats = FakeStats({"a.jsonl": None})
-    watcher = TranscriptActivity(marks.append, stat=stats)
-    watcher.poll({"a": Path("a.jsonl")})
-    watcher.poll({"a": Path("a.jsonl")})
-    assert marks == []
-
-
-def test_a_session_that_comes_back_is_baselined_again():
-    # It stopped being detached, ran on in a tab, and detached again: comparing
-    # against the size it had before would report activity that isn't there.
-    marks: list[str] = []
-    stats = FakeStats({"a.jsonl": (100.0, 10)})
-    watcher = TranscriptActivity(marks.append, stat=stats)
-    watcher.poll({"a": Path("a.jsonl")})
-    watcher.poll({})  # no longer detached
-    stats.readings["a.jsonl"] = (200.0, 999)
-    watcher.poll({"a": Path("a.jsonl")})
-    assert marks == []
 
 
 # -- EchoGate: telling the agent's output from the terminal's answers ---------
