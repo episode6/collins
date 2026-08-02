@@ -1341,6 +1341,12 @@ class MainWindow(Adw.ApplicationWindow):
         keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         keys.connect("key-pressed", self._on_terminal_key_pressed, page)
         tab.terminal.add_controller(keys)
+        # Any button, capture phase, never claimed: the click still reaches
+        # VTE untouched, this only wants to know the user is at the terminal.
+        clicks = Gtk.GestureClick(button=0)
+        clicks.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        clicks.connect("pressed", self._on_terminal_click, page)
+        tab.terminal.add_controller(clicks)
         self.tab_view.set_selected_page(page)
         self.content_stack.set_visible_child_name("tabs")
         self._sort_tabs()  # appended at the end; slot it in beside its row
@@ -2255,9 +2261,9 @@ class MainWindow(Adw.ApplicationWindow):
 
         The selected tab's row is flagged like any other — a finish is a
         finish whether or not the user was looking, and they may not have
-        been — and its flag falls to the next keystroke into its terminal, or
-        to leaving the tab and coming back (both through _clear_unread).
-        Every other row's falls to selecting its tab.
+        been — and its flag falls to the next keystroke or click into its
+        terminal, or to leaving the tab and coming back (all through
+        _clear_unread). Every other row's falls to selecting its tab.
         """
         if self.sidebar.has_placeholder(session_id):
             self.sidebar.set_placeholder_unread(session_id, True)
@@ -2418,6 +2424,15 @@ class MainWindow(Adw.ApplicationWindow):
             if tracked:
                 self._activity.mark(tracked)
         return Gdk.EVENT_PROPAGATE
+
+    def _on_terminal_click(
+        self, _gesture, _n_press: int, _x: float, _y: float, page: Adw.TabPage
+    ) -> None:
+        """A click into the terminal is presence, same as a keystroke: whatever
+        finished in this tab has been seen (see _on_terminal_key_pressed).
+        Only the selected tab's terminal is on screen to be clicked, so this
+        can only ever clear the flag the user is looking at."""
+        self._clear_unread(page)
 
     def _startup_held(self, page: Adw.TabPage) -> bool:
         """Whether this tab's ungated pole starters are still held.
