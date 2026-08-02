@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -95,8 +95,9 @@ class SessionStore(GObject.Object):
         # Projects with no rows under their group (all sessions archived or
         # favorited): (group_key, label, cwd), newest first.
         self.empty_groups: list[tuple[tuple, str, str | None]] = []
-        # Project names in display order (persisted user order + new projects
-        # appended alphabetically), covering archived projects too.
+        # Project names in display order (new projects prepended
+        # alphabetically + persisted user order), covering archived
+        # projects too.
         self.resolved_project_order: list[str] = []
         self.show_archived = False
 

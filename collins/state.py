@@ -99,13 +99,15 @@ def merge_project_order(saved: list[str], names: Iterable[str]) -> list[str]:
     """Resolve the sidebar display order for `names` against the saved order.
 
     Names present in `saved` keep their saved relative order; names not yet
-    ranked are appended alphabetically. Saved entries for projects that no
-    longer exist are dropped from the result (but not from the saved list).
+    ranked are prepended alphabetically, so a project seen for the first time
+    surfaces at the top of the sidebar instead of sinking to the bottom. Saved
+    entries for projects that no longer exist are dropped from the result (but
+    not from the saved list).
     """
     present = set(names)
     ranked = set(saved)
-    ordered = [n for n in saved if n in present]
-    ordered += sorted((n for n in present if n not in ranked), key=str.casefold)
+    ordered = sorted((n for n in present if n not in ranked), key=str.casefold)
+    ordered += [n for n in saved if n in present]
     return ordered
 
 
