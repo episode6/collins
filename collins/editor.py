@@ -722,7 +722,7 @@ class EditorPane(Gtk.Box):
         self._style_scheme_setting = settings.get("editor_style_scheme") or ""
         self._show_line_numbers = bool(settings.get("editor_show_line_numbers", True))
         self._font = settings.get("editor_font") or ""
-        self._tree.set_show_hidden(bool(settings.get("editor_show_hidden_files", False)))
+        self._tree.set_show_hidden(bool(settings.get("editor_show_hidden_files", True)))
         for opened in self._open.values():
             self._apply_scheme(opened.buffer)
             opened.view.set_show_line_numbers(self._show_line_numbers)
