@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 """Translation setup. Call init() once at startup, then use _() everywhere."""
 
 from __future__ import annotations
@@ -40,6 +40,11 @@ def init(language: str | None = None) -> None:
 
 def _(message: str) -> str:
     return _translation.gettext(message)
+
+
+def ngettext(singular: str, plural: str, n: int) -> str:
+    """Plural-aware translation (extracted by xgettext -k ngettext:1,2)."""
+    return _translation.ngettext(singular, plural, n)
 
 
 def N_(message: str) -> str:

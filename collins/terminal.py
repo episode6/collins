@@ -22,6 +22,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa:
 from . import (  # noqa: E402
     apppicker,
     dialogs,
+    dropimages,
     editor,
     editorfiles,
     footerapps,
@@ -37,7 +38,7 @@ from .copylabel import (  # noqa: E402
 )
 from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch, has_changes  # noqa: E402
-from .i18n import _  # noqa: E402
+from .i18n import _, ngettext  # noqa: E402
 from .linkpatterns import URL_PATTERN  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
@@ -762,6 +763,7 @@ class TerminalTab(Gtk.Box):
 
         self._easy_copy_paste = False
         self._setup_context_menu()
+        self._setup_image_drop()
 
         self._search_bar = self._build_search_bar()
         self.append(self._search_bar)
@@ -1405,6 +1407,115 @@ class TerminalTab(Gtk.Box):
             root.present()
         self.grab_terminal_focus()
         return GLib.SOURCE_REMOVE
+
+    # -- drag & drop into the agent ----------------------------------------
+
+    def _setup_image_drop(self) -> None:
+        """Dropping onto the agent terminal references the payload in the
+        chat, the same way "Add to chat" does. Two payloads are claimed:
+
+        - files (Gdk.FileList — a file manager drag): the mention names the
+          dropped file itself, wherever it lives;
+        - raw image data (Gdk.Texture — a drag from a browser, a screenshot
+          tool, an image viewer): there is no path to mention, so a PNG copy
+          is saved first and the mention names the copy (see dropimages.py).
+
+        Texture is listed first so a drag offering both — a browser image
+        drag carries the source URL *and* the pixels — resolves to the
+        pixels; the URL half would arrive as a Gio.File with no local path,
+        referencing nothing the CLI could read.
+
+        Everything else (plain text, and every drop while no agent is
+        running — see _accept_drop) is left unclaimed on purpose: VTE's own
+        drop handling pastes dropped text and file paths into the terminal,
+        which is exactly right at a shell prompt.
+        """
+        # Constructed bare (PyGObject's DropTarget.new refuses the
+        # "no type yet" GType) and given both payload types via set_gtypes.
+        drop = Gtk.DropTarget(actions=Gdk.DragAction.COPY)
+        drop.set_gtypes([Gdk.Texture, Gdk.FileList])
+        drop.connect("accept", self._accept_drop)
+        drop.connect("drop", self._on_drop)
+        self.terminal.add_controller(drop)
+
+    def _accept_drop(self, target: Gtk.DropTarget, drop: Gdk.Drop) -> bool:
+        """Claim the drag only when the mention it would type means
+        something: the payload is one of ours, the provider has a mention
+        syntax at all, and the agent is actually in the terminal. Connecting
+        "accept" replaces GtkDropTarget's built-in format check, so that
+        check comes first — the drop's formats already carry the GTypes GDK
+        can deserialize the offered mime types into, so a plain match covers
+        both a real Gdk.FileList and an image/png offer. Declining here (vs
+        failing in _on_drop) matters: an unclaimed drag falls through to
+        VTE's path-pasting drop handling instead of dying on our target."""
+        if not drop.get_formats().match(target.get_formats()):
+            return False
+        if self.provider.file_reference("image.png", None) is None:
+            return False  # base agents: no input box to type a mention into
+        return self._agent_is_running()
+
+    def _on_drop(self, _target: Gtk.DropTarget, value, _x: float, _y: float) -> bool:
+        if isinstance(value, Gdk.Texture):
+            return self._drop_texture(value)
+        if isinstance(value, Gdk.FileList):
+            return self._drop_files(value.get_files())
+        return False
+
+    def _drop_texture(self, texture: Gdk.Texture) -> bool:
+        """Raw image data: save the PNG copy, mention the copy."""
+        try:
+            data = texture.save_to_png_bytes().get_data()
+            directory = dropimages.default_directory()
+            dropimages.prune_stale(directory)
+            path = dropimages.save_png(bytes(data), directory)
+        except (GLib.Error, OSError):
+            self.feed_message(_("couldn't save a copy of the dropped image"))
+            return False
+        return self._mention_dropped_paths([str(path)])
+
+    def _drop_files(self, files: list[Gio.File]) -> bool:
+        """Dropped files: mention each one directly. Skipped entries (a
+        remote URI with no local path) are counted, not echoed — a URI is
+        outside content arriving at first contact, and feed_message writes
+        raw bytes to the tty."""
+        paths = [p for f in files if (p := f.get_path()) is not None]
+        skipped = len(files) - len(paths)
+        if skipped:
+            self.feed_message(
+                ngettext(
+                    "skipped {n} dropped item that isn't a local file",
+                    "skipped {n} dropped items that aren't local files",
+                    skipped,
+                ).format(n=skipped)
+            )
+        return self._mention_dropped_paths(paths)
+
+    def _mention_dropped_paths(self, paths: list[str]) -> bool:
+        """Type a mention token for each path into the input box — typed,
+        never submitted, mirroring "Add to chat" (see _on_editor_add_to_chat
+        for why the trailing space and the missing takes_prompt gate). Paths
+        the provider refuses to reference (a control character in the name —
+        see file_reference) are reported by count, not echoed: those names
+        are exactly the untrusted bytes feed_message must not write to the
+        tty. The focus grab is immediate rather than idle-deferred: a drop
+        has no popover to hand focus back anywhere."""
+        cwd = self.current_agent_cwd()
+        text, failed = dropimages.mention_text(
+            paths, lambda path: self.provider.file_reference(path, cwd)
+        )
+        if failed:
+            self.feed_message(
+                ngettext(
+                    "couldn't reference {n} dropped file name",
+                    "couldn't reference {n} dropped file names",
+                    failed,
+                ).format(n=failed)
+            )
+        if not text:
+            return False
+        self.feed_child_text(text)
+        self.grab_terminal_focus()
+        return True
 
     def inject_prompt(self, text: str) -> None:
         """Type *text* into the agent, send it, and put the tab in front.
