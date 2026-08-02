@@ -588,6 +588,7 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
         "checks": {"passed": 1, "failed": 0, "pending": 1},
         "title": "Keep the yellow line on a backgrounded session",
         "mergeable": "MERGEABLE",
+        "unresolved": False,
     }
 
 
@@ -1082,3 +1083,109 @@ def test_forget_status_drops_mergeability():
     side, so it is refetched, never remembered."""
     pr = PullRequest(55, URL, "episode6/collins", state="OPEN", mergeable="CONFLICTING")
     assert forget_status(pr).mergeable is None
+
+
+# -- unresolved comments -----------------------------------------------------
+
+
+def _comment(mine, minimized=False):
+    """One entry of gh's comments list, as small as the check needs."""
+    return {"viewerDidAuthor": mine, "isMinimized": minimized}
+
+
+def test_someone_elses_last_word_is_unresolved():
+    comments = [_comment(True), _comment(False)]
+    assert prstatus._entry({"comments": comments})["unresolved"] is True
+
+
+def test_our_own_last_word_is_resolved():
+    comments = [_comment(False), _comment(True)]
+    assert prstatus._entry({"comments": comments})["unresolved"] is False
+
+
+@pytest.mark.parametrize("comments", [[], None, "chatty", 7])
+def test_no_comments_is_nothing_to_answer(comments):
+    assert prstatus._entry({"comments": comments})["unresolved"] is False
+
+
+def test_a_minimized_last_comment_does_not_count():
+    """GitHub collapses spam and off-topic; the last word is the last one
+    still standing."""
+    comments = [_comment(True), _comment(False, minimized=True)]
+    assert prstatus._entry({"comments": comments})["unresolved"] is False
+
+
+def test_a_malformed_last_comment_is_skipped_not_flagged():
+    comments = [_comment(True), "not a comment"]
+    assert prstatus._entry({"comments": comments})["unresolved"] is False
+
+
+def test_a_missing_authorship_stamp_reads_as_someone_elses():
+    """viewerDidAuthor gone missing means gh no longer says whose the comment
+    is; erring toward "look at it" beats silently swallowing a reply."""
+    assert prstatus._entry({"comments": [{"isMinimized": False}]})["unresolved"] is True
+
+
+def test_unresolved_comments_badge_on_passing_checks():
+    pr = PullRequest(55, URL, state="OPEN", passed=2, failed=0, pending=0,
+                     mergeable="MERGEABLE", unresolved=True)
+    assert pr.badge == "unresolved"
+
+
+def test_unresolved_comments_badge_without_any_checks():
+    """A PR with no checks earns no green mark, but an unanswered comment is
+    still worth a triangle."""
+    pr = PullRequest(55, URL, state="OPEN", passed=0, failed=0, pending=0,
+                     unresolved=True)
+    assert pr.badge == "unresolved"
+
+
+@pytest.mark.parametrize(
+    "counts,mergeable,expected",
+    [
+        ((1, 1, 0), "MERGEABLE", "failed"),  # a red build outranks the reply
+        ((1, 0, 0), "CONFLICTING", "conflict"),  # so does a branch that won't merge
+        ((1, 0, 2), "MERGEABLE", "pending"),  # checks not passed yet: wait for them
+    ],
+)
+def test_merge_blockers_outrank_unresolved_comments(counts, mergeable, expected):
+    passed, failed, pending = counts
+    pr = PullRequest(55, URL, state="OPEN", passed=passed, failed=failed,
+                     pending=pending, mergeable=mergeable, unresolved=True)
+    assert pr.badge == expected
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED", None])
+def test_only_a_live_pr_awaits_a_reply(state):
+    pr = PullRequest(55, URL, state=state, unresolved=True)
+    assert pr.awaiting_reply is False
+    assert pr.badge != "unresolved"
+
+
+def test_describe_names_unresolved_comments():
+    pr = PullRequest(55, URL, "episode6/collins", state="OPEN",
+                     passed=2, failed=0, pending=0, unresolved=True)
+    assert describe(pr) == (
+        "episode6/collins#55 · Open pull request · Has unresolved comments · 2 passed"
+    )
+
+
+def test_enrich_fills_unresolved(gh):
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0},
+        "unresolved": True})
+    refresh(URL)
+    pr = enrich(parse_pr_link(_link()))
+    assert pr.unresolved is True
+    assert pr.badge == "unresolved"
+
+
+def test_the_cli_cache_carries_no_comments(cache):
+    """Its entries predate the field, so a warm start says "nothing waiting"."""
+    cache({URL: {"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}}})
+    assert enrich(parse_pr_link(_link())).unresolved is False
+
+
+def test_forget_status_drops_unresolved():
+    """The next reply flips it, so it is refetched, never remembered."""
+    pr = PullRequest(55, URL, "episode6/collins", state="OPEN", unresolved=True)
+    assert forget_status(pr).unresolved is False

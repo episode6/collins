@@ -109,6 +109,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Terminal": "Terminál",
         "Font": "Betűtípus",
         "Applies to all terminal tabs": "Minden terminállapra érvényes",
+        "New terminal tab": "Új terminállap",
+        "Terminal {number}": "{number}. terminál",
+        "A command is still running in this terminal tab and will be terminated.":
+            "Ezen a terminállapon még fut egy parancs, amely le lesz állítva.",
         "Reset to default font": "Visszaállítás az alapértelmezett betűtípusra",
         "Scrollback lines": "Visszagörgetési sorok",
         "Easy copy & paste": "Egyszerű másolás és beillesztés",
@@ -288,6 +292,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open on GitHub": "Megnyitás GitHubon",
         "Rebase / resolve conflicts": "Rebase / konfliktusok feloldása",
         "Has merge conflicts": "Beolvasztási konfliktusai vannak",
+        "Has unresolved comments": "Megválaszolatlan hozzászólásai vannak",
         # pull request footer chip
         "Open pull request": "Nyitott pull request",
         "Draft pull request": "Piszkozat pull request",
@@ -441,6 +446,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Terminal": "Terminal",
         "Font": "Schriftart",
         "Applies to all terminal tabs": "Gilt für alle Terminal-Tabs",
+        "New terminal tab": "Neuer Terminal-Tab",
+        "Terminal {number}": "Terminal {number}",
+        "A command is still running in this terminal tab and will be terminated.":
+            "In diesem Terminal-Tab läuft noch ein Befehl, der beendet wird.",
         "Reset to default font": "Auf Standardschriftart zurücksetzen",
         "Scrollback lines": "Scrollback-Zeilen",
         "Easy copy & paste": "Einfaches Kopieren & Einfügen",
@@ -624,6 +633,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open on GitHub": "Auf GitHub öffnen",
         "Rebase / resolve conflicts": "Rebase / Konflikte auflösen",
         "Has merge conflicts": "Hat Merge-Konflikte",
+        "Has unresolved comments": "Hat unbeantwortete Kommentare",
         # pull request footer chip
         "Open pull request": "Offener Pull Request",
         "Draft pull request": "Pull-Request-Entwurf",
@@ -778,6 +788,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Terminal": "Terminal",
         "Font": "Fuente",
         "Applies to all terminal tabs": "Se aplica a todas las pestañas de terminal",
+        "New terminal tab": "Nueva pestaña de terminal",
+        "Terminal {number}": "Terminal {number}",
+        "A command is still running in this terminal tab and will be terminated.":
+            "Todavía se está ejecutando un comando en esta pestaña de terminal "
+            "y se terminará.",
         "Reset to default font": "Restablecer la fuente predeterminada",
         "Scrollback lines": "Líneas de historial",
         "Easy copy & paste": "Copiado y pegado fáciles",
@@ -960,6 +975,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open on GitHub": "Abrir en GitHub",
         "Rebase / resolve conflicts": "Rebase / resolver conflictos",
         "Has merge conflicts": "Tiene conflictos de fusión",
+        "Has unresolved comments": "Tiene comentarios sin responder",
         # pull request footer chip
         "Open pull request": "Pull request abierto",
         "Draft pull request": "Pull request en borrador",
@@ -1113,6 +1129,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Terminal": "Terminal",
         "Font": "Police",
         "Applies to all terminal tabs": "S’applique à tous les onglets de terminal",
+        "New terminal tab": "Nouvel onglet de terminal",
+        "Terminal {number}": "Terminal {number}",
+        "A command is still running in this terminal tab and will be terminated.":
+            "Une commande est encore en cours d’exécution dans cet onglet de "
+            "terminal et sera interrompue.",
         "Reset to default font": "Réinitialiser la police par défaut",
         "Scrollback lines": "Lignes d’historique",
         "Easy copy & paste": "Copier-coller simplifié",
@@ -1297,6 +1318,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open on GitHub": "Ouvrir sur GitHub",
         "Rebase / resolve conflicts": "Rebase / résoudre les conflits",
         "Has merge conflicts": "A des conflits de fusion",
+        "Has unresolved comments": "A des commentaires sans réponse",
         # pull request footer chip
         "Open pull request": "Pull request ouverte",
         "Draft pull request": "Brouillon de pull request",

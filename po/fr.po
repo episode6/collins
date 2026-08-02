@@ -11,15 +11,6 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgid "A command is still running in this terminal tab and will be terminated."
-msgstr "Une commande est encore en cours d’exécution dans cet onglet de terminal et sera interrompue."
-
-msgid "New terminal tab"
-msgstr "Nouvel onglet de terminal"
-
-msgid "Terminal {number}"
-msgstr "Terminal {number}"
-
 msgid "── restored panel history ──"
 msgstr "── historique du panneau restauré ──"
 
@@ -268,6 +259,15 @@ msgstr "Police"
 
 msgid "Applies to all terminal tabs"
 msgstr "S’applique à tous les onglets de terminal"
+
+msgid "New terminal tab"
+msgstr "Nouvel onglet de terminal"
+
+msgid "Terminal {number}"
+msgstr "Terminal {number}"
+
+msgid "A command is still running in this terminal tab and will be terminated."
+msgstr "Une commande est encore en cours d’exécution dans cet onglet de terminal et sera interrompue."
 
 msgid "Reset to default font"
 msgstr "Réinitialiser la police par défaut"
@@ -718,6 +718,9 @@ msgstr "Rebase / résoudre les conflits"
 
 msgid "Has merge conflicts"
 msgstr "A des conflits de fusion"
+
+msgid "Has unresolved comments"
+msgstr "A des commentaires sans réponse"
 
 msgid "Open pull request"
 msgstr "Pull request ouverte"

@@ -39,6 +39,7 @@ from .prstatus import (  # noqa: E402
     BADGE_FAILED,
     BADGE_PASSED,
     BADGE_PENDING,
+    BADGE_UNRESOLVED,
     PullRequest,
     describe,
     invalidate,
@@ -72,12 +73,15 @@ _BASE_ICONS = {
     "DRAFT": ("git-pull-request-draft-symbolic", "pr-draft"),
 }
 _BASE_FALLBACK = ("git-pull-request-symbolic", "pr-draft")  # unfetched or closed
-# The badge says how the PR's checks stand: the same marks GitHub puts on a
-# failed check, a conflicting branch, a run still going and a clean sweep.
+# The badge says how the PR stands. Both merge blockers — a failed check and
+# a conflicting branch — get the same red x; the warning triangle is the
+# softer "someone is waiting on a reply", which only shows once nothing
+# blocks the merge (see PullRequest.badge).
 _BADGE_ICONS = {
     BADGE_FAILED: ("x-circle-fill-symbolic", "pr-checks-failed"),
-    BADGE_CONFLICT: ("alert-fill-symbolic", "pr-conflict"),
+    BADGE_CONFLICT: ("x-circle-fill-symbolic", "pr-conflict"),
     BADGE_PENDING: ("circle-fill-symbolic", "pr-checks-pending"),
+    BADGE_UNRESOLVED: ("alert-fill-symbolic", "pr-unresolved"),
     BADGE_PASSED: ("check-circle-fill-symbolic", "pr-checks-passed"),
 }
 # What a popover is currently showing: the PR whose actions are up (None while

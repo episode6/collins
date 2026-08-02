@@ -84,7 +84,11 @@ _MAX_GH_ERROR = 500
 # The stamp of a status that is due no matter which TTL applies to it (see
 # invalidate) — every interval measured against it is already over.
 _DUE = float("-inf")
-_GH_FIELDS = "title,state,isDraft,statusCheckRollup,mergeable"
+# ``comments`` rides along for one bit: whether the newest comment is someone
+# else's. Each comment carries ``viewerDidAuthor`` — GitHub answering "did the
+# logged-in user write this?" — which spares a separate call to learn who that
+# user is.
+_GH_FIELDS = "title,state,isDraft,statusCheckRollup,mergeable,comments"
 # What gh may say in the mergeable field. GitHub works the answer out lazily —
 # the first fetch after a push routinely says UNKNOWN while a background job
 # recomputes — so only a definite verdict is kept and UNKNOWN is stored as "no
@@ -130,6 +134,7 @@ _gh_missing = False  # gh isn't on PATH; nothing to retry against this run
 BADGE_FAILED = "failed"
 BADGE_CONFLICT = "conflict"
 BADGE_PENDING = "pending"
+BADGE_UNRESOLVED = "unresolved"
 BADGE_PASSED = "passed"
 
 
@@ -154,6 +159,9 @@ class PullRequest:
     # has no such field). Like the check counts, never persisted: whether a
     # branch still merges goes stale with every push to either side.
     mergeable: str | None = None
+    # Whether the PR's newest comment is someone else's — the conversation is
+    # waiting on us. Never persisted either: one reply flips it.
+    unresolved: bool = False
 
     @property
     def slug(self) -> str:
@@ -175,6 +183,15 @@ class PullRequest:
         return self.state in ("OPEN", "DRAFT") and self.mergeable == "CONFLICTING"
 
     @property
+    def awaiting_reply(self) -> bool:
+        """Whether someone else has the last word on a PR that is still live.
+
+        Only live PRs count, as with `conflicting`: a comment on a merged or
+        closed PR isn't waiting on anyone.
+        """
+        return self.state in ("OPEN", "DRAFT") and self.unresolved
+
+    @property
     def badge(self) -> str | None:
         """The one status worth acting on, or None when there is nothing to do.
 
@@ -182,11 +199,14 @@ class PullRequest:
         slot holds one mark, so these outrank each other: a failed check needs
         fixing whatever else is true; a conflict blocks the merge even when
         every check is green; pending runs beat the all-clear that some checks
-        already gave; and a clean sweep gets GitHub's green check.
+        already gave; a conversation waiting on a reply only surfaces once
+        nothing above blocks the merge — checks passed (or none exist) and the
+        branch merges clean; and a clean sweep gets GitHub's green check.
 
         A merged PR carries none: the purple base says all there is to say,
-        and whether CI passed on the way in is history. So does a PR with no
-        checks at all — a green check it never earned would be a lie.
+        and whether CI passed on the way in is history. A PR with no checks at
+        all earns no green check either — one it never ran would be a lie —
+        though unanswered comments still show on it.
         """
         if self.merged:
             return None
@@ -196,6 +216,8 @@ class PullRequest:
             return BADGE_CONFLICT
         if self.pending:
             return BADGE_PENDING
+        if self.awaiting_reply:
+            return BADGE_UNRESOLVED
         if self.passed:
             return BADGE_PASSED
         return None
@@ -241,6 +263,8 @@ def describe(pr: PullRequest) -> str:
         parts.append(state_text(pr.state))
     if pr.conflicting:
         parts.append(_("Has merge conflicts"))
+    if pr.awaiting_reply:
+        parts.append(_("Has unresolved comments"))
     checks = [
         _("{n} passed").format(n=pr.passed) if pr.passed else None,
         _("{n} failed").format(n=pr.failed) if pr.failed else None,
@@ -340,6 +364,7 @@ def forget_status(pr: PullRequest) -> PullRequest:
         failed=None,
         pending=None,
         mergeable=None,
+        unresolved=False,
     )
 
 
@@ -561,7 +586,26 @@ def _entry(data: dict) -> dict:
         "checks": _counts(data.get("statusCheckRollup")),
         "title": _title(data.get("title")),
         "mergeable": mergeable if mergeable in _MERGEABLE_STATES else None,
+        "unresolved": _unresolved(data.get("comments")),
     }
+
+
+def _unresolved(comments: object) -> bool:
+    """Whether the newest comment on the PR is someone else's.
+
+    gh hands the PR's comments back oldest-first, each stamped with
+    ``viewerDidAuthor``; the last word being anyone else's means there is
+    plausibly something to answer. Minimized comments are skipped — GitHub
+    collapses those as spam or off-topic, so they demand nothing. Anything
+    malformed reads as "nothing to answer": this bit decorates a chip, it
+    doesn't gate one.
+    """
+    if not isinstance(comments, list):
+        return False
+    for comment in reversed(comments):
+        if isinstance(comment, dict) and comment.get("isMinimized") is not True:
+            return comment.get("viewerDidAuthor") is not True
+    return False
 
 
 def _title(value: object) -> str | None:
@@ -730,6 +774,7 @@ def enrich(pr: PullRequest | None) -> PullRequest | None:
         failed=_count(checks, "failed"),
         pending=_count(checks, "pending"),
         mergeable=mergeable if mergeable in _MERGEABLE_STATES else None,
+        unresolved=entry.get("unresolved") is True,
     )
 
 
