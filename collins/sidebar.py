@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -1405,9 +1405,9 @@ class SessionSidebar(Gtk.Box):
             open_section.append_item(item(_("Fork session"), "fork-session"))
         for cv in provider.chat_variants():
             if cv.label:
-                label = _("Continue in chat ({mode})").format(mode=_(cv.label))
+                label = _("Continue in native chat ({mode}) (experimental)").format(mode=_(cv.label))
             else:
-                label = _("Continue in chat")
+                label = _("Continue in native chat (experimental)")
             chat_item = Gio.MenuItem.new(label, None)
             chat_item.set_action_and_target_value(
                 "win.resume-chat", GLib.Variant("s", f"{cv.key}:{session_id}")
