@@ -101,6 +101,7 @@ _ACTION_ICONS = {
     practions.REBASE: ("agent-claude-symbolic", None),
     practions.REVIEW: ("agent-claude-symbolic", None),
     practions.FIX_CI: ("agent-claude-symbolic", None),
+    practions.COMMENTS: ("agent-claude-symbolic", None),
     practions.NEW_PR: ("agent-claude-symbolic", None),
 }
 
