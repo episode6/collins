@@ -443,6 +443,9 @@ msgstr "Fájlkezelő"
 msgid "Right-click to open this folder in your terminal"
 msgstr "Jobb kattintással megnyithatod ezt a mappát a termináljában"
 
+msgid "Open this folder in your file manager"
+msgstr "A mappa megnyitása a fájlkezelőben"
+
 msgid "No terminal application found"
 msgstr "Nem található terminálalkalmazás"
 

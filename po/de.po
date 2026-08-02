@@ -443,6 +443,9 @@ msgstr "Dateimanager"
 msgid "Right-click to open this folder in your terminal"
 msgstr "Rechtsklick öffnet diesen Ordner in deinem Terminal"
 
+msgid "Open this folder in your file manager"
+msgstr "Diesen Ordner in deinem Dateimanager öffnen"
+
 msgid "No terminal application found"
 msgstr "Keine Terminal-Anwendung gefunden"
 

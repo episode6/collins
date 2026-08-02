@@ -1457,3 +1457,7 @@ msgid "couldn't reference {n} dropped file name"
 msgid_plural "couldn't reference {n} dropped file names"
 msgstr[0] ""
 msgstr[1] ""
+
+#: collins/terminal.py:1112
+msgid "Open this folder in your file manager"
+msgstr ""
