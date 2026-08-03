@@ -13,7 +13,9 @@ the screen, at which point it stops growing and pans instead — the picture
 lives in a ScrolledWindow whose slot is pinned to min(display size, screen
 max) per axis, so the two are equal (no scrolling) until the display size
 outgrows the window. The picture's size request IS the display size; its
-huge natural size never wins (a viewport allocates by minimum).
+huge natural size never wins (a viewport allocates by minimum). Once the
+display outgrows the space left beside the button strip, the strip hides
+so the image gets its space back (zooming out returns it).
 
 Not a dialog: an earlier Adw.Dialog version couldn't deliver "click outside
 closes" — Adwaita leaves a floating dialog's dimmed area untargetable, so
@@ -208,7 +210,7 @@ class ImageLightbox(Gtk.Box):
             fit_w / max(self._image_size[0], 1), fit_h / max(self._image_size[1], 1), 1.0
         )
 
-        strip = Gtk.Box(
+        self._strip = Gtk.Box(
             orientation=(
                 Gtk.Orientation.VERTICAL if side == "right" else Gtk.Orientation.HORIZONTAL
             ),
@@ -217,7 +219,7 @@ class ImageLightbox(Gtk.Box):
             valign=Gtk.Align.CENTER,
         )
         for btn in self._buttons:
-            strip.append(btn)
+            self._strip.append(btn)
         self._panel = Gtk.Box(
             orientation=(
                 Gtk.Orientation.HORIZONTAL if side == "right" else Gtk.Orientation.VERTICAL
@@ -225,7 +227,7 @@ class ImageLightbox(Gtk.Box):
             spacing=6,
         )
         self._panel.append(self._slot)
-        self._panel.append(strip)
+        self._panel.append(self._strip)
         self.append(self._panel)
 
         if self._picture is not None:
@@ -262,27 +264,46 @@ class ImageLightbox(Gtk.Box):
         """Set the display scale: the picture's size request becomes the
         display size, the slot is pinned to min(display, screen max) per
         axis — equal until the image hits the window edges, scrolling
-        after."""
+        after. The button strip yields to the image: once the display
+        outgrows the space left beside it on its axis, keeping it would
+        only shrink the image, so it hides (and returns on zooming back
+        out)."""
         zoom = min(max(zoom, self._fit_zoom), _ZOOM_MAX)
         if zoom == self._zoom or self._picture is None:
             return
         self._zoom = zoom
         display = (round(self._image_size[0] * zoom), round(self._image_size[1] * zoom))
-        slot = (min(display[0], self._max_slot[0]), min(display[1], self._max_slot[1]))
+        axis = 0 if self._chrome[0] else 1
+        strip_shown = display[axis] <= self._max_slot[axis]
+        self._strip.set_visible(strip_shown)
+        chrome = self._chrome if strip_shown else (0, 0)
+        max_slot = (
+            self._max_slot
+            if strip_shown
+            else (
+                max(self._win[0] - 2 * LIGHTBOX_SHADOW_PAD, 1),
+                max(self._win[1] - 2 * LIGHTBOX_SHADOW_PAD, 1),
+            )
+        )
+        slot = (min(display[0], max_slot[0]), min(display[1], max_slot[1]))
         self._picture.set_size_request(*display)
-        self._pin_panel(slot)
+        self._pin_panel(slot, chrome)
         self._zoom_out_btn.set_sensitive(zoom > self._fit_zoom)
         self._zoom_in_btn.set_sensitive(zoom < _ZOOM_MAX)
         if display != slot:
             GLib.idle_add(self._center_scroll)
 
-    def _pin_panel(self, slot: tuple[int, int]) -> None:
+    def _pin_panel(self, slot: tuple[int, int], chrome: tuple[int, int] | None = None) -> None:
         """Center the panel by margins for an image slot of *slot* px — the
         shade fills the window, so margins are what fix the panel's size
-        (and the picture's huge natural size never wins)."""
+        (and the picture's huge natural size never wins). *chrome* is the
+        button strip's reservation, `self._chrome` unless the strip is
+        hidden."""
         win_w, win_h = self._win
-        content_w = slot[0] + self._chrome[0]
-        content_h = slot[1] + self._chrome[1]
+        if chrome is None:
+            chrome = self._chrome
+        content_w = slot[0] + chrome[0]
+        content_h = slot[1] + chrome[1]
         left = max((win_w - content_w) // 2, LIGHTBOX_SHADOW_PAD)
         top = max((win_h - content_h) // 2, LIGHTBOX_SHADOW_PAD)
         self._panel.set_margin_start(left)
