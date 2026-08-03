@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-02. Full change history: git log for this file.
 """Built-in terminal color palettes for the VTE terminal."""
 
 from __future__ import annotations
@@ -111,13 +111,15 @@ def apply_terminal_theme(terminal: Vte.Terminal, name: str | None) -> None:
     _apply_dynamic_theme_css(theme)
 
 
-# Two places need to track whatever `apply_terminal_theme` just set on the
+# A few places need to track whatever `apply_terminal_theme` just set on the
 # VTE widget itself, so they read as part of the terminal rather than a
 # mismatched frame around it: the empty space beside a width-clamped
-# terminal (.terminal-gutter, see TerminalTab's Adw.Clamp), and the selected
-# tab's row in the tab bar, which sits directly above the terminal it shows.
-# One provider for the whole app: terminal_theme is a single global setting,
-# not per-tab.
+# terminal (.terminal-gutter, see TerminalTab's Adw.Clamp), the selected
+# tab's row in the tab bar, which sits directly above the terminal it shows,
+# and the floating attach-file button in the terminal's corner
+# (.attach-overlay), which inverts the terminal's colors so it contrasts
+# with any palette. One provider for the whole app: terminal_theme is a
+# single global setting, not per-tab.
 _dynamic_theme_provider: Gtk.CssProvider | None = None
 
 
@@ -133,7 +135,14 @@ def _apply_dynamic_theme_css(theme: dict | None) -> None:
     # "Default" tracks the system light/dark scheme, so it has no fixed hex —
     # @window_bg_color is the same stand-in the chat-card overlay uses for it.
     bg_css = f"#{theme['bg']}" if theme else "@window_bg_color"
+    fg_css = f"#{theme['fg']}" if theme else "@window_fg_color"
     _dynamic_theme_provider.load_from_data(
         f".terminal-gutter {{ background-color: {bg_css}; }}"
-        f"tabbar tab:selected {{ background-color: {bg_css}; }}".encode()
+        f"tabbar tab:selected {{ background-color: {bg_css}; }}"
+        # Semi-transparent terminal-fg pill with a terminal-bg icon: readable
+        # over the terminal without fully hiding what's underneath, solidifying
+        # on hover. Shape and placement are static (see app.py's _CSS).
+        f".attach-overlay {{ background-color: alpha({fg_css}, 0.45); color: {bg_css}; }}"
+        f".attach-overlay:hover {{ background-color: alpha({fg_css}, 0.8); }}"
+        f".attach-overlay:active {{ background-color: {fg_css}; }}".encode()
     )

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-03. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -69,6 +69,10 @@ DEFAULT_SETTINGS = {
     "archive_running_session": "ask",  # archiving a session whose tab is busy
     "quit_with_running_sessions": "ask",  # closing a window while sessions run
     "show_tab_bar": True,  # tab bar visibility (tabs keep working underneath)
+    # The floating attach-file button over each agent terminal's bottom-left
+    # corner (see terminal.py). Off hides it everywhere; the header's attach
+    # button keeps working either way.
+    "attach_overlay_button": True,
     "show_folder_path": False,  # show each session's project folder path in the sidebar
     "project_icon_size": 16,  # px size of the sidebar's project/folder (and group) icons
     "show_usage_panel": True,  # Claude subscription usage bars under the session list

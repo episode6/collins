@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-03. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -806,12 +806,37 @@ class TerminalTab(Gtk.Box):
         scrolled = Gtk.ScrolledWindow(child=self.terminal, vexpand=True)
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
 
+        # Floating attach-file button over the terminal's bottom-left corner —
+        # the same pick-a-file flow as the header button, kept within reach
+        # when the pointer is already down in the terminal. Overlaid on the
+        # scrolled terminal itself, inside the width clamp below, so it hugs
+        # the corner of the terminal *content* — not the tab — when the clamp
+        # centers a width-limited terminal between gutters. Shown only for
+        # providers with a file mention syntax (base agents return None);
+        # whether the agent is actually running is checked at click time,
+        # like "Add to chat" (see add_file_to_chat).
+        self._attach_overlay_btn = Gtk.Button(
+            icon_name="mail-attachment-symbolic",
+            halign=Gtk.Align.START,
+            valign=Gtk.Align.END,
+            margin_start=10,
+            margin_bottom=10,
+            tooltip_text=_("Attach file to chat"),
+        )
+        self._attach_overlay_btn.add_css_class("attach-overlay")
+        self._attach_overlay_btn.connect("clicked", lambda *_: self.pick_file_to_attach())
+        self._attach_overlay_btn.set_visible(
+            self.provider.file_reference("image.png", None) is not None
+        )
+        content_overlay = Gtk.Overlay(child=scrolled)
+        content_overlay.add_overlay(self._attach_overlay_btn)
+
         # Past "terminal_max_width", the clamp stops growing the terminal and
         # centers it instead; see _apply_terminal_max_width. Unset until
         # apply_settings runs, so it must start unconstrained rather than at
         # Adw.Clamp's own default (600px).
         self._width_clamp = Adw.Clamp(
-            child=scrolled,
+            child=content_overlay,
             hexpand=True,
             vexpand=True,
             maximum_size=_UNLIMITED_CLAMP_WIDTH,
@@ -1454,6 +1479,35 @@ class TerminalTab(Gtk.Box):
 
     def _on_editor_add_to_chat(self, _pane, path: str, start_line: int, end_line: int) -> None:
         self.add_file_to_chat(path, start_line, end_line)
+
+    def pick_file_to_attach(self) -> None:
+        """The attach-file buttons — the header's and the floating one in the
+        terminal's corner: pick a file, then reference it in the chat (typed,
+        never submitted — see add_file_to_chat).
+
+        The dialog starts in the agent's cwd right now, not the directory the
+        tab started in, matching where the mention it produces will resolve."""
+        dialog = Gtk.FileDialog(title=_("Attach file to chat"))
+        cwd = self.current_agent_cwd()
+        if cwd:
+            dialog.set_initial_folder(Gio.File.new_for_path(cwd))
+        root = self.get_root()
+        parent = root if isinstance(root, Gtk.Window) else None
+        dialog.open(parent, None, self._on_attach_file_chosen)
+
+    def _on_attach_file_chosen(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            gfile = dialog.open_finish(result)
+        except GLib.Error:
+            return  # cancelled
+        # The tab can close while the dialog is up; a mention typed into a
+        # dead terminal goes nowhere, so just drop it.
+        if self.get_root() is None:
+            return
+        path = gfile.get_path()
+        if path is None:
+            return  # a remote location — nothing the CLI could read
+        self.add_file_to_chat(path)
 
     def add_file_to_chat(self, path: str, start_line: int = 0, end_line: int = 0) -> None:
         """The editor's "Add to chat" (a right-clicked selection or file)
@@ -2468,6 +2522,12 @@ class TerminalTab(Gtk.Box):
         except (TypeError, ValueError):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
+        # The floating attach button can be turned off in preferences; the
+        # provider gate (no file mention syntax = no button) still applies.
+        self._attach_overlay_btn.set_visible(
+            bool(settings.get("attach_overlay_button", True))
+            and self.provider.file_reference("image.png", None) is not None
+        )
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
         self._apply_terminal_max_width(settings)
         self._set_footer_apps(settings.get("footer_apps") or [])

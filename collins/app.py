@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-03. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -50,6 +50,22 @@ tabbar tab:selected {
 }
 tabbar tab:selected label { font-weight: bold; }
 tabbar tab:not(:selected) label { opacity: 0.6; }
+
+/* attach-file button floating over the terminal's bottom-left corner. Only
+   its shape lives here: its colors come from themes._apply_dynamic_theme_css,
+   which inverts the current terminal theme (semi-transparent fg-colored pill,
+   bg-colored icon) so it contrasts with any palette. background-image: none
+   strips Adwaita's own button fill so that background-color is the whole
+   story. */
+.attach-overlay {
+  border-radius: 9999px;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 3px;
+}
 
 .count-badge {
   background-color: alpha(currentColor, 0.1);
