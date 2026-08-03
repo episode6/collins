@@ -799,6 +799,27 @@ class TerminalTab(Gtk.Box):
         self._overlay.add_css_class("terminal-gutter")
         self._overlay.set_child(self._width_clamp)
 
+        # Floating attach-file button over the terminal's bottom-left corner —
+        # the same pick-a-file flow as the header button, kept within reach
+        # when the pointer is already down in the terminal. Shown only for
+        # providers with a file mention syntax (base agents return None);
+        # whether the agent is actually running is checked at click time,
+        # like "Add to chat" (see add_file_to_chat).
+        self._attach_overlay_btn = Gtk.Button(
+            icon_name="mail-attachment-symbolic",
+            halign=Gtk.Align.START,
+            valign=Gtk.Align.END,
+            margin_start=12,
+            margin_bottom=12,
+            tooltip_text=_("Attach file to chat"),
+        )
+        self._attach_overlay_btn.add_css_class("attach-overlay")
+        self._attach_overlay_btn.connect("clicked", lambda *_: self.pick_file_to_attach())
+        self._attach_overlay_btn.set_visible(
+            self.provider.file_reference("image.png", None) is not None
+        )
+        self._overlay.add_overlay(self._attach_overlay_btn)
+
         # Secondary plain-shell panel — an inner tab strip of shells — below
         # or beside the agent terminal. Swapping bottom↔right only flips the
         # paned's orientation, so the shells keep running.
@@ -1403,6 +1424,35 @@ class TerminalTab(Gtk.Box):
 
     def _on_editor_add_to_chat(self, _pane, path: str, start_line: int, end_line: int) -> None:
         self.add_file_to_chat(path, start_line, end_line)
+
+    def pick_file_to_attach(self) -> None:
+        """The attach-file buttons — the header's and the floating one in the
+        terminal's corner: pick a file, then reference it in the chat (typed,
+        never submitted — see add_file_to_chat).
+
+        The dialog starts in the agent's cwd right now, not the directory the
+        tab started in, matching where the mention it produces will resolve."""
+        dialog = Gtk.FileDialog(title=_("Attach file to chat"))
+        cwd = self.current_agent_cwd()
+        if cwd:
+            dialog.set_initial_folder(Gio.File.new_for_path(cwd))
+        root = self.get_root()
+        parent = root if isinstance(root, Gtk.Window) else None
+        dialog.open(parent, None, self._on_attach_file_chosen)
+
+    def _on_attach_file_chosen(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            gfile = dialog.open_finish(result)
+        except GLib.Error:
+            return  # cancelled
+        # The tab can close while the dialog is up; a mention typed into a
+        # dead terminal goes nowhere, so just drop it.
+        if self.get_root() is None:
+            return
+        path = gfile.get_path()
+        if path is None:
+            return  # a remote location — nothing the CLI could read
+        self.add_file_to_chat(path)
 
     def add_file_to_chat(self, path: str, start_line: int = 0, end_line: int = 0) -> None:
         """The editor's "Add to chat" (a right-clicked selection or file)

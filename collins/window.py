@@ -2812,33 +2812,13 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _attach_file_to_chat(self) -> None:
         """The header attach button: pick a file, reference it in the focused
-        agent's chat (typed, never submitted — see TerminalTab.add_file_to_chat).
-
-        The dialog starts in the agent's cwd right now, not the directory the
-        tab started in, matching where the mention it produces will resolve."""
+        agent's chat. The pick-then-mention flow lives on the tab (see
+        TerminalTab.pick_file_to_attach), shared with the floating button in
+        the terminal's corner."""
         page = self.tab_view.get_selected_page()
         tab = page.get_child() if page is not None else None
-        if not isinstance(tab, TerminalTab):
-            return
-        dialog = Gtk.FileDialog(title=_("Attach file to chat"))
-        cwd = tab.current_agent_cwd()
-        if cwd:
-            dialog.set_initial_folder(Gio.File.new_for_path(cwd))
-        dialog.open(self, None, lambda d, r: self._on_attach_file_chosen(d, r, tab))
-
-    def _on_attach_file_chosen(self, dialog: Gtk.FileDialog, result, tab: TerminalTab) -> None:
-        try:
-            gfile = dialog.open_finish(result)
-        except GLib.Error:
-            return  # cancelled
-        # The tab can close while the dialog is up; a mention typed into a
-        # dead terminal goes nowhere, so just drop it.
-        if tab.get_root() is None:
-            return
-        path = gfile.get_path()
-        if path is None:
-            return  # a remote location — nothing the CLI could read
-        tab.add_file_to_chat(path)
+        if isinstance(tab, TerminalTab):
+            tab.pick_file_to_attach()
 
     # -- the background gate ---------------------------------------------------
 
