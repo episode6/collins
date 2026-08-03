@@ -372,7 +372,9 @@ class EditorPane(Gtk.Box):
         manager = GtkSource.LanguageManager.get_default()
         language = manager.guess_language(key, None)
         if language is None:
-            hint = editorfiles.guess_language_id(path)
+            hint = editorfiles.guess_language_id(
+                path, editorfiles.read_first_line(path)
+            )
             if hint:
                 language = manager.get_language(hint)
         if language is not None and editorfiles.should_highlight(path):

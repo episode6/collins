@@ -123,10 +123,27 @@ def guess_language_id(path: str | Path, first_line: str = "") -> str | None:
         if not parts:
             return None
         interpreter = Path(parts[0]).name
-        if interpreter == "env" and len(parts) > 1:
-            interpreter = Path(parts[1]).name
+        if interpreter == "env":
+            # Skip env's own flags (-S, -i, ...) and VAR=val assignments to
+            # reach the interpreter, e.g. `env -S FOO=bar python3`.
+            rest = [p for p in parts[1:] if not p.startswith("-") and "=" not in p]
+            if not rest:
+                return None
+            interpreter = Path(rest[0]).name
         return _SHEBANG_INTERPRETERS.get(interpreter)
     return None
+
+
+def read_first_line(path: str | Path, max_bytes: int = 512) -> str:
+    """The first line of *path* (line ending stripped), decoded leniently —
+    just enough for `guess_language_id`'s shebang sniff. Empty string when
+    the file can't be read."""
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.readline(max_bytes)
+    except OSError:
+        return ""
+    return raw.decode("utf-8", "replace").rstrip("\r\n")
 
 
 def load_guard(path: str | Path) -> LoadGuard:
