@@ -71,6 +71,11 @@ _PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
 # PrChipRow).
 _MAX_PR_CHIPS = 20
 _PR_CHIP_SPACING = 8  # between chips; their own parts sit 4 apart
+# How long a coming-back-into-view refresh (window refocused, tab selected)
+# vouches for the chips before another one is allowed to hit `gh` again.
+# Focus comes and goes much faster than CI does — alt-tabbing past the window
+# must not turn into a flurry of subprocesses.
+_PR_FOCUS_REFRESH_MIN_US = 10 * 1_000_000
 
 # PCRE2 flags for the find bar: multiline, case-insensitive.
 _PCRE2_CASELESS = 0x00000008
@@ -862,6 +867,7 @@ class TerminalTab(Gtk.Box):
         self._footer_prs: list[PullRequest] = []  # what the chips currently show
         self._saved_pr_records: list[dict] = []  # last records handed to the window
         self._pr_discover = False  # a click's search, waiting for a free tick
+        self._pr_focus_refresh_at = 0  # last time coming into view forced a refetch
         self._cwd_refresh_source: int | None = None
         self.append(self._build_footer())
 
@@ -1366,6 +1372,29 @@ class TerminalTab(Gtk.Box):
         """
         self._pr_refresh_btn.set_sensitive(False)
         self._request_update(discover=True)
+
+    def refresh_pr_statuses(self) -> None:
+        """Mark every chip's status due, so the update that follows refetches it.
+
+        The window calls this when the tab comes back into view — selected, or
+        its window refocused — because that's exactly when a stale mark is
+        looked at: CI that finished while the user was away should show up on
+        arrival, not up to a TTL later. Only status is re-asked; discovering a
+        *new* PR stays with the refresh button, whose click says to go look.
+
+        Throttled per tab, and a tab with nothing unmerged doesn't start the
+        clock — its first PR still deserves an on-arrival refresh later.
+        """
+        if all(pr.merged for pr in self._footer_prs):
+            return
+        now = GLib.get_monotonic_time()
+        if now - self._pr_focus_refresh_at < _PR_FOCUS_REFRESH_MIN_US:
+            return
+        self._pr_focus_refresh_at = now
+        for pr in self._footer_prs:
+            if not pr.merged:
+                invalidate(pr.url)
+        self._request_update()
 
     # -- graceful close ----------------------------------------------------
 
