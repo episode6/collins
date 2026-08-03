@@ -134,6 +134,11 @@ class EditorPane(Gtk.Box):
         self._tab_view.connect("close-page", self._on_tabview_close_page)
         self._tab_view.connect("notify::selected-page", lambda *_a: self._on_page_switched())
         tab_bar = Adw.TabBar(view=self._tab_view, autohide=False)
+        self._tab_bar = tab_bar
+        double_click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
+        double_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        double_click.connect("pressed", self._on_tab_bar_pressed)
+        tab_bar.add_controller(double_click)
         editors.append(tab_bar)
         self._search_bar = self._build_search_bar()
         editors.append(self._search_bar)
@@ -186,6 +191,33 @@ class EditorPane(Gtk.Box):
                 )
             )
         self.add_controller(controller)
+
+    # -- tab-bar double-click ------------------------------------------------
+
+    def _on_tab_bar_pressed(self, _gesture, n_press: int, x: float, y: float) -> None:
+        """Double-clicking a tab reveals its file in the tree. Observed from
+        a capture-phase gesture that never claims the press, so the tab bar's
+        own selection and drag-reorder handling keep working underneath."""
+        if n_press != 2:
+            return
+        page = self._tab_page_at(x, y)
+        key = self._page_key.get(page) if page is not None else None
+        if key is not None:
+            self._tree.reveal(key)
+
+    def _tab_page_at(self, x: float, y: float) -> Adw.TabPage | None:
+        """The page whose tab-bar header sits under (*x*, *y*), or None for
+        the bar's empty space. Walks up from the picked widget to the
+        enclosing "AdwTab" — the same private-libadwaita-type dependency as
+        MainWindow._tab_widget, tolerated for the same reason: a rename in a
+        libadwaita bump makes this return None and the double-click quietly
+        does nothing."""
+        widget = self._tab_bar.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while widget is not None and widget is not self._tab_bar:
+            if widget.__gtype__.name == "AdwTab":
+                return widget.get_property("page")
+            widget = widget.get_parent()
+        return None
 
     # -- add to chat ---------------------------------------------------------
 
