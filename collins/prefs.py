@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-03. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -140,6 +140,17 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._easy_copy_row.set_active(bool(state.get_setting("easy_copy_paste")))
         self._easy_copy_row.connect("notify::active", self._on_easy_copy_changed)
         terminal_group.add(self._easy_copy_row)
+
+        self._attach_overlay_row = Adw.SwitchRow(
+            title=_("Floating attach-file button"),
+            subtitle=_(
+                "Overlay a semi-transparent attach button on the corner of "
+                "each agent terminal"
+            ),
+        )
+        self._attach_overlay_row.set_active(bool(state.get_setting("attach_overlay_button")))
+        self._attach_overlay_row.connect("notify::active", self._on_attach_overlay_changed)
+        terminal_group.add(self._attach_overlay_row)
 
         current_theme = state.get_setting("terminal_theme") or DEFAULT_THEME
         if current_theme not in THEME_NAMES:
@@ -499,6 +510,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_easy_copy_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("easy_copy_paste", row.get_active())
+        self._on_change()
+
+    def _on_attach_overlay_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("attach_overlay_button", row.get_active())
         self._on_change()
 
     def _add_running_behavior_row(

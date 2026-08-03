@@ -2471,6 +2471,12 @@ class TerminalTab(Gtk.Box):
         except (TypeError, ValueError):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
+        # The floating attach button can be turned off in preferences; the
+        # provider gate (no file mention syntax = no button) still applies.
+        self._attach_overlay_btn.set_visible(
+            bool(settings.get("attach_overlay_button", True))
+            and self.provider.file_reference("image.png", None) is not None
+        )
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
         self._apply_terminal_max_width(settings)
         self._set_footer_apps(settings.get("footer_apps") or [])

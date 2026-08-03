@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-03. Full change history: git log for this file.
 
 # SOME DESCRIPTIVE TITLE.
 # Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
@@ -388,6 +388,16 @@ msgstr ""
 msgid ""
 "Ctrl+C copies selected text (otherwise interrupts as usual), Ctrl+V pastes, "
 "and right-click opens a copy/paste menu"
+msgstr ""
+
+#: collins/prefs.py:145
+msgid "Floating attach-file button"
+msgstr ""
+
+#: collins/prefs.py:147
+msgid ""
+"Overlay a semi-transparent attach button on the corner of each agent "
+"terminal"
 msgstr ""
 
 #: collins/prefs.py:128
