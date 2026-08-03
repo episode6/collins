@@ -263,42 +263,53 @@ def _resolve_wrapped_at(
 ) -> tuple[str, int | None, int | None] | None:
     """Stitch a failed candidate with its neighbour rows (see linkpatterns.
     resolve_wrapped_reference) — this half only turns the click's x/y into a
-    buffer cell and fetches row texts. With *candidate* None (nothing under
+    screen cell and fetches row texts. With *candidate* None (nothing under
     the pointer matched at all), the whitespace-delimited token at the cell
-    stands in as the candidate. The clicked row is probed with a ±1 slop:
-    the y→row division ignores VTE's inner border, and the stitcher's
-    geometry gates reject the wrong rows anyway."""
+    stands in as the candidate.
+
+    Row texts come from the *visible screen* snapshot, indexed by screen
+    row, never from grid-row reads: the grid APIs address VTE's internal
+    ring, and under a repaint-style renderer (claude's own UI) the ring
+    drifts a full page away from what the adjustment describes, so every
+    adjustment-derived get_text_range read comes back empty — discovered
+    live. The clicked row is probed with a ±1 slop: the y→row division
+    ignores VTE's inner border, and the stitcher's geometry gates reject
+    the wrong rows anyway."""
     ch = terminal.get_char_height()
     cw = terminal.get_char_width()
     if ch <= 0 or cw <= 0:
         return None
+    text = terminal.get_text_format(Vte.Format.TEXT) or ""
+    cols = int(terminal.get_column_count())
+    rows: list[str] = []
+    for line in text.split("\n"):
+        if len(line) <= cols:
+            rows.append(line)
+        else:
+            # VTE returns soft-wrapped screen rows joined into one logical
+            # line; a soft-wrapped row is by definition full-width, so
+            # fixed-size chunks reconstruct the screen rows exactly.
+            rows.extend(line[i : i + cols] for i in range(0, len(line), cols))
+    # With pixel scrolling the viewport may start mid-row; the snapshot's
+    # first line is that partial row, so shift y by the fraction cut off.
     vadj = terminal.get_vadjustment()
-    scroll = vadj.get_value() if vadj is not None else 0.0
-    if terminal.get_scroll_unit_is_pixels():
-        row = int((scroll + y) // ch)
-    else:
-        row = int(scroll) + int(y // ch)
+    frac = 0.0
+    if vadj is not None and terminal.get_scroll_unit_is_pixels():
+        frac = vadj.get_value() % ch
+    row = int((y + frac) // ch)
     col = int(x // cw)
 
     def row_text(r: int) -> str:
-        if r < 0:
-            return ""
-        try:
-            text = terminal.get_text_range_format(
-                Vte.Format.TEXT, r, 0, r, terminal.get_column_count()
-            )[0]
-        except GLib.Error:
-            return ""
-        return (text or "").rstrip("\n")
+        return rows[r] if 0 <= r < len(rows) else ""
 
     for r in (row, row - 1, row + 1):
-        text = row_text(r)
-        cand = candidate if candidate is not None else token_at_column(text, col)
+        row_txt = row_text(r)
+        cand = candidate if candidate is not None else token_at_column(row_txt, col)
         if not cand:
             continue
         resolved = resolve_wrapped_reference(
             cand,
-            text,
+            row_txt,
             [row_text(r - 1), row_text(r - 2)],
             [row_text(r + 1), row_text(r + 2), row_text(r + 3)],
             roots,
