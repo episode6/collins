@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-03. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -62,9 +62,9 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   background-image: none;
   border: none;
   box-shadow: none;
-  min-width: 30px;
-  min-height: 30px;
-  padding: 4px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 3px;
 }
 
 .count-badge {

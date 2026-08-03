@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-03. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -778,12 +778,37 @@ class TerminalTab(Gtk.Box):
         scrolled = Gtk.ScrolledWindow(child=self.terminal, vexpand=True)
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
 
+        # Floating attach-file button over the terminal's bottom-left corner —
+        # the same pick-a-file flow as the header button, kept within reach
+        # when the pointer is already down in the terminal. Overlaid on the
+        # scrolled terminal itself, inside the width clamp below, so it hugs
+        # the corner of the terminal *content* — not the tab — when the clamp
+        # centers a width-limited terminal between gutters. Shown only for
+        # providers with a file mention syntax (base agents return None);
+        # whether the agent is actually running is checked at click time,
+        # like "Add to chat" (see add_file_to_chat).
+        self._attach_overlay_btn = Gtk.Button(
+            icon_name="mail-attachment-symbolic",
+            halign=Gtk.Align.START,
+            valign=Gtk.Align.END,
+            margin_start=10,
+            margin_bottom=10,
+            tooltip_text=_("Attach file to chat"),
+        )
+        self._attach_overlay_btn.add_css_class("attach-overlay")
+        self._attach_overlay_btn.connect("clicked", lambda *_: self.pick_file_to_attach())
+        self._attach_overlay_btn.set_visible(
+            self.provider.file_reference("image.png", None) is not None
+        )
+        content_overlay = Gtk.Overlay(child=scrolled)
+        content_overlay.add_overlay(self._attach_overlay_btn)
+
         # Past "terminal_max_width", the clamp stops growing the terminal and
         # centers it instead; see _apply_terminal_max_width. Unset until
         # apply_settings runs, so it must start unconstrained rather than at
         # Adw.Clamp's own default (600px).
         self._width_clamp = Adw.Clamp(
-            child=scrolled,
+            child=content_overlay,
             hexpand=True,
             vexpand=True,
             maximum_size=_UNLIMITED_CLAMP_WIDTH,
@@ -798,27 +823,6 @@ class TerminalTab(Gtk.Box):
         self._overlay.set_vexpand(True)
         self._overlay.add_css_class("terminal-gutter")
         self._overlay.set_child(self._width_clamp)
-
-        # Floating attach-file button over the terminal's bottom-left corner —
-        # the same pick-a-file flow as the header button, kept within reach
-        # when the pointer is already down in the terminal. Shown only for
-        # providers with a file mention syntax (base agents return None);
-        # whether the agent is actually running is checked at click time,
-        # like "Add to chat" (see add_file_to_chat).
-        self._attach_overlay_btn = Gtk.Button(
-            icon_name="mail-attachment-symbolic",
-            halign=Gtk.Align.START,
-            valign=Gtk.Align.END,
-            margin_start=12,
-            margin_bottom=12,
-            tooltip_text=_("Attach file to chat"),
-        )
-        self._attach_overlay_btn.add_css_class("attach-overlay")
-        self._attach_overlay_btn.connect("clicked", lambda *_: self.pick_file_to_attach())
-        self._attach_overlay_btn.set_visible(
-            self.provider.file_reference("image.png", None) is not None
-        )
-        self._overlay.add_overlay(self._attach_overlay_btn)
 
         # Secondary plain-shell panel — an inner tab strip of shells — below
         # or beside the agent terminal. Swapping bottom↔right only flips the
