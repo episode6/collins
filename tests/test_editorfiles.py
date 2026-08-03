@@ -16,6 +16,7 @@ from collins.editorfiles import (
     is_image_path,
     is_inside,
     lightbox_layout,
+    lightbox_zoom_slot,
     list_dir,
     load_guard,
     path_from_file_uri,
@@ -217,6 +218,76 @@ def test_lightbox_layout_never_upscales():
 def test_lightbox_layout_tiny_image_clamped_to_minimum():
     side, w, h = lightbox_layout(16, 16, 1920, 1080)
     assert (w, h) == (LIGHTBOX_MIN_W, LIGHTBOX_MIN_H)
+
+
+def test_lightbox_layout_forced_side_wins_over_spare_space():
+    # 1600x600 in an 800x1000 window prefers "below" (see the test above);
+    # forcing "right" (re-layout after a resize keeps the strip put) must
+    # honor it and reserve the strip in the width instead.
+    side, w, h = lightbox_layout(1600, 600, 800, 1000, side="right")
+    assert side == "right"
+    scale = (int(800 * 0.85) - _PAD - LIGHTBOX_BUTTON_STRIP) / 1600
+    assert w == round(1600 * scale) + LIGHTBOX_BUTTON_STRIP + _PAD
+    assert h == round(600 * scale) + _PAD
+
+
+# -- lightbox_zoom_slot -------------------------------------------------------
+
+# An 800x600 image in a 1200x800 window with the strip on the right: the
+# space beside the strip is 1200 - _PAD - strip = 1040 wide, so the strip
+# yields once the zoomed display width passes 1040.
+_CHROME_R = (LIGHTBOX_BUTTON_STRIP, 0)
+_BESIDE_W = 1200 - _PAD - LIGHTBOX_BUTTON_STRIP
+
+
+def test_lightbox_zoom_slot_fit_keeps_strip_and_matches_display():
+    display, strip_shown, chrome, slot = lightbox_zoom_slot(
+        800, 600, 1.0, _CHROME_R, 1200, 800
+    )
+    assert display == (800, 600)
+    assert strip_shown and chrome == _CHROME_R
+    assert slot == display  # no scrolling while the display fits
+
+
+def test_lightbox_zoom_slot_strip_stays_until_its_space_is_needed():
+    zoom = _BESIDE_W / 800  # display width exactly the space beside the strip
+    display, strip_shown, chrome, slot = lightbox_zoom_slot(
+        800, 600, zoom, _CHROME_R, 1200, 800
+    )
+    assert display[0] == _BESIDE_W and strip_shown and chrome == _CHROME_R
+
+
+def test_lightbox_zoom_slot_strip_yields_and_slot_reclaims_its_space():
+    zoom = (_BESIDE_W + 1) / 800  # one px past the space beside the strip
+    display, strip_shown, chrome, slot = lightbox_zoom_slot(
+        800, 600, zoom, _CHROME_R, 1200, 800
+    )
+    assert not strip_shown and chrome == (0, 0)
+    assert slot[0] == _BESIDE_W + 1  # wider than the with-strip cap: reclaimed
+    assert slot[1] == min(display[1], 800 - _PAD)  # other axis unaffected
+
+
+def test_lightbox_zoom_slot_caps_slot_at_window_minus_shadow_pad():
+    display, strip_shown, chrome, slot = lightbox_zoom_slot(
+        800, 600, 4.0, _CHROME_R, 1200, 800
+    )
+    assert display == (3200, 2400)
+    assert not strip_shown
+    assert slot == (1200 - _PAD, 800 - _PAD)  # scrolls: display exceeds the slot
+
+
+def test_lightbox_zoom_slot_below_strip_thresholds_on_height():
+    chrome = (0, LIGHTBOX_BUTTON_STRIP)
+    over = (1000 - _PAD - LIGHTBOX_BUTTON_STRIP + 1) / 600
+    display, strip_shown, _chrome, _slot = lightbox_zoom_slot(
+        1600, 600, over / 2, chrome, 800, 1000
+    )
+    assert strip_shown  # height still fits above the strip
+    display, strip_shown, eff, slot = lightbox_zoom_slot(
+        1600, 600, over, chrome, 800, 1000
+    )
+    assert not strip_shown and eff == (0, 0)
+    assert slot[1] == display[1]  # the reclaimed height
 
 
 def test_lightbox_layout_unrealized_window_uses_fallback():

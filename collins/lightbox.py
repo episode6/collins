@@ -15,7 +15,10 @@ max) per axis, so the two are equal (no scrolling) until the display size
 outgrows the window. The picture's size request IS the display size; its
 huge natural size never wins (a viewport allocates by minimum). Once the
 display outgrows the space left beside the button strip, the strip hides
-so the image gets its space back (zooming out returns it).
+so the image gets its space back (zooming out returns it). The zoom/slot
+math is editorfiles.lightbox_zoom_slot, unit-tested there. Resizing the
+window while the lightbox is open re-lays it out (via the surface's size,
+the one signal that also fires for maximize).
 
 Not a dialog: an earlier Adw.Dialog version couldn't deliver "click outside
 closes" — Adwaita leaves a floating dialog's dimmed area untargetable, so
@@ -51,6 +54,7 @@ from .editorfiles import (  # noqa: E402
     LIGHTBOX_MIN_W,
     LIGHTBOX_SHADOW_PAD,
     lightbox_layout,
+    lightbox_zoom_slot,
 )
 from .i18n import _  # noqa: E402
 
@@ -77,6 +81,11 @@ class ImageLightbox(Gtk.Box):
         self._esc_root: Gtk.Widget | None = None
         self._zoom: float | None = None
         self._fit_zoom = 1.0
+        self._win = _FALLBACK_WINDOW
+        self._chrome = (0, 0)
+        self._resize_queued = False
+        self._surface: Gdk.Surface | None = None
+        self._surface_handlers: list[int] = []
         self.add_css_class("lightbox-shade")
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -197,18 +206,10 @@ class ImageLightbox(Gtk.Box):
         self._win = (win_w, win_h)
         strip_r = LIGHTBOX_BUTTON_STRIP if side == "right" else 0
         strip_b = LIGHTBOX_BUTTON_STRIP if side == "below" else 0
-        # Panel chrome around the image slot, and the zoom ceiling: the slot
-        # may grow to the window edges minus the shadow inset and chrome.
+        # Panel chrome around the image slot: the strip's reservation on its
+        # side. The zoom/slot math lives in editorfiles.lightbox_zoom_slot.
         self._chrome = (strip_r, strip_b)
-        self._max_slot = (
-            max(win_w - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[0], 1),
-            max(win_h - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[1], 1),
-        )
-        fit_w = width - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[0]
-        fit_h = height - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[1]
-        self._fit_zoom = min(
-            fit_w / max(self._image_size[0], 1), fit_h / max(self._image_size[1], 1), 1.0
-        )
+        self._set_fit_zoom(width, height)
 
         self._strip = Gtk.Box(
             orientation=(
@@ -248,17 +249,77 @@ class ImageLightbox(Gtk.Box):
         root.add_controller(esc)
         self._esc, self._esc_root = esc, root
 
+        # Re-layout when the window resizes while the lightbox is open (the
+        # surface, not a widget signal — see _on_surface_size).
+        surface = root.get_surface()
+        if surface is not None:
+            self._surface = surface
+            self._surface_handlers = [
+                surface.connect("notify::width", self._on_surface_size),
+                surface.connect("notify::height", self._on_surface_size),
+            ]
+
         overlay.add_overlay(self)
 
     def close(self) -> None:
         if self._esc_root is not None and self._esc is not None:
             self._esc_root.remove_controller(self._esc)
             self._esc = self._esc_root = None
+        if self._surface is not None:
+            for handler in self._surface_handlers:
+                self._surface.disconnect(handler)
+            self._surface, self._surface_handlers = None, []
         if self._overlay is not None:
             self._overlay.remove_overlay(self)
             self._overlay = None
 
+    # -- window resize while open --------------------------------------------
+
+    def _on_surface_size(self, _surface, _pspec) -> None:
+        """The window's Gdk.Surface resized (fires for interactive resizes
+        AND maximize, which the window's default-width property deliberately
+        doesn't track — and which a size-allocate vfunc never sees either,
+        Gtk.Box allocating through its layout manager). Re-layout from an
+        idle, once the window's own size has settled."""
+        if not self._resize_queued:
+            self._resize_queued = True
+            GLib.idle_add(self._relayout_for_resize)
+
+    def _relayout_for_resize(self) -> bool:
+        self._resize_queued = False
+        root = self.get_root()
+        if self._overlay is None or root is None:
+            return GLib.SOURCE_REMOVE
+        w, h = root.get_width(), root.get_height()
+        if w <= 0 or h <= 0 or (w, h) == self._win:
+            return GLib.SOURCE_REMOVE
+        # Keep the strip on the side it's already on (the panel is built for
+        # it); refit for the new window and re-apply the zoom — a fitted
+        # image stays fitted, a zoomed one keeps its scale (clamped to the
+        # new floor) and the slot re-caps to the new edges.
+        at_fit = self._zoom is not None and abs(self._zoom - self._fit_zoom) < 0.001
+        self._win = (w, h)
+        side = "right" if self._chrome[0] else "below"
+        _side, width, height = lightbox_layout(*self._image_size, w, h, side)
+        self._set_fit_zoom(width, height)
+        if self._picture is None:
+            self._pin_panel(self._image_size)
+        else:
+            zoom = self._fit_zoom if at_fit else (self._zoom or self._fit_zoom)
+            self._zoom = None  # force a re-apply even at a numerically equal zoom
+            self._apply_zoom(zoom)
+        return GLib.SOURCE_REMOVE
+
     # -- zoom ----------------------------------------------------------------
+
+    def _set_fit_zoom(self, width: int, height: int) -> None:
+        """The fitted display scale from lightbox_layout's content size (the
+        image's fitted size once the shadow inset and chrome come out)."""
+        fit_w = width - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[0]
+        fit_h = height - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[1]
+        self._fit_zoom = min(
+            fit_w / max(self._image_size[0], 1), fit_h / max(self._image_size[1], 1), 1.0
+        )
 
     def _apply_zoom(self, zoom: float) -> None:
         """Set the display scale: the picture's size request becomes the
@@ -267,25 +328,16 @@ class ImageLightbox(Gtk.Box):
         after. The button strip yields to the image: once the display
         outgrows the space left beside it on its axis, keeping it would
         only shrink the image, so it hides (and returns on zooming back
-        out)."""
+        out). The math is editorfiles.lightbox_zoom_slot, unit-tested
+        there."""
         zoom = min(max(zoom, self._fit_zoom), _ZOOM_MAX)
         if zoom == self._zoom or self._picture is None:
             return
         self._zoom = zoom
-        display = (round(self._image_size[0] * zoom), round(self._image_size[1] * zoom))
-        axis = 0 if self._chrome[0] else 1
-        strip_shown = display[axis] <= self._max_slot[axis]
-        self._strip.set_visible(strip_shown)
-        chrome = self._chrome if strip_shown else (0, 0)
-        max_slot = (
-            self._max_slot
-            if strip_shown
-            else (
-                max(self._win[0] - 2 * LIGHTBOX_SHADOW_PAD, 1),
-                max(self._win[1] - 2 * LIGHTBOX_SHADOW_PAD, 1),
-            )
+        display, strip_shown, chrome, slot = lightbox_zoom_slot(
+            *self._image_size, zoom, self._chrome, *self._win
         )
-        slot = (min(display[0], max_slot[0]), min(display[1], max_slot[1]))
+        self._strip.set_visible(strip_shown)
         self._picture.set_size_request(*display)
         self._pin_panel(slot, chrome)
         self._zoom_out_btn.set_sensitive(zoom > self._fit_zoom)

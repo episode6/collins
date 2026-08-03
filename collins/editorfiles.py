@@ -193,7 +193,7 @@ _LIGHTBOX_FALLBACK_WINDOW = (1200, 800)  # sizing when the window isn't realized
 
 
 def lightbox_layout(
-    image_w: int, image_h: int, window_w: int, window_h: int
+    image_w: int, image_h: int, window_w: int, window_h: int, side: str | None = None
 ) -> tuple[str, int, int]:
     """Which side of the lightbox image the button strip goes on, and the
     dialog's content size: ("right" | "below", width, height).
@@ -201,8 +201,9 @@ def lightbox_layout(
     The strip takes whichever side of the fitted image has more spare screen
     space; the image shows 1:1 when it fits inside the window fraction minus
     the strip, scaled down (aspect kept by the picture's CONTAIN fit) when it
-    doesn't. GTK-free on purpose — the dialog itself (lightbox.py) can't be
-    imported in headless tests."""
+    doesn't. Passing *side* forces the strip's side instead — re-layout after
+    a window resize keeps the strip where it already is. GTK-free on purpose
+    — the dialog itself (lightbox.py) can't be imported in headless tests."""
     if window_w <= 0 or window_h <= 0:
         window_w, window_h = _LIGHTBOX_FALLBACK_WINDOW
     avail_w = int(window_w * LIGHTBOX_WINDOW_FRACTION)
@@ -210,8 +211,11 @@ def lightbox_layout(
     # The spare space around the image as it would fit strip-less decides the
     # side; the image is then refitted with the strip and the shadow inset
     # taken out.
-    plain = min(1.0, avail_w / max(image_w, 1), avail_h / max(image_h, 1))
-    side = "right" if window_w - image_w * plain >= window_h - image_h * plain else "below"
+    if side is None:
+        plain = min(1.0, avail_w / max(image_w, 1), avail_h / max(image_h, 1))
+        side = (
+            "right" if window_w - image_w * plain >= window_h - image_h * plain else "below"
+        )
     pad = 2 * LIGHTBOX_SHADOW_PAD
     img_w = avail_w - pad - (LIGHTBOX_BUTTON_STRIP if side == "right" else 0)
     img_h = avail_h - pad - (LIGHTBOX_BUTTON_STRIP if side == "below" else 0)
@@ -219,6 +223,38 @@ def lightbox_layout(
     width = round(image_w * scale) + pad + (LIGHTBOX_BUTTON_STRIP if side == "right" else 0)
     height = round(image_h * scale) + pad + (LIGHTBOX_BUTTON_STRIP if side == "below" else 0)
     return side, max(width, LIGHTBOX_MIN_W), max(height, LIGHTBOX_MIN_H)
+
+
+def lightbox_zoom_slot(
+    image_w: int,
+    image_h: int,
+    zoom: float,
+    chrome: tuple[int, int],
+    window_w: int,
+    window_h: int,
+) -> tuple[tuple[int, int], bool, tuple[int, int], tuple[int, int]]:
+    """The lightbox's geometry at a zoom level: (display size, whether the
+    button strip shows, effective chrome, image slot size).
+
+    *chrome* is the strip's reservation as (right, below) px — exactly one
+    entry is non-zero. The strip yields to the image: once the zoomed display
+    outgrows the space left beside the strip on its axis, keeping it would
+    only shrink the image, so it hides (chrome drops to zero) and the slot
+    may use the reclaimed space. The slot is the display size capped to the
+    window minus the shadow inset and whatever chrome remains — equal to the
+    display (no scrolling) until the image hits the window edges. GTK-free
+    on purpose, like lightbox_layout."""
+    display = (round(image_w * zoom), round(image_h * zoom))
+    pad = 2 * LIGHTBOX_SHADOW_PAD
+    axis = 0 if chrome[0] else 1
+    strip_shown = display[axis] <= max((window_w, window_h)[axis] - pad - chrome[axis], 1)
+    eff_chrome = chrome if strip_shown else (0, 0)
+    max_slot = (
+        max(window_w - pad - eff_chrome[0], 1),
+        max(window_h - pad - eff_chrome[1], 1),
+    )
+    slot = (min(display[0], max_slot[0]), min(display[1], max_slot[1]))
+    return display, strip_shown, eff_chrome, slot
 
 
 def path_from_file_uri(uri: str) -> str | None:
