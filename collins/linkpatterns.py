@@ -50,7 +50,11 @@ _LINE_SUFFIX = "(?::\\d+(?::\\d+)?)?"
 FILE_PATTERN = (
     f"{_PATH_PRE}"
     f"(?:~?/{_PATH_CHAR}*{_PATH_FINAL}"  # absolute, or ~/ home-relative
-    f"|{_PATH_SEG}+/{_PATH_CHAR}*{_PATH_FINAL})"  # relative with >= 1 slash
+    # Relative with >= 1 slash. The tail is optional so a bare directory
+    # reference (`collins/`) matches too; the absolute alternative keeps a
+    # mandatory tail so a lone `/` in prose never becomes a link to the
+    # filesystem root.
+    f"|{_PATH_SEG}+/(?:{_PATH_CHAR}*{_PATH_FINAL})?)"
     f"{_LINE_SUFFIX}"
 )
 

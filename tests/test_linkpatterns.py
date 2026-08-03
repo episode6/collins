@@ -104,6 +104,9 @@ def test_matches_file_references(text: str, expected: str) -> None:
         ("edit 'collins/foo.py', then", "collins/foo.py"),
         ("[a](collins/foo.py)", "collins/foo.py"),
         ("dir collins/subdir/ listed", "collins/subdir"),
+        # A bare directory reference keeps its structural slash — that slash
+        # is what makes it a candidate at all.
+        ("the collins/ package", "collins/"),
         ("really /var/log/syslog?", "/var/log/syslog"),
     ],
 )
@@ -204,12 +207,11 @@ def test_resolve_normalizes_dot_segments(project) -> None:
 
 def test_resolve_finds_directories(project) -> None:
     # Directories resolve too — the click path sends them to the file
-    # manager instead of the editor.
-    assert resolve_file_reference("collins", [str(project)]) == (
-        str(project / "collins"),
-        None,
-        None,
-    )
+    # manager instead of the editor. With or without the trailing slash a
+    # bare directory reference matches with (normpath sheds it).
+    expected = (str(project / "collins"), None, None)
+    assert resolve_file_reference("collins", [str(project)]) == expected
+    assert resolve_file_reference("collins/", [str(project)]) == expected
 
 
 def test_resolve_prefers_line_suffix_over_literal_colon_name(project) -> None:

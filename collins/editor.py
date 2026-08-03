@@ -613,11 +613,23 @@ class EditorPane(Gtk.Box):
         _found, it = opened.buffer.get_iter_at_line(max(0, min(int(line), n_lines - 1)))
         it.set_line_offset(max(0, min(int(offset), it.get_chars_in_line())))
         opened.buffer.place_cursor(it)
-        # scroll_to_iter uses line heights computed in an idle handler, so on
-        # a freshly loaded buffer it can silently stay at the top; a mark is
-        # re-scrolled after validation (a clicked `path:42` reference must
-        # actually land the view on line 42).
+        # On a freshly loaded buffer, line heights are estimates until the
+        # view's validation idles run: scroll_to_iter silently stays at the
+        # top, and even scroll_to_mark's pending scroll lands hundreds of
+        # lines short on a large file. Scroll now for the cheap case, then
+        # re-issue at PRIORITY_LOW — validation runs at a far higher idle
+        # priority, so by the time the re-scroll fires the heights are exact
+        # (a clicked `path:602` reference must actually land on line 602).
         opened.view.scroll_to_mark(opened.buffer.get_insert(), 0.1, False, 0.0, 0.0)
+        view = opened.view
+
+        def rescroll() -> bool:
+            buffer = view.get_buffer()
+            if buffer is not None:
+                view.scroll_to_mark(buffer.get_insert(), 0.1, False, 0.0, 0.0)
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(rescroll, priority=GLib.PRIORITY_LOW)
 
     # -- notices ---------------------------------------------------------------
 
