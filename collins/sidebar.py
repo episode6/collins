@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-03. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -747,7 +747,7 @@ class SessionSidebar(Gtk.Box):
         self._view = Adw.ToolbarView(vexpand=True)
         self.append(self._view)
         # Claude subscription usage readout, tucked under the session list.
-        self.usage_panel = UsagePanel()
+        self.usage_panel = UsagePanel(store.state)
         self.usage_panel.set_visible(bool(store.state.get_setting("show_usage_panel")))
         self.append(self.usage_panel)
         self._collapsed: set[tuple] = set()

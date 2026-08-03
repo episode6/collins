@@ -76,6 +76,7 @@ DEFAULT_SETTINGS = {
     "show_folder_path": False,  # show each session's project folder path in the sidebar
     "project_icon_size": 16,  # px size of the sidebar's project/folder (and group) icons
     "show_usage_panel": True,  # Claude subscription usage bars under the session list
+    "usage_panel_collapsed": False,  # usage panel folded down to its heading line
     "footer_apps": [],  # desktop-file IDs of apps launchable from each tab's footer
     "caffeine_on_launch": False,  # start with Caffeine Mode on (inhibit suspend/idle)
     "caffeine_launch_timer": "indefinite",  # shut-off timer armed at launch (see caffeine.py)

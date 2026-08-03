@@ -419,6 +419,16 @@ popover.menu button.open-with-row:hover {
 .usage-panel button.usage-refresh image {
   -gtk-icon-size: 13px;
 }
+/* The heading itself is the collapse/expand toggle: strip the button chrome
+   so it still reads as the plain caption heading it replaced, with just the
+   caret giving the affordance away. */
+.usage-panel button.usage-toggle {
+  padding: 0 2px;
+  min-height: 20px;
+}
+.usage-panel button.usage-toggle image {
+  -gtk-icon-size: 13px;
+}
 .usage-panel progressbar.usage-bar trough,
 .usage-panel progressbar.usage-bar progress {
   min-height: 6px;
