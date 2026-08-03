@@ -46,6 +46,7 @@ from .linkpatterns import (  # noqa: E402
     URL_PATTERN,
     resolve_file_reference,
     resolve_wrapped_reference,
+    token_at_column,
 )
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
@@ -182,6 +183,19 @@ def _setup_links(terminal: Vte.Terminal) -> None:
                     match = "http://" + match
             uri = match
         if not uri:
+            # A wrapped reference's continuation fragment often contains no
+            # slash (`o.py:7)`) and so matches nothing — the half holding
+            # the file *name* offers no click candidate at all. Hand the
+            # stitcher the raw token under the pointer instead; its geometry
+            # gates and existence check keep prose clicks inert.
+            resolved = _resolve_wrapped_at(
+                terminal, None, x, y, _reference_roots(terminal)
+            )
+            if resolved is None:
+                return
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            path, line, col = resolved
+            _open_file_reference(terminal, path, line, col)
             return
         if kind == "file":
             roots = _reference_roots(terminal)
@@ -191,7 +205,7 @@ def _setup_links(terminal: Vte.Terminal) -> None:
             # directory prefix), and the stitched whole is the truer
             # reading. The stitcher only ever returns geometry-gated,
             # existence-checked joins, so unwrapped references skip it fast.
-            resolved = _resolve_wrapped_at(terminal, uri, y, roots)
+            resolved = _resolve_wrapped_at(terminal, uri, x, y, roots)
             if resolved is None:
                 resolved = resolve_file_reference(uri, roots)
             if resolved is None:
@@ -241,15 +255,22 @@ def _reference_roots(terminal: Vte.Terminal) -> list[str | None]:
 
 
 def _resolve_wrapped_at(
-    terminal: Vte.Terminal, candidate: str, y: float, roots: list[str | None]
+    terminal: Vte.Terminal,
+    candidate: str | None,
+    x: float,
+    y: float,
+    roots: list[str | None],
 ) -> tuple[str, int | None, int | None] | None:
     """Stitch a failed candidate with its neighbour rows (see linkpatterns.
-    resolve_wrapped_reference) — this half only turns the click's y into a
-    buffer row and fetches row texts. The clicked row is probed with a ±1
-    slop: the y→row division ignores VTE's inner border, and the stitcher's
+    resolve_wrapped_reference) — this half only turns the click's x/y into a
+    buffer cell and fetches row texts. With *candidate* None (nothing under
+    the pointer matched at all), the whitespace-delimited token at the cell
+    stands in as the candidate. The clicked row is probed with a ±1 slop:
+    the y→row division ignores VTE's inner border, and the stitcher's
     geometry gates reject the wrong rows anyway."""
     ch = terminal.get_char_height()
-    if ch <= 0:
+    cw = terminal.get_char_width()
+    if ch <= 0 or cw <= 0:
         return None
     vadj = terminal.get_vadjustment()
     scroll = vadj.get_value() if vadj is not None else 0.0
@@ -257,6 +278,7 @@ def _resolve_wrapped_at(
         row = int((scroll + y) // ch)
     else:
         row = int(scroll) + int(y // ch)
+    col = int(x // cw)
 
     def row_text(r: int) -> str:
         if r < 0:
@@ -270,9 +292,13 @@ def _resolve_wrapped_at(
         return (text or "").rstrip("\n")
 
     for r in (row, row - 1, row + 1):
+        text = row_text(r)
+        cand = candidate if candidate is not None else token_at_column(text, col)
+        if not cand:
+            continue
         resolved = resolve_wrapped_reference(
-            candidate,
-            row_text(r),
+            cand,
+            text,
             [row_text(r - 1), row_text(r - 2)],
             [row_text(r + 1), row_text(r + 2), row_text(r + 3)],
             roots,

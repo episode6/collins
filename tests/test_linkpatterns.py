@@ -14,6 +14,7 @@ from collins.linkpatterns import (
     URL_PATTERN,
     resolve_file_reference,
     resolve_wrapped_reference,
+    token_at_column,
 )
 
 _RX = re.compile(URL_PATTERN)
@@ -313,3 +314,58 @@ def test_prose_at_row_start_is_not_poisoned_by_row_above(project) -> None:
         "collins/nope.py", "  collins/nope.py here", ["ends with word"], [], [str(project)]
     )
     assert resolved is None
+
+
+def test_stitch_upward_sheds_prefix_glued_to_head(project) -> None:
+    # Claude Code's tool-call format wraps as `⏺ Read(/…/fo` + `o.py)`: the
+    # row above contributes a token with `Read(` still attached, which must
+    # be shed for the join to match.
+    path = str(project / "collins" / "foo.py")
+    head, tail = _split(path, 20)
+    resolved = resolve_wrapped_reference(
+        tail, f"      {tail})", [f"⏺ Read({head}"], [], []
+    )
+    assert resolved == (path, None, None)
+
+
+def test_stitch_slashless_token_candidate(project) -> None:
+    # The continuation fragment of a wrapped path often has no slash at all
+    # (`o.py:7)`), so it is never a FILE_PATTERN match — the raw token under
+    # the pointer stands in as the candidate and still stitches, keeping the
+    # line suffix and shedding the trailing paren.
+    path = str(project / "collins" / "foo.py")
+    head, tail = _split(path, len(path) - 4)  # tail = "o.py", no slash
+    resolved = resolve_wrapped_reference(
+        f"{tail}:7)", f"      {tail}:7)", [f"⏺ Read({head}"], [], []
+    )
+    assert resolved == (path, 7, None)
+
+
+def test_stitch_must_reach_into_the_candidate(project) -> None:
+    # A token candidate leading with a boundary character (`("x`) must not
+    # resolve to whatever existing path the row above happened to end with —
+    # the join has to cover text the click actually touched.
+    above = f"see {project / 'collins'}"
+    resolved = resolve_wrapped_reference('("x', '("x', [above], [], [])
+    assert resolved is None
+
+
+def test_stitch_token_candidate_with_glued_prefix(project) -> None:
+    # Clicking the head fragment of `⏺ Update(collins` + `/foo.py)`: the head
+    # has no slash so it matches nothing, and the token under the pointer
+    # arrives with `Update(` glued on. The search sheds it and the join still
+    # resolves.
+    resolved = resolve_wrapped_reference(
+        "Update(collins", "⏺ Update(collins", [], ["      /foo.py)"], [str(project)]
+    )
+    assert resolved == (str(project / "collins" / "foo.py"), None, None)
+
+
+def test_token_at_column() -> None:
+    text = "  wrote o.py:7) done"
+    assert token_at_column(text, 8) == "o.py:7)"
+    assert token_at_column(text, 14) == "o.py:7)"
+    assert token_at_column(text, 1) is None  # whitespace
+    assert token_at_column(text, 99) is None  # past the end
+    assert token_at_column(text, -1) is None
+    assert token_at_column(text, 17) == "done"

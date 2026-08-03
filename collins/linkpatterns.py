@@ -99,6 +99,27 @@ def resolve_file_reference(
     return None
 
 
+def token_at_column(text: str, col: int) -> str | None:
+    """The whitespace-delimited token covering column *col* of a screen row,
+    or None over whitespace / past the end of the text.
+
+    A wrapped reference's continuation fragment frequently contains no slash
+    (`o.py:7)`), so it matches nothing and offers no click candidate at all —
+    yet it is the half holding the file *name*, the natural place to click.
+    The raw token under the pointer stands in as the candidate; the stitcher's
+    geometry gates and existence check keep arbitrary prose tokens inert.
+    """
+    if col < 0 or col >= len(text) or text[col].isspace():
+        return None
+    start = col
+    while start > 0 and not text[start - 1].isspace():
+        start -= 1
+    end = col + 1
+    while end < len(text) and not text[end].isspace():
+        end += 1
+    return text[start:end]
+
+
 def resolve_wrapped_reference(
     candidate: str,
     row_text: str,
@@ -148,10 +169,20 @@ def resolve_wrapped_reference(
         for down in reversed(downs):
             if not up and not down:
                 continue  # the bare candidate already failed
-            m = _FILE_RX.match(up + candidate + down)
-            if m is None:
-                continue
-            resolved = resolve_file_reference(m.group(0), roots)
-            if resolved is not None:
-                return resolved
+            joined = up + candidate + down
+            # The emitter wraps whatever surrounds the path along with it,
+            # so a contributed token — or a token-derived candidate — often
+            # arrives glued to a prefix: `Read(/a/b/c` is Claude Code's own
+            # tool-call format. Searching (rather than an anchored match)
+            # sheds that junk wherever it sits; the span guards keep only
+            # hits that overlap the clicked fragment itself, so a join never
+            # resolves text the click didn't touch.
+            for m in _FILE_RX.finditer(joined):
+                if m.end() <= len(up):
+                    continue
+                if m.start() >= len(up) + len(candidate):
+                    break
+                resolved = resolve_file_reference(m.group(0), roots)
+                if resolved is not None:
+                    return resolved
     return None
