@@ -7,7 +7,8 @@ weekly all-models, weekly model-scoped) plus extra-usage credits when the
 account has them. The panel owns its own poller: fetches run on a daemon
 thread and marshal back via ``GLib.idle_add``, and the timer is gated on the
 widget being mapped (same pattern as the terminal footer's cwd poll), so a
-hidden sidebar or disabled panel costs nothing. Polling also pauses while
+hidden sidebar or a disabled or collapsed panel costs nothing. Polling also
+pauses while
 the window is suspended (minimized / fully hidden, GTK >= 4.12) or the
 session is locked (screensaver ``ActiveChanged`` over D-Bus).
 """
@@ -21,6 +22,7 @@ from gi.repository import Gio, GLib, Gtk
 
 from . import usage
 from .i18n import _
+from .state import AppState
 
 _POLL_INTERVAL_S = 300
 # A sidebar toggle remaps the panel; don't re-fetch if the data is this fresh.
@@ -119,21 +121,35 @@ class _BarRow(Gtk.Box):
 class UsagePanel(Gtk.Box):
     """Compact Claude usage readout for the bottom of the session sidebar."""
 
-    def __init__(self) -> None:
+    def __init__(self, state: AppState | None = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("usage-panel")
+        self._state = state
+        self._collapsed = bool(state.get_setting("usage_panel_collapsed")) if state else False
 
+        # The whole heading is the collapse/expand toggle: a caret plus the
+        # "Claude usage" label inside one flat button (styled in app.py to
+        # keep looking like the plain caption heading it replaced).
+        self._caret = Gtk.Image(valign=Gtk.Align.CENTER)
+        self._caret.add_css_class("dim-label")
         title = Gtk.Label(label=_("Claude usage"), xalign=0.0, hexpand=True)
         title.add_css_class("caption-heading")
+        title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        title_box.append(self._caret)
+        title_box.append(title)
+        toggle = Gtk.Button(child=title_box, hexpand=True)
+        toggle.add_css_class("flat")
+        toggle.add_css_class("usage-toggle")
+        toggle.connect("clicked", lambda *_a: self._set_collapsed(not self._collapsed))
         self._spinner = Gtk.Spinner()
-        refresh = Gtk.Button(icon_name="view-refresh-symbolic")
+        self._refresh_btn = refresh = Gtk.Button(icon_name="view-refresh-symbolic")
         refresh.add_css_class("flat")
         refresh.add_css_class("usage-refresh")
         refresh.set_valign(Gtk.Align.CENTER)
         refresh.set_tooltip_text(_("Refresh usage"))
         refresh.connect("clicked", lambda *_a: self._refresh())
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        header.append(title)
+        header.append(toggle)
         header.append(self._spinner)
         header.append(refresh)
         self.append(header)
@@ -173,8 +189,24 @@ class UsagePanel(Gtk.Box):
         self._locked = False  # session screen locked
         self._watching_window = False
         self._watch_screen_lock()
-        # Poll only while on screen; resumes automatically on the next map.
-        self.connect("map", lambda *_a: self._on_map())
+        self._set_collapsed(self._collapsed)
+        # Poll only while the bars are on screen — collapsing hides the stack,
+        # so a collapsed panel doesn't fetch; expanding maps it again and
+        # resumes (refreshing right away if the data has gone stale).
+        self._stack.connect("map", lambda *_a: self._on_map())
+
+    # -- collapsing --------------------------------------------------------
+
+    def _set_collapsed(self, collapsed: bool) -> None:
+        self._collapsed = collapsed
+        self._caret.set_from_icon_name(
+            "pan-end-symbolic" if collapsed else "pan-down-symbolic"
+        )
+        self._stack.set_visible(not collapsed)
+        self._refresh_btn.set_visible(not collapsed)
+        if self._state is not None and \
+                bool(self._state.get_setting("usage_panel_collapsed")) != collapsed:
+            self._state.set_setting("usage_panel_collapsed", collapsed)
 
     # -- polling -----------------------------------------------------------
 
@@ -225,7 +257,7 @@ class UsagePanel(Gtk.Box):
             if self._source is not None:
                 GLib.source_remove(self._source)
                 self._source = None
-        elif self.get_mapped():
+        elif self._stack.get_mapped():
             self._start()
 
     def _start(self) -> None:
@@ -238,9 +270,10 @@ class UsagePanel(Gtk.Box):
             self._source = GLib.timeout_add_seconds(_POLL_INTERVAL_S, self._tick)
 
     def _tick(self) -> bool:
-        # Hidden sidebar/panel, minimized window, or locked screen → stop;
-        # map / notify::suspended / ActiveChanged restarts the timer.
-        if not self.get_mapped() or self._paused():
+        # Hidden sidebar/panel, collapsed panel, minimized window, or locked
+        # screen → stop; map / notify::suspended / ActiveChanged restarts the
+        # timer.
+        if not self._stack.get_mapped() or self._paused():
             self._source = None
             return GLib.SOURCE_REMOVE
         for row in self._bar_rows:
