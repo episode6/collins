@@ -110,6 +110,9 @@ class SessionStore(GObject.Object):
         self._last_sessions: list[Session] = []
         self._first_scan = True
         self._regen_pending: set[str] = set()  # ids whose regen should replace a manual name
+        # Last-seen pr_title_sessions value, so apply_pr_titles sweeps only
+        # when the setting flips on rather than on every preferences apply.
+        self._pr_titles_on = bool(state.get_setting("pr_title_sessions"))
         self._monitors: list[Gio.FileMonitor] = []
         self._refresh_queued = False
         self._scanning = False
@@ -461,8 +464,16 @@ class SessionStore(GObject.Object):
 
     def apply_pr_titles(self) -> None:
         """The catch-up half of pr_title_sessions: every known session at
-        once, for when the setting is switched on with PRs already saved."""
-        if not self.state.get_setting("pr_title_sessions"):
+        once, for when the setting is switched on with PRs already saved.
+
+        Called on every preferences apply — that's the only signal there is —
+        so the off→on flip is detected here: a save that didn't just flip the
+        setting returns without walking a thing. While the setting stays on,
+        apply_pr_title at each detection site is what keeps names current.
+        """
+        on = bool(self.state.get_setting("pr_title_sessions"))
+        was_on, self._pr_titles_on = self._pr_titles_on, on
+        if not on or was_on:
             return
         names: dict[str, str] = {}
         for session_id in self.sessions:

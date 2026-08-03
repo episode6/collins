@@ -588,3 +588,25 @@ def test_apply_pr_titles_sweeps_saved_prs_when_switched_on(store):
     store.apply_pr_titles()
     assert store.state.get_generated_name(first.session_id) == "Add the thing"
     assert store.state.get_generated_name(second.session_id) is None
+
+
+def test_apply_pr_titles_sweeps_only_on_the_off_to_on_flip(store):
+    """Preferences apply calls the sweep on every save; only the save that
+    flips the setting on walks the sessions — steady-state names are the
+    per-detection apply_pr_title's job."""
+    first = store._last_sessions[0]
+    store.state.set_setting("pr_title_sessions", True)
+    store.apply_pr_titles()  # off at construction, on now: the flip
+
+    # A list saved behind the sweep's back: a later steady-state apply (the
+    # user changed the font, say) must not pick it up.
+    store.state.set_session_prs(first.session_id, [_titled_pr(55, "Add the thing")])
+    store.apply_pr_titles()
+    assert store.state.get_generated_name(first.session_id) is None
+
+    # Off and back on is a fresh flip, and a fresh catch-up.
+    store.state.set_setting("pr_title_sessions", False)
+    store.apply_pr_titles()
+    store.state.set_setting("pr_title_sessions", True)
+    store.apply_pr_titles()
+    assert store.state.get_generated_name(first.session_id) == "Add the thing"
