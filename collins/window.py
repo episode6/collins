@@ -978,12 +978,20 @@ class MainWindow(Adw.ApplicationWindow):
             "trash-session": self._on_trash_session,
             "open-folder": self._on_open_folder,
             "open-folder-terminal": self._on_open_folder_terminal,
-            "open-in-editor": lambda _a, p: self._open_in_editor(p.get_string()),
         }
         for name, callback in per_session.items():
             action = Gio.SimpleAction(name=name, parameter_type=GLib.VariantType("s"))
             action.connect("activate", callback)
             self.add_action(action)
+
+        # (path, line, col) with line/col 1-based and 0 meaning "no cursor" —
+        # clicked file references carry a position, tool chips and the
+        # lightbox handoff pass zeros.
+        open_in_editor = Gio.SimpleAction(
+            name="open-in-editor", parameter_type=GLib.VariantType("(sii)")
+        )
+        open_in_editor.connect("activate", self._on_open_in_editor)
+        self.add_action(open_in_editor)
 
         # The two-part targets: (desktop-file ID, folder), and the session plus
         # the prompt a row's PR menu wants typed into it.
@@ -2939,11 +2947,16 @@ class MainWindow(Adw.ApplicationWindow):
         self._quickopen.connect("closed", lambda *_: setattr(self, "_quickopen", None))
         self._quickopen.present(self)
 
-    def _open_in_editor(self, path: str) -> None:
-        """win.open-in-editor(path): the current terminal tab's editor when the
-        file belongs to its project, else whichever tab's project it does
-        belong to (chat tabs have no editor, but their tool chips fire this).
-        Nowhere to open it → quietly nothing, like the other editor actions."""
+    def _on_open_in_editor(self, _action, param: GLib.Variant) -> None:
+        path, line, col = param.unpack()
+        self._open_in_editor(path, [line - 1, col] if line > 0 else None)
+
+    def _open_in_editor(self, path: str, cursor: list | None = None) -> None:
+        """win.open-in-editor(path, line, col): the current terminal tab's
+        editor when the file belongs to its project, else whichever tab's
+        project it does belong to (chat tabs have no editor, but their tool
+        chips fire this). Nowhere to open it → quietly nothing, like the
+        other editor actions."""
         tab = self._current_terminal_tab()
         if tab is None or not tab.can_open_in_editor(path):
             tab = None
@@ -2955,15 +2968,15 @@ class MainWindow(Adw.ApplicationWindow):
             if tab is None:
                 return
             self.tab_view.set_selected_page(self.tab_view.get_page(tab))
-        self._open_in_tab_editor(tab, path)
+        self._open_in_tab_editor(tab, path, cursor)
 
-    def _open_in_tab_editor(self, tab: TerminalTab, path: str) -> None:
+    def _open_in_tab_editor(self, tab: TerminalTab, path: str, cursor: list | None = None) -> None:
         win = self._editor_windows.get(tab)
         if win is not None:
             win.present()  # the pane lives in its own window right now
         elif not tab.editor_visible and self._editor_opens_popped_out():
             self._pop_out_editor(tab)
-        tab.open_in_editor(path)
+        tab.open_in_editor(path, cursor)
 
     # -- popped-out editor windows --------------------------------------------
 

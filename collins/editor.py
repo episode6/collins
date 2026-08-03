@@ -347,6 +347,12 @@ class EditorPane(Gtk.Box):
         existing = self._pages.get(key)
         if existing is not None:
             self._tab_view.set_selected_page(existing)
+            if restore_cursor:
+                # A clicked `path:line` reference re-targets a page that is
+                # already open (image pages have no buffer and stay put).
+                opened = self._open.get(key)
+                if opened is not None:
+                    self._apply_cursor(opened, restore_cursor)
             return
         # Defense in depth behind the tree's own symlink filtering: every
         # caller (tree activation, session restore, future pop-out) funnels
@@ -609,7 +615,23 @@ class EditorPane(Gtk.Box):
         _found, it = opened.buffer.get_iter_at_line(max(0, min(int(line), n_lines - 1)))
         it.set_line_offset(max(0, min(int(offset), it.get_chars_in_line())))
         opened.buffer.place_cursor(it)
-        opened.view.scroll_to_iter(it, 0.1, False, 0, 0)
+        # On a freshly loaded buffer, line heights are estimates until the
+        # view's validation idles run: scroll_to_iter silently stays at the
+        # top, and even scroll_to_mark's pending scroll lands hundreds of
+        # lines short on a large file. Scroll now for the cheap case, then
+        # re-issue at PRIORITY_LOW — validation runs at a far higher idle
+        # priority, so by the time the re-scroll fires the heights are exact
+        # (a clicked `path:602` reference must actually land on line 602).
+        opened.view.scroll_to_mark(opened.buffer.get_insert(), 0.1, False, 0.0, 0.0)
+        view = opened.view
+
+        def rescroll() -> bool:
+            buffer = view.get_buffer()
+            if buffer is not None:
+                view.scroll_to_mark(buffer.get_insert(), 0.1, False, 0.0, 0.0)
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(rescroll, priority=GLib.PRIORITY_LOW)
 
     # -- notices ---------------------------------------------------------------
 
