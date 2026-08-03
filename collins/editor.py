@@ -347,6 +347,12 @@ class EditorPane(Gtk.Box):
         existing = self._pages.get(key)
         if existing is not None:
             self._tab_view.set_selected_page(existing)
+            if restore_cursor:
+                # A clicked `path:line` reference re-targets a page that is
+                # already open (image pages have no buffer and stay put).
+                opened = self._open.get(key)
+                if opened is not None:
+                    self._apply_cursor(opened, restore_cursor)
             return
         # Defense in depth behind the tree's own symlink filtering: every
         # caller (tree activation, session restore, future pop-out) funnels
@@ -607,7 +613,11 @@ class EditorPane(Gtk.Box):
         _found, it = opened.buffer.get_iter_at_line(max(0, min(int(line), n_lines - 1)))
         it.set_line_offset(max(0, min(int(offset), it.get_chars_in_line())))
         opened.buffer.place_cursor(it)
-        opened.view.scroll_to_iter(it, 0.1, False, 0, 0)
+        # scroll_to_iter uses line heights computed in an idle handler, so on
+        # a freshly loaded buffer it can silently stay at the top; a mark is
+        # re-scrolled after validation (a clicked `path:42` reference must
+        # actually land the view on line 42).
+        opened.view.scroll_to_mark(opened.buffer.get_insert(), 0.1, False, 0.0, 0.0)
 
     # -- notices ---------------------------------------------------------------
 

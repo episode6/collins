@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-03. Full change history: git log for this file.
 
 """A chat tab backed by a live headless `claude -p` stream-json session.
 
@@ -267,7 +267,7 @@ class ChatSessionTab(Gtk.Box):
         return ""
 
     def _open_in_editor(self, path: str) -> None:
-        self.activate_action("win.open-in-editor", GLib.Variant("s", path))
+        self.activate_action("win.open-in-editor", GLib.Variant("(sii)", (path, 0, 0)))
 
     # -- permissions -----------------------------------------------------------
 

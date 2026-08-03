@@ -41,7 +41,7 @@ from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch, has_changes  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 from .lightbox import present_image_lightbox  # noqa: E402
-from .linkpatterns import URL_PATTERN  # noqa: E402
+from .linkpatterns import FILE_PATTERN, URL_PATTERN, resolve_file_reference  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
 from .prstatus import (  # noqa: E402
@@ -141,51 +141,65 @@ def _setup_links(terminal: Vte.Terminal) -> None:
     """Give links GNOME Terminal's behaviour: underline on hover, open on
     Ctrl+click.
 
-    Covers both kinds of link a terminal shows: OSC 8 hyperlinks (what agent
+    Covers three kinds of link a terminal shows: OSC 8 hyperlinks (what agent
     CLIs emit for file references — VTE ignores the escape entirely until
-    allow-hyperlink is switched on) and plain URLs in the output, matched by
-    regex the way GNOME Terminal matches them.
+    allow-hyperlink is switched on), plain URLs in the output matched by regex
+    the way GNOME Terminal matches them, and path-shaped file references
+    (`collins/foo.py:12`) matched by a second regex and validated against the
+    filesystem only at click time — VTE has no per-match callback, so the
+    hover underline can't know whether the file exists, but a click on a
+    candidate that resolves nowhere falls through to the terminal unclaimed
+    and costs the user nothing.
     """
     terminal.set_allow_hyperlink(True)
-    try:
-        regex = Vte.Regex.new_for_match(
-            URL_PATTERN, len(URL_PATTERN.encode()), _PCRE2_MULTILINE
-        )
-        terminal.match_set_cursor_name(terminal.match_add_regex(regex, 0), "pointer")
-    except GLib.Error:
-        regex = None  # VTE built without PCRE2: OSC 8 links still work
-
-    def on_launched(launcher: Gtk.UriLauncher | Gtk.FileLauncher, result) -> None:
+    tag_kinds: dict[int, str] = {}
+    for pattern, kind in ((URL_PATTERN, "url"), (FILE_PATTERN, "file")):
         try:
-            launcher.launch_finish(result)
+            regex = Vte.Regex.new_for_match(
+                pattern, len(pattern.encode()), _PCRE2_MULTILINE
+            )
         except GLib.Error:
-            pass  # no handler for the scheme/type, or the user dismissed the chooser
+            continue  # VTE built without PCRE2: OSC 8 links still work
+        tag = terminal.match_add_regex(regex, 0)
+        terminal.match_set_cursor_name(tag, "pointer")
+        tag_kinds[tag] = kind
 
     def on_pressed(gesture: Gtk.GestureClick, _n_press, x: float, y: float) -> None:
         if not gesture.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
             return
+        kind = "url"
         uri = terminal.check_hyperlink_at(x, y)
-        if uri is None and regex is not None:
-            match, _tag = terminal.check_match_at(x, y)
-            if match is not None and match.startswith("www."):
-                match = "http://" + match
+        if uri is None and tag_kinds:
+            match, tag = terminal.check_match_at(x, y)
+            if match is not None:
+                kind = tag_kinds.get(tag, "url")
+                if kind == "url" and match.startswith("www."):
+                    match = "http://" + match
             uri = match
         if not uri:
             return
+        if kind == "file":
+            resolved = resolve_file_reference(uri, _reference_roots(terminal))
+            if resolved is None:
+                return  # over-matched prose: leave the click to the terminal
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            path, line, col = resolved
+            _open_file_reference(terminal, path, line, col)
+            return
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         if uri.startswith("file:"):
+            # A file: URI (or OSC 8 file: hyperlink) behaves exactly like a
+            # matched path reference — lightbox for images, editor inside
+            # the project, default app otherwise — however the CLI happened
+            # to emit it. path_from_file_uri sheds any #L10-style fragment.
             path = editorfiles.path_from_file_uri(uri)
-            if path is not None and editorfiles.is_image_path(path):
-                _present_image(terminal, path)
+            if path is not None:
+                _open_file_reference(terminal, path, None, None)
                 return
-            # Open the file itself in its default app (what xdg-open does).
-            # UriLauncher would hand a file: URI to the portal, which only
-            # reveals it in the file manager. Gio.File also sheds any line
-            # fragment the emitter tacked on.
             launcher = Gtk.FileLauncher.new(Gio.File.new_for_uri(uri))
         else:
             launcher = Gtk.UriLauncher.new(uri)
-        launcher.launch(terminal.get_root(), None, on_launched)
+        launcher.launch(terminal.get_root(), None, _on_link_launched)
 
     # Capture phase, so Ctrl+click opens the link even when the running app
     # has turned on mouse reporting (same trick as the context menu).
@@ -193,6 +207,49 @@ def _setup_links(terminal: Vte.Terminal) -> None:
     click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
     click.connect("pressed", on_pressed)
     terminal.add_controller(click)
+
+
+def _on_link_launched(launcher: Gtk.UriLauncher | Gtk.FileLauncher, result) -> None:
+    try:
+        launcher.launch_finish(result)
+    except GLib.Error:
+        pass  # no handler for the scheme/type, or the user dismissed the chooser
+
+
+def _reference_roots(terminal: Vte.Terminal) -> list[str | None]:
+    """Where a relative file reference may be rooted: the running agent's cwd
+    first (Claude often works from a worktree or subdirectory), then the
+    tab's project root. Trying both catches the common cases cheaply."""
+    tab = terminal.get_ancestor(TerminalTab)
+    if tab is None:
+        return []
+    return [tab.current_agent_cwd(), tab.editor_root]
+
+
+def _open_file_reference(
+    terminal: Vte.Terminal, path: str, line: int | None, col: int | None
+) -> None:
+    """Open a resolved file reference the way the reference deserves: images
+    in the lightbox (any readable path, even outside the project — its own
+    "Open in Editor" button handles the editor handoff), files inside the
+    clicking tab's project in that tab's editor at the referenced line, and
+    everything else — directories, outside-project files, no editor — in the
+    default app, as `file:` URIs always opened."""
+    if os.path.isfile(path):
+        if editorfiles.is_image_path(path):
+            _present_image(terminal, path)
+            return
+        tab = terminal.get_ancestor(TerminalTab)
+        if tab is not None and tab.can_open_in_editor(path):
+            # The window's action, not the tab directly: it also presents a
+            # popped-out editor window and applies the pop-out-on-small-
+            # screen policy. Line/col travel 1-based; 0 means none.
+            terminal.activate_action(
+                "win.open-in-editor", GLib.Variant("(sii)", (path, line or 0, col or 0))
+            )
+            return
+    launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(path))
+    launcher.launch(terminal.get_root(), None, _on_link_launched)
 
 
 def _present_image(terminal: Vte.Terminal, path: str) -> None:
@@ -208,7 +265,9 @@ def _present_image(terminal: Vte.Terminal, path: str) -> None:
     if can_edit:
 
         def on_open() -> None:
-            terminal.activate_action("win.open-in-editor", GLib.Variant("s", path))
+            terminal.activate_action(
+                "win.open-in-editor", GLib.Variant("(sii)", (path, 0, 0))
+            )
 
     present_image_lightbox(
         terminal, path, can_open_in_editor=can_edit, on_open_in_editor=on_open
@@ -2369,15 +2428,17 @@ class TerminalTab(Gtk.Box):
         refuse anything outside; this lets the window pick a better tab)."""
         return self._editor is not None and editorfiles.is_inside(self._editor.root, path)
 
-    def open_in_editor(self, path: str | Path) -> None:
+    def open_in_editor(self, path: str | Path, cursor: list | None = None) -> None:
         """Open *path* in this tab's editor, revealing the panel if it is
-        closed. While the pane is popped out its window already shows it —
-        presenting that window is the caller's job (it owns the windows)."""
+        closed, optionally placing the cursor (*cursor* is open_file's
+        restore_cursor: [0-based line, char offset]). While the pane is
+        popped out its window already shows it — presenting that window is
+        the caller's job (it owns the windows)."""
         if self._editor is None:
             return
         if not self._editor_detached and not self.editor_visible:
             self.show_editor()
-        self._editor.open_file(path)
+        self._editor.open_file(path, restore_cursor=cursor)
         self._editor.focus_default()
 
     def set_editor_width_lookup(self, lookup) -> None:
