@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-03. Full change history: git log for this file.
 
 import json
 
@@ -88,6 +88,13 @@ def test_defaults_for_unknown_settings(app_state):
     state = app_state.AppState()
     assert state.get_setting("color_scheme") == "system"
     assert state.get_setting("font") == ""
+
+
+def test_pr_title_sessions_setting(app_state):
+    state = app_state.AppState()
+    assert state.get_setting("pr_title_sessions") is False  # opt-in only
+    state.set_setting("pr_title_sessions", True)
+    assert app_state.AppState().get_setting("pr_title_sessions") is True
 
 
 def test_caffeine_on_launch_setting(app_state):

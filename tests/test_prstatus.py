@@ -25,6 +25,7 @@ from collins.prstatus import (
     invalidate,
     menu_name,
     merge_ordered,
+    newest_title,
     parse_pr_link,
     refresh,
     resync,
@@ -828,6 +829,31 @@ def test_untrustworthy_records_are_dropped(record):
 
 def test_from_records_tolerates_junk_in_place_of_a_list():
     assert from_records({"number": 55, "url": URL}) == []
+
+
+def test_newest_title_is_the_last_titled_records():
+    """Two titled PRs: the later one is what the session gets renamed to."""
+    records = [
+        {"number": 40, "url": "https://github.com/episode6/collins/pull/40", "title": "Old work"},
+        {"number": 55, "url": URL, "title": "New work"},
+    ]
+    assert newest_title(records) == "New work"
+
+
+def test_newest_title_skips_untitled_records():
+    """A fresh pr-link has no title until gh answers; it must not blank the
+    name a titled predecessor already provided."""
+    records = [
+        {"number": 40, "url": "https://github.com/episode6/collins/pull/40", "title": "Old work"},
+        {"number": 55, "url": URL},
+    ]
+    assert newest_title(records) == "Old work"
+
+
+def test_newest_title_none_without_any_title():
+    assert newest_title([{"number": 55, "url": URL}]) is None
+    assert newest_title([]) is None
+    assert newest_title("junk") is None
 
 
 # -- merge_ordered (saved list + transcript links) --------------------------

@@ -425,6 +425,19 @@ def from_records(records: object) -> list[PullRequest]:
     return [pr for record in records if (pr := from_record(record)) is not None]
 
 
+def newest_title(records: object) -> str | None:
+    """The newest saved PR's title, or None while no saved PR has one.
+
+    What the pr_title_sessions setting renames a session to (see
+    SessionStore.apply_pr_title). A saved list is oldest-first, so the last
+    titled entry is the PR the session opened most recently; a PR whose title
+    hasn't arrived from `gh` yet (a bare pr-link, say) contributes nothing
+    until a refresh lands one.
+    """
+    titles = [pr.title for pr in from_records(records) if pr.title]
+    return titles[-1] if titles else None
+
+
 def _load_cache() -> dict:
     """The whole gh PR status cache, or {} when it is missing or unusable."""
     try:

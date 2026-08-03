@@ -525,3 +525,88 @@ def test_rows_representing_holds_a_mid_chain_fork_during_a_second_handoff(store)
     store.record_forward(first_fork, second_fork)
     assert store.rows_representing(first_fork) == [original]
     assert store.rows_representing(second_fork) == [original]
+
+
+# -- apply_pr_title (the pr_title_sessions setting) -------------------------
+
+
+def _titled_pr(number, title=None):
+    record = {"number": number, "url": f"https://github.com/episode6/collins/pull/{number}"}
+    if title:
+        record["title"] = title
+    return record
+
+
+def test_apply_pr_title_is_off_by_default(store):
+    session_id = store._last_sessions[0].session_id
+    store.state.set_session_prs(session_id, [_titled_pr(55, "Add the thing")])
+    store.apply_pr_title(session_id)
+    assert store.state.get_generated_name(session_id) is None
+
+
+def test_apply_pr_title_renames_to_the_newest_titled_pr(store):
+    store.state.set_setting("pr_title_sessions", True)
+    session = store._last_sessions[0]
+    store.state.set_session_prs(
+        session.session_id, [_titled_pr(40, "Old work"), _titled_pr(55, "Add the thing")]
+    )
+    store.apply_pr_title(session.session_id)
+    assert store.state.get_generated_name(session.session_id) == "Add the thing"
+    assert store.display_name(session) == "Add the thing"
+
+
+def test_apply_pr_title_waits_for_a_title(store):
+    """A bare pr-link record has no title until gh answers; nothing to do yet."""
+    store.state.set_setting("pr_title_sessions", True)
+    session_id = store._last_sessions[0].session_id
+    store.state.set_generated_name(session_id, "Auto title")
+    store.state.set_session_prs(session_id, [_titled_pr(55)])
+    store.apply_pr_title(session_id)
+    assert store.state.get_generated_name(session_id) == "Auto title"
+
+
+def test_apply_pr_title_loses_to_a_manual_rename(store):
+    store.state.set_setting("pr_title_sessions", True)
+    session = store._last_sessions[0]
+    store.rename(session.session_id, "My name")
+    store.state.set_session_prs(session.session_id, [_titled_pr(55, "Add the thing")])
+    store.apply_pr_title(session.session_id)
+    # The generated slot is written, but the manual name keeps winning.
+    assert store.state.get_generated_name(session.session_id) == "Add the thing"
+    assert store.display_name(session) == "My name"
+
+
+def test_apply_pr_titles_sweeps_saved_prs_when_switched_on(store):
+    """Turning the setting on retitles sessions whose PRs are already saved."""
+    first, second = store._last_sessions[0], store._last_sessions[1]
+    store.state.set_session_prs(first.session_id, [_titled_pr(55, "Add the thing")])
+    store.state.set_session_prs(second.session_id, [_titled_pr(56)])  # no title yet
+    store.apply_pr_titles()  # setting still off: a no-op
+    assert store.state.get_generated_name(first.session_id) is None
+
+    store.state.set_setting("pr_title_sessions", True)
+    store.apply_pr_titles()
+    assert store.state.get_generated_name(first.session_id) == "Add the thing"
+    assert store.state.get_generated_name(second.session_id) is None
+
+
+def test_apply_pr_titles_sweeps_only_on_the_off_to_on_flip(store):
+    """Preferences apply calls the sweep on every save; only the save that
+    flips the setting on walks the sessions — steady-state names are the
+    per-detection apply_pr_title's job."""
+    first = store._last_sessions[0]
+    store.state.set_setting("pr_title_sessions", True)
+    store.apply_pr_titles()  # off at construction, on now: the flip
+
+    # A list saved behind the sweep's back: a later steady-state apply (the
+    # user changed the font, say) must not pick it up.
+    store.state.set_session_prs(first.session_id, [_titled_pr(55, "Add the thing")])
+    store.apply_pr_titles()
+    assert store.state.get_generated_name(first.session_id) is None
+
+    # Off and back on is a fresh flip, and a fresh catch-up.
+    store.state.set_setting("pr_title_sessions", False)
+    store.apply_pr_titles()
+    store.state.set_setting("pr_title_sessions", True)
+    store.apply_pr_titles()
+    assert store.state.get_generated_name(first.session_id) == "Add the thing"
