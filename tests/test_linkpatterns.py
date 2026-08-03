@@ -361,6 +361,43 @@ def test_stitch_token_candidate_with_glued_prefix(project) -> None:
     assert resolved == (str(project / "collins" / "foo.py"), None, None)
 
 
+def test_stitch_downward_across_directory_boundary(project) -> None:
+    # The wrap can fall right after a slash: the row ends `…/collins/` but
+    # FILE_PATTERN refuses to end a match on `/`, so the candidate arrives
+    # without it. The shed slash must still join the fragments — without it
+    # the click "resolves" to the parent directory instead of the file.
+    path = str(project / "collins" / "foo.py")
+    head = str(project / "collins") + "/"
+    candidate = str(project / "collins")  # what the pattern hands the handler
+    resolved = resolve_wrapped_reference(
+        candidate, f"● {head} ", [], ["  foo.py and prose"], []
+    )
+    assert resolved == (path, None, None)
+
+
+def test_stitch_downward_across_hidden_dir_boundary(project) -> None:
+    # Same shape, wrap after `/.` (start of a dotfile/dot-directory): two
+    # shed characters seed the join.
+    (project / "collins" / ".hidden").mkdir()
+    (project / "collins" / ".hidden" / "bar.py").write_text("x\n")
+    path = str(project / "collins" / ".hidden" / "bar.py")
+    candidate = str(project / "collins")
+    resolved = resolve_wrapped_reference(
+        candidate, f"● {candidate}/. ", [], ["  hidden/bar.py:9, done"], []
+    )
+    assert resolved == (path, 9, None)
+
+
+def test_prose_hanging_punctuation_does_not_false_join(project) -> None:
+    # `collins/foo.py, and` — the comma is prose, not a wrap; the shed-run
+    # gate opens but the join `foo.py,and` resolves nowhere and the click
+    # falls back to the direct resolution of the candidate itself.
+    resolved = resolve_wrapped_reference(
+        "collins/foo.py", "  see collins/foo.py,", [], ["  and more"], [str(project)]
+    )
+    assert resolved is None
+
+
 def test_token_at_column() -> None:
     text = "  wrote o.py:7) done"
     assert token_at_column(text, 8) == "o.py:7)"
