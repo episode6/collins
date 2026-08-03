@@ -8,9 +8,8 @@ account has them. The panel owns its own poller: fetches run on a daemon
 thread and marshal back via ``GLib.idle_add``, and the timer is gated on the
 widget being mapped (same pattern as the terminal footer's cwd poll), so a
 hidden sidebar or a disabled or collapsed panel costs nothing. Polling also
-pauses while
-the window is suspended (minimized / fully hidden, GTK >= 4.12) or the
-session is locked (screensaver ``ActiveChanged`` over D-Bus).
+pauses while the window is suspended (minimized / fully hidden, GTK >= 4.12)
+or the session is locked (screensaver ``ActiveChanged`` over D-Bus).
 """
 
 from __future__ import annotations
