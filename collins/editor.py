@@ -104,6 +104,20 @@ class EditorPane(Gtk.Box):
         paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
         paned.set_wide_handle(True)
         paned.set_position(_TREE_INITIAL_WIDTH)
+        # The pane is built hidden (terminal.py shows it on demand), and a
+        # position set while the paned has no allocation is clamped away, so
+        # the tree came up squeezed to its minimum — icons with no room for
+        # names. Re-assert the default once, from an idle after the first
+        # map, when the real allocation exists; later maps leave whatever
+        # width the user has dragged it to. Same first-show race as the
+        # outer editor paned's apply-pending gate (see _apply_editor_width).
+        map_handler: list[int] = []
+
+        def _on_first_map(widget: Gtk.Paned) -> None:
+            widget.disconnect(map_handler[0])
+            GLib.idle_add(widget.set_position, _TREE_INITIAL_WIDTH)
+
+        map_handler.append(paned.connect("map", _on_first_map))
 
         self._tree = FileTree(self._root)
         self._tree.connect("open-file", lambda _t, path: self.open_file(path))

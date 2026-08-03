@@ -1,5 +1,5 @@
 """Tests for gitinfo: current_branch, which is pure filesystem parsing and
-needs no git, and has_changes, which is the one call that shells out to it."""
+needs no git, and has_changes/ignored_names, the calls that shell out to it."""
 
 import shutil
 import subprocess
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from collins.gitinfo import current_branch, has_changes
+from collins.gitinfo import current_branch, has_changes, ignored_names
 
 
 def make_repo(root: Path, head: str = "ref: refs/heads/main\n") -> Path:
@@ -179,3 +179,53 @@ def test_a_git_that_never_answers(repo, monkeypatch):
 
     monkeypatch.setattr("collins.gitinfo.subprocess.run", timeout)
     assert has_changes(repo) is False
+
+
+# -- ignored_names ------------------------------------------------------------
+
+
+@needs_git
+def test_ignored_entries_are_reported(repo):
+    (repo / ".gitignore").write_text("junk\nbuild/\n")
+    (repo / "junk").write_text("noise\n")
+    (repo / "build").mkdir()
+    assert ignored_names(repo, ["a.txt", "junk", "build", ".gitignore"]) == {"junk", "build"}
+
+
+@needs_git
+def test_ignores_apply_in_subdirectories(repo):
+    (repo / ".gitignore").write_text("*.log\n")
+    sub = repo / "sub"
+    sub.mkdir()
+    (sub / "x.log").write_text("noise\n")
+    (sub / "x.txt").write_text("real\n")
+    assert ignored_names(sub, ["x.log", "x.txt"]) == {"x.log"}
+
+
+@needs_git
+def test_nothing_ignored(repo):
+    """check-ignore exits 1 here, which is an answer, not a failure."""
+    assert ignored_names(repo, ["a.txt"]) == set()
+
+
+@needs_git
+def test_ignored_name_with_spaces(repo):
+    """-z framing keeps awkward filenames intact both ways."""
+    (repo / ".gitignore").write_text("with space\n")
+    assert ignored_names(repo, ["with space", "a.txt"]) == {"with space"}
+
+
+@needs_git
+def test_not_a_repository_means_nothing_ignored(tmp_path):
+    (tmp_path / "junk").write_text("noise\n")
+    assert ignored_names(tmp_path, ["junk"]) == set()
+
+
+def test_no_names_asks_nothing(repo):
+    assert ignored_names(repo, []) == set()
+    assert ignored_names(None, ["junk"]) == set()
+
+
+def test_ignored_names_without_git(repo, monkeypatch):
+    monkeypatch.setattr("collins.gitinfo.shutil.which", lambda _name: None)
+    assert ignored_names(repo, ["a.txt"]) == set()

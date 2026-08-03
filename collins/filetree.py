@@ -17,7 +17,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import editorfiles
+from . import editorfiles, filetypes, gitinfo
 from .i18n import _
 
 # How long after the last change in an expanded directory its row list is
@@ -31,11 +31,14 @@ class _Node(GObject.Object):
     """One row: a file or directory, never re-created for the same path
     while its parent directory is listed (see `_refresh_dir`'s splice)."""
 
-    def __init__(self, name: str, path: Path, is_dir: bool) -> None:
+    def __init__(self, name: str, path: Path, is_dir: bool, dim: bool = False) -> None:
         super().__init__()
         self.name = name
         self.path = path
         self.is_dir = is_dir
+        # Drawn at reduced opacity: a dotfile, or something git ignores —
+        # still openable, but visibly not part of the project's real content.
+        self.dim = dim
 
 
 class FileTree(Gtk.Box):
@@ -91,9 +94,11 @@ class FileTree(Gtk.Box):
     # -- population ----------------------------------------------------------
 
     def _fill_store(self, store: Gio.ListStore, directory: Path) -> None:
+        entries = editorfiles.list_dir(directory, self._show_hidden, root=self._root)
+        ignored = gitinfo.ignored_names(directory, [name for name, _ in entries])
         nodes = [
-            _Node(name, directory / name, is_dir)
-            for name, is_dir in editorfiles.list_dir(directory, self._show_hidden, root=self._root)
+            _Node(name, directory / name, is_dir, dim=name.startswith(".") or name in ignored)
+            for name, is_dir in entries
         ]
         store.splice(0, store.get_n_items(), nodes)
 
@@ -171,7 +176,13 @@ class FileTree(Gtk.Box):
         box = expander.get_child()
         icon: Gtk.Image = box.get_first_child()
         label: Gtk.Label = icon.get_next_sibling()
-        icon.set_from_icon_name("folder-symbolic" if node.is_dir else "text-x-generic-symbolic")
+        icon_name, color_class = filetypes.icon_for(node.name, node.is_dir)
+        icon.set_from_icon_name(icon_name)
+        # Rows are recycled, so both class lists are replaced wholesale on
+        # every bind — never added to — or a row would keep the color and
+        # dimming of whatever node it showed last.
+        icon.set_css_classes([color_class] if color_class else [])
+        box.set_css_classes(["filetree-dim"] if node.dim else [])
         label.set_label(node.name)
 
     def _on_activate(self, _list_view: Gtk.ListView, position: int) -> None:

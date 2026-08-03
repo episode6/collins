@@ -383,6 +383,14 @@ popover.menu button.open-with-row:hover {
   opacity: 0.8;
   text-decoration-line: underline;
 }
+
+/* file-tree rows for dotfiles and gitignored entries: still there, still
+   openable, but visibly not part of the project's real content. On the row's
+   content box, so the icon's file-type color dims with the label instead of
+   staying at full strength next to faded text. */
+.filetree-dim {
+  opacity: 0.55;
+}
 """
 
 
@@ -408,6 +416,19 @@ _SCHEME_CSS = """
 .pr-checks-passed { color: %(passed_green)s; }
 .pr-checks-failed { color: %(failed_red)s; }
 .pr-checks-pending { color: %(pending_yellow)s; }
+
+/* the file tree's file-type icon palette (see filetypes.py for the mapping).
+   Hues from VS Code's Seti icon theme, which is built for dark backgrounds;
+   the light shades are the same hues pulled down far enough to read on
+   white, most borrowed from GitHub's light palette for the overlaps. */
+.ft-blue { color: %(ft_blue)s; }
+.ft-yellow { color: %(ft_yellow)s; }
+.ft-orange { color: %(ft_orange)s; }
+.ft-green { color: %(ft_green)s; }
+.ft-red { color: %(ft_red)s; }
+.ft-purple { color: %(ft_purple)s; }
+.ft-pink { color: %(ft_pink)s; }
+.ft-grey { color: %(ft_grey)s; }
 """
 _MARK_COLORS = {
     False: {  # light
@@ -423,6 +444,31 @@ _MARK_COLORS = {
         "failed_red": "#f85149",
         "pending_yellow": "#d29922",
         "draft_grey": "#9198a1",
+    },
+}
+# The file-type icon palette, same keying. The dark shades are Seti's own
+# (VS Code's default file-icon theme); each light shade is the same hue,
+# darkened to hold contrast on a white sidebar.
+_FILETYPE_COLORS = {
+    False: {  # light
+        "ft_blue": "#1a7aa8",
+        "ft_yellow": "#9e6a03",
+        "ft_orange": "#bc4c00",
+        "ft_green": "#2da44e",
+        "ft_red": "#cf222e",
+        "ft_purple": "#8250df",
+        "ft_pink": "#bf3989",
+        "ft_grey": "#59636e",
+    },
+    True: {  # dark
+        "ft_blue": "#519aba",
+        "ft_yellow": "#cbcb41",
+        "ft_orange": "#e37933",
+        "ft_green": "#8dc149",
+        "ft_red": "#cc3e44",
+        "ft_purple": "#a074c4",
+        "ft_pink": "#f55385",
+        "ft_grey": "#9198a1",
     },
 }
 
@@ -484,7 +530,8 @@ class App(Adw.Application):
         """Load the scheme's colors. Runs at startup and on every light/dark
         flip, whether that came from the setting or from the system."""
         dark = Adw.StyleManager.get_default().get_dark()
-        self._scheme_provider.load_from_data((_SCHEME_CSS % _MARK_COLORS[dark]).encode())
+        colors = {**_MARK_COLORS[dark], **_FILETYPE_COLORS[dark]}
+        self._scheme_provider.load_from_data((_SCHEME_CSS % colors).encode())
 
     @property
     def caffeine_enabled(self) -> bool:
