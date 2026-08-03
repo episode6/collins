@@ -59,6 +59,13 @@ FILE_PATTERN = (
 )
 
 _SUFFIX = re.compile(r"(.+?):(\d+)(?::(\d+))?")
+_FILE_RX = re.compile(FILE_PATTERN)
+
+# How many rows a hard-wrapped reference may be stitched across, per
+# direction. Agent CLIs wrap long paths over two rows, occasionally three;
+# beyond that the joins are more likely to be accidental than real.
+_STITCH_ROWS_UP = 2
+_STITCH_ROWS_DOWN = 3
 
 
 def resolve_file_reference(
@@ -89,4 +96,62 @@ def resolve_file_reference(
         for trial in trials:
             if os.path.exists(trial):
                 return os.path.normpath(trial), line, col
+    return None
+
+
+def resolve_wrapped_reference(
+    candidate: str,
+    row_text: str,
+    rows_above: list[str],
+    rows_below: list[str],
+    roots: list[str | None],
+) -> tuple[str, int | None, int | None] | None:
+    """A candidate that resolved nowhere may be a fragment of a reference the
+    *emitter* hard-wrapped — a real newline plus continuation indent in the
+    output, which no regex over screen text can see past.
+
+    The stitch is geometry-gated: fragments are only joined downward when the
+    candidate sits at the very end of its row, and upward when it sits at the
+    start (after indent) — the two signatures of a wrapped token. Neighbour
+    rows contribute their adjacent whitespace-delimited token, chaining
+    further only while a whole row was one token (a middle fragment).
+    *rows_above*/*rows_below* are nearest-first. Every join is re-matched
+    against FILE_PATTERN and then existence-checked like any other candidate,
+    so a stitch that guesses wrong still opens nothing.
+    """
+    row = row_text.rstrip("\n")
+    downs = [""]
+    if row.rstrip().endswith(candidate):
+        chain = ""
+        for below in rows_below[:_STITCH_ROWS_DOWN]:
+            frag = below.strip()
+            if not frag:
+                break
+            token = frag.split()[0]
+            chain += token
+            downs.append(chain)
+            if token != frag:
+                break
+    ups = [""]
+    if row.lstrip().startswith(candidate):
+        chain = ""
+        for above in rows_above[:_STITCH_ROWS_UP]:
+            frag = above.strip()
+            if not frag:
+                break
+            token = frag.split()[-1]
+            chain = token + chain
+            ups.append(chain)
+            if token != frag:
+                break
+    for up in reversed(ups):  # longest joins first
+        for down in reversed(downs):
+            if not up and not down:
+                continue  # the bare candidate already failed
+            m = _FILE_RX.match(up + candidate + down)
+            if m is None:
+                continue
+            resolved = resolve_file_reference(m.group(0), roots)
+            if resolved is not None:
+                return resolved
     return None
