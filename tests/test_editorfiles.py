@@ -17,6 +17,7 @@ from collins.editorfiles import (
     is_inside,
     lightbox_layout,
     lightbox_zoom_slot,
+    lightbox_zoombar_inside,
     list_dir,
     load_guard,
     path_from_file_uri,
@@ -288,6 +289,21 @@ def test_lightbox_zoom_slot_below_strip_thresholds_on_height():
     )
     assert not strip_shown and eff == (0, 0)
     assert slot[1] == display[1]  # the reclaimed height
+
+
+# -- lightbox_zoombar_inside --------------------------------------------------
+
+
+def test_lightbox_zoombar_floats_while_at_most_half_the_image():
+    assert lightbox_zoombar_inside(58, 116)  # exactly half: still floats
+
+
+def test_lightbox_zoombar_moves_below_past_half_the_image():
+    assert not lightbox_zoombar_inside(58, 115)
+
+
+def test_lightbox_zoombar_moves_below_tiny_images():
+    assert not lightbox_zoombar_inside(58, 48)  # a 48px icon at 1:1
 
 
 def test_lightbox_layout_unrealized_window_uses_fallback():

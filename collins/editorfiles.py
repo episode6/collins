@@ -257,6 +257,15 @@ def lightbox_zoom_slot(
     return display, strip_shown, eff_chrome, slot
 
 
+def lightbox_zoombar_inside(bar_h: int, slot_h: int) -> bool:
+    """Whether the -/+ zoom bar floats inside the image slot: only while its
+    footprint *bar_h* (the bar's height plus its floating margin) takes at
+    most half of the visible image height *slot_h*. On smaller images the
+    bar would cover most of the picture, so it sits below the image instead.
+    GTK-free on purpose, like lightbox_layout."""
+    return bar_h * 2 <= slot_h
+
+
 def path_from_file_uri(uri: str) -> str | None:
     """The local filesystem path a `file:` URI points at, or None when it
     isn't one (other scheme, or a remote host). Sheds any query/fragment —

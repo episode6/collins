@@ -55,11 +55,17 @@ _CSS = b"""
   background-color: alpha(white, 0.22);
 }
 /* the -/+ zoom bar floating over the image's bottom edge: a dark pill so
-   the round buttons stay readable over any image content */
+   the round buttons stay readable over any image content. While floating
+   it fades out when the pointer leaves the image (lightbox.py toggles
+   .faded); sitting below a small image it stays fully shown. */
 .lightbox-shade .lightbox-zoombar {
   background-color: alpha(black, 0.35);
   border-radius: 999px;
   padding: 6px;
+  transition: opacity 400ms ease;
+}
+.lightbox-shade .lightbox-zoombar.faded {
+  opacity: 0;
 }
 /* the round -/+ zoom buttons in that bar */
 .lightbox-shade button.lightbox-zoom {

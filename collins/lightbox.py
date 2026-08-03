@@ -3,7 +3,11 @@
 """A lightbox for image files: the bare picture floated over the whole window,
 dimming everything behind it, with two big captioned buttons on whichever
 side of the image has more screen space (editorfiles.lightbox_layout) and a
--/+ zoom bar floating over the bottom edge of the image.
+-/+ zoom bar floating over the bottom edge of the image. The floating bar
+only shows while the pointer is over the image (fading out a couple of
+seconds after it leaves), and on images too small to float over — where the
+bar would cover more than half the picture — it sits below the image
+instead, always visible (editorfiles.lightbox_zoombar_inside).
 
 Zooming is a display scale relative to the image's natural size, starting at
 the fitted scale: the -/+ buttons step it, double-clicking the image zooms
@@ -55,6 +59,7 @@ from .editorfiles import (  # noqa: E402
     LIGHTBOX_SHADOW_PAD,
     lightbox_layout,
     lightbox_zoom_slot,
+    lightbox_zoombar_inside,
 )
 from .i18n import _  # noqa: E402
 
@@ -62,6 +67,9 @@ _ICON_SIZE = 32  # the captioned action buttons' icon, px
 _ZOOM_STEP = 1.25  # one -/+ button press multiplies/divides the zoom by this
 _ZOOM_MAX = 8.0  # ceiling on the display scale relative to natural size
 _FALLBACK_WINDOW = (1200, 800)  # margins math when the window isn't realized
+_PANEL_SPACING = 6  # gap between the image, the button strip and a below-bar
+_ZOOMBAR_MARGIN = 12  # the floating bar's inset from the image's bottom edge
+_ZOOMBAR_FADE_DELAY_MS = 2000  # pointer-left-the-image grace before fading out
 
 
 class ImageLightbox(Gtk.Box):
@@ -83,6 +91,8 @@ class ImageLightbox(Gtk.Box):
         self._fit_zoom = 1.0
         self._win = _FALLBACK_WINDOW
         self._chrome = (0, 0)
+        self._zoombar_inside = True
+        self._fade_source = 0
         self._resize_queued = False
         self._surface: Gdk.Surface | None = None
         self._surface_handlers: list[int] = []
@@ -122,7 +132,10 @@ class ImageLightbox(Gtk.Box):
 
         # The -/+ zoom bar floats over the image, anchored to its bottom —
         # which, the slot being pinned to min(display, screen), is the bottom
-        # of the image or of the screen, whichever is smaller.
+        # of the image or of the screen, whichever is smaller. On images too
+        # small to float over it sits below the image instead, and while
+        # floating it only shows when the pointer is over the image
+        # (_place_zoombar / the fade handlers).
         self._zoom_out_btn = self._zoom_button("zoom-out-symbolic", _("Zoom out"), 1 / _ZOOM_STEP)
         self._zoom_in_btn = self._zoom_button("zoom-in-symbolic", _("Zoom in"), _ZOOM_STEP)
         self._zoombar = Gtk.Box(
@@ -130,13 +143,18 @@ class ImageLightbox(Gtk.Box):
             spacing=12,
             halign=Gtk.Align.CENTER,
             valign=Gtk.Align.END,
-            margin_bottom=12,
+            margin_bottom=_ZOOMBAR_MARGIN,
         )
         self._zoombar.add_css_class("lightbox-zoombar")
         self._zoombar.append(self._zoom_out_btn)
         self._zoombar.append(self._zoom_in_btn)
+        self._hover: Gtk.EventControllerMotion | None = None
         if isinstance(self._slot, Gtk.Overlay):
             self._slot.add_overlay(self._zoombar)
+            self._hover = Gtk.EventControllerMotion()
+            self._hover.connect("enter", self._on_slot_enter)
+            self._hover.connect("leave", self._on_slot_leave)
+            self._slot.add_controller(self._hover)
 
         self._buttons: list[Gtk.Button] = []
         if can_open_in_editor and on_open_in_editor is not None:
@@ -221,18 +239,28 @@ class ImageLightbox(Gtk.Box):
         )
         for btn in self._buttons:
             self._strip.append(btn)
+        # The image column: the slot, plus the zoom bar when it sits below
+        # the image instead of floating inside it (_place_zoombar).
+        self._image_col = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=_PANEL_SPACING
+        )
+        self._image_col.append(self._slot)
         self._panel = Gtk.Box(
             orientation=(
                 Gtk.Orientation.HORIZONTAL if side == "right" else Gtk.Orientation.VERTICAL
             ),
-            spacing=6,
+            spacing=_PANEL_SPACING,
         )
-        self._panel.append(self._slot)
+        self._panel.append(self._image_col)
         self._panel.append(self._strip)
         self.append(self._panel)
 
         if self._picture is not None:
             self._apply_zoom(self._fit_zoom)
+            if self._zoombar_inside:
+                # Visible at open for discoverability, then the usual fade —
+                # hovering the image (or already being over it) keeps it.
+                self._arm_zoombar_fade()
         else:
             self._pin_panel(self._image_size)
 
@@ -262,6 +290,9 @@ class ImageLightbox(Gtk.Box):
         overlay.add_overlay(self)
 
     def close(self) -> None:
+        if self._fade_source:
+            GLib.source_remove(self._fade_source)
+            self._fade_source = 0
         if self._esc_root is not None and self._esc is not None:
             self._esc_root.remove_controller(self._esc)
             self._esc = self._esc_root = None
@@ -339,6 +370,9 @@ class ImageLightbox(Gtk.Box):
         )
         self._strip.set_visible(strip_shown)
         self._picture.set_size_request(*display)
+        self._place_zoombar(
+            lightbox_zoombar_inside(self._zoombar_h() + _ZOOMBAR_MARGIN, slot[1])
+        )
         self._pin_panel(slot, chrome)
         self._zoom_out_btn.set_sensitive(zoom > self._fit_zoom)
         self._zoom_in_btn.set_sensitive(zoom < _ZOOM_MAX)
@@ -356,6 +390,8 @@ class ImageLightbox(Gtk.Box):
             chrome = self._chrome
         content_w = slot[0] + chrome[0]
         content_h = slot[1] + chrome[1]
+        if not self._zoombar_inside:
+            content_h += self._zoombar_h() + _PANEL_SPACING
         left = max((win_w - content_w) // 2, LIGHTBOX_SHADOW_PAD)
         top = max((win_h - content_h) // 2, LIGHTBOX_SHADOW_PAD)
         self._panel.set_margin_start(left)
@@ -379,15 +415,74 @@ class ImageLightbox(Gtk.Box):
         else:
             self._apply_zoom(self._fit_zoom)
 
+    # -- the -/+ zoom bar ----------------------------------------------------
+
+    def _zoombar_h(self) -> int:
+        """The bar's natural height with its variable bottom margin taken
+        back out (GTK4's measure includes margins) — so the value doesn't
+        depend on where the bar currently sits."""
+        _min, nat, _mb, _nb = self._zoombar.measure(Gtk.Orientation.VERTICAL, -1)
+        return nat - self._zoombar.get_margin_bottom()
+
+    def _place_zoombar(self, inside: bool) -> None:
+        """Float the bar over the image's bottom edge, or — when it would
+        cover too much of a small image (editorfiles.lightbox_zoombar_inside)
+        — sit it below the image in the image column. Floating, it fades out
+        while the pointer isn't over the image; below, it is always shown."""
+        if inside == self._zoombar_inside:
+            return
+        self._zoombar_inside = inside
+        if inside:
+            self._image_col.remove(self._zoombar)
+            self._zoombar.set_margin_bottom(_ZOOMBAR_MARGIN)
+            self._slot.add_overlay(self._zoombar)
+            if self._hover is not None and self._hover.contains_pointer():
+                self._wake_zoombar()  # zooming via the bar: pointer is on it
+            else:
+                self._arm_zoombar_fade()
+        else:
+            self._slot.remove_overlay(self._zoombar)
+            self._zoombar.set_margin_bottom(0)
+            self._wake_zoombar()
+            self._image_col.append(self._zoombar)
+
+    def _wake_zoombar(self) -> None:
+        if self._fade_source:
+            GLib.source_remove(self._fade_source)
+            self._fade_source = 0
+        self._zoombar.remove_css_class("faded")
+        self._zoombar.set_can_target(True)
+
+    def _arm_zoombar_fade(self) -> None:
+        """(Re)start the countdown to fading the floating bar out."""
+        self._wake_zoombar()
+        self._fade_source = GLib.timeout_add(_ZOOMBAR_FADE_DELAY_MS, self._fade_zoombar)
+
+    def _fade_zoombar(self) -> bool:
+        self._fade_source = 0
+        self._zoombar.add_css_class("faded")
+        self._zoombar.set_can_target(False)  # invisible: don't swallow clicks
+        return GLib.SOURCE_REMOVE
+
+    def _on_slot_enter(self, _ctrl, _x, _y) -> None:
+        if self._zoombar_inside:
+            self._wake_zoombar()
+
+    def _on_slot_leave(self, _ctrl) -> None:
+        if self._zoombar_inside:
+            self._arm_zoombar_fade()
+
     # -- input ---------------------------------------------------------------
 
     def _press_closes(self, x: float, y: float) -> bool:
         """Whether a press at shade-local (x, y) should close the lightbox:
-        anything that isn't the image slot, the zoom bar or a button."""
+        anything that isn't the image column (the slot, plus the zoom bar
+        when it sits below the image) or a button."""
         target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
         while target is not None and target is not self:
             if (
                 target is self._slot
+                or target is self._image_col
                 or target is self._zoombar
                 or isinstance(target, Gtk.Button)
             ):
