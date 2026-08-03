@@ -142,6 +142,34 @@ class FileTree(Gtk.Box):
         self._fill_store(store, path)
         return GLib.SOURCE_REMOVE
 
+    def reveal(self, path: str | Path) -> None:
+        """Expand the directories above *path* and select its row (without
+        stealing focus). A path the tree can't show — outside the project,
+        under a symlinked directory, or hidden while hidden files are off —
+        is a no-op."""
+        try:
+            parts = Path(path).relative_to(self._root).parts
+        except ValueError:
+            return
+        if not parts:
+            return
+        depth = 0
+        position = 0
+        while position < self._tree_model.get_n_items():
+            row: Gtk.TreeListRow = self._tree_model.get_item(position)
+            if row.get_depth() < depth:
+                return  # walked out of the expanded ancestor without a match
+            node: _Node = row.get_item()
+            if row.get_depth() == depth and node.name == parts[depth]:
+                if depth == len(parts) - 1:
+                    self._list_view.scroll_to(position, Gtk.ListScrollFlags.SELECT, None)
+                    return
+                # Children splice into the flat model right after this row,
+                # so the sequential scan walks straight into them.
+                row.set_expanded(True)
+                depth += 1
+            position += 1
+
     def set_show_hidden(self, show_hidden: bool) -> None:
         """Applies immediately to the root and to any directory refreshed
         from here on; a directory already expanded keeps its current rows
