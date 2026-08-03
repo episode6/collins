@@ -44,6 +44,7 @@ from .lightbox import present_image_lightbox  # noqa: E402
 from .linkpatterns import (  # noqa: E402
     FILE_PATTERN,
     URL_PATTERN,
+    bare_names_pattern,
     resolve_file_reference,
     resolve_wrapped_reference,
 )
@@ -154,7 +155,9 @@ def _setup_links(terminal: Vte.Terminal) -> None:
     filesystem only at click time — VTE has no per-match callback, so the
     hover underline can't know whether the file exists, but a click on a
     candidate that resolves nowhere falls through to the terminal unclaimed
-    and costs the user nothing.
+    and costs the user nothing. Root-level files carry no slash, so the path
+    grammar can't take them; _RootNameLinks keeps one more regex built from
+    the names actually at the project root, so `README.md` underlines too.
     """
     terminal.set_allow_hyperlink(True)
     tag_kinds: dict[int, str] = {}
@@ -168,6 +171,7 @@ def _setup_links(terminal: Vte.Terminal) -> None:
         tag = terminal.match_add_regex(regex, 0)
         terminal.match_set_cursor_name(tag, "pointer")
         tag_kinds[tag] = kind
+    _RootNameLinks(terminal, tag_kinds)
 
     def on_pressed(gesture: Gtk.GestureClick, _n_press, x: float, y: float) -> None:
         if not gesture.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
@@ -280,6 +284,99 @@ def _resolve_wrapped_at(
         if resolved is not None:
             return resolved
     return None
+
+
+class _RootNameLinks:
+    """_setup_links' bare-filename grammar: one extra match tag holding an
+    alternation of the names actually sitting at the tab's project root
+    (bare_names_pattern), so `README.md` underlines without the slash the
+    path grammar demands. Files only — root directory names (docs, tests)
+    are everyday prose words, and `docs/` is already the path grammar's.
+
+    The root lives on the ancestor TerminalTab, which isn't an ancestor yet
+    while either terminal kind is being constructed — so the tag is built on
+    first map and the root never re-resolved (a tab's root is fixed for
+    life; panel bottom↔right swaps re-map without reparenting tabs). A
+    directory monitor keeps the alternation honest: on changes the names
+    are re-listed (debounced — a busy agent touches root files in bursts,
+    and most events are content writes that leave the name set alone) and
+    the tag swapped only when the set really changed. Between snapshots the
+    usual guarantees hold: a deleted file's click resolves nowhere and falls
+    through unclaimed. The terminal's signal closures keep the instance
+    alive; no one else needs to hold it."""
+
+    def __init__(self, terminal: Vte.Terminal, tag_kinds: dict[int, str]) -> None:
+        self._terminal = terminal
+        self._tag_kinds = tag_kinds
+        self._root: str | None = None
+        self._names: frozenset[str] | None = None
+        self._tag: int | None = None
+        self._monitor: Gio.FileMonitor | None = None
+        self._refresh_source: int | None = None
+        terminal.connect("map", self._on_map)
+        terminal.connect("destroy", self._on_destroy)
+
+    def _on_map(self, _terminal: Vte.Terminal) -> None:
+        if self._root is not None:
+            return  # re-mapped (panel swap); the tag and monitor live on
+        tab = self._terminal.get_ancestor(TerminalTab)
+        if tab is None:
+            return
+        self._root = tab.link_root
+        self._apply()
+        try:
+            self._monitor = Gio.File.new_for_path(self._root).monitor_directory(
+                Gio.FileMonitorFlags.NONE, None
+            )
+        except GLib.Error:
+            return  # no monitor backend: the map-time snapshot still serves
+        self._monitor.connect("changed", self._on_root_changed)
+
+    def _on_root_changed(self, *_args) -> None:
+        if self._refresh_source is None:
+            self._refresh_source = GLib.timeout_add(500, self._refresh)
+
+    def _refresh(self) -> bool:
+        self._refresh_source = None
+        self._apply()
+        return GLib.SOURCE_REMOVE
+
+    def _apply(self) -> None:
+        names = self._file_names()
+        if names == self._names:
+            return
+        self._names = names
+        if self._tag is not None:
+            self._terminal.match_remove(self._tag)
+            del self._tag_kinds[self._tag]
+            self._tag = None
+        pattern = bare_names_pattern(names)
+        if pattern is None:
+            return
+        try:
+            regex = Vte.Regex.new_for_match(pattern, len(pattern.encode()), _PCRE2_MULTILINE)
+        except GLib.Error:
+            return  # VTE built without PCRE2 (the static tags are gone too)
+        self._tag = self._terminal.match_add_regex(regex, 0)
+        self._terminal.match_set_cursor_name(self._tag, "pointer")
+        self._tag_kinds[self._tag] = "file"
+
+    def _file_names(self) -> frozenset[str]:
+        try:
+            with os.scandir(self._root) as entries:
+                # is_dir follows symlinks, so a directory behind a link is
+                # excluded the same way a plain one is.
+                return frozenset(entry.name for entry in entries if not entry.is_dir())
+        except OSError:
+            return frozenset()
+
+    def _on_destroy(self, _terminal: Vte.Terminal) -> None:
+        if self._monitor is not None:
+            self._monitor.cancel()
+            self._monitor = None
+        if self._refresh_source is not None:
+            GLib.source_remove(self._refresh_source)
+            self._refresh_source = None
 
 
 def _open_file_reference(
@@ -1027,6 +1124,10 @@ class TerminalTab(Gtk.Box):
         # a construct-on-demand race; HAVE_GTKSOURCE false leaves it None and
         # the footer button that would open it hidden (see _build_footer).
         editor_root = cwd if cwd and Path(cwd).is_dir() else str(Path.home())
+        # Where bare root-name links look (_RootNameLinks): the directory the
+        # editor opens at, kept even when GtkSourceView (and so the editor
+        # itself, and the editor_root property) is missing.
+        self.link_root: str = editor_root
         self._editor = editor.EditorPane(editor_root) if editor.HAVE_GTKSOURCE else None
         self._editor_detached = False  # pane reparented into its own EditorWindow
         self._editor_width = 0  # this tab's last-set editor width, px (0 = none yet)

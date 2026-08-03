@@ -12,6 +12,7 @@ import pytest
 from collins.linkpatterns import (
     FILE_PATTERN,
     URL_PATTERN,
+    bare_names_pattern,
     resolve_file_reference,
     resolve_wrapped_reference,
 )
@@ -147,6 +148,92 @@ def test_non_paths_do_not_match(text: str) -> None:
 def test_urls_still_match_as_urls() -> None:
     for text in ("https://example.com/a/b", "file:///home/user/notes.txt"):
         assert _first_match(text) == text
+
+
+# -- bare_names_pattern ------------------------------------------------------
+
+_ROOT_NAMES = ["README.md", "pyproject.toml", "LICENSE", ".gitignore", "start-debug"]
+
+
+def _first_bare_match(text: str, names: list[str] = _ROOT_NAMES) -> str | None:
+    pattern = bare_names_pattern(names)
+    assert pattern is not None
+    m = re.search(pattern, text)
+    return m.group(0) if m else None
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("open README.md please", "README.md"),
+        # At the very start of a line, like FILE_PATTERN's lookbehind.
+        ("README.md changed", "README.md"),
+        ("at README.md:12 there", "README.md:12"),
+        ("at README.md:12:5 there", "README.md:12:5"),
+        ("see `pyproject.toml` for deps", "pyproject.toml"),
+        ("read (LICENSE) first", "LICENSE"),
+        ("a hidden .gitignore too", ".gitignore"),
+        ("run start-debug now", "start-debug"),
+    ],
+)
+def test_bare_names_match(text: str, expected: str) -> None:
+    assert _first_bare_match(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        # The same ending discipline as the other grammars.
+        ("update the README.md.", "README.md"),
+        ("fixed README.md:12.", "README.md:12"),
+        ("README.md, then LICENSE", "README.md"),
+        ("is it README.md?", "README.md"),
+        ("quote 'LICENSE' end", "LICENSE"),
+    ],
+)
+def test_bare_name_sheds_trailing_punctuation(text: str, expected: str) -> None:
+    assert _first_bare_match(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # A known name must never half-match inside a longer token, in
+        # either direction.
+        "a README.mdx variant",
+        "xREADME.md glued on",
+        "the README.md-old backup",
+        # Slashed references are the path grammar's territory; the bare
+        # grammar must stay out (the lookbehind sees the slash).
+        "docs/README.md is a path",
+        "no names here at all",
+    ],
+)
+def test_bare_name_boundaries(text: str) -> None:
+    assert _first_bare_match(text) is None
+
+
+def test_longer_entry_wins_over_its_prefix() -> None:
+    # Sorting inside bare_names_pattern, not caller order, decides: the
+    # alternation must try README.md.bak before README.md either way.
+    for names in (["README.md", "README.md.bak"], ["README.md.bak", "README.md"]):
+        assert _first_bare_match("see README.md.bak", names) == "README.md.bak"
+
+
+def test_names_with_regex_metacharacters_match_literally() -> None:
+    assert _first_bare_match("open note[1]+x.md now", ["note[1]+x.md"]) == "note[1]+x.md"
+    # Unescaped, `[1]+` would read as a repeated class and admit this text;
+    # the literal must not.
+    assert _first_bare_match("open note11x.md now", ["note[1]+x.md"]) is None
+
+
+def test_unboundable_names_are_filtered() -> None:
+    # Whitespace can't be bounded, `:` collides with the line suffix, `/`
+    # belongs to the path grammar; nothing usable means no pattern at all.
+    assert bare_names_pattern([]) is None
+    assert bare_names_pattern(["with space.txt", "a:b", "a/b", ""]) is None
+    # ...and unusable names don't poison the usable rest.
+    assert _first_bare_match("see README.md", ["with space.txt", "README.md"]) == "README.md"
 
 
 # -- resolve_file_reference ------------------------------------------------

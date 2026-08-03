@@ -13,6 +13,10 @@ simpler than GNOME Terminal's terminal-regex.h:
   ignored — the click falls through to the terminal. Bare filenames
   (``terminal.py``) are deliberately out of the grammar; without a slash
   the false-positive rate in ordinary prose is too high.
+- ``bare_names_pattern``: the one sound way back in for bare filenames — an
+  alternation of *known* names (the entries actually sitting at a tab's
+  project root), so the hover underline can only ever land on a name that
+  exists. Built per terminal at runtime; see terminal._RootNameLinks.
 
 Both grammars stop at whitespace, quotes and brackets, and refuse to *end*
 on punctuation that prose tends to hang off a reference — so
@@ -25,6 +29,7 @@ them with PCRE2 at runtime, the tests exercise them with `re`.
 
 import os
 import re
+from collections.abc import Iterable
 
 # One body-then-final-char pair per alternative: the greedy body backtracks
 # until the last character is something a URL can plausibly end on.
@@ -57,6 +62,36 @@ FILE_PATTERN = (
     f"|{_PATH_SEG}+/(?:{_PATH_CHAR}*{_PATH_FINAL})?)"
     f"{_LINE_SUFFIX}"
 )
+
+# Names the bare grammar can't take: whitespace can't be bounded by a regex
+# at all, `:` would collide with the line suffix, and `/` belongs to the
+# slashed grammar above.
+_BARE_UNBOUNDABLE = re.compile("[\\s:/]")
+
+
+def bare_names_pattern(names: Iterable[str]) -> str | None:
+    """A FILE_PATTERN companion matching any of *names* as a bare token.
+
+    Bare filenames stay out of FILE_PATTERN because a *shape* can't help
+    over-matching prose — but an alternation of literal names underlines
+    only what genuinely exists, so the usual objection disappears. Same
+    boundary discipline as paths: a boundary (or line start) before, the
+    optional ``:line[:col]`` suffix after, and the token must not continue
+    with a character a path could end on — ``README.md.`` sheds its period
+    while ``README.mdx`` never half-matches an entry ``README.md``. Longest
+    name first, so an entry extending another wins the alternation
+    (``README.md.bak`` before ``README.md``). None when nothing survives
+    the unboundable-name filter: no regex to register at all.
+    """
+    usable = sorted(
+        {name for name in names if name and not _BARE_UNBOUNDABLE.search(name)},
+        key=lambda name: (-len(name), name),
+    )
+    if not usable:
+        return None
+    alternatives = "|".join(re.escape(name) for name in usable)
+    return f"{_PATH_PRE}(?:{alternatives}){_LINE_SUFFIX}(?!{_PATH_FINAL})"
+
 
 _SUFFIX = re.compile(r"(.+?):(\d+)(?::(\d+))?")
 _FILE_RX = re.compile(FILE_PATTERN)
