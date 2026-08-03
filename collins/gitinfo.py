@@ -1,3 +1,5 @@
+# New in the ghackett fork of agent-session-manager (GPL-3.0).
+
 """Best-effort git repository info, read straight from `.git` where it can be.
 
 Finding the branch is a couple of stat calls and one small file read, with no
@@ -23,6 +25,13 @@ _BRANCH_REF_PREFIX = "refs/heads/"
 # short enough that a menu built on the answer doesn't visibly stall waiting
 # for it. A repository slower than this is treated as clean.
 _STATUS_TIMEOUT_S = 2.0
+
+# `ignored_names` runs on the GTK main loop (the file tree asks while
+# building rows), so its budget is much tighter than the menu-building
+# _STATUS_TIMEOUT_S: `check-ignore` reads only the exclude files, never the
+# index, and answers in milliseconds — a repository that can't make this
+# deadline just renders undimmed rather than stalling every expand.
+_IGNORE_TIMEOUT_S = 0.5
 
 
 def current_branch(cwd: str | Path | None) -> str | None:
@@ -94,12 +103,16 @@ def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
     per row, so this stays one short-lived process per user action. `-z` on
     both ends keeps any filename byte-clean in transit.
 
+    The caller is on the GTK main loop, so this is kept cheap: outside a
+    repository no process is spawned at all (a pure-filesystem `.git` walk,
+    like `current_branch`'s, answers first), and inside one the subprocess
+    gets only `_IGNORE_TIMEOUT_S` before the answer becomes "nothing".
+
     Empty set for every case that can't be answered — no git on PATH, not a
-    repository (check-ignore exits 128), a timeout. What is built on the
-    answer is only a dimmed row, so anything short of git saying "ignored"
-    means shown at full strength.
+    repository, a timeout. What is built on the answer is only a dimmed row,
+    so anything short of git saying "ignored" means shown at full strength.
     """
-    if not directory or not names:
+    if not directory or not names or not _in_repository(Path(directory)):
         return set()
     git = shutil.which("git")
     if git is None:
@@ -110,7 +123,7 @@ def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
             input="\0".join(names) + "\0",
             capture_output=True,
             text=True,
-            timeout=_STATUS_TIMEOUT_S,
+            timeout=_IGNORE_TIMEOUT_S,
             cwd=str(directory),
         )
     except (OSError, subprocess.SubprocessError, UnicodeError) as err:
@@ -121,6 +134,15 @@ def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
     if result.returncode != 0:
         return set()
     return {name for name in result.stdout.split("\0") if name}
+
+
+def _in_repository(start: Path) -> bool:
+    """Whether *start* is inside a git repository — a couple of stat calls
+    (`.git` may be a directory, or a worktree/submodule pointer file), so a
+    tree outside any repository never pays for a `git` process."""
+    if not start.is_dir():
+        return False
+    return any((directory / ".git").exists() for directory in (start, *start.parents))
 
 
 def _resolve_gitdir_pointer(git_file: Path) -> Path | None:

@@ -38,12 +38,14 @@ Most icons are named icons resolved at runtime from the system icon theme, typic
 **Adwaita icon theme** — © the GNOME Project — CC-BY-SA-3.0 or LGPL-3.0 —
 [GNOME/adwaita-icon-theme](https://gitlab.gnome.org/GNOME/adwaita-icon-theme). The
 symbolic icons bundled under `data/icons` are either original artwork for this fork or
-derived from agent-session-manager (GPL-3.0), except `alert-symbolic`,
-`git-merge-symbolic`, `git-pull-request-symbolic` and `github-symbolic`, which are used
-unmodified from **Octicons** — © GitHub, Inc. — MIT License —
-[primer/octicons](https://github.com/primer/octicons), so that a merged PR, a conflicted
-or open one's marks and the button opening a session's pull requests read the same here
-as on the site they came from. The Collins app icon is original artwork.
+derived from agent-session-manager (GPL-3.0), except the ones used unmodified from
+**Octicons** — © GitHub, Inc. — MIT License —
+[primer/octicons](https://github.com/primer/octicons): `alert-symbolic`,
+`git-merge-symbolic`, `git-pull-request-symbolic` and `github-symbolic`, so that a
+merged PR, a conflicted or open one's marks and the button opening a session's pull
+requests read the same here as on the site they came from; and the file tree's
+file-type set, `ft-*-symbolic` (each SVG names its source Octicon in its header
+comment). The Collins app icon is original artwork.
 
 ## Terminal color schemes
 
