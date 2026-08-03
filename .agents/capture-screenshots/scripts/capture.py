@@ -32,11 +32,13 @@ parser.add_argument("--open-session", metavar="UUID",
                     help="open this session's tab once the store finds it")
 parser.add_argument("--panel", action="store_true",
                     help="also show the opened tab's secondary terminal panel")
+parser.add_argument("--editor", action="store_true",
+                    help="also show the opened tab's editor pane")
 parser.add_argument("--settle-ms", type=int, default=2500,
                     help="delay before the shot, for scan/paint to settle")
 args = parser.parse_args()
-if args.panel and not args.open_session:
-    parser.error("--panel requires --open-session")
+if (args.panel or args.editor) and not args.open_session:
+    parser.error("--panel/--editor require --open-session")
 
 sys.path.insert(0, args.repo_root)
 
@@ -93,6 +95,8 @@ def prepare() -> bool:
         win.open_session(session)
         if args.panel:
             win.tab_view.get_selected_page().get_child().show_panel()
+        if args.editor:
+            win.tab_view.get_selected_page().get_child().show_editor()
     GLib.timeout_add(args.settle_ms, capture)
     return GLib.SOURCE_REMOVE
 

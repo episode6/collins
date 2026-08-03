@@ -2,8 +2,9 @@
 
 Finding the branch is a couple of stat calls and one small file read, with no
 `git` processes spawned — cheap enough for the tab footer's 2s poll. Asking
-whether the tree is dirty is the one question that can't be answered that way
-(see `has_changes`), so that one shells out and is only ever asked on demand.
+whether the tree is dirty (`has_changes`) or which entries are ignored
+(`ignored_names`) can't be answered that way, so those shell out and are only
+ever asked on demand.
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ def has_changes(cwd: str | Path | None) -> bool:
     practions.NEW_PR). Ignored files don't — `git status` leaves them out, and
     so does the pull request.
 
-    The only subprocess in this module, and the reason it is asked on demand
+    A subprocess (like `ignored_names`), and the reason it is asked on demand
     rather than from the footer's poll: "is this tree dirty?" means comparing
     every tracked file against the index, which is `git status`' whole job and
     not something to re-derive off `.git`. `--no-optional-locks` keeps it from
@@ -83,6 +84,43 @@ def has_changes(cwd: str | Path | None) -> bool:
         log.debug("gitinfo: git status in %s failed: %s", cwd, err)
         return False
     return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
+    """Which of *names* (entries directly inside *directory*) git ignores.
+
+    One batched `git check-ignore --stdin -z` per call — the file tree asks
+    once per directory listing (on expand and on the debounced refresh), never
+    per row, so this stays one short-lived process per user action. `-z` on
+    both ends keeps any filename byte-clean in transit.
+
+    Empty set for every case that can't be answered — no git on PATH, not a
+    repository (check-ignore exits 128), a timeout. What is built on the
+    answer is only a dimmed row, so anything short of git saying "ignored"
+    means shown at full strength.
+    """
+    if not directory or not names:
+        return set()
+    git = shutil.which("git")
+    if git is None:
+        return set()
+    try:
+        result = subprocess.run(
+            [git, "--no-optional-locks", "check-ignore", "-z", "--stdin"],
+            input="\0".join(names) + "\0",
+            capture_output=True,
+            text=True,
+            timeout=_STATUS_TIMEOUT_S,
+            cwd=str(directory),
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError) as err:
+        log.debug("gitinfo: git check-ignore in %s failed: %s", directory, err)
+        return set()
+    # 0 = some ignored, 1 = none ignored; anything else (128: not a repo,
+    # bad input) means "don't know", which reads the same as "none".
+    if result.returncode != 0:
+        return set()
+    return {name for name in result.stdout.split("\0") if name}
 
 
 def _resolve_gitdir_pointer(git_file: Path) -> Path | None:
