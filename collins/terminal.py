@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shlex
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import gi
@@ -269,14 +270,26 @@ class PrChipRow(Gtk.Widget):
 
     It only ever holds a handful of small labels, so measuring them on every
     allocation is cheaper than caching would be.
+
+    Whether any chip is currently dropped is reported through
+    *on_overflow_changed*, so the footer can show a way to the full list
+    exactly when the row isn't it.
     """
 
-    def __init__(self, spacing: int) -> None:
+    def __init__(self, spacing: int, on_overflow_changed: Callable[[bool], None]) -> None:
         super().__init__()
         self._spacing = spacing
+        self._on_overflow_changed = on_overflow_changed
+        self._overflowing = False
 
     def set_chips(self, chips: list[Gtk.Widget]) -> None:
-        """Replace the row's chips, oldest first."""
+        """Replace the row's chips, oldest first.
+
+        Resets overflow without reporting: the caller is rebuilding the row
+        and hides its overflow button itself; the next allocation reports
+        again if the new chips don't fit either.
+        """
+        self._overflowing = False
         while (child := self.get_first_child()) is not None:
             child.unparent()
         for chip in chips:
@@ -320,6 +333,7 @@ class PrChipRow(Gtk.Widget):
                 break
             keep.append(chip)
             used += needed
+        self._report_overflow(len(keep) < len(chips))
         x = 0
         for chip in chips:
             chip.set_child_visible(chip in keep)
@@ -330,6 +344,20 @@ class PrChipRow(Gtk.Widget):
             rect.x, rect.y, rect.width, rect.height = x, 0, chip_width, height
             chip.size_allocate(rect, baseline)
             x += chip_width + self._spacing
+
+    def _report_overflow(self, overflowing: bool) -> None:
+        if overflowing == self._overflowing:
+            return
+        self._overflowing = overflowing
+        # From inside an allocation, where a sibling's visibility must not
+        # change (the box would allocate again mid-allocation) — so the report
+        # waits for idle. Reading the flag then, not capturing it now, keeps a
+        # stale queued report from contradicting a newer one.
+        GLib.idle_add(self._deliver_overflow)
+
+    def _deliver_overflow(self) -> bool:
+        self._on_overflow_changed(self._overflowing)
+        return GLib.SOURCE_REMOVE
 
     def do_dispose(self) -> None:
         while (child := self.get_first_child()) is not None:
@@ -1083,15 +1111,17 @@ class TerminalTab(Gtk.Box):
         # order the work happened. Unlike their neighbours they act rather
         # than copy: a click opens the PR's actions, and its page on GitHub
         # is a right-click (or the menu's own "Open on GitHub" row) away.
-        self._pr_chips = PrChipRow(_PR_CHIP_SPACING)
+        self._pr_chips = PrChipRow(_PR_CHIP_SPACING, self._on_pr_overflow_changed)
         self._pr_chips.set_visible(False)
-        # Leading the row, where the oldest chip would be: the caret opens the
-        # full list, titles and all — including the chips that didn't fit,
-        # since it takes its width from the row and so costs it one.
+        # Leading the row, where the oldest dropped chip would be: an ellipsis
+        # opens the full list, titles and all. It only shows once the row has
+        # had to drop a chip (PrChipRow reports that), because that is when
+        # the list holds something the chips don't — with every chip on show
+        # it would only repeat them.
         # The list itself is shared with the sidebar's own PR button (prmenu);
         # the footer is at the bottom of the tab, so this copy opens upwards.
         self._pr_menu = prmenu.new_popover(Gtk.PositionType.TOP)
-        menu_icon = Gtk.Image.new_from_icon_name("pan-up-symbolic")
+        menu_icon = Gtk.Image.new_from_icon_name("view-more-horizontal-symbolic")
         menu_icon.set_pixel_size(_PR_REFRESH_ICON_PX)
         menu_icon.add_css_class("dim-label")
         self._pr_menu_btn = Gtk.MenuButton(child=menu_icon, popover=self._pr_menu)
@@ -1255,14 +1285,14 @@ class TerminalTab(Gtk.Box):
         )
         enable_open_on_click(chip, lambda: pr.url, button=Gdk.BUTTON_SECONDARY)
         # The chip is the shortest way to do something about a PR: the same
-        # actions the caret's list offers, opened on the chip itself.
+        # actions the footer's PR list offers, opened on the chip itself.
         prmenu.attach_actions(chip, pr, self._pr_action_host())
         return chip
 
     def _pr_action_host(self) -> prmenu.ActionHost:
         """How a PR's actions reach this tab: it is the session they belong to.
 
-        The chips and the caret's list are the tab's own, so "can this session
+        The chips and the footer's PR list are the tab's own, so "can this session
         take a prompt?" is a question the tab answers about itself — a tab
         whose agent has exited, or whose prompt is half-written, keeps its
         chips and its PRs, but is not somewhere to send anything.
@@ -1275,11 +1305,11 @@ class TerminalTab(Gtk.Box):
         )
 
     def _fill_pr_menu(self, _button: Gtk.MenuButton) -> None:
-        """Build the caret's list, just before it opens.
+        """Build the ellipsis button's list, just before it opens.
 
         Nothing to fetch here, unlike the sidebar's copy of this menu: the
         footer's own poll is already refreshing every PR on the row, so what
-        the tab is holding when the caret is clicked is current.
+        the tab is holding when the list is opened is current.
         """
         prmenu.fill(self._pr_menu, self._footer_prs, host=self._pr_action_host())
 
@@ -1296,10 +1326,23 @@ class TerminalTab(Gtk.Box):
         self._footer_prs = list(prs)
         self._pr_chips.set_chips([self._build_pr_chip(pr) for pr in prs])
         self._pr_chips.set_visible(bool(prs))
-        self._pr_menu_btn.set_visible(bool(prs))
+        # Hidden until the rebuilt row reports whether these chips fit; with
+        # no PRs at all the hidden row never allocates, so this is also what
+        # retires the button when the last chip goes.
+        self._pr_menu_btn.set_visible(False)
         self._remember_prs(prs)
         self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
+
+    def _on_pr_overflow_changed(self, overflowing: bool) -> None:
+        """Show the ellipsis only while the chip row is short of room.
+
+        Showing it costs the row its own width, and hiding it gives that back
+        — but neither flips the answer: a row that overflowed keeps
+        overflowing with less room, and one that fit still fits with more, so
+        the button never oscillates.
+        """
+        self._pr_menu_btn.set_visible(overflowing)
 
     def _remember_prs(self, prs: list[PullRequest]) -> None:
         """Hand the row's PRs to the window, which saves them for this session.
@@ -1770,7 +1813,7 @@ class TerminalTab(Gtk.Box):
         A merged PR that already has a title is left alone: it has no checks
         left to run and shows no badge anyway, so an old chip on a long-lived
         session never costs another `gh` call. One with no title still asks
-        once — the caret's menu has a line to fill, and a list saved before
+        once — the PR menu has a line to fill, and a list saved before
         Collins knew about titles has nothing in it.
         """
         return pr if pr.merged and pr.title else (enrich(pr) or pr)

@@ -295,7 +295,7 @@ row.session-child.running.busy.bell-flash {
   box-shadow: none;
 }
 
-/* ...except inside the caret's PR list, which is a menu and reads as one. A
+/* ...except inside the footer's PR list, which is a menu and reads as one. A
    popover belongs to the widget tree of the button it hangs off, so the two
    rules above apply to its rows too: without these they sit 22px tall with
    2px of side padding, flush against the popover's edge, and stay flat as the
