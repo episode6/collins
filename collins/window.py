@@ -480,6 +480,8 @@ class MainWindow(Adw.ApplicationWindow):
         for prop in ("default-width", "default-height", "maximized"):
             self.connect(f"notify::{prop}", self._schedule_save_window_geometry)
         self.connect("close-request", self._on_close_request)
+        # Coming back to the app re-checks the visible tab's PR statuses.
+        self.connect("notify::is-active", self._on_is_active_changed)
 
     # -- window geometry persistence -----------------------------------------
 
@@ -3044,7 +3046,23 @@ class MainWindow(Adw.ApplicationWindow):
             if session_id:
                 self._sync_status(session_id)
         if isinstance(page.get_child(), TerminalTab):
+            page.get_child().refresh_pr_statuses()  # its chips may have gone stale unwatched
             GLib.idle_add(page.get_child().grab_terminal_focus)
+
+    def _on_is_active_changed(self, *_args) -> None:
+        """Window (re)focused: re-check the selected tab's PR statuses.
+
+        Coming back to the app is the moment a mark that went stale while the
+        user worked elsewhere gets looked at. Only the selected tab — the
+        others get the same treatment from _on_selected_page_changed when
+        they're switched to, and refreshing a tab nobody is looking at is a
+        `gh` call for nothing.
+        """
+        if not self.is_active():
+            return
+        page = self.tab_view.get_selected_page()
+        if page is not None and isinstance(page.get_child(), TerminalTab):
+            page.get_child().refresh_pr_statuses()
 
     # -- idle notifications --------------------------------------------------
 
