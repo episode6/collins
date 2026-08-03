@@ -51,6 +51,12 @@ def test_guess_language_suffix_wins_over_shebang():
     assert guess_language_id("script.py", "#!/bin/bash") == "python3"
 
 
+def test_guess_language_env_s_flag_and_assignments_are_skipped():
+    assert guess_language_id("script", "#!/usr/bin/env -S python3") == "python3"
+    assert guess_language_id("script", "#!/usr/bin/env -S FOO=bar bash") == "sh"
+    assert guess_language_id("script", "#!/usr/bin/env -S") is None
+
+
 def test_guess_language_unknown_shebang_interpreter_is_none():
     assert guess_language_id("script", "#!/usr/bin/env made-up-lang") is None
     assert guess_language_id("script", "not a shebang") is None

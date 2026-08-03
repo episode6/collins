@@ -123,8 +123,13 @@ def guess_language_id(path: str | Path, first_line: str = "") -> str | None:
         if not parts:
             return None
         interpreter = Path(parts[0]).name
-        if interpreter == "env" and len(parts) > 1:
-            interpreter = Path(parts[1]).name
+        if interpreter == "env":
+            # Skip env's own flags (-S, -i, ...) and VAR=val assignments to
+            # reach the interpreter, e.g. `env -S FOO=bar python3`.
+            rest = [p for p in parts[1:] if not p.startswith("-") and "=" not in p]
+            if not rest:
+                return None
+            interpreter = Path(rest[0]).name
         return _SHEBANG_INTERPRETERS.get(interpreter)
     return None
 
