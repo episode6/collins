@@ -1112,7 +1112,6 @@ class TerminalTab(Gtk.Box):
         # than copy: a click opens the PR's actions, and its page on GitHub
         # is a right-click (or the menu's own "Open on GitHub" row) away.
         self._pr_chips = PrChipRow(_PR_CHIP_SPACING, self._on_pr_overflow_changed)
-        self._pr_chips.set_visible(False)
         # Leading the row, where the oldest dropped chip would be: an ellipsis
         # opens the full list, titles and all. It only shows once the row has
         # had to drop a chip (PrChipRow reports that), because that is when
@@ -1129,6 +1128,16 @@ class TerminalTab(Gtk.Box):
         self._pr_menu_btn.set_tooltip_text(_("Every pull request this session has opened"))
         self._pr_menu_btn.set_create_popup_func(self._fill_pr_menu)
         self._pr_menu_btn.set_visible(False)
+        # The ellipsis stands in for chips, so it sits with them in a box of
+        # their own, tighter than the footer's 8px rhythm: the button's
+        # min-width already leaves ~6px of air around its dots, and the full
+        # spacing on top of that read as a hole in the row. The box is what
+        # comes and goes with the PR list — one visibility for the group,
+        # so an empty group never costs the footer a spacing gap.
+        self._pr_group = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        self._pr_group.set_visible(False)
+        self._pr_group.append(self._pr_menu_btn)
+        self._pr_group.append(self._pr_chips)
         # Sibling of the chips, never inside them: a chip opens its menu on
         # click, and a button in there would open the menu along with itself.
         # It shows whether or not a PR does — with none, it is the way to go
@@ -1175,8 +1184,7 @@ class TerminalTab(Gtk.Box):
         left.append(self._branch_seps[0])
         left.append(self._branch_label)
         left.append(self._branch_seps[1])
-        left.append(self._pr_menu_btn)
-        left.append(self._pr_chips)
+        left.append(self._pr_group)
         left.append(self._pr_refresh_btn)
         left.append(self._pr_sep)
 
@@ -1325,9 +1333,9 @@ class TerminalTab(Gtk.Box):
             return
         self._footer_prs = list(prs)
         self._pr_chips.set_chips([self._build_pr_chip(pr) for pr in prs])
-        self._pr_chips.set_visible(bool(prs))
+        self._pr_group.set_visible(bool(prs))
         # Hidden until the rebuilt row reports whether these chips fit; with
-        # no PRs at all the hidden row never allocates, so this is also what
+        # no PRs at all the hidden group never allocates, so this is also what
         # retires the button when the last chip goes.
         self._pr_menu_btn.set_visible(False)
         self._remember_prs(prs)
