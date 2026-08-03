@@ -60,6 +60,10 @@ DEFAULT_SETTINGS = {
     # the env half only takes effect for tabs opened after a change.
     "progress_termprop": True,
     "auto_title_sessions": True,  # summarize each new session's first prompt into a short title
+    # Retitle a session to its newest pull request's title as PRs are
+    # detected (see SessionStore.apply_pr_title). Fills the generated-name
+    # slot, so a manual rename always wins.
+    "pr_title_sessions": False,
     # Launch new sessions with the agent CLI's worktree flag (claude -w) in
     # git projects, isolating their edits from the live checkout. Per-project
     # overrides live in AppState.project_worktree.

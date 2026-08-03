@@ -443,6 +443,16 @@ msgid ""
 "prompt"
 msgstr ""
 
+#: collins/prefs.py:253
+msgid "Rename sessions after their pull requests"
+msgstr ""
+
+#: collins/prefs.py:255
+msgid ""
+"Retitle a session to match the newest pull request opened in it; manually "
+"renamed sessions keep their name"
+msgstr ""
+
 #: collins/prefs.py:190 collins/prefs.py:196
 msgid "Language"
 msgstr ""
