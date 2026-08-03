@@ -21,6 +21,7 @@ from collins.editorfiles import (
     list_dir,
     load_guard,
     path_from_file_uri,
+    read_first_line,
     should_highlight,
     walk_files,
 )
@@ -53,6 +54,37 @@ def test_guess_language_suffix_wins_over_shebang():
 def test_guess_language_unknown_shebang_interpreter_is_none():
     assert guess_language_id("script", "#!/usr/bin/env made-up-lang") is None
     assert guess_language_id("script", "not a shebang") is None
+
+
+# -- read_first_line ----------------------------------------------------------
+
+
+def test_read_first_line_strips_line_ending(tmp_path):
+    f = tmp_path / "script"
+    f.write_text("#!/bin/bash\necho hi\n")
+    assert read_first_line(f) == "#!/bin/bash"
+
+
+def test_read_first_line_crlf(tmp_path):
+    f = tmp_path / "script"
+    f.write_bytes(b"#!/usr/bin/env python3\r\nprint(1)\r\n")
+    assert read_first_line(f) == "#!/usr/bin/env python3"
+
+
+def test_read_first_line_missing_file_is_empty(tmp_path):
+    assert read_first_line(tmp_path / "missing") == ""
+
+
+def test_read_first_line_caps_bytes(tmp_path):
+    f = tmp_path / "long"
+    f.write_text("x" * 4096)
+    assert read_first_line(f) == "x" * 512
+
+
+def test_read_first_line_feeds_shebang_guess(tmp_path):
+    f = tmp_path / "deploy"
+    f.write_text("#!/usr/bin/env bash\nset -euo pipefail\n")
+    assert guess_language_id(f, read_first_line(f)) == "sh"
 
 
 # -- load_guard -----------------------------------------------------------------

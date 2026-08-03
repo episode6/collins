@@ -129,6 +129,18 @@ def guess_language_id(path: str | Path, first_line: str = "") -> str | None:
     return None
 
 
+def read_first_line(path: str | Path, max_bytes: int = 512) -> str:
+    """The first line of *path* (line ending stripped), decoded leniently —
+    just enough for `guess_language_id`'s shebang sniff. Empty string when
+    the file can't be read."""
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.readline(max_bytes)
+    except OSError:
+        return ""
+    return raw.decode("utf-8", "replace").rstrip("\r\n")
+
+
 def load_guard(path: str | Path) -> LoadGuard:
     """Whether *path* looks safe to load into the editor. Binary = a NUL byte
     in the first 8 KB. Refuses outright above ~5 MB; a caller opening
