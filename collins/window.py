@@ -461,7 +461,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.split.set_shrink_start_child(False)
         self.split.set_position(int(self.state.get_setting("sidebar_width")))
         self.split.connect("notify::position", self._schedule_save_sidebar_width)
-        self.set_content(self.split)
+        # The image lightbox (lightbox.py) floats in this overlay, above
+        # everything — sidebar, tabs, editor. It looks the widget up on the
+        # root window by this attribute name.
+        self.lightbox_overlay = Gtk.Overlay(child=self.split)
+        self.set_content(self.lightbox_overlay)
 
         # Toggle button reflects (and controls) sidebar visibility.
         self._sidebar_width_save_source: int | None = None

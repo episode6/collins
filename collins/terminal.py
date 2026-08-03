@@ -40,6 +40,7 @@ from .copylabel import (  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch, has_changes  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
+from .lightbox import present_image_lightbox  # noqa: E402
 from .linkpatterns import URL_PATTERN  # noqa: E402
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
@@ -173,6 +174,10 @@ def _setup_links(terminal: Vte.Terminal) -> None:
             return
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         if uri.startswith("file:"):
+            path = editorfiles.path_from_file_uri(uri)
+            if path is not None and editorfiles.is_image_path(path):
+                _present_image(terminal, path)
+                return
             # Open the file itself in its default app (what xdg-open does).
             # UriLauncher would hand a file: URI to the portal, which only
             # reveals it in the file manager. Gio.File also sheds any line
@@ -188,6 +193,26 @@ def _setup_links(terminal: Vte.Terminal) -> None:
     click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
     click.connect("pressed", on_pressed)
     terminal.add_controller(click)
+
+
+def _present_image(terminal: Vte.Terminal, path: str) -> None:
+    """A clicked file reference turned out to be an image: lightbox over the
+    window instead of handing it to the default app. Its "Open in Editor"
+    button only appears when the click's own tab could actually open the
+    file (an editor exists and the path is inside its project) — routed
+    through the window's `open-in-editor` action, which also handles a
+    popped-out editor window."""
+    tab = terminal.get_ancestor(TerminalTab)
+    can_edit = tab is not None and tab.can_open_in_editor(path)
+    on_open = None
+    if can_edit:
+
+        def on_open() -> None:
+            terminal.activate_action("win.open-in-editor", GLib.Variant("s", path))
+
+    present_image_lightbox(
+        terminal, path, can_open_in_editor=can_edit, on_open_in_editor=on_open
+    )
 
 
 def _setup_smooth_scroll(terminal: Vte.Terminal) -> None:

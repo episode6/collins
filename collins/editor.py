@@ -359,6 +359,9 @@ class EditorPane(Gtk.Box):
                 )
             )
             return
+        if editorfiles.is_image_path(path):
+            self._open_image_page(key, path)
+            return
         guard = editorfiles.load_guard(path)
         if guard != editorfiles.LoadGuard.OK:
             self._notify(self._guard_message(path, guard))
@@ -402,6 +405,33 @@ class EditorPane(Gtk.Box):
             GLib.PRIORITY_DEFAULT, None, callback=self._on_loaded, user_data=(key, restore_cursor)
         )
 
+        self._tab_view.set_selected_page(page)
+
+    def _open_image_page(self, key: str, path: Path) -> None:
+        """A read-only `Gtk.Picture` page — images never get a buffer
+        (`load_guard` would refuse them as binary), so none of the
+        save/dirty/search machinery applies: `_open` stays text-only and
+        every `_open` consumer skips these pages."""
+        guard = editorfiles.image_guard(path)
+        if guard != editorfiles.LoadGuard.OK:
+            self._notify(self._guard_message(path, guard))
+            return
+        try:
+            texture = Gdk.Texture.new_from_filename(key)
+        except GLib.Error:
+            self._notify(_("{name} couldn't be decoded as an image.").format(name=path.name))
+            return
+        picture = Gtk.Picture.new_for_paintable(texture)
+        picture.set_can_shrink(True)
+        picture.set_content_fit(Gtk.ContentFit.CONTAIN)
+        picture.set_hexpand(True)
+        picture.set_vexpand(True)
+        page = self._tab_view.append(picture)
+        page.set_title(path.name)
+        page.set_tooltip(key)
+        page.set_icon(Gio.ThemedIcon.new("image-x-generic-symbolic"))
+        self._pages[key] = page
+        self._page_key[page] = key
         self._tab_view.set_selected_page(page)
 
     def _on_loaded(self, loader: GtkSource.FileLoader, result: Gio.AsyncResult, data: tuple) -> None:
@@ -783,8 +813,11 @@ class EditorPane(Gtk.Box):
     def _sync_status(self) -> None:
         opened = self._active_open()
         if opened is None:
-            self._status_path.set_text("")
-            self._status_lang.set_text("")
+            # An image page still names itself in the status row; everything
+            # else there (language, cursor, save) is buffer-only.
+            key = self._selected_key()
+            self._status_path.set_text(key or "")
+            self._status_lang.set_text(_("Image") if key else "")
             self._status_cursor.set_text("")
             self._save_btn.set_sensitive(False)
             return
@@ -807,9 +840,12 @@ class EditorPane(Gtk.Box):
             self.hide_search()
         self._sync_status()
 
-    def _active_open(self) -> _OpenFile | None:
+    def _selected_key(self) -> str | None:
         page = self._tab_view.get_selected_page()
-        key = self._page_key.get(page) if page is not None else None
+        return self._page_key.get(page) if page is not None else None
+
+    def _active_open(self) -> _OpenFile | None:
+        key = self._selected_key()
         return self._open.get(key) if key is not None else None
 
     # -- appearance ------------------------------------------------------------
@@ -861,11 +897,12 @@ class EditorPane(Gtk.Box):
         return self._root
 
     def open_paths(self) -> list[str]:
-        return list(self._open.keys())
+        # _pages, not _open: image pages have no buffer but should still be
+        # part of the session's remembered files.
+        return list(self._pages.keys())
 
     def active_path(self) -> str | None:
-        opened = self._active_open()
-        return str(opened.path) if opened is not None else None
+        return self._selected_key()
 
     def cursor_positions(self) -> dict[str, list[int]]:
         positions = {}
