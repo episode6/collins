@@ -381,6 +381,7 @@ class SessionRow(Gtk.ListBoxRow):
         name_label = Gtk.Label(xalign=0.0, hexpand=True)
         name_label.set_ellipsize(_ELLIPSIZE_END)
         top.append(name_label)
+        self._name_label = name_label
 
         # Only the waiting state badges the row (interrupted colors the guide
         # line instead — see _on_state_changed), so the badge is fixed here
@@ -503,6 +504,14 @@ class SessionRow(Gtk.ListBoxRow):
         hover.connect("enter", self._on_hover_enter)
         hover.connect("leave", self._on_hover_leave)
         self.add_controller(hover)
+
+        # An ellipsised title is recoverable on hover: the row answers tooltip
+        # queries with the full title, but only while the label is actually
+        # truncated — repeating a fully visible title would be noise. On the
+        # row, not the label, so the whole row width is a hover target; the
+        # action buttons' own tooltips still win while the pointer is on them.
+        self.set_has_tooltip(True)
+        self.connect("query-tooltip", self._on_query_tooltip)
         box.append(top)
 
         path_label = Gtk.Label(xalign=0.0)
@@ -617,6 +626,14 @@ class SessionRow(Gtk.ListBoxRow):
         if self._pr_menu.get_visible():
             prmenu.update(self._pr_menu, prs, self._pr_host)
         return GLib.SOURCE_REMOVE
+
+    def _on_query_tooltip(
+        self, _row: Gtk.Widget, _x: int, _y: int, _keyboard: bool, tooltip: Gtk.Tooltip
+    ) -> bool:
+        if not self._name_label.get_layout().is_ellipsized():
+            return False
+        tooltip.set_text(self._name_label.get_label())
+        return True
 
     def _on_hover_enter(self, *_args) -> None:
         self._hovered = True
