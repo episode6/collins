@@ -448,7 +448,7 @@ class SessionRow(Gtk.ListBoxRow):
         self._archive_btn = archive_btn
 
         # Leading the row's actions: the pull requests this session opened —
-        # the same list the tab footer's caret shows, from a row whose tab
+        # the same list the tab footer's ellipsis shows, from a row whose tab
         # needn't be open (or exist) to read it. Clicking the button opens the
         # menu and nothing else: a button consumes the click that would
         # otherwise activate the row and open the session.

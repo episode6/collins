@@ -1,7 +1,8 @@
 """A session's pull requests as a popover list: one row per PR, titles and all.
 
-Two buttons open this same list. The caret beside the tab footer's PR chips
-opens it for the tab in front of you, off a list its poll keeps current; the
+Two buttons open this same list. The ellipsis beside the tab footer's PR chips
+— shown only while the row is too narrow for every chip — opens it for the tab
+in front of you, off a list its poll keeps current; the
 GitHub button on a sidebar row opens it for a session whose tab may not even
 be open, off the list saved for that session — which is why that one refreshes
 before it shows anything (see SessionRow._fill_pr_menu).
