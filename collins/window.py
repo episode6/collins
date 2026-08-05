@@ -1773,7 +1773,16 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _start_new_chat_session(self, cwd: str, provider=None, variant_key: str = "") -> None:
+        # Same gate as the terminal launches: a chat session runs the agent
+        # headlessly, where the CLI's own trust prompt never appears, so this
+        # dialog is the only thing standing between an arbitrary picked folder
+        # and an agent editing in it.
         provider = provider or self._default_provider()
+        self._with_folder_trust(
+            cwd, provider, lambda: self._launch_new_chat_session(cwd, provider, variant_key)
+        )
+
+    def _launch_new_chat_session(self, cwd: str, provider, variant_key: str = "") -> None:
         variants = provider.chat_variants()
         variant = provider.chat_variant(variant_key) or (variants[0] if variants else None)
         if variant is None:

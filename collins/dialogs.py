@@ -244,6 +244,11 @@ def trust_folder_dialog(
 
     Trusting is the suggested response rather than a destructive one: the user
     picked this folder deliberately, and the answer is a grant, not a loss.
+    The *keyboard* default stays on Cancel all the same (confirm_dialog's
+    default_response), which is the one place this dialog parts company with
+    its own styling: granting an agent read/write/execute over a directory
+    tree should take a deliberate click, not an Enter that was meant for
+    whatever had focus a moment ago. Escape and Enter both decline.
     """
     confirm_dialog(
         parent,
