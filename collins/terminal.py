@@ -1018,6 +1018,12 @@ class TerminalTab(Gtk.Box):
         # prstatus records, oldest first), so the window can save them against
         # the session. Never fires for a tab that has nothing to say yet.
         "prs-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
+        # Emitted whenever the chips are rebuilt — a check went red, a PR
+        # merged, a new one turned up — so the session's sidebar row can
+        # re-read its own mark from the status this tab just fetched. Fires
+        # where prs-changed doesn't: status is not part of a saved record, so
+        # a PR going from pending to failed changes every mark and no record.
+        "pr-status-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
         # Emitted (debounced) when the editor panel's divider is moved: the
         # new panel px size, so the window can persist it as the app-wide
         # default. Mirrors panel-size-changed, minus the mode — the editor
@@ -1650,6 +1656,11 @@ class TerminalTab(Gtk.Box):
         # retires the button when the last chip goes.
         self._pr_menu_btn.set_visible(False)
         self._remember_prs(prs)
+        # After the save, never before it: the sidebar row rebuilds its mark
+        # from this session's saved list plus the status now sitting in
+        # prstatus, so a list that just gained a PR has to be on disk by the
+        # time the row goes looking.
+        self.emit("pr-status-changed")
         self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
 

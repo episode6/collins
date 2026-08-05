@@ -97,6 +97,11 @@ _GH_FIELDS = "title,state,isDraft,statusCheckRollup,mergeable,comments"
 # recomputes — so only a definite verdict is kept and UNKNOWN is stored as "no
 # answer", to be corrected by the refresh after the next TTL.
 _MERGEABLE_STATES = frozenset({"MERGEABLE", "CONFLICTING"})
+# The states worth writing to disk, and the only ones read back (see
+# `to_record`): how a PR ended, which is what its base icon needs before the
+# first fetch of a run lands. OPEN and DRAFT are not among them — a live PR's
+# state is exactly the thing that changes while Collins isn't looking.
+_SAVED_STATES = frozenset({"MERGED", "CLOSED"})
 # Long PR titles are a thing; the menu ellipsizes them anyway, and this keeps
 # what a repository can put on screen (and on disk) bounded.
 _MAX_TITLE = 200
@@ -378,15 +383,19 @@ def merge_ordered(
 
 
 def forget_status(pr: PullRequest) -> PullRequest:
-    """*pr* stripped back to its identity, keeping only a merge that happened.
+    """*pr* stripped back to its identity, keeping only how the PR ended.
 
     What a tab remembers between polls, and the shape `to_record` writes out:
     check counts are refetched, a title is part of what the PR *is*, and a
-    merge is forever.
+    merge or a close is what the mark reads as until a fetch says otherwise.
+
+    Keeping the state is not the same as being done with the PR, though: a
+    merge is forever and stops the refetching (see `resync`), while a closed PR
+    can be reopened and so keeps being asked about.
     """
     return replace(
         pr,
-        state="MERGED" if pr.merged else None,
+        state=pr.state if pr.settled else None,
         passed=None,
         failed=None,
         pending=None,
@@ -401,6 +410,12 @@ def to_record(pr: PullRequest) -> dict | None:
     A URL that doesn't look like a PR page is dropped rather than written: it
     can't be refreshed (see `_FETCHABLE`), so the only thing persisting it
     would achieve is putting an unvalidated URL on disk.
+
+    Only how the PR *ended* is worth saving beside its identity and title: a
+    merged or closed one gets its base icon back the moment the list is read,
+    rather than a grey "nothing known" one until the first fetch of the run.
+    Everything else — checks, mergeability, unresolved comments — goes stale
+    between runs and is deliberately left to `gh`.
     """
     if not _FETCHABLE.match(pr.url):
         return None
@@ -409,8 +424,8 @@ def to_record(pr: PullRequest) -> dict | None:
         record["repository"] = pr.repository
     if pr.title:
         record["title"] = pr.title
-    if pr.merged:
-        record["state"] = "MERGED"
+    if pr.settled:
+        record["state"] = pr.state
     return record
 
 
@@ -425,7 +440,10 @@ def from_record(record: object) -> PullRequest | None:
     Everything is re-validated on the way in. These records started life in a
     transcript — repo content, i.e. untrusted — and a restored PR's URL is
     handed to a browser and to `gh`, so being the one that wrote the file
-    earns no shortcut here.
+    earns no shortcut here. That includes the state: only the two `to_record`
+    writes are read back, so a record claiming OPEN (hand-edited, or written by
+    a future version) restores as "nothing known" rather than as a live PR the
+    fetch would have to disprove.
     """
     if not isinstance(record, dict):
         return None
@@ -441,7 +459,7 @@ def from_record(record: object) -> PullRequest | None:
         url=url,
         repository=repository if isinstance(repository, str) and repository else None,
         title=_title(record.get("title")),
-        state="MERGED" if record.get("state") == "MERGED" else None,
+        state=record["state"] if record.get("state") in _SAVED_STATES else None,
     )
 
 
@@ -852,7 +870,9 @@ def resync(prs: Iterable[PullRequest]) -> list[PullRequest]:
     recorded, and keeps the title the saved record supplied).
 
     A merged PR is skipped unless its title is missing: nothing else about one
-    can change (see `forget_status`), so it isn't worth a subprocess.
+    can change (see `forget_status`), so it isn't worth a subprocess. Merged,
+    not settled — a closed PR is asked about like any other, because closing
+    one is reversible and reopening it must not need a restart to show.
 
     Never call on the main thread — this waits on `gh`, several at a time.
     """
@@ -1000,7 +1020,9 @@ def sweep(targets: Iterable[tuple[str, list[PullRequest], str | None]]) -> dict[
     }
 
     # One fetch per URL, whatever it is worth to. A PR the lookup just found
-    # came back with its status attached, so it is already current.
+    # came back with its status attached, so it is already current. Only a
+    # merged one is skipped outright, as in `resync`: a closed PR still costs a
+    # call, since it is the click that would show it reopened.
     due = {
         pr.url
         for prs in collected.values()

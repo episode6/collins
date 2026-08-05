@@ -1461,6 +1461,7 @@ class MainWindow(Adw.ApplicationWindow):
         tab.connect("editor-pop-out-requested", self._pop_out_editor)
         tab.connect("bell", self._on_bell)
         tab.connect("prs-changed", self._on_tab_prs_changed)
+        tab.connect("pr-status-changed", self._on_tab_pr_status_changed)
         tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
         tab.set_editor_width_lookup(lambda: int(self.state.get_setting("editor_width") or 0))
         gate = EchoGate()
@@ -1647,6 +1648,25 @@ class MainWindow(Adw.ApplicationWindow):
         self.state.set_session_prs(tab.session_id, list(records or []))
         self.sidebar.sync_session_prs(tab.session_id)
         self.store.apply_pr_title(tab.session_id)
+
+    def _on_tab_pr_status_changed(self, tab: TerminalTab) -> None:
+        """A tab's chips read differently now: rebuild its row's mark to match.
+
+        The saved list is only half of what a row's mark is made of — the other
+        half is live status, which is never written down (see
+        prstatus.to_record). So a check going red changes every chip in the tab
+        and not one record, and without this the row beside it would keep
+        showing yesterday's verdict until something else touched the list.
+
+        Nothing is saved here; the row reads the status this tab's own fetch
+        just put in prstatus. Fork tabs included: they write no list, but they
+        do fetch, and the row they share deserves the answer. (A list change
+        arrives as prs-changed first and syncs the row too — one extra rebuild
+        of one row, and the alternative is either signal depending on the
+        other's ordering.)
+        """
+        if tab.session_id:
+            self.sidebar.sync_session_prs(tab.session_id)
 
     def _on_panel_size_changed(self, _tab: TerminalTab, mode: str, size: int) -> None:
         """A divider was dragged: remember the size app-wide, so every panel

@@ -1168,12 +1168,14 @@ class SessionSidebar(Gtk.Box):
             row.check.set_active(row.item.session_id in self._selected)
 
     def sync_session_prs(self, session_id: str) -> None:
-        """A session's PR list changed: re-read it on that session's row.
+        """A session's PRs changed: re-read them on that session's row.
 
-        The window calls this whenever a tab saves a new list, so a session
-        that has just opened its first PR gains the button that opens it — the
+        The window calls this whenever a tab saves a new list — so a session
+        that has just opened its first PR gains the mark that opens it; the
         rows themselves are only rebuilt when the list's order changes, which
-        opening a PR isn't.
+        opening a PR isn't — and whenever an open tab's chips change how they
+        read, so the row's mark follows the status that tab just fetched
+        instead of waiting for the next sweep.
         """
         row = self._rows.get(session_id)
         if row is not None:

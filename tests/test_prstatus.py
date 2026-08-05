@@ -804,16 +804,26 @@ def test_record_keeps_identity_and_drops_status():
     assert to_record(pr) == {"number": 55, "url": URL, "repository": "episode6/collins"}
 
 
-def test_a_merged_pr_stays_merged_on_disk():
-    """The one status that can't go stale, so the mark is up before gh answers."""
-    pr = PullRequest(55, URL, "episode6/collins", state="MERGED", passed=2)
-    assert to_record(pr)["state"] == "MERGED"
-    assert from_record(to_record(pr)).merged is True
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
+def test_how_a_pr_ended_is_kept_on_disk(state):
+    """How it ended is the one thing that survives the run, so the base icon is
+    up before gh answers."""
+    pr = PullRequest(55, URL, "episode6/collins", state=state, passed=2)
+    assert to_record(pr)["state"] == state
+    assert from_record(to_record(pr)).state == state
 
 
-def test_forget_status_keeps_only_the_merge():
-    pr = PullRequest(55, URL, "episode6/collins", state="MERGED", passed=2, failed=1, pending=3)
-    assert forget_status(pr) == PullRequest(55, URL, "episode6/collins", state="MERGED")
+@pytest.mark.parametrize("state", ["OPEN", "DRAFT", "SOMETHING_NEW", 7, "", None])
+def test_only_the_ended_states_are_read_back(state):
+    """A record claiming a live state — hand-edited, or from a later version —
+    restores as "nothing known" rather than as a PR the fetch has to disprove."""
+    assert from_record({"number": 55, "url": URL, "state": state}).state is None
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
+def test_forget_status_keeps_only_how_it_ended(state):
+    pr = PullRequest(55, URL, "episode6/collins", state=state, passed=2, failed=1, pending=3)
+    assert forget_status(pr) == PullRequest(55, URL, "episode6/collins", state=state)
     open_pr = replace(pr, state="OPEN")
     assert forget_status(open_pr) == PullRequest(55, URL, "episode6/collins")
 
@@ -1055,6 +1065,16 @@ def test_resync_does_not_spend_a_fetch_on_a_merged_pr(gh_calls):
     pr = PullRequest(55, URL, title="Track every PR", state="MERGED")
     assert resync([pr]) == [pr]
     assert urls == []
+
+
+def test_resync_still_asks_about_a_closed_pr(gh_calls):
+    """Closing is reversible: a reopened PR must not need a restart to show,
+    so only a merge buys a PR out of the fetch."""
+    urls, replies = gh_calls
+    replies[URL] = {"state": "OPEN", "checks": {}, "title": "Track every PR"}
+    out = resync([PullRequest(55, URL, title="Track every PR", state="CLOSED")])
+    assert urls == [URL]
+    assert out[0].state == "OPEN"
 
 
 def test_resync_fetches_a_merged_pr_that_never_learned_its_title(gh_calls):
@@ -1478,10 +1498,18 @@ def test_sweep_survives_a_lookup_that_blows_up(monkeypatch, gh_calls, branches):
     assert swept["s2"][0].title == "Track every PR"
 
 
-def test_sweep_spends_no_call_on_a_settled_pr(gh_json, gh_calls, branches):
+def test_sweep_spends_no_call_on_a_merged_pr(gh_json, gh_calls, branches):
     """A merged PR that knows its title is what most old rows carry, and a
     sidebar full of them must cost nothing at all."""
     urls, _replies = gh_calls
     pr = PullRequest(55, URL, title="Track every PR", state="MERGED")
     assert sweep([("s1", [pr], None)]) == {"s1": [pr]}
     assert urls == []
+
+
+def test_sweep_still_asks_about_a_closed_pr(gh_json, gh_calls, branches):
+    """The sweep is the click that would show a closed PR reopened."""
+    urls, _replies = gh_calls
+    pr = PullRequest(55, URL, title="Track every PR", state="CLOSED")
+    sweep([("s1", [pr], None)])
+    assert urls == [URL]
