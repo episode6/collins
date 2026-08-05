@@ -642,8 +642,17 @@ class SessionRow(Gtk.ListBoxRow):
         yesterday's answer. So opening the menu is what fetches — the rows go
         up immediately, since the titles and numbers are the readable part,
         with a spinner in the column each status will land in.
+
+        A session with a single PR skips the list entirely and opens that PR's
+        actions, the way a footer chip does: a list of one asks which of one,
+        and the answer is a click that only ever leads to the same place. There
+        is no way back from it because there is nothing behind it, and the
+        refresh lands in the actions themselves (see prmenu.update).
         """
-        prmenu.fill(self._pr_menu, self._prs, loading=True, host=self._pr_host)
+        if len(self._prs) == 1:
+            prmenu.show_actions(self._pr_menu, self._prs[0], self._pr_host)
+        else:
+            prmenu.fill(self._pr_menu, self._prs, loading=True, host=self._pr_host)
         self._refresh_prs()
 
     def _refresh_prs(self) -> None:

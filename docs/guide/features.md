@@ -33,7 +33,9 @@ fork. Last modified: 2026-08-05. Full change history: git log for this file.
   failed check or a conflicting branch, an amber **⚠** for comments waiting on
   a reply, an amber **●** for checks still running, and a green **✓** only when
   every live PR has passed everything. Hovering names each PR; clicking opens
-  the same list (and the same per-PR actions) the tab footer's caret shows.
+  the same list (and the same per-PR actions) the tab footer's caret shows —
+  or, when the session has just the one pull request, that PR's actions
+  directly, since a list of one only ever leads to the same place.
 - **Refresh** (the header's ↻) re-reads the session list *and* every listed
   session's pull requests: each one's checks, conflicts and unanswered
   comments, plus a **branch lookup** that picks up PRs opened by hand, which no

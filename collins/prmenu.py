@@ -98,9 +98,12 @@ _BADGE_ICONS = {
     BADGE_PASSED: ("check-circle-fill-symbolic", "pr-checks-passed"),
 }
 # What a popover is currently showing: the PR whose actions are up (None while
-# it is the list), and the list itself — the contents a submenu leads back to,
-# which a refresh can replace without disturbing the submenu on top of it.
+# it is the list), the way back out of those actions (None when the actions are
+# the whole menu, as for a footer chip or a session with one PR), and the list
+# itself — the contents a submenu leads back to, which a refresh can replace
+# without disturbing the submenu on top of it.
 _ACTIONS = "_collins_actions_pr"
+_ACTIONS_BACK = "_collins_actions_back"
 _LIST = "_collins_pr_list"
 # Each action's mark, by key: the icon says who carries the action out —
 # GitHub's own glyphs (colored as on the PR page: merge purple, open green)
@@ -318,6 +321,7 @@ def fill(
     scroller.set_max_content_height(MAX_HEIGHT_PX)
     popover.set_child(scroller)
     setattr(popover, _ACTIONS, None)
+    setattr(popover, _ACTIONS_BACK, None)
     setattr(popover, _LIST, (prs, loading, host))
 
 
@@ -336,15 +340,38 @@ def refill(popover: Gtk.Popover) -> None:
 def update(popover: Gtk.Popover, prs: Iterable[PullRequest], host: ActionHost | None) -> None:
     """Land a refreshed list into an open menu, wherever the reader is in it.
 
-    On the list, that means rebuilding it. Inside a PR's actions, it means
-    leaving what is on screen alone — swapping a menu out from under the
-    pointer is how a click lands on something nobody chose — and putting the
-    new list behind it, for the way back.
+    On the list, that means rebuilding it. Inside a *submenu* — actions someone
+    stepped into from the list — it means leaving what is on screen alone,
+    because swapping a menu out from under the pointer is how a click lands on
+    something nobody chose; the new list goes behind it, for the way back.
+
+    Actions with nothing behind them are the exception (a session with a single
+    PR opens straight into them, see SessionRow._fill_pr_menu). There they are
+    not a submenu but the whole menu, standing where the list would have stood
+    and refreshing as the list would: what the fetch just learned is the
+    difference between offering to merge a PR and offering to fix its build.
+    Only an actual change rebuilds, so a fetch that confirms what was already
+    there leaves the rows exactly where the pointer left them.
     """
-    if showing_actions(popover):
-        setattr(popover, _LIST, (list(prs), False, host))
-    else:
+    prs = list(prs)
+    child = popover.get_child()
+    if child is not None and not child.get_sensitive():
+        # An action is running in here: the menu was made insensitive for the
+        # duration and a spinner is turning in the row that started it (see
+        # _start_action). Rebuilding now would hand back a live menu that says
+        # nothing is happening, so the merge in flight could be started twice.
+        return
+    shown = getattr(popover, _ACTIONS, None)
+    if shown is None:
         fill(popover, prs, host=host)
+        return
+    setattr(popover, _LIST, (prs, False, host))
+    if getattr(popover, _ACTIONS_BACK, None) is not None or host is None:
+        return  # a submenu: leave it, the list behind it is now current
+    if len(prs) != 1:
+        fill(popover, prs, host=host)  # no longer a list of one, so show the list
+    elif prs[0] != shown:
+        show_actions(popover, prs[0], host)
 
 
 def _on_row_clicked(button: Gtk.Button, popover: Gtk.Popover, url: str) -> None:
@@ -395,6 +422,7 @@ def show_actions(
     there is nothing behind it.
     """
     setattr(popover, _ACTIONS, pr)
+    setattr(popover, _ACTIONS_BACK, back)
     rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
     rows.append(_header(pr, back))
     separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
