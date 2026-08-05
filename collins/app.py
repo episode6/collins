@@ -23,7 +23,7 @@ from .i18n import _
 from .prefs import apply_color_scheme
 from .state import AppState
 from .store import SessionStore
-from .window import MainWindow
+from .window import MainWindow, session_window
 
 # Bundled icons (e.g. tab-close-symbolic); found by name when installed.
 _BUNDLED_ICONS = Path(__file__).resolve().parent.parent / "data" / "icons"
@@ -709,11 +709,17 @@ class App(Adw.Application):
         return next((w for w in self.get_windows() if isinstance(w, MainWindow)), None)
 
     def _on_focus_session(self, _action, param: GLib.Variant) -> None:
+        session_id = param.get_string()
+        # The notification came from one specific tab, which may not be in the
+        # window that happens to be active — go to the window that has it.
+        window = session_window(self, session_id) if session_id else None
+        if window is not None:
+            window.focus_session(session_id)
+            return
         window = self._main_window()
         if window is None:
             return
         window.present()
-        session_id = param.get_string()
         if session_id:
             window.focus_session(session_id)
 
