@@ -1082,11 +1082,12 @@ def test_resync_leaves_a_pr_alone_when_the_fetch_fails(gh_calls):
     assert resync([pr]) == [pr]
 
 
-def test_resync_does_not_spend_a_fetch_on_a_merged_pr(gh_calls):
+def test_resync_does_not_spend_a_fetch_on_a_merged_pr(gh_calls, scheduled):
     urls, _replies = gh_calls
     pr = PullRequest(55, URL, title="Track every PR", state="MERGED")
     assert resync([pr]) == [pr]
     assert urls == []
+    assert scheduled == []  # nor one in the background on the way out
 
 
 def test_resync_still_asks_about_a_closed_pr(gh_calls):
@@ -1521,13 +1522,15 @@ def test_sweep_survives_a_lookup_that_blows_up(monkeypatch, gh_calls, branches):
     assert swept["s2"][0].title == "Track every PR"
 
 
-def test_sweep_spends_no_call_on_a_merged_pr(gh_json, gh_calls, branches):
+def test_sweep_spends_no_call_on_a_merged_pr(gh_json, gh_calls, branches, scheduled):
     """A merged PR that knows its title is what most old rows carry, and a
-    sidebar full of them must cost nothing at all."""
+    sidebar full of them must cost nothing at all — including in the
+    background, which is what reading one back through `enrich` would start."""
     urls, _replies = gh_calls
     pr = PullRequest(55, URL, title="Track every PR", state="MERGED")
     assert sweep([("s1", [pr], None)]) == {"s1": [pr]}
     assert urls == []
+    assert scheduled == []
 
 
 def test_sweep_still_asks_about_a_closed_pr(gh_json, gh_calls, branches):

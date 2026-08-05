@@ -39,7 +39,11 @@ fork. Last modified: 2026-08-05. Full change history: git log for this file.
   comments, plus a **branch lookup** that picks up PRs opened by hand, which no
   transcript would ever mention. Archived sessions are left out of it. The
   button turns into a spinner while it works, since that part is `gh` over the
-  whole panel.
+  whole panel. **Collins runs that sweep once by itself, a few seconds after
+  launch**, so the marks start the day current instead of as the last run left
+  them — turn it off with *Refresh pull requests at launch* in Preferences.
+  Marks are restored from the last run either way, so the panel reads
+  immediately and then settles.
 - A **`+` button on every project header** starts a new session in that
   project; right-click a header for *New session here* and *Archive project*.
   Projects whose sessions are all archived or favorited still show their header,

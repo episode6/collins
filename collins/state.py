@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-03. Full change history: git log for this file.
+# fork. Last modified: 2026-08-05. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -64,6 +64,10 @@ DEFAULT_SETTINGS = {
     # detected (see SessionStore.apply_pr_title). Fills the generated-name
     # slot, so a manual rename always wins.
     "pr_title_sessions": False,
+    # Run the sidebar's PR sweep once, shortly after launch, so the marks
+    # restored from the last run are replaced by current ones without the
+    # refresh button being clicked (see MainWindow._sweep_prs_at_launch).
+    "refresh_prs_on_launch": True,
     # Launch new sessions with the agent CLI's worktree flag (claude -w) in
     # git projects, isolating their edits from the live checkout. Per-project
     # overrides live in AppState.project_worktree.

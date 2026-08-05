@@ -875,10 +875,10 @@ def resync(prs: Iterable[PullRequest]) -> list[PullRequest]:
     `enrich` is the polling path: it hands back what it has and only goes out
     to `gh` once a TTL is up. This is the on-demand one, for a list that is
     being opened rather than watched — a sidebar row's PR menu has no poll
-    behind it, and what it saved last run is a title and nothing else. So each
-    PR is fetched before the list comes back, and a fetch that fails leaves
-    that PR exactly as it arrived (`enrich` reads the "no status" the failure
-    recorded, and keeps the title the saved record supplied).
+    behind it, and what it saved last run may be days old. So each PR is
+    fetched before the list comes back, and a fetch that fails leaves that PR
+    exactly as it arrived (`enrich` reads the "no status" the failure recorded,
+    and keeps what the saved record supplied).
 
     A merged PR is skipped unless its title is missing: nothing about one can
     change, so it isn't worth a subprocess. Merged, not settled — a closed PR
@@ -888,12 +888,12 @@ def resync(prs: Iterable[PullRequest]) -> list[PullRequest]:
     Never call on the main thread — this waits on `gh`, several at a time.
     """
     prs = list(prs)
-    due = [pr.url for pr in prs if not pr.merged or pr.title is None]
+    due = [pr.url for pr in prs if _worth_fetching(pr)]
     due = [url for url in due if _FETCHABLE.match(url)]
     if due and not _gh_missing:
         with ThreadPoolExecutor(max_workers=min(_RESYNC_WORKERS, len(due))) as pool:
             list(pool.map(refresh, due))
-    return [enrich(pr) or pr for pr in prs]
+    return [_after_fetching(pr) for pr in prs]
 
 
 # -- a session's whole list as one mark --------------------------------------
@@ -1038,15 +1038,36 @@ def sweep(targets: Iterable[tuple[str, list[PullRequest], str | None]]) -> dict[
         pr.url
         for prs in collected.values()
         for pr in prs
-        if (not pr.merged or pr.title is None) and _FETCHABLE.match(pr.url)
+        if _worth_fetching(pr) and _FETCHABLE.match(pr.url)
     } - {pr.url for pr in found.values()}
     if due and not _gh_missing:
         with ThreadPoolExecutor(max_workers=min(_SWEEP_WORKERS, len(due))) as pool:
             list(pool.map(refresh, sorted(due)))
     return {
-        session_id: [enrich(pr) or pr for pr in prs]
+        session_id: [_after_fetching(pr) for pr in prs]
         for session_id, prs in collected.items()
     }
+
+
+def _worth_fetching(pr: PullRequest) -> bool:
+    """Whether asking `gh` about *pr* could tell us anything new.
+
+    A merged PR that knows its title is the one thing nothing can change; a
+    closed one is still asked about, because closing is reversible.
+    """
+    return not pr.merged or pr.title is None
+
+
+def _after_fetching(pr: PullRequest) -> PullRequest:
+    """*pr* with the status a just-finished round of fetching left for it.
+
+    `enrich` for anything that was worth fetching — it reads what came back,
+    and falls back to the CLI's cache when the fetch failed. `known` for the
+    rest, which is a dictionary lookup and, unlike `enrich`, schedules nothing:
+    a sweep that deliberately spent no call on a merged PR must not then start
+    one in the background for it.
+    """
+    return (enrich(pr) or pr) if _worth_fetching(pr) else known(pr)
 
 
 def _discover(target: tuple[str, str]) -> PullRequest | None:

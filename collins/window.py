@@ -77,6 +77,12 @@ _IDLE_NOTIFY_MS = 4000
 # Window (and content header) title while the tab bar is showing the tab names.
 _APP_TITLE = "Collins"
 
+# How long after the store's first scan the launch PR sweep waits before going
+# out to gh (see _schedule_launch_sweep). Long enough for the restored tabs to
+# have spawned their shells, short enough that the marks are current by the
+# time anyone has read the panel.
+_LAUNCH_SWEEP_DELAY_MS = 2500
+
 # Quit-time backgrounding, which runs one session at a time. How long to wait
 # for a tab's session id to land before giving up and exiting it cleanly, how
 # often to re-check while waiting, and how long to let one handoff hold the
@@ -209,6 +215,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._last_active_session = ""
         # Session to reopen once the store's first scan delivers it.
         self._restore_session_id: str | None = None
+        # The startup PR sweep is a once-per-window thing, and it can only run
+        # after the first scan has said which sessions there are.
+        self._launch_sweep_source: int | None = None
+        self._launch_sweep_done = False
         self._menu_page: Adw.TabPage | None = None
         self._base_titles: dict[Adw.TabPage, str] = {}  # fork/new tab title without emoji
         # Tabs whose session id was just resolved, waiting for the store to
@@ -1700,6 +1710,38 @@ class MainWindow(Adw.ApplicationWindow):
                 self._clear_backgrounding(session_id, "fork discovered; row handed off")
         # Rows just appeared or went away, and a row is what a handoff needs.
         self._refresh_background_affordances()
+        self._schedule_launch_sweep()
+
+    def _schedule_launch_sweep(self) -> None:
+        """Line up the one PR sweep a launch runs by itself.
+
+        A restored mark is the last thing the previous run knew (see
+        prstatus.to_record), which is the right thing to *show* immediately and
+        the wrong thing to leave standing: overnight the checks finished and
+        somebody replied. So the panel asks once, unprompted, and the marks
+        settle into today's answers a few seconds after the window opens —
+        without a click, and without a poll pestering GitHub all day.
+
+        Waits for the store's first scan, since a sweep with no sessions in it
+        is nothing, and then a little longer: opening a window already spawns a
+        shell per restored tab, and this is `gh` per directory on top. The
+        delay keeps the two out of each other's way — the button spins for it,
+        so the wait is visible rather than mysterious.
+        """
+        if self._launch_sweep_done or self._launch_sweep_source is not None:
+            return
+        if not self.store.sessions:
+            return  # nothing to sweep yet; the next scan may have some
+        if not self.state.get_setting("refresh_prs_on_launch"):
+            self._launch_sweep_done = True
+            return
+        self._launch_sweep_source = GLib.timeout_add(_LAUNCH_SWEEP_DELAY_MS, self._launch_sweep)
+
+    def _launch_sweep(self) -> bool:
+        self._launch_sweep_source = None
+        self._launch_sweep_done = True
+        self.sidebar.refresh_pull_requests()
+        return GLib.SOURCE_REMOVE
 
     def _sync_transcript_paths(self) -> None:
         """Re-aim tabs whose transcript moved out from under them.
@@ -2562,6 +2604,9 @@ class MainWindow(Adw.ApplicationWindow):
         if self._process_poll is not None:
             GLib.source_remove(self._process_poll)
             self._process_poll = None
+        if self._launch_sweep_source is not None:
+            GLib.source_remove(self._launch_sweep_source)
+            self._launch_sweep_source = None
 
     def _sync_row_busy(self, session_id: str) -> None:
         """Push the busy flag onto every row this session shows up as.
