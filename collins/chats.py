@@ -9,7 +9,6 @@ unit-testable headless.
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import tempfile
@@ -17,7 +16,7 @@ from pathlib import Path
 
 from gi.repository import Gio, GLib
 
-from .sessions import CLAUDE_CONFIG
+from . import trust
 
 # Override with COLLINS_CHATS_DIR for demos, tests and development.
 CHATS_DIR = Path(
@@ -62,38 +61,18 @@ def create_chat_dir() -> str:
 
 def trust_chat_dir(cwd: str) -> None:
     """Pre-trust a chat directory in the agent CLI's config, so launching in
-    a directory we just created (empty) skips the folder-trust prompt.
+    a directory we just created (empty) skips the folder-trust question.
 
-    Trust is per-directory — it is not inherited from the chats root — and
-    the CLI rewrites its config wholesale when a session ends, so an entry
-    written while another session runs can occasionally be clobbered. That's
-    fine: the cost is the trust prompt appearing, exactly as it would today.
-    Best-effort by design — every failure is swallowed.
+    The one place Collins answers that question on the user's behalf: a chat
+    directory is an empty folder Collins made moments earlier, with no
+    third-party content in it to judge. Every real project is asked about
+    instead (see trust.py and the dialog in dialogs.py) — the chats root is
+    deliberately left untrusted, so trust never spreads from here to a
+    sibling by inheritance.
     """
     if not is_chat_cwd(cwd):
         return
-    try:
-        try:
-            config = json.loads(Path(CLAUDE_CONFIG).read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            config = {}
-        if not isinstance(config, dict):
-            return
-        projects = config.setdefault("projects", {})
-        # The CLI keys trust by the physical working directory; write the
-        # resolved path too when the chats root sits behind a symlink.
-        keys = {os.path.normpath(cwd), os.path.realpath(cwd)}
-        if all(projects.get(key, {}).get("hasTrustDialogAccepted") is True for key in keys):
-            return
-        for key in keys:
-            entry = projects.setdefault(key, {})
-            if isinstance(entry, dict):
-                entry["hasTrustDialogAccepted"] = True
-        tmp = Path(str(CLAUDE_CONFIG) + ".tmp")
-        tmp.write_text(json.dumps(config, indent=2), encoding="utf-8")
-        tmp.replace(CLAUDE_CONFIG)
-    except (OSError, ValueError, TypeError, AttributeError):
-        pass
+    trust.trust_dir(cwd)
 
 
 def delete_chat_dir(cwd: str) -> str | None:

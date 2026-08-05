@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-03. Full change history: git log for this file.
+# fork. Last modified: 2026-08-05. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
@@ -20,7 +21,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import __version__, chats, dialogs, editor, footerapps, openwith, panelhistory
+from . import __version__, chats, dialogs, editor, footerapps, openwith, panelhistory, trust
 from .activity import (
     PROCESS_IDLE_S,
     PROCESS_POLL_MS,
@@ -1300,12 +1301,44 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         return self.state.worktree_for_project(project_name_for_cwd(cwd))
 
+    def _with_folder_trust(self, cwd: str, provider, proceed: Callable[[], None]) -> None:
+        """Run `proceed` once the folder is trusted, asking first the one time
+        it isn't — and dropping the launch entirely if the answer is no.
+
+        The agent's trust covers a directory *and everything under it*, so the
+        question is asked about the project root (a session in a Claude-managed
+        worktree is really about its repository) and answering it once also
+        covers every worktree the agent creates there later.
+
+        Chats are exempt: their directory is an empty one Collins created
+        moments earlier and trusted itself (see chats.trust_chat_dir).
+        """
+        root = trust.trust_root(cwd)
+        if chats.is_chat_cwd(cwd) or trust.is_trusted(root):
+            proceed()
+            return
+
+        def accept() -> None:
+            # Record the answer where the CLI reads it, so the terminal doesn't
+            # open onto the agent's own copy of the question we just asked.
+            trust.trust_dir(root)
+            proceed()
+
+        dialogs.trust_folder_dialog(self, provider.name, root, accept)
+
     def _start_new_session(
         self, cwd: str, provider=None, options=None, worktree: bool | None = None
     ) -> None:
         """`worktree` forces this one launch on/off (still never outside a git
         checkout); None resolves the project's effective value as usual."""
         provider = provider or self._default_provider()
+        self._with_folder_trust(
+            cwd, provider, lambda: self._launch_new_session(cwd, provider, options, worktree)
+        )
+
+    def _launch_new_session(
+        self, cwd: str, provider, options=None, worktree: bool | None = None
+    ) -> None:
         if worktree is None:
             worktree = self._worktree_for_new_session(cwd)
         else:
@@ -1394,6 +1427,9 @@ class MainWindow(Adw.ApplicationWindow):
             return
         cwd = folder.get_path()
         provider = getattr(self, "_cont_provider", None) or self._default_provider()
+        self._with_folder_trust(cwd, provider, lambda: self._launch_continue(cwd, provider))
+
+    def _launch_continue(self, cwd: str, provider) -> None:
         tab = TerminalTab(
             cwd=cwd, settings=self.state.settings, provider=provider,
             command_override=provider.continue_command(),
@@ -1737,7 +1773,16 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _start_new_chat_session(self, cwd: str, provider=None, variant_key: str = "") -> None:
+        # Same gate as the terminal launches: a chat session runs the agent
+        # headlessly, where the CLI's own trust prompt never appears, so this
+        # dialog is the only thing standing between an arbitrary picked folder
+        # and an agent editing in it.
         provider = provider or self._default_provider()
+        self._with_folder_trust(
+            cwd, provider, lambda: self._launch_new_chat_session(cwd, provider, variant_key)
+        )
+
+    def _launch_new_chat_session(self, cwd: str, provider, variant_key: str = "") -> None:
         variants = provider.chat_variants()
         variant = provider.chat_variant(variant_key) or (variants[0] if variants else None)
         if variant is None:

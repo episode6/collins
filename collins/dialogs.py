@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-05. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -16,7 +16,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from .chats import is_chat_cwd
-from .formatting import format_size, format_timestamp, format_tokens
+from .formatting import display_path, format_size, format_timestamp, format_tokens
 from .i18n import _
 from .providers import SessionOptions, get_provider
 from .sessions import (
@@ -228,6 +228,43 @@ def info_dialog(parent: Gtk.Widget, heading: str, body: str) -> None:
 
 def error_dialog(parent: Gtk.Widget, heading: str, body: str) -> None:
     info_dialog(parent, heading, body)
+
+
+def trust_folder_dialog(
+    parent: Gtk.Widget,
+    agent_name: str,
+    path: str,
+    on_trust: Callable[[], None],
+    on_decline: Callable[[], None] | None = None,
+) -> None:
+    """The folder-trust question, asked before the first launch in a project
+    Collins has never opened. Declining cancels the launch outright — no tab,
+    no project — so this is the one gate between choosing a directory and an
+    agent reading and writing inside it.
+
+    Trusting is the suggested response rather than a destructive one: the user
+    picked this folder deliberately, and the answer is a grant, not a loss.
+    The *keyboard* default stays on Cancel all the same (confirm_dialog's
+    default_response), which is the one place this dialog parts company with
+    its own styling: granting an agent read/write/execute over a directory
+    tree should take a deliberate click, not an Enter that was meant for
+    whatever had focus a moment ago. Escape and Enter both decline.
+    """
+    confirm_dialog(
+        parent,
+        _("Do you trust this folder?"),
+        _(
+            "{agent} will be able to read, edit and execute files in\n\n{path}\n\n"
+            "and everything inside it, including any worktrees it creates there. "
+            "Open it only if this is a project you created or otherwise trust — "
+            "like your own code, a well-known open source project, or work from "
+            "your team."
+        ).format(agent=agent_name, path=display_path(path)),
+        _("Trust and open"),
+        on_trust,
+        on_dismiss=on_decline,
+        destructive=False,
+    )
 
 
 def new_session_options_dialog(

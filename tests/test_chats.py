@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from collins import chats
+from collins import sessions as sessions_mod
 
 
 @pytest.fixture
@@ -204,8 +205,10 @@ def test_is_degraded_chat_cwd_ignores_real_projects(chats_dir, monkeypatch):
 
 @pytest.fixture
 def claude_config(tmp_path, monkeypatch):
+    # trust.py owns the config surgery chats.trust_chat_dir delegates to, and
+    # reads the path off sessions live.
     config = tmp_path / "claude.json"
-    monkeypatch.setattr(chats, "CLAUDE_CONFIG", config)
+    monkeypatch.setattr(sessions_mod, "CLAUDE_CONFIG", config)
     return config
 
 
