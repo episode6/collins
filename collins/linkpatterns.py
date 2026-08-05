@@ -61,6 +61,12 @@ FILE_PATTERN = (
 _SUFFIX = re.compile(r"(.+?):(\d+)(?::(\d+))?")
 _FILE_RX = re.compile(FILE_PATTERN)
 
+# The characters FILE_PATTERN refuses to *end* a match on (_PATH_FINAL's
+# exclusions). When a wrap falls right after one of them — a row ending
+# `…/collins/` — the match candidate comes back without it, so the
+# end-of-row stitch gate must tolerate a trailing run of exactly these.
+_SHED_CHARS = ":.,;!?/"
+
 # How many rows a hard-wrapped reference may be stitched across, per
 # direction. Agent CLIs wrap long paths over two rows, occasionally three;
 # beyond that the joins are more likely to be accidental than real.
@@ -99,6 +105,27 @@ def resolve_file_reference(
     return None
 
 
+def token_at_column(text: str, col: int) -> str | None:
+    """The whitespace-delimited token covering column *col* of a screen row,
+    or None over whitespace / past the end of the text.
+
+    A wrapped reference's continuation fragment frequently contains no slash
+    (`o.py:7)`), so it matches nothing and offers no click candidate at all —
+    yet it is the half holding the file *name*, the natural place to click.
+    The raw token under the pointer stands in as the candidate; the stitcher's
+    geometry gates and existence check keep arbitrary prose tokens inert.
+    """
+    if col < 0 or col >= len(text) or text[col].isspace():
+        return None
+    start = col
+    while start > 0 and not text[start - 1].isspace():
+        start -= 1
+    end = col + 1
+    while end < len(text) and not text[end].isspace():
+        end += 1
+    return text[start:end]
+
+
 def resolve_wrapped_reference(
     candidate: str,
     row_text: str,
@@ -121,8 +148,20 @@ def resolve_wrapped_reference(
     """
     row = row_text.rstrip("\n")
     downs = [""]
-    if row.rstrip().endswith(candidate):
-        chain = ""
+    row_r = row.rstrip()
+    trail = None
+    if row_r.endswith(candidate):
+        trail = ""
+    else:
+        # A wrap that falls right after a character the pattern sheds
+        # (`…/collins/` ⏎ `linkpatterns.py`) leaves the candidate short of
+        # the row end; the shed run is part of the reference, so it seeds
+        # the downward join.
+        core = row_r.rstrip(_SHED_CHARS)
+        if core != row_r and core.endswith(candidate):
+            trail = row_r[len(core):]
+    if trail is not None:
+        chain = trail
         for below in rows_below[:_STITCH_ROWS_DOWN]:
             frag = below.strip()
             if not frag:
@@ -148,10 +187,20 @@ def resolve_wrapped_reference(
         for down in reversed(downs):
             if not up and not down:
                 continue  # the bare candidate already failed
-            m = _FILE_RX.match(up + candidate + down)
-            if m is None:
-                continue
-            resolved = resolve_file_reference(m.group(0), roots)
-            if resolved is not None:
-                return resolved
+            joined = up + candidate + down
+            # The emitter wraps whatever surrounds the path along with it,
+            # so a contributed token — or a token-derived candidate — often
+            # arrives glued to a prefix: `Read(/a/b/c` is Claude Code's own
+            # tool-call format. Searching (rather than an anchored match)
+            # sheds that junk wherever it sits; the span guards keep only
+            # hits that overlap the clicked fragment itself, so a join never
+            # resolves text the click didn't touch.
+            for m in _FILE_RX.finditer(joined):
+                if m.end() <= len(up):
+                    continue
+                if m.start() >= len(up) + len(candidate):
+                    break
+                resolved = resolve_file_reference(m.group(0), roots)
+                if resolved is not None:
+                    return resolved
     return None

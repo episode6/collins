@@ -46,6 +46,7 @@ from .linkpatterns import (  # noqa: E402
     URL_PATTERN,
     resolve_file_reference,
     resolve_wrapped_reference,
+    token_at_column,
 )
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
@@ -181,17 +182,30 @@ def _setup_links(terminal: Vte.Terminal) -> None:
                 if kind == "url" and match.startswith("www."):
                     match = "http://" + match
             uri = match
+        roots = _reference_roots(terminal)
         if not uri:
+            # A wrapped reference's continuation fragment often contains no
+            # slash (`o.py:7)`) and so matches nothing — the half holding
+            # the file *name* offers no click candidate at all. Hand the
+            # stitcher the raw token under the pointer instead; its geometry
+            # gates and existence check keep prose clicks inert.
+            resolved = _resolve_wrapped_at(terminal, None, x, y, roots)
+            if resolved is None:
+                return
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            path, line, col = resolved
+            _open_file_reference(terminal, path, line, col)
             return
         if kind == "file":
-            roots = _reference_roots(terminal)
             # Stitching runs before direct resolution: a fragment of a
             # reference the CLI hard-wrapped can resolve on its own (the
             # leading fragment of a wrapped path is often an existing
             # directory prefix), and the stitched whole is the truer
             # reading. The stitcher only ever returns geometry-gated,
-            # existence-checked joins, so unwrapped references skip it fast.
-            resolved = _resolve_wrapped_at(terminal, uri, y, roots)
+            # existence-checked joins. Mid-row references fail its edge
+            # gates immediately; a reference alone on its row does probe
+            # its neighbours before the direct fallback wins.
+            resolved = _resolve_wrapped_at(terminal, uri, x, y, roots)
             if resolved is None:
                 resolved = resolve_file_reference(uri, roots)
             if resolved is None:
@@ -241,38 +255,61 @@ def _reference_roots(terminal: Vte.Terminal) -> list[str | None]:
 
 
 def _resolve_wrapped_at(
-    terminal: Vte.Terminal, candidate: str, y: float, roots: list[str | None]
+    terminal: Vte.Terminal,
+    candidate: str | None,
+    x: float,
+    y: float,
+    roots: list[str | None],
 ) -> tuple[str, int | None, int | None] | None:
     """Stitch a failed candidate with its neighbour rows (see linkpatterns.
-    resolve_wrapped_reference) — this half only turns the click's y into a
-    buffer row and fetches row texts. The clicked row is probed with a ±1
-    slop: the y→row division ignores VTE's inner border, and the stitcher's
-    geometry gates reject the wrong rows anyway."""
+    resolve_wrapped_reference) — this half only turns the click's x/y into a
+    screen cell and fetches row texts. With *candidate* None (nothing under
+    the pointer matched at all), the whitespace-delimited token at the cell
+    stands in as the candidate.
+
+    Row texts come from the *visible screen* snapshot, indexed by screen
+    row, never from grid-row reads: the grid APIs address VTE's internal
+    ring, and under a repaint-style renderer (claude's own UI) the ring
+    drifts a full page away from what the adjustment describes, so every
+    adjustment-derived get_text_range read comes back empty — discovered
+    live. The clicked row is probed with a ±1 slop: the y→row division
+    ignores VTE's inner border, and the stitcher's geometry gates reject
+    the wrong rows anyway."""
     ch = terminal.get_char_height()
-    if ch <= 0:
+    cw = terminal.get_char_width()
+    if ch <= 0 or cw <= 0:
         return None
+    text = terminal.get_text_format(Vte.Format.TEXT) or ""
+    cols = int(terminal.get_column_count())
+    rows: list[str] = []
+    for line in text.split("\n"):
+        if len(line) <= cols:
+            rows.append(line)
+        else:
+            # VTE returns soft-wrapped screen rows joined into one logical
+            # line; a soft-wrapped row is by definition full-width, so
+            # fixed-size chunks reconstruct the screen rows exactly.
+            rows.extend(line[i : i + cols] for i in range(0, len(line), cols))
+    # With pixel scrolling the viewport may start mid-row; the snapshot's
+    # first line is that partial row, so shift y by the fraction cut off.
     vadj = terminal.get_vadjustment()
-    scroll = vadj.get_value() if vadj is not None else 0.0
-    if terminal.get_scroll_unit_is_pixels():
-        row = int((scroll + y) // ch)
-    else:
-        row = int(scroll) + int(y // ch)
+    frac = 0.0
+    if vadj is not None and terminal.get_scroll_unit_is_pixels():
+        frac = vadj.get_value() % ch
+    row = int((y + frac) // ch)
+    col = int(x // cw)
 
     def row_text(r: int) -> str:
-        if r < 0:
-            return ""
-        try:
-            text = terminal.get_text_range_format(
-                Vte.Format.TEXT, r, 0, r, terminal.get_column_count()
-            )[0]
-        except GLib.Error:
-            return ""
-        return (text or "").rstrip("\n")
+        return rows[r] if 0 <= r < len(rows) else ""
 
     for r in (row, row - 1, row + 1):
+        row_txt = row_text(r)
+        cand = candidate if candidate is not None else token_at_column(row_txt, col)
+        if not cand:
+            continue
         resolved = resolve_wrapped_reference(
-            candidate,
-            row_text(r),
+            cand,
+            row_txt,
             [row_text(r - 1), row_text(r - 2)],
             [row_text(r + 1), row_text(r + 2), row_text(r + 3)],
             roots,

@@ -14,6 +14,7 @@ from collins.linkpatterns import (
     URL_PATTERN,
     resolve_file_reference,
     resolve_wrapped_reference,
+    token_at_column,
 )
 
 _RX = re.compile(URL_PATTERN)
@@ -313,3 +314,116 @@ def test_prose_at_row_start_is_not_poisoned_by_row_above(project) -> None:
         "collins/nope.py", "  collins/nope.py here", ["ends with word"], [], [str(project)]
     )
     assert resolved is None
+
+
+def test_stitch_upward_sheds_prefix_glued_to_head(project) -> None:
+    # Claude Code's tool-call format wraps as `⏺ Read(/…/fo` + `o.py)`: the
+    # row above contributes a token with `Read(` still attached, which must
+    # be shed for the join to match.
+    path = str(project / "collins" / "foo.py")
+    head, tail = _split(path, 20)
+    resolved = resolve_wrapped_reference(
+        tail, f"      {tail})", [f"⏺ Read({head}"], [], []
+    )
+    assert resolved == (path, None, None)
+
+
+def test_stitch_slashless_token_candidate(project) -> None:
+    # The continuation fragment of a wrapped path often has no slash at all
+    # (`o.py:7)`), so it is never a FILE_PATTERN match — the raw token under
+    # the pointer stands in as the candidate and still stitches, keeping the
+    # line suffix and shedding the trailing paren.
+    path = str(project / "collins" / "foo.py")
+    head, tail = _split(path, len(path) - 4)  # tail = "o.py", no slash
+    resolved = resolve_wrapped_reference(
+        f"{tail}:7)", f"      {tail}:7)", [f"⏺ Read({head}"], [], []
+    )
+    assert resolved == (path, 7, None)
+
+
+def test_stitch_must_reach_into_the_candidate(project) -> None:
+    # A token candidate leading with a boundary character (`("x`) must not
+    # resolve to whatever existing path the row above happened to end with —
+    # the join has to cover text the click actually touched.
+    above = f"see {project / 'collins'}"
+    resolved = resolve_wrapped_reference('("x', '("x', [above], [], [])
+    assert resolved is None
+
+
+def test_stitch_token_candidate_with_glued_prefix(project) -> None:
+    # Clicking the head fragment of `⏺ Update(collins` + `/foo.py)`: the head
+    # has no slash so it matches nothing, and the token under the pointer
+    # arrives with `Update(` glued on. The search sheds it and the join still
+    # resolves.
+    resolved = resolve_wrapped_reference(
+        "Update(collins", "⏺ Update(collins", [], ["      /foo.py)"], [str(project)]
+    )
+    assert resolved == (str(project / "collins" / "foo.py"), None, None)
+
+
+def test_standalone_reference_ignores_deceptive_neighbours(project) -> None:
+    # A reference alone on its row opens BOTH edge gates (the trimmed row
+    # equals the candidate), so the stitcher does probe its neighbours — but
+    # every join is a non-existent path, the stitcher returns None, and the
+    # click handler's fallback resolves the reference directly. Pins down
+    # that active neighbours can't poison a good standalone reference.
+    resolved = resolve_wrapped_reference(
+        "collins/foo.py",
+        "  collins/foo.py",
+        ["prose above ending in .claude", "more prose"],
+        ["  bar.txt below", "  and more"],
+        [str(project)],
+    )
+    assert resolved is None
+    assert resolve_file_reference("collins/foo.py", [str(project)]) == (
+        str(project / "collins" / "foo.py"),
+        None,
+        None,
+    )
+
+
+def test_stitch_downward_across_directory_boundary(project) -> None:
+    # The wrap can fall right after a slash: the row ends `…/collins/` but
+    # FILE_PATTERN refuses to end a match on `/`, so the candidate arrives
+    # without it. The shed slash must still join the fragments — without it
+    # the click "resolves" to the parent directory instead of the file.
+    path = str(project / "collins" / "foo.py")
+    head = str(project / "collins") + "/"
+    candidate = str(project / "collins")  # what the pattern hands the handler
+    resolved = resolve_wrapped_reference(
+        candidate, f"● {head} ", [], ["  foo.py and prose"], []
+    )
+    assert resolved == (path, None, None)
+
+
+def test_stitch_downward_across_hidden_dir_boundary(project) -> None:
+    # Same shape, wrap after `/.` (start of a dotfile/dot-directory): two
+    # shed characters seed the join.
+    (project / "collins" / ".hidden").mkdir()
+    (project / "collins" / ".hidden" / "bar.py").write_text("x\n")
+    path = str(project / "collins" / ".hidden" / "bar.py")
+    candidate = str(project / "collins")
+    resolved = resolve_wrapped_reference(
+        candidate, f"● {candidate}/. ", [], ["  hidden/bar.py:9, done"], []
+    )
+    assert resolved == (path, 9, None)
+
+
+def test_prose_hanging_punctuation_does_not_false_join(project) -> None:
+    # `collins/foo.py, and` — the comma is prose, not a wrap; the shed-run
+    # gate opens but the join `foo.py,and` resolves nowhere and the click
+    # falls back to the direct resolution of the candidate itself.
+    resolved = resolve_wrapped_reference(
+        "collins/foo.py", "  see collins/foo.py,", [], ["  and more"], [str(project)]
+    )
+    assert resolved is None
+
+
+def test_token_at_column() -> None:
+    text = "  wrote o.py:7) done"
+    assert token_at_column(text, 8) == "o.py:7)"
+    assert token_at_column(text, 14) == "o.py:7)"
+    assert token_at_column(text, 1) is None  # whitespace
+    assert token_at_column(text, 99) is None  # past the end
+    assert token_at_column(text, -1) is None
+    assert token_at_column(text, 17) == "done"
