@@ -361,6 +361,27 @@ def test_stitch_token_candidate_with_glued_prefix(project) -> None:
     assert resolved == (str(project / "collins" / "foo.py"), None, None)
 
 
+def test_standalone_reference_ignores_deceptive_neighbours(project) -> None:
+    # A reference alone on its row opens BOTH edge gates (the trimmed row
+    # equals the candidate), so the stitcher does probe its neighbours — but
+    # every join is a non-existent path, the stitcher returns None, and the
+    # click handler's fallback resolves the reference directly. Pins down
+    # that active neighbours can't poison a good standalone reference.
+    resolved = resolve_wrapped_reference(
+        "collins/foo.py",
+        "  collins/foo.py",
+        ["prose above ending in .claude", "more prose"],
+        ["  bar.txt below", "  and more"],
+        [str(project)],
+    )
+    assert resolved is None
+    assert resolve_file_reference("collins/foo.py", [str(project)]) == (
+        str(project / "collins" / "foo.py"),
+        None,
+        None,
+    )
+
+
 def test_stitch_downward_across_directory_boundary(project) -> None:
     # The wrap can fall right after a slash: the row ends `…/collins/` but
     # FILE_PATTERN refuses to end a match on `/`, so the candidate arrives

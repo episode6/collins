@@ -182,15 +182,14 @@ def _setup_links(terminal: Vte.Terminal) -> None:
                 if kind == "url" and match.startswith("www."):
                     match = "http://" + match
             uri = match
+        roots = _reference_roots(terminal)
         if not uri:
             # A wrapped reference's continuation fragment often contains no
             # slash (`o.py:7)`) and so matches nothing — the half holding
             # the file *name* offers no click candidate at all. Hand the
             # stitcher the raw token under the pointer instead; its geometry
             # gates and existence check keep prose clicks inert.
-            resolved = _resolve_wrapped_at(
-                terminal, None, x, y, _reference_roots(terminal)
-            )
+            resolved = _resolve_wrapped_at(terminal, None, x, y, roots)
             if resolved is None:
                 return
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
@@ -198,13 +197,14 @@ def _setup_links(terminal: Vte.Terminal) -> None:
             _open_file_reference(terminal, path, line, col)
             return
         if kind == "file":
-            roots = _reference_roots(terminal)
             # Stitching runs before direct resolution: a fragment of a
             # reference the CLI hard-wrapped can resolve on its own (the
             # leading fragment of a wrapped path is often an existing
             # directory prefix), and the stitched whole is the truer
             # reading. The stitcher only ever returns geometry-gated,
-            # existence-checked joins, so unwrapped references skip it fast.
+            # existence-checked joins. Mid-row references fail its edge
+            # gates immediately; a reference alone on its row does probe
+            # its neighbours before the direct fallback wins.
             resolved = _resolve_wrapped_at(terminal, uri, x, y, roots)
             if resolved is None:
                 resolved = resolve_file_reference(uri, roots)
