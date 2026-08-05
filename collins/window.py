@@ -2052,13 +2052,17 @@ class MainWindow(Adw.ApplicationWindow):
         return tab.current_agent_cwd() if tab is not None else None
 
     def _adopt_session_prs(self, session_id: str, records: list) -> None:
-        """A sweep found this session PRs it didn't know about: tell its tab.
+        """The sweep covered this session: hand the result to its open tab.
 
-        Only a tab that is open has anything to adopt, and only it needs to be
-        told — its own list is rebuilt from the transcript and from whatever it
-        has tracked, so a PR that reached the session by branch lookup lives
-        nowhere it would look and would be dropped from the saved list on the
-        tab's next poll (see SessionSidebar._prs_swept).
+        Two things ride on this, and only a tab that is open cares about
+        either. A PR that reached the session by branch lookup lives nowhere
+        the tab would look — its own list is rebuilt from the transcript and
+        from whatever it has tracked — so without this it would be dropped from
+        the saved list on the tab's next poll. And the refresh button is a
+        refresh of what the user is looking at, not only of the panel beside
+        it: adopting the list asks the tab for an update, which rebuilds its
+        chips from the status the sweep just fetched (see
+        SessionSidebar._prs_swept).
         """
         tab = self._session_tab(session_id)
         if tab is not None:

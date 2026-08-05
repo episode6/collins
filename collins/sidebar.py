@@ -1240,12 +1240,14 @@ class SessionSidebar(Gtk.Box):
         GLib.idle_add(self._prs_swept, swept)
 
     def _prs_swept(self, swept: dict[str, list[PullRequest]]) -> bool:
-        """Land a sweep: onto every row it covers, and onto disk.
+        """Land a sweep: onto every row it covers, its open tab, and disk.
 
-        A session whose list is unchanged is left entirely alone — no write, no
-        tab to tell — but its row is still handed the result, because the
-        status that came back with it is the point of the exercise and status
-        is no part of what gets saved.
+        A session whose list is unchanged is not written back — status is no
+        part of a record, so there would be nothing new to write — but both
+        places that show the session hear about it either way, because the
+        status that came back is the point of the exercise: the row is handed
+        the swept list for its mark, and the tab is told so its chips leave
+        whatever they were showing before the button was clicked.
         """
         self._pr_sweep = False
         self._set_refresh_busy(False)
@@ -1254,10 +1256,11 @@ class SessionSidebar(Gtk.Box):
             if records != self.store.state.get_session_prs(session_id):
                 self.store.state.set_session_prs(session_id, records)
                 self.store.apply_pr_title(session_id)
-                # An open tab re-derives this list from its own sources every
-                # poll; without this, a PR found by the branch lookup would be
-                # written now and overwritten a second later.
-                self.prs_updated(session_id, records)
+            # An open tab re-derives this list from its own sources every poll,
+            # so a PR the branch lookup just found would otherwise be written
+            # now and overwritten a second later; handing it over also puts the
+            # tab's own chips on the status this sweep fetched.
+            self.prs_updated(session_id, records)
             row = self._rows.get(session_id)
             if row is not None:
                 row.apply_prs(prs)
