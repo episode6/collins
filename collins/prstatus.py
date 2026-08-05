@@ -958,8 +958,9 @@ def sweep(targets: Iterable[tuple[str, list[PullRequest], str | None]]) -> dict[
 
     found: dict[str, PullRequest] = {}
     if branches and not _gh_missing:
-        with ThreadPoolExecutor(max_workers=min(_SWEEP_WORKERS, len(branches))) as pool:
-            for cwd, pr in zip(branches, pool.map(_discover, branches.items())):
+        heads = list(branches.items())
+        with ThreadPoolExecutor(max_workers=min(_SWEEP_WORKERS, len(heads))) as pool:
+            for (cwd, _branch), pr in zip(heads, pool.map(_discover, heads), strict=True):
                 if pr is not None:
                     found[cwd] = pr
         log.info("prstatus: swept %s branch(es), %s with a PR", len(branches), len(found))
