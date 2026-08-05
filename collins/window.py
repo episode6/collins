@@ -186,8 +186,8 @@ def _app_icon_name(window: Gtk.Window) -> str:
 
 
 def session_window(
-    app: Gtk.Application | None, session_id: str, skip: "MainWindow | None" = None
-) -> "MainWindow | None":
+    app: Gtk.Application | None, session_id: str, skip: MainWindow | None = None
+) -> MainWindow | None:
     """The window holding this session's tab, if any is open in one.
 
     Tabs are per-window but the sidebar's session list is app-wide, so every
