@@ -24,6 +24,21 @@ fork. Last modified: 2026-08-05. Full change history: git log for this file.
   **archive** on every row, preceded by **stop** (exit the agent and close its
   tab) and **background** (detach with `/bg`, leaving it running) on the
   sessions that have a tab open.
+- **A pull request mark ahead of the title**, on every session that has opened
+  one: GitHub's own iconography, with everything that session's PRs amount to
+  read into a single mark. The base says the least settled state among them
+  (grey **draft**, green **open**, purple once they have all **merged**) and
+  the badge on its corner says the loudest thing left to do — a red **✗** for a
+  failed check or a conflicting branch, an amber **⚠** for comments waiting on
+  a reply, an amber **●** for checks still running, and a green **✓** only when
+  every live PR has passed everything. Hovering names each PR; clicking opens
+  the same list (and the same per-PR actions) the tab footer's caret shows.
+- **Refresh** (the header's ↻) re-reads the session list *and* every listed
+  session's pull requests: each one's checks, conflicts and unanswered
+  comments, plus a **branch lookup** that picks up PRs opened by hand, which no
+  transcript would ever mention. Archived sessions are left out of it. The
+  button turns into a spinner while it works, since that part is `gh` over the
+  whole panel.
 - A **`+` button on every project header** starts a new session in that
   project; right-click a header for *New session here* and *Archive project*.
   Projects whose sessions are all archived or favorited still show their header,
@@ -128,7 +143,7 @@ agents' own session files are never modified.
 - **Pull request chips** trail the branch: one per PR the session has opened,
   each with its **CI mark** (✓ / ✗ / ●) or GitHub's merge mark, and each
   opening that PR on click. The caret beside them lists every one with its
-  title — the same list a sidebar row's GitHub button opens.
+  title — the same list a sidebar row's pull request mark opens.
 - **Right-click a chip** (or a PR in either list) for what to *do* with it:
   mark a draft **ready for review**, **merge** it — or turn on **auto-merge**
   while its checks are still running — or **ask Claude for a review** (a

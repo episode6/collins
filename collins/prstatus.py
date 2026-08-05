@@ -22,7 +22,9 @@ after launch), and Collins otherwise refreshes status itself with a short
 A transcript is not the only way a session gets a PR, though: one opened by
 hand never shows up in it. So the footer's refresh button can also ask gh which
 PR belongs to the checked-out branch (`discover_pr`), which fills the chip in
-for a session whose transcript will never mention one.
+for a session whose transcript will never mention one. The sidebar's refresh
+button does both halves for every session it lists at once (`sweep`), so the
+marks down the panel are current without every row being visited.
 
 A session accumulates PRs — the footer shows every one of them — so its list
 outlives the app run: `to_record`/`from_record` reduce a PR to what is worth
@@ -50,6 +52,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from .gitinfo import current_branch
 from .i18n import _
 
 log = logging.getLogger(__name__)
@@ -106,6 +109,13 @@ _DISCOVER_LIMIT = 20
 # subprocess and someone is watching a spinner, so a session with twenty of
 # them doesn't wait twenty round trips — but it isn't a fan-out either.
 _RESYNC_WORKERS = 4
+# The same, for a `sweep` across every session in the sidebar: a wider pool,
+# because that is a whole panel's worth of directories and PRs behind one
+# click, and still narrow enough that Collins doesn't look like a load test to
+# the machine or to GitHub.
+_SWEEP_WORKERS = 8
+# How many PRs a row's tooltip spells out before it starts counting them.
+_MAX_TOOLTIP_PRS = 8
 
 # Only fetch for URLs shaped like a PR page. The URL comes out of a transcript
 # — repo content, i.e. untrusted — and lands in an argv, so this also keeps a
@@ -775,7 +785,27 @@ def enrich(pr: PullRequest | None) -> PullRequest | None:
     """
     if pr is None:
         return None
-    entry = _own_status(pr.url) or _cached_status(pr.url)
+    return _applied(pr, _own_status(pr.url) or _cached_status(pr.url))
+
+
+def known(pr: PullRequest) -> PullRequest:
+    """*pr* with whatever status has already been fetched this run, if any.
+
+    The main loop's own version of `enrich`: a dictionary lookup and nothing
+    else — no file is read, no TTL is consulted and no `gh` is scheduled — so a
+    widget can be rebuilt from it without either blocking or quietly starting
+    subprocesses. What it hands back is therefore only ever as good as the last
+    fetch someone else made (a tab's poll, a menu opening, a refresh sweep),
+    which is exactly what the sidebar's marks want: the status the app already
+    knows, shown wherever that session appears.
+    """
+    with _lock:
+        stamped = _statuses.get(pr.url)
+    return _applied(pr, stamped[1] if stamped else None)
+
+
+def _applied(pr: PullRequest, entry: object) -> PullRequest:
+    """*pr* with a fetched status entry folded into it, or unchanged without one."""
     if not isinstance(entry, dict):
         return pr
     state = entry.get("state")
@@ -816,3 +846,159 @@ def resync(prs: Iterable[PullRequest]) -> list[PullRequest]:
         with ThreadPoolExecutor(max_workers=min(_RESYNC_WORKERS, len(due))) as pool:
             list(pool.map(refresh, due))
     return [enrich(pr) or pr for pr in prs]
+
+
+# -- a session's whole list as one mark --------------------------------------
+#
+# A footer has room for a chip per PR; a sidebar row has room for one mark, and
+# it stands for everything the session has open. So the list is reduced the way
+# a person reading the row would: the worst thing among them is what the mark
+# says, and the all-clear has to be earned by every one of them.
+
+
+def combined_state(prs: Iterable[PullRequest]) -> str | None:
+    """The state a whole session's PRs read as, for one base icon.
+
+    Least-settled first, because that is what the session still has to do: a
+    draft anywhere means work in progress, an open PR anywhere means something
+    is up for review, and only a set that has entirely landed reads as merged.
+    Anything else — a closed PR, a mix of merged and closed, or PRs nothing has
+    been fetched for yet — has no state to claim, and the caller's fallback
+    (grey, i.e. "nothing known") says so.
+    """
+    states = {pr.state for pr in prs}
+    if not states:
+        return None
+    if "DRAFT" in states:
+        return "DRAFT"
+    if "OPEN" in states:
+        return "OPEN"
+    return "MERGED" if states == {"MERGED"} else None
+
+
+def combined_badge(prs: Iterable[PullRequest]) -> str | None:
+    """The one status worth acting on across a session's PRs, or None.
+
+    Same slot and same marks as a single PR's `badge`, ranked by how loudly the
+    session is asking for attention rather than by what blocks a given merge:
+    anything broken (a failed check or a conflicting branch) outranks a
+    conversation waiting on a reply, which outranks checks still running. That
+    puts unanswered comments above pending runs — the opposite of the per-PR
+    order, where a merge blocker is the question being asked; here the question
+    is "does this session need me?", and a comment does while a running check
+    does not.
+
+    Merged PRs abstain entirely: nothing about one can change, and the purple
+    base already says it landed. The green check is the only mark that has to
+    be earned by all of them — one live PR still running, still conflicting or
+    with no checks at all is enough to withhold it, because a green mark on a
+    row means "there is nothing here to do".
+    """
+    live = [pr for pr in prs if not pr.merged]
+    if any(pr.failed for pr in live):
+        return BADGE_FAILED
+    if any(pr.conflicting for pr in live):
+        return BADGE_CONFLICT
+    if any(pr.awaiting_reply for pr in live):
+        return BADGE_UNRESOLVED
+    if any(pr.pending for pr in live):
+        return BADGE_PENDING
+    if live and all(pr.passed for pr in live):
+        return BADGE_PASSED
+    return None
+
+
+def describe_all(prs: Iterable[PullRequest]) -> str:
+    """Every PR behind one mark, a `describe` line each.
+
+    What the row's tooltip says, since the mark itself has collapsed them all
+    into a single verdict: the line count is the PR count, and the one that
+    earned the badge is in there with the rest. Bounded, like everything else
+    built out of repository text — a session that has opened dozens of PRs
+    still gets a tooltip rather than a wall.
+    """
+    prs = list(prs)
+    lines = [describe(pr) for pr in prs[:_MAX_TOOLTIP_PRS]]
+    if len(prs) > _MAX_TOOLTIP_PRS:
+        lines.append(_("and {n} more").format(n=len(prs) - _MAX_TOOLTIP_PRS))
+    return "\n".join(lines)
+
+
+def sweep(targets: Iterable[tuple[str, list[PullRequest], str | None]]) -> dict[str, list[PullRequest]]:
+    """Re-read every listed session's pull requests, branch lookup included.
+
+    What the sidebar's refresh button runs over the whole list, so a panel full
+    of rows tells the truth about CI and comments without each row's menu being
+    opened one at a time. Each *target* is a session's ``(id, saved PRs, cwd)``,
+    and each comes back with the same PRs enriched, plus any the branch lookup
+    turned up — the same two halves the footer's own refresh button does for one
+    tab, and in the same order: find first, then fetch, so a PR discovered here
+    lands with its status already on it.
+
+    The lookups are deduplicated by directory: sessions that share a worktree
+    share a branch, and asking gh the same question once per row would be the
+    expensive half of this. Status fetches are deduplicated by URL for the same
+    reason — several sessions on one PR cost one call between them.
+
+    Never call on the main thread: this is a `gh` call per directory and per
+    unsettled PR, a few at a time. Every failure degrades to "nothing found"
+    and leaves that session's list exactly as it arrived.
+    """
+    targets = [(session_id, list(prs), cwd) for session_id, prs, cwd in targets]
+
+    # Which branch each distinct directory is on. Cheap enough to do serially:
+    # current_branch is a couple of stat calls and a small read, no subprocess.
+    branches: dict[str, str] = {}
+    for _session_id, _prs, cwd in targets:
+        if not cwd or cwd in branches:
+            continue
+        branch = current_branch(cwd)
+        if branch:
+            branches[cwd] = branch
+
+    found: dict[str, PullRequest] = {}
+    if branches and not _gh_missing:
+        with ThreadPoolExecutor(max_workers=min(_SWEEP_WORKERS, len(branches))) as pool:
+            for cwd, pr in zip(branches, pool.map(_discover, branches.items())):
+                if pr is not None:
+                    found[cwd] = pr
+        log.info("prstatus: swept %s branch(es), %s with a PR", len(branches), len(found))
+
+    # A discovered PR is the newest thing that session knows about, exactly as
+    # it is for a tab (see TerminalTab._collect_prs) — appended, never
+    # replacing, so a session keeps the PRs it opened earlier.
+    collected = {
+        session_id: (
+            [*prs, discovered]
+            if (discovered := found.get(cwd or "")) is not None
+            and all(pr.url != discovered.url for pr in prs)
+            else prs
+        )
+        for session_id, prs, cwd in targets
+    }
+
+    # One fetch per URL, whatever it is worth to. A PR the lookup just found
+    # came back with its status attached, so it is already current.
+    due = {
+        pr.url
+        for prs in collected.values()
+        for pr in prs
+        if (not pr.merged or pr.title is None) and _FETCHABLE.match(pr.url)
+    } - {pr.url for pr in found.values()}
+    if due and not _gh_missing:
+        with ThreadPoolExecutor(max_workers=min(_SWEEP_WORKERS, len(due))) as pool:
+            list(pool.map(refresh, sorted(due)))
+    return {
+        session_id: [enrich(pr) or pr for pr in prs]
+        for session_id, prs in collected.items()
+    }
+
+
+def _discover(target: tuple[str, str]) -> PullRequest | None:
+    """One directory's branch lookup, for the sweep's pool. Never raises."""
+    cwd, branch = target
+    try:
+        return discover_pr(cwd, branch)
+    except Exception:
+        log.debug("prstatus: branch lookup in %s failed", cwd, exc_info=True)
+        return None

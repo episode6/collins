@@ -16,13 +16,17 @@ from collins import prstatus
 from collins.prstatus import (
     CACHE_MAX_AGE_S,
     PullRequest,
+    combined_badge,
+    combined_state,
     describe,
+    describe_all,
     discover_pr,
     enrich,
     forget_status,
     from_record,
     from_records,
     invalidate,
+    known,
     menu_name,
     merge_ordered,
     newest_title,
@@ -30,6 +34,7 @@ from collins.prstatus import (
     refresh,
     resync,
     state_text,
+    sweep,
     to_record,
     to_records,
 )
@@ -1215,3 +1220,237 @@ def test_forget_status_drops_unresolved():
     """The next reply flips it, so it is refetched, never remembered."""
     pr = PullRequest(55, URL, "episode6/collins", state="OPEN", unresolved=True)
     assert forget_status(pr).unresolved is False
+
+
+# -- known (what a sidebar row rebuilds its mark from) -----------------------
+
+
+def test_known_hands_back_the_status_already_fetched(gh_calls):
+    _urls, replies = gh_calls
+    replies[URL] = _reply("Track every PR", passed=3)
+    refresh(URL)
+    pr = known(PullRequest(55, URL))
+    assert (pr.title, pr.state, pr.passed) == ("Track every PR", "OPEN", 3)
+
+
+def test_known_never_schedules_a_fetch(scheduled):
+    """It runs on the main loop, where a fetch is a subprocess nobody asked
+    for — an unfetched PR simply has no status on it yet."""
+    pr = PullRequest(55, URL, title="Track every PR")
+    assert known(pr) == pr
+    assert scheduled == []
+
+
+def test_known_ignores_the_cli_cache(cache, scheduled):
+    """Reading it is a stat and a JSON parse, and the marks are rebuilt far too
+    often for that; whatever is in it reaches them through `enrich` anyway."""
+    cache({URL: {"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}}})
+    assert known(PullRequest(55, URL)).state is None
+    assert scheduled == []
+
+
+# -- combined_state / combined_badge (a session's whole list as one mark) ----
+
+
+def _pr(number, **overrides):
+    return PullRequest(
+        number, f"https://github.com/episode6/collins/pull/{number}", **overrides
+    )
+
+
+@pytest.mark.parametrize(
+    "states, expected",
+    [
+        ([], None),                              # no PRs at all
+        (["OPEN"], "OPEN"),
+        (["MERGED"], "MERGED"),
+        (["MERGED", "MERGED"], "MERGED"),        # all landed
+        (["MERGED", "OPEN"], "OPEN"),            # one still up for review
+        (["MERGED", "OPEN", "DRAFT"], "DRAFT"),  # work in progress outranks it
+        (["DRAFT", "MERGED"], "DRAFT"),
+        (["CLOSED"], None),                      # no icon of its own: grey
+        (["MERGED", "CLOSED"], None),            # neither all merged nor open
+        ([None, "MERGED"], None),                # one unfetched: nothing known
+        (["CLOSED", "OPEN"], "OPEN"),
+    ],
+)
+def test_combined_state_reads_the_least_settled_first(states, expected):
+    assert combined_state([_pr(n, state=s) for n, s in enumerate(states)]) == expected
+
+
+def test_a_failed_check_anywhere_takes_the_badge():
+    prs = [_pr(1, state="OPEN", passed=3), _pr(2, state="OPEN", failed=1, passed=1)]
+    assert combined_badge(prs) == "failed"
+
+
+def test_a_conflict_anywhere_takes_the_badge_next():
+    prs = [_pr(1, state="OPEN", passed=3), _pr(2, state="OPEN", mergeable="CONFLICTING")]
+    assert combined_badge(prs) == "conflict"
+
+
+def test_unanswered_comments_outrank_running_checks():
+    """The row answers "does this session need me?" — a comment does, a check
+    still running does not. (The per-PR badge ranks these the other way round,
+    where the question is what blocks that one merge.)"""
+    prs = [_pr(1, state="OPEN", pending=2), _pr(2, state="OPEN", passed=1, unresolved=True)]
+    assert combined_badge(prs) == "unresolved"
+
+
+def test_pending_checks_take_the_badge_over_a_clean_sweep():
+    prs = [_pr(1, state="OPEN", passed=3), _pr(2, state="OPEN", pending=1)]
+    assert combined_badge(prs) == "pending"
+
+
+def test_the_green_check_is_earned_by_every_live_pr():
+    prs = [_pr(1, state="OPEN", passed=3), _pr(2, state="DRAFT", passed=1)]
+    assert combined_badge(prs) == "passed"
+
+
+def test_a_live_pr_with_no_checks_withholds_the_green_check():
+    """One it never ran would be a lie on a single chip, and it is a lie about
+    the session too."""
+    prs = [_pr(1, state="OPEN", passed=3), _pr(2, state="OPEN")]
+    assert combined_badge(prs) is None
+
+
+def test_merged_prs_abstain_from_the_badge():
+    """Nothing about one can change, and the purple base already says it
+    landed: they neither withhold the green check nor earn one."""
+    assert combined_badge([_pr(1, state="MERGED", passed=1)]) is None
+    assert combined_badge([_pr(1, state="MERGED"), _pr(2, state="OPEN", passed=1)]) == "passed"
+
+
+def test_no_prs_is_no_badge():
+    assert combined_badge([]) is None
+
+
+def test_describe_all_gives_a_line_to_every_pr():
+    prs = [_pr(1, state="OPEN", passed=1), _pr(2, state="MERGED")]
+    assert describe_all(prs).splitlines() == [describe(prs[0]), describe(prs[1])]
+
+
+def test_describe_all_counts_the_ones_it_stops_naming():
+    prs = [_pr(n, state="OPEN") for n in range(prstatus._MAX_TOOLTIP_PRS + 3)]
+    lines = describe_all(prs).splitlines()
+    assert len(lines) == prstatus._MAX_TOOLTIP_PRS + 1
+    assert lines[-1] == "and 3 more"
+
+
+# -- sweep (what the sidebar's refresh button runs over every listed row) ----
+
+
+@pytest.fixture
+def branches(monkeypatch):
+    """Stub the branch each directory is on; returns the dict to fill in."""
+    heads: dict[str, str] = {}
+    monkeypatch.setattr(prstatus, "current_branch", heads.get)
+    return heads
+
+
+def test_sweep_finds_the_branch_pr_a_session_never_knew_about(gh_json, gh_calls, branches):
+    serve, _calls = gh_json
+    serve(_DISCOVERED)
+    branches["/home/me/dev/collins"] = "feat/x"
+    swept = sweep([("s1", [], "/home/me/dev/collins")])
+    assert [pr.number for pr in swept["s1"]] == [74]
+    assert swept["s1"][0].badge == "failed"  # the lookup's own status came with it
+
+
+def test_sweep_asks_each_directory_once(gh_json, gh_calls, branches):
+    """Sessions sharing a worktree share its branch, and a panel of them must
+    not become a panel of identical gh calls."""
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    branches["/home/me/dev/collins"] = "feat/x"
+    swept = sweep([
+        ("s1", [], "/home/me/dev/collins"),
+        ("s2", [], "/home/me/dev/collins"),
+    ])
+    assert len(calls) == 1
+    assert [pr.number for pr in swept["s2"]] == [74]
+
+
+def test_sweep_does_not_refetch_what_the_lookup_just_answered(gh_json, gh_calls, branches):
+    serve, _calls = gh_json
+    serve(_DISCOVERED)
+    branches["/home/me/dev/collins"] = "feat/x"
+    urls, _replies = gh_calls
+    sweep([("s1", [], "/home/me/dev/collins")])
+    assert urls == []
+
+
+def test_sweep_refreshes_every_saved_pr(gh_json, gh_calls, branches):
+    urls, replies = gh_calls
+    replies[URL] = _reply("Track every PR")
+    replies[OTHER_URL] = _reply("Give the list room", passed=2)
+    swept = sweep([
+        ("s1", [PullRequest(55, URL)], None),
+        ("s2", [PullRequest(56, OTHER_URL)], None),
+    ])
+    assert sorted(urls) == [URL, OTHER_URL]
+    assert swept["s1"][0].title == "Track every PR"
+    assert swept["s2"][0].passed == 2
+
+
+def test_sweep_fetches_a_shared_pr_once(gh_json, gh_calls, branches):
+    """Two sessions on one PR (a fork, or the same work resumed twice) cost a
+    single call between them."""
+    urls, replies = gh_calls
+    replies[URL] = _reply("Track every PR")
+    swept = sweep([("s1", [PullRequest(55, URL)], None), ("s2", [PullRequest(55, URL)], None)])
+    assert urls == [URL]
+    assert swept["s1"] == swept["s2"]
+
+
+def test_sweep_appends_a_discovery_to_what_the_session_had(gh_json, gh_calls, branches):
+    """A PR the session opened earlier stays, oldest first: the branch has
+    simply moved on to a newer one."""
+    serve, _calls = gh_json
+    serve(_DISCOVERED)
+    branches["/home/me/dev/collins"] = "feat/x"
+    _urls, replies = gh_calls
+    replies[URL] = _reply("Track every PR")
+    swept = sweep([("s1", [PullRequest(55, URL)], "/home/me/dev/collins")])
+    assert [pr.number for pr in swept["s1"]] == [55, 74]
+
+
+def test_sweep_never_lists_the_same_pr_twice(gh_json, gh_calls, branches):
+    serve, _calls = gh_json
+    serve(_DISCOVERED)
+    branches["/home/me/dev/collins"] = "feat/x"
+    swept = sweep([("s1", [PullRequest(74, _found()["url"])], "/home/me/dev/collins")])
+    assert [pr.number for pr in swept["s1"]] == [74]
+
+
+def test_sweep_asks_nothing_for_a_session_with_no_directory(gh_json, gh_calls, branches):
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    assert sweep([("s1", [], None)]) == {"s1": []}
+    assert calls == []
+
+
+def test_sweep_survives_a_lookup_that_blows_up(monkeypatch, gh_calls, branches):
+    """One unreadable repository can't cost every other row its refresh."""
+
+    def explode(args, cwd=None):
+        raise OSError("no such repository")
+
+    monkeypatch.setattr(prstatus, "gh_json", explode)
+    branches["/home/me/dev/gone"] = "feat/x"
+    _urls, replies = gh_calls
+    replies[URL] = _reply("Track every PR")
+    swept = sweep([
+        ("s1", [], "/home/me/dev/gone"),
+        ("s2", [PullRequest(55, URL)], None),
+    ])
+    assert swept["s1"] == []
+    assert swept["s2"][0].title == "Track every PR"
+
+
+def test_sweep_spends_no_call_on_a_settled_pr(gh_json, gh_calls, branches):
+    """A merged PR that knows its title is what most old rows carry, and a
+    sidebar full of them must cost nothing at all."""
+    urls, _replies = gh_calls
+    pr = PullRequest(55, URL, title="Track every PR", state="MERGED")
+    assert sweep([("s1", [pr], None)]) == {"s1": [pr]}
+    assert urls == []

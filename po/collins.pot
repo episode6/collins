@@ -689,8 +689,16 @@ msgstr ""
 msgid "About Collins"
 msgstr ""
 
-#: collins/sidebar.py:377
-msgid "Refresh session list"
+#: collins/sidebar.py:930 collins/sidebar.py:1261
+msgid "Refresh session list and pull requests"
+msgstr ""
+
+#: collins/sidebar.py:1258
+msgid "Refreshing pull requests…"
+msgstr ""
+
+#: collins/prstatus.py:923
+msgid "and {n} more"
 msgstr ""
 
 #: collins/sidebar.py:383

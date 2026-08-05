@@ -434,6 +434,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.takes_prompt = self._session_takes_prompt
         self.sidebar.has_changes = self._session_has_changes
         self.sidebar.live_cwd = self._session_live_cwd
+        self.sidebar.prs_updated = self._adopt_session_prs
         self.sidebar.connect("open-session", self._on_sidebar_open)
         self.sidebar.connect("open-many", self._on_sidebar_open_many)
         self.sidebar.connect("trash-many", self._on_sidebar_trash_many)
@@ -895,7 +896,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _install_actions(self) -> None:
         plain = {
-            "refresh": lambda *_: self.store.refresh(force_rebuild=True),
+            "refresh": lambda *_: self._refresh_everything(),
             "new-session": lambda *_: self._new_session(),
             "new-session-in-chats": lambda *_: self._new_session_in_chats(),
             "preferences": lambda *_: self._show_preferences(),
@@ -1026,6 +1027,19 @@ class MainWindow(Adw.ApplicationWindow):
         )
         select_sessions.connect("change-state", self._on_select_sessions)
         self.add_action(select_sessions)
+
+    def _refresh_everything(self) -> None:
+        """What the sidebar's refresh button does: re-read the sessions, and
+        re-read the pull requests behind the marks on their rows.
+
+        Two independent passes, deliberately not chained: the scan is a
+        filesystem walk that lands in a blink and reorders the list, the sweep
+        is `gh` over every session it lists and takes as long as GitHub does.
+        Waiting for the second before showing the first would make the button
+        feel broken.
+        """
+        self.store.refresh(force_rebuild=True)
+        self.sidebar.refresh_pull_requests()
 
     def _install_shortcuts(self) -> None:
         controller = Gtk.ShortcutController()
@@ -2016,6 +2030,19 @@ class MainWindow(Adw.ApplicationWindow):
         """
         tab = self._session_tab(session_id)
         return tab.current_agent_cwd() if tab is not None else None
+
+    def _adopt_session_prs(self, session_id: str, records: list) -> None:
+        """A sweep found this session PRs it didn't know about: tell its tab.
+
+        Only a tab that is open has anything to adopt, and only it needs to be
+        told — its own list is rebuilt from the transcript and from whatever it
+        has tracked, so a PR that reached the session by branch lookup lives
+        nowhere it would look and would be dropped from the saved list on the
+        tab's next poll (see SessionSidebar._prs_swept).
+        """
+        tab = self._session_tab(session_id)
+        if tab is not None:
+            tab.restore_prs(records)
 
     def _send_prompt(self, session_id: str, prompt: str) -> None:
         """A sidebar PR menu's prompt action: type it into the session's own

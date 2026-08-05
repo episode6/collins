@@ -2,10 +2,10 @@
 
 Two buttons open this same list. The ellipsis beside the tab footer's PR chips
 — shown only while the row is too narrow for every chip — opens it for the tab
-in front of you, off a list its poll keeps current; the
-GitHub button on a sidebar row opens it for a session whose tab may not even
-be open, off the list saved for that session — which is why that one refreshes
-before it shows anything (see SessionRow._fill_pr_menu).
+in front of you, off a list its poll keeps current; the combined mark ahead of
+a sidebar row's title opens it for a session whose tab may not even be open,
+off the list saved for that session — which is why that one refreshes before it
+shows anything (see SessionRow._fill_pr_menu).
 
 The widgets live here rather than beside either caller so both get the same
 menu: the same mark column, the same ellipsizing title, the same click that
@@ -42,6 +42,8 @@ from .prstatus import (  # noqa: E402
     BADGE_PENDING,
     BADGE_UNRESOLVED,
     PullRequest,
+    combined_badge,
+    combined_state,
     describe,
     invalidate,
     menu_name,
@@ -61,6 +63,12 @@ BADGE_OVERHANG_PX = 3
 # titles beside them line up; how wide a title gets before it ellipsizes; and
 # how tall the list gets before it scrolls.
 MARK_COLUMN_PX = MERGED_ICON_PX + BADGE_OVERHANG_PX
+# The sidebar's combined mark (see combined_icon) stands in a line of title
+# text and is the only colored thing on the row, so it takes the size the row's
+# other symbolic icons do rather than the chips' caption size — badge and
+# overhang scaled to match.
+ROW_ICON_PX = 16
+ROW_BADGE_PX = 10
 MAX_CHARS = 48
 MAX_HEIGHT_PX = 400
 # Every PR mark is GitHub's own iconography, colored as on the PR page (the
@@ -157,33 +165,61 @@ def new_popover(position: Gtk.PositionType) -> Gtk.Popover:
     return popover
 
 
-def status_icon(pr: PullRequest) -> Gtk.Widget:
-    """A PR's state and status as one two-icon mark.
+def _mark(
+    state: str | None, badge_name: str | None, base_px: int, badge_px: int
+) -> Gtk.Widget:
+    """One two-icon mark: a state's base icon, with a status badge on its corner.
 
-    The base icon carries the PR's own state (see `_BASE_ICONS`); the one
-    status worth acting on rides its bottom-left corner as a smaller badge
-    (see `PullRequest.badge` for which wins the slot — the tooltip still
-    carries everything, via describe). The base always keeps room for the
-    overhang, badge or no badge, so bases line up down a column of marks
-    and a chip doesn't shift when a badge comes or goes.
+    The base icon carries the state (see `_BASE_ICONS`); the one status worth
+    acting on rides its bottom-left corner as a smaller badge (see
+    `PullRequest.badge` for which wins the slot — the tooltip still carries
+    everything, via describe). The base always keeps room for the overhang,
+    badge or no badge, so bases line up down a column of marks and a chip
+    doesn't shift when a badge comes or goes.
+
+    The overhang scales with the badge: it is how much of the badge hangs off
+    the base, and at a bigger badge a fixed one would leave the mark sitting
+    over the drawing instead of beside its corner.
     """
-    name, css_class = _BASE_ICONS.get(pr.state or "", _BASE_FALLBACK)
+    overhang = max(1, round(badge_px * BADGE_OVERHANG_PX / BADGE_PX))
+    name, css_class = _BASE_ICONS.get(state or "", _BASE_FALLBACK)
     base = Gtk.Image.new_from_icon_name(name)
-    base.set_pixel_size(MERGED_ICON_PX)
+    base.set_pixel_size(base_px)
     base.add_css_class(css_class)
-    base.set_margin_start(BADGE_OVERHANG_PX)
-    base.set_margin_bottom(BADGE_OVERHANG_PX)
+    base.set_margin_start(overhang)
+    base.set_margin_bottom(overhang)
     mark = Gtk.Overlay(child=base)
-    badge = _BADGE_ICONS.get(pr.badge or "")
+    badge = _BADGE_ICONS.get(badge_name or "")
     if badge is not None:
         name, css_class = badge
         image = Gtk.Image.new_from_icon_name(name)
-        image.set_pixel_size(BADGE_PX)
+        image.set_pixel_size(badge_px)
         image.add_css_class(css_class)
         image.set_halign(Gtk.Align.START)
         image.set_valign(Gtk.Align.END)
         mark.add_overlay(image)
     return mark
+
+
+def status_icon(pr: PullRequest) -> Gtk.Widget:
+    """One PR's state and status as a mark, at the size the chips use."""
+    return _mark(pr.state, pr.badge, MERGED_ICON_PX, BADGE_PX)
+
+
+def combined_icon(prs: Iterable[PullRequest]) -> Gtk.Widget:
+    """A whole session's pull requests as a single mark, at row-icon size.
+
+    The sidebar has one slot per row, not one per PR, so the list is reduced
+    before it is drawn: `combined_state` picks the base and `combined_badge`
+    picks the badge, each of them reading the set the way the row's reader
+    would — the least-settled state, and the loudest thing still to do.
+
+    Bigger than the footer's mark, because it sits in a line of title text
+    rather than among caption-sized chips, and because it is the only thing on
+    the row carrying a color.
+    """
+    prs = list(prs)
+    return _mark(combined_state(prs), combined_badge(prs), ROW_ICON_PX, ROW_BADGE_PX)
 
 
 def status_mark(pr: PullRequest) -> Gtk.Widget:
