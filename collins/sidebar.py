@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-03. Full change history: git log for this file.
+# fork. Last modified: 2026-08-05. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -381,6 +381,7 @@ class SessionRow(Gtk.ListBoxRow):
         name_label = Gtk.Label(xalign=0.0, hexpand=True)
         name_label.set_ellipsize(_ELLIPSIZE_END)
         top.append(name_label)
+        self._name_label = name_label
 
         # Only the waiting state badges the row (interrupted colors the guide
         # line instead — see _on_state_changed), so the badge is fixed here
@@ -503,6 +504,15 @@ class SessionRow(Gtk.ListBoxRow):
         hover.connect("enter", self._on_hover_enter)
         hover.connect("leave", self._on_hover_leave)
         self.add_controller(hover)
+
+        # Ellipsised text is recoverable on hover: the row answers tooltip
+        # queries with the full title (and folder path, when shown), but only
+        # for labels that are actually truncated — repeating fully visible
+        # text would be noise. On the row, not the labels, so the whole row
+        # width is a hover target; the action buttons' own tooltips still win
+        # while the pointer is on them.
+        self.set_has_tooltip(True)
+        self.connect("query-tooltip", self._on_query_tooltip)
         box.append(top)
 
         path_label = Gtk.Label(xalign=0.0)
@@ -617,6 +627,19 @@ class SessionRow(Gtk.ListBoxRow):
         if self._pr_menu.get_visible():
             prmenu.update(self._pr_menu, prs, self._pr_host)
         return GLib.SOURCE_REMOVE
+
+    def _on_query_tooltip(
+        self, _row: Gtk.Widget, _x: int, _y: int, _keyboard: bool, tooltip: Gtk.Tooltip
+    ) -> bool:
+        lines = [
+            label.get_label()
+            for label in (self._name_label, self._path_label)
+            if label.get_visible() and label.get_layout().is_ellipsized()
+        ]
+        if not lines:
+            return False
+        tooltip.set_text("\n".join(lines))
+        return True
 
     def _on_hover_enter(self, *_args) -> None:
         self._hovered = True
