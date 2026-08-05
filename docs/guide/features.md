@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-02. Full change history: git log for this file.
+fork. Last modified: 2026-08-05. Full change history: git log for this file.
 -->
 
 # Features
@@ -303,6 +303,14 @@ card overlays it — answer with a click instead of typing a number.
 - **Advanced new session** (New Session menu): choose a **model**, a
   **permission mode**, or an **extra directory** (`--add-dir`).
 - **Continue** the most recent session in a folder (`claude --continue`).
+- **Folder trust is asked once, up front**: the first launch in a project the
+  agent doesn't trust yet asks *Do you trust this folder?* before anything
+  starts. Decline and nothing happens at all — no tab, no project in the
+  sidebar. Accept and the answer is recorded where the agent reads it, so the
+  question isn't asked a second time inside the terminal. Trust covers
+  everything under the folder, including the worktrees the agent creates
+  there, and folders the agent already trusts (or that sit inside one) start
+  as they always have, without a dialog.
 
 ## Bulk actions & housekeeping
 
