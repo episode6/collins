@@ -27,7 +27,8 @@ fork. Last modified: 2026-08-05. Full change history: git log for this file.
 - **A pull request mark ahead of the title**, on every session that has opened
   one: GitHub's own iconography, with everything that session's PRs amount to
   read into a single mark. The base says the least settled state among them
-  (grey **draft**, green **open**, purple once they have all **merged**) and
+  (grey **draft**, green **open**, purple once they have all **merged**, red
+  once they have all been **closed**) and
   the badge on its corner says the loudest thing left to do — a red **✗** for a
   failed check or a conflicting branch, an amber **⚠** for comments waiting on
   a reply, an amber **●** for checks still running, and a green **✓** only when

@@ -184,6 +184,22 @@ class PullRequest:
         return self.state == "MERGED"
 
     @property
+    def closed(self) -> bool:
+        """Closed-without-merging PRs get GitHub's red closed-PR mark."""
+        return self.state == "CLOSED"
+
+    @property
+    def settled(self) -> bool:
+        """Whether the PR is over — merged or closed — so nothing about it can change.
+
+        The line every status mark stops at: a settled PR's base icon already
+        says everything there is to say, and whatever its checks read at the
+        end is history rather than something to act on. A PR nothing has been
+        fetched for is *not* settled: unknown is not the same as finished.
+        """
+        return self.merged or self.closed
+
+    @property
     def conflicting(self) -> bool:
         """Whether GitHub has said this PR can't merge as it stands.
 
@@ -213,12 +229,13 @@ class PullRequest:
         nothing above blocks the merge — checks passed (or none exist) and the
         branch merges clean; and a clean sweep gets GitHub's green check.
 
-        A merged PR carries none: the purple base says all there is to say,
-        and whether CI passed on the way in is history. A PR with no checks at
-        all earns no green check either — one it never ran would be a lie —
-        though unanswered comments still show on it.
+        A settled PR carries none: its base — purple merged, red closed — says
+        all there is to say, and whether CI passed on the way in or out is
+        history. A PR with no checks at all earns no green check either — one
+        it never ran would be a lie — though unanswered comments still show on
+        it.
         """
-        if self.merged:
+        if self.settled:
             return None
         if self.failed:
             return BADGE_FAILED
@@ -861,10 +878,11 @@ def combined_state(prs: Iterable[PullRequest]) -> str | None:
 
     Least-settled first, because that is what the session still has to do: a
     draft anywhere means work in progress, an open PR anywhere means something
-    is up for review, and only a set that has entirely landed reads as merged.
-    Anything else — a closed PR, a mix of merged and closed, or PRs nothing has
-    been fetched for yet — has no state to claim, and the caller's fallback
-    (grey, i.e. "nothing known") says so.
+    is up for review, and a set with nothing live left reads as however it
+    ended — merged if every one of them landed, closed if every one of them was
+    abandoned. A mix of the two ended both ways and claims neither, and so does
+    a list with a PR nothing has been fetched for: the caller's fallback (grey,
+    i.e. "nothing known") is the honest answer to both.
     """
     states = {pr.state for pr in prs}
     if not states:
@@ -873,7 +891,9 @@ def combined_state(prs: Iterable[PullRequest]) -> str | None:
         return "DRAFT"
     if "OPEN" in states:
         return "OPEN"
-    return "MERGED" if states == {"MERGED"} else None
+    if states == {"MERGED"}:
+        return "MERGED"
+    return "CLOSED" if states == {"CLOSED"} else None
 
 
 def combined_badge(prs: Iterable[PullRequest]) -> str | None:
@@ -888,13 +908,14 @@ def combined_badge(prs: Iterable[PullRequest]) -> str | None:
     is "does this session need me?", and a comment does while a running check
     does not.
 
-    Merged PRs abstain entirely: nothing about one can change, and the purple
-    base already says it landed. The green check is the only mark that has to
-    be earned by all of them — one live PR still running, still conflicting or
-    with no checks at all is enough to withhold it, because a green mark on a
-    row means "there is nothing here to do".
+    Settled PRs abstain entirely: nothing about a merged or closed one can
+    change, and its base already says how it ended — a red build it carried on
+    the way out is not something the row can ask for. The green check is the
+    only mark that has to be earned by all of them — one live PR still running,
+    still conflicting or with no checks at all is enough to withhold it,
+    because a green mark on a row means "there is nothing here to do".
     """
-    live = [pr for pr in prs if not pr.merged]
+    live = [pr for pr in prs if not pr.settled]
     if any(pr.failed for pr in live):
         return BADGE_FAILED
     if any(pr.conflicting for pr in live):

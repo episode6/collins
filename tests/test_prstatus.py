@@ -701,6 +701,22 @@ def test_repository_for_is_the_gate_every_gh_call_goes_through(url, repository):
 
 
 @pytest.mark.parametrize(
+    "state,merged,closed,settled",
+    [
+        ("MERGED", True, False, True),
+        ("CLOSED", False, True, True),
+        ("OPEN", False, False, False),
+        ("DRAFT", False, False, False),
+        (None, False, False, False),  # unfetched: unknown, not finished
+        ("SOMETHING_NEW", False, False, False),
+    ],
+)
+def test_a_pr_knows_how_it_ended(state, merged, closed, settled):
+    pr = PullRequest(55, URL, state=state)
+    assert (pr.merged, pr.closed, pr.settled) == (merged, closed, settled)
+
+
+@pytest.mark.parametrize(
     "counts,badge",
     [
         ((None, None, None), None),  # nothing cached
@@ -738,16 +754,19 @@ def test_a_clean_conflict_still_badges():
     assert pr.badge == "conflict"
 
 
-def test_a_merged_pr_drops_its_badge():
-    """The purple base mark says it all — how CI went on the way in is history."""
-    pr = PullRequest(55, URL, state="MERGED", passed=2, failed=1, pending=0)
-    assert (pr.merged, pr.badge) == (True, None)
-
-
-@pytest.mark.parametrize("state", [None, "OPEN", "DRAFT", "CLOSED", "SOMETHING_NEW"])
-def test_every_other_state_keeps_the_badge(state):
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
+def test_a_settled_pr_drops_its_badge(state):
+    """The base mark says it all — purple or red, how CI went on the way in or
+    out is history."""
     pr = PullRequest(55, URL, state=state, passed=2, failed=1, pending=0)
-    assert (pr.merged, pr.badge) == (False, "failed")
+    assert (pr.settled, pr.badge) == (True, None)
+
+
+@pytest.mark.parametrize("state", [None, "OPEN", "DRAFT", "SOMETHING_NEW"])
+def test_every_live_state_keeps_the_badge(state):
+    """Including the states we've never heard of: unknown isn't finished."""
+    pr = PullRequest(55, URL, state=state, passed=2, failed=1, pending=0)
+    assert (pr.settled, pr.badge) == (False, "failed")
 
 
 # -- describe (the tooltip's long form) -------------------------------------
@@ -1268,10 +1287,13 @@ def _pr(number, **overrides):
         (["MERGED", "OPEN"], "OPEN"),            # one still up for review
         (["MERGED", "OPEN", "DRAFT"], "DRAFT"),  # work in progress outranks it
         (["DRAFT", "MERGED"], "DRAFT"),
-        (["CLOSED"], None),                      # no icon of its own: grey
-        (["MERGED", "CLOSED"], None),            # neither all merged nor open
+        (["CLOSED"], "CLOSED"),                  # abandoned, and nothing else
+        (["CLOSED", "CLOSED"], "CLOSED"),
+        (["MERGED", "CLOSED"], None),            # ended both ways: claims neither
         ([None, "MERGED"], None),                # one unfetched: nothing known
+        ([None, "CLOSED"], None),
         (["CLOSED", "OPEN"], "OPEN"),
+        (["CLOSED", "DRAFT"], "DRAFT"),
     ],
 )
 def test_combined_state_reads_the_least_settled_first(states, expected):
@@ -1313,11 +1335,20 @@ def test_a_live_pr_with_no_checks_withholds_the_green_check():
     assert combined_badge(prs) is None
 
 
-def test_merged_prs_abstain_from_the_badge():
-    """Nothing about one can change, and the purple base already says it
-    landed: they neither withhold the green check nor earn one."""
-    assert combined_badge([_pr(1, state="MERGED", passed=1)]) is None
-    assert combined_badge([_pr(1, state="MERGED"), _pr(2, state="OPEN", passed=1)]) == "passed"
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
+def test_settled_prs_abstain_from_the_badge(state):
+    """Nothing about a merged or closed one can change, and its base already
+    says how it ended: they neither withhold the green check nor earn one."""
+    assert combined_badge([_pr(1, state=state, passed=1)]) is None
+    assert combined_badge([_pr(1, state=state), _pr(2, state="OPEN", passed=1)]) == "passed"
+
+
+def test_a_closed_prs_last_red_build_is_not_the_rows_problem():
+    """The review's catch: a closed PR used to count as live, so a red build it
+    carried out of the door badged the row that had nothing left to fix."""
+    assert combined_badge([_pr(1, state="CLOSED", failed=1)]) is None
+    assert combined_badge([_pr(1, state="CLOSED", pending=2)]) is None
+    assert combined_badge([_pr(1, state="CLOSED", unresolved=True)]) is None
 
 
 def test_no_prs_is_no_badge():

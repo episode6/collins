@@ -75,13 +75,17 @@ MAX_HEIGHT_PX = 400
 # shades follow the light/dark scheme and live in app.py). The base icon says
 # what the PR *is*: grey while it's a draft — or while nothing has been
 # fetched, where grey reads as "nothing known" rather than a wrongly green
-# all-clear — green once it's ready for review, purple when it lands.
+# all-clear — green once it's ready for review, purple when it lands, red when
+# it is closed without landing.
 _BASE_ICONS = {
     "MERGED": ("git-merge-symbolic", "pr-merged"),
     "OPEN": ("git-pull-request-symbolic", "pr-open"),
     "DRAFT": ("git-pull-request-draft-symbolic", "pr-draft"),
+    "CLOSED": ("git-pull-request-closed-symbolic", "pr-closed"),
 }
-_BASE_FALLBACK = ("git-pull-request-symbolic", "pr-draft")  # unfetched or closed
+# Nothing fetched yet, or (for a row's combined mark) a set of PRs whose states
+# disagree about how they ended. Grey, the same "nothing known" a draft wears.
+_BASE_FALLBACK = ("git-pull-request-symbolic", "pr-draft")
 # The badge says how the PR stands. Both merge blockers — a failed check and
 # a conflicting branch — get the same red x; the warning triangle is the
 # softer "someone is waiting on a reply", which only shows once nothing

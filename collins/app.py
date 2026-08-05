@@ -498,11 +498,13 @@ _SCHEME_CSS = """
 .pr-merged { color: %(merged_purple)s; }
 /* GitHub's open-PR green is its checks-passed green, so the open base icon
    shares the shade; a draft (and a PR nothing is known about) takes GitHub's
-   muted grey; the conflict badge shares the failed red — either one blocks
-   the merge; the unresolved-comments badge borrows the pending yellow —
+   muted grey; a closed PR and the conflict badge both share the failed red —
+   on GitHub a closed PR is that same danger red, and either of the other two
+   blocks the merge; the unresolved-comments badge borrows the pending yellow —
    attention-colored, but nothing is broken, someone just has the last word. */
 .pr-open { color: %(passed_green)s; }
 .pr-draft { color: %(draft_grey)s; }
+.pr-closed { color: %(failed_red)s; }
 .pr-conflict { color: %(failed_red)s; }
 .pr-unresolved { color: %(pending_yellow)s; }
 .pr-checks-passed { color: %(passed_green)s; }
