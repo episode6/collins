@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-03. Full change history: git log for this file.
+# fork. Last modified: 2026-08-05. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -259,6 +259,17 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._pr_title_row.set_active(bool(state.get_setting("pr_title_sessions")))
         self._pr_title_row.connect("notify::active", self._on_pr_title_changed)
         sidebar_group.add(self._pr_title_row)
+        self._pr_launch_row = Adw.SwitchRow(
+            title=_("Refresh pull requests at launch"),
+            subtitle=_(
+                "Ask GitHub about every listed session's pull requests once on "
+                "startup, so the marks in the sidebar start out current rather "
+                "than as they were left"
+            ),
+        )
+        self._pr_launch_row.set_active(bool(state.get_setting("refresh_prs_on_launch")))
+        self._pr_launch_row.connect("notify::active", self._on_pr_launch_changed)
+        sidebar_group.add(self._pr_launch_row)
         page.add(sidebar_group)
 
         self._footer_apps_group = Adw.PreferencesGroup(
@@ -571,6 +582,11 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_pr_title_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("pr_title_sessions", row.get_active())
+        self._on_change()
+
+    def _on_pr_launch_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        # Only ever read at startup, so this takes effect from the next launch.
+        self._state.set_setting("refresh_prs_on_launch", row.get_active())
         self._on_change()
 
     def _on_worktree_changed(self, row: Adw.SwitchRow, _pspec) -> None:

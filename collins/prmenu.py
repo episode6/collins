@@ -2,10 +2,10 @@
 
 Two buttons open this same list. The ellipsis beside the tab footer's PR chips
 — shown only while the row is too narrow for every chip — opens it for the tab
-in front of you, off a list its poll keeps current; the
-GitHub button on a sidebar row opens it for a session whose tab may not even
-be open, off the list saved for that session — which is why that one refreshes
-before it shows anything (see SessionRow._fill_pr_menu).
+in front of you, off a list its poll keeps current; the combined mark ahead of
+a sidebar row's title opens it for a session whose tab may not even be open,
+off the list saved for that session — which is why that one refreshes before it
+shows anything (see SessionRow._fill_pr_menu).
 
 The widgets live here rather than beside either caller so both get the same
 menu: the same mark column, the same ellipsizing title, the same click that
@@ -42,6 +42,8 @@ from .prstatus import (  # noqa: E402
     BADGE_PENDING,
     BADGE_UNRESOLVED,
     PullRequest,
+    combined_badge,
+    combined_state,
     describe,
     invalidate,
     menu_name,
@@ -61,19 +63,29 @@ BADGE_OVERHANG_PX = 3
 # titles beside them line up; how wide a title gets before it ellipsizes; and
 # how tall the list gets before it scrolls.
 MARK_COLUMN_PX = MERGED_ICON_PX + BADGE_OVERHANG_PX
+# The sidebar's combined mark (see combined_icon) stands in a line of title
+# text and is the only colored thing on the row, so it takes the size the row's
+# other symbolic icons do rather than the chips' caption size — badge and
+# overhang scaled to match.
+ROW_ICON_PX = 16
+ROW_BADGE_PX = 10
 MAX_CHARS = 48
 MAX_HEIGHT_PX = 400
 # Every PR mark is GitHub's own iconography, colored as on the PR page (the
 # shades follow the light/dark scheme and live in app.py). The base icon says
 # what the PR *is*: grey while it's a draft — or while nothing has been
 # fetched, where grey reads as "nothing known" rather than a wrongly green
-# all-clear — green once it's ready for review, purple when it lands.
+# all-clear — green once it's ready for review, purple when it lands, red when
+# it is closed without landing.
 _BASE_ICONS = {
     "MERGED": ("git-merge-symbolic", "pr-merged"),
     "OPEN": ("git-pull-request-symbolic", "pr-open"),
     "DRAFT": ("git-pull-request-draft-symbolic", "pr-draft"),
+    "CLOSED": ("git-pull-request-closed-symbolic", "pr-closed"),
 }
-_BASE_FALLBACK = ("git-pull-request-symbolic", "pr-draft")  # unfetched or closed
+# Nothing fetched yet, or (for a row's combined mark) a set of PRs whose states
+# disagree about how they ended. Grey, the same "nothing known" a draft wears.
+_BASE_FALLBACK = ("git-pull-request-symbolic", "pr-draft")
 # The badge says how the PR stands. Both merge blockers — a failed check and
 # a conflicting branch — get the same red x; the warning triangle is the
 # softer "someone is waiting on a reply", which only shows once nothing
@@ -86,9 +98,12 @@ _BADGE_ICONS = {
     BADGE_PASSED: ("check-circle-fill-symbolic", "pr-checks-passed"),
 }
 # What a popover is currently showing: the PR whose actions are up (None while
-# it is the list), and the list itself — the contents a submenu leads back to,
-# which a refresh can replace without disturbing the submenu on top of it.
+# it is the list), the way back out of those actions (None when the actions are
+# the whole menu, as for a footer chip or a session with one PR), and the list
+# itself — the contents a submenu leads back to, which a refresh can replace
+# without disturbing the submenu on top of it.
 _ACTIONS = "_collins_actions_pr"
+_ACTIONS_BACK = "_collins_actions_back"
 _LIST = "_collins_pr_list"
 # Each action's mark, by key: the icon says who carries the action out —
 # GitHub's own glyphs (colored as on the PR page: merge purple, open green)
@@ -157,33 +172,61 @@ def new_popover(position: Gtk.PositionType) -> Gtk.Popover:
     return popover
 
 
-def status_icon(pr: PullRequest) -> Gtk.Widget:
-    """A PR's state and status as one two-icon mark.
+def _mark(
+    state: str | None, badge_name: str | None, base_px: int, badge_px: int
+) -> Gtk.Widget:
+    """One two-icon mark: a state's base icon, with a status badge on its corner.
 
-    The base icon carries the PR's own state (see `_BASE_ICONS`); the one
-    status worth acting on rides its bottom-left corner as a smaller badge
-    (see `PullRequest.badge` for which wins the slot — the tooltip still
-    carries everything, via describe). The base always keeps room for the
-    overhang, badge or no badge, so bases line up down a column of marks
-    and a chip doesn't shift when a badge comes or goes.
+    The base icon carries the state (see `_BASE_ICONS`); the one status worth
+    acting on rides its bottom-left corner as a smaller badge (see
+    `PullRequest.badge` for which wins the slot — the tooltip still carries
+    everything, via describe). The base always keeps room for the overhang,
+    badge or no badge, so bases line up down a column of marks and a chip
+    doesn't shift when a badge comes or goes.
+
+    The overhang scales with the badge: it is how much of the badge hangs off
+    the base, and at a bigger badge a fixed one would leave the mark sitting
+    over the drawing instead of beside its corner.
     """
-    name, css_class = _BASE_ICONS.get(pr.state or "", _BASE_FALLBACK)
+    overhang = max(1, round(badge_px * BADGE_OVERHANG_PX / BADGE_PX))
+    name, css_class = _BASE_ICONS.get(state or "", _BASE_FALLBACK)
     base = Gtk.Image.new_from_icon_name(name)
-    base.set_pixel_size(MERGED_ICON_PX)
+    base.set_pixel_size(base_px)
     base.add_css_class(css_class)
-    base.set_margin_start(BADGE_OVERHANG_PX)
-    base.set_margin_bottom(BADGE_OVERHANG_PX)
+    base.set_margin_start(overhang)
+    base.set_margin_bottom(overhang)
     mark = Gtk.Overlay(child=base)
-    badge = _BADGE_ICONS.get(pr.badge or "")
+    badge = _BADGE_ICONS.get(badge_name or "")
     if badge is not None:
         name, css_class = badge
         image = Gtk.Image.new_from_icon_name(name)
-        image.set_pixel_size(BADGE_PX)
+        image.set_pixel_size(badge_px)
         image.add_css_class(css_class)
         image.set_halign(Gtk.Align.START)
         image.set_valign(Gtk.Align.END)
         mark.add_overlay(image)
     return mark
+
+
+def status_icon(pr: PullRequest) -> Gtk.Widget:
+    """One PR's state and status as a mark, at the size the chips use."""
+    return _mark(pr.state, pr.badge, MERGED_ICON_PX, BADGE_PX)
+
+
+def combined_icon(prs: Iterable[PullRequest]) -> Gtk.Widget:
+    """A whole session's pull requests as a single mark, at row-icon size.
+
+    The sidebar has one slot per row, not one per PR, so the list is reduced
+    before it is drawn: `combined_state` picks the base and `combined_badge`
+    picks the badge, each of them reading the set the way the row's reader
+    would — the least-settled state, and the loudest thing still to do.
+
+    Bigger than the footer's mark, because it sits in a line of title text
+    rather than among caption-sized chips, and because it is the only thing on
+    the row carrying a color.
+    """
+    prs = list(prs)
+    return _mark(combined_state(prs), combined_badge(prs), ROW_ICON_PX, ROW_BADGE_PX)
 
 
 def status_mark(pr: PullRequest) -> Gtk.Widget:
@@ -278,6 +321,7 @@ def fill(
     scroller.set_max_content_height(MAX_HEIGHT_PX)
     popover.set_child(scroller)
     setattr(popover, _ACTIONS, None)
+    setattr(popover, _ACTIONS_BACK, None)
     setattr(popover, _LIST, (prs, loading, host))
 
 
@@ -296,15 +340,38 @@ def refill(popover: Gtk.Popover) -> None:
 def update(popover: Gtk.Popover, prs: Iterable[PullRequest], host: ActionHost | None) -> None:
     """Land a refreshed list into an open menu, wherever the reader is in it.
 
-    On the list, that means rebuilding it. Inside a PR's actions, it means
-    leaving what is on screen alone — swapping a menu out from under the
-    pointer is how a click lands on something nobody chose — and putting the
-    new list behind it, for the way back.
+    On the list, that means rebuilding it. Inside a *submenu* — actions someone
+    stepped into from the list — it means leaving what is on screen alone,
+    because swapping a menu out from under the pointer is how a click lands on
+    something nobody chose; the new list goes behind it, for the way back.
+
+    Actions with nothing behind them are the exception (a session with a single
+    PR opens straight into them, see SessionRow._fill_pr_menu). There they are
+    not a submenu but the whole menu, standing where the list would have stood
+    and refreshing as the list would: what the fetch just learned is the
+    difference between offering to merge a PR and offering to fix its build.
+    Only an actual change rebuilds, so a fetch that confirms what was already
+    there leaves the rows exactly where the pointer left them.
     """
-    if showing_actions(popover):
-        setattr(popover, _LIST, (list(prs), False, host))
-    else:
+    prs = list(prs)
+    child = popover.get_child()
+    if child is not None and not child.get_sensitive():
+        # An action is running in here: the menu was made insensitive for the
+        # duration and a spinner is turning in the row that started it (see
+        # _start_action). Rebuilding now would hand back a live menu that says
+        # nothing is happening, so the merge in flight could be started twice.
+        return
+    shown = getattr(popover, _ACTIONS, None)
+    if shown is None:
         fill(popover, prs, host=host)
+        return
+    setattr(popover, _LIST, (prs, False, host))
+    if getattr(popover, _ACTIONS_BACK, None) is not None or host is None:
+        return  # a submenu: leave it, the list behind it is now current
+    if len(prs) != 1:
+        fill(popover, prs, host=host)  # no longer a list of one, so show the list
+    elif prs[0] != shown:
+        show_actions(popover, prs[0], host)
 
 
 def _on_row_clicked(button: Gtk.Button, popover: Gtk.Popover, url: str) -> None:
@@ -355,6 +422,7 @@ def show_actions(
     there is nothing behind it.
     """
     setattr(popover, _ACTIONS, pr)
+    setattr(popover, _ACTIONS_BACK, back)
     rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
     rows.append(_header(pr, back))
     separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)

@@ -77,6 +77,12 @@ _IDLE_NOTIFY_MS = 4000
 # Window (and content header) title while the tab bar is showing the tab names.
 _APP_TITLE = "Collins"
 
+# How long after the store's first scan the launch PR sweep waits before going
+# out to gh (see _schedule_launch_sweep). Long enough for the restored tabs to
+# have spawned their shells, short enough that the marks are current by the
+# time anyone has read the panel.
+_LAUNCH_SWEEP_DELAY_MS = 2500
+
 # Quit-time backgrounding, which runs one session at a time. How long to wait
 # for a tab's session id to land before giving up and exiting it cleanly, how
 # often to re-check while waiting, and how long to let one handoff hold the
@@ -209,6 +215,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._last_active_session = ""
         # Session to reopen once the store's first scan delivers it.
         self._restore_session_id: str | None = None
+        # The startup PR sweep is a once-per-window thing, and it can only run
+        # after the first scan has said which sessions there are.
+        self._launch_sweep_source: int | None = None
+        self._launch_sweep_done = False
         self._menu_page: Adw.TabPage | None = None
         self._base_titles: dict[Adw.TabPage, str] = {}  # fork/new tab title without emoji
         # Tabs whose session id was just resolved, waiting for the store to
@@ -434,6 +444,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.takes_prompt = self._session_takes_prompt
         self.sidebar.has_changes = self._session_has_changes
         self.sidebar.live_cwd = self._session_live_cwd
+        self.sidebar.prs_updated = self._adopt_session_prs
         self.sidebar.connect("open-session", self._on_sidebar_open)
         self.sidebar.connect("open-many", self._on_sidebar_open_many)
         self.sidebar.connect("trash-many", self._on_sidebar_trash_many)
@@ -895,7 +906,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _install_actions(self) -> None:
         plain = {
-            "refresh": lambda *_: self.store.refresh(force_rebuild=True),
+            "refresh": lambda *_: self._refresh_everything(),
             "new-session": lambda *_: self._new_session(),
             "new-session-in-chats": lambda *_: self._new_session_in_chats(),
             "preferences": lambda *_: self._show_preferences(),
@@ -1026,6 +1037,19 @@ class MainWindow(Adw.ApplicationWindow):
         )
         select_sessions.connect("change-state", self._on_select_sessions)
         self.add_action(select_sessions)
+
+    def _refresh_everything(self) -> None:
+        """What the sidebar's refresh button does: re-read the sessions, and
+        re-read the pull requests behind the marks on their rows.
+
+        Two independent passes, deliberately not chained: the scan is a
+        filesystem walk that lands in a blink and reorders the list, the sweep
+        is `gh` over every session it lists and takes as long as GitHub does.
+        Waiting for the second before showing the first would make the button
+        feel broken.
+        """
+        self.store.refresh(force_rebuild=True)
+        self.sidebar.refresh_pull_requests()
 
     def _install_shortcuts(self) -> None:
         controller = Gtk.ShortcutController()
@@ -1447,6 +1471,7 @@ class MainWindow(Adw.ApplicationWindow):
         tab.connect("editor-pop-out-requested", self._pop_out_editor)
         tab.connect("bell", self._on_bell)
         tab.connect("prs-changed", self._on_tab_prs_changed)
+        tab.connect("pr-status-changed", self._on_tab_pr_status_changed)
         tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
         tab.set_editor_width_lookup(lambda: int(self.state.get_setting("editor_width") or 0))
         gate = EchoGate()
@@ -1634,6 +1659,22 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.sync_session_prs(tab.session_id)
         self.store.apply_pr_title(tab.session_id)
 
+    def _on_tab_pr_status_changed(self, tab: TerminalTab) -> None:
+        """A tab's chips read differently now: rebuild its row's mark to match.
+
+        The row builds its mark from the saved list plus whatever this run has
+        fetched (prstatus.known), and the tab's poll is what does most of that
+        fetching — so the row needs telling whenever the answer moved, whether
+        or not it was worth writing down. A fork tab counts too: it saves no
+        list, but it fetches, and the row it shares deserves the answer.
+
+        Nothing is saved here. (A list change arrives as prs-changed first and
+        syncs the row too — one extra rebuild of one row, and the alternative
+        is either signal depending on the other's ordering.)
+        """
+        if tab.session_id:
+            self.sidebar.sync_session_prs(tab.session_id)
+
     def _on_panel_size_changed(self, _tab: TerminalTab, mode: str, size: int) -> None:
         """A divider was dragged: remember the size app-wide, so every panel
         opened from now on (in any tab) defaults to it."""
@@ -1669,6 +1710,38 @@ class MainWindow(Adw.ApplicationWindow):
                 self._clear_backgrounding(session_id, "fork discovered; row handed off")
         # Rows just appeared or went away, and a row is what a handoff needs.
         self._refresh_background_affordances()
+        self._schedule_launch_sweep()
+
+    def _schedule_launch_sweep(self) -> None:
+        """Line up the one PR sweep a launch runs by itself.
+
+        A restored mark is the last thing the previous run knew (see
+        prstatus.to_record), which is the right thing to *show* immediately and
+        the wrong thing to leave standing: overnight the checks finished and
+        somebody replied. So the panel asks once, unprompted, and the marks
+        settle into today's answers a few seconds after the window opens —
+        without a click, and without a poll pestering GitHub all day.
+
+        Waits for the store's first scan, since a sweep with no sessions in it
+        is nothing, and then a little longer: opening a window already spawns a
+        shell per restored tab, and this is `gh` per directory on top. The
+        delay keeps the two out of each other's way — the button spins for it,
+        so the wait is visible rather than mysterious.
+        """
+        if self._launch_sweep_done or self._launch_sweep_source is not None:
+            return
+        if not self.store.sessions:
+            return  # nothing to sweep yet; the next scan may have some
+        if not self.state.get_setting("refresh_prs_on_launch"):
+            self._launch_sweep_done = True
+            return
+        self._launch_sweep_source = GLib.timeout_add(_LAUNCH_SWEEP_DELAY_MS, self._launch_sweep)
+
+    def _launch_sweep(self) -> bool:
+        self._launch_sweep_source = None
+        self._launch_sweep_done = True
+        self.sidebar.refresh_pull_requests()
+        return GLib.SOURCE_REMOVE
 
     def _sync_transcript_paths(self) -> None:
         """Re-aim tabs whose transcript moved out from under them.
@@ -2016,6 +2089,23 @@ class MainWindow(Adw.ApplicationWindow):
         """
         tab = self._session_tab(session_id)
         return tab.current_agent_cwd() if tab is not None else None
+
+    def _adopt_session_prs(self, session_id: str, records: list) -> None:
+        """The sweep covered this session: hand the result to its open tab.
+
+        Two things ride on this, and only a tab that is open cares about
+        either. A PR that reached the session by branch lookup lives nowhere
+        the tab would look — its own list is rebuilt from the transcript and
+        from whatever it has tracked — so without this it would be dropped from
+        the saved list on the tab's next poll. And the refresh button is a
+        refresh of what the user is looking at, not only of the panel beside
+        it: adopting the list asks the tab for an update, which rebuilds its
+        chips from the status the sweep just fetched (see
+        SessionSidebar._prs_swept).
+        """
+        tab = self._session_tab(session_id)
+        if tab is not None:
+            tab.restore_prs(records)
 
     def _send_prompt(self, session_id: str, prompt: str) -> None:
         """A sidebar PR menu's prompt action: type it into the session's own
@@ -2514,6 +2604,9 @@ class MainWindow(Adw.ApplicationWindow):
         if self._process_poll is not None:
             GLib.source_remove(self._process_poll)
             self._process_poll = None
+        if self._launch_sweep_source is not None:
+            GLib.source_remove(self._launch_sweep_source)
+            self._launch_sweep_source = None
 
     def _sync_row_busy(self, session_id: str) -> None:
         """Push the busy flag onto every row this session shows up as.

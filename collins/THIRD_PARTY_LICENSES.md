@@ -41,9 +41,12 @@ symbolic icons bundled under `data/icons` are either original artwork for this f
 derived from agent-session-manager (GPL-3.0), except the ones used unmodified from
 **Octicons** — © GitHub, Inc. — MIT License —
 [primer/octicons](https://github.com/primer/octicons): `alert-symbolic`,
-`git-merge-symbolic`, `git-pull-request-symbolic` and `github-symbolic`, so that a
-merged PR, a conflicted or open one's marks and the button opening a session's pull
-requests read the same here as on the site they came from; and the file tree's
+`alert-fill-symbolic`, `check-circle-fill-symbolic`, `x-circle-fill-symbolic`,
+`git-merge-symbolic`, `git-pull-request-symbolic`,
+`git-pull-request-draft-symbolic`, `git-pull-request-closed-symbolic` and
+`github-symbolic`, so that a pull request's state and status marks — merged, open,
+draft or closed, with the check, warning or error riding its corner — read the same
+here as on the site they came from; and the file tree's
 file-type set, `ft-*-symbolic` (each SVG names its source Octicon in its header
 comment). The Collins app icon is original artwork.
 

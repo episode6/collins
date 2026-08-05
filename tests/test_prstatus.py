@@ -16,13 +16,16 @@ from collins import prstatus
 from collins.prstatus import (
     CACHE_MAX_AGE_S,
     PullRequest,
+    combined_badge,
+    combined_state,
     describe,
+    describe_all,
     discover_pr,
     enrich,
-    forget_status,
     from_record,
     from_records,
     invalidate,
+    known,
     menu_name,
     merge_ordered,
     newest_title,
@@ -30,6 +33,7 @@ from collins.prstatus import (
     refresh,
     resync,
     state_text,
+    sweep,
     to_record,
     to_records,
 )
@@ -696,6 +700,22 @@ def test_repository_for_is_the_gate_every_gh_call_goes_through(url, repository):
 
 
 @pytest.mark.parametrize(
+    "state,merged,closed,settled",
+    [
+        ("MERGED", True, False, True),
+        ("CLOSED", False, True, True),
+        ("OPEN", False, False, False),
+        ("DRAFT", False, False, False),
+        (None, False, False, False),  # unfetched: unknown, not finished
+        ("SOMETHING_NEW", False, False, False),
+    ],
+)
+def test_a_pr_knows_how_it_ended(state, merged, closed, settled):
+    pr = PullRequest(55, URL, state=state)
+    assert (pr.merged, pr.closed, pr.settled) == (merged, closed, settled)
+
+
+@pytest.mark.parametrize(
     "counts,badge",
     [
         ((None, None, None), None),  # nothing cached
@@ -733,16 +753,19 @@ def test_a_clean_conflict_still_badges():
     assert pr.badge == "conflict"
 
 
-def test_a_merged_pr_drops_its_badge():
-    """The purple base mark says it all — how CI went on the way in is history."""
-    pr = PullRequest(55, URL, state="MERGED", passed=2, failed=1, pending=0)
-    assert (pr.merged, pr.badge) == (True, None)
-
-
-@pytest.mark.parametrize("state", [None, "OPEN", "DRAFT", "CLOSED", "SOMETHING_NEW"])
-def test_every_other_state_keeps_the_badge(state):
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
+def test_a_settled_pr_drops_its_badge(state):
+    """The base mark says it all — purple or red, how CI went on the way in or
+    out is history."""
     pr = PullRequest(55, URL, state=state, passed=2, failed=1, pending=0)
-    assert (pr.merged, pr.badge) == (False, "failed")
+    assert (pr.settled, pr.badge) == (True, None)
+
+
+@pytest.mark.parametrize("state", [None, "OPEN", "DRAFT", "SOMETHING_NEW"])
+def test_every_live_state_keeps_the_badge(state):
+    """Including the states we've never heard of: unknown isn't finished."""
+    pr = PullRequest(55, URL, state=state, passed=2, failed=1, pending=0)
+    assert (pr.settled, pr.badge) == (False, "failed")
 
 
 # -- describe (the tooltip's long form) -------------------------------------
@@ -774,24 +797,62 @@ def test_unknown_states_pass_through():
 # -- persisting a session's PRs ---------------------------------------------
 
 
-def test_record_keeps_identity_and_drops_status():
-    """Status is refetched every run; writing it down would age on disk."""
-    pr = PullRequest(55, URL, "episode6/collins", state="OPEN", passed=2, failed=1, pending=0)
-    assert to_record(pr) == {"number": 55, "url": URL, "repository": "episode6/collins"}
+def test_a_record_carries_the_whole_pr():
+    """Status is saved with it, so a mark reads as the last answer rather than
+    as "nothing known" until the run's first fetch."""
+    pr = PullRequest(55, URL, "episode6/collins", title="Track every PR", state="OPEN",
+                     passed=2, failed=1, pending=0, mergeable="CONFLICTING", unresolved=True)
+    assert to_record(pr) == {
+        "number": 55,
+        "url": URL,
+        "repository": "episode6/collins",
+        "title": "Track every PR",
+        "state": "OPEN",
+        "checks": {"passed": 2, "failed": 1, "pending": 0},
+        "mergeable": "CONFLICTING",
+        "unresolved": True,
+    }
+    assert from_record(to_record(pr)) == pr
 
 
-def test_a_merged_pr_stays_merged_on_disk():
-    """The one status that can't go stale, so the mark is up before gh answers."""
-    pr = PullRequest(55, URL, "episode6/collins", state="MERGED", passed=2)
-    assert to_record(pr)["state"] == "MERGED"
-    assert from_record(to_record(pr)).merged is True
+def test_a_record_says_only_what_was_known():
+    """Nothing fetched yet: no state, no counts, no null-filled keys either."""
+    assert to_record(PullRequest(55, URL)) == {"number": 55, "url": URL}
+    assert from_record(to_record(PullRequest(55, URL))) == PullRequest(55, URL)
 
 
-def test_forget_status_keeps_only_the_merge():
-    pr = PullRequest(55, URL, "episode6/collins", state="MERGED", passed=2, failed=1, pending=3)
-    assert forget_status(pr) == PullRequest(55, URL, "episode6/collins", state="MERGED")
-    open_pr = replace(pr, state="OPEN")
-    assert forget_status(open_pr) == PullRequest(55, URL, "episode6/collins")
+@pytest.mark.parametrize("state", ["OPEN", "DRAFT", "MERGED", "CLOSED"])
+def test_every_state_gh_reports_survives_the_run(state):
+    pr = PullRequest(55, URL, "episode6/collins", state=state, passed=2)
+    assert to_record(pr)["state"] == state
+    assert from_record(to_record(pr)).state == state
+
+
+@pytest.mark.parametrize("state", ["SOMETHING_NEW", 7, "", None, True])
+def test_a_state_nothing_recognizes_is_not_read_back(state):
+    """A saved list is a file, and a mark gets built out of whatever it says."""
+    assert from_record({"number": 55, "url": URL, "state": state}).state is None
+    assert to_record(PullRequest(55, URL, state=state)).get("state") is None
+
+
+@pytest.mark.parametrize(
+    "checks",
+    [
+        "lots",
+        {"passed": "3"},
+        {"passed": True},  # bool is an int subclass
+        {"passed": -1},
+        {"passed": 10_000},  # not a count of anything about one PR
+    ],
+)
+def test_saved_check_counts_are_revalidated(checks):
+    assert from_record({"number": 55, "url": URL, "checks": checks}).passed is None
+
+
+def test_saved_mergeability_and_comments_are_revalidated():
+    record = {"number": 55, "url": URL, "mergeable": "PROBABLY", "unresolved": "yes"}
+    restored = from_record(record)
+    assert (restored.mergeable, restored.unresolved) == (None, False)
 
 
 def test_records_roundtrip_in_order():
@@ -962,11 +1023,6 @@ def test_a_title_is_saved_and_read_back():
     assert from_record(to_record(pr)).title == "Track every PR"
 
 
-def test_forget_status_keeps_the_title():
-    pr = PullRequest(55, URL, "episode6/collins", title="Track every PR", state="OPEN", passed=2)
-    assert forget_status(pr) == PullRequest(55, URL, "episode6/collins", title="Track every PR")
-
-
 def test_a_junk_title_on_disk_is_dropped():
     assert from_record({"number": 55, "url": URL, "title": ["not", "a", "title"]}).title is None
 
@@ -1026,11 +1082,22 @@ def test_resync_leaves_a_pr_alone_when_the_fetch_fails(gh_calls):
     assert resync([pr]) == [pr]
 
 
-def test_resync_does_not_spend_a_fetch_on_a_merged_pr(gh_calls):
+def test_resync_does_not_spend_a_fetch_on_a_merged_pr(gh_calls, scheduled):
     urls, _replies = gh_calls
     pr = PullRequest(55, URL, title="Track every PR", state="MERGED")
     assert resync([pr]) == [pr]
     assert urls == []
+    assert scheduled == []  # nor one in the background on the way out
+
+
+def test_resync_still_asks_about_a_closed_pr(gh_calls):
+    """Closing is reversible: a reopened PR must not need a restart to show,
+    so only a merge buys a PR out of the fetch."""
+    urls, replies = gh_calls
+    replies[URL] = {"state": "OPEN", "checks": {}, "title": "Track every PR"}
+    out = resync([PullRequest(55, URL, title="Track every PR", state="CLOSED")])
+    assert urls == [URL]
+    assert out[0].state == "OPEN"
 
 
 def test_resync_fetches_a_merged_pr_that_never_learned_its_title(gh_calls):
@@ -1104,11 +1171,11 @@ def test_describe_names_a_conflict():
     )
 
 
-def test_forget_status_drops_mergeability():
-    """Whether a branch still merges goes stale with every push to either
-    side, so it is refetched, never remembered."""
+def test_mergeability_survives_the_run():
+    """Stale beats blank: a conflict that was there last night is the best
+    answer available until the next fetch says otherwise."""
     pr = PullRequest(55, URL, "episode6/collins", state="OPEN", mergeable="CONFLICTING")
-    assert forget_status(pr).mergeable is None
+    assert from_record(to_record(pr)).conflicting is True
 
 
 # -- unresolved comments -----------------------------------------------------
@@ -1211,7 +1278,264 @@ def test_the_cli_cache_carries_no_comments(cache):
     assert enrich(parse_pr_link(_link())).unresolved is False
 
 
-def test_forget_status_drops_unresolved():
-    """The next reply flips it, so it is refetched, never remembered."""
+def test_unresolved_comments_survive_the_run():
+    """A reply flips it, but until one is fetched the row still says someone
+    was waiting — which is the last thing anyone knew."""
     pr = PullRequest(55, URL, "episode6/collins", state="OPEN", unresolved=True)
-    assert forget_status(pr).unresolved is False
+    assert from_record(to_record(pr)).awaiting_reply is True
+
+
+# -- known (what a sidebar row rebuilds its mark from) -----------------------
+
+
+def test_known_hands_back_the_status_already_fetched(gh_calls):
+    _urls, replies = gh_calls
+    replies[URL] = _reply("Track every PR", passed=3)
+    refresh(URL)
+    pr = known(PullRequest(55, URL))
+    assert (pr.title, pr.state, pr.passed) == ("Track every PR", "OPEN", 3)
+
+
+def test_known_never_schedules_a_fetch(scheduled):
+    """It runs on the main loop, where a fetch is a subprocess nobody asked
+    for — an unfetched PR simply has no status on it yet."""
+    pr = PullRequest(55, URL, title="Track every PR")
+    assert known(pr) == pr
+    assert scheduled == []
+
+
+def test_known_ignores_the_cli_cache(cache, scheduled):
+    """Reading it is a stat and a JSON parse, and the marks are rebuilt far too
+    often for that; whatever is in it reaches them through `enrich` anyway."""
+    cache({URL: {"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}}})
+    assert known(PullRequest(55, URL)).state is None
+    assert scheduled == []
+
+
+# -- combined_state / combined_badge (a session's whole list as one mark) ----
+
+
+def _pr(number, **overrides):
+    return PullRequest(
+        number, f"https://github.com/episode6/collins/pull/{number}", **overrides
+    )
+
+
+@pytest.mark.parametrize(
+    "states, expected",
+    [
+        ([], None),                              # no PRs at all
+        (["OPEN"], "OPEN"),
+        (["MERGED"], "MERGED"),
+        (["MERGED", "MERGED"], "MERGED"),        # all landed
+        (["MERGED", "OPEN"], "OPEN"),            # one still up for review
+        (["MERGED", "OPEN", "DRAFT"], "DRAFT"),  # work in progress outranks it
+        (["DRAFT", "MERGED"], "DRAFT"),
+        (["CLOSED"], "CLOSED"),                  # abandoned, and nothing else
+        (["CLOSED", "CLOSED"], "CLOSED"),
+        (["MERGED", "CLOSED"], None),            # ended both ways: claims neither
+        ([None, "MERGED"], None),                # one unfetched: nothing known
+        ([None, "CLOSED"], None),
+        (["CLOSED", "OPEN"], "OPEN"),
+        (["CLOSED", "DRAFT"], "DRAFT"),
+    ],
+)
+def test_combined_state_reads_the_least_settled_first(states, expected):
+    assert combined_state([_pr(n, state=s) for n, s in enumerate(states)]) == expected
+
+
+def test_a_failed_check_anywhere_takes_the_badge():
+    prs = [_pr(1, state="OPEN", passed=3), _pr(2, state="OPEN", failed=1, passed=1)]
+    assert combined_badge(prs) == "failed"
+
+
+def test_a_conflict_anywhere_takes_the_badge_next():
+    prs = [_pr(1, state="OPEN", passed=3), _pr(2, state="OPEN", mergeable="CONFLICTING")]
+    assert combined_badge(prs) == "conflict"
+
+
+def test_unanswered_comments_outrank_running_checks():
+    """The row answers "does this session need me?" — a comment does, a check
+    still running does not. (The per-PR badge ranks these the other way round,
+    where the question is what blocks that one merge.)"""
+    prs = [_pr(1, state="OPEN", pending=2), _pr(2, state="OPEN", passed=1, unresolved=True)]
+    assert combined_badge(prs) == "unresolved"
+
+
+def test_pending_checks_take_the_badge_over_a_clean_sweep():
+    prs = [_pr(1, state="OPEN", passed=3), _pr(2, state="OPEN", pending=1)]
+    assert combined_badge(prs) == "pending"
+
+
+def test_the_green_check_is_earned_by_every_live_pr():
+    prs = [_pr(1, state="OPEN", passed=3), _pr(2, state="DRAFT", passed=1)]
+    assert combined_badge(prs) == "passed"
+
+
+def test_a_live_pr_with_no_checks_withholds_the_green_check():
+    """One it never ran would be a lie on a single chip, and it is a lie about
+    the session too."""
+    prs = [_pr(1, state="OPEN", passed=3), _pr(2, state="OPEN")]
+    assert combined_badge(prs) is None
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
+def test_settled_prs_abstain_from_the_badge(state):
+    """Nothing about a merged or closed one can change, and its base already
+    says how it ended: they neither withhold the green check nor earn one."""
+    assert combined_badge([_pr(1, state=state, passed=1)]) is None
+    assert combined_badge([_pr(1, state=state), _pr(2, state="OPEN", passed=1)]) == "passed"
+
+
+def test_a_closed_prs_last_red_build_is_not_the_rows_problem():
+    """The review's catch: a closed PR used to count as live, so a red build it
+    carried out of the door badged the row that had nothing left to fix."""
+    assert combined_badge([_pr(1, state="CLOSED", failed=1)]) is None
+    assert combined_badge([_pr(1, state="CLOSED", pending=2)]) is None
+    assert combined_badge([_pr(1, state="CLOSED", unresolved=True)]) is None
+
+
+def test_no_prs_is_no_badge():
+    assert combined_badge([]) is None
+
+
+def test_describe_all_gives_a_line_to_every_pr():
+    prs = [_pr(1, state="OPEN", passed=1), _pr(2, state="MERGED")]
+    assert describe_all(prs).splitlines() == [describe(prs[0]), describe(prs[1])]
+
+
+def test_describe_all_counts_the_ones_it_stops_naming():
+    prs = [_pr(n, state="OPEN") for n in range(prstatus._MAX_TOOLTIP_PRS + 3)]
+    lines = describe_all(prs).splitlines()
+    assert len(lines) == prstatus._MAX_TOOLTIP_PRS + 1
+    assert lines[-1] == "and 3 more"
+
+
+# -- sweep (what the sidebar's refresh button runs over every listed row) ----
+
+
+@pytest.fixture
+def branches(monkeypatch):
+    """Stub the branch each directory is on; returns the dict to fill in."""
+    heads: dict[str, str] = {}
+    monkeypatch.setattr(prstatus, "current_branch", heads.get)
+    return heads
+
+
+def test_sweep_finds_the_branch_pr_a_session_never_knew_about(gh_json, gh_calls, branches):
+    serve, _calls = gh_json
+    serve(_DISCOVERED)
+    branches["/home/me/dev/collins"] = "feat/x"
+    swept = sweep([("s1", [], "/home/me/dev/collins")])
+    assert [pr.number for pr in swept["s1"]] == [74]
+    assert swept["s1"][0].badge == "failed"  # the lookup's own status came with it
+
+
+def test_sweep_asks_each_directory_once(gh_json, gh_calls, branches):
+    """Sessions sharing a worktree share its branch, and a panel of them must
+    not become a panel of identical gh calls."""
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    branches["/home/me/dev/collins"] = "feat/x"
+    swept = sweep([
+        ("s1", [], "/home/me/dev/collins"),
+        ("s2", [], "/home/me/dev/collins"),
+    ])
+    assert len(calls) == 1
+    assert [pr.number for pr in swept["s2"]] == [74]
+
+
+def test_sweep_does_not_refetch_what_the_lookup_just_answered(gh_json, gh_calls, branches):
+    serve, _calls = gh_json
+    serve(_DISCOVERED)
+    branches["/home/me/dev/collins"] = "feat/x"
+    urls, _replies = gh_calls
+    sweep([("s1", [], "/home/me/dev/collins")])
+    assert urls == []
+
+
+def test_sweep_refreshes_every_saved_pr(gh_json, gh_calls, branches):
+    urls, replies = gh_calls
+    replies[URL] = _reply("Track every PR")
+    replies[OTHER_URL] = _reply("Give the list room", passed=2)
+    swept = sweep([
+        ("s1", [PullRequest(55, URL)], None),
+        ("s2", [PullRequest(56, OTHER_URL)], None),
+    ])
+    assert sorted(urls) == [URL, OTHER_URL]
+    assert swept["s1"][0].title == "Track every PR"
+    assert swept["s2"][0].passed == 2
+
+
+def test_sweep_fetches_a_shared_pr_once(gh_json, gh_calls, branches):
+    """Two sessions on one PR (a fork, or the same work resumed twice) cost a
+    single call between them."""
+    urls, replies = gh_calls
+    replies[URL] = _reply("Track every PR")
+    swept = sweep([("s1", [PullRequest(55, URL)], None), ("s2", [PullRequest(55, URL)], None)])
+    assert urls == [URL]
+    assert swept["s1"] == swept["s2"]
+
+
+def test_sweep_appends_a_discovery_to_what_the_session_had(gh_json, gh_calls, branches):
+    """A PR the session opened earlier stays, oldest first: the branch has
+    simply moved on to a newer one."""
+    serve, _calls = gh_json
+    serve(_DISCOVERED)
+    branches["/home/me/dev/collins"] = "feat/x"
+    _urls, replies = gh_calls
+    replies[URL] = _reply("Track every PR")
+    swept = sweep([("s1", [PullRequest(55, URL)], "/home/me/dev/collins")])
+    assert [pr.number for pr in swept["s1"]] == [55, 74]
+
+
+def test_sweep_never_lists_the_same_pr_twice(gh_json, gh_calls, branches):
+    serve, _calls = gh_json
+    serve(_DISCOVERED)
+    branches["/home/me/dev/collins"] = "feat/x"
+    swept = sweep([("s1", [PullRequest(74, _found()["url"])], "/home/me/dev/collins")])
+    assert [pr.number for pr in swept["s1"]] == [74]
+
+
+def test_sweep_asks_nothing_for_a_session_with_no_directory(gh_json, gh_calls, branches):
+    serve, calls = gh_json
+    serve(_DISCOVERED)
+    assert sweep([("s1", [], None)]) == {"s1": []}
+    assert calls == []
+
+
+def test_sweep_survives_a_lookup_that_blows_up(monkeypatch, gh_calls, branches):
+    """One unreadable repository can't cost every other row its refresh."""
+
+    def explode(args, cwd=None):
+        raise OSError("no such repository")
+
+    monkeypatch.setattr(prstatus, "gh_json", explode)
+    branches["/home/me/dev/gone"] = "feat/x"
+    _urls, replies = gh_calls
+    replies[URL] = _reply("Track every PR")
+    swept = sweep([
+        ("s1", [], "/home/me/dev/gone"),
+        ("s2", [PullRequest(55, URL)], None),
+    ])
+    assert swept["s1"] == []
+    assert swept["s2"][0].title == "Track every PR"
+
+
+def test_sweep_spends_no_call_on_a_merged_pr(gh_json, gh_calls, branches, scheduled):
+    """A merged PR that knows its title is what most old rows carry, and a
+    sidebar full of them must cost nothing at all — including in the
+    background, which is what reading one back through `enrich` would start."""
+    urls, _replies = gh_calls
+    pr = PullRequest(55, URL, title="Track every PR", state="MERGED")
+    assert sweep([("s1", [pr], None)]) == {"s1": [pr]}
+    assert urls == []
+    assert scheduled == []
+
+
+def test_sweep_still_asks_about_a_closed_pr(gh_json, gh_calls, branches):
+    """The sweep is the click that would show a closed PR reopened."""
+    urls, _replies = gh_calls
+    pr = PullRequest(55, URL, title="Track every PR", state="CLOSED")
+    sweep([("s1", [pr], None)])
+    assert urls == [URL]

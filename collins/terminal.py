@@ -56,7 +56,6 @@ from .prstatus import (  # noqa: E402
     describe,
     discover_pr,
     enrich,
-    forget_status,
     from_records,
     invalidate,
     merge_ordered,
@@ -1018,6 +1017,14 @@ class TerminalTab(Gtk.Box):
         # prstatus records, oldest first), so the window can save them against
         # the session. Never fires for a tab that has nothing to say yet.
         "prs-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
+        # Emitted whenever the chips are rebuilt — a check went red, a PR
+        # merged, a new one turned up — so the session's sidebar row can
+        # re-read its own mark from the status this tab just fetched. Separate
+        # from prs-changed because the two questions are: prs-changed asks
+        # "does the saved list need writing?", this one asks "does anything
+        # else showing this session need redrawing?" — and a rebuild that
+        # changed no record (a fetch that came back the same) still redraws.
+        "pr-status-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
         # Emitted (debounced) when the editor panel's divider is moved: the
         # new panel px size, so the window can persist it as the app-wide
         # default. Mirrors panel-size-changed, minus the mode — the editor
@@ -1198,9 +1205,10 @@ class TerminalTab(Gtk.Box):
 
         self._footer_cwd: str | None = None  # last value shown in the footer
         self._footer_branch: str | None = None
-        # Every PR this session has opened, oldest first: url -> PR without its
-        # CI status (see _collect_prs). Replaced wholesale, never mutated in
-        # place — the update thread reads it while the main loop writes it.
+        # Every PR this session has opened, oldest first: url -> PR with the
+        # last status known for it (see _collect_prs). Replaced wholesale,
+        # never mutated in place — the update thread reads it while the main
+        # loop writes it.
         self._tracked_prs: dict[str, PullRequest] = {}
         self._restored_prs: list[PullRequest] = []  # this session's, from a previous run
         self._footer_prs: list[PullRequest] = []  # what the chips currently show
@@ -1650,6 +1658,11 @@ class TerminalTab(Gtk.Box):
         # retires the button when the last chip goes.
         self._pr_menu_btn.set_visible(False)
         self._remember_prs(prs)
+        # After the save, never before it: the sidebar row rebuilds its mark
+        # from this session's saved list plus the status now sitting in
+        # prstatus, so a list that just gained a PR has to be on disk by the
+        # time the row goes looking.
+        self.emit("pr-status-changed")
         self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
 
@@ -1666,9 +1679,11 @@ class TerminalTab(Gtk.Box):
     def _remember_prs(self, prs: list[PullRequest]) -> None:
         """Hand the row's PRs to the window, which saves them for this session.
 
-        Their CI status doesn't go with them (see prstatus.to_record), so what
-        changes here is the list itself — a new PR, or one that just merged —
-        and a session that hasn't opened any never emits at all.
+        Status goes with them (see prstatus.to_record), so this fires for a
+        check that turned red as well as for a PR that turned up — but only
+        when the records actually differ, so a poll that came back with the
+        same answer writes nothing. A session that has opened no PRs never
+        emits at all.
         """
         records = to_records(prs)
         if records == self._saved_pr_records:
@@ -2207,13 +2222,12 @@ class TerminalTab(Gtk.Box):
             # Same pane object wherever it lives (in-tab or popped out).
             self._editor.set_agent_files(self._transcript.touched_files())
         if tracked is not None:
-            # The shown ones come back with status; a merge is the one part of
-            # it worth keeping, and keeping it is what stops that PR from being
-            # refetched (and re-saved) for the rest of the session.
+            # The shown ones come back with status, and they keep it: it is
+            # what the chips fall back to when a poll brings nothing new (a
+            # failed fetch, or no fetch at all), and what gets saved for the
+            # next run. A fetch that does land replaces it wholesale.
             shown = {pr.url: pr for pr in prs or []}
-            self._tracked_prs = {
-                pr.url: forget_status(shown.get(pr.url, pr)) for pr in tracked
-            }
+            self._tracked_prs = {pr.url: shown.get(pr.url, pr) for pr in tracked}
             self._merge_restored()
         self._refresh_pr_chips(prs or [])
         if lookup_empty:  # even with PRs still showing: none of them is this branch's

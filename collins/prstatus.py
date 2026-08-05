@@ -22,13 +22,18 @@ after launch), and Collins otherwise refreshes status itself with a short
 A transcript is not the only way a session gets a PR, though: one opened by
 hand never shows up in it. So the footer's refresh button can also ask gh which
 PR belongs to the checked-out branch (`discover_pr`), which fills the chip in
-for a session whose transcript will never mention one.
+for a session whose transcript will never mention one. The sidebar's refresh
+button does both halves for every session it lists at once (`sweep`), so the
+marks down the panel are current without every row being visited.
 
 A session accumulates PRs — the footer shows every one of them — so its list
-outlives the app run: `to_record`/`from_record` reduce a PR to what is worth
-keeping (see AppState.set_session_prs). Status is deliberately not part of
-that; last week's green check says nothing about today. The one exception is
-a merged PR, which can't change back.
+outlives the app run: `to_record`/`from_record` write a PR out whole, status
+included (see AppState.set_session_prs). What was true when the app last looked
+is not what is true now, but it is the closest thing to it that costs nothing:
+the alternative is a panel of grey "nothing known" marks on every launch, which
+reads as a verdict of its own. So a restored mark is last week's answer until a
+fetch replaces it, and every path that shows one is already asking for that
+fetch (an open tab's poll, a menu opening, the refresh sweep).
 
 Those gh calls are the only subprocesses here; everything else is a filesystem
 read, they always happen off the main thread, and every failure degrades to "no
@@ -50,6 +55,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from .gitinfo import current_branch
 from .i18n import _
 
 log = logging.getLogger(__name__)
@@ -94,6 +100,13 @@ _GH_FIELDS = "title,state,isDraft,statusCheckRollup,mergeable,comments"
 # recomputes — so only a definite verdict is kept and UNKNOWN is stored as "no
 # answer", to be corrected by the refresh after the next TTL.
 _MERGEABLE_STATES = frozenset({"MERGEABLE", "CONFLICTING"})
+# The states a record may carry, in and out (see `to_record`). A state gh has
+# never reported isn't written, and one nothing here recognizes isn't read: a
+# saved list is a file on disk, and a mark is built out of whatever it says.
+_SAVED_STATES = frozenset({"OPEN", "DRAFT", "MERGED", "CLOSED"})
+# Check counts are small integers about a single PR. A saved list that claims
+# otherwise is not describing a PR, so it doesn't get to describe a mark.
+_MAX_CHECK_COUNT = 9999
 # Long PR titles are a thing; the menu ellipsizes them anyway, and this keeps
 # what a repository can put on screen (and on disk) bounded.
 _MAX_TITLE = 200
@@ -106,6 +119,13 @@ _DISCOVER_LIMIT = 20
 # subprocess and someone is watching a spinner, so a session with twenty of
 # them doesn't wait twenty round trips — but it isn't a fan-out either.
 _RESYNC_WORKERS = 4
+# The same, for a `sweep` across every session in the sidebar: a wider pool,
+# because that is a whole panel's worth of directories and PRs behind one
+# click, and still narrow enough that Collins doesn't look like a load test to
+# the machine or to GitHub.
+_SWEEP_WORKERS = 8
+# How many PRs a row's tooltip spells out before it starts counting them.
+_MAX_TOOLTIP_PRS = 8
 
 # Only fetch for URLs shaped like a PR page. The URL comes out of a transcript
 # — repo content, i.e. untrusted — and lands in an argv, so this also keeps a
@@ -147,20 +167,21 @@ class PullRequest:
     repository: str | None = None
     # What the PR is called. A transcript never says, so this arrives with the
     # first `gh` reply — and stays with the PR from then on, saved list
-    # included: it is what the chips' menu reads, and a title doesn't go stale
-    # the way a check does.
+    # included: it is what the chips' menu reads.
     title: str | None = None
+    # Everything below is status: what `gh` last said. All of it is saved with
+    # the PR (see `to_record`) and all of it is what the next fetch replaces —
+    # a restored value is the last answer, not the current one.
     state: str | None = None  # OPEN / DRAFT / MERGED / CLOSED
     passed: int | None = None
     failed: int | None = None
     pending: int | None = None
     # MERGEABLE / CONFLICTING, or None while GitHub hasn't said (an unfetched
     # PR, gh's transient UNKNOWN, or a warm start from the CLI cache — which
-    # has no such field). Like the check counts, never persisted: whether a
-    # branch still merges goes stale with every push to either side.
+    # has no such field).
     mergeable: str | None = None
     # Whether the PR's newest comment is someone else's — the conversation is
-    # waiting on us. Never persisted either: one reply flips it.
+    # waiting on us.
     unresolved: bool = False
 
     @property
@@ -172,6 +193,22 @@ class PullRequest:
     def merged(self) -> bool:
         """Merged PRs get GitHub's purple git-merge mark as their base icon."""
         return self.state == "MERGED"
+
+    @property
+    def closed(self) -> bool:
+        """Closed-without-merging PRs get GitHub's red closed-PR mark."""
+        return self.state == "CLOSED"
+
+    @property
+    def settled(self) -> bool:
+        """Whether the PR is over — merged or closed — so nothing about it can change.
+
+        The line every status mark stops at: a settled PR's base icon already
+        says everything there is to say, and whatever its checks read at the
+        end is history rather than something to act on. A PR nothing has been
+        fetched for is *not* settled: unknown is not the same as finished.
+        """
+        return self.merged or self.closed
 
     @property
     def conflicting(self) -> bool:
@@ -203,12 +240,13 @@ class PullRequest:
         nothing above blocks the merge — checks passed (or none exist) and the
         branch merges clean; and a clean sweep gets GitHub's green check.
 
-        A merged PR carries none: the purple base says all there is to say,
-        and whether CI passed on the way in is history. A PR with no checks at
-        all earns no green check either — one it never ran would be a lie —
-        though unanswered comments still show on it.
+        A settled PR carries none: its base — purple merged, red closed — says
+        all there is to say, and whether CI passed on the way in or out is
+        history. A PR with no checks at all earns no green check either — one
+        it never ran would be a lie — though unanswered comments still show on
+        it.
         """
-        if self.merged:
+        if self.settled:
             return None
         if self.failed:
             return BADGE_FAILED
@@ -350,30 +388,20 @@ def merge_ordered(
     return [by_url[url] for url in order]
 
 
-def forget_status(pr: PullRequest) -> PullRequest:
-    """*pr* stripped back to its identity, keeping only a merge that happened.
-
-    What a tab remembers between polls, and the shape `to_record` writes out:
-    check counts are refetched, a title is part of what the PR *is*, and a
-    merge is forever.
-    """
-    return replace(
-        pr,
-        state="MERGED" if pr.merged else None,
-        passed=None,
-        failed=None,
-        pending=None,
-        mergeable=None,
-        unresolved=False,
-    )
-
-
 def to_record(pr: PullRequest) -> dict | None:
     """*pr* as a JSON-safe record for AppState, or None when it isn't one.
 
     A URL that doesn't look like a PR page is dropped rather than written: it
     can't be refreshed (see `_FETCHABLE`), so the only thing persisting it
     would achieve is putting an unvalidated URL on disk.
+
+    Status goes out with the PR — state, check counts, mergeability, whether
+    someone is waiting on a reply — so a mark reads as the last thing gh said
+    rather than as "nothing known" until the run's first fetch. Stale beats
+    blank: grey says a PR nothing is known about, and saying that about a PR
+    the app has watched all week is the more wrong of the two answers. A field
+    gh never answered is left out of the record rather than written as null, so
+    a record only ever says what was actually known.
     """
     if not _FETCHABLE.match(pr.url):
         return None
@@ -382,8 +410,20 @@ def to_record(pr: PullRequest) -> dict | None:
         record["repository"] = pr.repository
     if pr.title:
         record["title"] = pr.title
-    if pr.merged:
-        record["state"] = "MERGED"
+    if pr.state in _SAVED_STATES:
+        record["state"] = pr.state
+    checks = {
+        name: count
+        for name, count in (("passed", pr.passed), ("failed", pr.failed),
+                            ("pending", pr.pending))
+        if count is not None
+    }
+    if checks:
+        record["checks"] = checks
+    if pr.mergeable in _MERGEABLE_STATES:
+        record["mergeable"] = pr.mergeable
+    if pr.unresolved:
+        record["unresolved"] = True
     return record
 
 
@@ -398,7 +438,10 @@ def from_record(record: object) -> PullRequest | None:
     Everything is re-validated on the way in. These records started life in a
     transcript — repo content, i.e. untrusted — and a restored PR's URL is
     handed to a browser and to `gh`, so being the one that wrote the file
-    earns no shortcut here.
+    earns no shortcut here. Status is read back the same way `gh`'s own reply
+    is: a state nothing recognizes, a count that isn't a small integer or a
+    mergeability GitHub never uses is dropped, and that field reads as "not
+    known" — which is what it is.
     """
     if not isinstance(record, dict):
         return None
@@ -409,13 +452,26 @@ def from_record(record: object) -> PullRequest | None:
     if not isinstance(url, str) or not _FETCHABLE.match(url):
         return None
     repository = record.get("repository")
+    checks = record.get("checks")
+    mergeable = record.get("mergeable")
     return PullRequest(
         number=number,
         url=url,
         repository=repository if isinstance(repository, str) and repository else None,
         title=_title(record.get("title")),
-        state="MERGED" if record.get("state") == "MERGED" else None,
+        state=record["state"] if record.get("state") in _SAVED_STATES else None,
+        passed=_saved_count(checks, "passed"),
+        failed=_saved_count(checks, "failed"),
+        pending=_saved_count(checks, "pending"),
+        mergeable=mergeable if mergeable in _MERGEABLE_STATES else None,
+        unresolved=record.get("unresolved") is True,
     )
+
+
+def _saved_count(checks: object, key: str) -> int | None:
+    """One saved check count, or None when the file doesn't have a usable one."""
+    count = _count(checks, key)
+    return count if count is not None and 0 <= count <= _MAX_CHECK_COUNT else None
 
 
 def from_records(records: object) -> list[PullRequest]:
@@ -775,7 +831,27 @@ def enrich(pr: PullRequest | None) -> PullRequest | None:
     """
     if pr is None:
         return None
-    entry = _own_status(pr.url) or _cached_status(pr.url)
+    return _applied(pr, _own_status(pr.url) or _cached_status(pr.url))
+
+
+def known(pr: PullRequest) -> PullRequest:
+    """*pr* with whatever status has already been fetched this run, if any.
+
+    The main loop's own version of `enrich`: a dictionary lookup and nothing
+    else — no file is read, no TTL is consulted and no `gh` is scheduled — so a
+    widget can be rebuilt from it without either blocking or quietly starting
+    subprocesses. What it hands back is therefore only ever as good as the last
+    fetch someone else made (a tab's poll, a menu opening, a refresh sweep),
+    which is exactly what the sidebar's marks want: the status the app already
+    knows, shown wherever that session appears.
+    """
+    with _lock:
+        stamped = _statuses.get(pr.url)
+    return _applied(pr, stamped[1] if stamped else None)
+
+
+def _applied(pr: PullRequest, entry: object) -> PullRequest:
+    """*pr* with a fetched status entry folded into it, or unchanged without one."""
     if not isinstance(entry, dict):
         return pr
     state = entry.get("state")
@@ -799,20 +875,206 @@ def resync(prs: Iterable[PullRequest]) -> list[PullRequest]:
     `enrich` is the polling path: it hands back what it has and only goes out
     to `gh` once a TTL is up. This is the on-demand one, for a list that is
     being opened rather than watched — a sidebar row's PR menu has no poll
-    behind it, and what it saved last run is a title and nothing else. So each
-    PR is fetched before the list comes back, and a fetch that fails leaves
-    that PR exactly as it arrived (`enrich` reads the "no status" the failure
-    recorded, and keeps the title the saved record supplied).
+    behind it, and what it saved last run may be days old. So each PR is
+    fetched before the list comes back, and a fetch that fails leaves that PR
+    exactly as it arrived (`enrich` reads the "no status" the failure recorded,
+    and keeps what the saved record supplied).
 
-    A merged PR is skipped unless its title is missing: nothing else about one
-    can change (see `forget_status`), so it isn't worth a subprocess.
+    A merged PR is skipped unless its title is missing: nothing about one can
+    change, so it isn't worth a subprocess. Merged, not settled — a closed PR
+    is asked about like any other, because closing one is reversible and
+    reopening it must not need a restart to show.
 
     Never call on the main thread — this waits on `gh`, several at a time.
     """
     prs = list(prs)
-    due = [pr.url for pr in prs if not pr.merged or pr.title is None]
+    due = [pr.url for pr in prs if _worth_fetching(pr)]
     due = [url for url in due if _FETCHABLE.match(url)]
     if due and not _gh_missing:
         with ThreadPoolExecutor(max_workers=min(_RESYNC_WORKERS, len(due))) as pool:
             list(pool.map(refresh, due))
-    return [enrich(pr) or pr for pr in prs]
+    return [_after_fetching(pr) for pr in prs]
+
+
+# -- a session's whole list as one mark --------------------------------------
+#
+# A footer has room for a chip per PR; a sidebar row has room for one mark, and
+# it stands for everything the session has open. So the list is reduced the way
+# a person reading the row would: the worst thing among them is what the mark
+# says, and the all-clear has to be earned by every one of them.
+
+
+def combined_state(prs: Iterable[PullRequest]) -> str | None:
+    """The state a whole session's PRs read as, for one base icon.
+
+    Least-settled first, because that is what the session still has to do: a
+    draft anywhere means work in progress, an open PR anywhere means something
+    is up for review, and a set with nothing live left reads as however it
+    ended — merged if every one of them landed, closed if every one of them was
+    abandoned. A mix of the two ended both ways and claims neither, and so does
+    a list with a PR nothing has been fetched for: the caller's fallback (grey,
+    i.e. "nothing known") is the honest answer to both.
+    """
+    states = {pr.state for pr in prs}
+    if not states:
+        return None
+    if "DRAFT" in states:
+        return "DRAFT"
+    if "OPEN" in states:
+        return "OPEN"
+    if states == {"MERGED"}:
+        return "MERGED"
+    return "CLOSED" if states == {"CLOSED"} else None
+
+
+def combined_badge(prs: Iterable[PullRequest]) -> str | None:
+    """The one status worth acting on across a session's PRs, or None.
+
+    Same slot and same marks as a single PR's `badge`, ranked by how loudly the
+    session is asking for attention rather than by what blocks a given merge:
+    anything broken (a failed check or a conflicting branch) outranks a
+    conversation waiting on a reply, which outranks checks still running. That
+    puts unanswered comments above pending runs — the opposite of the per-PR
+    order, where a merge blocker is the question being asked; here the question
+    is "does this session need me?", and a comment does while a running check
+    does not.
+
+    Settled PRs abstain entirely: nothing about a merged or closed one can
+    change, and its base already says how it ended — a red build it carried on
+    the way out is not something the row can ask for. The green check is the
+    only mark that has to be earned by all of them — one live PR still running,
+    still conflicting or with no checks at all is enough to withhold it,
+    because a green mark on a row means "there is nothing here to do".
+    """
+    live = [pr for pr in prs if not pr.settled]
+    if any(pr.failed for pr in live):
+        return BADGE_FAILED
+    if any(pr.conflicting for pr in live):
+        return BADGE_CONFLICT
+    if any(pr.awaiting_reply for pr in live):
+        return BADGE_UNRESOLVED
+    if any(pr.pending for pr in live):
+        return BADGE_PENDING
+    if live and all(pr.passed for pr in live):
+        return BADGE_PASSED
+    return None
+
+
+def describe_all(prs: Iterable[PullRequest]) -> str:
+    """Every PR behind one mark, a `describe` line each.
+
+    What the row's tooltip says, since the mark itself has collapsed them all
+    into a single verdict: the line count is the PR count, and the one that
+    earned the badge is in there with the rest. Bounded, like everything else
+    built out of repository text — a session that has opened dozens of PRs
+    still gets a tooltip rather than a wall.
+    """
+    prs = list(prs)
+    lines = [describe(pr) for pr in prs[:_MAX_TOOLTIP_PRS]]
+    if len(prs) > _MAX_TOOLTIP_PRS:
+        lines.append(_("and {n} more").format(n=len(prs) - _MAX_TOOLTIP_PRS))
+    return "\n".join(lines)
+
+
+def sweep(targets: Iterable[tuple[str, list[PullRequest], str | None]]) -> dict[str, list[PullRequest]]:
+    """Re-read every listed session's pull requests, branch lookup included.
+
+    What the sidebar's refresh button runs over the whole list, so a panel full
+    of rows tells the truth about CI and comments without each row's menu being
+    opened one at a time. Each *target* is a session's ``(id, saved PRs, cwd)``,
+    and each comes back with the same PRs enriched, plus any the branch lookup
+    turned up — the same two halves the footer's own refresh button does for one
+    tab, and in the same order: find first, then fetch, so a PR discovered here
+    lands with its status already on it.
+
+    The lookups are deduplicated by directory: sessions that share a worktree
+    share a branch, and asking gh the same question once per row would be the
+    expensive half of this. Status fetches are deduplicated by URL for the same
+    reason — several sessions on one PR cost one call between them.
+
+    Never call on the main thread: this is a `gh` call per directory and per
+    unsettled PR, a few at a time. Every failure degrades to "nothing found"
+    and leaves that session's list exactly as it arrived.
+    """
+    targets = [(session_id, list(prs), cwd) for session_id, prs, cwd in targets]
+
+    # Which branch each distinct directory is on. Cheap enough to do serially:
+    # current_branch is a couple of stat calls and a small read, no subprocess.
+    branches: dict[str, str] = {}
+    for _session_id, _prs, cwd in targets:
+        if not cwd or cwd in branches:
+            continue
+        branch = current_branch(cwd)
+        if branch:
+            branches[cwd] = branch
+
+    found: dict[str, PullRequest] = {}
+    if branches and not _gh_missing:
+        heads = list(branches.items())
+        with ThreadPoolExecutor(max_workers=min(_SWEEP_WORKERS, len(heads))) as pool:
+            for (cwd, _branch), pr in zip(heads, pool.map(_discover, heads), strict=True):
+                if pr is not None:
+                    found[cwd] = pr
+        log.info("prstatus: swept %s branch(es), %s with a PR", len(branches), len(found))
+
+    # A discovered PR is the newest thing that session knows about, exactly as
+    # it is for a tab (see TerminalTab._collect_prs) — appended, never
+    # replacing, so a session keeps the PRs it opened earlier.
+    collected = {
+        session_id: (
+            [*prs, discovered]
+            if (discovered := found.get(cwd or "")) is not None
+            and all(pr.url != discovered.url for pr in prs)
+            else prs
+        )
+        for session_id, prs, cwd in targets
+    }
+
+    # One fetch per URL, whatever it is worth to. A PR the lookup just found
+    # came back with its status attached, so it is already current. Only a
+    # merged one is skipped outright, as in `resync`: a closed PR still costs a
+    # call, since it is the click that would show it reopened.
+    due = {
+        pr.url
+        for prs in collected.values()
+        for pr in prs
+        if _worth_fetching(pr) and _FETCHABLE.match(pr.url)
+    } - {pr.url for pr in found.values()}
+    if due and not _gh_missing:
+        with ThreadPoolExecutor(max_workers=min(_SWEEP_WORKERS, len(due))) as pool:
+            list(pool.map(refresh, sorted(due)))
+    return {
+        session_id: [_after_fetching(pr) for pr in prs]
+        for session_id, prs in collected.items()
+    }
+
+
+def _worth_fetching(pr: PullRequest) -> bool:
+    """Whether asking `gh` about *pr* could tell us anything new.
+
+    A merged PR that knows its title is the one thing nothing can change; a
+    closed one is still asked about, because closing is reversible.
+    """
+    return not pr.merged or pr.title is None
+
+
+def _after_fetching(pr: PullRequest) -> PullRequest:
+    """*pr* with the status a just-finished round of fetching left for it.
+
+    `enrich` for anything that was worth fetching — it reads what came back,
+    and falls back to the CLI's cache when the fetch failed. `known` for the
+    rest, which is a dictionary lookup and, unlike `enrich`, schedules nothing:
+    a sweep that deliberately spent no call on a merged PR must not then start
+    one in the background for it.
+    """
+    return (enrich(pr) or pr) if _worth_fetching(pr) else known(pr)
+
+
+def _discover(target: tuple[str, str]) -> PullRequest | None:
+    """One directory's branch lookup, for the sweep's pool. Never raises."""
+    cwd, branch = target
+    try:
+        return discover_pr(cwd, branch)
+    except Exception:
+        log.debug("prstatus: branch lookup in %s failed", cwd, exc_info=True)
+        return None

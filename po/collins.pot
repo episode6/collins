@@ -473,6 +473,16 @@ msgid ""
 "renamed sessions keep their name"
 msgstr ""
 
+#: collins/prefs.py:263
+msgid "Refresh pull requests at launch"
+msgstr ""
+
+#: collins/prefs.py:265
+msgid ""
+"Ask GitHub about every listed session's pull requests once on startup, so "
+"the marks in the sidebar start out current rather than as they were left"
+msgstr ""
+
 #: collins/prefs.py:190 collins/prefs.py:196
 msgid "Language"
 msgstr ""
@@ -689,8 +699,16 @@ msgstr ""
 msgid "About Collins"
 msgstr ""
 
-#: collins/sidebar.py:377
-msgid "Refresh session list"
+#: collins/sidebar.py:930 collins/sidebar.py:1261
+msgid "Refresh session list and pull requests"
+msgstr ""
+
+#: collins/sidebar.py:1258
+msgid "Refreshing pull requests…"
+msgstr ""
+
+#: collins/prstatus.py:923
+msgid "and {n} more"
 msgstr ""
 
 #: collins/sidebar.py:383

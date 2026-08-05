@@ -162,6 +162,22 @@ row.session-child checkbutton {
   padding: 0;
   margin-right: 4px;  /* keep the shrunken check off the title */
 }
+/* the pull request mark ahead of the title (see SessionRow): a menu button
+   standing in a line of text, so it takes only the width of the two icons in
+   it rather than the tap target the row's other buttons keep. Its padding is
+   lopsided on purpose: none on the left, so the mark tucks in against the
+   guide line where it reads as the row's own rather than the title's, and more
+   than the stock 4px on the right, so the base icon doesn't crowd the first
+   letter of the title.
+   The selector is the menubutton node, not the button one: pr-mark is set on
+   the GtkMenuButton, whose CSS node is "menubutton" wrapping the "button" node
+   that carries the padding. Written as button.pr-mark it matches nothing, and
+   the mark silently keeps the generic row-button metrics above. */
+row.session-child menubutton.pr-mark > button {
+  min-height: 20px;
+  min-width: 0;
+  padding: 0 6px 0 0;
+}
 row.session-child checkbutton > check {
   min-height: 14px;
   min-width: 14px;
@@ -482,11 +498,13 @@ _SCHEME_CSS = """
 .pr-merged { color: %(merged_purple)s; }
 /* GitHub's open-PR green is its checks-passed green, so the open base icon
    shares the shade; a draft (and a PR nothing is known about) takes GitHub's
-   muted grey; the conflict badge shares the failed red — either one blocks
-   the merge; the unresolved-comments badge borrows the pending yellow —
+   muted grey; a closed PR and the conflict badge both share the failed red —
+   on GitHub a closed PR is that same danger red, and either of the other two
+   blocks the merge; the unresolved-comments badge borrows the pending yellow —
    attention-colored, but nothing is broken, someone just has the last word. */
 .pr-open { color: %(passed_green)s; }
 .pr-draft { color: %(draft_grey)s; }
+.pr-closed { color: %(failed_red)s; }
 .pr-conflict { color: %(failed_red)s; }
 .pr-unresolved { color: %(pending_yellow)s; }
 .pr-checks-passed { color: %(passed_green)s; }

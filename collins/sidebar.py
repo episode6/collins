@@ -18,6 +18,7 @@ Emits:
 
 from __future__ import annotations
 
+import logging
 import shutil
 import threading
 from collections.abc import Callable
@@ -38,11 +39,21 @@ from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .projecticons import project_icon_data
 from .providers import get_provider
-from .prstatus import PullRequest, from_records, resync, to_records
+from .prstatus import (
+    PullRequest,
+    describe_all,
+    from_records,
+    known,
+    resync,
+    sweep,
+    to_records,
+)
 from .scrolling import offset_into_view
 from .sessions import Session, project_name_for_cwd, resume_cwd, worktree_project_root
 from .store import SessionStore
 from .usagepanel import UsagePanel
+
+log = logging.getLogger(__name__)
 
 _GHOSTTY = shutil.which("ghostty")
 _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
@@ -381,6 +392,24 @@ class SessionRow(Gtk.ListBoxRow):
         self.check.connect("toggled", lambda c: sidebar.on_row_check_toggled(self, c.get_active()))
         top.append(self.check)
 
+        # Leading the title: everything this session's pull requests amount to,
+        # as one mark (see prmenu.combined_icon). It is the row's only color,
+        # and it is a button — clicking it opens the same list the tab footer's
+        # ellipsis shows, from a row whose tab needn't be open (or exist) to
+        # read it, and consumes the click that would otherwise open the session.
+        # A session with no PRs has no mark, and the title starts where the
+        # check would leave it.
+        self._pr_menu = prmenu.new_popover(Gtk.PositionType.BOTTOM)
+        pr_btn = Gtk.MenuButton(valign=Gtk.Align.CENTER, popover=self._pr_menu)
+        pr_btn.add_css_class("flat")
+        # .pr-mark trades a button's even padding for the placement a mark in a
+        # line of text wants: tucked in against the guide line, held off the
+        # title (see app.py, which styles the button node inside this one).
+        pr_btn.add_css_class("pr-mark")
+        pr_btn.set_create_popup_func(self._fill_pr_menu)
+        self._pr_btn = pr_btn
+        top.append(pr_btn)
+
         name_label = Gtk.Label(xalign=0.0, hexpand=True)
         # The title is what carries "this session has a tab open": app.py dims
         # it on every row that doesn't (see row.session-child:not(.running)).
@@ -454,20 +483,6 @@ class SessionRow(Gtk.ListBoxRow):
         archive_btn.set_visible(sidebar.store.forward_state(item.session) != "moved")
         self._archive_btn = archive_btn
 
-        # Leading the row's actions: the pull requests this session opened —
-        # the same list the tab footer's ellipsis shows, from a row whose tab
-        # needn't be open (or exist) to read it. Clicking the button opens the
-        # menu and nothing else: a button consumes the click that would
-        # otherwise activate the row and open the session.
-        self._pr_menu = prmenu.new_popover(Gtk.PositionType.BOTTOM)
-        self._pr_menu.connect("closed", self._on_pr_menu_closed)
-        pr_btn = Gtk.MenuButton(
-            icon_name="github-symbolic", valign=Gtk.Align.CENTER, popover=self._pr_menu
-        )
-        pr_btn.add_css_class("flat")
-        pr_btn.set_tooltip_text(_("Pull requests from this session"))
-        pr_btn.set_create_popup_func(self._fill_pr_menu)
-        self._pr_btn = pr_btn
         self._prs: list[PullRequest] = []
         self._pr_fetch = 0  # generation: a slow fetch can't land on a later opening
         # What a PR's actions need of the session behind them. From a row, the
@@ -487,7 +502,6 @@ class SessionRow(Gtk.ListBoxRow):
         self.sync_prs()
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        actions.append(pr_btn)
         actions.append(stop_btn)
         actions.append(bg_btn)
         actions.append(archive_btn)  # rightmost: the one action every row has
@@ -505,7 +519,6 @@ class SessionRow(Gtk.ListBoxRow):
         self._action_stack.add_named(actions, "hover")
         top.append(self._action_stack)
 
-        self._hovered = False
         hover = Gtk.EventControllerMotion()
         hover.connect("enter", self._on_hover_enter)
         hover.connect("leave", self._on_hover_leave)
@@ -573,28 +586,73 @@ class SessionRow(Gtk.ListBoxRow):
         self.add_controller(right_click)
 
     def sync_prs(self) -> None:
-        """Re-read the session's saved PRs; the button is only there with one.
+        """Re-read the session's saved PRs; the mark is only there with one.
 
         Called as the row is built and again whenever the session's tab reports
-        a new list, so a session that opens its first PR grows the button
-        without waiting for the sidebar to be rebuilt around it.
+        a new list, so a session that opens its first PR grows the mark without
+        waiting for the sidebar to be rebuilt around it.
+
+        The saved list carries the status it was saved with (see
+        prstatus.to_record), and `known` puts anything this run has since
+        fetched over the top of it — a dictionary lookup, no file and no `gh`,
+        safe on the main loop. So a mark reads as the last thing anything knew
+        rather than as "nothing known", and it tracks an open tab's own poll:
+        the tab saves its list whenever its chips change, this re-reads it, and
+        the status the tab just fetched is sitting there waiting.
         """
-        self._prs = from_records(self._sidebar.store.state.get_session_prs(self.item.session_id))
+        self._prs = [
+            known(pr)
+            for pr in from_records(
+                self._sidebar.store.state.get_session_prs(self.item.session_id)
+            )
+        ]
+        self._sync_pr_mark()
+
+    def apply_prs(self, prs: list[PullRequest]) -> None:
+        """Land a freshly fetched list on this row (see SessionSidebar's sweep).
+
+        A menu fetch already in flight is dropped: this list is newer than
+        anything it will come back with, and its results would only overwrite
+        them with what the sweep already replaced.
+        """
+        self._pr_fetch += 1
+        self._prs = list(prs)
+        self._sync_pr_mark()
+        if self._pr_menu.get_visible():
+            prmenu.update(self._pr_menu, prs, self._pr_host)
+
+    def _sync_pr_mark(self) -> None:
+        """Rebuild the leading mark from the row's current list.
+
+        Rebuilt rather than patched, like the footer's chips: which icons a
+        mark is made of depends on the state it shows, and rows are cheap.
+        """
         self._pr_btn.set_visible(bool(self._prs))
+        if not self._prs:
+            return
+        self._pr_btn.set_child(prmenu.combined_icon(self._prs))
+        self._pr_btn.set_tooltip_text(describe_all(self._prs))
 
     def _fill_pr_menu(self, _button: Gtk.MenuButton) -> None:
         """Put the saved list up at once, and refresh it behind a spinner.
 
         The footer's copy of this menu is filled from a poll that is already
-        keeping it current. This one has only what was saved for the session,
-        which is titles and merges and no CI status at all (see
-        prstatus.to_record) — a status that survived a restart would be a
-        yesterday's check, so none is kept. Opening the menu is therefore what
-        fetches: the rows go up immediately, since the titles and numbers are
-        the readable part, with a spinner in the column each status will land
-        in.
+        keeping it current. This one has no poll behind it: what it starts from
+        is the saved list plus whatever this run has fetched, which may be
+        yesterday's answer. So opening the menu is what fetches — the rows go
+        up immediately, since the titles and numbers are the readable part,
+        with a spinner in the column each status will land in.
+
+        A session with a single PR skips the list entirely and opens that PR's
+        actions, the way a footer chip does: a list of one asks which of one,
+        and the answer is a click that only ever leads to the same place. There
+        is no way back from it because there is nothing behind it, and the
+        refresh lands in the actions themselves (see prmenu.update).
         """
-        prmenu.fill(self._pr_menu, self._prs, loading=True, host=self._pr_host)
+        if len(self._prs) == 1:
+            prmenu.show_actions(self._pr_menu, self._prs[0], self._pr_host)
+        else:
+            prmenu.fill(self._pr_menu, self._prs, loading=True, host=self._pr_host)
         self._refresh_prs()
 
     def _refresh_prs(self) -> None:
@@ -628,6 +686,7 @@ class SessionRow(Gtk.ListBoxRow):
         if token != self._pr_fetch:
             return GLib.SOURCE_REMOVE
         self._prs = prs
+        self._sync_pr_mark()  # the status the menu just fetched is the row's too
         self._sidebar.store.state.set_session_prs(self.item.session_id, to_records(prs))
         self._sidebar.store.apply_pr_title(self.item.session_id)
         if self._pr_menu.get_visible():
@@ -648,22 +707,15 @@ class SessionRow(Gtk.ListBoxRow):
         return True
 
     def _on_hover_enter(self, *_args) -> None:
-        self._hovered = True
         self._action_stack.set_visible_child_name("hover")
 
     def _on_hover_leave(self, *_args) -> None:
-        # The pointer leaving isn't the whole story while the PR menu is open:
-        # a popover takes a pointer grab, and the grab arrives here as a leave.
-        # Swapping the buttons back out for the timestamp would hide the button
-        # the menu hangs off — and a popover goes down with the widget it is
-        # attached to, so the menu would close in the act of being opened.
-        self._hovered = False
-        if not self._pr_menu.get_visible():
-            self._action_stack.set_visible_child_name("rest")
-
-    def _on_pr_menu_closed(self, _popover: Gtk.Popover) -> None:
-        if not self._hovered:
-            self._action_stack.set_visible_child_name("rest")
+        # Opening the PR menu grabs the pointer, which arrives here as a leave;
+        # that costs the row its hover buttons and nothing more. The menu hangs
+        # off the mark ahead of the title, which is always shown — a popover
+        # goes down with the widget it is attached to, and the buttons in this
+        # stack are no longer that widget.
+        self._action_stack.set_visible_child_name("rest")
 
     def update_folder_path(self, show: bool) -> None:
         self._path_label.set_visible(
@@ -810,6 +862,15 @@ class SessionSidebar(Gtk.Box):
         # the window on the same terms; None means no tab, and the transcript
         # answers instead (see _session_cwd).
         self.live_cwd: Callable[[str], str | None] = lambda _session_id: None
+        # "This session's PR list has changed under you" — for a session whose
+        # tab is open, whose own copy of that list would otherwise overwrite
+        # what a sweep just found on the next poll. Replaced by the window on
+        # the same terms as the callables above; with no tab there is nothing
+        # to tell, and the saved list stands on its own.
+        self.prs_updated: Callable[[str, list], None] = lambda _session_id, _records: None
+        # Whether a PR sweep is running (see refresh_pull_requests): one click
+        # of the refresh button at a time, however long gh takes.
+        self._pr_sweep = False
         # Scrolling the list is deferred to an idle callback (see
         # _schedule_scroll): the offset to restore and the row to reveal when
         # it runs, plus the id of the pending source.
@@ -877,7 +938,7 @@ class SessionSidebar(Gtk.Box):
         header.pack_start(self.search_btn)
 
         self._refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")
-        self._refresh_btn.set_tooltip_text(_("Refresh session list"))
+        self._refresh_btn.set_tooltip_text(_("Refresh session list and pull requests"))
         self._refresh_btn.set_action_name("win.refresh")
         header.pack_end(self._refresh_btn)
 
@@ -1115,16 +1176,119 @@ class SessionSidebar(Gtk.Box):
             row.check.set_active(row.item.session_id in self._selected)
 
     def sync_session_prs(self, session_id: str) -> None:
-        """A session's PR list changed: re-read it on that session's row.
+        """A session's PRs changed: re-read them on that session's row.
 
-        The window calls this whenever a tab saves a new list, so a session
-        that has just opened its first PR gains the button that opens it — the
+        The window calls this whenever a tab saves a new list — so a session
+        that has just opened its first PR gains the mark that opens it; the
         rows themselves are only rebuilt when the list's order changes, which
-        opening a PR isn't.
+        opening a PR isn't — and whenever an open tab's chips change how they
+        read, so the row's mark follows the status that tab just fetched
+        instead of waiting for the next sweep.
         """
         row = self._rows.get(session_id)
         if row is not None:
             row.sync_prs()
+
+    # -- pull request sweep ----------------------------------------------------
+
+    def refresh_pull_requests(self) -> None:
+        """Re-read every listed session's pull requests, off the main thread.
+
+        The other half of the header's refresh button (see window's "refresh"
+        action): rescanning the sessions says which rows exist, this says what
+        each of their marks should be showing. Every session the sidebar isn't
+        keeping out of sight is asked about — archived ones, and sessions in an
+        archived project, are not: a panel-wide sweep is `gh` calls, and rows
+        nobody is looking at shouldn't cost any.
+
+        A session with no PRs is still worth including: what the sweep does
+        with its directory is look for one (see prstatus.sweep), which is the
+        only way a PR opened by hand ever reaches a row whose transcript will
+        never mention it.
+
+        Only the live half of each session's directory is read here — asking
+        its tab, which only the main loop may do. The fallback for a session
+        with no tab is a transcript tail per session, and a panel's worth of
+        those is not something to read between two frames, so it waits for the
+        thread (see _sweep_prs).
+        """
+        if self._pr_sweep:
+            return
+        targets = [
+            (
+                session_id,
+                from_records(self.store.state.get_session_prs(session_id)),
+                session,
+                self.live_cwd(session_id),
+            )
+            for session_id, session in self.store.sessions.items()
+            if not self.store.is_out_of_sight(session)
+        ]
+        if not targets:
+            return
+        self._pr_sweep = True
+        self._set_refresh_busy(True)
+        threading.Thread(
+            target=self._sweep_prs, args=(targets,), name="pr-sweep", daemon=True
+        ).start()
+
+    def _sweep_prs(
+        self, targets: list[tuple[str, list[PullRequest], Session, str | None]]
+    ) -> None:
+        """Run the sweep. Off the main loop — it is a `gh` call per directory,
+        after a transcript tail for every session whose tab isn't open."""
+        try:
+            swept = sweep(
+                (session_id, prs, live or resume_cwd(session))
+                for session_id, prs, session, live in targets
+            )
+        except Exception:
+            log.debug("sidebar: PR sweep failed", exc_info=True)
+            swept = {}
+        GLib.idle_add(self._prs_swept, swept)
+
+    def _prs_swept(self, swept: dict[str, list[PullRequest]]) -> bool:
+        """Land a sweep: onto every row it covers, its open tab, and disk.
+
+        A session whose list is unchanged is not written back — status is no
+        part of a record, so there would be nothing new to write — but both
+        places that show the session hear about it either way, because the
+        status that came back is the point of the exercise: the row is handed
+        the swept list for its mark, and the tab is told so its chips leave
+        whatever they were showing before the button was clicked.
+        """
+        self._pr_sweep = False
+        self._set_refresh_busy(False)
+        for session_id, prs in swept.items():
+            records = to_records(prs)
+            if records != self.store.state.get_session_prs(session_id):
+                self.store.state.set_session_prs(session_id, records)
+                self.store.apply_pr_title(session_id)
+            # An open tab re-derives this list from its own sources every poll,
+            # so a PR the branch lookup just found would otherwise be written
+            # now and overwritten a second later; handing it over also puts the
+            # tab's own chips on the status this sweep fetched.
+            self.prs_updated(session_id, records)
+            row = self._rows.get(session_id)
+            if row is not None:
+                row.apply_prs(prs)
+        return GLib.SOURCE_REMOVE
+
+    def _set_refresh_busy(self, busy: bool) -> None:
+        """Turn the header's refresh button into a spinner while it works.
+
+        Rescanning sessions is over in a blink, so the button never used to say
+        anything; a sweep is `gh` calls over a whole panel and takes seconds,
+        which needs saying — and needs the second click that would run it all
+        again to be impossible while it does.
+        """
+        if busy:
+            self._refresh_btn.set_child(Gtk.Spinner(spinning=True))
+            self._refresh_btn.set_tooltip_text(_("Refreshing pull requests…"))
+        else:
+            self._refresh_btn.set_icon_name("view-refresh-symbolic")
+            self._refresh_btn.set_tooltip_text(_("Refresh session list and pull requests"))
+        self._refresh_btn.set_sensitive(not busy)
 
     def set_active_session(self, session_id: str | None) -> None:
         """Highlight the row of the session (or new-session placeholder)
