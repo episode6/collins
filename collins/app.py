@@ -127,10 +127,10 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
 
 /* every session row is the same outlined card with a left guide line; what a
    running session adds is a full-strength title (every other row's dims), and
-   (for a detached one) a status color on that line. The border box is identical
-   in every status, so a row never
-   shifts or resizes as its status changes; the selected tab's row is the one
-   exception, and it changes only horizontally (see .active-tab below).
+   (for a detached one) a status color on that line. The border box is
+   identical in every status, so a row never shifts or resizes as its status
+   changes; the selected tab's row is the one exception, and it changes only
+   horizontally (see .active-tab below).
    The left indent is a widget margin set in sidebar.py, not a CSS margin
    here: it tracks the configurable project-icon size, so the card always
    starts just past the icon of the project header above it. */
