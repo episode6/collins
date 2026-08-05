@@ -66,7 +66,7 @@ DEFAULT_SETTINGS = {
     "pr_title_sessions": False,
     # Run the sidebar's PR sweep once, shortly after launch, so the marks
     # restored from the last run are replaced by current ones without the
-    # refresh button being clicked (see MainWindow._sweep_prs_at_launch).
+    # refresh button being clicked (see MainWindow._schedule_launch_sweep).
     "refresh_prs_on_launch": True,
     # Launch new sessions with the agent CLI's worktree flag (claude -w) in
     # git projects, isolating their edits from the live checkout. Per-project
