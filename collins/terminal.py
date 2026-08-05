@@ -41,7 +41,12 @@ from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch, has_changes  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 from .lightbox import present_image_lightbox  # noqa: E402
-from .linkpatterns import FILE_PATTERN, URL_PATTERN, resolve_file_reference  # noqa: E402
+from .linkpatterns import (  # noqa: E402
+    FILE_PATTERN,
+    URL_PATTERN,
+    resolve_file_reference,
+    resolve_wrapped_reference,
+)
 from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
 from .prstatus import (  # noqa: E402
@@ -179,7 +184,16 @@ def _setup_links(terminal: Vte.Terminal) -> None:
         if not uri:
             return
         if kind == "file":
-            resolved = resolve_file_reference(uri, _reference_roots(terminal))
+            roots = _reference_roots(terminal)
+            # Stitching runs before direct resolution: a fragment of a
+            # reference the CLI hard-wrapped can resolve on its own (the
+            # leading fragment of a wrapped path is often an existing
+            # directory prefix), and the stitched whole is the truer
+            # reading. The stitcher only ever returns geometry-gated,
+            # existence-checked joins, so unwrapped references skip it fast.
+            resolved = _resolve_wrapped_at(terminal, uri, y, roots)
+            if resolved is None:
+                resolved = resolve_file_reference(uri, roots)
             if resolved is None:
                 return  # over-matched prose: leave the click to the terminal
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
@@ -224,6 +238,48 @@ def _reference_roots(terminal: Vte.Terminal) -> list[str | None]:
     if tab is None:
         return []
     return [tab.current_agent_cwd(), tab.editor_root]
+
+
+def _resolve_wrapped_at(
+    terminal: Vte.Terminal, candidate: str, y: float, roots: list[str | None]
+) -> tuple[str, int | None, int | None] | None:
+    """Stitch a failed candidate with its neighbour rows (see linkpatterns.
+    resolve_wrapped_reference) — this half only turns the click's y into a
+    buffer row and fetches row texts. The clicked row is probed with a ±1
+    slop: the y→row division ignores VTE's inner border, and the stitcher's
+    geometry gates reject the wrong rows anyway."""
+    ch = terminal.get_char_height()
+    if ch <= 0:
+        return None
+    vadj = terminal.get_vadjustment()
+    scroll = vadj.get_value() if vadj is not None else 0.0
+    if terminal.get_scroll_unit_is_pixels():
+        row = int((scroll + y) // ch)
+    else:
+        row = int(scroll) + int(y // ch)
+
+    def row_text(r: int) -> str:
+        if r < 0:
+            return ""
+        try:
+            text = terminal.get_text_range_format(
+                Vte.Format.TEXT, r, 0, r, terminal.get_column_count()
+            )[0]
+        except GLib.Error:
+            return ""
+        return (text or "").rstrip("\n")
+
+    for r in (row, row - 1, row + 1):
+        resolved = resolve_wrapped_reference(
+            candidate,
+            row_text(r),
+            [row_text(r - 1), row_text(r - 2)],
+            [row_text(r + 1), row_text(r + 2), row_text(r + 3)],
+            roots,
+        )
+        if resolved is not None:
+            return resolved
+    return None
 
 
 def _open_file_reference(

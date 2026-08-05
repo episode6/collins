@@ -9,7 +9,12 @@ import re
 
 import pytest
 
-from collins.linkpatterns import FILE_PATTERN, URL_PATTERN, resolve_file_reference
+from collins.linkpatterns import (
+    FILE_PATTERN,
+    URL_PATTERN,
+    resolve_file_reference,
+    resolve_wrapped_reference,
+)
 
 _RX = re.compile(URL_PATTERN)
 _FILE_RX = re.compile(FILE_PATTERN)
@@ -231,3 +236,80 @@ def test_resolve_falls_back_to_literal_colon_name(project) -> None:
 def test_resolve_missing_returns_none(project) -> None:
     assert resolve_file_reference("collins/nope.py", [str(project)]) is None
     assert resolve_file_reference("collins/nope.py:3", [str(project)]) is None
+
+
+# -- resolve_wrapped_reference ---------------------------------------------
+#
+# An emitter that hard-wraps output splits a long reference across real
+# lines; each on-screen fragment matches FILE_PATTERN on its own but
+# resolves nowhere. The stitcher joins a failed fragment with its neighbour
+# rows' adjacent tokens, gated on the fragment touching its row's edge.
+
+
+def _split(path: str, at: int) -> tuple[str, str]:
+    return path[:at], path[at:]
+
+
+def test_stitch_downward_from_first_fragment(project) -> None:
+    path = str(project / "collins" / "foo.py")
+    head, tail = _split(path, 20)
+    resolved = resolve_wrapped_reference(
+        head, f"  see {head}", [], [f"  {tail} and more prose"], []
+    )
+    assert resolved == (path, None, None)
+
+
+def test_stitch_upward_from_continuation_fragment(project) -> None:
+    path = str(project / "collins" / "foo.py")
+    head, tail = _split(path, 20)
+    resolved = resolve_wrapped_reference(
+        tail, f"  {tail} and more prose", [f"  see {head}"], [], []
+    )
+    assert resolved == (path, None, None)
+
+
+def test_stitch_three_rows_from_middle_fragment(project) -> None:
+    path = str(project / "collins" / "foo.py")
+    head, rest = _split(path, 15)
+    middle, tail = _split(rest, 10)
+    resolved = resolve_wrapped_reference(
+        middle, f"  {middle}", [f"wrote {head}"], [f"  {tail}, done."], []
+    )
+    assert resolved == (path, None, None)
+
+
+def test_stitch_keeps_line_suffix_on_continuation(project) -> None:
+    path = str(project / "collins" / "foo.py")
+    head, tail = _split(path, 20)
+    resolved = resolve_wrapped_reference(
+        head, f"  {head}", [], [f"  {tail}:12, then"], []
+    )
+    assert resolved == (path, 12, None)
+
+
+def test_no_stitch_when_fragment_is_mid_row(project) -> None:
+    path = str(project / "collins" / "foo.py")
+    head, tail = _split(path, 20)
+    # The fragment has text after it on its own row, so it never wrapped —
+    # the row below must not be pulled in even though joining would resolve.
+    resolved = resolve_wrapped_reference(
+        head, f"  {head} trailing words", [], [f"  {tail}"], []
+    )
+    assert resolved is None
+
+
+def test_stitch_that_resolves_nowhere_returns_none(project) -> None:
+    resolved = resolve_wrapped_reference(
+        "collins/nope", "  collins/nope", [], ["  .py either"], [str(project)]
+    )
+    assert resolved is None
+
+
+def test_prose_at_row_start_is_not_poisoned_by_row_above(project) -> None:
+    # `collins/foo.py` at the start of its row resolves directly and never
+    # reaches the stitcher; a *failing* start-of-row fragment tries the row
+    # above, and the bogus join just fails resolution.
+    resolved = resolve_wrapped_reference(
+        "collins/nope.py", "  collins/nope.py here", ["ends with word"], [], [str(project)]
+    )
+    assert resolved is None
