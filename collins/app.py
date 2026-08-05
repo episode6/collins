@@ -163,15 +163,20 @@ row.session-child checkbutton {
   margin-right: 4px;  /* keep the shrunken check off the title */
 }
 /* the pull request mark ahead of the title (see SessionRow): a menu button
-   standing in a line of text, so it gives up the padding the row's other
-   buttons keep and takes only the width of the two icons in it. Its own
-   margin keeps it off the title, since the icon's overhang column already
-   sits between the mark and the guide line. */
-row.session-child button.pr-mark {
+   standing in a line of text, so it takes only the width of the two icons in
+   it rather than the tap target the row's other buttons keep. Its padding is
+   lopsided on purpose: none on the left, so the mark tucks in against the
+   guide line where it reads as the row's own rather than the title's, and more
+   than the stock 4px on the right, so the base icon doesn't crowd the first
+   letter of the title.
+   The selector is the menubutton node, not the button one: pr-mark is set on
+   the GtkMenuButton, whose CSS node is "menubutton" wrapping the "button" node
+   that carries the padding. Written as button.pr-mark it matches nothing, and
+   the mark silently keeps the generic row-button metrics above. */
+row.session-child menubutton.pr-mark > button {
   min-height: 20px;
   min-width: 0;
-  padding: 0;
-  margin-right: 4px;
+  padding: 0 6px 0 0;
 }
 row.session-child checkbutton > check {
   min-height: 14px;

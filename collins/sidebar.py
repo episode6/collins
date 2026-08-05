@@ -402,7 +402,10 @@ class SessionRow(Gtk.ListBoxRow):
         self._pr_menu = prmenu.new_popover(Gtk.PositionType.BOTTOM)
         pr_btn = Gtk.MenuButton(valign=Gtk.Align.CENTER, popover=self._pr_menu)
         pr_btn.add_css_class("flat")
-        pr_btn.add_css_class("pr-mark")  # no button padding: it sits in a line of text
+        # .pr-mark trades a button's even padding for the placement a mark in a
+        # line of text wants: tucked in against the guide line, held off the
+        # title (see app.py, which styles the button node inside this one).
+        pr_btn.add_css_class("pr-mark")
         pr_btn.set_create_popup_func(self._fill_pr_menu)
         self._pr_btn = pr_btn
         top.append(pr_btn)
