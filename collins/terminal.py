@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-03. Full change history: git log for this file.
+# fork. Last modified: 2026-08-05. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -298,9 +298,13 @@ class _RootNameLinks:
     first map and the root never re-resolved (a tab's root is fixed for
     life; panel bottom↔right swaps re-map without reparenting tabs). A
     directory monitor keeps the alternation honest: on changes the names
-    are re-listed (debounced — a busy agent touches root files in bursts,
-    and most events are content writes that leave the name set alone) and
-    the tag swapped only when the set really changed. Between snapshots the
+    are re-listed and the tag swapped only when the set really changed.
+    Change events coalesce on a 500ms timer armed by the first one — a
+    leading-edge throttle, deliberately not a trailing-edge debounce, so an
+    agent churning root files steadily can't starve the refresh; a rebuild
+    that lands mid-burst is harmless (the next event re-arms the timer, and
+    most events are content writes that leave the set alone anyway).
+    Between snapshots the
     usual guarantees hold: a deleted file's click resolves nowhere and falls
     through unclaimed. The terminal's signal closures keep the instance
     alive; no one else needs to hold it."""
@@ -1126,7 +1130,11 @@ class TerminalTab(Gtk.Box):
         editor_root = cwd if cwd and Path(cwd).is_dir() else str(Path.home())
         # Where bare root-name links look (_RootNameLinks): the directory the
         # editor opens at, kept even when GtkSourceView (and so the editor
-        # itself, and the editor_root property) is missing.
+        # itself, and the editor_root property) is missing. That includes the
+        # HOME fallback above, deliberately: when a project dir is gone this
+        # whole tab is already rooted at home — the editor, quick open, and
+        # click-time resolution — so bare names follow suit rather than
+        # becoming the one link kind that goes dark.
         self.link_root: str = editor_root
         self._editor = editor.EditorPane(editor_root) if editor.HAVE_GTKSOURCE else None
         self._editor_detached = False  # pane reparented into its own EditorWindow
