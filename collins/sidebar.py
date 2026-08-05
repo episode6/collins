@@ -48,10 +48,11 @@ _GHOSTTY = shutil.which("ghostty")
 _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
 _ELLIPSIZE_START = 1  # Pango.EllipsizeMode.START
 
-# Row highlight per session status. Both tab statuses share one fill (see
+# Row treatment per session status. Both tab statuses share one class (see
 # row.session-child.running in app.py) — read or unread, the session has a tab
-# open; "background", i.e. running detached, colors the guide line instead, as
-# there is no tab to return to.
+# open, and its title reads at full strength while every other row's dims.
+# "background", i.e. running detached, colors the guide line instead and dims
+# with the rest, as there is no tab to return to.
 _STATUS_CSS = {
     "open": "running",
     "attention": "running",
@@ -340,7 +341,9 @@ class PlaceholderRow(Gtk.ListBoxRow):
         box.set_margin_start(4)  # match SessionRow's title inset
 
         label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
-        label.add_css_class("dim-label")
+        # Full strength, like the real rows with a tab open: dimming now means
+        # "no tab", and a placeholder is standing in for one that is starting.
+        label.add_css_class("session-title")
         label.set_ellipsize(_ELLIPSIZE_END)
         box.append(label)
 
@@ -379,6 +382,9 @@ class SessionRow(Gtk.ListBoxRow):
         top.append(self.check)
 
         name_label = Gtk.Label(xalign=0.0, hexpand=True)
+        # The title is what carries "this session has a tab open": app.py dims
+        # it on every row that doesn't (see row.session-child:not(.running)).
+        name_label.add_css_class("session-title")
         name_label.set_ellipsize(_ELLIPSIZE_END)
         top.append(name_label)
         self._name_label = name_label
@@ -704,9 +710,9 @@ class SessionRow(Gtk.ListBoxRow):
         )
 
     def _on_status_changed(self, item: SessionItem, _pspec) -> None:
-        # The card itself carries the status: a session running in a tab gets a
-        # brighter background, and one running detached colors its left guide
-        # line instead.
+        # The row itself carries the status: a session running in a tab keeps
+        # its title at full strength (the class the dimming rule tests for),
+        # and one running detached colors its left guide line instead.
         for css in _STATUS_CSS.values():
             self.remove_css_class(css)
         status_css = _STATUS_CSS.get(item.status)

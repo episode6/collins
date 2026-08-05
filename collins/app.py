@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-03. Full change history: git log for this file.
+# fork. Last modified: 2026-08-05. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -126,10 +126,11 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
 }
 
 /* every session row is the same outlined card with a left guide line; what a
-   running session adds is a fill, and (for a detached one) a status color on
-   that line. The border box is identical in every status, so a row never
-   shifts or resizes as its status changes; the selected tab's row is the one
-   exception, and it changes only horizontally (see .active-tab below).
+   running session adds is a full-strength title (every other row's dims), and
+   (for a detached one) a status color on that line. The border box is
+   identical in every status, so a row never shifts or resizes as its status
+   changes; the selected tab's row is the one exception, and it changes only
+   horizontally (see .active-tab below).
    The left indent is a widget margin set in sidebar.py, not a CSS margin
    here: it tracks the configurable project-icon size, so the card always
    starts just past the icon of the project header above it. */
@@ -170,19 +171,17 @@ row.session-child:hover {
   background-color: alpha(currentColor, 0.1);
   border-color: alpha(currentColor, 0.3);
 }
-/* sessions running in an open tab share one fill, so live work stands out
-   from the archive of past sessions as a group; their guide line stays the
-   neutral one every row has. Detached (/bg) sessions are the other way round:
-   a colored line and no fill. They are running, but there is no tab to return
-   to, and the fill is what marks the sessions there is one for. These rules
-   must stay below the plain :hover one, whose border-color shorthand would
-   otherwise repaint the guide line, and above the active-tab rules, which take
-   over the fill for the one session the selected tab is showing. */
-row.session-child.running {
-  background-color: alpha(currentColor, 0.13);
-}
-row.session-child.running:hover {
-  background-color: alpha(currentColor, 0.18);
+/* sessions running in an open tab are the ones the panel is really about, and
+   they say so through their titles: theirs read at full strength while every
+   other row's dims back. No fill carries this: the resting card looks the
+   same in every status, so the only filled rows in the list are the selected
+   tab's (orange, below) and whichever one the pointer is on, and neither has
+   to compete with a wash of gray for attention.
+
+   Detached (/bg) sessions dim with the rest. They are running, but there is no
+   tab to return to, and their guide line is what says they are still going. */
+row.session-child:not(.running) .session-title {
+  opacity: 0.55;
 }
 /* a finished run nobody has looked at yet (see SessionItem.unread): the guide
    line holds solid green -- the run is done and its result is waiting --
