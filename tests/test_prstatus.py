@@ -22,7 +22,6 @@ from collins.prstatus import (
     describe_all,
     discover_pr,
     enrich,
-    forget_status,
     from_record,
     from_records,
     invalidate,
@@ -798,34 +797,62 @@ def test_unknown_states_pass_through():
 # -- persisting a session's PRs ---------------------------------------------
 
 
-def test_record_keeps_identity_and_drops_status():
-    """Status is refetched every run; writing it down would age on disk."""
-    pr = PullRequest(55, URL, "episode6/collins", state="OPEN", passed=2, failed=1, pending=0)
-    assert to_record(pr) == {"number": 55, "url": URL, "repository": "episode6/collins"}
+def test_a_record_carries_the_whole_pr():
+    """Status is saved with it, so a mark reads as the last answer rather than
+    as "nothing known" until the run's first fetch."""
+    pr = PullRequest(55, URL, "episode6/collins", title="Track every PR", state="OPEN",
+                     passed=2, failed=1, pending=0, mergeable="CONFLICTING", unresolved=True)
+    assert to_record(pr) == {
+        "number": 55,
+        "url": URL,
+        "repository": "episode6/collins",
+        "title": "Track every PR",
+        "state": "OPEN",
+        "checks": {"passed": 2, "failed": 1, "pending": 0},
+        "mergeable": "CONFLICTING",
+        "unresolved": True,
+    }
+    assert from_record(to_record(pr)) == pr
 
 
-@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
-def test_how_a_pr_ended_is_kept_on_disk(state):
-    """How it ended is the one thing that survives the run, so the base icon is
-    up before gh answers."""
+def test_a_record_says_only_what_was_known():
+    """Nothing fetched yet: no state, no counts, no null-filled keys either."""
+    assert to_record(PullRequest(55, URL)) == {"number": 55, "url": URL}
+    assert from_record(to_record(PullRequest(55, URL))) == PullRequest(55, URL)
+
+
+@pytest.mark.parametrize("state", ["OPEN", "DRAFT", "MERGED", "CLOSED"])
+def test_every_state_gh_reports_survives_the_run(state):
     pr = PullRequest(55, URL, "episode6/collins", state=state, passed=2)
     assert to_record(pr)["state"] == state
     assert from_record(to_record(pr)).state == state
 
 
-@pytest.mark.parametrize("state", ["OPEN", "DRAFT", "SOMETHING_NEW", 7, "", None])
-def test_only_the_ended_states_are_read_back(state):
-    """A record claiming a live state — hand-edited, or from a later version —
-    restores as "nothing known" rather than as a PR the fetch has to disprove."""
+@pytest.mark.parametrize("state", ["SOMETHING_NEW", 7, "", None, True])
+def test_a_state_nothing_recognizes_is_not_read_back(state):
+    """A saved list is a file, and a mark gets built out of whatever it says."""
     assert from_record({"number": 55, "url": URL, "state": state}).state is None
+    assert to_record(PullRequest(55, URL, state=state)).get("state") is None
 
 
-@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
-def test_forget_status_keeps_only_how_it_ended(state):
-    pr = PullRequest(55, URL, "episode6/collins", state=state, passed=2, failed=1, pending=3)
-    assert forget_status(pr) == PullRequest(55, URL, "episode6/collins", state=state)
-    open_pr = replace(pr, state="OPEN")
-    assert forget_status(open_pr) == PullRequest(55, URL, "episode6/collins")
+@pytest.mark.parametrize(
+    "checks",
+    [
+        "lots",
+        {"passed": "3"},
+        {"passed": True},  # bool is an int subclass
+        {"passed": -1},
+        {"passed": 10_000},  # not a count of anything about one PR
+    ],
+)
+def test_saved_check_counts_are_revalidated(checks):
+    assert from_record({"number": 55, "url": URL, "checks": checks}).passed is None
+
+
+def test_saved_mergeability_and_comments_are_revalidated():
+    record = {"number": 55, "url": URL, "mergeable": "PROBABLY", "unresolved": "yes"}
+    restored = from_record(record)
+    assert (restored.mergeable, restored.unresolved) == (None, False)
 
 
 def test_records_roundtrip_in_order():
@@ -996,11 +1023,6 @@ def test_a_title_is_saved_and_read_back():
     assert from_record(to_record(pr)).title == "Track every PR"
 
 
-def test_forget_status_keeps_the_title():
-    pr = PullRequest(55, URL, "episode6/collins", title="Track every PR", state="OPEN", passed=2)
-    assert forget_status(pr) == PullRequest(55, URL, "episode6/collins", title="Track every PR")
-
-
 def test_a_junk_title_on_disk_is_dropped():
     assert from_record({"number": 55, "url": URL, "title": ["not", "a", "title"]}).title is None
 
@@ -1148,11 +1170,11 @@ def test_describe_names_a_conflict():
     )
 
 
-def test_forget_status_drops_mergeability():
-    """Whether a branch still merges goes stale with every push to either
-    side, so it is refetched, never remembered."""
+def test_mergeability_survives_the_run():
+    """Stale beats blank: a conflict that was there last night is the best
+    answer available until the next fetch says otherwise."""
     pr = PullRequest(55, URL, "episode6/collins", state="OPEN", mergeable="CONFLICTING")
-    assert forget_status(pr).mergeable is None
+    assert from_record(to_record(pr)).conflicting is True
 
 
 # -- unresolved comments -----------------------------------------------------
@@ -1255,10 +1277,11 @@ def test_the_cli_cache_carries_no_comments(cache):
     assert enrich(parse_pr_link(_link())).unresolved is False
 
 
-def test_forget_status_drops_unresolved():
-    """The next reply flips it, so it is refetched, never remembered."""
+def test_unresolved_comments_survive_the_run():
+    """A reply flips it, but until one is fetched the row still says someone
+    was waiting — which is the last thing anyone knew."""
     pr = PullRequest(55, URL, "episode6/collins", state="OPEN", unresolved=True)
-    assert forget_status(pr).unresolved is False
+    assert from_record(to_record(pr)).awaiting_reply is True
 
 
 # -- known (what a sidebar row rebuilds its mark from) -----------------------

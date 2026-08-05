@@ -1652,18 +1652,15 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_tab_pr_status_changed(self, tab: TerminalTab) -> None:
         """A tab's chips read differently now: rebuild its row's mark to match.
 
-        The saved list is only half of what a row's mark is made of — the other
-        half is live status, which is never written down (see
-        prstatus.to_record). So a check going red changes every chip in the tab
-        and not one record, and without this the row beside it would keep
-        showing yesterday's verdict until something else touched the list.
+        The row builds its mark from the saved list plus whatever this run has
+        fetched (prstatus.known), and the tab's poll is what does most of that
+        fetching — so the row needs telling whenever the answer moved, whether
+        or not it was worth writing down. A fork tab counts too: it saves no
+        list, but it fetches, and the row it shares deserves the answer.
 
-        Nothing is saved here; the row reads the status this tab's own fetch
-        just put in prstatus. Fork tabs included: they write no list, but they
-        do fetch, and the row they share deserves the answer. (A list change
-        arrives as prs-changed first and syncs the row too — one extra rebuild
-        of one row, and the alternative is either signal depending on the
-        other's ordering.)
+        Nothing is saved here. (A list change arrives as prs-changed first and
+        syncs the row too — one extra rebuild of one row, and the alternative
+        is either signal depending on the other's ordering.)
         """
         if tab.session_id:
             self.sidebar.sync_session_prs(tab.session_id)

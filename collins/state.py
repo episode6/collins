@@ -177,7 +177,9 @@ class AppState:
         self.panel_states: dict[str, dict] = {}  # per-session panel open/mode/sizes
         self.editor_states: dict[str, dict] = {}  # per-session editor open/width/files/cursors
         # session id -> the PRs it has opened, oldest first, as prstatus
-        # records ({number, url, repository?, state? — see to_record}).
+        # records ({number, url, repository?, title?, state?, checks?,
+        # mergeable?, unresolved? — see to_record). The status in one is the
+        # last that was fetched, not the current one.
         self.session_prs: dict[str, list] = {}
         # old session id -> the id its conversation continued under (Claude's
         # /bg has been observed forking a backgrounded session to a fresh

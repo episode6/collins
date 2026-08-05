@@ -27,10 +27,13 @@ button does both halves for every session it lists at once (`sweep`), so the
 marks down the panel are current without every row being visited.
 
 A session accumulates PRs — the footer shows every one of them — so its list
-outlives the app run: `to_record`/`from_record` reduce a PR to what is worth
-keeping (see AppState.set_session_prs). Status is deliberately not part of
-that; last week's green check says nothing about today. The one exception is
-a merged PR, which can't change back.
+outlives the app run: `to_record`/`from_record` write a PR out whole, status
+included (see AppState.set_session_prs). What was true when the app last looked
+is not what is true now, but it is the closest thing to it that costs nothing:
+the alternative is a panel of grey "nothing known" marks on every launch, which
+reads as a verdict of its own. So a restored mark is last week's answer until a
+fetch replaces it, and every path that shows one is already asking for that
+fetch (an open tab's poll, a menu opening, the refresh sweep).
 
 Those gh calls are the only subprocesses here; everything else is a filesystem
 read, they always happen off the main thread, and every failure degrades to "no
@@ -97,11 +100,13 @@ _GH_FIELDS = "title,state,isDraft,statusCheckRollup,mergeable,comments"
 # recomputes — so only a definite verdict is kept and UNKNOWN is stored as "no
 # answer", to be corrected by the refresh after the next TTL.
 _MERGEABLE_STATES = frozenset({"MERGEABLE", "CONFLICTING"})
-# The states worth writing to disk, and the only ones read back (see
-# `to_record`): how a PR ended, which is what its base icon needs before the
-# first fetch of a run lands. OPEN and DRAFT are not among them — a live PR's
-# state is exactly the thing that changes while Collins isn't looking.
-_SAVED_STATES = frozenset({"MERGED", "CLOSED"})
+# The states a record may carry, in and out (see `to_record`). A state gh has
+# never reported isn't written, and one nothing here recognizes isn't read: a
+# saved list is a file on disk, and a mark is built out of whatever it says.
+_SAVED_STATES = frozenset({"OPEN", "DRAFT", "MERGED", "CLOSED"})
+# Check counts are small integers about a single PR. A saved list that claims
+# otherwise is not describing a PR, so it doesn't get to describe a mark.
+_MAX_CHECK_COUNT = 9999
 # Long PR titles are a thing; the menu ellipsizes them anyway, and this keeps
 # what a repository can put on screen (and on disk) bounded.
 _MAX_TITLE = 200
@@ -162,20 +167,21 @@ class PullRequest:
     repository: str | None = None
     # What the PR is called. A transcript never says, so this arrives with the
     # first `gh` reply — and stays with the PR from then on, saved list
-    # included: it is what the chips' menu reads, and a title doesn't go stale
-    # the way a check does.
+    # included: it is what the chips' menu reads.
     title: str | None = None
+    # Everything below is status: what `gh` last said. All of it is saved with
+    # the PR (see `to_record`) and all of it is what the next fetch replaces —
+    # a restored value is the last answer, not the current one.
     state: str | None = None  # OPEN / DRAFT / MERGED / CLOSED
     passed: int | None = None
     failed: int | None = None
     pending: int | None = None
     # MERGEABLE / CONFLICTING, or None while GitHub hasn't said (an unfetched
     # PR, gh's transient UNKNOWN, or a warm start from the CLI cache — which
-    # has no such field). Like the check counts, never persisted: whether a
-    # branch still merges goes stale with every push to either side.
+    # has no such field).
     mergeable: str | None = None
     # Whether the PR's newest comment is someone else's — the conversation is
-    # waiting on us. Never persisted either: one reply flips it.
+    # waiting on us.
     unresolved: bool = False
 
     @property
@@ -382,28 +388,6 @@ def merge_ordered(
     return [by_url[url] for url in order]
 
 
-def forget_status(pr: PullRequest) -> PullRequest:
-    """*pr* stripped back to its identity, keeping only how the PR ended.
-
-    What a tab remembers between polls, and the shape `to_record` writes out:
-    check counts are refetched, a title is part of what the PR *is*, and a
-    merge or a close is what the mark reads as until a fetch says otherwise.
-
-    Keeping the state is not the same as being done with the PR, though: a
-    merge is forever and stops the refetching (see `resync`), while a closed PR
-    can be reopened and so keeps being asked about.
-    """
-    return replace(
-        pr,
-        state=pr.state if pr.settled else None,
-        passed=None,
-        failed=None,
-        pending=None,
-        mergeable=None,
-        unresolved=False,
-    )
-
-
 def to_record(pr: PullRequest) -> dict | None:
     """*pr* as a JSON-safe record for AppState, or None when it isn't one.
 
@@ -411,11 +395,13 @@ def to_record(pr: PullRequest) -> dict | None:
     can't be refreshed (see `_FETCHABLE`), so the only thing persisting it
     would achieve is putting an unvalidated URL on disk.
 
-    Only how the PR *ended* is worth saving beside its identity and title: a
-    merged or closed one gets its base icon back the moment the list is read,
-    rather than a grey "nothing known" one until the first fetch of the run.
-    Everything else — checks, mergeability, unresolved comments — goes stale
-    between runs and is deliberately left to `gh`.
+    Status goes out with the PR — state, check counts, mergeability, whether
+    someone is waiting on a reply — so a mark reads as the last thing gh said
+    rather than as "nothing known" until the run's first fetch. Stale beats
+    blank: grey says a PR nothing is known about, and saying that about a PR
+    the app has watched all week is the more wrong of the two answers. A field
+    gh never answered is left out of the record rather than written as null, so
+    a record only ever says what was actually known.
     """
     if not _FETCHABLE.match(pr.url):
         return None
@@ -424,8 +410,20 @@ def to_record(pr: PullRequest) -> dict | None:
         record["repository"] = pr.repository
     if pr.title:
         record["title"] = pr.title
-    if pr.settled:
+    if pr.state in _SAVED_STATES:
         record["state"] = pr.state
+    checks = {
+        name: count
+        for name, count in (("passed", pr.passed), ("failed", pr.failed),
+                            ("pending", pr.pending))
+        if count is not None
+    }
+    if checks:
+        record["checks"] = checks
+    if pr.mergeable in _MERGEABLE_STATES:
+        record["mergeable"] = pr.mergeable
+    if pr.unresolved:
+        record["unresolved"] = True
     return record
 
 
@@ -440,10 +438,10 @@ def from_record(record: object) -> PullRequest | None:
     Everything is re-validated on the way in. These records started life in a
     transcript — repo content, i.e. untrusted — and a restored PR's URL is
     handed to a browser and to `gh`, so being the one that wrote the file
-    earns no shortcut here. That includes the state: only the two `to_record`
-    writes are read back, so a record claiming OPEN (hand-edited, or written by
-    a future version) restores as "nothing known" rather than as a live PR the
-    fetch would have to disprove.
+    earns no shortcut here. Status is read back the same way `gh`'s own reply
+    is: a state nothing recognizes, a count that isn't a small integer or a
+    mergeability GitHub never uses is dropped, and that field reads as "not
+    known" — which is what it is.
     """
     if not isinstance(record, dict):
         return None
@@ -454,13 +452,26 @@ def from_record(record: object) -> PullRequest | None:
     if not isinstance(url, str) or not _FETCHABLE.match(url):
         return None
     repository = record.get("repository")
+    checks = record.get("checks")
+    mergeable = record.get("mergeable")
     return PullRequest(
         number=number,
         url=url,
         repository=repository if isinstance(repository, str) and repository else None,
         title=_title(record.get("title")),
         state=record["state"] if record.get("state") in _SAVED_STATES else None,
+        passed=_saved_count(checks, "passed"),
+        failed=_saved_count(checks, "failed"),
+        pending=_saved_count(checks, "pending"),
+        mergeable=mergeable if mergeable in _MERGEABLE_STATES else None,
+        unresolved=record.get("unresolved") is True,
     )
+
+
+def _saved_count(checks: object, key: str) -> int | None:
+    """One saved check count, or None when the file doesn't have a usable one."""
+    count = _count(checks, key)
+    return count if count is not None and 0 <= count <= _MAX_CHECK_COUNT else None
 
 
 def from_records(records: object) -> list[PullRequest]:
@@ -869,10 +880,10 @@ def resync(prs: Iterable[PullRequest]) -> list[PullRequest]:
     that PR exactly as it arrived (`enrich` reads the "no status" the failure
     recorded, and keeps the title the saved record supplied).
 
-    A merged PR is skipped unless its title is missing: nothing else about one
-    can change (see `forget_status`), so it isn't worth a subprocess. Merged,
-    not settled — a closed PR is asked about like any other, because closing
-    one is reversible and reopening it must not need a restart to show.
+    A merged PR is skipped unless its title is missing: nothing about one can
+    change, so it isn't worth a subprocess. Merged, not settled — a closed PR
+    is asked about like any other, because closing one is reversible and
+    reopening it must not need a restart to show.
 
     Never call on the main thread — this waits on `gh`, several at a time.
     """

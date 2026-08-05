@@ -592,12 +592,13 @@ class SessionRow(Gtk.ListBoxRow):
         a new list, so a session that opens its first PR grows the mark without
         waiting for the sidebar to be rebuilt around it.
 
-        The saved list carries no status (see prstatus.to_record), so each PR
-        is handed whatever status this run has already fetched for it —
-        `known` is a dictionary lookup, no file and no `gh`, safe on the main
-        loop. That is what keeps the mark tracking an open tab's own poll: the
-        tab saves its list whenever its chips change, this re-reads it, and the
-        status the tab just fetched is sitting there waiting.
+        The saved list carries the status it was saved with (see
+        prstatus.to_record), and `known` puts anything this run has since
+        fetched over the top of it — a dictionary lookup, no file and no `gh`,
+        safe on the main loop. So a mark reads as the last thing anything knew
+        rather than as "nothing known", and it tracks an open tab's own poll:
+        the tab saves its list whenever its chips change, this re-reads it, and
+        the status the tab just fetched is sitting there waiting.
         """
         self._prs = [
             known(pr)
@@ -636,13 +637,11 @@ class SessionRow(Gtk.ListBoxRow):
         """Put the saved list up at once, and refresh it behind a spinner.
 
         The footer's copy of this menu is filled from a poll that is already
-        keeping it current. This one has only what was saved for the session,
-        which is titles and merges and no CI status at all (see
-        prstatus.to_record) — a status that survived a restart would be a
-        yesterday's check, so none is kept. Opening the menu is therefore what
-        fetches: the rows go up immediately, since the titles and numbers are
-        the readable part, with a spinner in the column each status will land
-        in.
+        keeping it current. This one has no poll behind it: what it starts from
+        is the saved list plus whatever this run has fetched, which may be
+        yesterday's answer. So opening the menu is what fetches — the rows go
+        up immediately, since the titles and numbers are the readable part,
+        with a spinner in the column each status will land in.
         """
         prmenu.fill(self._pr_menu, self._prs, loading=True, host=self._pr_host)
         self._refresh_prs()
