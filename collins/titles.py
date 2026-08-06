@@ -123,10 +123,14 @@ class PRReference:
     about it. Nothing in either is free text: a URL has been through
     `prstatus.repository_for`, and the other two are built out of a matched
     repository and a run of digits, so neither can turn into a gh flag.
+
+    *needs_cwd* marks the one form that names no repository of its own — a
+    bare number — and so can only be asked about from inside one.
     """
 
     label: str
     args: tuple[str, ...]
+    needs_cwd: bool = False
 
 
 def pr_reference(prompt: str) -> PRReference | None:
@@ -155,7 +159,7 @@ def pr_reference(prompt: str) -> PRReference | None:
         )
     match = _PR_NUMBER.search(prompt)
     if match:
-        return PRReference(label=f"#{match.group(1)}", args=(match.group(1),))
+        return PRReference(label=f"#{match.group(1)}", args=(match.group(1),), needs_cwd=True)
     return None
 
 
@@ -167,7 +171,7 @@ def _fetch_pr_title(ref: PRReference, cwd: str | None) -> str | None:
     resolve it against. Every one of those is ordinary, and each one just
     means the prompt goes out without the context.
     """
-    if len(ref.args) == 1 and not cwd:
+    if ref.needs_cwd and not cwd:
         return None  # a bare number needs a repository to be a number in
     data = prstatus.gh_json(["pr", "view", *ref.args, "--json", "title"], cwd=cwd)
     title = data.get("title") if isinstance(data, dict) else None
