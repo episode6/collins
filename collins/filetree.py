@@ -17,7 +17,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import editorfiles, filetypes, gitinfo
+from . import editorfiles, fileclipboard, filetypes, gitinfo
 from .i18n import _
 
 # How long after the last change in an expanded directory its row list is
@@ -25,6 +25,30 @@ from .i18n import _
 # into one refresh, short enough that "the tree matches disk" still feels
 # immediate. Mirrors store.py's own filesystem-change debounce.
 _REFRESH_DEBOUNCE_MS = 500
+
+
+def _menu(*items: tuple[str, str]) -> Gio.Menu:
+    """A flat menu of `(label, action)` pairs — flat like every other context
+    menu in the app (the terminal's, the tabs'), and short enough that it
+    never has to scroll."""
+    menu = Gio.Menu()
+    for label, action in items:
+        menu.append(label, action)
+    return menu
+
+
+def _expander_in(widget: Gtk.Widget) -> Gtk.TreeExpander | None:
+    """The `Gtk.TreeExpander` inside *widget* — the row's, which is what
+    carries the `Gtk.TreeListRow` a node hangs off (see `_on_setup`)."""
+    child = widget.get_first_child()
+    while child is not None:
+        if isinstance(child, Gtk.TreeExpander):
+            return child
+        found = _expander_in(child)
+        if found is not None:
+            return found
+        child = child.get_next_sibling()
+    return None
 
 
 class _Node(GObject.Object):
@@ -56,6 +80,12 @@ class FileTree(Gtk.Box):
         # the pane, which is what knows whether the thing being renamed is
         # open in a tab (see EditorPane._prompt_rename).
         "rename-request": (GObject.SignalFlags.RUN_FIRST, None, (str, bool)),
+        # A folder's (or the empty space's) context menu asked to paste the
+        # clipboard into it. Payload is the destination directory. Copying is
+        # done here — it is only a clipboard write — but a paste can *move*
+        # files, and a moved file that is open has to keep its tab, which
+        # again only the pane knows about (see EditorPane._paste_into).
+        "paste-request": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(self, root: str | Path, show_hidden: bool = False) -> None:
@@ -87,18 +117,37 @@ class FileTree(Gtk.Box):
         self._list_view = Gtk.ListView(model=self._selection, factory=factory)
         self._list_view.add_css_class("navigation-sidebar")
         self._list_view.connect("activate", self._on_activate)
+        # One gesture for the whole tree — the rows and the empty space below
+        # them — rather than one per row widget: which row a press landed on
+        # (if any) is worked out from the coordinates in `_row_at`.
+        right_click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        right_click.connect("pressed", self._on_right_click)
+        self._list_view.add_controller(right_click)
 
-        # The context menu's action; the clicked row's path is stashed here
-        # by the right-click handler just before the popover opens.
+        # The context menu's actions; what was clicked is stashed here by the
+        # right-click handlers just before the popover opens — the path and
+        # kind of the row, and the directory a paste would land in (the
+        # clicked folder, or the root for a click on the empty space below
+        # the rows).
         self._menu_path = ""
         self._menu_is_dir = False
+        self._menu_dir = self._root
         actions = Gio.SimpleActionGroup()
-        add_to_chat = Gio.SimpleAction.new("add-to-chat", None)
-        add_to_chat.connect("activate", self._on_add_to_chat)
-        actions.add_action(add_to_chat)
-        rename = Gio.SimpleAction.new("rename", None)
-        rename.connect("activate", self._on_rename)
-        actions.add_action(rename)
+        for name, handler in (
+            ("add-to-chat", self._on_add_to_chat),
+            ("rename", self._on_rename),
+            ("copy", self._on_copy),
+            ("cut", self._on_cut),
+        ):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", handler)
+            actions.add_action(action)
+        # Kept to hand: Paste is greyed out, not dropped, when the clipboard
+        # holds nothing to paste — an item that vanishes reads as a bug, and
+        # an empty-space menu would otherwise have no items at all.
+        self._paste_action = Gio.SimpleAction.new("paste", None)
+        self._paste_action.connect("activate", self._on_paste)
+        actions.add_action(self._paste_action)
         self.insert_action_group("tree", actions)
 
         scrolled = Gtk.ScrolledWindow(child=self._list_view, vexpand=True, hexpand=True)
@@ -233,11 +282,6 @@ class FileTree(Gtk.Box):
         box.append(label)
         expander.set_child(box)
         list_item.set_child(expander)
-        # One gesture per recycled row widget; the closure's list_item
-        # yields whatever node is bound to the row at click time.
-        right_click = Gtk.GestureClick(button=3)
-        right_click.connect("pressed", self._on_row_right_click, list_item)
-        expander.add_controller(right_click)
 
     def _on_bind(self, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem) -> None:
         row: Gtk.TreeListRow = list_item.get_item()
@@ -266,26 +310,77 @@ class FileTree(Gtk.Box):
 
     # -- context menu --------------------------------------------------------
 
-    def _on_row_right_click(
-        self, gesture: Gtk.GestureClick, _n_press: int, x: float, y: float, list_item: Gtk.ListItem
+    def _row_at(self, x: float, y: float) -> Gtk.TreeListRow | None:
+        """The row under (*x*, *y*) in the list view, or None for the empty
+        space below the last one.
+
+        Hit-tests the row widgets rather than picking whatever is under the
+        pointer: a row is only partly covered by the widgets that make it up
+        — the indent left of the icon and the space right of the name belong
+        to no child at all — so picking would call two thirds of every row
+        empty space. Only rows on screen are the list view's children (it
+        recycles the rest), which is exactly the set a pointer can be over."""
+        bands: list[tuple[float, float, Gtk.Widget]] = []
+        child = self._list_view.get_first_child()
+        while child is not None:
+            found, bounds = child.compute_bounds(self._list_view)
+            if found:
+                bands.append((bounds.origin.y, bounds.origin.y + bounds.size.height, child))
+            child = child.get_next_sibling()
+        bands.sort(key=lambda band: band[0])
+        for index, (top, bottom, widget) in enumerate(bands):
+            # A row owns the seam below it as well as itself: the rows carry a
+            # couple of pixels of margin, which is inside no widget's bounds,
+            # and a menu that came up "on nothing" every twentieth pixel would
+            # be a mystery. Only the last row stops at its own edge — past
+            # that really is the empty space.
+            if index + 1 < len(bands):
+                bottom = bands[index + 1][0]
+            if top <= y < bottom:
+                expander = _expander_in(widget)
+                return expander.get_list_row() if expander is not None else None
+        return None
+
+    def _on_right_click(
+        self, gesture: Gtk.GestureClick, _n_press: int, x: float, y: float
     ) -> None:
-        """Right-clicking a row. Both kinds can be renamed; only a file can be
-        referenced in the chat — the agent's mention syntax is for files, and
-        an item that quietly did nothing would read as broken."""
-        row: Gtk.TreeListRow | None = list_item.get_item()
-        if row is None:
-            return
-        node: _Node = row.get_item()
+        """Right-clicking the tree. On a row: both kinds can be copied, cut
+        and renamed; only a file can be referenced in the chat — the agent's
+        mention syntax is for files, and an item that quietly did nothing
+        would read as broken — and only a folder can be pasted into, being the
+        one kind with an inside. Below the last row: a paste into the project
+        root, the only thing there is to do to a piece of empty tree."""
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        row = self._row_at(x, y)
+        node: _Node | None = row.get_item() if row is not None else None
+
+        if node is None:
+            self._menu_path = ""
+            self._menu_is_dir = False
+            self._menu_dir = self._root
+            self._popup_menu(_menu((_("Paste"), "tree.paste")), x, y)
+            return
+
+        # Selected as well as menued: with the whole row clickable, the
+        # highlight is what says which one the menu is about.
+        self._selection.set_selected(row.get_position())
         self._menu_path = str(node.path)
         self._menu_is_dir = node.is_dir
+        self._menu_dir = node.path if node.is_dir else self._root
 
-        menu = Gio.Menu()
-        if not node.is_dir:
-            menu.append(_("Add to chat"), "tree.add-to-chat")
-        menu.append(_("Rename…"), "tree.rename")
+        items = [] if node.is_dir else [(_("Add to chat"), "tree.add-to-chat")]
+        items += [(_("Copy"), "tree.copy"), (_("Cut"), "tree.cut")]
+        if node.is_dir:
+            items.append((_("Paste"), "tree.paste"))
+        items.append((_("Rename…"), "tree.rename"))
+        self._popup_menu(_menu(*items), x, y)
+
+    def _popup_menu(self, menu: Gio.Menu, x: float, y: float) -> None:
+        # Paste's state is settled here rather than per menu: every menu that
+        # carries it opens through this.
+        self._paste_action.set_enabled(fileclipboard.has_files(self.get_clipboard()))
         popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(gesture.get_widget())
+        popover.set_parent(self._list_view)
         popover.set_has_arrow(False)
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
@@ -300,3 +395,17 @@ class FileTree(Gtk.Box):
     def _on_rename(self, _action: Gio.SimpleAction, _param) -> None:
         if self._menu_path:
             self.emit("rename-request", self._menu_path, self._menu_is_dir)
+
+    def _on_copy(self, _action: Gio.SimpleAction, _param) -> None:
+        if self._menu_path:
+            fileclipboard.set_files(self.get_clipboard(), [self._menu_path])
+
+    def _on_cut(self, _action: Gio.SimpleAction, _param) -> None:
+        # Nothing moves yet: a cut only says what a later paste should move,
+        # and until then the file stays exactly where it is (the same bargain
+        # every file manager makes).
+        if self._menu_path:
+            fileclipboard.set_files(self.get_clipboard(), [self._menu_path], cut=True)
+
+    def _on_paste(self, _action: Gio.SimpleAction, _param) -> None:
+        self.emit("paste-request", str(self._menu_dir))

@@ -262,6 +262,13 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   and so does everything open inside a renamed folder. Renaming only ever
   renames in place: a name with a path in it is refused, as is one already
   taken.
+- **Copy, cut and paste** files and folders from the same menu — into a
+  folder, or into the empty space below the tree for the project root. It is
+  the system clipboard, so a copy taken here pastes into Files (and one taken
+  there pastes in here, cut included). Nothing is ever overwritten: a name
+  already taken lands as *name (copy)* beside it, and a folder can't be pasted
+  into itself. A cut file that is open keeps its tab, exactly as a renamed one
+  does.
 - **Right-click a tab** for the bulk closes: *close other tabs*, *close tabs
   to the right*, *close all tabs*. Anything with unsaved changes still asks
   before it goes, one file at a time, and keeping one doesn't keep the rest.
