@@ -23,8 +23,8 @@ from collins.editorfiles import (
     load_guard,
     path_from_file_uri,
     read_first_line,
-    renamed_path,
     rename_target,
+    renamed_path,
     should_highlight,
     walk_files,
 )
