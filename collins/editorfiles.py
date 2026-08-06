@@ -413,6 +413,20 @@ def _exists(path: Path) -> bool:
         return True
 
 
+def _copy_split(name: str) -> tuple[str, str]:
+    """*name* cut into the part "(copy)" goes after and the extension it goes
+    before. `Path.suffix` alone stops at the last dot, which makes
+    `archive.tar.gz` into `archive.tar (copy).gz`; the `.tar` of a compressed
+    tarball is part of the extension, and that pair is the one compound
+    suffix worth the exception — the same one GNOME's own file manager
+    makes. A leading dot is a name, not an extension: `.bashrc` splits whole,
+    so a dotfile's copy stays a dotfile."""
+    stem, suffix = Path(name).stem, Path(name).suffix
+    if suffix and Path(stem).suffix == ".tar":
+        stem, suffix = Path(stem).stem, ".tar" + suffix
+    return stem, suffix
+
+
 def unique_target(directory: str | Path, name: str) -> Path | None:
     """Where an entry called *name* can land in *directory* without replacing
     anything: `name` itself when it is free, then "name (copy).ext",
@@ -423,7 +437,7 @@ def unique_target(directory: str | Path, name: str) -> Path | None:
     `shutil.move` overwrite what they land on without a word, and a paste is
     nobody's idea of a way to delete a file."""
     directory = Path(directory)
-    stem, suffix = Path(name).stem, Path(name).suffix
+    stem, suffix = _copy_split(name)
     for attempt in range(_MAX_COPY_SUFFIXES + 1):
         if attempt == 0:
             candidate = name

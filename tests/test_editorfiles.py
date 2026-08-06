@@ -682,6 +682,14 @@ def test_unique_target_keeps_the_suffix_and_handles_dotfiles(tmp_path):
     assert unique_target(tmp_path, "pkg") == tmp_path / "pkg (copy)"
 
 
+def test_unique_target_keeps_a_tarballs_whole_extension(tmp_path):
+    _touch(tmp_path, "archive.tar.gz")
+    _touch(tmp_path, "notes.2026.txt")
+    assert unique_target(tmp_path, "archive.tar.gz") == tmp_path / "archive (copy).tar.gz"
+    # Only ".tar" earns the exception: any other dot in a name is part of it.
+    assert unique_target(tmp_path, "notes.2026.txt") == tmp_path / "notes.2026 (copy).txt"
+
+
 def test_unique_target_counts_a_broken_symlink_as_taken(tmp_path):
     (tmp_path / "a.txt").symlink_to(tmp_path / "gone.txt")
     assert unique_target(tmp_path, "a.txt") == tmp_path / "a (copy).txt"

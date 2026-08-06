@@ -376,14 +376,31 @@ class EditorPane(Gtk.Box):
         if len(pasted) == 1:
             self._tree.reveal(pasted[0].target)
         if move and pasted:
-            # A cut is spent the moment it lands: what it names isn't there
-            # any more, so a second paste could only report it missing.
-            clipboard = self.get_clipboard()
-            if clipboard.get_content() is not None:  # ours to clear
-                clipboard.set_content(None)
+            self._spend_cut(outcomes)
         failed = [outcome for outcome in outcomes if outcome.error is not None]
         if failed:
             self._notify(self._paste_error_message(failed))
+
+    def _spend_cut(self, outcomes: list[editorfiles.PasteOutcome]) -> None:
+        """What is left of a cut once a paste of it has moved what it could.
+        A cut is spent the moment it lands — what it named isn't there any
+        more, so a second paste could only report it missing — but only for
+        what actually landed. Anything that failed (a permission error, a
+        folder refused into itself) is still sitting where it was, and
+        clearing the clipboard wholesale would mean going back to cut it
+        again. Those stay on it, still cut, so the paste can be retried."""
+        clipboard = self.get_clipboard()
+        if clipboard.get_content() is None:
+            return  # someone else's cut — not ours to rewrite
+        still_cut = [
+            str(outcome.source)
+            for outcome in outcomes
+            if outcome.target is None and outcome.error is not editorfiles.PasteError.MISSING
+        ]
+        if still_cut:
+            fileclipboard.set_files(clipboard, still_cut, cut=True)
+        else:
+            clipboard.set_content(None)
 
     def _paste_error_message(self, failed: list[editorfiles.PasteOutcome]) -> str:
         """Why a paste didn't happen — named, the way the rename errors are.
