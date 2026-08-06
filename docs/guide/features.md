@@ -386,6 +386,10 @@ Open additional windows from the New Session button's menu or with
 `Ctrl+Shift+N`. Windows share one session list and state, so favorites, names,
 and live updates stay consistent across them.
 
+A session only ever runs in one tab. Clicking a session that another window
+already has open — or clicking its idle notification — raises that window and
+selects its tab instead of resuming the conversation a second time.
+
 ## Preferences
 
 Terminal **font**, **scrollback** size, **easy copy & paste** (on by default),

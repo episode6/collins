@@ -185,6 +185,30 @@ def _app_icon_name(window: Gtk.Window) -> str:
     return "com.episode6.Collins"
 
 
+def session_window(
+    app: Gtk.Application | None, session_id: str, skip: MainWindow | None = None
+) -> MainWindow | None:
+    """The window holding this session's tab, if any is open in one.
+
+    Tabs are per-window but the sidebar's session list is app-wide, so every
+    window offers to open every session — including the ones another window
+    already has running. Resuming a live conversation a second time would put
+    two CLIs on one transcript, so the callers jump to the tab that exists
+    instead. `skip` leaves the asking window out when it has already looked
+    through its own tabs."""
+    windows = app.get_windows() if app is not None else []
+    return next(
+        (
+            window
+            for window in windows
+            if window is not skip
+            and isinstance(window, MainWindow)
+            and window.has_session_tab(session_id)
+        ),
+        None,
+    )
+
+
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, state: AppState, store: SessionStore, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -1179,6 +1203,16 @@ class MainWindow(Adw.ApplicationWindow):
             page = self._page_for(session.session_id)
             if page is not None:
                 self.tab_view.set_selected_page(page)
+                return
+            # Open in another window: jump to it rather than resuming the
+            # conversation a second time here, which would leave two CLIs
+            # writing one transcript.
+            other = session_window(self.get_application(), session.session_id, skip=self)
+            if other is not None:
+                other.focus_session(session.session_id)
+                # Nothing opened here, so this window's highlight stays with the
+                # tab it is already showing, and the click is spent.
+                self._update_active_row()
                 return
 
         cwd = resume_cwd(session)
@@ -3226,10 +3260,20 @@ class MainWindow(Adw.ApplicationWindow):
             app.send_notification(session_id or page.get_title(), notification)
         return GLib.SOURCE_REMOVE
 
-    def focus_session(self, session_id: str) -> None:
+    def has_session_tab(self, session_id: str) -> bool:
+        """Whether this window is the one holding this session's tab — asked
+        across windows by session_window()."""
+        return self._page_for(session_id) is not None
+
+    def focus_session(self, session_id: str) -> bool:
+        """Raise this session's tab, and this window with it: the caller may be
+        another window handing the session over. False if no tab here."""
         page = self._page_for(session_id)
-        if page is not None:
-            self.tab_view.set_selected_page(page)
+        if page is None:
+            return False
+        self.tab_view.set_selected_page(page)
+        self.present()
+        return True
 
     # -- tab rename / menu ---------------------------------------------------
 
