@@ -58,6 +58,18 @@ class LoadGuard(enum.Enum):
     UNREADABLE = "unreadable"
 
 
+class RenameError(enum.Enum):
+    """Why a rename asked for in the file tree can't happen. Each one gets
+    its own message in editor.py — "that didn't work" says nothing about
+    which of these it was."""
+
+    EMPTY = "empty"
+    NOT_A_NAME = "not_a_name"  # a path, not a name: separators, "." or ".."
+    EXISTS = "exists"
+    MISSING = "missing"  # what's being renamed is already gone
+    OUTSIDE = "outside"
+
+
 # Suffix -> GtkSource language id, for the common cases worth a fast, GTK-free
 # hint before GtkSource.LanguageManager.guess_language does the real
 # (content-aware) resolution in the widget. Deliberately not exhaustive: this
@@ -314,6 +326,61 @@ def is_inside(root: str | Path, path: str | Path) -> bool:
     except OSError:
         return False
     return resolved_path == resolved_root or resolved_root in resolved_path.parents
+
+
+def rename_target(
+    root: str | Path, path: str | Path, new_name: str
+) -> tuple[Path | None, RenameError | None]:
+    """Where renaming *path* to *new_name* would land: `(target, None)` for a
+    rename worth doing, `(None, None)` when the name is unchanged (nothing to
+    do, and nothing to complain about), `(None, error)` otherwise.
+
+    Only ever a rename *in place* — the entry keeps its directory, so this
+    takes a bare name and refuses anything with a path in it. Everything
+    else is checked here rather than left to `Path.rename`, whose own answer
+    to renaming onto an existing file is to silently replace it."""
+    path = Path(path)
+    name = new_name.strip()
+    if not name:
+        return None, RenameError.EMPTY
+    # The .name comparison catches separators (and "." on its own, whose name
+    # is empty); ".." survives it, and "\0" is the one character Path carries
+    # happily right up to the syscall that rejects it.
+    if name in (".", "..") or "\x00" in name or Path(name).name != name:
+        return None, RenameError.NOT_A_NAME
+    if name == path.name:
+        return None, None
+    try:
+        if not path.exists() and not path.is_symlink():
+            return None, RenameError.MISSING
+    except OSError:
+        return None, RenameError.MISSING
+    target = path.parent / name
+    # Belt and braces behind the bare-name check above: the same rule the
+    # tree and the editor apply to everything else they touch — nothing
+    # outside the project.
+    if not is_inside(root, target):
+        return None, RenameError.OUTSIDE
+    try:
+        if target.exists() or target.is_symlink():
+            return None, RenameError.EXISTS
+    except OSError:
+        return None, RenameError.EXISTS
+    return target, None
+
+
+def renamed_path(old: str | Path, new: str | Path, path: str | Path) -> str | None:
+    """*path* rewritten for a rename of *old* to *new*, or None when the
+    rename doesn't touch it. Covers the renamed entry itself and — when a
+    directory was renamed — everything that was open underneath it."""
+    old, new, target = Path(old), Path(new), Path(path)
+    if target == old:
+        return str(new)
+    try:
+        relative = target.relative_to(old)
+    except ValueError:
+        return None
+    return str(new / relative)
 
 
 def walk_files(

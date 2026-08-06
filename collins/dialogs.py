@@ -43,6 +43,46 @@ def rename_dialog(parent: Gtk.Widget, body: str, current: str, on_save: Callable
     dialog.present(parent)
 
 
+def rename_path_dialog(
+    parent: Gtk.Widget, current: str, is_dir: bool, on_rename: Callable[[str], None]
+) -> None:
+    """Rename a file or folder in the editor's file tree. `on_rename` gets
+    the raw text — the caller (editor.py) is what decides whether it names a
+    rename that can happen, and says why when it doesn't.
+
+    The name comes up selected except for its extension: renaming `notes.md`
+    is nearly always about the `notes` part, and typing over the whole thing
+    would quietly drop the suffix that makes the file highlight."""
+    dialog = Adw.AlertDialog(
+        heading=_("Rename folder") if is_dir else _("Rename file"),
+        body=_("Enter a new name for “{name}”.").format(name=current),
+    )
+    entry = Gtk.Entry(text=current)
+    entry.set_activates_default(True)
+    dialog.set_extra_child(entry)
+    dialog.add_response("cancel", _("Cancel"))
+    dialog.add_response("rename", _("Rename"))
+    dialog.set_response_appearance("rename", Adw.ResponseAppearance.SUGGESTED)
+    dialog.set_default_response("rename")
+    dialog.set_close_response("cancel")
+
+    def select_name() -> bool:
+        dot = -1 if is_dir else current.rfind(".")
+        entry.grab_focus()  # which selects the whole name...
+        entry.select_region(0, dot if dot > 0 else len(current))  # ...so this comes after
+        return GLib.SOURCE_REMOVE
+
+    # From a low-priority idle off the *entry's* map, not the dialog's: the
+    # dialog puts focus in the entry itself as it maps (selecting everything),
+    # and anything queued from the dialog's own map still runs before that.
+    entry.connect("map", lambda *_a: GLib.idle_add(select_name, priority=GLib.PRIORITY_LOW))
+    dialog.connect(
+        "response",
+        lambda _d, response: on_rename(entry.get_text()) if response == "rename" else None,
+    )
+    dialog.present(parent)
+
+
 def emoji_dialog(parent: Gtk.Widget, current: str, on_save: Callable[[str], None]) -> None:
     dialog = Adw.AlertDialog(
         heading=_("Set tab emoji"),

@@ -11,6 +11,7 @@ from collins.editorfiles import (
     LIGHTBOX_MIN_W,
     LIGHTBOX_SHADOW_PAD,
     LoadGuard,
+    RenameError,
     guess_language_id,
     image_guard,
     is_image_path,
@@ -22,6 +23,8 @@ from collins.editorfiles import (
     load_guard,
     path_from_file_uri,
     read_first_line,
+    renamed_path,
+    rename_target,
     should_highlight,
     walk_files,
 )
@@ -561,3 +564,88 @@ def test_walk_files_cap_truncates(tmp_path):
 
 def test_walk_files_missing_root_is_empty(tmp_path):
     assert walk_files(tmp_path / "nope") == ([], False)
+
+
+# -- rename_target -------------------------------------------------------------
+
+
+def test_rename_target_is_the_new_name_in_the_same_directory(tmp_path):
+    _touch(tmp_path, "pkg/old.py")
+    target, error = rename_target(tmp_path, tmp_path / "pkg/old.py", "new.py")
+    assert error is None
+    assert target == tmp_path / "pkg" / "new.py"
+
+
+def test_rename_target_renames_directories_too(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    target, error = rename_target(tmp_path, tmp_path / "pkg", "package")
+    assert (target, error) == (tmp_path / "package", None)
+
+
+def test_rename_target_trims_surrounding_whitespace(tmp_path):
+    _touch(tmp_path, "a.txt")
+    target, error = rename_target(tmp_path, tmp_path / "a.txt", "  b.txt  ")
+    assert (target, error) == (tmp_path / "b.txt", None)
+
+
+def test_rename_target_unchanged_name_is_nothing_to_do(tmp_path):
+    _touch(tmp_path, "a.txt")
+    assert rename_target(tmp_path, tmp_path / "a.txt", "a.txt") == (None, None)
+
+
+def test_rename_target_empty_name_is_refused(tmp_path):
+    _touch(tmp_path, "a.txt")
+    assert rename_target(tmp_path, tmp_path / "a.txt", "   ") == (None, RenameError.EMPTY)
+
+
+def test_rename_target_refuses_anything_that_isnt_a_bare_name(tmp_path):
+    _touch(tmp_path, "a.txt")
+    path = tmp_path / "a.txt"
+    for name in ("sub/b.txt", "../b.txt", "/etc/passwd", ".", "..", "b\x00.txt"):
+        assert rename_target(tmp_path, path, name) == (None, RenameError.NOT_A_NAME), name
+
+
+def test_rename_target_refuses_an_existing_name(tmp_path):
+    _touch(tmp_path, "a.txt")
+    _touch(tmp_path, "b.txt")
+    assert rename_target(tmp_path, tmp_path / "a.txt", "b.txt") == (None, RenameError.EXISTS)
+
+
+def test_rename_target_refuses_an_existing_name_that_is_a_broken_symlink(tmp_path):
+    _touch(tmp_path, "a.txt")
+    (tmp_path / "b.txt").symlink_to(tmp_path / "gone.txt")
+    assert rename_target(tmp_path, tmp_path / "a.txt", "b.txt") == (None, RenameError.EXISTS)
+
+
+def test_rename_target_refuses_when_the_source_is_gone(tmp_path):
+    assert rename_target(tmp_path, tmp_path / "a.txt", "b.txt") == (None, RenameError.MISSING)
+
+
+def test_rename_target_refuses_landing_outside_the_project(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    _touch(root, "a.txt")
+    # A rename inside a directory that is itself a symlink out of the project
+    # keeps the bare name and still lands outside it.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a.txt").write_text("x")
+    (root / "link").symlink_to(outside)
+    assert rename_target(root, root / "link" / "a.txt", "b.txt") == (None, RenameError.OUTSIDE)
+
+
+# -- renamed_path --------------------------------------------------------------
+
+
+def test_renamed_path_rewrites_the_renamed_entry_itself():
+    assert renamed_path("/p/old.py", "/p/new.py", "/p/old.py") == "/p/new.py"
+
+
+def test_renamed_path_rewrites_everything_under_a_renamed_directory():
+    assert renamed_path("/p/pkg", "/p/package", "/p/pkg/a/b.py") == "/p/package/a/b.py"
+
+
+def test_renamed_path_leaves_untouched_paths_alone():
+    assert renamed_path("/p/pkg", "/p/package", "/p/other/b.py") is None
+    # A prefix match on the name, not on the directory, is not a match.
+    assert renamed_path("/p/pkg", "/p/package", "/p/pkg2/b.py") is None

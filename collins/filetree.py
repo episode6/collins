@@ -51,6 +51,11 @@ class FileTree(Gtk.Box):
         # A file row's context menu asked for the file to be referenced in
         # the tab's agent chat. Payload is the absolute path.
         "add-to-chat": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # A row's context menu asked to rename it. Payload is (absolute path,
+        # is a directory). The tree only asks: the rename itself belongs to
+        # the pane, which is what knows whether the thing being renamed is
+        # open in a tab (see EditorPane._prompt_rename).
+        "rename-request": (GObject.SignalFlags.RUN_FIRST, None, (str, bool)),
     }
 
     def __init__(self, root: str | Path, show_hidden: bool = False) -> None:
@@ -62,6 +67,11 @@ class FileTree(Gtk.Box):
         # module docstring; only ever grows across directories actually
         # opened, never the whole project up front.
         self._monitors: dict[str, Gio.FileMonitor] = {}
+        # path -> the store holding that directory's rows, for every listed
+        # directory (the root included, which no monitor covers). Lets a
+        # change this tree made itself show up at once instead of waiting out
+        # the monitor's debounce — see `refresh_dir`.
+        self._stores: dict[str, Gio.ListStore] = {}
 
         self._root_store = Gio.ListStore(item_type=_Node)
         self._fill_store(self._root_store, self._root)
@@ -81,10 +91,14 @@ class FileTree(Gtk.Box):
         # The context menu's action; the clicked row's path is stashed here
         # by the right-click handler just before the popover opens.
         self._menu_path = ""
+        self._menu_is_dir = False
         actions = Gio.SimpleActionGroup()
         add_to_chat = Gio.SimpleAction.new("add-to-chat", None)
         add_to_chat.connect("activate", self._on_add_to_chat)
         actions.add_action(add_to_chat)
+        rename = Gio.SimpleAction.new("rename", None)
+        rename.connect("activate", self._on_rename)
+        actions.add_action(rename)
         self.insert_action_group("tree", actions)
 
         scrolled = Gtk.ScrolledWindow(child=self._list_view, vexpand=True, hexpand=True)
@@ -94,6 +108,7 @@ class FileTree(Gtk.Box):
     # -- population ----------------------------------------------------------
 
     def _fill_store(self, store: Gio.ListStore, directory: Path) -> None:
+        self._stores[str(directory)] = store
         entries = editorfiles.list_dir(directory, self._show_hidden, root=self._root)
         ignored = gitinfo.ignored_names(directory, [name for name, _ in entries])
         nodes = [
@@ -141,6 +156,14 @@ class FileTree(Gtk.Box):
         pending["queued"] = False
         self._fill_store(store, path)
         return GLib.SOURCE_REMOVE
+
+    def refresh_dir(self, path: str | Path) -> None:
+        """Re-list *path* now, if this tree is showing it. For changes the
+        app made itself (a rename): the directory monitors would get there on
+        their own, half a second later, and the root has no monitor at all."""
+        store = self._stores.get(str(path))
+        if store is not None:
+            self._fill_store(store, Path(path))
 
     def reveal(self, path: str | Path) -> None:
         """Expand the directories above *path* and select its row (without
@@ -226,20 +249,21 @@ class FileTree(Gtk.Box):
     def _on_row_right_click(
         self, gesture: Gtk.GestureClick, _n_press: int, x: float, y: float, list_item: Gtk.ListItem
     ) -> None:
-        """Right-clicking a file row: a one-item menu referencing the file in
-        the chat. Directory rows get nothing — the agent's mention syntax is
-        for files, and a silent no-op menu would read as broken."""
+        """Right-clicking a row. Both kinds can be renamed; only a file can be
+        referenced in the chat — the agent's mention syntax is for files, and
+        an item that quietly did nothing would read as broken."""
         row: Gtk.TreeListRow | None = list_item.get_item()
         if row is None:
             return
         node: _Node = row.get_item()
-        if node.is_dir:
-            return
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self._menu_path = str(node.path)
+        self._menu_is_dir = node.is_dir
 
         menu = Gio.Menu()
-        menu.append(_("Add to chat"), "tree.add-to-chat")
+        if not node.is_dir:
+            menu.append(_("Add to chat"), "tree.add-to-chat")
+        menu.append(_("Rename…"), "tree.rename")
         popover = Gtk.PopoverMenu.new_from_model(menu)
         popover.set_parent(gesture.get_widget())
         popover.set_has_arrow(False)
@@ -252,3 +276,7 @@ class FileTree(Gtk.Box):
     def _on_add_to_chat(self, _action: Gio.SimpleAction, _param) -> None:
         if self._menu_path:
             self.emit("add-to-chat", self._menu_path)
+
+    def _on_rename(self, _action: Gio.SimpleAction, _param) -> None:
+        if self._menu_path:
+            self.emit("rename-request", self._menu_path, self._menu_is_dir)
