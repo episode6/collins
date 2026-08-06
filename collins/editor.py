@@ -36,9 +36,9 @@ except (ValueError, ImportError):
         "gtksourceview5) and restart Collins to enable it."
     )
 
-from . import dialogs, editorfiles  # noqa: E402
+from . import dialogs, editorfiles, fileclipboard  # noqa: E402
 from .filetree import FileTree  # noqa: E402
-from .i18n import _  # noqa: E402
+from .i18n import _, ngettext  # noqa: E402
 
 _MAX_RECENT_FILES = 20  # cap on files a session's editor_state remembers
 _MAX_AGENT_FILES = 8  # rows in the "agent files" list pinned above the tree
@@ -129,6 +129,7 @@ class EditorPane(Gtk.Box):
         self._tree.connect("open-file", lambda _t, path: self.open_file(path))
         self._tree.connect("add-to-chat", lambda _t, path: self.emit("add-to-chat", path, 0, 0))
         self._tree.connect("rename-request", lambda _t, path, is_dir: self._prompt_rename(path, is_dir))
+        self._tree.connect("paste-request", lambda _t, dest: self._paste_into(dest))
         left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         left.append(self._build_agent_files())
         left.append(self._tree)
@@ -342,6 +343,74 @@ class EditorPane(Gtk.Box):
         if error is RE.MISSING:
             return _("{name} is no longer there.").format(name=name)
         return _("{name} can't be renamed to something outside this project.").format(name=name)
+
+    # -- pasting ---------------------------------------------------------------
+
+    def _paste_into(self, dest_dir: str) -> None:
+        """The file tree's "Paste", carried out here rather than in the tree:
+        a cut pasted somewhere else *moves* files, and an open one has to
+        follow its file exactly as it does through a rename."""
+        fileclipboard.read_files(
+            self.get_clipboard(), lambda paths, cut: self._paste(dest_dir, paths, cut)
+        )
+
+    def _paste(self, dest_dir: str, paths: list[str], move: bool) -> None:
+        """*paths* as the clipboard handed them over — possibly several, and
+        possibly from outside the project (a copy taken in a file manager is
+        exactly what paste is for). Nothing is ever overwritten: a name
+        already taken lands as "name (copy)" instead."""
+        if not paths:
+            self._notify(_("There's nothing on the clipboard to paste here."))
+            return
+        outcomes = editorfiles.paste_entries(self._root, dest_dir, paths, move)
+        pasted = [outcome for outcome in outcomes if outcome.target is not None]
+        for outcome in pasted:
+            if not move:
+                continue
+            self._retarget_open(outcome.source, outcome.target)
+            # What moved is now nothing: a directory moved out from under the
+            # tree leaves its rows and its monitor watching a path that's gone.
+            self._tree.forget_dir(outcome.source)
+            self._tree.refresh_dir(outcome.source.parent)
+        self._tree.refresh_dir(dest_dir)
+        if len(pasted) == 1:
+            self._tree.reveal(pasted[0].target)
+        if move and pasted:
+            # A cut is spent the moment it lands: what it names isn't there
+            # any more, so a second paste could only report it missing.
+            clipboard = self.get_clipboard()
+            if clipboard.get_content() is not None:  # ours to clear
+                clipboard.set_content(None)
+        failed = [outcome for outcome in outcomes if outcome.error is not None]
+        if failed:
+            self._notify(self._paste_error_message(failed))
+
+    def _paste_error_message(self, failed: list[editorfiles.PasteOutcome]) -> str:
+        """Why a paste didn't happen — named, the way the rename errors are.
+        Several at once (a clipboard full of files, half of them gone) is
+        counted rather than listed: a banner is one line."""
+        if len(failed) > 1:
+            return ngettext(
+                "{count} item couldn't be pasted.",
+                "{count} items couldn't be pasted.",
+                len(failed),
+            ).format(count=len(failed))
+        outcome = failed[0]
+        name = outcome.source.name
+        PE = editorfiles.PasteError
+        if outcome.error is PE.MISSING:
+            return _("{name} is no longer there.").format(name=name)
+        if outcome.error is PE.INTO_ITSELF:
+            return _("{name} can't be pasted into itself.").format(name=name)
+        if outcome.error is PE.NOT_A_DIR:
+            # Names the destination, which the outcome doesn't carry — and
+            # which the tree has stopped showing anyway.
+            return _("That folder is no longer there.")
+        if outcome.error is PE.OUTSIDE:
+            return _("{name} can't be pasted outside this project.").format(name=name)
+        if outcome.error is PE.NO_ROOM:
+            return _("There are already too many copies of {name} here.").format(name=name)
+        return _("Couldn't paste {name}: {message}").format(name=name, message=outcome.message)
 
     def _retarget_open(self, old: Path, new: Path) -> None:
         """Follow a rename through the open tabs: the renamed file — or every

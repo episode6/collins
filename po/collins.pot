@@ -801,7 +801,7 @@ msgstr ""
 msgid "Continue in native chat (experimental)"
 msgstr ""
 
-#: collins/sidebar.py:778 collins/window.py:152 collins/filetree.py:266
+#: collins/sidebar.py:778 collins/window.py:152 collins/filetree.py:378
 msgid "Rename…"
 msgstr ""
 
@@ -912,11 +912,11 @@ msgstr ""
 msgid "warning: `{cli}` not found in PATH — starting a plain shell"
 msgstr ""
 
-#: collins/terminal.py:422
+#: collins/terminal.py:422 collins/filetree.py:374
 msgid "Copy"
 msgstr ""
 
-#: collins/terminal.py:423
+#: collins/terminal.py:423 collins/filetree.py:361 collins/filetree.py:376
 msgid "Paste"
 msgstr ""
 
@@ -1516,7 +1516,7 @@ msgid ""
 "that agent."
 msgstr ""
 
-#: collins/editor.py:164 collins/editor.py:281 collins/filetree.py:203
+#: collins/editor.py:164 collins/editor.py:281 collins/filetree.py:373
 msgid "Add to chat"
 msgstr ""
 
@@ -1554,6 +1554,40 @@ msgstr ""
 
 #: collins/editor.py:335
 msgid "{name} can't be renamed to something outside this project."
+msgstr ""
+
+#: collins/filetree.py:374
+msgid "Cut"
+msgstr ""
+
+#: collins/editor.py:363
+msgid "There's nothing on the clipboard to paste here."
+msgstr ""
+
+#: collins/editor.py:393
+msgid "{count} item couldn't be pasted."
+msgid_plural "{count} items couldn't be pasted."
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/editor.py:404
+msgid "{name} can't be pasted into itself."
+msgstr ""
+
+#: collins/editor.py:406
+msgid "That folder is no longer there."
+msgstr ""
+
+#: collins/editor.py:408
+msgid "{name} can't be pasted outside this project."
+msgstr ""
+
+#: collins/editor.py:410
+msgid "There are already too many copies of {name} here."
+msgstr ""
+
+#: collins/editor.py:411
+msgid "Couldn't paste {name}: {message}"
 msgstr ""
 
 #: collins/terminal.py:1199

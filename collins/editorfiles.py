@@ -1,18 +1,21 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
 """GTK-free helpers for the editor panel: language guessing, open guards,
-and directory listing.
+directory listing, and the rename/paste rules the file tree's context menus
+act on.
 
 Kept GTK-free (like gitinfo.py/projecticons.py) so this stays unit-testable
-headless; editor.py and filetree.py own turning these into widgets and
-GtkSource calls.
+headless; editor.py, filetree.py and fileclipboard.py own turning these into
+widgets, clipboard payloads and GtkSource calls.
 """
 
 from __future__ import annotations
 
 import enum
+import shutil
 import urllib.parse
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 
 # Skipped wherever a directory is listed or expanded: build output,
@@ -44,6 +47,9 @@ IMAGE_SUFFIXES = {
     ".tif",
     ".avif",
 }
+# How many "(copy N)" names a paste will try before giving up on finding a
+# free one (see `unique_target`).
+_MAX_COPY_SUFFIXES = 100
 # A directory this size is either a build artifact that slipped past
 # SKIP_DIR_NAMES or a mistake; either way the tree stops rather than stalling
 # on it. Sorted first, so what's dropped is always the tail, alphabetically.
@@ -68,6 +74,19 @@ class RenameError(enum.Enum):
     EXISTS = "exists"
     MISSING = "missing"  # what's being renamed is already gone
     OUTSIDE = "outside"
+
+
+class PasteError(enum.Enum):
+    """Why something on the clipboard can't be pasted where it was asked for.
+    One entry per rule, for the same reason `RenameError` has them: "that
+    didn't work" says nothing about which rule it broke."""
+
+    MISSING = "missing"  # what the clipboard names is no longer on disk
+    OUTSIDE = "outside"  # the destination isn't inside the project
+    NOT_A_DIR = "not_a_dir"  # the destination folder is gone
+    INTO_ITSELF = "into_itself"  # a folder pasted into itself or its contents
+    NO_ROOM = "no_room"  # every "(copy N)" name is taken
+    FAILED = "failed"  # the copy/move itself failed; `message` says why
 
 
 # Suffix -> GtkSource language id, for the common cases worth a fast, GTK-free
@@ -381,6 +400,143 @@ def renamed_path(old: str | Path, new: str | Path, path: str | Path) -> str | No
     except ValueError:
         return None
     return str(new / relative)
+
+
+def _exists(path: Path) -> bool:
+    """Whether *path* is taken — a broken symlink included, which `exists()`
+    alone says nothing about and which `rename`/`copy` would still clobber.
+    An unreadable answer counts as taken: nothing here should write over
+    something it couldn't look at."""
+    try:
+        return path.exists() or path.is_symlink()
+    except OSError:
+        return True
+
+
+def unique_target(directory: str | Path, name: str) -> Path | None:
+    """Where an entry called *name* can land in *directory* without replacing
+    anything: `name` itself when it is free, then "name (copy).ext",
+    "name (copy 2).ext"… None once even those are taken (a directory holding
+    a hundred copies of one name is doing something else entirely).
+
+    Never handing back an existing path is the point: both `shutil.copy2` and
+    `shutil.move` overwrite what they land on without a word, and a paste is
+    nobody's idea of a way to delete a file."""
+    directory = Path(directory)
+    stem, suffix = Path(name).stem, Path(name).suffix
+    for attempt in range(_MAX_COPY_SUFFIXES + 1):
+        if attempt == 0:
+            candidate = name
+        elif attempt == 1:
+            candidate = f"{stem} (copy){suffix}"
+        else:
+            candidate = f"{stem} (copy {attempt}){suffix}"
+        target = directory / candidate
+        if not _exists(target):
+            return target
+    return None
+
+
+def paste_target(
+    root: str | Path, dest_dir: str | Path, source: str | Path, move: bool = False
+) -> tuple[Path | None, PasteError | None]:
+    """Where pasting *source* into *dest_dir* would land: `(target, None)` for
+    a paste worth doing, `(None, None)` when there is nothing to do (a cut
+    entry pasted back into the folder it came from), `(None, error)` otherwise.
+
+    *source* is deliberately allowed to live outside the project — a copy
+    taken in a file manager is exactly what paste is for — but the
+    destination never is, and a folder can't be pasted into itself or into
+    anything it contains, which would either fail halfway or recurse."""
+    dest = Path(dest_dir)
+    src = Path(source)
+    if not is_inside(root, dest):
+        return None, PasteError.OUTSIDE
+    if not dest.is_dir():
+        return None, PasteError.NOT_A_DIR
+    if not _exists(src):
+        return None, PasteError.MISSING
+    if src.is_dir() and is_inside(src, dest):
+        return None, PasteError.INTO_ITSELF
+    if move and _same_dir(src.parent, dest):
+        return None, None  # already where the paste would put it
+    target = unique_target(dest, src.name)
+    if target is None:
+        return None, PasteError.NO_ROOM
+    return target, None
+
+
+def _same_dir(one: Path, other: Path) -> bool:
+    try:
+        return one.resolve() == other.resolve()
+    except OSError:
+        return False
+
+
+@dataclass
+class PasteOutcome:
+    """What became of one clipboard entry. *target* is where it landed (None
+    when it didn't), *error* why not, and *message* the OS's own words for a
+    `FAILED` one."""
+
+    source: Path
+    target: Path | None = None
+    error: PasteError | None = None
+    message: str = ""
+
+
+def paste_entries(
+    root: str | Path, dest_dir: str | Path, sources: list[str], move: bool = False
+) -> list[PasteOutcome]:
+    """Paste every entry in *sources* into *dest_dir* — copying, or moving
+    when *move* (a cut). One outcome per source, in order: a clipboard holding
+    several files is normal (it came from a file manager), and one of them
+    being gone is no reason to drop the rest.
+
+    Symlinks are copied as symlinks rather than followed: the tree already
+    refuses to show one that leaves the project, and following one here would
+    quietly duplicate whatever it points at into the repo."""
+    outcomes: list[PasteOutcome] = []
+    for source in sources:
+        src = Path(source)
+        target, error = paste_target(root, dest_dir, src, move)
+        if target is None:
+            outcomes.append(PasteOutcome(src, None, error))
+            continue
+        try:
+            if move:
+                shutil.move(str(src), str(target))
+            elif src.is_dir() and not src.is_symlink():
+                shutil.copytree(src, target, symlinks=True)
+            else:
+                shutil.copy2(src, target, follow_symlinks=False)
+        except (OSError, shutil.Error) as err:
+            message = getattr(err, "strerror", None) or str(err)
+            outcomes.append(PasteOutcome(src, None, PasteError.FAILED, message))
+            continue
+        outcomes.append(PasteOutcome(src, target))
+    return outcomes
+
+
+def format_copied_files(uris: list[str], cut: bool) -> str:
+    """The `x-special/gnome-copied-files` payload for *uris*: the operation on
+    the first line, one URI per line after it. Every GNOME file manager reads
+    this, and it is the only one of the three clipboard payloads that can say
+    "cut" — `text/uri-list` carries no such flag, so a cut pasted through it
+    would silently become a copy."""
+    return "\n".join([("cut" if cut else "copy"), *uris])
+
+
+def parse_copied_files(text: str) -> tuple[list[str], bool]:
+    """`format_copied_files` read back: `(paths, cut)`. Non-`file:` URIs are
+    dropped — a paste can only act on something local — and an unknown
+    operation reads as a copy, which is the harmless half of the pair."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return [], False
+    cut = lines[0] == "cut"
+    paths = [path for uri in lines[1:] if (path := path_from_file_uri(uri)) is not None]
+    return paths, cut
 
 
 def walk_files(

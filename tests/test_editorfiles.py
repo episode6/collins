@@ -11,7 +11,9 @@ from collins.editorfiles import (
     LIGHTBOX_MIN_W,
     LIGHTBOX_SHADOW_PAD,
     LoadGuard,
+    PasteError,
     RenameError,
+    format_copied_files,
     guess_language_id,
     image_guard,
     is_image_path,
@@ -21,11 +23,15 @@ from collins.editorfiles import (
     lightbox_zoombar_inside,
     list_dir,
     load_guard,
+    parse_copied_files,
+    paste_entries,
+    paste_target,
     path_from_file_uri,
     read_first_line,
     rename_target,
     renamed_path,
     should_highlight,
+    unique_target,
     walk_files,
 )
 
@@ -649,3 +655,215 @@ def test_renamed_path_leaves_untouched_paths_alone():
     assert renamed_path("/p/pkg", "/p/package", "/p/other/b.py") is None
     # A prefix match on the name, not on the directory, is not a match.
     assert renamed_path("/p/pkg", "/p/package", "/p/pkg2/b.py") is None
+
+
+# -- unique_target -------------------------------------------------------------
+
+
+def test_unique_target_keeps_a_free_name(tmp_path):
+    assert unique_target(tmp_path, "a.txt") == tmp_path / "a.txt"
+
+
+def test_unique_target_numbers_around_a_taken_name(tmp_path):
+    _touch(tmp_path, "a.txt")
+    assert unique_target(tmp_path, "a.txt") == tmp_path / "a (copy).txt"
+    _touch(tmp_path, "a (copy).txt")
+    assert unique_target(tmp_path, "a.txt") == tmp_path / "a (copy 2).txt"
+    _touch(tmp_path, "a (copy 2).txt")
+    assert unique_target(tmp_path, "a.txt") == tmp_path / "a (copy 3).txt"
+
+
+def test_unique_target_keeps_the_suffix_and_handles_dotfiles(tmp_path):
+    _touch(tmp_path, "archive.tar")
+    (tmp_path / ".bashrc").write_text("x")
+    (tmp_path / "pkg").mkdir()
+    assert unique_target(tmp_path, "archive.tar") == tmp_path / "archive (copy).tar"
+    assert unique_target(tmp_path, ".bashrc") == tmp_path / ".bashrc (copy)"
+    assert unique_target(tmp_path, "pkg") == tmp_path / "pkg (copy)"
+
+
+def test_unique_target_counts_a_broken_symlink_as_taken(tmp_path):
+    (tmp_path / "a.txt").symlink_to(tmp_path / "gone.txt")
+    assert unique_target(tmp_path, "a.txt") == tmp_path / "a (copy).txt"
+
+
+def test_unique_target_gives_up_once_every_name_is_taken(tmp_path):
+    _touch(tmp_path, "a.txt")
+    _touch(tmp_path, "a (copy).txt")
+    for n in range(2, 101):
+        _touch(tmp_path, f"a (copy {n}).txt")
+    assert unique_target(tmp_path, "a.txt") is None
+
+
+# -- paste_target --------------------------------------------------------------
+
+
+def test_paste_target_is_the_name_inside_the_destination(tmp_path):
+    _touch(tmp_path, "a.txt")
+    (tmp_path / "pkg").mkdir()
+    target, error = paste_target(tmp_path, tmp_path / "pkg", tmp_path / "a.txt")
+    assert (target, error) == (tmp_path / "pkg" / "a.txt", None)
+
+
+def test_paste_target_sidesteps_a_name_already_there(tmp_path):
+    _touch(tmp_path, "a.txt")
+    target, error = paste_target(tmp_path, tmp_path, tmp_path / "a.txt")
+    assert (target, error) == (tmp_path / "a (copy).txt", None)
+
+
+def test_paste_target_takes_a_source_from_outside_the_project(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    _touch(tmp_path, "elsewhere/a.txt")
+    target, error = paste_target(root, root, tmp_path / "elsewhere" / "a.txt")
+    assert (target, error) == (root / "a.txt", None)
+
+
+def test_paste_target_refuses_a_destination_outside_the_project(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    _touch(root, "a.txt")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    assert paste_target(root, outside, root / "a.txt") == (None, PasteError.OUTSIDE)
+
+
+def test_paste_target_refuses_a_destination_that_is_gone(tmp_path):
+    _touch(tmp_path, "a.txt")
+    assert paste_target(tmp_path, tmp_path / "nope", tmp_path / "a.txt") == (
+        None,
+        PasteError.NOT_A_DIR,
+    )
+
+
+def test_paste_target_refuses_a_source_that_is_gone(tmp_path):
+    assert paste_target(tmp_path, tmp_path, tmp_path / "gone.txt") == (None, PasteError.MISSING)
+
+
+def test_paste_target_refuses_a_folder_into_itself_or_its_own_contents(tmp_path):
+    (tmp_path / "pkg" / "sub").mkdir(parents=True)
+    pkg = tmp_path / "pkg"
+    assert paste_target(tmp_path, pkg, pkg) == (None, PasteError.INTO_ITSELF)
+    assert paste_target(tmp_path, pkg / "sub", pkg) == (None, PasteError.INTO_ITSELF)
+
+
+def test_paste_target_copying_a_folder_beside_itself_is_fine(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    target, error = paste_target(tmp_path, tmp_path, tmp_path / "pkg")
+    assert (target, error) == (tmp_path / "pkg (copy)", None)
+
+
+def test_paste_target_moving_into_the_folder_it_came_from_is_nothing_to_do(tmp_path):
+    _touch(tmp_path, "pkg/a.txt")
+    assert paste_target(tmp_path, tmp_path / "pkg", tmp_path / "pkg" / "a.txt", move=True) == (
+        None,
+        None,
+    )
+    # Copying it there is still a copy, though.
+    target, error = paste_target(tmp_path, tmp_path / "pkg", tmp_path / "pkg" / "a.txt")
+    assert (target, error) == (tmp_path / "pkg" / "a (copy).txt", None)
+
+
+# -- paste_entries -------------------------------------------------------------
+
+
+def test_paste_entries_copies_a_file_and_leaves_the_original(tmp_path):
+    _touch(tmp_path, "a.txt")
+    (tmp_path / "pkg").mkdir()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "pkg", [str(tmp_path / "a.txt")])
+    assert outcome.target == tmp_path / "pkg" / "a.txt"
+    assert outcome.error is None
+    assert (tmp_path / "pkg" / "a.txt").read_text() == "x"
+    assert (tmp_path / "a.txt").exists()
+
+
+def test_paste_entries_moves_a_file_for_a_cut(tmp_path):
+    _touch(tmp_path, "a.txt")
+    (tmp_path / "pkg").mkdir()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "pkg", [str(tmp_path / "a.txt")], move=True)
+    assert outcome.target == tmp_path / "pkg" / "a.txt"
+    assert not (tmp_path / "a.txt").exists()
+
+
+def test_paste_entries_copies_a_whole_folder(tmp_path):
+    _touch(tmp_path, "pkg/sub/a.txt")
+    (tmp_path / "dest").mkdir()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "pkg")])
+    assert outcome.target == tmp_path / "dest" / "pkg"
+    assert (tmp_path / "dest" / "pkg" / "sub" / "a.txt").read_text() == "x"
+
+
+def test_paste_entries_never_overwrites_what_is_already_there(tmp_path):
+    _touch(tmp_path, "a.txt")
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "a.txt").write_text("mine")
+    (outcome,) = paste_entries(tmp_path, tmp_path / "pkg", [str(tmp_path / "a.txt")])
+    assert outcome.target == tmp_path / "pkg" / "a (copy).txt"
+    assert (tmp_path / "pkg" / "a.txt").read_text() == "mine"
+
+
+def test_paste_entries_copies_a_symlink_as_a_symlink(tmp_path):
+    _touch(tmp_path, "a.txt")
+    (tmp_path / "link.txt").symlink_to(tmp_path / "a.txt")
+    (tmp_path / "pkg").mkdir()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "pkg", [str(tmp_path / "link.txt")])
+    assert outcome.target == tmp_path / "pkg" / "link.txt"
+    assert (tmp_path / "pkg" / "link.txt").is_symlink()
+
+
+def test_paste_entries_carries_on_past_one_that_cant_be_pasted(tmp_path):
+    _touch(tmp_path, "a.txt")
+    _touch(tmp_path, "b.txt")
+    (tmp_path / "pkg").mkdir()
+    outcomes = paste_entries(
+        tmp_path,
+        tmp_path / "pkg",
+        [str(tmp_path / "a.txt"), str(tmp_path / "gone.txt"), str(tmp_path / "b.txt")],
+    )
+    assert [o.target for o in outcomes] == [
+        tmp_path / "pkg" / "a.txt",
+        None,
+        tmp_path / "pkg" / "b.txt",
+    ]
+    assert [o.error for o in outcomes] == [None, PasteError.MISSING, None]
+
+
+def test_paste_entries_reports_a_failed_copy_with_the_os_message(tmp_path):
+    source = tmp_path / "a.txt"
+    source.write_text("x")
+    dest = tmp_path / "pkg"
+    dest.mkdir()
+    dest.chmod(0o500)  # readable, not writable: the copy itself fails
+    try:
+        (outcome,) = paste_entries(tmp_path, dest, [str(source)])
+    finally:
+        dest.chmod(0o700)
+    assert outcome.target is None
+    assert outcome.error is PasteError.FAILED
+    assert outcome.message
+
+
+# -- the gnome-copied-files payload --------------------------------------------
+
+
+def test_format_copied_files_leads_with_the_operation():
+    assert format_copied_files(["file:///a", "file:///b"], cut=False) == "copy\nfile:///a\nfile:///b"
+    assert format_copied_files(["file:///a"], cut=True) == "cut\nfile:///a"
+
+
+def test_parse_copied_files_round_trips_both_operations():
+    assert parse_copied_files("copy\nfile:///a\nfile:///b") == (["/a", "/b"], False)
+    assert parse_copied_files("cut\nfile:///a") == (["/a"], True)
+
+
+def test_parse_copied_files_unquotes_and_drops_what_isnt_local():
+    assert parse_copied_files("copy\nfile:///a%20b.txt\nhttp://x/y\nfile://host/z") == (
+        ["/a b.txt"],
+        False,
+    )
+
+
+def test_parse_copied_files_takes_an_unknown_operation_as_a_copy():
+    assert parse_copied_files("file:///a") == ([], False)  # no operation line at all
+    assert parse_copied_files("link\nfile:///a") == (["/a"], False)
+    assert parse_copied_files("") == ([], False)
