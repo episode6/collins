@@ -489,10 +489,13 @@ class SessionRow(Gtk.ListBoxRow):
         # session is only reachable through the window — which is also the only
         # thing holding the tab whose prompt they would go to.
         self._pr_host = prmenu.ActionHost(
-            takes_prompt=lambda: (
-                self.item.status in _IN_TAB_STATUSES
-                and sidebar.takes_prompt(self.item.session_id)
-            ),
+            # Asked of the window and of nothing else: it looks the session's
+            # tab up and asks that tab. The row's own status property says the
+            # same thing a beat later (it is set from the same lookup), and
+            # testing it here as well only ever subtracted — a row whose status
+            # hadn't caught up dropped every prompt action from its menu while
+            # the tab sat there ready for one.
+            prompt_block=lambda: sidebar.prompt_block(self.item.session_id),
             has_changes=lambda: sidebar.has_changes(self.item.session_id),
             send_prompt=lambda prompt: self.activate_action(
                 "win.send-prompt", GLib.Variant("(ss)", (self.item.session_id, prompt))
@@ -848,11 +851,14 @@ class SessionSidebar(Gtk.Box):
         # same terms (see SessionItem.unread for the flag's meaning).
         self._unread_placeholders: set[str] = set()
         self._active_session_id: str | None = None
-        # "Is this session sitting at an empty prompt?", for a row's PR actions
-        # (see SessionRow._pr_host). Only the window can answer — the tab is
-        # its — so it replaces this the moment it builds the sidebar; until
-        # then, and for a session it has no tab for, the answer is no.
-        self.takes_prompt: Callable[[str], bool] = lambda _session_id: False
+        # "Why can't this session be sent a prompt right now?", for a row's PR
+        # actions (see SessionRow._pr_host) — the empty string when it can.
+        # Only the window can answer — the tab is its — so it replaces this the
+        # moment it builds the sidebar; until then, nothing can be sent
+        # anywhere.
+        self.prompt_block: Callable[[str], str] = lambda _session_id: _(
+            "This session has no tab open."
+        )
         # "Does this session's terminal have uncommitted work in front of it?",
         # for the same rows' "Open pull request". Replaced by the window on the
         # same terms, and no for as long as it hasn't been.

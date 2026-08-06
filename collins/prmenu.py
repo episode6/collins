@@ -136,8 +136,11 @@ class ActionHost:
     keystroke.
     """
 
-    # Whether the session has a tab open, at an empty prompt (Provider.takes_prompt).
-    takes_prompt: Callable[[], bool]
+    # Why a prompt can't be sent to this session right now — no tab open, or an
+    # input that isn't empty (Provider.takes_prompt) — and "" when one can. A
+    # sentence rather than a flag because it is shown: the actions it blocks
+    # stay in the menu, greyed out, carrying this as their tooltip.
+    prompt_block: Callable[[], str]
     # Whether its terminal's cwd is a repo with uncommitted work in it. Costs a
     # `git status`, so practions only asks when a PR's state could use it.
     has_changes: Callable[[], bool]
@@ -430,7 +433,7 @@ def show_actions(
     separator.set_margin_bottom(3)
     rows.append(separator)
     rows.append(_open_row(popover, pr))
-    for action in practions.actions_for(pr, host.takes_prompt(), host.has_changes):
+    for action in practions.actions_for(pr, host.prompt_block(), host.has_changes):
         rows.append(_action_row(popover, pr, action, host))
     popover.set_child(rows)
 
@@ -525,7 +528,13 @@ def _action_row(
     popover: Gtk.Popover, pr: PullRequest, action: practions.Action, host: ActionHost
 ) -> Gtk.Widget:
     """One action as a row: its mark, what it does, and a spinner for while it
-    is doing it."""
+    is doing it.
+
+    An action the session can't take right now (see practions.Action.blocked)
+    is that same row, unpressable and saying why — the badge that sent the user
+    here is still on the PR, so the menu owes them the answer rather than the
+    gap where it was.
+    """
     label = Gtk.Label(label=action.label, xalign=0.0, hexpand=True)
     spinner = Gtk.Spinner()
     spinner.set_visible(False)
@@ -543,10 +552,22 @@ def _action_row(
     button = Gtk.Button(child=row)
     button.add_css_class("flat")
     button.add_css_class("pr-menu-row")
-    if action.tooltip:
-        button.set_tooltip_text(action.tooltip)
-    button.connect("clicked", _on_action_clicked, popover, pr, action, host, spinner)
-    return button
+    tooltip = "\n".join(part for part in (action.tooltip, action.blocked) if part)
+    if tooltip:
+        button.set_tooltip_text(tooltip)
+    if not action.blocked:
+        button.connect("clicked", _on_action_clicked, popover, pr, action, host, spinner)
+        return button
+    # Insensitive widgets are skipped when GTK picks what the pointer is over,
+    # so a tooltip set on the button itself would never be shown — the reason
+    # the row is dead would be readable nowhere. Hand it to a wrapper that
+    # stays sensitive: the pick lands there instead, and the tooltip with it.
+    button.set_sensitive(False)
+    button.set_hexpand(True)  # the wrapper is the row now; the button still fills it
+    wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+    wrapper.set_tooltip_text(tooltip)
+    wrapper.append(button)
+    return wrapper
 
 
 def _on_action_clicked(

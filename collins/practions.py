@@ -17,6 +17,11 @@ send a prompt to the session that opened the PR and let the agent do the work.
 All need a session sitting at an empty prompt, and NEW_PR needs uncommitted
 work to open a pull request *for* — neither is a property of the PR, so the
 caller answers both.
+A session that can't take a prompt right now doesn't take the action away with
+it, though: it comes back `blocked`, for the menu to show greyed out with the
+reason on it. What a PR offers is a question about the PR, and a badge saying
+"someone is waiting on a reply" over a menu with nothing about comments in it
+is the app disagreeing with itself.
 Note that nothing here opens the PR's page: the menu carries its own "Open on
 GitHub" row ahead of these actions, built beside the widgets (prmenu) because
 opening a browser is Gtk's business and this module stays importable without
@@ -90,6 +95,11 @@ class Action:
     picking it types that text into the session and sends it. Carrying the
     text on the action is what keeps the menu from having to know which of
     them is which (see prmenu._on_action_clicked).
+
+    *blocked* is why picking it wouldn't work right now — an empty string when
+    it would. The menu shows a blocked action as an unpressable row carrying
+    that sentence, rather than leaving it out: an offer that comes and goes
+    with what a terminal happens to be showing is one nobody can find twice.
     """
 
     key: str
@@ -97,6 +107,7 @@ class Action:
     tooltip: str = ""
     confirm: Confirm | None = None
     prompt: str = ""
+    blocked: str = ""
 
 
 def checks_green(pr: PullRequest) -> bool:
@@ -117,19 +128,21 @@ def checks_green(pr: PullRequest) -> bool:
 
 def actions_for(
     pr: PullRequest,
-    takes_prompt: bool,
+    prompt_block: str = "",
     has_changes: Callable[[], bool] = lambda: False,
 ) -> list[Action]:
     """The menu for *pr*: every action that makes sense for the state it is in.
 
     Two of the three arguments are about the session rather than the PR.
-    *takes_prompt* is whether it is somewhere a prompt can be sent right now —
-    a tab open, at an empty input (see Provider.takes_prompt) — and it is why
-    the prompt-sending actions come and go: a session that is closed, or
-    mid-sentence, is not somewhere to send one. *has_changes* is whether its
-    working tree has uncommitted work in it, asked as a callable rather than a
-    value because answering costs a `git status` (see gitinfo.has_changes) and
-    only one PR state can use the answer.
+    *prompt_block* is why a prompt can't be sent to it right now — no tab open,
+    or an input that isn't empty (see Provider.takes_prompt) — and the empty
+    string when one can. It doesn't decide *whether* the prompt-sending actions
+    are offered, only whether they are pressable: they are carried on the
+    actions themselves as `blocked`, and the menu greys those rows out with the
+    reason. *has_changes* is whether the session's working tree has uncommitted
+    work in it, asked as a callable rather than a value because answering costs
+    a `git status` (see gitinfo.has_changes) and only one PR state can use the
+    answer.
 
     Everything here needs a state, and an unfetched PR (no gh, no network) has
     none: better an empty list than a "Merge" that was never going to work.
@@ -152,7 +165,7 @@ def actions_for(
         # a branch GitHub can't merge. The rebase action below stands where
         # the merge would have — resolving is what makes merging offerable.
         actions.append(_merge_action(pr))
-    if pr.state in _LIVE and pr.conflicting and takes_prompt:
+    if pr.state in _LIVE and pr.conflicting:
         rebase_prompt = REBASE_PROMPT.format(number=pr.number)
         actions.append(
             Action(
@@ -160,6 +173,7 @@ def actions_for(
                 _("Rebase / resolve conflicts"),
                 _("Send “{prompt}” to this session").format(prompt=rebase_prompt),
                 prompt=rebase_prompt,
+                blocked=prompt_block,
             )
         )
     if pr.state in _LIVE:
@@ -170,7 +184,7 @@ def actions_for(
                 _("Comment “{comment}” on {slug}").format(comment=REVIEW_COMMENT, slug=pr.slug),
             )
         )
-        if pr.failed and takes_prompt:
+        if pr.failed:
             ci_prompt = CI_PROMPT.format(number=pr.number)
             actions.append(
                 Action(
@@ -178,9 +192,10 @@ def actions_for(
                     _("Address the CI errors"),
                     _("Send “{prompt}” to this session").format(prompt=ci_prompt),
                     prompt=ci_prompt,
+                    blocked=prompt_block,
                 )
             )
-        if pr.awaiting_reply and takes_prompt:
+        if pr.awaiting_reply:
             # Offered whenever someone else has the last word, not only when
             # the chip badges it — answering a reviewer doesn't wait on CI.
             comments_prompt = COMMENTS_PROMPT.format(number=pr.number)
@@ -190,13 +205,17 @@ def actions_for(
                     _("Address unresolved comments"),
                     _("Send “{prompt}” to this session").format(prompt=comments_prompt),
                     prompt=comments_prompt,
+                    blocked=prompt_block,
                 )
             )
-    elif pr.merged and takes_prompt and has_changes():
+    elif pr.merged and has_changes():
         # The PR landed and the tree has moved on since: the work in it is
         # what the next pull request is for, so the offer is to open that one.
-        # Asked last, after the two cheap conditions, because it is the one
-        # that costs a subprocess.
+        # Asked last, after the cheap condition, because it is the one that
+        # costs a subprocess — and unlike the three above it stays a condition
+        # rather than a blocked row: uncommitted work is a fact about the tree,
+        # not about whether the session can be typed into, and there is nothing
+        # to offer to open a pull request for without it.
         actions.append(
             Action(
                 NEW_PR,
@@ -207,6 +226,7 @@ def actions_for(
                 _("Open a pull request"),
                 _("Send “{prompt}” to this session").format(prompt=NEW_PR_PROMPT),
                 prompt=NEW_PR_PROMPT,
+                blocked=prompt_block,
             )
         )
     return actions

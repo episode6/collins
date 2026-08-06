@@ -143,6 +143,18 @@ msgstr ""
 msgid "Rebase / resolve conflicts"
 msgstr ""
 
+#: collins/terminal.py:2017
+msgid "This session isn't at an empty prompt."
+msgstr ""
+
+#: collins/sidebar.py:860 collins/window.py:2073
+msgid "This session has no tab open."
+msgstr ""
+
+#: collins/window.py:2129
+msgid "Couldn't send that to the session"
+msgstr ""
+
 #: collins/prstatus.py:239
 msgid "Has merge conflicts"
 msgstr ""

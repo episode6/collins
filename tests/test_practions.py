@@ -42,8 +42,23 @@ def _pr(**overrides) -> PullRequest:
     return PullRequest(**fields)
 
 
+# What a session that can't be typed into says for itself (see
+# window._session_prompt_block); any non-empty sentence blocks the same way.
+BLOCKED = "This session has no tab open."
+
+
+def _actions(pr, takes_prompt=False, has_changes=False) -> list:
+    return actions_for(pr, "" if takes_prompt else BLOCKED, lambda: has_changes)
+
+
 def _keys(pr, takes_prompt=False, has_changes=False) -> list[str]:
-    return [action.key for action in actions_for(pr, takes_prompt, lambda: has_changes)]
+    """Every action the menu shows, pressable or not."""
+    return [action.key for action in _actions(pr, takes_prompt, has_changes)]
+
+
+def _live_keys(pr, takes_prompt=False, has_changes=False) -> list[str]:
+    """Only the ones that can be picked right now."""
+    return [a.key for a in _actions(pr, takes_prompt, has_changes) if not a.blocked]
 
 
 # -- what a PR offers -------------------------------------------------------
@@ -92,8 +107,11 @@ def test_a_merged_pr_over_a_dirty_tree_is_offered_the_next_one():
 
 def test_opening_the_next_pr_needs_a_session_at_its_prompt():
     """It sends a prompt, like addressing CI does, so a session that is closed
-    or mid-sentence is nowhere to send one."""
-    assert _keys(_pr(state="MERGED"), takes_prompt=False, has_changes=True) == []
+    or mid-sentence is nowhere to send one — the offer stays in the menu and
+    says so, rather than disappearing out of it."""
+    actions = _actions(_pr(state="MERGED"), takes_prompt=False, has_changes=True)
+    assert [a.key for a in actions] == [NEW_PR]
+    assert actions[0].blocked == BLOCKED
 
 
 def test_an_open_pr_is_never_offered_a_new_one():
@@ -119,11 +137,15 @@ def test_a_conflicting_pr_trades_its_merge_for_a_rebase():
 
 
 def test_rebasing_needs_a_session_at_its_prompt():
-    """It sends a prompt; a conflicted PR whose session is closed offers
-    neither the rebase nor the merge it stands in for."""
-    keys = _keys(_pr(mergeable="CONFLICTING"), takes_prompt=False)
-    assert REBASE not in keys
+    """It sends a prompt; a conflicted PR whose session is closed still shows
+    the rebase — greyed out, saying why — and never the merge it stands in
+    for, which GitHub would refuse whoever is at the terminal."""
+    actions = _actions(_pr(mergeable="CONFLICTING"), takes_prompt=False)
+    keys = [a.key for a in actions]
+    assert REBASE in keys
+    assert next(a for a in actions if a.key == REBASE).blocked == BLOCKED
     assert MERGE not in keys
+    assert REBASE not in _live_keys(_pr(mergeable="CONFLICTING"), takes_prompt=False)
 
 
 def test_a_conflicted_draft_still_offers_ready_before_the_rebase():
@@ -138,7 +160,7 @@ def test_rebase_is_only_offered_to_a_conflicted_live_pr():
 
 
 def test_the_rebase_prompt_names_the_pr():
-    actions = actions_for(_pr(mergeable="CONFLICTING"), True)
+    actions = actions_for(_pr(mergeable="CONFLICTING"))
     action = next(a for a in actions if a.key == REBASE)
     assert action.prompt == "rebase PR #55 and resolve the conflicts"
 
@@ -152,33 +174,60 @@ def test_the_working_tree_is_only_consulted_when_it_could_matter():
         asked.append(True)
         return True
 
-    actions_for(_pr(), True, has_changes)
-    actions_for(_pr(state="DRAFT"), True, has_changes)
-    actions_for(_pr(state="CLOSED"), True, has_changes)
-    actions_for(_pr(state="MERGED"), False, has_changes)  # no session to prompt
+    actions_for(_pr(), "", has_changes)
+    actions_for(_pr(state="DRAFT"), "", has_changes)
+    actions_for(_pr(state="CLOSED"), "", has_changes)
     assert asked == []
-    actions_for(_pr(state="MERGED"), True, has_changes)
+    actions_for(_pr(state="MERGED"), "", has_changes)
     assert asked == [True]
 
 
-def test_addressing_ci_needs_both_a_failure_and_a_session_at_its_prompt():
-    """It sends a prompt, so a session that is closed — or mid-sentence — has
-    nowhere to send one, and a PR that is passing has nothing to say."""
+def test_a_merged_pr_asks_about_the_tree_even_with_nowhere_to_send_a_prompt():
+    """The row it decides on is shown either way now — greyed out when the
+    session can't take a prompt — so the question can't wait on the session.
+    A session with no tab at all answers "no changes" without a subprocess
+    (see window._session_has_changes), so this stays cheap where it matters."""
+    asked = []
+
+    def has_changes():
+        asked.append(True)
+        return True
+
+    actions_for(_pr(state="MERGED"), BLOCKED, has_changes)
+    assert asked == [True]
+
+
+def test_addressing_ci_is_offered_to_a_failing_pr_and_to_nothing_else():
+    """A PR that is passing has nothing to say; a failing one always does, and
+    whether its session can be typed into decides only whether the row can be
+    picked."""
     failing = _pr(passed=1, failed=2)
-    assert FIX_CI in _keys(failing, takes_prompt=True)
-    assert FIX_CI not in _keys(failing, takes_prompt=False)
+    assert FIX_CI in _live_keys(failing, takes_prompt=True)
+    assert FIX_CI in _keys(failing, takes_prompt=False)
+    assert FIX_CI not in _live_keys(failing, takes_prompt=False)
     assert FIX_CI not in _keys(_pr(), takes_prompt=True)
 
 
 def test_unresolved_comments_offer_the_agent_a_reply():
     commented = _pr(unresolved=True)
-    assert COMMENTS in _keys(commented, takes_prompt=True)
-    assert COMMENTS not in _keys(commented, takes_prompt=False)
+    assert COMMENTS in _live_keys(commented, takes_prompt=True)
     assert COMMENTS not in _keys(_pr(), takes_prompt=True)
 
 
+def test_the_reply_is_offered_even_where_it_cannot_be_sent_yet():
+    """The badge that sends someone to this menu is on the PR, not on the
+    session, so the menu that opens under it always has the row the badge is
+    about — greyed out, carrying the reason, when there is nowhere to send it.
+    An offer that comes and goes with what a terminal is showing is one nobody
+    can find twice."""
+    actions = _actions(_pr(unresolved=True), takes_prompt=False)
+    comments = next(a for a in actions if a.key == COMMENTS)
+    assert comments.blocked == BLOCKED
+    assert comments.prompt  # still knows what it would send, once it can
+
+
 def test_the_comments_prompt_names_the_pr():
-    actions = actions_for(_pr(unresolved=True), True)
+    actions = actions_for(_pr(unresolved=True))
     action = next(a for a in actions if a.key == COMMENTS)
     assert action.prompt == "Address unresolved comments on PR #55"
 
@@ -200,9 +249,9 @@ def test_only_a_live_pr_offers_the_reply(state):
 def test_only_merging_asks_first():
     """The two irreversible, everybody-can-see-it actions confirm; a comment
     and a prompt sent to a session don't."""
-    asks = {a.key: a.confirm is not None for a in actions_for(_pr(passed=1, failed=1), True)}
+    asks = {a.key: a.confirm is not None for a in actions_for(_pr(passed=1, failed=1))}
     assert asks == {AUTO_MERGE: True, REVIEW: False, FIX_CI: False}
-    assert {a.key: a.confirm is not None for a in actions_for(_pr(), True)}[MERGE]
+    assert {a.key: a.confirm is not None for a in actions_for(_pr())}[MERGE]
 
 
 def test_the_prompt_actions_are_the_ones_carrying_a_prompt():
@@ -210,15 +259,23 @@ def test_the_prompt_actions_are_the_ones_carrying_a_prompt():
     session, and everything else goes to gh."""
     sending = {
         a.key: a.prompt
-        for a in actions_for(_pr(passed=1, failed=1), True)
-        + actions_for(_pr(state="MERGED"), True, lambda: True)
+        for a in actions_for(_pr(passed=1, failed=1))
+        + actions_for(_pr(state="MERGED"), "", lambda: True)
         if a.prompt
     }
     assert sending == {FIX_CI: "Address the ci error(s) on PR #55", NEW_PR: NEW_PR_PROMPT}
 
 
+def test_only_the_prompt_actions_are_ever_blocked():
+    """gh runs the rest from here whatever the session is doing: merging a PR
+    and commenting on one need a token, not a terminal."""
+    actions = _actions(_pr(state="DRAFT", unresolved=True), takes_prompt=False)
+    assert {a.key for a in actions if a.blocked} == {COMMENTS}
+    assert {a.key for a in actions if not a.blocked} == {READY, REVIEW}
+
+
 def test_every_action_names_the_pr_in_its_tooltip():
-    for action in actions_for(_pr(passed=1, failed=1), takes_prompt=True):
+    for action in actions_for(_pr(passed=1, failed=1)):
         assert action.label and action.tooltip
 
 

@@ -157,14 +157,19 @@ agents' own session files are never modified.
   `@claude review` comment, for repositories running the Claude Code GitHub
   action). Left-clicking still opens the page, which is why nothing in the
   menu does; a PR with nothing left to do says so rather than opening empty.
-- Two of those items are **sent to the session as a prompt** instead of run
-  against GitHub: **address the CI errors**, when that PR's CI is red, and
-  **open pull request**, once it has **merged** and the terminal's working
-  directory has **uncommitted changes** again — your work landed, and what is
-  in the tree now wants a PR of its own. Both are only offered while the
-  session is open **and sitting at an empty prompt**, so a half-written line
-  of yours is never sent along with it (and a permission dialog, which takes
-  Enter too, is never answered by it).
+- Four of those items are **sent to the session as a prompt** instead of run
+  against GitHub: **address the CI errors** when that PR's CI is red,
+  **rebase / resolve conflicts** when GitHub says the branch no longer merges,
+  **address unresolved comments** when somebody else has had the last word on
+  it, and **open a pull request** once it has **merged** and the terminal's
+  working directory has **uncommitted changes** again — your work landed, and
+  what is in the tree now wants a PR of its own.
+- Those four need the session **open in a tab and sitting at an empty
+  prompt**, so a half-written line of yours is never sent along with one (and
+  a permission dialog, which takes Enter too, is never answered by one). Where
+  it can't be sent, the item is still in the menu — **greyed out, saying
+  why** — because what a pull request offers is a question about the pull
+  request, not about what its terminal happens to be showing.
 - **Rename** tabs, **copy the session ID**, or **fork** a session
   (`--fork-session`) from the right-click menu.
 - **Shift+Enter** inserts a newline in the agent's prompt.
