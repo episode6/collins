@@ -1625,7 +1625,7 @@ class TerminalTab(Gtk.Box):
         chips and its PRs, but is not somewhere to send anything.
         """
         return prmenu.ActionHost(
-            takes_prompt=self.takes_prompt,
+            prompt_block=self.prompt_block,
             has_changes=lambda: has_changes(self.current_agent_cwd()),
             send_prompt=self.inject_prompt,
             refresh=self._request_update,
@@ -2004,6 +2004,17 @@ class TerminalTab(Gtk.Box):
         )
         text = line[0] if isinstance(line, tuple) else line
         return self.provider.takes_prompt(text or "", column)
+
+    def prompt_block(self) -> str:
+        """Why a prompt sent to this tab wouldn't land, or "" when it would.
+
+        The sentence a PR menu greys its prompt actions out with (see
+        prmenu.ActionHost). One line covers every no: an agent that has exited,
+        one mid-turn, one at a permission dialog and one with half a sentence
+        already typed are all "not at an empty input", and the fix for all four
+        is to look at the terminal.
+        """
+        return "" if self.takes_prompt() else _("This session isn't at an empty prompt.")
 
     def worktree_exit_prompt_keystrokes(self) -> str | None:
         """Keystrokes that accept the agent's "leaving a worktree" dialog if

@@ -441,7 +441,7 @@ class MainWindow(Adw.ApplicationWindow):
         # A row's PR actions need to know whether that session is sitting at an
         # empty prompt, and what its terminal's working tree looks like; only
         # the tab knows either, and only the window holds the tabs.
-        self.sidebar.takes_prompt = self._session_takes_prompt
+        self.sidebar.prompt_block = self._session_prompt_block
         self.sidebar.has_changes = self._session_has_changes
         self.sidebar.live_cwd = self._session_live_cwd
         self.sidebar.prs_updated = self._adopt_session_prs
@@ -2059,15 +2059,19 @@ class MainWindow(Adw.ApplicationWindow):
         tab = page.get_child()
         self._ask_save_editors([tab] if isinstance(tab, TerminalTab) else [], proceed, cancelled)
 
-    def _session_takes_prompt(self, session_id: str) -> bool:
-        """Whether a prompt sent to this session would land in an empty input.
+    def _session_prompt_block(self, session_id: str) -> str:
+        """Why a prompt sent to this session wouldn't land, or "" when it would.
 
-        What the sidebar asks before offering a row's PR prompt actions (see
-        SessionSidebar.takes_prompt): the tab that would receive one is the
-        window's, and only it can read what its agent is waiting at.
+        What the sidebar asks for a row's PR prompt actions (see
+        SessionSidebar.prompt_block): the tab that would receive one is the
+        window's, and only it can read what its agent is waiting at. With no
+        tab at all the answer is this window's own — there is nothing here to
+        type into, and opening the session is what changes that.
         """
         tab = self._session_tab(session_id)
-        return tab is not None and tab.takes_prompt()
+        if tab is None:
+            return _("This session has no tab open.")
+        return tab.prompt_block()
 
     def _session_has_changes(self, session_id: str) -> bool:
         """Whether this session's terminal is sitting over uncommitted work.
@@ -2114,9 +2118,17 @@ class MainWindow(Adw.ApplicationWindow):
 
         Both checks again rather than assuming: rows are built long before they
         are clicked, and the tab may have been closed — or its prompt started —
-        since the menu was opened."""
+        since the menu was opened. That is a race, not an ordinary no (the menu
+        greys an action out for as long as it knows the session can't take one),
+        so it is worth saying out loud: the click looked like it did something,
+        and nothing was typed anywhere."""
         tab = self._session_tab(session_id)
         if tab is None or not tab.takes_prompt():
+            dialogs.error_dialog(
+                self,
+                _("Couldn't send that to the session"),
+                self._session_prompt_block(session_id),
+            )
             return
         self.tab_view.set_selected_page(self._page_for(session_id))
         tab.inject_prompt(prompt)
