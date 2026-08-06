@@ -60,6 +60,12 @@ class _OpenFile:
         self.gfile = gfile
         self.monitor: Gio.FileMonitor | None = None
         self.font_provider: Gtk.CssProvider | None = None
+        # Which load this buffer is waiting on, and where to put the cursor
+        # when it lands. Bumped per load so a superseded one (a rename that
+        # restarted it) can be told apart from the live one — see _start_load.
+        self.load_id = 0
+        self.loading = False
+        self.pending_cursor: list | None = None
 
 
 class EditorPane(Gtk.Box):
@@ -317,6 +323,9 @@ class EditorPane(Gtk.Box):
             )
             return
         self._retarget_open(Path(path), target)
+        # The old path is now nothing: a directory renamed out from under the
+        # tree leaves its rows and its monitor watching a name that's gone.
+        self._tree.forget_dir(path)
         self._tree.refresh_dir(target.parent)
         self._tree.reveal(target)
 
@@ -356,11 +365,14 @@ class EditorPane(Gtk.Box):
             # The saver writes wherever the GtkSource.File points, so this is
             # what keeps Ctrl+S from recreating the old name.
             opened.gfile.set_location(Gio.File.new_for_path(moved))
-            opened.gfile.check_file_on_disk()
-            if opened.monitor is not None:
-                opened.monitor.cancel()
-                opened.monitor = None
-            self._watch_external_changes(opened)
+            if opened.loading:
+                # The load in flight is still opening the old path (the loader
+                # opens lazily), so it is already doomed: start it again from
+                # the new one, which supersedes it.
+                self._start_load(opened, opened.pending_cursor)
+            else:
+                opened.gfile.check_file_on_disk()
+                self._watch_external_changes(opened)
             self._open[moved] = opened
             page.set_title(("• " if opened.buffer.get_modified() else "") + opened.path.name)
         self._sync_status()
@@ -557,12 +569,26 @@ class EditorPane(Gtk.Box):
         buffer.connect("modified-changed", self._on_modified_changed, opened)
         buffer.connect("notify::cursor-position", lambda *_a: self._sync_status())
 
-        loader = GtkSource.FileLoader.new(buffer, gfile)
-        loader.load_async(
-            GLib.PRIORITY_DEFAULT, None, callback=self._on_loaded, user_data=(key, restore_cursor)
-        )
+        self._start_load(opened, restore_cursor)
 
         self._tab_view.set_selected_page(page)
+
+    def _start_load(self, opened: _OpenFile, restore_cursor: list | None) -> None:
+        """(Re)fill the buffer from wherever its `GtkSource.File` now points.
+
+        Carries the `_OpenFile` rather than the path it was opened under: a
+        rename re-keys the page while a big file is still loading, and a
+        completion holding the old path would find nothing to finish. The
+        loader opens its file lazily, so that rename also *breaks* the load in
+        flight — `_retarget_open` starts a fresh one, and `load_id` is what
+        makes the broken one's failure a no-op instead of a banner."""
+        opened.load_id += 1
+        opened.loading = True
+        opened.pending_cursor = restore_cursor
+        loader = GtkSource.FileLoader.new(opened.buffer, opened.gfile)
+        loader.load_async(
+            GLib.PRIORITY_DEFAULT, None, callback=self._on_loaded, user_data=(opened, opened.load_id)
+        )
 
     def _open_image_page(self, key: str, path: Path) -> None:
         """A read-only `Gtk.Picture` page — images never get a buffer
@@ -592,21 +618,31 @@ class EditorPane(Gtk.Box):
         self._tab_view.set_selected_page(page)
 
     def _on_loaded(self, loader: GtkSource.FileLoader, result: Gio.AsyncResult, data: tuple) -> None:
-        key, restore_cursor = data
-        opened = self._open.get(key)
+        opened, load_id = data
+        if load_id != opened.load_id:
+            return  # a newer load (a rename's) owns this buffer now
+        opened.loading = False
+        restore_cursor = opened.pending_cursor
+        # Looked up under the file's *current* path, since a rename may have
+        # moved it since the load started — and by identity, so a page closed
+        # and reopened meanwhile isn't mistaken for this one.
+        key = str(opened.path)
+        still_open = self._open.get(key) is opened
         try:
             loader.load_finish(result)
         except GLib.Error as err:
             self._notify(
-                _("Couldn't open {name}: {message}").format(name=Path(key).name, message=err.message)
+                _("Couldn't open {name}: {message}").format(
+                    name=opened.path.name, message=err.message
+                )
             )
-            if opened is not None:
+            if still_open:
                 page = self._pages.get(key)
                 if page is not None:
                     self._teardown_page(page, key)
                     self._tab_view.close_page(page)
             return
-        if opened is None:
+        if not still_open:
             return
         opened.buffer.set_modified(False)
         if restore_cursor:
@@ -704,6 +740,11 @@ class EditorPane(Gtk.Box):
     # -- external changes ----------------------------------------------------
 
     def _watch_external_changes(self, opened: _OpenFile) -> None:
+        # Idempotent: a file that gets re-watched (a rename, a restarted load)
+        # must not leave the monitor on its old path running.
+        if opened.monitor is not None:
+            opened.monitor.cancel()
+            opened.monitor = None
         try:
             monitor = Gio.File.new_for_path(str(opened.path)).monitor_file(Gio.FileMonitorFlags.NONE, None)
         except GLib.Error:

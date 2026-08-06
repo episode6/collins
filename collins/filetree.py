@@ -157,6 +157,26 @@ class FileTree(Gtk.Box):
         self._fill_store(store, path)
         return GLib.SOURCE_REMOVE
 
+    def forget_dir(self, path: str | Path) -> None:
+        """Drop what this tree remembers about *path* and anything under it:
+        the row stores and the file monitors watching them. For a directory
+        that has just been renamed or removed — its monitor now watches a path
+        nothing will ever change again, and expanding the new name builds its
+        store fresh. Without this the entries would sit there for the tab's
+        lifetime, which is the one cost this tree's monitors deliberately
+        accept for directories that still exist (see `_watch`)."""
+        prefix = str(path)
+        gone = [
+            key
+            for key in list(self._stores) + list(self._monitors)
+            if key == prefix or key.startswith(prefix + "/")
+        ]
+        for key in gone:
+            self._stores.pop(key, None)
+            monitor = self._monitors.pop(key, None)
+            if monitor is not None:
+                monitor.cancel()
+
     def refresh_dir(self, path: str | Path) -> None:
         """Re-list *path* now, if this tree is showing it. For changes the
         app made itself (a rename): the directory monitors would get there on
