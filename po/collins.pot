@@ -180,6 +180,22 @@ msgstr ""
 msgid "Save"
 msgstr ""
 
+#: collins/dialogs.py:57
+msgid "Rename folder"
+msgstr ""
+
+#: collins/dialogs.py:57
+msgid "Rename file"
+msgstr ""
+
+#: collins/dialogs.py:58
+msgid "Enter a new name for “{name}”."
+msgstr ""
+
+#: collins/dialogs.py:64
+msgid "Rename"
+msgstr ""
+
 #: collins/dialogs.py:47
 msgid "Set tab emoji"
 msgstr ""
@@ -785,7 +801,7 @@ msgstr ""
 msgid "Continue in native chat (experimental)"
 msgstr ""
 
-#: collins/sidebar.py:778 collins/window.py:152
+#: collins/sidebar.py:778 collins/window.py:152 collins/filetree.py:266
 msgid "Rename…"
 msgstr ""
 
@@ -1502,6 +1518,42 @@ msgstr ""
 
 #: collins/editor.py:164 collins/editor.py:281 collins/filetree.py:203
 msgid "Add to chat"
+msgstr ""
+
+#: collins/editor.py:143
+msgid "Close other tabs"
+msgstr ""
+
+#: collins/editor.py:144
+msgid "Close tabs to the right"
+msgstr ""
+
+#: collins/editor.py:145
+msgid "Close all tabs"
+msgstr ""
+
+#: collins/editor.py:314
+msgid "Couldn't rename {name}: {message}"
+msgstr ""
+
+#: collins/editor.py:326
+msgid "A name is needed to rename {name}."
+msgstr ""
+
+#: collins/editor.py:328
+msgid "“{new_name}” isn't a name — renaming can't move things elsewhere."
+msgstr ""
+
+#: collins/editor.py:332
+msgid "“{new_name}” already exists here."
+msgstr ""
+
+#: collins/editor.py:334
+msgid "{name} is no longer there."
+msgstr ""
+
+#: collins/editor.py:335
+msgid "{name} can't be renamed to something outside this project."
 msgstr ""
 
 #: collins/terminal.py:1199

@@ -255,6 +255,16 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   open it in a tab strip of its own, with a dot marking unsaved changes.
 - **Quick open** (`Ctrl+Shift+O`): fuzzy-find any file in the project by
   typing a few letters of its name or path — no digging through the tree.
+- **Rename** a file or folder from its right-click menu in the tree, with the
+  extension left out of the selection so typing replaces the name and keeps
+  the suffix. A renamed file that is open keeps its tab, its cursor and its
+  unsaved changes — the buffer follows the file rather than being reopened —
+  and so does everything open inside a renamed folder. Renaming only ever
+  renames in place: a name with a path in it is refused, as is one already
+  taken.
+- **Right-click a tab** for the bulk closes: *close other tabs*, *close tabs
+  to the right*, *close all tabs*. Anything with unsaved changes still asks
+  before it goes, one file at a time, and keeping one doesn't keep the rest.
 - An **Agent files** list pinned above the tree: the files this session's
   agent has most recently written or edited, newest first, one click from
   the change it just made. It appears the moment the agent first writes a

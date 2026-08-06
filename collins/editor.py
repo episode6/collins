@@ -60,6 +60,12 @@ class _OpenFile:
         self.gfile = gfile
         self.monitor: Gio.FileMonitor | None = None
         self.font_provider: Gtk.CssProvider | None = None
+        # Which load this buffer is waiting on, and where to put the cursor
+        # when it lands. Bumped per load so a superseded one (a rename that
+        # restarted it) can be told apart from the live one — see _start_load.
+        self.load_id = 0
+        self.loading = False
+        self.pending_cursor: list | None = None
 
 
 class EditorPane(Gtk.Box):
@@ -122,6 +128,7 @@ class EditorPane(Gtk.Box):
         self._tree = FileTree(self._root)
         self._tree.connect("open-file", lambda _t, path: self.open_file(path))
         self._tree.connect("add-to-chat", lambda _t, path: self.emit("add-to-chat", path, 0, 0))
+        self._tree.connect("rename-request", lambda _t, path, is_dir: self._prompt_rename(path, is_dir))
         left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         left.append(self._build_agent_files())
         left.append(self._tree)
@@ -133,6 +140,17 @@ class EditorPane(Gtk.Box):
         self._tab_view = Adw.TabView()
         self._tab_view.connect("close-page", self._on_tabview_close_page)
         self._tab_view.connect("notify::selected-page", lambda *_a: self._on_page_switched())
+        # Right-clicking a tab: the bulk closes, on top of the X each tab
+        # already carries. Which tab was clicked arrives through "setup-menu"
+        # — the same pattern as the window's session tabs (see
+        # MainWindow._on_tab_setup_menu).
+        self._menu_page: Adw.TabPage | None = None
+        tab_menu = Gio.Menu()
+        tab_menu.append(_("Close other tabs"), "editor.close-other-tabs")
+        tab_menu.append(_("Close tabs to the right"), "editor.close-tabs-to-the-right")
+        tab_menu.append(_("Close all tabs"), "editor.close-all-tabs")
+        self._tab_view.set_menu_model(tab_menu)
+        self._tab_view.connect("setup-menu", self._on_tab_setup_menu)
         tab_bar = Adw.TabBar(view=self._tab_view, autohide=False)
         self._tab_bar = tab_bar
         double_click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
@@ -175,6 +193,18 @@ class EditorPane(Gtk.Box):
         add_file = Gio.SimpleAction.new("add-file-to-chat", None)
         add_file.connect("activate", lambda *_a: self._add_menu_file_to_chat())
         actions.add_action(add_file)
+        # The tab context menu's bulk closes. Kept to hand so `setup-menu` can
+        # grey out the ones that would close nothing for the clicked tab.
+        self._tab_actions: dict[str, Gio.SimpleAction] = {}
+        for name, handler in (
+            ("close-other-tabs", self._close_other_tabs),
+            ("close-tabs-to-the-right", self._close_tabs_to_the_right),
+            ("close-all-tabs", self._close_all_tabs),
+        ):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda _a, _p, run=handler: run())
+            actions.add_action(action)
+            self._tab_actions[name] = action
         self.insert_action_group("editor", actions)
 
         # Appended by GtkTextView to every source view's built-in context
@@ -218,6 +248,134 @@ class EditorPane(Gtk.Box):
                 return widget.get_property("page")
             widget = widget.get_parent()
         return None
+
+    # -- tab context menu ----------------------------------------------------
+
+    def _on_tab_setup_menu(self, view: Adw.TabView, page: Adw.TabPage | None) -> None:
+        """The menu is opening on *page* — or closing, which is a None page
+        and leaves the stashed one alone: the action fires after the popover
+        is gone, and it still has to know which tab it was opened on.
+
+        An item that would close nothing is greyed out rather than left to be
+        a no-op click: with one file open, "close other tabs" has nothing to
+        act on, and neither has "close tabs to the right" on the last tab."""
+        if page is None:
+            return
+        self._menu_page = page
+        position = view.get_page_position(page)
+        n_pages = view.get_n_pages()
+        self._tab_actions["close-other-tabs"].set_enabled(n_pages > 1)
+        self._tab_actions["close-tabs-to-the-right"].set_enabled(position < n_pages - 1)
+
+    def _menu_target_page(self) -> Adw.TabPage | None:
+        """The tab the context menu was opened on, falling back to the visible
+        one — a page closed since the menu opened is no longer this view's."""
+        page = self._menu_page
+        if page is not None and page in self._page_key:
+            return page
+        return self._tab_view.get_selected_page()
+
+    def _close_other_tabs(self) -> None:
+        page = self._menu_target_page()
+        if page is not None:
+            self._tab_view.close_other_pages(page)
+
+    def _close_tabs_to_the_right(self) -> None:
+        page = self._menu_target_page()
+        if page is not None:
+            self._tab_view.close_pages_after(page)
+
+    def _close_all_tabs(self) -> None:
+        # Back to front, the way libadwaita's own bulk closes walk: a page
+        # that closes takes the positions above it with it, never one this
+        # loop still has to reach. Each close goes through close-page, so a
+        # file with unsaved changes still gets its own ask (and a Cancel
+        # there only keeps that one file, not the rest).
+        for position in reversed(range(self._tab_view.get_n_pages())):
+            self._tab_view.close_page(self._tab_view.get_nth_page(position))
+
+    # -- renaming --------------------------------------------------------------
+
+    def _prompt_rename(self, path: str, is_dir: bool) -> None:
+        """The file tree's "Rename…", asked and then carried out here: the
+        pane is what knows whether the thing being renamed is open in a tab."""
+        dialogs.rename_path_dialog(
+            self.get_root(),
+            Path(path).name,
+            is_dir,
+            lambda name: self._rename(path, name),
+        )
+
+    def _rename(self, path: str, new_name: str) -> None:
+        target, error = editorfiles.rename_target(self._root, path, new_name)
+        if error is not None:
+            self._notify(self._rename_error_message(Path(path).name, new_name.strip(), error))
+            return
+        if target is None:
+            return  # the name came back unchanged
+        try:
+            Path(path).rename(target)
+        except OSError as err:
+            self._notify(
+                _("Couldn't rename {name}: {message}").format(
+                    name=Path(path).name, message=err.strerror or str(err)
+                )
+            )
+            return
+        self._retarget_open(Path(path), target)
+        # The old path is now nothing: a directory renamed out from under the
+        # tree leaves its rows and its monitor watching a name that's gone.
+        self._tree.forget_dir(path)
+        self._tree.refresh_dir(target.parent)
+        self._tree.reveal(target)
+
+    def _rename_error_message(self, name: str, new_name: str, error) -> str:
+        RE = editorfiles.RenameError
+        if error is RE.EMPTY:
+            return _("A name is needed to rename {name}.").format(name=name)
+        if error is RE.NOT_A_NAME:
+            return _("“{new_name}” isn't a name — renaming can't move things elsewhere.").format(
+                new_name=new_name
+            )
+        if error is RE.EXISTS:
+            return _("“{new_name}” already exists here.").format(new_name=new_name)
+        if error is RE.MISSING:
+            return _("{name} is no longer there.").format(name=name)
+        return _("{name} can't be renamed to something outside this project.").format(name=name)
+
+    def _retarget_open(self, old: Path, new: Path) -> None:
+        """Follow a rename through the open tabs: the renamed file — or every
+        open file inside a renamed folder — keeps its buffer, its unsaved
+        changes and its place in the strip, now pointed at the new path.
+        Reopening it as a fresh tab instead would throw away edits that
+        haven't been saved yet."""
+        for key in list(self._pages):
+            moved = editorfiles.renamed_path(old, new, key)
+            if moved is None or moved == key:
+                continue
+            page = self._pages.pop(key)
+            self._pages[moved] = page
+            self._page_key[page] = moved
+            page.set_tooltip(moved)
+            opened = self._open.pop(key, None)
+            if opened is None:  # an image page: no buffer, nothing else to move
+                page.set_title(Path(moved).name)
+                continue
+            opened.path = Path(moved)
+            # The saver writes wherever the GtkSource.File points, so this is
+            # what keeps Ctrl+S from recreating the old name.
+            opened.gfile.set_location(Gio.File.new_for_path(moved))
+            if opened.loading:
+                # The load in flight is still opening the old path (the loader
+                # opens lazily), so it is already doomed: start it again from
+                # the new one, which supersedes it.
+                self._start_load(opened, opened.pending_cursor)
+            else:
+                opened.gfile.check_file_on_disk()
+                self._watch_external_changes(opened)
+            self._open[moved] = opened
+            page.set_title(("• " if opened.buffer.get_modified() else "") + opened.path.name)
+        self._sync_status()
 
     # -- add to chat ---------------------------------------------------------
 
@@ -405,15 +563,32 @@ class EditorPane(Gtk.Box):
         self._pages[key] = page
         self._page_key[page] = key
 
-        buffer.connect("modified-changed", self._on_modified_changed, key)
+        # Carries the _OpenFile, not the key it was opened under: a rename
+        # re-keys the page (see _retarget_open), and a handler holding the
+        # old path would stop finding the tab it titles.
+        buffer.connect("modified-changed", self._on_modified_changed, opened)
         buffer.connect("notify::cursor-position", lambda *_a: self._sync_status())
 
-        loader = GtkSource.FileLoader.new(buffer, gfile)
-        loader.load_async(
-            GLib.PRIORITY_DEFAULT, None, callback=self._on_loaded, user_data=(key, restore_cursor)
-        )
+        self._start_load(opened, restore_cursor)
 
         self._tab_view.set_selected_page(page)
+
+    def _start_load(self, opened: _OpenFile, restore_cursor: list | None) -> None:
+        """(Re)fill the buffer from wherever its `GtkSource.File` now points.
+
+        Carries the `_OpenFile` rather than the path it was opened under: a
+        rename re-keys the page while a big file is still loading, and a
+        completion holding the old path would find nothing to finish. The
+        loader opens its file lazily, so that rename also *breaks* the load in
+        flight — `_retarget_open` starts a fresh one, and `load_id` is what
+        makes the broken one's failure a no-op instead of a banner."""
+        opened.load_id += 1
+        opened.loading = True
+        opened.pending_cursor = restore_cursor
+        loader = GtkSource.FileLoader.new(opened.buffer, opened.gfile)
+        loader.load_async(
+            GLib.PRIORITY_DEFAULT, None, callback=self._on_loaded, user_data=(opened, opened.load_id)
+        )
 
     def _open_image_page(self, key: str, path: Path) -> None:
         """A read-only `Gtk.Picture` page — images never get a buffer
@@ -443,21 +618,31 @@ class EditorPane(Gtk.Box):
         self._tab_view.set_selected_page(page)
 
     def _on_loaded(self, loader: GtkSource.FileLoader, result: Gio.AsyncResult, data: tuple) -> None:
-        key, restore_cursor = data
-        opened = self._open.get(key)
+        opened, load_id = data
+        if load_id != opened.load_id:
+            return  # a newer load (a rename's) owns this buffer now
+        opened.loading = False
+        restore_cursor = opened.pending_cursor
+        # Looked up under the file's *current* path, since a rename may have
+        # moved it since the load started — and by identity, so a page closed
+        # and reopened meanwhile isn't mistaken for this one.
+        key = str(opened.path)
+        still_open = self._open.get(key) is opened
         try:
             loader.load_finish(result)
         except GLib.Error as err:
             self._notify(
-                _("Couldn't open {name}: {message}").format(name=Path(key).name, message=err.message)
+                _("Couldn't open {name}: {message}").format(
+                    name=opened.path.name, message=err.message
+                )
             )
-            if opened is not None:
+            if still_open:
                 page = self._pages.get(key)
                 if page is not None:
                     self._teardown_page(page, key)
                     self._tab_view.close_page(page)
             return
-        if opened is None:
+        if not still_open:
             return
         opened.buffer.set_modified(False)
         if restore_cursor:
@@ -555,6 +740,11 @@ class EditorPane(Gtk.Box):
     # -- external changes ----------------------------------------------------
 
     def _watch_external_changes(self, opened: _OpenFile) -> None:
+        # Idempotent: a file that gets re-watched (a rename, a restarted load)
+        # must not leave the monitor on its old path running.
+        if opened.monitor is not None:
+            opened.monitor.cancel()
+            opened.monitor = None
         try:
             monitor = Gio.File.new_for_path(str(opened.path)).monitor_file(Gio.FileMonitorFlags.NONE, None)
         except GLib.Error:
@@ -852,10 +1042,9 @@ class EditorPane(Gtk.Box):
         self._status_cursor.set_text(f"{it.get_line() + 1}:{it.get_line_offset() + 1}")
         self._save_btn.set_sensitive(opened.buffer.get_modified())
 
-    def _on_modified_changed(self, buffer: GtkSource.Buffer, key: str) -> None:
-        page = self._pages.get(key)
-        opened = self._open.get(key)
-        if page is not None and opened is not None:
+    def _on_modified_changed(self, buffer: GtkSource.Buffer, opened: _OpenFile) -> None:
+        page = self._pages.get(str(opened.path))
+        if page is not None:
             page.set_title(("• " if buffer.get_modified() else "") + opened.path.name)
         self._sync_status()
 
