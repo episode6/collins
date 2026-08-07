@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-06. Full change history: git log for this file.
 
 """GObject view-models. UI widgets bind to SessionItem properties, so
 renames, favorites and status changes propagate without list rebuilds."""
@@ -37,8 +37,8 @@ class SessionItem(GObject.Object):
     # A run finished and nobody has looked yet: set when the agent's output
     # runs out on its own (never when a tab closes or a detach is torn down),
     # cleared by returning to the session's tab — or, for the tab already on
-    # screen, by the next keystroke into its terminal. Paints the row's guide
-    # line green (see row.session-child.unread in app.py).
+    # screen, by the next keystroke into its terminal. Sets the row's guide
+    # line pulsing green (see row.session-child.unread in app.py).
     unread = GObject.Property(type=bool, default=False)
     # Conversation moved to a fork the store hasn't discovered yet (row is
     # kept visible but disabled until the fork's row can take its place).
