@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-06. Full change history: git log for this file.
 
 import os
 import shutil
@@ -267,17 +267,28 @@ def test_background_watch_dir():
 
 # -- is the agent's prompt free to type into? ---------------------------------
 #
-# The lines below are real Claude Code v2.1.220 screens, read back out of a VTE
-# terminal exactly as TerminalTab.takes_prompt reads them: the line the cursor
-# is on, and the column it sits at. The marker is a caret and U+00A0.
+# The lines below are real Claude Code screens (v2.1.220, and v2.1.223 for the
+# suggestions), read back out of a VTE terminal exactly as
+# TerminalTab.takes_prompt reads them: the line the cursor is on, the column it
+# sits at, and whether the rest of that line was drawn dim. The marker is a
+# caret and U+00A0.
 
 
 def test_claude_prompt_is_free_when_it_is_empty():
     claude = ClaudeProvider()
     # Freshly drawn: a dim suggestion sits in the empty input.
-    assert claude.takes_prompt('❯\xa0Try "create a util logging.py that..."', 2) is True
+    assert claude.takes_prompt('❯\xa0Try "create a util logging.py that..."', 2, True) is True
     # Just after a prompt was sent: no suggestion at all.
     assert claude.takes_prompt("❯\xa0", 2) is True
+
+
+def test_a_suggestion_written_for_the_session_is_still_an_empty_prompt():
+    """Once a session has some history the CLI stops offering `Try "…"` and
+    suggests something about the work at hand instead. It is ghost text just
+    the same — dim, and gone the moment anything is typed — and reading it as
+    the user's own is what greyed a resting session's prompt actions out."""
+    claude = ClaudeProvider()
+    assert claude.takes_prompt("❯\xa0close both PRs and delete the branches", 2, True) is True
 
 
 def test_claude_prompt_is_taken_once_anything_is_typed():
@@ -287,9 +298,19 @@ def test_claude_prompt_is_taken_once_anything_is_typed():
 
 
 def test_a_cursor_sent_home_over_typed_text_is_not_an_empty_prompt():
-    """Ctrl+A puts the cursor back at column 2 with the line still written;
-    what follows the marker is what gives it away."""
+    """Ctrl+A puts the cursor back at column 2 with the line still written.
+    Typed text is drawn in the plain foreground, so what saves this is the same
+    thing that lets a suggestion through: how the line was drawn, not where the
+    cursor ended up."""
     assert ClaudeProvider().takes_prompt("❯\xa0fix the flaky test", 2) is False
+
+
+def test_dim_text_somewhere_other_than_the_input_is_not_an_empty_prompt():
+    """The dimness only ever excuses a line that already opens like the input
+    box — a dim line under a permission prompt stays untypeable."""
+    claude = ClaudeProvider()
+    assert claude.takes_prompt("❯ 1. Yes, proceed", 2, True) is False
+    assert claude.takes_prompt("❯\xa0fix the flaky test", 20, True) is False
 
 
 def test_claudes_other_prompts_are_not_the_input():
