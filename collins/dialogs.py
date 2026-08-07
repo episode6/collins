@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-06. Full change history: git log for this file.
+# fork. Last modified: 2026-08-07. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -39,6 +39,19 @@ def rename_dialog(parent: Gtk.Widget, body: str, current: str, on_save: Callable
     # beats a grab from the entry's map: the dialog applies it as it presents,
     # so focus never bounces off the Save button on the way.
     dialog.set_focus(entry)
+
+    def select_all() -> bool:
+        # Selected, not just focused: the common rename types a whole new name
+        # over the old one, and the rarer small edit is still a click or an
+        # arrow key away. Selected end-to-start, so the cursor lands at 0 and a
+        # name too long for the entry shows its beginning, not its tail.
+        entry.select_region(len(current), 0)
+        return GLib.SOURCE_REMOVE
+
+    # The dialog focuses the entry as it maps, which selects everything with
+    # the cursor at the end; this has to run after that, and a low-priority
+    # idle off the entry's own map is what lands there (see rename_path_dialog).
+    entry.connect("map", lambda *_a: GLib.idle_add(select_all, priority=GLib.PRIORITY_LOW))
     dialog.add_response("cancel", _("Cancel"))
     dialog.add_response("save", _("Save"))
     dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
