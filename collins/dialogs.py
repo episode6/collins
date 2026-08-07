@@ -34,6 +34,11 @@ def rename_dialog(parent: Gtk.Widget, body: str, current: str, on_save: Callable
     entry = Gtk.Entry(text=current, placeholder_text=_("Custom name"))
     entry.set_activates_default(True)
     dialog.set_extra_child(entry)
+    # Otherwise the dialog focuses its default response, leaving the name one
+    # Tab away in a dialog that exists only to type a name into. set_focus
+    # beats a grab from the entry's map: the dialog applies it as it presents,
+    # so focus never bounces off the Save button on the way.
+    dialog.set_focus(entry)
     dialog.add_response("cancel", _("Cancel"))
     dialog.add_response("save", _("Save"))
     dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
