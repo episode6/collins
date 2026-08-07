@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-06. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -35,6 +35,9 @@ from .titles import scratch_project_dirname
 # space (an ordinary space is what its *other* prompts use), followed by the
 # suggestion it shows while nothing has been typed. See takes_prompt.
 _PROMPT_MARK = "❯ "
+# The one suggestion whose wording is fixed, kept as a second way to recognise
+# ghost text for a terminal that can't report how the line was drawn. Every
+# other suggestion is written for the session at hand and can say anything.
 _PROMPT_HINT = 'Try "'
 
 # Claude's own confirmation before it will leave a worktree session (with or
@@ -241,10 +244,15 @@ class Provider:
         terminal). Base agents can't auto-answer."""
         return None
 
-    def takes_prompt(self, cursor_line: str, cursor_column: int) -> bool:
+    def takes_prompt(
+        self, cursor_line: str, cursor_column: int, tail_is_dim: bool = False
+    ) -> bool:
         """Whether typing a prompt into the terminal right now would only ever
         land in an empty input box — evidence being the CLI's own screen, as the
-        terminal has it: the line the cursor is on, and where in it it sits.
+        terminal has it: the line the cursor is on, where in it it sits, and
+        whether everything from there to the end of the line is drawn dim (see
+        vtehtml.is_dim_run), which is how a CLI marks text as its own ghost
+        suggestion rather than the user's.
 
         Collins types into a terminal it doesn't otherwise speak for (the PR
         menu's "Address the CI errors"), so this is the check that keeps a
@@ -316,29 +324,40 @@ class ClaudeProvider(Provider):
         # never parse its contents; changes just wake up the status poller.
         return Path.home() / ".claude" / "jobs"
 
-    def takes_prompt(self, cursor_line: str, cursor_column: int) -> bool:
+    def takes_prompt(
+        self, cursor_line: str, cursor_column: int, tail_is_dim: bool = False
+    ) -> bool:
         """Claude Code's prompt, read off the screen.
 
         The CLI draws its input as ``❯`` and a no-break space, then whatever
-        has been typed; empty, it shows a dim ``Try "…"`` suggestion in that
-        space, or nothing at all just after a prompt was sent. Every other
-        thing it waits at — the trust dialog, a permission prompt — draws its
-        own marker (an indented ``❯ 1. Yes, …``, with an ordinary space), so
-        requiring this exact opening is what keeps a typed prompt from
-        answering a question nobody read.
+        has been typed; empty, it shows a suggestion in that space, or nothing
+        at all just after a prompt was sent. Every other thing it waits at —
+        the trust dialog, a permission prompt — draws its own marker (an
+        indented ``❯ 1. Yes, …``, with an ordinary space), so requiring this
+        exact opening is what keeps a typed prompt from answering a question
+        nobody read.
 
         The cursor is the second half of the test, and the half that catches a
         line still being written: on an empty input it sits immediately after
         the marker. That alone would be fooled by a cursor sent home over
         typed text (Ctrl+A), so what follows the marker has to look untyped
         as well.
+
+        "Untyped" is a question about how the line was *drawn*, not what it
+        says. The suggestion is ghost text — Tab fills it in, Enter sends
+        nothing — and the CLI prints it dim (``ESC[2m``) precisely to say so,
+        which the terminal reports as *tail_is_dim*. Only the oldest of these,
+        the ``Try "…"`` opener, is recognisable by its words; the rest are
+        written for the session at hand ("close both PRs and delete the
+        branches"), and reading those as typed text is what greyed a resting
+        session's prompt actions out.
         """
         if not cursor_line.startswith(_PROMPT_MARK):
             return False
         if cursor_column != len(_PROMPT_MARK):
             return False
         rest = cursor_line[len(_PROMPT_MARK) :].strip()
-        return not rest or rest.startswith(_PROMPT_HINT)
+        return not rest or tail_is_dim or rest.startswith(_PROMPT_HINT)
 
     def file_reference(
         self, path: str, cwd: str | None, start_line: int = 0, end_line: int = 0

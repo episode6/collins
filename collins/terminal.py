@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-05. Full change history: git log for this file.
+# fork. Last modified: 2026-08-06. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -31,6 +31,7 @@ from . import (  # noqa: E402
     prmenu,
     proctree,
     themes,
+    vtehtml,
 )
 from .copylabel import (  # noqa: E402
     copy_tooltip,
@@ -1082,6 +1083,10 @@ class TerminalTab(Gtk.Box):
         self.terminal.connect("bell", lambda *_: self.emit("bell"))
 
         self._easy_copy_paste = False
+        # The colour plain text is drawn in, once a theme has been applied;
+        # None while the terminal is following the system colours. Read when
+        # telling an agent's dim ghost text from typing (see _tail_is_dim).
+        self._terminal_fg: tuple[int, int, int] | None = None
         self._setup_context_menu()
         self._setup_image_drop()
 
@@ -1992,8 +1997,9 @@ class TerminalTab(Gtk.Box):
         """Whether a prompt sent right now would land in an empty input box.
 
         The provider reads that off the screen (see Provider.takes_prompt); all
-        this does is find what it reads — the line the cursor is on, and how
-        far into it the cursor sits — and rule out a terminal with no agent
+        this does is find what it reads — the line the cursor is on, how far
+        into it the cursor sits, and whether the rest of that line is the
+        agent's own dim ghost text — and rule out a terminal with no agent
         left in it.
         """
         if self._child_pid is None:
@@ -2003,7 +2009,27 @@ class TerminalTab(Gtk.Box):
             Vte.Format.TEXT, row, 0, row, self.terminal.get_column_count()
         )
         text = line[0] if isinstance(line, tuple) else line
-        return self.provider.takes_prompt(text or "", column)
+        # What the line says is enough to say yes to an empty input, and that
+        # is the answer nearly every time this is asked; only a line that reads
+        # as written-in is worth a second look at how it was drawn.
+        if self.provider.takes_prompt(text or "", column):
+            return True
+        return self.provider.takes_prompt(text or "", column, self._tail_is_dim(row, column))
+
+    def _tail_is_dim(self, row: int, column: int) -> bool:
+        """Whether the line from *column* to the end of *row* is drawn dim.
+
+        Read as HTML rather than text, because dim is a thing VTE draws, not a
+        thing the line says. The range has to start at the cursor for that to
+        come back at all — VTE folds the dim attribute into a colour only for
+        the run a range opens on (see vtehtml) — which suits the caller: the
+        cursor is exactly where an agent's ghost text begins.
+        """
+        html = self.terminal.get_text_range_format(
+            Vte.Format.HTML, row, column, row, self.terminal.get_column_count()
+        )
+        text = html[0] if isinstance(html, tuple) else html
+        return vtehtml.is_dim_run(text or "", self._terminal_fg)
 
     def prompt_block(self) -> str:
         """Why a prompt sent to this tab wouldn't land, or "" when it would.
@@ -2835,6 +2861,7 @@ class TerminalTab(Gtk.Box):
         except (TypeError, ValueError):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
+        self._terminal_fg = themes.terminal_foreground(settings.get("terminal_theme"))
         # The floating attach button can be turned off in preferences; the
         # provider gate (no file mention syntax = no button) still applies.
         self._attach_overlay_btn.set_visible(
