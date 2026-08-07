@@ -126,7 +126,8 @@ Enter opens, Esc closes.
 ## Custom names, favorites & emoji
 
 - Give any session a **custom name** (right-click → *Rename…*, or rename its
-  tab — the name syncs everywhere).
+  tab — the name syncs everywhere). The box opens on the name the session goes
+  by now, selected: type to replace it, or click in to fix a single word.
 - **Star** sessions to pin them to Favorites.
 - Add an **emoji** prefix to a tab (right-click a tab → *Set emoji…*, or
   `Ctrl+Shift+E` for a quick 😊 marker).

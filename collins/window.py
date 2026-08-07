@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-05. Full change history: git log for this file.
+# fork. Last modified: 2026-08-07. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -3485,7 +3485,17 @@ class MainWindow(Adw.ApplicationWindow):
             self._prompt_rename_session(session)
 
     def _prompt_rename_session(self, session: Session) -> None:
+        # Prefilled with the name the session goes by right now, whoever wrote
+        # it — a manual rename, an auto-title, the first words of the prompt —
+        # so a rename that only fixes a word doesn't start by retyping the
+        # rest. Saving an auto-title back untouched is the one case that gets
+        # dropped: it would copy the title into the manual slot, which is the
+        # slot that stops the session ever re-titling itself.
+        current = self.store.display_name(session)
+
         def save(name: str) -> None:
+            if name.strip() == current and not self.state.get_name(session.session_id):
+                return
             self.store.rename(session.session_id, name)
             page = self._page_for(session.session_id)
             if page is not None:
@@ -3494,7 +3504,7 @@ class MainWindow(Adw.ApplicationWindow):
         dialogs.rename_dialog(
             self,
             session.preview or session.session_id,
-            self.state.get_name(session.session_id) or "",
+            current,
             save,
         )
 
