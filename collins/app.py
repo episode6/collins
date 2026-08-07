@@ -129,8 +129,9 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
    drawn as an outlined card with a left guide line; what a running one adds
    is a full-strength title (every other row's dims), and (for a detached one)
    a status color on that line. Every idle row keeps this same box with its
-   borders turned transparent (see the :not(.running):not(.detached) rule
-   below), so the border box is identical in every status and a row never
+   borders turned transparent -- all but the red guide line of an interrupted
+   one (see the :not(.running):not(.detached) rules below) -- so the border
+   box is identical in every status and a row never
    shifts or resizes as its status changes; the selected tab's row is the one
    exception, and it changes only horizontally (see .active-tab below).
    The left indent is a widget margin set in sidebar.py, not a CSS margin
@@ -251,7 +252,10 @@ row.session-child.detached { border-left-color: #e5a50a; }
    a /bg row whose transcript ends in an interruption is a reachable
    combination, not a hypothetical. The .busy pole rule still beats it (one
    more class on its selector) for the same reason it beats unread: a
-   resumed session should move, not sit on a stale interruption. */
+   resumed session should move, not sit on a stale interruption.
+   It is also the only one of these colors an idle row keeps: the rule below
+   takes the card and the line off a row with nothing going on, and carves
+   this one out. */
 row.session-child.interrupted { border-left-color: #e01b24; }
 
 /* nothing going on: no tab open, and not running detached either. Those rows
@@ -263,14 +267,21 @@ row.session-child.interrupted { border-left-color: #e01b24; }
    no row changes size as a session starts, stops or is handed to the
    background.
 
-   Last of the border rules and more specific than any of them, so the guide
-   line goes with the outline: the status colors above all speak for a session
-   that is doing something, and an idle row is not. An interrupted one says so
-   in red while its tab is open, and goes quiet with the rest of the list once
-   the tab is gone. The other two never reach an idle row anyway -- .detached
-   is a running status by definition, and window._sync_status drops .unread
-   from any row whose tab is gone -- and .busy only paints alongside .running,
-   so the barber pole below stays out of this too.
+   Two rules, because the guide line is not part of the card here. The box
+   goes in the first: three sides, named one at a time rather than through the
+   border-color shorthand, which would take the left with them. The line goes
+   in the second, and only for a row with nothing to say on it -- an
+   interrupted session keeps its red whether or not a tab is open, since being
+   stopped mid-task outlives the tab it was stopped in and is the one thing an
+   otherwise idle row still needs to flag. The other two line colors above
+   never reach an idle row anyway (.detached is a running status by
+   definition, and window._sync_status drops .unread from any row whose tab is
+   gone), and .busy only paints alongside .running, so the barber pole below
+   stays out of this too.
+
+   Both rules are more specific than every border rule above, so order among
+   them doesn't matter -- but the red itself is still set once, up at
+   .interrupted, and simply left standing here.
 
    The stand-in row under an empty project (see NewThreadRow) falls in here
    for free: it stands for no session, so it carries no status class, and an
@@ -280,7 +291,12 @@ row.session-child.interrupted { border-left-color: #e01b24; }
    the card back in around it, which would read as the row changing rather
    than as the pointer arriving. */
 row.session-child:not(.running):not(.detached) {
-  border-color: transparent;
+  border-top-color: transparent;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+}
+row.session-child:not(.running):not(.detached):not(.interrupted) {
+  border-left-color: transparent;
 }
 
 /* An agent producing output right now (see activity.py) turns its row's guide
