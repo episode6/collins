@@ -2619,7 +2619,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.store.set_status(row_id, status)
             # Unread means "a finished run waits in this session's tab" — a
             # row whose tab is gone (closed, or handed to the background) has
-            # no tab to return to, so the green flag has nothing left to say
+            # no tab to return to, so the pulsing flag has nothing left to say
             # and must not outlive the tab it spoke for.
             if status not in ("open", "attention"):
                 self.store.set_unread(row_id, False)

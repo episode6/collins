@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-05. Full change history: git log for this file.
+# fork. Last modified: 2026-08-06. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -77,13 +77,14 @@ _IN_TAB_STATUSES = ("open", "attention")
 # nothing. Only tab sessions ever get it — a detached (/bg) row has no
 # activity source and keeps its still yellow line.
 _BUSY_CSS = "busy"
-# A finished run nobody has looked at yet: paints the guide line green until
-# the user returns to the session's tab (see SessionItem.unread). A tab-only
-# signal: window._sync_status drops the flag from any row whose tab is gone,
-# and the detached yellow outranks it in CSS besides, so a backgrounded
-# session never reads green. The busy pole outranks it too, so a session that
-# starts a new turn unread moves again and shows green once more when that
-# turn also runs out.
+# A finished run nobody has looked at yet: sets the guide line pulsing slowly
+# in green until the user returns to the session's tab (see
+# SessionItem.unread).
+# A tab-only signal: window._sync_status drops the flag from any row whose tab
+# is gone, and the detached yellow outranks it in CSS besides, so a
+# backgrounded session never pulses. The busy pole outranks it too, so a
+# session that starts a new turn unread moves again and goes back to pulsing
+# when that turn also runs out.
 _UNREAD_CSS = "unread"
 # The user stopped Claude mid-task and nothing has happened since (see
 # sessions.py's transcript scan): paints the guide line red, the same channel

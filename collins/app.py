@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-05. Full change history: git log for this file.
+# fork. Last modified: 2026-08-06. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -200,11 +200,39 @@ row.session-child:not(.running) .session-title {
   opacity: 0.55;
 }
 /* a finished run nobody has looked at yet (see SessionItem.unread): the guide
-   line holds solid green -- the run is done and its result is waiting --
-   until the user returns to the tab. Beaten by the .busy pole rule (its
-   selector carries one more class), so a session sent straight back to work
-   moves again instead of sitting on a stale flag. */
+   line breathes green -- the run is done and its result is waiting -- until
+   the user returns to the tab. It held that green still until the pull
+   request marks arrived beside the titles, where the checks-passed glyph is
+   green too: a still line an inch away from a still glyph of the same hue
+   reads as more of the same chrome, so the flag now says "look here" by
+   moving. Nothing else in a row moves slowly, which is the whole signal.
+
+   Two rules, and the split is load-bearing. The color alone sits on the plain
+   .unread selector, where the .detached and .interrupted rules below still
+   outrank it on source order, exactly as they did when it was still. The
+   animation cannot ride along: an animated property beats every normal
+   declaration in the cascade, so keyframes on that selector would repaint the
+   line green right over the yellow and red those rules set. The pulse is
+   therefore fenced off from all three of the statuses that outrank it --
+   .busy (whose barber pole would also lose its own animation to this one,
+   the selector being more specific) and the two colors below.
+
+   The pulse is slow where the busy pole is fast, so the two never read as the
+   same signal: blue stripes climbing means an agent is working, one green
+   line breathing means it stopped and left something for you. GTK stops CSS
+   animation when the desktop's animations are off, which leaves the still
+   #2ec27e of the first rule -- the old solid green, the reduced-motion
+   fallback for free, and the reason the color does not live in the
+   keyframes. */
+@keyframes unread-pulse {
+  0%   { border-left-color: #26a269; }
+  50%  { border-left-color: #8ff0a4; }
+  100% { border-left-color: #26a269; }
+}
 row.session-child.unread { border-left-color: #2ec27e; }
+row.session-child.unread:not(.busy):not(.detached):not(.interrupted) {
+  animation: unread-pulse 3s ease-in-out infinite;
+}
 
 /* running detached (/bg): the one status the guide line still speaks for.
    Below the .unread rule so yellow wins the line: a detached session is
