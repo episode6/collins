@@ -70,7 +70,9 @@ def is_dim_run(html: str, foreground: tuple[int, int, int] | None = None) -> boo
 def _is_scaled_down(rgb: tuple[int, ...], foreground: tuple[int, int, int]) -> bool:
     """Whether *rgb* is *foreground* with every channel scaled by one factor."""
     factors = []
-    for drawn, plain in zip(rgb, foreground):
+    # Both are three channels: the colour came out of a six-digit hex, and a
+    # foreground that isn't RGB is a caller's bug, not something to paper over.
+    for drawn, plain in zip(rgb, foreground, strict=True):
         if plain == 0:
             if drawn:  # nothing dims *out of* an empty channel
                 return False
