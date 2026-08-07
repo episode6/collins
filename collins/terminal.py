@@ -68,6 +68,11 @@ from .transcript import TranscriptModel  # noqa: E402
 _TRANSCRIPT_DEBOUNCE_MS = 400
 _PROMPT_POLL_MS = 1000  # backstop poll for detecting the agent's prompts
 _CWD_POLL_MS = 2000  # footer refresh; only ticks while the tab is visible
+# How many consecutive cwd polls a new working directory has to survive before
+# the editor follows it (see _maybe_follow_editor). Two is enough to ride out
+# the flap around a CLI starting, exiting or being forked, and still lands
+# inside the pause after a worktree is entered.
+_EDITOR_FOLLOW_TICKS = 2
 # How long an injected prompt is left sitting in the input before the Return
 # that sends it (see inject_prompt). Long enough that the CLI has stopped
 # reading the text as a paste, short enough that nobody watching sees a pause.
@@ -332,10 +337,12 @@ class _RootNameLinks:
 
     The root lives on the ancestor TerminalTab, which isn't an ancestor yet
     while either terminal kind is being constructed — so the tag is built on
-    first map and the root never re-resolved (a tab's root is fixed for
-    life; panel bottom↔right swaps re-map without reparenting tabs). A
-    directory monitor keeps the alternation honest: on changes the names
-    are re-listed and the tag swapped only when the set really changed.
+    first map and not re-resolved on later ones (panel bottom↔right swaps
+    re-map without reparenting tabs). The tab does push a new root in when
+    its editor follows the session's working directory somewhere else, which
+    is the only way this moves (`set_root`). A directory monitor keeps the
+    alternation honest: on changes the names are re-listed and the tag
+    swapped only when the set really changed.
     Change events coalesce on a 500ms timer armed by the first one — a
     leading-edge throttle, deliberately not a trailing-edge debounce, so an
     agent churning root files steadily can't starve the refresh; a rebuild
@@ -349,6 +356,7 @@ class _RootNameLinks:
     def __init__(self, terminal: Vte.Terminal, tag_kinds: dict[int, str]) -> None:
         self._terminal = terminal
         self._tag_kinds = tag_kinds
+        self._tab: TerminalTab | None = None
         self._root: str | None = None
         self._names: frozenset[str] | None = None
         self._tag: int | None = None
@@ -363,7 +371,24 @@ class _RootNameLinks:
         tab = self._terminal.get_ancestor(TerminalTab)
         if tab is None:
             return
-        self._root = tab.link_root
+        self._tab = tab
+        tab.register_root_name_links(self)
+        self._rebuild(tab.link_root)
+
+    def set_root(self, root: str) -> None:
+        """Re-point at a different project root — the tab's editor followed the
+        session's working directory somewhere new. Only ever called after the
+        first map, so a root of None here means this instance never resolved a
+        tab at all and has nothing to re-point."""
+        if self._root is None or root == self._root:
+            return
+        self._rebuild(root)
+
+    def _rebuild(self, root: str) -> None:
+        if self._monitor is not None:
+            self._monitor.cancel()
+            self._monitor = None
+        self._root = root
         self._apply()
         try:
             self._monitor = Gio.File.new_for_path(self._root).monitor_directory(
@@ -412,6 +437,9 @@ class _RootNameLinks:
             return frozenset()
 
     def _on_destroy(self, _terminal: Vte.Terminal) -> None:
+        if self._tab is not None:
+            self._tab.unregister_root_name_links(self)
+            self._tab = None
         if self._monitor is not None:
             self._monitor.cancel()
             self._monitor = None
@@ -1070,6 +1098,12 @@ class TerminalTab(Gtk.Box):
         self._current_question_id: str | None = None  # question the card is showing
         self._handled_question_id: str | None = None  # answered/dismissed; don't reshow
         self._card: Gtk.Widget | None = None
+        # Every _RootNameLinks watching a terminal inside this tab — the agent's
+        # and one per panel shell — so a re-root can re-point them all. They
+        # register themselves the first time they map, which is after this
+        # constructor returns; it exists this early only so the _setup_links
+        # calls below can never race it.
+        self._root_name_links: list[_RootNameLinks] = []
 
         self.terminal = Vte.Terminal()
         self.terminal.set_scrollback_lines(10_000)
@@ -1205,6 +1239,14 @@ class TerminalTab(Gtk.Box):
                 "request-pop-out", lambda *_: self.emit("editor-pop-out-requested")
             )
             self._editor.connect("add-to-chat", self._on_editor_add_to_chat)
+            self._editor.connect("root-changed", self._on_editor_root_changed)
+        # Following the agent's working directory (see _maybe_follow_editor):
+        # the cwd it has to hold still at, how many polls it has held it for,
+        # and the last one already acted on — offered and declined counts as
+        # acted on, so a banner ignored doesn't come back every two seconds.
+        self._editor_follow_pending: str | None = None
+        self._editor_follow_ticks = 0
+        self._editor_follow_settled: str | None = None
         self._outer.connect("notify::position", lambda *_: self._remember_editor_width())
         self.append(self._outer)
 
@@ -1565,6 +1607,7 @@ class TerminalTab(Gtk.Box):
 
     def _refresh_cwd_label(self) -> None:
         cwd = self.current_agent_cwd()
+        self._maybe_follow_editor(cwd)
         if cwd != self._footer_cwd:
             self._footer_cwd = cwd
             self._cwd_label.set_text(display_path(cwd) if cwd else "")
@@ -1579,6 +1622,64 @@ class TerminalTab(Gtk.Box):
             # any of them; it only makes the button worth pressing again.
             self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
+
+    def _maybe_follow_editor(self, cwd: str | None) -> None:
+        """Keep the editor pointed at wherever the agent is actually working.
+
+        Rides the footer's cwd poll rather than adding one of its own — the
+        value is already in hand — but acts on far less of it: the agent's cwd
+        is read from a live process tree, and it flaps. A worktree launch moves
+        it before the first prompt; a restarted background job forks a fresh
+        process at the old directory; between the CLI exiting and the shell
+        being read the fallback answer is the directory the tab started in. So
+        a new directory has to hold still across consecutive polls before it
+        counts as a move, and each settled answer is acted on exactly once —
+        an offer the user ignored must not come back every two seconds.
+
+        Where the agent went decides how far this goes: still inside the same
+        project (a worktree, most often) and the editor simply follows;
+        anywhere else and it only offers. See `editorfiles.follow_scope`."""
+        if self._editor is None:
+            return
+        root = str(self._editor.root)
+        if cwd != self._editor_follow_pending:
+            self._editor_follow_pending = cwd
+            self._editor_follow_ticks = 1
+            return
+        self._editor_follow_ticks += 1
+        if self._editor_follow_ticks < _EDITOR_FOLLOW_TICKS or cwd == self._editor_follow_settled:
+            return
+        scope = editorfiles.follow_scope(root, cwd)
+        if scope is editorfiles.FollowScope.NONE:
+            # Back where it already was — including the fallback the tab
+            # started at, which is how leaving a worktree usually reads.
+            self._editor_follow_settled = None
+            return
+        self._editor_follow_settled = cwd
+        if scope is editorfiles.FollowScope.AUTO:
+            self._editor.request_root(cwd)
+        else:
+            self._editor.offer_root(cwd)
+
+    def register_root_name_links(self, links: _RootNameLinks) -> None:
+        """Called by a `_RootNameLinks` the first time it resolves this tab, so
+        a later re-root can reach every one of them — the agent terminal's and
+        one per shell in the panel."""
+        if links not in self._root_name_links:
+            self._root_name_links.append(links)
+
+    def unregister_root_name_links(self, links: _RootNameLinks) -> None:
+        if links in self._root_name_links:
+            self._root_name_links.remove(links)
+
+    def _on_editor_root_changed(self, _pane, root: str) -> None:
+        """The editor moved to a new project directory: everything else in the
+        tab that was rooted at the old one moves with it — bare root-name link
+        matching, and the fallback the click-time path resolver and quick open
+        read (`link_root`)."""
+        self.link_root = root
+        for links in list(self._root_name_links):
+            links.set_root(root)
 
     def _sync_footer_seps(self) -> None:
         """Show only the dividers that separate two visible chips.

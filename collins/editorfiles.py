@@ -1,8 +1,9 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
 """GTK-free helpers for the editor panel: language guessing, open guards,
-directory listing, and the rename/paste rules the file tree's context menus
-act on.
+directory listing, the rename/paste rules the file tree's context menus act
+on, and the rules for following the session's working directory when it moves
+(`follow_scope` / `plan_reroot`).
 
 Kept GTK-free (like gitinfo.py/projecticons.py) so this stays unit-testable
 headless; editor.py, filetree.py and fileclipboard.py own turning these into
@@ -12,11 +13,14 @@ widgets, clipboard payloads and GtkSource calls.
 from __future__ import annotations
 
 import enum
+import os
 import shutil
 import urllib.parse
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+
+from .sessions import worktree_project_root
 
 # Skipped wherever a directory is listed or expanded: build output,
 # dependency trees, and VCS internals nobody wants cluttering a "look at
@@ -74,6 +78,23 @@ class RenameError(enum.Enum):
     EXISTS = "exists"
     MISSING = "missing"  # what's being renamed is already gone
     OUTSIDE = "outside"
+
+
+class FollowScope(enum.Enum):
+    """How the editor should react to the session's working directory moving
+    somewhere new (see `follow_scope`)."""
+
+    NONE = "none"  # not a move: same place, or nowhere worth following
+    AUTO = "auto"  # still the same project — re-root without asking
+    OFFER = "offer"  # somewhere else entirely — offer it, don't take it
+
+
+class RerootAction(enum.Enum):
+    """What happens to one open file when the editor re-roots."""
+
+    FOLLOW = "follow"  # the tab moves to the new root's copy, unsaved edits intact
+    RELOAD = "reload"  # the tab moves to the new root's copy as it is on disk
+    LEAVE = "leave"  # the tab stays on the file it was already showing
 
 
 class PasteError(enum.Enum):
@@ -400,6 +421,125 @@ def renamed_path(old: str | Path, new: str | Path, path: str | Path) -> str | No
     except ValueError:
         return None
     return str(new / relative)
+
+
+# -- following the session's working directory -----------------------------
+
+
+def repository_root(path: str | Path) -> str | None:
+    """The top of the git repository *path* sits in, or None when it is in
+    none. A couple of stat calls rather than a `git` process, and `.git` may
+    be a directory (a checkout) or a pointer file (a worktree, a submodule) —
+    either one tops the search out."""
+    try:
+        start = Path(path)
+        for directory in (start, *start.parents):
+            if (directory / ".git").exists():
+                return str(directory)
+    except OSError:
+        return None
+    return None
+
+
+def follow_scope(root: str | Path, cwd: str | None) -> FollowScope:
+    """Whether an editor rooted at *root* should move to *cwd*.
+
+    The session's agent moves on its own — into a Claude worktree under the
+    repository (`<repo>/.claude/worktrees/<name>`), back out of one, or down
+    into a subdirectory — and the editor is meant to be showing whatever the
+    agent is working on. Anywhere inside the same repository is that same
+    project seen from a different angle, so it is followed silently (AUTO);
+    `.claude` being a dotfile makes the worktree case the one that matters
+    most, since the file tree hides it outright from the repository root.
+
+    Anywhere *else* is a different project, and re-rooting there would
+    silently swap out every open file. That is offered, never taken (OFFER).
+    """
+    if not cwd:
+        return FollowScope.NONE
+    try:
+        if not Path(cwd).is_dir():
+            return FollowScope.NONE
+        if os.path.realpath(cwd) == os.path.realpath(root):
+            return FollowScope.NONE
+    except OSError:
+        return FollowScope.NONE
+    # The boundary is the repository, not wherever the pane happens to be
+    # rooted at this moment — an editor that already followed the agent down
+    # into a worktree or a subdirectory has to be able to follow it back out
+    # again, and comparing against its current root would read that as leaving
+    # the project. A Claude worktree names its repository outright; anything
+    # else walks up to the enclosing checkout, and a directory in no
+    # repository at all is its own boundary.
+    project = worktree_project_root(str(root)) or repository_root(root) or str(root)
+    return FollowScope.AUTO if is_inside(project, cwd) else FollowScope.OFFER
+
+
+@dataclass(frozen=True)
+class RerootEntry:
+    """One open file's fate in a re-root. `target` is the counterpart the tab
+    would move to, None when there is nothing to move to."""
+
+    path: str
+    target: str | None
+    dirty: bool
+    default: RerootAction
+
+    @property
+    def needs_asking(self) -> bool:
+        """Whether only the user can settle this one: two real files, both
+        with content worth keeping — the buffer's unsaved edits here, and
+        whatever the new root's copy holds there."""
+        return self.dirty and self.target is not None
+
+
+def plan_reroot(
+    old_root: str | Path,
+    new_root: str | Path,
+    open_paths: list[str],
+    dirty_paths: set[str] | frozenset[str] = frozenset(),
+) -> list[RerootEntry]:
+    """What should become of each open file when the editor moves from
+    *old_root* to *new_root*, in the order given.
+
+    A file open from inside *old_root* has a counterpart at the same
+    project-relative path under *new_root* — usually the same source file on a
+    different branch, the session having stepped into a worktree — and that is
+    what the editor follows. A file with no counterpart there, or one that was
+    never inside *old_root* to begin with, has nowhere to go and stays put:
+    leaving it open costs nothing and loses nothing, and its own on-disk
+    monitor goes on working from outside the tree.
+
+    Defaults are the answer that can't destroy anything. A clean buffer takes
+    the new root's copy (RELOAD) — there was nothing of the user's in it to
+    lose. A dirty one stays where it is (LEAVE), because the edits were made
+    against *this* file and this is where saving them belongs; following them
+    across is a real choice, and the entries flagged `needs_asking` are
+    exactly the ones the user gets asked about."""
+    old_root, new_root = Path(old_root), Path(new_root)
+    entries: list[RerootEntry] = []
+    for path in open_paths:
+        dirty = path in dirty_paths
+        moved = renamed_path(old_root, new_root, path)
+        if moved is None or moved == path or not _is_file(Path(moved)):
+            entries.append(RerootEntry(path, None, dirty, RerootAction.LEAVE))
+            continue
+        entries.append(
+            RerootEntry(
+                path,
+                moved,
+                dirty,
+                RerootAction.LEAVE if dirty else RerootAction.RELOAD,
+            )
+        )
+    return entries
+
+
+def _is_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
 
 
 def _exists(path: Path) -> bool:

@@ -203,6 +203,11 @@ class FileTree(Gtk.Box):
 
     def _debounced_refresh(self, path: Path, store: Gio.ListStore, pending: dict) -> bool:
         pending["queued"] = False
+        # A store the tree has since dropped — the directory was renamed away,
+        # or the whole tree was re-rooted (`set_root`) — is no longer in the
+        # model, and re-listing it would only put its key back in `_stores`.
+        if self._stores.get(str(path)) is not store:
+            return GLib.SOURCE_REMOVE
         self._fill_store(store, path)
         return GLib.SOURCE_REMOVE
 
@@ -233,6 +238,33 @@ class FileTree(Gtk.Box):
         store = self._stores.get(str(path))
         if store is not None:
             self._fill_store(store, Path(path))
+
+    @property
+    def root(self) -> Path:
+        return self._root
+
+    def set_root(self, root: str | Path) -> None:
+        """Point the whole tree at a different directory: every monitor is
+        cancelled, every remembered store dropped, and the root row list built
+        again from scratch.
+
+        Expansion state is deliberately *not* carried over. The rows are of a
+        different directory tree now — matching them up by name would expand
+        paths the user never opened here — and the tree is small enough that
+        re-expanding is cheaper than getting that wrong. Whoever re-roots is
+        expected to `reveal` whatever should be showing afterwards."""
+        new_root = Path(root)
+        if new_root == self._root:
+            return
+        for monitor in self._monitors.values():
+            monitor.cancel()
+        self._monitors.clear()
+        self._stores.clear()
+        self._root = new_root
+        self._menu_dir = new_root
+        # Re-listing the root store empties the model of every old row, and a
+        # TreeListModel drops the child models built for them along with it.
+        self._fill_store(self._root_store, self._root)
 
     def reveal(self, path: str | Path) -> None:
         """Expand the directories above *path* and select its row (without
