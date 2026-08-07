@@ -475,9 +475,19 @@ class PreferencesDialog(Adw.Dialog):
         self._stack.add_named(page, "settings")
         self._stack.add_named(self._no_results, "no-results")
 
-        search_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        search_bar.add_css_class("toolbar")
-        search_bar.append(self._search_entry)
+        # The box lines up with the setting rows rather than running the full
+        # width of the dialog. Reproducing that inset takes the same clamp the
+        # page uses, not a fixed margin: Adw.Clamp eases the gap open between
+        # its tightening threshold and its maximum, so the rows sit 12px in at
+        # 360px wide and 54px in at 640px. Same two numbers, same 12px margin
+        # on the clamped child, and the two agree at every width.
+        self._search_entry.set_margin_start(12)
+        self._search_entry.set_margin_end(12)
+        self._search_entry.set_margin_top(6)
+        self._search_entry.set_margin_bottom(6)
+        search_bar = Adw.Clamp(
+            child=self._search_entry, maximum_size=600, tightening_threshold=400
+        )
 
         toolbar_view = Adw.ToolbarView(content=self._stack)
         toolbar_view.add_top_bar(Adw.HeaderBar())
