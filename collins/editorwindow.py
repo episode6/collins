@@ -13,6 +13,8 @@ button, the WM close button, or the tab's footer icon) docks it back.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -77,6 +79,13 @@ class EditorWindow(Adw.ApplicationWindow):
         self._toolbar.set_content(pane)
         self.set_content(self._toolbar)
 
+        # The pane can re-root while it lives here — its session stepped into a
+        # worktree, and the editor followed — and this window is titled after
+        # the project the pane is showing.
+        self._root_handler = pane.connect(
+            "root-changed", lambda _pane, root: self.set_title(Path(root).name)
+        )
+
         self._geometry_save_source: int | None = None
         for prop in ("default-width", "default-height", "maximized"):
             self.connect(f"notify::{prop}", self._schedule_save_geometry)
@@ -100,6 +109,9 @@ class EditorWindow(Adw.ApplicationWindow):
             return
         pane = self._pane
         self._pane = None
+        # The pane outlives this window — it is going back into its tab, where
+        # the tab's own handler keeps everything else in step.
+        pane.disconnect(self._root_handler)
         if self._geometry_save_source is not None:
             GLib.source_remove(self._geometry_save_source)
         self._save_geometry()

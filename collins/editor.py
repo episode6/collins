@@ -84,6 +84,11 @@ class EditorPane(Gtk.Box):
         # TerminalTab._on_editor_add_to_chat); the pane deliberately knows
         # nothing about any agent's syntax.
         "add-to-chat": (GObject.SignalFlags.RUN_FIRST, None, (str, int, int)),
+        # The pane is now rooted at a different project directory, having
+        # followed the session's working directory somewhere new. Payload is
+        # the new root; the tab re-points what it roots at the editor (bare
+        # root-name links, quick open) and a popped-out window re-titles.
+        "root-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(self, root: str | Path) -> None:
@@ -97,6 +102,7 @@ class EditorPane(Gtk.Box):
         self._show_line_numbers = True
         self._font = ""
         self._banner_click_id: int | None = None
+        self._reroot_asking = False  # the follow-the-working-directory dialog is up
         self._active_search_context: GtkSource.SearchContext | None = None
         self._last_match: tuple[int, int] | None = None  # (start, end) char offsets
 
@@ -908,6 +914,114 @@ class EditorPane(Gtk.Box):
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(rescroll, priority=GLib.PRIORITY_LOW)
+
+    # -- following the session's working directory ------------------------------
+
+    def request_root(self, root: str | Path) -> None:
+        """Re-root the pane at *root*: the file tree, the guard on what may be
+        opened here, and the root quick open searches all move with it.
+
+        Open tabs come across too, each landing on the same project-relative
+        path under the new root — but never at the cost of unsaved work.
+        Buffers that are dirty *and* have a counterpart over there are put to
+        the user first (`dialogs.follow_working_dir_dialog`), and declining
+        there calls the whole move off, tree included. Everything else
+        `plan_reroot` already has a safe answer for."""
+        new_root = Path(root)
+        if new_root == self._root or self._reroot_asking:
+            return
+        try:
+            if not new_root.is_dir():
+                return
+        except OSError:
+            return
+        old_root = self._root
+        entries = editorfiles.plan_reroot(
+            old_root, new_root, list(self._pages), self._dirty_paths()
+        )
+        defaults = {entry.path: entry.default for entry in entries}
+        asking = [entry for entry in entries if entry.needs_asking]
+        if not asking:
+            self._apply_reroot(new_root, defaults)
+            return
+
+        answered = {"move": False}
+
+        def move(choices: dict) -> None:
+            answered["move"] = True
+            # The pane may have moved again (or the tab been closed) while the
+            # dialog sat open. Re-planning would be answering a question the
+            # user was never shown, so a move that is no longer the one asked
+            # about is simply dropped.
+            if self._root != old_root:
+                return
+            self._apply_reroot(new_root, {**defaults, **choices})
+
+        def done() -> None:
+            self._reroot_asking = False
+            # Declining means "not now", not "never": the banner leaves the
+            # move one click away without the poll asking again, which it
+            # won't — a settled working directory is acted on exactly once.
+            if not answered["move"] and self._root == old_root:
+                self.offer_root(str(new_root))
+
+        self._reroot_asking = True
+        dialogs.follow_working_dir_dialog(
+            self.get_root(), str(old_root), str(new_root), asking, move, done
+        )
+
+    def offer_root(self, root: str) -> None:
+        """Offer a move the pane won't make on its own — the session working
+        somewhere outside the project this editor belongs to, where re-rooting
+        would swap out every open file (see `editorfiles.follow_scope`).
+        Ignoring the banner is a real answer, so nothing expires it."""
+        self._show_banner(
+            _("Session moved to {name}").format(name=Path(root).name),
+            _("Follow"),
+            lambda: self.request_root(root),
+        )
+
+    def _dirty_paths(self) -> set[str]:
+        return {key for key, opened in self._open.items() if opened.buffer.get_modified()}
+
+    def _apply_reroot(self, new_root: Path, decisions: dict) -> None:
+        RA = editorfiles.RerootAction
+        old_root = self._root
+        self._root = Path(new_root)
+        self._tree.set_root(self._root)
+        # Whatever the banner was saying belonged to the old root — a file that
+        # changed on disk over there, or the offer that got us here.
+        self._banner.set_revealed(False)
+        for path, action in decisions.items():
+            if action is RA.LEAVE:
+                continue
+            page = self._pages.get(path)
+            if page is None:
+                continue  # closed while the dialog was open
+            target = editorfiles.renamed_path(old_root, self._root, path)
+            if target is None or target == path:
+                continue
+            opened = self._open.get(path)
+            if opened is None:
+                # An image page: its texture was decoded from the old file and
+                # can't be re-pointed, so it is closed and opened again. It
+                # lands at the end of the strip — the one thing about a page a
+                # re-root doesn't keep.
+                self._tab_view.close_page(page)
+                self.open_file(target)
+                continue
+            # Same machinery a rename uses: the buffer, its unsaved changes and
+            # its place in the strip stay put; only the file underneath moves.
+            self._retarget_open(Path(path), Path(target))
+            if action is RA.RELOAD:
+                moved = self._open.get(target)
+                if moved is not None:
+                    self._reload_from_disk(moved)
+        active = self._selected_key()
+        if active and editorfiles.is_inside(self._root, active):
+            self._tree.reveal(active)
+        self._sync_status()
+        self.emit("root-changed", str(self._root))
 
     # -- notices ---------------------------------------------------------------
 

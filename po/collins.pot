@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-05. Full change history: git log for this file.
+# fork. Last modified: 2026-08-06. Full change history: git log for this file.
 
 # SOME DESCRIPTIVE TITLE.
 # Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
@@ -1685,4 +1685,63 @@ msgstr ""
 
 #: collins/lightbox.py:108
 msgid "Zoom in"
+msgstr ""
+
+#: collins/dialogs.py:112
+#, python-brace-format
+msgid "Move editor to {name}?"
+msgstr ""
+
+#: collins/dialogs.py:113
+#, python-brace-format
+msgid ""
+"This session is now working in {path}. One open file has unsaved changes and "
+"also exists there — choose what happens to it."
+msgid_plural ""
+"This session is now working in {path}. {count} open files have unsaved "
+"changes and also exist there — choose what happens to each."
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/dialogs.py:140
+msgid "Stay"
+msgstr ""
+
+#: collins/dialogs.py:141
+msgid "Go on editing this file, where your unsaved changes belong"
+msgstr ""
+
+#: collins/dialogs.py:145
+msgid "Take edits"
+msgstr ""
+
+#: collins/dialogs.py:146
+msgid ""
+"Move this tab to the new copy, keeping your unsaved changes — saving will "
+"write them over whatever that copy holds"
+msgstr ""
+
+#: collins/dialogs.py:153
+msgid "Use new"
+msgstr ""
+
+#: collins/dialogs.py:154
+msgid "Open the new copy and discard your unsaved changes"
+msgstr ""
+
+#: collins/dialogs.py:188
+msgid "Don't Move"
+msgstr ""
+
+#: collins/dialogs.py:189
+msgid "Move Editor"
+msgstr ""
+
+#: collins/editor.py:979
+#, python-brace-format
+msgid "Session moved to {name}"
+msgstr ""
+
+#: collins/editor.py:980
+msgid "Follow"
 msgstr ""

@@ -261,6 +261,15 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   tab, full-height in a right-hand column.
 - A **project file tree** rooted at the tab's directory; click a file to
   open it in a tab strip of its own, with a dot marking unsaved changes.
+- **It follows the session.** When the agent steps into a worktree — or
+  anywhere else inside the same repository — the editor moves with it: the
+  tree, quick open and the open tabs all land on the same files in the new
+  directory. Clean buffers follow silently. Anything with unsaved changes
+  asks first, per file: keep editing where you are, take your edits across to
+  the new copy, or open that copy and drop them. Declining leaves everything
+  where it is and puts the move one click away in a banner. A session that
+  moves somewhere *outside* the project only ever offers — that would swap
+  out every open file, so it is never done for you.
 - **Quick open** (`Ctrl+Shift+O`): fuzzy-find any file in the project by
   typing a few letters of its name or path — no digging through the tree.
 - **Rename** a file or folder from its right-click menu in the tree, with the

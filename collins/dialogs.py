@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-05. Full change history: git log for this file.
+# fork. Last modified: 2026-08-06. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from pathlib import Path
 
 import gi
 
@@ -15,9 +16,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
+from . import editorfiles
 from .chats import is_chat_cwd
 from .formatting import display_path, format_size, format_timestamp, format_tokens
-from .i18n import _
+from .i18n import _, ngettext
 from .providers import SessionOptions, get_provider
 from .sessions import (
     Session,
@@ -80,6 +82,125 @@ def rename_path_dialog(
         "response",
         lambda _d, response: on_rename(entry.get_text()) if response == "rename" else None,
     )
+    dialog.present(parent)
+
+
+def follow_working_dir_dialog(
+    parent: Gtk.Widget,
+    old_root: str,
+    new_root: str,
+    entries: list[editorfiles.RerootEntry],
+    on_move: Callable[[dict[str, editorfiles.RerootAction]], None],
+    on_done: Callable[[], None] | None = None,
+) -> None:
+    """Asked when the session's working directory has moved and the editor is
+    about to follow it, but open buffers hold unsaved changes.
+
+    Every file listed exists in both places — the same project-relative path
+    on either side of the move, almost always the same source file on two
+    branches — so there is no answer that is right for all of them, and each
+    row gets its own. The three are: leave the tab where it is, so the edits
+    stay attached to the file they were made against; take the edits across,
+    so saving writes them over the new root's copy; or drop them and open that
+    copy as it stands. Clean buffers aren't listed — they follow silently,
+    having nothing to lose — and neither are files the move can't place.
+
+    "Don't Move" (and Escape) abandons the whole re-root, editor and tree
+    included, not just the files listed here."""
+    RA = editorfiles.RerootAction
+    dialog = Adw.AlertDialog(
+        heading=_("Move editor to {name}?").format(name=Path(new_root).name),
+        body=ngettext(
+            "This session is now working in {path}. One open file has unsaved "
+            "changes and also exists there — choose what happens to it.",
+            "This session is now working in {path}. {count} open files have "
+            "unsaved changes and also exist there — choose what happens to each.",
+            len(entries),
+        ).format(path=display_path(new_root), count=len(entries)),
+    )
+
+    choices: dict[str, editorfiles.RerootAction] = {}
+    listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+    listbox.add_css_class("boxed-list")
+    for entry in entries:
+        choices[entry.path] = entry.default
+        try:
+            subtitle = str(Path(entry.path).relative_to(old_root))
+        except ValueError:
+            subtitle = display_path(entry.path)
+        row = Adw.ActionRow(title=Path(entry.path).name, subtitle=subtitle)
+        row.set_title_lines(1)
+        row.set_subtitle_lines(1)
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, valign=Gtk.Align.CENTER)
+        buttons.add_css_class("linked")
+        group: Gtk.ToggleButton | None = None
+        for action, label, tooltip in (
+            (
+                RA.LEAVE,
+                _("Stay"),
+                _("Go on editing this file, where your unsaved changes belong"),
+            ),
+            (
+                RA.FOLLOW,
+                _("Take edits"),
+                _(
+                    "Move this tab to the new copy, keeping your unsaved changes — "
+                    "saving will write them over whatever that copy holds"
+                ),
+            ),
+            (
+                RA.RELOAD,
+                _("Use new"),
+                _("Open the new copy and discard your unsaved changes"),
+            ),
+        ):
+            button = Gtk.ToggleButton(label=label, tooltip_text=tooltip)
+            if group is None:
+                group = button
+            else:
+                button.set_group(group)
+            button.set_active(action is entry.default)
+            # Bound per row and per action; the default-setting above happens
+            # before this, so arming the handler can't record a stray choice.
+            button.connect(
+                "toggled",
+                lambda btn, path=entry.path, act=action: (
+                    choices.__setitem__(path, act) if btn.get_active() else None
+                ),
+            )
+            buttons.append(button)
+        row.add_suffix(buttons)
+        listbox.append(row)
+
+    # Capped rather than unbounded: a session with a dozen dirty buffers would
+    # otherwise grow a dialog taller than the window it is presented over. The
+    # width is asked for rather than left to the default: an AlertDialog sizes
+    # itself around its heading, which leaves the rows narrower than the button
+    # strip plus a filename, and the filename is what loses.
+    scroller = Gtk.ScrolledWindow(
+        child=listbox,
+        hscrollbar_policy=Gtk.PolicyType.NEVER,
+        propagate_natural_height=True,
+        max_content_height=280,
+    )
+    scroller.set_size_request(440, -1)
+    dialog.set_extra_child(scroller)
+    dialog.add_response("cancel", _("Don't Move"))
+    dialog.add_response("move", _("Move Editor"))
+    dialog.set_response_appearance("move", Adw.ResponseAppearance.SUGGESTED)
+    dialog.set_default_response("move")
+    dialog.set_close_response("cancel")
+
+    def respond(_dialog, response: str) -> None:
+        # on_done fires either way: the caller holds an "asking" flag that has
+        # to clear on a decline as much as on a move, or the next time the
+        # session moves nothing would be asked at all.
+        if response == "move":
+            on_move(choices)
+        if on_done is not None:
+            on_done()
+
+    dialog.connect("response", respond)
     dialog.present(parent)
 
 
