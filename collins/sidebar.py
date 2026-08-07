@@ -381,10 +381,11 @@ class NewThreadRow(Gtk.ListBoxRow):
     thing to do there is start a thread — so the space where its first session
     will go says so. It stands for no session, so it reads like every row
     without a tab open, and gets that for free from the two rules keyed on the
-    status classes it never carries (see row.session-child:not(.running) in
-    app.py): dimmed, and without the card outline a running or detached row is
-    drawn in — the group is empty, and an outlined row there would say
-    otherwise.
+    status classes it never carries (both in app.py): dimmed, through
+    row.session-child:not(.running) .session-title, and without the card
+    outline a running or detached row is drawn in, through
+    row.session-child:not(.running):not(.detached) — the group is empty, and
+    an outlined row there would say otherwise.
     """
 
     def __init__(self, group_key: tuple, cwd: str | None) -> None:
