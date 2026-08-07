@@ -78,13 +78,31 @@ _PR_CONTEXT_TEMPLATE = (
 
 # What a reference to a PR looks like in a prompt, most specific form first.
 # A URL is unambiguous and needs no repository; ``owner/repo#183`` names its
-# own repository; a bare number ("PR 183", "pull request #183", "#183") means
-# whichever repository the session is sitting in, so it is only followed up
-# when there is one to ask. Digits are capped because a PR number is a small
-# integer — a longer run of them is something else.
-_PR_URL = re.compile(r"https://[\w.-]+/[\w.-]+/[\w.-]+/pull/\d{1,7}")
-_PR_SLUG = re.compile(r"\b([\w.-]+/[\w.-]+)#(\d{1,7})\b")
-_PR_NUMBER = re.compile(r"(?:\b(?:pull\s+requests?|PRs?)\s*#?\s*|#)(\d{1,7})\b", re.IGNORECASE)
+# own repository; a bare number ("PR 183", "pull request #183") means whichever
+# repository the session is sitting in, so it is only followed up when there is
+# one to ask. Digits are capped because a PR number is a small integer — a
+# longer run of them is something else, and the cap only holds if the digits
+# after it are refused too, or ".../pull/12345678" reads as PR 1234567.
+_PR_URL = re.compile(r"https://[\w.-]+/[\w.-]+/[\w.-]+/pull/\d{1,7}(?!\d)")
+# The lookbehind keeps the tail of a longer path ("collins/tests/test_x.py#3")
+# from reading as a repository.
+_PR_SLUG = re.compile(r"(?<![\w./-])([\w.-]+/[\w.-]+)#(\d{1,7})\b")
+# A number only counts as a PR when something says so. "#183" on its own does
+# not: a colour is "#123456", a note is "C#5", and a wrong hit here is worse
+# than a miss — a PR that exists under that number gets a session named after
+# work it has nothing to do with. The plural is held to the same bar as a bare
+# number ("prs 5 need review" counts PRs, it doesn't name one), so it needs the
+# '#' the singular can do without.
+_PR_NUMBER = re.compile(
+    r"\b(?:pull\s+requests?|PRs?)\s*#\s*(\d{1,7})\b"
+    r"|\b(?:pull\s+request|PR)\s+(\d{1,7})\b",
+    re.IGNORECASE,
+)
+# A prompt can name more than one PR (a file path that reads as a repository, a
+# number that turns out to be an issue), so a lookup that comes back empty is
+# allowed one fall-through to the next form. Two calls is the whole budget: a
+# title is not worth a third subprocess.
+_MAX_PR_LOOKUPS = 2
 
 
 def scratch_dir() -> Path:
@@ -133,34 +151,46 @@ class PRReference:
     needs_cwd: bool = False
 
 
-def pr_reference(prompt: str) -> PRReference | None:
-    """The first pull request *prompt* refers to, or None if it names none.
+def pr_references(prompt: str) -> list[PRReference]:
+    """The pull requests *prompt* refers to, most specific form first.
 
-    Only the first: a prompt that mentions several is about the first one it
-    raises far more often than not, and one lookup is the budget a title gets.
+    By specificity, not by position: a URL says exactly which PR in which
+    repository it means, so it outranks a number written earlier in the same
+    sentence. One reference per form is enough — a prompt that mentions
+    several of the same shape is about the first it raises far more often
+    than not.
 
-    A bare ``#183`` is taken as a PR reference too, which occasionally it is
-    not (an issue, a comment, a line number). That costs a failed `gh` call
-    and nothing else — the number either belongs to a PR in that repository
-    or the lookup comes back empty and the prompt goes out without context.
+    Nothing here is certain. ``src/app.py#42`` has the shape of a repository
+    and a number, and a bare number may belong to an issue rather than a PR.
+    That is why the list is ordered rather than reduced to one: a lookup that
+    comes back empty falls through to the next candidate, and a prompt that
+    names none of them just goes out without context.
     """
+    refs: list[PRReference] = []
     match = _PR_URL.search(prompt)
     if match and (repository := prstatus.repository_for(match.group(0))):
         url = match.group(0)
         # gh is asked by URL — it needs no repository and covers Enterprise
         # hosts — but the model is told the short form, which is what a person
         # would call it.
-        return PRReference(label=f"{repository}#{url.rsplit('/', 1)[-1]}", args=(url,))
+        refs.append(PRReference(label=f"{repository}#{url.rsplit('/', 1)[-1]}", args=(url,)))
     match = _PR_SLUG.search(prompt)
     if match:
         repository, number = match.group(1), match.group(2)
-        return PRReference(
-            label=f"{repository}#{number}", args=(number, "--repo", repository)
+        refs.append(
+            PRReference(label=f"{repository}#{number}", args=(number, "--repo", repository))
         )
     match = _PR_NUMBER.search(prompt)
     if match:
-        return PRReference(label=f"#{match.group(1)}", args=(match.group(1),), needs_cwd=True)
-    return None
+        number = match.group(1) or match.group(2)  # one branch per alternative
+        refs.append(PRReference(label=f"#{number}", args=(number,), needs_cwd=True))
+    return refs
+
+
+def pr_reference(prompt: str) -> PRReference | None:
+    """The pull request *prompt* most specifically refers to, or None."""
+    refs = pr_references(prompt)
+    return refs[0] if refs else None
 
 
 def _fetch_pr_title(ref: PRReference, cwd: str | None) -> str | None:
@@ -170,12 +200,37 @@ def _fetch_pr_title(ref: PRReference, cwd: str | None) -> str | None:
     issue, a repository the user can't see, a bare number with no directory to
     resolve it against. Every one of those is ordinary, and each one just
     means the prompt goes out without the context.
+
+    Only a bare number is asked from inside *cwd*. The other forms carry their
+    own repository, and running them there would tie them to a directory they
+    don't need: a session whose recorded cwd has since been removed (an
+    auto-deleted worktree) can't run a subprocess there at all, and a lookup
+    that would have worked anywhere would die on the missing directory.
     """
     if ref.needs_cwd and not cwd:
         return None  # a bare number needs a repository to be a number in
-    data = prstatus.gh_json(["pr", "view", *ref.args, "--json", "title"], cwd=cwd)
+    data = prstatus.gh_json(
+        ["pr", "view", *ref.args, "--json", "title"], cwd=cwd if ref.needs_cwd else None
+    )
     title = data.get("title") if isinstance(data, dict) else None
     return title if isinstance(title, str) and title.strip() else None
+
+
+def _visible_prompt(prompt: str) -> str:
+    """As much of *prompt* as the model is given, cut on a word boundary.
+
+    Cutting blind would leave a half-word at the end, and a half-number is
+    worse than that: "PR 1834" sliced down to "PR 183" is not a truncated
+    reference, it is a reference to a different pull request — one the prompt
+    never mentioned, fetched and described as if it had been.
+    """
+    if len(prompt) <= _MAX_PROMPT_CHARS:
+        return prompt
+    head = prompt[:_MAX_PROMPT_CHARS]
+    if head[-1].isspace() or prompt[_MAX_PROMPT_CHARS].isspace():
+        return head  # the cut already fell between two words
+    words = head.rsplit(None, 1)
+    return words[0] if len(words) > 1 else head  # one very long word: keep it
 
 
 def quote_for_prompt(text: str) -> str:
@@ -284,7 +339,7 @@ class TitleGenerator:
 
     def _generate(self, prompt: str, cwd: str | None) -> str | None:
         try:
-            reply = self._runner(self._prompt_for(prompt[:_MAX_PROMPT_CHARS], cwd))
+            reply = self._runner(self._prompt_for(_visible_prompt(prompt), cwd))
         except Exception as err:  # TitleError, TimeoutExpired, OSError, ...
             self._handle_error(err)
             return None
@@ -301,20 +356,22 @@ class TitleGenerator:
 
         A lookup that fails costs the context and nothing more: this runs on
         the worker thread between two subprocesses either way, and a title
-        without the PR's name still beats no title.
+        without the PR's name still beats no title. An empty answer is worth
+        one more try at the next candidate — a repository-shaped file path
+        gets asked about first and answers nothing — and then no more.
         """
-        ref = pr_reference(prompt)
-        pr_title = None
-        if ref is not None:
+        context = ""
+        for ref in pr_references(prompt)[:_MAX_PR_LOOKUPS]:
             try:
                 pr_title = self._pr_fetcher(ref, cwd)
             except Exception:
                 log.debug("session titles: looking up %s failed", ref.label, exc_info=True)
-        context = ""
-        if pr_title:
-            context = _PR_CONTEXT_TEMPLATE.format(
-                number=ref.label, title=quote_for_prompt(pr_title)
-            )
+                continue
+            if pr_title:
+                context = _PR_CONTEXT_TEMPLATE.format(
+                    number=ref.label, title=quote_for_prompt(pr_title)
+                )
+                break
         return _PROMPT_TEMPLATE.format(context=context, prompt=prompt)
 
     def _handle_error(self, err: Exception) -> None:
