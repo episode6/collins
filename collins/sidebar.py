@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-06. Full change history: git log for this file.
+# fork. Last modified: 2026-08-07. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -371,6 +371,50 @@ class PlaceholderRow(Gtk.ListBoxRow):
         box.append(close_btn)
 
         self.set_child(box)
+
+
+class NewThreadRow(Gtk.ListBoxRow):
+    """The row an empty project would have if it had a session: clicking it
+    starts one, exactly as the header's + button does.
+
+    A project with nothing under it is all header and no list, and the one
+    thing to do there is start a thread — so the space where its first session
+    will go says so. It stands for no session, so it reads like every row
+    without a tab open: dimmed, through the same .session-title class the real
+    rows dim by (see row.session-child:not(.running) in app.py).
+    """
+
+    def __init__(self, group_key: tuple, cwd: str | None) -> None:
+        super().__init__()
+        self.group_key = group_key
+        self.cwd = cwd
+        self.set_selectable(False)
+        self.add_css_class("session-child")  # same card, indent and guide line
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        box.set_valign(Gtk.Align.CENTER)  # match SessionRow in a taller row
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+        box.set_margin_start(4)  # match SessionRow's title inset
+
+        label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
+        label.add_css_class("session-title")
+        label.set_ellipsize(_ELLIPSIZE_END)
+        box.append(label)
+
+        self.set_child(box)
+        self.set_tooltip_text(
+            _("New chat")
+            if group_key == CHATS_GROUP
+            else _("New session in {path}").format(path=_abbreviate_path(cwd))
+        )
+
+    def start_session(self) -> None:
+        """Do what the + button on this row's project header does."""
+        if self.group_key == CHATS_GROUP:
+            self.activate_action("win.new-session-in-chats", None)
+        elif self.cwd:
+            self.activate_action("win.new-session-in", GLib.Variant("s", self.cwd))
 
 
 class SessionRow(Gtk.ListBoxRow):
@@ -841,6 +885,8 @@ class SessionSidebar(Gtk.Box):
         self._selected: set[str] = set()
         self._rows: dict[str, SessionRow] = {}
         self._header_rows: dict[tuple, GroupHeaderRow] = {}
+        # The stand-in row under each group that has nothing else in it.
+        self._new_thread_rows: dict[tuple, NewThreadRow] = {}
         self._placeholders: dict[str, str] = {}  # placeholder id -> cwd
         self._placeholder_rows: dict[str, PlaceholderRow] = {}
         self._row_order: list[str] = []  # session/placeholder ids, top to bottom
@@ -1053,7 +1099,11 @@ class SessionSidebar(Gtk.Box):
         for header in self._header_rows.values():
             header.set_icon_size(size)
         indent = _session_child_indent(size)
-        for child in (*self._rows.values(), *self._placeholder_rows.values()):
+        for child in (
+            *self._rows.values(),
+            *self._placeholder_rows.values(),
+            *self._new_thread_rows.values(),
+        ):
             child.set_margin_start(indent)
 
     def _project_icon_size(self) -> int:
@@ -1064,6 +1114,7 @@ class SessionSidebar(Gtk.Box):
         self.list.remove_all()
         self._rows = {}
         self._header_rows = {}
+        self._new_thread_rows = {}
         self._placeholder_rows = {}
         self._row_order = []
 
@@ -1134,6 +1185,20 @@ class SessionSidebar(Gtk.Box):
             )
             self._header_rows[key] = header
             self.list.append(header)
+            # A group with nothing under it gets the row that starts its first
+            # session — but only where there is a session to start: Favorites
+            # is a view onto other projects, and a virtual project whose folder
+            # is unknown has nowhere to start one (both are exactly the groups
+            # the header's + button skips).
+            if (
+                not items_by_group.get(key)
+                and not placeholders_by_group.get(key)
+                and (key == CHATS_GROUP or cwd)
+            ):
+                new_thread = NewThreadRow(key, cwd)
+                new_thread.set_margin_start(child_indent)
+                self._new_thread_rows[key] = new_thread
+                self.list.append(new_thread)
             for pid in placeholders_by_group.get(key, ()):
                 prow = PlaceholderRow(pid, key, self)
                 prow.set_margin_start(child_indent)
@@ -1516,6 +1581,10 @@ class SessionSidebar(Gtk.Box):
             # Nothing to search yet; the group itself is never collapsed while
             # it holds a placeholder, but respect a collapse made afterwards.
             return not query and row.group_key not in self._collapsed
+        if isinstance(row, NewThreadRow):
+            # No session behind it to match a query against, and it folds away
+            # with its group like the rows it stands in for.
+            return not query and row.group_key not in self._collapsed
         if query:
             return query in row.item.search_text  # search ignores collapsed state
         return row.item.group_key not in self._collapsed
@@ -1629,6 +1698,10 @@ class SessionSidebar(Gtk.Box):
             if not self._selection_mode:  # focus the still-unbound tab
                 self._activated_row_id = row.placeholder_id
                 self.emit("open-placeholder", row.placeholder_id)
+            return
+        if isinstance(row, NewThreadRow):
+            if not self._selection_mode:  # there is no session here to select
+                row.start_session()
             return
         if self._selection_mode:
             row.check.set_active(not row.check.get_active())
