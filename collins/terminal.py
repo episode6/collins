@@ -341,8 +341,8 @@ class _RootNameLinks:
     re-map without reparenting tabs). The tab does push a new root in when
     its editor follows the session's working directory somewhere else, which
     is the only way this moves (`set_root`). A directory monitor keeps the
-    alternation honest: on changes the names
-    are re-listed and the tag swapped only when the set really changed.
+    alternation honest: on changes the names are re-listed and the tag
+    swapped only when the set really changed.
     Change events coalesce on a 500ms timer armed by the first one — a
     leading-edge throttle, deliberately not a trailing-edge debounce, so an
     agent churning root files steadily can't starve the refresh; a rebuild

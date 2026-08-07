@@ -912,6 +912,31 @@ def test_follow_scope_takes_the_way_back_out_of_a_worktree(tmp_path):
     assert follow_scope(worktree, str(_worktree(repo, "other"))) is FollowScope.AUTO
 
 
+def test_follow_scope_takes_the_way_back_out_of_a_subdirectory(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    api = repo / "packages" / "api"
+    api.mkdir(parents=True)
+    web = repo / "packages" / "web"
+    web.mkdir()
+    # Rooted at a subdirectory the editor already followed the agent into, the
+    # repository around it is the boundary — not the subdirectory itself, or
+    # the way back out would read as leaving the project.
+    assert follow_scope(api, str(repo)) is FollowScope.AUTO
+    assert follow_scope(api, str(web)) is FollowScope.AUTO
+
+
+def test_follow_scope_only_offers_a_sibling_repository(tmp_path):
+    checkouts = tmp_path / "dev"
+    repo = checkouts / "repo"
+    (repo / ".git").mkdir(parents=True)
+    other = checkouts / "other"
+    (other / ".git").mkdir(parents=True)
+    # The enclosing checkout tops the walk out: a sibling repository is its
+    # own project even though a plain directory holds both.
+    assert follow_scope(repo, str(other)) is FollowScope.OFFER
+
+
 def test_follow_scope_only_offers_somewhere_else_entirely(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()

@@ -426,6 +426,21 @@ def renamed_path(old: str | Path, new: str | Path, path: str | Path) -> str | No
 # -- following the session's working directory -----------------------------
 
 
+def repository_root(path: str | Path) -> str | None:
+    """The top of the git repository *path* sits in, or None when it is in
+    none. A couple of stat calls rather than a `git` process, and `.git` may
+    be a directory (a checkout) or a pointer file (a worktree, a submodule) —
+    either one tops the search out."""
+    try:
+        start = Path(path)
+        for directory in (start, *start.parents):
+            if (directory / ".git").exists():
+                return str(directory)
+    except OSError:
+        return None
+    return None
+
+
 def follow_scope(root: str | Path, cwd: str | None) -> FollowScope:
     """Whether an editor rooted at *root* should move to *cwd*.
 
@@ -449,10 +464,14 @@ def follow_scope(root: str | Path, cwd: str | None) -> FollowScope:
             return FollowScope.NONE
     except OSError:
         return FollowScope.NONE
-    # An editor already sitting in a worktree compares against the repository
-    # it belongs to, so worktree -> sibling worktree and worktree -> repository
-    # are both "the same project" too.
-    project = worktree_project_root(str(root)) or str(root)
+    # The boundary is the repository, not wherever the pane happens to be
+    # rooted at this moment — an editor that already followed the agent down
+    # into a worktree or a subdirectory has to be able to follow it back out
+    # again, and comparing against its current root would read that as leaving
+    # the project. A Claude worktree names its repository outright; anything
+    # else walks up to the enclosing checkout, and a directory in no
+    # repository at all is its own boundary.
+    project = worktree_project_root(str(root)) or repository_root(root) or str(root)
     return FollowScope.AUTO if is_inside(project, cwd) else FollowScope.OFFER
 
 

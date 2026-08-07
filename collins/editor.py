@@ -103,6 +103,7 @@ class EditorPane(Gtk.Box):
         self._font = ""
         self._banner_click_id: int | None = None
         self._reroot_asking = False  # the follow-the-working-directory dialog is up
+        self._reroot_queued: Path | None = None  # a move that arrived while it was
         self._active_search_context: GtkSource.SearchContext | None = None
         self._last_match: tuple[int, int] | None = None  # (start, end) char offsets
 
@@ -928,7 +929,16 @@ class EditorPane(Gtk.Box):
         there calls the whole move off, tree included. Everything else
         `plan_reroot` already has a safe answer for."""
         new_root = Path(root)
-        if new_root == self._root or self._reroot_asking:
+        if self._reroot_asking:
+            # One dialog at a time — but the session has moved on since that
+            # one went up, and whatever sent this considers the directory
+            # acted on and won't send it again (the poll settles a working
+            # directory exactly once). So it is remembered, and picked up
+            # when the open dialog is answered. Only the latest is worth
+            # keeping; a move back to where the pane already is cancels it.
+            self._reroot_queued = None if new_root == self._root else new_root
+            return
+        if new_root == self._root:
             return
         try:
             if not new_root.is_dir():
@@ -959,6 +969,18 @@ class EditorPane(Gtk.Box):
 
         def done() -> None:
             self._reroot_asking = False
+            queued = self._reroot_queued
+            self._reroot_queued = None
+            if queued is not None and queued != self._root:
+                # The session moved again while the dialog was up. That is
+                # where it actually is now, so it wins over the answer just
+                # given — but from a root that may have changed underneath
+                # it, so how far it goes is judged again rather than
+                # inherited: silently swapping in a different project is
+                # exactly what OFFER exists to prevent. Deferred so the
+                # dialog being answered is gone before the next is presented.
+                GLib.idle_add(self._follow_queued, queued)
+                return
             # Declining means "not now", not "never": the banner leaves the
             # move one click away without the poll asking again, which it
             # won't — a settled working directory is acted on exactly once.
@@ -969,6 +991,16 @@ class EditorPane(Gtk.Box):
         dialogs.follow_working_dir_dialog(
             self.get_root(), str(old_root), str(new_root), asking, move, done
         )
+
+    def _follow_queued(self, root: Path) -> bool:
+        """A move that arrived while the follow dialog was up, taken as far as
+        it goes from wherever the pane ended up (see `request_root`)."""
+        scope = editorfiles.follow_scope(self._root, str(root))
+        if scope is editorfiles.FollowScope.AUTO:
+            self.request_root(root)
+        elif scope is editorfiles.FollowScope.OFFER:
+            self.offer_root(str(root))
+        return GLib.SOURCE_REMOVE
 
     def offer_root(self, root: str) -> None:
         """Offer a move the pane won't make on its own — the session working

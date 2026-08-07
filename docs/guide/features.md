@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-06. Full change history: git log for this file.
+fork. Last modified: 2026-08-07. Full change history: git log for this file.
 -->
 
 # Features
@@ -259,8 +259,9 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 - Toggle it with `F8` or the footer icon (a page with a folded corner,
   between the footer apps and the terminal-panel button) — one editor per
   tab, full-height in a right-hand column.
-- A **project file tree** rooted at the tab's directory; click a file to
-  open it in a tab strip of its own, with a dot marking unsaved changes.
+- A **project file tree** rooted at the directory the session is working in
+  (the tab's, to begin with); click a file to open it in a tab strip of its
+  own, with a dot marking unsaved changes.
 - **It follows the session.** When the agent steps into a worktree — or
   anywhere else inside the same repository — the editor moves with it: the
   tree, quick open and the open tabs all land on the same files in the new
