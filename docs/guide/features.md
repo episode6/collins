@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-05. Full change history: git log for this file.
+fork. Last modified: 2026-08-06. Full change history: git log for this file.
 -->
 
 # Features
@@ -103,6 +103,14 @@ Unnamed sessions get a **title generated for them**:
 - Sessions created while the app is running have their first prompt summarized
   to **five words or fewer** by a headless `claude -p --model haiku` run — the
   same CLI and login the whole app is based on, no extra credentials needed.
+
+A prompt that only points at a pull request ("review PR 183") would summarize
+to a number nobody can read at a glance, so that PR's **title is fetched with
+`gh`** and handed to the model as context — quoted, and flagged as untrusted
+data with any instruction inside it to be ignored. A bare number is looked up
+in the session's own repository; a URL or an `owner/repo#183` reference names
+its own. If the lookup comes back empty (no `gh`, not logged in, a number that
+belongs to an issue), the prompt is summarized without it.
 
 Titles are persisted so each is generated only once; right-click →
 **Regenerate name** re-runs the model for one session, and a Preferences

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-03. Full change history: git log for this file.
+# fork. Last modified: 2026-08-06. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -214,7 +214,7 @@ class SessionStore(GObject.Object):
                 and not self.state.get_name(session_id)
                 and not self.state.get_generated_name(session_id)
             ):
-                self._titles.submit(session_id, session.preview)
+                self._titles.submit(session_id, session.preview, session.cwd)
 
     def regenerate_name(self, session_id: str) -> None:
         """Right-click → Regenerate name: re-title one session via the API,
@@ -223,7 +223,7 @@ class SessionStore(GObject.Object):
         if session is None or not session.preview:
             return
         self._regen_pending.add(session_id)
-        self._titles.submit(session_id, session.preview, force=True)
+        self._titles.submit(session_id, session.preview, session.cwd, force=True)
 
     def _on_title_generated(self, session_id: str, title: str) -> bool:
         self.state.set_generated_name(session_id, title)
