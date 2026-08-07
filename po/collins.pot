@@ -1753,6 +1753,40 @@ msgstr ""
 msgid "Move Editor"
 msgstr ""
 
+#: collins/dialogs.py:687
+msgid "Generating icon…"
+msgstr ""
+
+#: collins/dialogs.py:691
+msgid "At sidebar size"
+msgstr ""
+
+#: collins/dialogs.py:709
+msgid "Optional adjustments, e.g. “make it blue”"
+msgstr ""
+
+#: collins/dialogs.py:710
+msgid "Regenerate"
+msgstr ""
+
+#: collins/dialogs.py:736 collins/dialogs.py:744 collins/sidebar.py:1815
+msgid "Generate Icon"
+msgstr ""
+
+#: collins/dialogs.py:782
+msgid "the generated SVG could not be rendered"
+msgstr ""
+
+#: collins/dialogs.py:796
+#, python-brace-format
+msgid "Icon generation failed: {error}"
+msgstr ""
+
+#: collins/dialogs.py:815
+#, python-brace-format
+msgid "Saving failed: {error}"
+msgstr ""
+
 #: collins/editor.py:979
 #, python-brace-format
 msgid "Session moved to {name}"

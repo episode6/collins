@@ -28,8 +28,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import footerapps, openwith, prmenu
 from .chats import is_chat_cwd
@@ -51,6 +50,7 @@ from .prstatus import (
 from .scrolling import offset_into_view
 from .sessions import Session, project_name_for_cwd, resume_cwd, worktree_project_root
 from .store import SessionStore
+from .svgtexture import svg_texture
 from .usagepanel import UsagePanel
 
 log = logging.getLogger(__name__)
@@ -164,34 +164,6 @@ def _group_state_key(group_key: tuple) -> str:
     return f"{group_key[0]}:{group_key[1]}"
 
 
-def _project_icon_texture(svg: bytes | None, size: int) -> Gdk.Texture | None:
-    """Rasterize project-icon bytes at the target icon size, forced through
-    the SVG pixbuf loader. Forcing the type keeps repo-controlled bytes away
-    from gdk-pixbuf's content sniffing (which would otherwise route a crafted
-    file to any installed codec), and decoding at icon size bounds the
-    raster surface regardless of the document's own canvas dimensions."""
-    if svg is None:
-        return None
-    try:
-        loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
-    except GLib.Error:  # SVG loader not installed
-        return None
-    loader.set_size(size, size)
-    try:
-        loader.write(svg)
-        loader.close()
-    except GLib.Error:
-        try:
-            loader.close()
-        except GLib.Error:
-            pass
-        return None
-    pixbuf = loader.get_pixbuf()
-    if pixbuf is None:
-        return None
-    return Gdk.Texture.new_for_pixbuf(pixbuf)
-
-
 class GroupHeaderRow(Gtk.ListBoxRow):
     """A real row acting as a group header, so it stays visible when the
     group's session rows are filtered out (collapsed)."""
@@ -232,7 +204,7 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         # One image doubles as project icon and collapse caret: the icon at
         # rest, the caret while the pointer is over the row.
         self._icon_svg = project_icon_data(cwd) if group_key[0] == "proj" else None
-        self._texture = _project_icon_texture(self._icon_svg, icon_size)
+        self._texture = svg_texture(self._icon_svg, icon_size)
         if self._texture is None:
             self._icon_svg = None  # unrenderable — stay on the fallback
             if group_key == FAV_GROUP:
@@ -298,7 +270,7 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         self._icon.set_pixel_size(size)
         # A custom icon's texture was rasterized at the old size; re-render
         # it so it stays sharp instead of scaling.
-        texture = _project_icon_texture(self._icon_svg, size)
+        texture = svg_texture(self._icon_svg, size)
         if texture is not None:
             self._texture = texture
         self._update_icon()
@@ -1838,6 +1810,15 @@ class SessionSidebar(Gtk.Box):
             )
             open_section.append(_("New sessions use a worktree"), "sidebar.project-worktree")
 
+        # Anything cosmetic about the project's row itself.
+        looks_section = Gio.Menu()
+        if row.cwd:
+            icon_item = Gio.MenuItem.new(_("Generate Icon"), None)
+            icon_item.set_action_and_target_value(
+                "win.generate-icon", GLib.Variant("s", row.cwd)
+            )
+            looks_section.append_item(icon_item)
+
         danger_section = Gio.Menu()
         archive_label = (
             _("Restore project")
@@ -1865,6 +1846,7 @@ class SessionSidebar(Gtk.Box):
 
         menu = Gio.Menu()
         menu.append_section(None, open_section)
+        menu.append_section(None, looks_section)
         menu.append_section(None, danger_section)
         self._popup_menu(menu, row, x, y, rows)
 

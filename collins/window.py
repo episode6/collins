@@ -1010,6 +1010,7 @@ class MainWindow(Adw.ApplicationWindow):
             ),
             "archive-session": self._on_archive_session,
             "archive-project": self._on_archive_project,
+            "generate-icon": self._on_generate_icon,
             "forget-project": lambda _a, p: self.store.forget_project(p.get_string()),
             "trash-session": self._on_trash_session,
             "open-folder": self._on_open_folder,
@@ -3618,6 +3619,17 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_archive_project(self, _action, param: GLib.Variant) -> None:
         name = param.get_string()
         self.store.set_project_archived(name, not self.state.is_project_archived(name))
+
+    def _on_generate_icon(self, _action, param: GLib.Variant) -> None:
+        cwd = param.get_string()
+        dialogs.generate_icon_dialog(
+            self,
+            cwd,
+            project_name_for_cwd(cwd),
+            # Row construction bakes project icons in, so the new icon only
+            # shows after the same rescan the sidebar's refresh button runs.
+            on_saved=lambda: self.store.refresh(force_rebuild=True),
+        )
 
     def _on_show_archived(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
         action.set_state(value)

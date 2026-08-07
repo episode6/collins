@@ -57,6 +57,14 @@ fork. Last modified: 2026-08-07. Full change history: git log for this file.
   `xdg-terminals.list`, and the system's own `x-terminal-emulator` are
   honoured, in that order). The Chats group has no folder of its own, so its
   menu stays as it was.
+- **Generate Icon**, in that menu too, asks Claude to design the project a
+  sidebar icon from what's in the folder — its name, top-level files and
+  README. The result is previewed at full size and at the 16px the sidebar
+  actually uses; type an adjustment ("make it blue") and *Regenerate* until
+  it's right. Nothing is written until *Save*, which puts a
+  `project-icon.svg` in the project root — the same file a project can ship
+  by hand to replace the generic folder icon, so commit it and everyone gets
+  it.
 - A **search button** that opens a search box across the sidebar header,
   filtering by name, project, message preview, or session ID, plus a footer
   showing session, project, transcript-size, and open-tab counts.
