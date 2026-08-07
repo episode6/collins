@@ -408,6 +408,10 @@ msgstr ""
 msgid "Search settings…"
 msgstr ""
 
+#: collins/prefs.py:182
+msgid "Search settings"
+msgstr ""
+
 #: collins/prefs.py:471
 msgid "No settings found"
 msgstr ""

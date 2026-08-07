@@ -168,6 +168,11 @@ class PreferencesDialog(Adw.Dialog):
         self._on_change = on_change
 
         self._search_entry = Gtk.SearchEntry(placeholder_text=_("Search settings…"), hexpand=True)
+        # A name of its own for screen readers: placeholder text is announced
+        # unreliably at best, and it is gone the moment anyone types.
+        self._search_entry.update_property(
+            [Gtk.AccessibleProperty.LABEL], [_("Search settings")]
+        )
         self._search_entry.connect("search-changed", self._on_search_changed)
         self._search_entry.connect("stop-search", self._on_search_stopped)
 
