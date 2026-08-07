@@ -120,15 +120,17 @@ class _SearchablePage(Adw.PreferencesPage):
         self.groups.append(group)
 
 
-def _searchable(row: Gtk.Widget, *terms: str) -> Gtk.Widget:
-    """Give *row* extra words to match, beyond its own title and subtitle.
+def _searchable(widget: Gtk.Widget, *terms: str) -> Gtk.Widget:
+    """Give *widget* extra words to match, beyond its own title and subtitle.
 
     The options folded away inside an expander or a dropdown — "Dracula",
     "Magyar", "Background Session" — are exactly what someone searches for,
-    and none of them are in the row's own text.
+    and none of them are in the row's own text. The same goes for a group
+    whose only control sits in its header suffix: "Add application…" is on a
+    button beside the Footer apps heading, not in any row.
     """
-    row.search_terms = " ".join(terms)
-    return row
+    widget.search_terms = " ".join(terms)
+    return widget
 
 
 def _row_text(row: Gtk.Widget) -> str:
@@ -143,7 +145,13 @@ def _row_text(row: Gtk.Widget) -> str:
 
 
 def _group_text(group: _SearchableGroup) -> str:
-    return f"{group.get_title() or ''} {group.get_description() or ''}"
+    return " ".join(
+        (
+            group.get_title() or "",
+            group.get_description() or "",
+            getattr(group, "search_terms", ""),
+        )
+    )
 
 
 class PreferencesDialog(Adw.Dialog):
@@ -365,6 +373,7 @@ class PreferencesDialog(Adw.Dialog):
         add_app_btn.set_tooltip_text(_("Add application…"))
         add_app_btn.connect("clicked", self._on_add_footer_app)
         self._footer_apps_group.set_header_suffix(add_app_btn)
+        _searchable(self._footer_apps_group, _("Add application…"))
         self._footer_app_rows: list[Adw.PreferencesRow] = []
         self._rebuild_footer_apps()
         page.add(self._footer_apps_group)
@@ -380,6 +389,7 @@ class PreferencesDialog(Adw.Dialog):
         self._restart_btn.set_visible(False)
         self._restart_btn.connect("clicked", self._on_restart)
         lang_group.set_header_suffix(self._restart_btn)
+        _searchable(lang_group, _("Restart now"))
         self._lang_expander = Adw.ExpanderRow(title=_("Language"), subtitle=current_label)
         lang_radio_group = None
         for code, label in LANGUAGES:
