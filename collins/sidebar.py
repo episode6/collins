@@ -380,10 +380,12 @@ class NewThreadRow(Gtk.ListBoxRow):
     A project with nothing under it is all header and no list, and the one
     thing to do there is start a thread — so the space where its first session
     will go says so. It stands for no session, so it reads like every row
-    without a tab open: dimmed, through the same .session-title class the real
-    rows dim by (see row.session-child:not(.running) in app.py), and without
-    the card outline a real row is drawn in (.new-thread, same file) — the
-    group is empty, and an outlined row there would say otherwise.
+    without a tab open, and gets that for free from the two rules keyed on the
+    status classes it never carries (both in app.py): dimmed, through
+    row.session-child:not(.running) .session-title, and without the card
+    outline a running or detached row is drawn in, through
+    row.session-child:not(.running):not(.detached) — the group is empty, and
+    an outlined row there would say otherwise.
     """
 
     def __init__(self, group_key: tuple, cwd: str | None) -> None:
@@ -392,7 +394,6 @@ class NewThreadRow(Gtk.ListBoxRow):
         self.cwd = cwd
         self.set_selectable(False)
         self.add_css_class("session-child")  # a real row's metrics and indent
-        self.add_css_class("new-thread")  # ...minus its outline and guide line
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         box.set_valign(Gtk.Align.CENTER)  # match SessionRow in a taller row

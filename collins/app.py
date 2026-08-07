@@ -125,12 +125,15 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   font-size: 0.8em;
 }
 
-/* every session row is the same outlined card with a left guide line; what a
-   running session adds is a full-strength title (every other row's dims), and
-   (for a detached one) a status color on that line. The border box is
-   identical in every status, so a row never shifts or resizes as its status
-   changes; the selected tab's row is the one exception, and it changes only
-   horizontally (see .active-tab below).
+/* a session with something going on -- a tab open, or running detached -- is
+   drawn as an outlined card with a left guide line; what a running one adds
+   is a full-strength title (every other row's dims), and (for a detached one)
+   a status color on that line. Every idle row keeps this same box with its
+   borders turned transparent -- all but the red guide line of an interrupted
+   one (see the :not(.running):not(.detached) rules below) -- so the border
+   box is identical in every status and a row never
+   shifts or resizes as its status changes; the selected tab's row is the one
+   exception, and it changes only horizontally (see .active-tab below).
    The left indent is a widget margin set in sidebar.py, not a CSS margin
    here: it tracks the configurable project-icon size, so the card always
    starts just past the icon of the project header above it. */
@@ -186,20 +189,6 @@ row.session-child checkbutton > check {
 row.session-child:hover {
   background-color: alpha(currentColor, 0.1);
   border-color: alpha(currentColor, 0.3);
-}
-/* the stand-in row under an empty project (see NewThreadRow): it holds the
-   place of a session rather than standing for one, so it takes the card's
-   metrics and none of its outline. An outlined card there would count as a
-   row in a list that has none, and the guide line beside it would be a status
-   line for a session that does not exist; without them the offer sits in the
-   empty space as text, and the group still reads as empty at a glance.
-   The borders stay in the box, only turned transparent, so the label lines up
-   with the titles of real rows and the row keeps their height. Hover still
-   fills -- the row is clickable and says so -- but does not draw the card
-   back in around it. */
-row.session-child.new-thread,
-row.session-child.new-thread:hover {
-  border-color: transparent;
 }
 /* sessions running in an open tab are the ones the panel is really about, and
    they say so through their titles: theirs read at full strength while every
@@ -263,8 +252,52 @@ row.session-child.detached { border-left-color: #e5a50a; }
    a /bg row whose transcript ends in an interruption is a reachable
    combination, not a hypothetical. The .busy pole rule still beats it (one
    more class on its selector) for the same reason it beats unread: a
-   resumed session should move, not sit on a stale interruption. */
+   resumed session should move, not sit on a stale interruption.
+   It is also the only one of these colors an idle row keeps: the rule below
+   takes the card and the line off a row with nothing going on, and carves
+   this one out. */
 row.session-child.interrupted { border-left-color: #e01b24; }
+
+/* nothing going on: no tab open, and not running detached either. Those rows
+   are most of a long list -- every session ever started is still in it -- and
+   drawn as cards they stack up into a wall of outlines that the few rows
+   actually doing something have to compete with. So the card is only drawn
+   around a session with something to say, and the rest keep the box with its
+   borders turned transparent: their titles still line up with the cards' and
+   no row changes size as a session starts, stops or is handed to the
+   background.
+
+   Two rules, because the guide line is not part of the card here. The box
+   goes in the first: three sides, named one at a time rather than through the
+   border-color shorthand, which would take the left with them. The line goes
+   in the second, and only for a row with nothing to say on it -- an
+   interrupted session keeps its red whether or not a tab is open, since being
+   stopped mid-task outlives the tab it was stopped in and is the one thing an
+   otherwise idle row still needs to flag. The other two line colors above
+   never reach an idle row anyway (.detached is a running status by
+   definition, and window._sync_status drops .unread from any row whose tab is
+   gone), and .busy only paints alongside .running, so the barber pole below
+   stays out of this too.
+
+   Both rules are more specific than every border rule above, so order among
+   them doesn't matter -- but the red itself is still set once, up at
+   .interrupted, and simply left standing here.
+
+   The stand-in row under an empty project (see NewThreadRow) falls in here
+   for free: it stands for no session, so it carries no status class, and an
+   outlined card there would count as a row in a list that has none.
+
+   Hover still fills -- the row is clickable and says so -- but does not draw
+   the card back in around it, which would read as the row changing rather
+   than as the pointer arriving. */
+row.session-child:not(.running):not(.detached) {
+  border-top-color: transparent;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+}
+row.session-child:not(.running):not(.detached):not(.interrupted) {
+  border-left-color: transparent;
+}
 
 /* An agent producing output right now (see activity.py) turns its row's guide
    line into a barber pole: stripes climbing while work is happening, still the
