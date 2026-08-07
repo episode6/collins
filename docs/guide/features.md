@@ -442,4 +442,13 @@ Español, Français), the sidebar's **Show folder path**, **Show Claude
 usage**, and **Auto-generate session titles** toggles, and the
 idle-notification toggle — reachable from the sidebar menu or `Ctrl+,`.
 
+A **search bar across the top** filters the whole screen as you type, and it
+has the focus the moment preferences opens, so the way to a setting is to type
+a word from it. Every word of the query has to turn up somewhere, in any order,
+and it looks well past the setting's own name: a section heading (*terminal*
+brings back the whole Terminal section), a word from the description
+(*Ctrl+C*), or one of the options folded away inside a row (*Dracula*,
+*Magyar*). `Esc` empties the box, and empties the dialog off the screen once
+there's nothing left to clear.
+
 ![Preferences dialog](/img/preferences.png)

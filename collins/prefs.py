@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-05. Full change history: git log for this file.
+# fork. Last modified: 2026-08-07. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -17,7 +17,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
 
-from . import apppicker, editor, footerapps
+from . import apppicker, editor, footerapps, prefssearch
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label
 from .i18n import LANGUAGES, N_, _
 from .state import AppState
@@ -84,18 +84,110 @@ def apply_color_scheme(value: str) -> None:
             return
 
 
-class PreferencesDialog(Adw.PreferencesDialog):
+# -- search ------------------------------------------------------------------
+#
+# GTK hands out no way to walk a preferences group's rows or a page's groups
+# back out again, so the two containers below remember what was put into them.
+# Everything the search bar hides is hidden through these lists.
+
+
+class _SearchableGroup(Adw.PreferencesGroup):
+    """A preferences group that remembers the rows added to it."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.rows: list[Gtk.Widget] = []
+
+    def add(self, row: Gtk.Widget) -> None:
+        super().add(row)
+        self.rows.append(row)
+
+    def remove(self, row: Gtk.Widget) -> None:
+        super().remove(row)
+        if row in self.rows:
+            self.rows.remove(row)
+
+
+class _SearchablePage(Adw.PreferencesPage):
+    """A preferences page that remembers the groups added to it."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.groups: list[_SearchableGroup] = []
+
+    def add(self, group: _SearchableGroup) -> None:
+        super().add(group)
+        self.groups.append(group)
+
+
+def _searchable(widget: Gtk.Widget, *terms: str) -> Gtk.Widget:
+    """Give *widget* extra words to match, beyond its own title and subtitle.
+
+    The options folded away inside an expander or a dropdown — "Dracula",
+    "Magyar", "Background Session" — are exactly what someone searches for,
+    and none of them are in the row's own text. The same goes for a group
+    whose only control sits in its header suffix: "Add application…" is on a
+    button beside the Footer apps heading, not in any row.
+    """
+    widget.search_terms = " ".join(terms)
+    return widget
+
+
+def _row_text(row: Gtk.Widget) -> str:
+    get_subtitle = getattr(row, "get_subtitle", None)
+    return " ".join(
+        (
+            row.get_title() or "",
+            (get_subtitle() or "") if get_subtitle is not None else "",
+            getattr(row, "search_terms", ""),
+        )
+    )
+
+
+def _group_text(group: _SearchableGroup) -> str:
+    return " ".join(
+        (
+            group.get_title() or "",
+            group.get_description() or "",
+            getattr(group, "search_terms", ""),
+        )
+    )
+
+
+class PreferencesDialog(Adw.Dialog):
     """on_change() is called after any setting is saved, so the window can
-    push the new settings into open terminal tabs."""
+    push the new settings into open terminal tabs.
+
+    An Adw.Dialog wrapping the page by hand rather than an
+    Adw.PreferencesDialog: the search bar has to stay pinned above the
+    settings while they scroll, which takes a toolbar of our own. Adwaita's
+    built-in preferences search hides behind a header button and answers on a
+    separate results page, and it matches neither group titles ("Terminal")
+    nor the options inside an expander ("Dracula").
+    """
 
     def __init__(self, state: AppState, on_change: Callable[[], None]) -> None:
-        super().__init__(title=_("Preferences"))
+        # A fixed size, unlike Adw.PreferencesDialog's grow-to-fit-the-page:
+        # the dialog has to hold still while filtering empties it out, or it
+        # would resize under the pointer on every keystroke. Small windows
+        # still clamp it down.
+        super().__init__(title=_("Preferences"), content_width=640, content_height=700)
         self._state = state
         self._on_change = on_change
 
-        page = Adw.PreferencesPage(title=_("General"), icon_name="preferences-system-symbolic")
+        self._search_entry = Gtk.SearchEntry(placeholder_text=_("Search settings…"), hexpand=True)
+        # A name of its own for screen readers: placeholder text is announced
+        # unreliably at best, and it is gone the moment anyone types.
+        self._search_entry.update_property(
+            [Gtk.AccessibleProperty.LABEL], [_("Search settings")]
+        )
+        self._search_entry.connect("search-changed", self._on_search_changed)
+        self._search_entry.connect("stop-search", self._on_search_stopped)
 
-        terminal_group = Adw.PreferencesGroup(title=_("Terminal"))
+        page = _SearchablePage(title=_("General"), icon_name="preferences-system-symbolic")
+        self._page = page
+
+        terminal_group = _SearchableGroup(title=_("Terminal"))
 
         font_row = Adw.ActionRow(title=_("Font"), subtitle=_("Applies to all terminal tabs"))
         self._font_button = Gtk.FontDialogButton(dialog=Gtk.FontDialog(), valign=Gtk.Align.CENTER)
@@ -170,24 +262,25 @@ class PreferencesDialog(Adw.PreferencesDialog):
             row.set_activatable_widget(radio)
             row.add_suffix(_theme_swatch(name))
             self._theme_expander.add_row(row)
-        terminal_group.add(self._theme_expander)
+        terminal_group.add(_searchable(self._theme_expander, *THEME_NAMES))
         page.add(terminal_group)
 
         if editor.HAVE_GTKSOURCE:
             self._build_editor_group(state, page)
 
-        appearance_group = Adw.PreferencesGroup(title=_("Appearance"))
+        appearance_group = _SearchableGroup(title=_("Appearance"))
         scheme_row = Adw.ComboRow(title=_("Color scheme"))
-        scheme_row.set_model(Gtk.StringList.new([_(label) for _k, label, _s in _SCHEMES]))
+        scheme_labels = [_(label) for _k, label, _s in _SCHEMES]
+        scheme_row.set_model(Gtk.StringList.new(scheme_labels))
         current_scheme = state.get_setting("color_scheme") or "system"
         scheme_row.set_selected(
             next((i for i, (k, _l, _s) in enumerate(_SCHEMES) if k == current_scheme), 0)
         )
         scheme_row.connect("notify::selected", self._on_scheme_changed)
-        appearance_group.add(scheme_row)
+        appearance_group.add(_searchable(scheme_row, *scheme_labels))
         page.add(appearance_group)
 
-        caffeine_group = Adw.PreferencesGroup(title=_("Caffeine Mode"))
+        caffeine_group = _SearchableGroup(title=_("Caffeine Mode"))
         self._caffeine_launch_row = Adw.SwitchRow(
             title=_("Turn on at launch"),
             subtitle=_(
@@ -204,9 +297,8 @@ class PreferencesDialog(Adw.PreferencesDialog):
             title=_("Turn off after"),
             subtitle=_("How long that launch-time Caffeine Mode runs before it turns itself off"),
         )
-        self._caffeine_timer_row.set_model(
-            Gtk.StringList.new([duration_label(key) for key in DURATION_KEYS])
-        )
+        duration_labels = [duration_label(key) for key in DURATION_KEYS]
+        self._caffeine_timer_row.set_model(Gtk.StringList.new(duration_labels))
         current_timer = state.get_setting("caffeine_launch_timer") or INDEFINITE
         self._caffeine_timer_row.set_selected(
             DURATION_KEYS.index(current_timer) if current_timer in DURATION_KEYS
@@ -214,10 +306,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
         )
         self._caffeine_timer_row.set_sensitive(self._caffeine_launch_row.get_active())
         self._caffeine_timer_row.connect("notify::selected", self._on_caffeine_timer_changed)
-        caffeine_group.add(self._caffeine_timer_row)
+        caffeine_group.add(_searchable(self._caffeine_timer_row, *duration_labels))
         page.add(caffeine_group)
 
-        sidebar_group = Adw.PreferencesGroup(title=_("Session list"))
+        sidebar_group = _SearchableGroup(title=_("Session list"))
         self._folder_path_row = Adw.SwitchRow(
             title=_("Show folder path"),
             subtitle=_("Show each session's project folder path in the sidebar"),
@@ -272,7 +364,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         sidebar_group.add(self._pr_launch_row)
         page.add(sidebar_group)
 
-        self._footer_apps_group = Adw.PreferencesGroup(
+        self._footer_apps_group = _SearchableGroup(
             title=_("Footer apps"),
             description=_("Buttons in each tab's footer that open the tab's directory"),
         )
@@ -281,6 +373,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         add_app_btn.set_tooltip_text(_("Add application…"))
         add_app_btn.connect("clicked", self._on_add_footer_app)
         self._footer_apps_group.set_header_suffix(add_app_btn)
+        _searchable(self._footer_apps_group, _("Add application…"))
         self._footer_app_rows: list[Adw.PreferencesRow] = []
         self._rebuild_footer_apps()
         page.add(self._footer_apps_group)
@@ -290,12 +383,13 @@ class PreferencesDialog(Adw.PreferencesDialog):
         current_label = next(
             (label for code, label in LANGUAGES if code == current_lang), LANGUAGES[0][1]
         )
-        lang_group = Adw.PreferencesGroup(title=_("Language"), description=_("Restart to apply"))
+        lang_group = _SearchableGroup(title=_("Language"), description=_("Restart to apply"))
         self._restart_btn = Gtk.Button(label=_("Restart now"), valign=Gtk.Align.CENTER)
         self._restart_btn.add_css_class("suggested-action")
         self._restart_btn.set_visible(False)
         self._restart_btn.connect("clicked", self._on_restart)
         lang_group.set_header_suffix(self._restart_btn)
+        _searchable(lang_group, _("Restart now"))
         self._lang_expander = Adw.ExpanderRow(title=_("Language"), subtitle=current_label)
         lang_radio_group = None
         for code, label in LANGUAGES:
@@ -310,10 +404,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
             row.add_prefix(radio)
             row.set_activatable_widget(radio)
             self._lang_expander.add_row(row)
-        lang_group.add(self._lang_expander)
+        lang_group.add(_searchable(self._lang_expander, *(label for _c, label in LANGUAGES)))
         page.add(lang_group)
 
-        new_sessions_group = Adw.PreferencesGroup(title=_("New sessions"))
+        new_sessions_group = _SearchableGroup(title=_("New sessions"))
         self._worktree_row = Adw.SwitchRow(
             title=_("Start new sessions in a git worktree"),
             subtitle=_(
@@ -327,7 +421,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         new_sessions_group.add(self._worktree_row)
         page.add(new_sessions_group)
 
-        running_group = Adw.PreferencesGroup(
+        running_group = _SearchableGroup(
             title=_("Running sessions"),
             description=_(
                 "Ask keeps the confirmation dialog; the other choices skip it "
@@ -348,7 +442,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         )
         page.add(running_group)
 
-        notif_group = Adw.PreferencesGroup(title=_("Notifications"))
+        notif_group = _SearchableGroup(title=_("Notifications"))
         self._notify_row = Adw.SwitchRow(
             title=_("Notify when a session goes idle"),
             subtitle=_("Desktop notification when a background tab stops producing output"),
@@ -358,7 +452,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         notif_group.add(self._notify_row)
         page.add(notif_group)
 
-        bg_group = Adw.PreferencesGroup(title=_("Background sessions"))
+        bg_group = _SearchableGroup(title=_("Background sessions"))
         self._bg_poll_row = Adw.SwitchRow(
             title=_("Poll for background sessions"),
             subtitle=_(
@@ -371,7 +465,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         bg_group.add(self._bg_poll_row)
         page.add(bg_group)
 
-        experimental_group = Adw.PreferencesGroup(title=_("Experimental"))
+        experimental_group = _SearchableGroup(title=_("Experimental"))
         self._progress_termprop_row = Adw.SwitchRow(
             title=_("Exact busy tracking from the agent"),
             subtitle=_(
@@ -385,10 +479,41 @@ class PreferencesDialog(Adw.PreferencesDialog):
         experimental_group.add(self._progress_termprop_row)
         page.add(experimental_group)
 
-        self.add(page)
+        self._no_results = Adw.StatusPage(
+            icon_name="system-search-symbolic",
+            title=_("No settings found"),
+            description=_("Try a different search."),
+        )
+        # Not homogeneous: the placeholder is free to be smaller than the
+        # settings, which would otherwise widen the dialog to fit it.
+        self._stack = Gtk.Stack(hhomogeneous=False, vhomogeneous=False)
+        self._stack.add_named(page, "settings")
+        self._stack.add_named(self._no_results, "no-results")
 
-    def _build_editor_group(self, state: AppState, page: Adw.PreferencesPage) -> None:
-        editor_group = Adw.PreferencesGroup(title=_("Editor"))
+        # The box lines up with the setting rows rather than running the full
+        # width of the dialog. Reproducing that inset takes the same clamp the
+        # page uses, not a fixed margin: Adw.Clamp eases the gap open between
+        # its tightening threshold and its maximum, so the rows sit 12px in at
+        # 360px wide and 54px in at 640px. Same two numbers, same 12px margin
+        # on the clamped child, and the two agree at every width.
+        self._search_entry.set_margin_start(12)
+        self._search_entry.set_margin_end(12)
+        self._search_entry.set_margin_top(6)
+        self._search_entry.set_margin_bottom(6)
+        search_bar = Adw.Clamp(
+            child=self._search_entry, maximum_size=600, tightening_threshold=400
+        )
+
+        toolbar_view = Adw.ToolbarView(content=self._stack)
+        toolbar_view.add_top_bar(Adw.HeaderBar())
+        toolbar_view.add_top_bar(search_bar)
+        # The search box is the first focusable widget in the dialog, so
+        # Adw.Dialog hands it the focus on open: preferences opens ready to
+        # type into. _on_search_stopped keeps Escape closing anyway.
+        self.set_child(toolbar_view)
+
+    def _build_editor_group(self, state: AppState, page: _SearchablePage) -> None:
+        editor_group = _SearchableGroup(title=_("Editor"))
 
         scheme_ids = [""] + sorted(editor.GtkSource.StyleSchemeManager.get_default().get_scheme_ids())
         current_editor_scheme = state.get_setting("editor_style_scheme") or ""
@@ -414,7 +539,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
             row.add_prefix(radio)
             row.set_activatable_widget(radio)
             self._editor_scheme_expander.add_row(row)
-        editor_group.add(self._editor_scheme_expander)
+        editor_group.add(
+            _searchable(self._editor_scheme_expander, *(scheme_label(s) for s in scheme_ids))
+        )
 
         font_row = Adw.ActionRow(title=_("Font"), subtitle=_("Applies to the editor panel"))
         self._editor_font_button = Gtk.FontDialogButton(dialog=Gtk.FontDialog(), valign=Gtk.Align.CENTER)
@@ -458,6 +585,41 @@ class PreferencesDialog(Adw.PreferencesDialog):
         editor_group.add(pop_out_row)
 
         page.add(editor_group)
+
+    # -- search --------------------------------------------------------------
+
+    def _on_search_changed(self, _entry: Gtk.SearchEntry) -> None:
+        self._apply_filter()
+
+    def _on_search_stopped(self, _entry: Gtk.SearchEntry) -> None:
+        # Escape empties the box, and closes preferences once it is already
+        # empty. The box holds the focus from the moment the dialog opens, so
+        # it swallows the key — without this, Escape would stop closing
+        # preferences at all.
+        if self._search_entry.get_text():
+            self._search_entry.set_text("")
+        else:
+            self.close()
+
+    def _apply_filter(self) -> None:
+        """Hide every setting the search box doesn't name.
+
+        A group whose own title matches keeps all of its rows: someone typing
+        "terminal" wants that whole section, not just the rows that happen to
+        repeat the word.
+        """
+        query = self._search_entry.get_text()
+        anything_matched = False
+        for group in self._page.groups:
+            whole_group = prefssearch.matches(query, _group_text(group))
+            matched_rows = False
+            for row in group.rows:
+                visible = whole_group or prefssearch.matches(query, _row_text(row))
+                row.set_visible(visible)
+                matched_rows = matched_rows or visible
+            group.set_visible(matched_rows)
+            anything_matched = anything_matched or matched_rows
+        self._stack.set_visible_child_name("settings" if anything_matched else "no-results")
 
     def _on_editor_scheme_radio(self, radio: Gtk.CheckButton, scheme_id: str) -> None:
         if not radio.get_active():
@@ -538,15 +700,16 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._on_change()
 
     def _add_running_behavior_row(
-        self, group: Adw.PreferencesGroup, title: str, subtitle: str, key: str
+        self, group: _SearchableGroup, title: str, subtitle: str, key: str
     ) -> None:
         row = Adw.ComboRow(title=title, subtitle=subtitle)
-        row.set_model(Gtk.StringList.new([_(label) for _v, label in _RUNNING_BEHAVIORS]))
+        labels = [_(label) for _v, label in _RUNNING_BEHAVIORS]
+        row.set_model(Gtk.StringList.new(labels))
         values = [value for value, _l in _RUNNING_BEHAVIORS]
         current = self._state.get_setting(key)
         row.set_selected(values.index(current) if current in values else 0)
         row.connect("notify::selected", self._on_running_behavior_changed, key)
-        group.add(row)
+        group.add(_searchable(row, *labels))
 
     def _on_running_behavior_changed(self, row: Adw.ComboRow, _pspec, key: str) -> None:
         self._state.set_setting(key, _RUNNING_BEHAVIORS[row.get_selected()][0])
@@ -658,6 +821,8 @@ class PreferencesDialog(Adw.PreferencesDialog):
     def _save_footer_apps(self, apps: list[str]) -> None:
         self._state.set_setting("footer_apps", apps)
         self._rebuild_footer_apps()
+        # The rebuilt rows are visible by default; put the search back over them.
+        self._apply_filter()
         self._on_change()
 
     def _on_language_radio(self, radio: Gtk.CheckButton, code: str, label: str) -> None:
