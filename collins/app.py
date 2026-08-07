@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-06. Full change history: git log for this file.
+# fork. Last modified: 2026-08-07. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -186,6 +186,20 @@ row.session-child checkbutton > check {
 row.session-child:hover {
   background-color: alpha(currentColor, 0.1);
   border-color: alpha(currentColor, 0.3);
+}
+/* the stand-in row under an empty project (see NewThreadRow): it holds the
+   place of a session rather than standing for one, so it takes the card's
+   metrics and none of its outline. An outlined card there would count as a
+   row in a list that has none, and the guide line beside it would be a status
+   line for a session that does not exist; without them the offer sits in the
+   empty space as text, and the group still reads as empty at a glance.
+   The borders stay in the box, only turned transparent, so the label lines up
+   with the titles of real rows and the row keeps their height. Hover still
+   fills -- the row is clickable and says so -- but does not draw the card
+   back in around it. */
+row.session-child.new-thread,
+row.session-child.new-thread:hover {
+  border-color: transparent;
 }
 /* sessions running in an open tab are the ones the panel is really about, and
    they say so through their titles: theirs read at full strength while every
