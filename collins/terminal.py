@@ -1083,6 +1083,10 @@ class TerminalTab(Gtk.Box):
         self.terminal.connect("bell", lambda *_: self.emit("bell"))
 
         self._easy_copy_paste = False
+        # The colour plain text is drawn in, once a theme has been applied;
+        # None while the terminal is following the system colours. Read when
+        # telling an agent's dim ghost text from typing (see _tail_is_dim).
+        self._terminal_fg: tuple[int, int, int] | None = None
         self._setup_context_menu()
         self._setup_image_drop()
 
@@ -2005,6 +2009,11 @@ class TerminalTab(Gtk.Box):
             Vte.Format.TEXT, row, 0, row, self.terminal.get_column_count()
         )
         text = line[0] if isinstance(line, tuple) else line
+        # What the line says is enough to say yes to an empty input, and that
+        # is the answer nearly every time this is asked; only a line that reads
+        # as written-in is worth a second look at how it was drawn.
+        if self.provider.takes_prompt(text or "", column):
+            return True
         return self.provider.takes_prompt(text or "", column, self._tail_is_dim(row, column))
 
     def _tail_is_dim(self, row: int, column: int) -> bool:
@@ -2020,7 +2029,7 @@ class TerminalTab(Gtk.Box):
             Vte.Format.HTML, row, column, row, self.terminal.get_column_count()
         )
         text = html[0] if isinstance(html, tuple) else html
-        return vtehtml.is_dim_run(text or "")
+        return vtehtml.is_dim_run(text or "", self._terminal_fg)
 
     def prompt_block(self) -> str:
         """Why a prompt sent to this tab wouldn't land, or "" when it would.
@@ -2852,6 +2861,7 @@ class TerminalTab(Gtk.Box):
         except (TypeError, ValueError):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
+        self._terminal_fg = themes.terminal_foreground(settings.get("terminal_theme"))
         # The floating attach button can be turned off in preferences; the
         # provider gate (no file mention syntax = no button) still applies.
         self._attach_overlay_btn.set_visible(

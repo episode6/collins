@@ -282,6 +282,15 @@ def test_claude_prompt_is_free_when_it_is_empty():
     assert claude.takes_prompt("❯\xa0", 2) is True
 
 
+def test_the_opening_suggestion_is_recognised_by_its_words_alone():
+    """The `Try "…"` opener is the one suggestion with fixed wording, and it
+    stays readable without the terminal reporting how the line was drawn — the
+    fallback for a terminal that can't say (an old VTE, an unknown foreground
+    behind an unusual theme)."""
+    claude = ClaudeProvider()
+    assert claude.takes_prompt('❯\xa0Try "create a util logging.py that..."', 2) is True
+
+
 def test_a_suggestion_written_for_the_session_is_still_an_empty_prompt():
     """Once a session has some history the CLI stops offering `Try "…"` and
     suggests something about the work at hand instead. It is ghost text just
