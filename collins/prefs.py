@@ -487,16 +487,6 @@ class PreferencesDialog(Adw.Dialog):
         )
         page.add(running_group)
 
-        notif_group = _SearchableGroup(title=_("Notifications"))
-        self._notify_row = Adw.SwitchRow(
-            title=_("Notify when a session goes idle"),
-            subtitle=_("Desktop notification when a background tab stops producing output"),
-        )
-        self._notify_row.set_active(bool(state.get_setting("notify_idle")))
-        self._notify_row.connect("notify::active", self._on_notify_changed)
-        notif_group.add(self._notify_row)
-        page.add(notif_group)
-
         bg_group = _SearchableGroup(title=_("Background sessions"))
         self._bg_poll_row = Adw.SwitchRow(
             title=_("Poll for background sessions"),
@@ -762,10 +752,6 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_running_behavior_changed(self, row: Adw.ComboRow, _pspec, key: str) -> None:
         self._state.set_setting(key, _RUNNING_BEHAVIORS[row.get_selected()][0])
-        self._on_change()
-
-    def _on_notify_changed(self, row: Adw.SwitchRow, _pspec) -> None:
-        self._state.set_setting("notify_idle", row.get_active())
         self._on_change()
 
     def _on_bg_poll_changed(self, row: Adw.SwitchRow, _pspec) -> None:

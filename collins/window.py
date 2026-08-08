@@ -77,9 +77,6 @@ log = logging.getLogger(__name__)
 
 _GHOSTTY = shutil.which("ghostty")
 
-# Quiet period before a background tab is considered "idle" / finished.
-_IDLE_NOTIFY_MS = 4000
-
 # Window (and content header) title while the tab bar is showing the tab names.
 _APP_TITLE = "Collins"
 
@@ -274,7 +271,6 @@ class MainWindow(Adw.ApplicationWindow):
         # Tabs renamed locally before their session was bound: never auto-sync
         # their titles from the store.
         self._local_titles: set[Adw.TabPage] = set()
-        self._idle_sources: dict[Adw.TabPage, int] = {}  # pending idle-notify timers
         # Tabs whose editor pane is popped out into its own window right now.
         # One entry per tab; the pane itself still belongs to the tab, so
         # dirty counts and state capture keep working through it.
@@ -1681,10 +1677,16 @@ class MainWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _on_bell(self, tab: TerminalTab) -> None:
-        """Visual bell (the audible bell is VTE's own): flash the header bar,
-        and the ringing session's tab header and sidebar row — the two places
-        that say which session wants attention when the bell isn't the
-        selected tab's."""
+        """Visual bell (the audible bell is VTE's own)."""
+        self.flash_session(tab)
+
+    def flash_session(self, tab: TerminalTab) -> None:
+        """Flash the header bar, and the ringing session's tab header and
+        sidebar row — the two places that say which session wants attention
+        when the bell isn't the selected tab's.
+
+        Rung by a terminal's BEL and by the `notify_user` tool, which wants
+        the same "this session" cue for anyone still looking at the app."""
         flash(self._content_header)
         page = self.tab_view.get_page(tab)
         if page is None:
@@ -3154,8 +3156,6 @@ class MainWindow(Adw.ApplicationWindow):
             page.set_needs_attention(True)
             if session_id:
                 self._sync_status(session_id)
-        if self.state.get_setting("notify_idle"):
-            self._schedule_idle_notify(page)
 
     # -- terminal panel ------------------------------------------------------
 
@@ -3417,7 +3417,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._sync_window_title()
         if page is None:
             return
-        self._cancel_idle(page)  # foreground now; no "finished" notification
         self._clear_unread(page)  # switching here is what reads a finished run
         if page.get_needs_attention():
             page.set_needs_attention(False)
@@ -3443,31 +3442,43 @@ class MainWindow(Adw.ApplicationWindow):
         if page is not None and isinstance(page.get_child(), TerminalTab):
             page.get_child().refresh_pr_statuses()
 
-    # -- idle notifications --------------------------------------------------
+    # -- session notifications -----------------------------------------------
 
-    def _schedule_idle_notify(self, page: Adw.TabPage) -> None:
-        self._cancel_idle(page)
-        self._idle_sources[page] = GLib.timeout_add(_IDLE_NOTIFY_MS, self._fire_idle_notify, page)
+    def notify_session(self, tab: TerminalTab, message: str) -> bool:
+        """Raise a desktop notification for *tab*'s session, and flash the tab.
 
-    def _cancel_idle(self, page: Adw.TabPage) -> None:
-        source = self._idle_sources.pop(page, None)
-        if source is not None:
-            GLib.source_remove(source)
+        The `notify_user` tool's surface: the agent asked for the user, so the
+        notification always goes out — no quiet period to guess at, no setting
+        to second-guess the request, and no suppression when the tab happens
+        to be selected (a tool that silently does nothing would lie to the
+        model, and the agent can only know it is being watched by asking).
 
-    def _fire_idle_notify(self, page: Adw.TabPage) -> bool:
-        self._idle_sources.pop(page, None)
-        if page is self.tab_view.get_selected_page() or not self.state.get_setting("notify_idle"):
-            return GLib.SOURCE_REMOVE
+        Titled with the session, so several notified sessions read apart, and
+        clicking it lands on that session's tab through app.focus-session —
+        the same action the sidebar's cross-window handoff uses. The
+        notification id is the session id, so a session that notifies twice
+        replaces its own notification instead of stacking a queue nobody
+        reads. The bell-flash rides along for the user who is looking: it
+        marks the ringing tab and row in-app, where a desktop notification
+        says nothing.
+
+        False when the window has no application to send through (a window
+        under test) — the tool reports that rather than claiming a
+        notification the user never got.
+        """
+        page = self.tab_view.get_page(tab)
+        self.flash_session(tab)
         app = self.get_application()
-        if app is not None:
-            session_id = self._session_id_of(page) or ""
-            notification = Gio.Notification.new(page.get_title())
-            notification.set_body("Claude finished responding.")
-            notification.set_default_action_and_target(
-                "app.focus-session", GLib.Variant("s", session_id)
-            )
-            app.send_notification(session_id or page.get_title(), notification)
-        return GLib.SOURCE_REMOVE
+        if app is None or page is None:
+            return False
+        session_id = self._session_id_of(page) or ""
+        notification = Gio.Notification.new(page.get_title())
+        notification.set_body(message)
+        notification.set_default_action_and_target(
+            "app.focus-session", GLib.Variant("s", session_id)
+        )
+        app.send_notification(session_id or page.get_title(), notification)
+        return True
 
     def has_session_tab(self, session_id: str) -> bool:
         """Whether this window is the one holding this session's tab — asked
@@ -3619,7 +3630,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._echo_gates.pop(page, None)
         self._remove_placeholder(page)
         self._local_titles.discard(page)
-        self._cancel_idle(page)
         if isinstance(tab, TerminalTab):
             # A popped-out editor dies with its tab: dock the pane back first
             # so the state captured below reflects it (and the app doesn't

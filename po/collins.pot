@@ -600,18 +600,6 @@ msgstr ""
 msgid "Closing a window while agent sessions are still running"
 msgstr ""
 
-#: collins/prefs.py:213
-msgid "Notifications"
-msgstr ""
-
-#: collins/prefs.py:215
-msgid "Notify when a session goes idle"
-msgstr ""
-
-#: collins/prefs.py:216
-msgid "Desktop notification when a background tab stops producing output"
-msgstr ""
-
 #: collins/prefs.py:223
 msgid "Background sessions"
 msgstr ""

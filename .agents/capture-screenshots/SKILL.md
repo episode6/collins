@@ -116,9 +116,8 @@ alpha-widgets session `$U1`). Adapt it, or hand-roll following these rules:
   - `expanded_groups`: groups start **collapsed**; list `"proj:<project-name>"`
     for each project plus `"fav:"` for favorites.
   - `settings`: set `"auto_title_sessions": false` (otherwise the app spawns
-    headless `claude` runs to title your fake sessions) and
-    `"notify_idle": false`; `window_width`/`window_height` size the shot
-    (1100×720 reads well).
+    headless `claude` runs to title your fake sessions);
+    `window_width`/`window_height` size the shot (1100×720 reads well).
 - Saved panel-terminal history is plain text at
   `state/collins/panel_history/<uuid>.txt`; a session with a file there
   replays it when its tab's panel opens.

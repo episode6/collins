@@ -51,7 +51,6 @@ DEFAULT_SETTINGS = {
     "terminal_max_width": 1200,  # px; terminal stops growing past this and centers (0 = no limit)
     "easy_copy_paste": True,  # Ctrl+C copies the selection (else SIGINT), Ctrl+V pastes, right-click menu
     "language": "",  # UI language code; "" = follow the system locale
-    "notify_idle": False,  # notify when a background session goes quiet
     "background_status_poll": False,  # timed-poll fallback for the yellow "running detached" lines
     # Experimental: drive the sidebar's busy pole from the agent CLI's own
     # OSC 9;4 progress announcements (see activity.ProgressWatch), coaxed out

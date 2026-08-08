@@ -326,15 +326,6 @@ msgstr "Fermer une fenêtre alors que des sessions d’agent sont encore en cour
 msgid "Ask"
 msgstr "Demander"
 
-msgid "Notifications"
-msgstr "Notifications"
-
-msgid "Notify when a session goes idle"
-msgstr "Notifier lorsqu’une session devient inactive"
-
-msgid "Desktop notification when a background tab stops producing output"
-msgstr "Notification de bureau lorsqu’un onglet en arrière-plan cesse de produire une sortie"
-
 msgid "Remove from favorites"
 msgstr "Retirer des favoris"
 
