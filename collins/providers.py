@@ -476,8 +476,14 @@ class ClaudeProvider(Provider):
         if cli is None:
             return []
         try:
+            # stdin must NOT be inherited: it is the terminal the app was
+            # launched from, and the CLI puts any tty stdin into raw mode
+            # for its whole run — restored only on a clean exit, so a
+            # timeout kill here left that terminal raw/no-echo (unreadable
+            # after quit). With /dev/null it never touches the tty.
             out = subprocess.run(
                 [cli, "agents", "--json"],
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=2,
