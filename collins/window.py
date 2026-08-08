@@ -3723,20 +3723,23 @@ class MainWindow(Adw.ApplicationWindow):
         # would show it seconds after the archive it speaks for.
         if self._undo_toast is not None:
             self._undo_toast.dismiss()
-        if len(session_ids) == 1:
-            session = self.store.get_session(session_ids[0])
-            name = self.store.display_name(session) if session else session_ids[0][:8]
-            # Toast titles are markup by default, and session names are not.
-            title = _("Archived “{name}”").format(name=GLib.markup_escape_text(name))
-        else:
-            title = _("Archived {n} sessions").format(n=len(session_ids))
         toast = Adw.Toast(
-            title=title, button_label=_("Undo"), timeout=_UNDO_TOAST_SECONDS
+            title=self._undo_toast_title(session_ids),
+            button_label=_("Undo"),
+            timeout=_UNDO_TOAST_SECONDS,
         )
         toast.set_action_name("win.undo-archive")
         toast.connect("dismissed", self._on_undo_toast_dismissed)
         self._undo_toast = toast
         self.sidebar.toast_overlay.add_toast(toast)
+
+    def _undo_toast_title(self, session_ids: list[str]) -> str:
+        if len(session_ids) == 1:
+            session = self.store.get_session(session_ids[0])
+            name = self.store.display_name(session) if session else session_ids[0][:8]
+            # Toast titles are markup by default, and session names are not.
+            return _("Archived “{name}”").format(name=GLib.markup_escape_text(name))
+        return _("Archived {n} sessions").format(n=len(session_ids))
 
     def _on_undo_toast_dismissed(self, toast: Adw.Toast) -> None:
         # Only the toast goes: the undo it advertised stays valid (see
@@ -3747,14 +3750,20 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _drop_undo(self, session_ids: list[str]) -> None:
         """Sessions Undo can no longer bring back — restored by hand, or
-        trashed outright: forget them, and take the snackbar down once
-        nothing armed is left."""
+        trashed or deleted outright: forget them, take the snackbar down once
+        nothing armed is left, and retitle it while something is — a batch
+        toast still advertising the sessions that just left would be lying
+        about what Undo restores."""
         gone = set(session_ids)
         remaining = [sid for sid in self._undo_archive if sid not in gone]
         if remaining == self._undo_archive:
             return
         self._undo_archive = remaining
-        if not remaining and self._undo_toast is not None:
+        if self._undo_toast is None:
+            return
+        if remaining:
+            self._undo_toast.set_title(self._undo_toast_title(remaining))
+        else:
             self._undo_toast.dismiss()
 
     def _undo_archive_now(self) -> None:
@@ -3893,6 +3902,7 @@ class MainWindow(Adw.ApplicationWindow):
                 dialogs.error_dialog(self, _("Could not trash transcript"), error)
                 return
             self._forget_transcript(session.session_id)
+            self._drop_undo([session.session_id])
 
         dialogs.confirm_dialog(
             self,
@@ -3920,6 +3930,7 @@ class MainWindow(Adw.ApplicationWindow):
                 dialogs.error_dialog(self, _("Could not delete transcript"), error)
                 return
             self._forget_transcript(session.session_id)
+            self._drop_undo([session.session_id])
 
         dialogs.confirm_dialog(
             self,
