@@ -410,18 +410,20 @@ row.session-child > revealer > box {
    hands its height to the revealer inside it for the length of the slide,
    so the slot grows from nothing as the content slides down out from behind
    the row above, and the rows below move down ahead of it rather than after
-   it. The body inside keeps the height the row gives up, so the moment the
-   slide ends and the class comes off, the row is already at least as tall
-   as its own min-height would make it and nothing moves: 26px here plus the
-   4px the body is margined by top and bottom (see PlaceholderRow) is a
-   placeholder row's own 34, and a session row's body measures taller than
-   the floor on its own. Only an arriving row has a revealer, so the body
-   rule is safe to state unconditionally -- and it has to be, being what the
-   row measures once .arriving is gone. */
+   it. The body inside keeps the height the row gives up for the length of
+   the slide, so the slot the revealer opens is the height the row will
+   stand at: 26px here plus the 4px the body is margined by top and bottom
+   (see PlaceholderRow) is the row's own 34 floor, and a session row's body
+   is shorter than that too. Both halves are scoped to .arriving and come off
+   together -- the floor simply moves back from the body to the row, at the
+   same height, so nothing jumps. Leaving the body's min-height on afterwards
+   is what an arrived row must not have: stretched to the floor it fills the
+   row instead of being centered in it (valign CENTER measuring its content),
+   which sat every restored row's title ~3px high. */
 row.session-child.arriving {
   min-height: 0;
 }
-row.session-child > revealer > box {
+row.session-child.arriving > revealer > box {
   min-height: 26px;
 }
 
