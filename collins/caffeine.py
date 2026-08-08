@@ -31,8 +31,8 @@ DURATION_KEYS: tuple[str, ...] = tuple(f"{h}h" for h in _HOURS) + (WHILE_ACTIVE,
 def duration_seconds(key: str) -> int | None:
     """How long a timer of *key* runs for, or None when it has no fixed length.
 
-    None covers both the open-ended options — `INDEFINITE`, and `WHILE_ACTIVE`,
-    whose deadline is set by the sessions rather than the clock (see
+    None covers both open-ended options — `INDEFINITE`, and `WHILE_ACTIVE`
+    (whose deadline comes from the sessions rather than the clock, see
     `follows_activity`) — and anything unrecognised: a hand-edited setting, a
     key from a newer version. A bad value leaving Caffeine Mode on too long is
     something the user can see and undo; cutting it short on its own is not.
@@ -48,6 +48,31 @@ def follows_activity(key: str) -> bool:
     clock. Only the exact key does: an unknown one falls through to indefinite
     above, which keeps the machine awake rather than second-guessing it."""
     return key == WHILE_ACTIVE
+
+
+def grace_deadline(
+    *, working: bool, deadline: float | None, now: float, grace: float = ACTIVE_GRACE_S
+) -> float | None:
+    """Where a sessions-following Caffeine Mode's shut-off deadline sits.
+
+    The whole rule of `WHILE_ACTIVE`, kept here so it can be tested without a
+    display — the app polls it once a second and only has to notice when the
+    answer moves (see App._follow_activity):
+
+    - **working**: None. There is nothing to count down to while the machine is
+      still being used, and no countdown to show.
+    - **idle, with a grace already running**: that same deadline, untouched, so
+      it runs down smoothly instead of restarting on every poll.
+    - **idle, with none**: a fresh one, *grace* from now. This is what makes any
+      burst of work reset the wait — the work cleared the old deadline on its
+      way in, so the next quiet moment starts the five minutes over.
+
+    *now* and *grace* only have to share a unit: the app polls in monotonic
+    microseconds, while the default is `ACTIVE_GRACE_S` in seconds.
+    """
+    if working:
+        return None
+    return now + grace if deadline is None else deadline
 
 
 def duration_label(key: str) -> str:

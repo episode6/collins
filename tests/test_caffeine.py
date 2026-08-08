@@ -10,6 +10,7 @@ from collins.caffeine import (
     duration_seconds,
     follows_activity,
     format_remaining,
+    grace_deadline,
     toggle_tooltip,
 )
 
@@ -55,6 +56,47 @@ def test_only_the_exact_key_follows_the_sessions(key):
 def test_grace_is_five_minutes():
     assert ACTIVE_GRACE_S == 300
     assert format_remaining(ACTIVE_GRACE_S) == "5:00"
+
+
+def test_working_sessions_leave_nothing_to_count_down():
+    # No deadline while the machine is being used for something — which is also
+    # what keeps a countdown out of the header.
+    assert grace_deadline(working=True, deadline=None, now=1000) is None
+    # ...including one dropped mid-countdown when work starts again.
+    assert grace_deadline(working=True, deadline=1200, now=1000) is None
+
+
+def test_the_grace_is_armed_when_the_last_session_stops():
+    assert grace_deadline(working=False, deadline=None, now=1000) == 1000 + ACTIVE_GRACE_S
+
+
+def test_a_running_grace_is_left_alone():
+    # Poll after poll with nothing working, the same deadline comes back — the
+    # countdown runs down instead of resetting to 5:00 every second.
+    deadline = grace_deadline(working=False, deadline=None, now=1000)
+    for now in (1001, 1030, 1100, 1290):
+        assert grace_deadline(working=False, deadline=deadline, now=now) == deadline
+
+
+def test_work_resets_the_grace():
+    # The reset the feature promises, poll by poll: idle arms it, a burst of
+    # work clears it, and going quiet again starts the five minutes over rather
+    # than resuming what was left of them.
+    first = grace_deadline(working=False, deadline=None, now=1000)
+    cleared = grace_deadline(working=True, deadline=first, now=1200)
+    assert cleared is None
+    second = grace_deadline(working=False, deadline=cleared, now=1400)
+    assert second == 1400 + ACTIVE_GRACE_S
+    assert second > first
+
+
+def test_the_grace_unit_follows_its_caller():
+    # The app polls a monotonic clock in microseconds, so now/grace only have
+    # to agree with each other.
+    micros = ACTIVE_GRACE_S * 1_000_000
+    assert grace_deadline(working=False, deadline=None, now=5_000_000, grace=micros) == (
+        5_000_000 + micros
+    )
 
 
 def test_labels():

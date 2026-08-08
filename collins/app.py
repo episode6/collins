@@ -19,7 +19,7 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import editorfiles, ghwelcome, mcpserver, mcptools, proctree, providers, tooltipmute
-from .caffeine import ACTIVE_GRACE_S, duration_seconds, follows_activity
+from .caffeine import ACTIVE_GRACE_S, duration_seconds, follows_activity, grace_deadline
 from .i18n import _
 from .lightbox import present_image_lightbox
 from .prefs import apply_color_scheme
@@ -984,12 +984,12 @@ class App(Adw.Application):
                 self._caffeine_flags_held = None
         # Nothing to count down to if the inhibit didn't take (or was refused).
         if self.caffeine_enabled:
-            seconds = duration_seconds(duration or "")
-            if follows_activity(duration or ""):
-                self._caffeine_mode = duration
-                self._follow_activity()  # sets the deadline if nothing is busy
+            key = duration or ""
+            if follows_activity(key):
+                self._caffeine_mode = key
+                self._follow_activity()  # arms the grace if nothing is working
                 self._caffeine_tick = GLib.timeout_add_seconds(1, self._on_caffeine_tick)
-            elif seconds:
+            elif seconds := duration_seconds(key):
                 self._caffeine_deadline = GLib.get_monotonic_time() + seconds * 1_000_000
                 self._caffeine_tick = GLib.timeout_add_seconds(1, self._on_caffeine_tick)
         self._sync_caffeine_windows()
@@ -1060,12 +1060,7 @@ class App(Adw.Application):
 
     def _follow_activity(self) -> bool:
         """Point the shut-off timer at the sessions, and say whether any is
-        working.
-
-        While something is: no deadline at all, so the headers show the mode's
-        tooltip rather than a countdown that would only ever be reset. When the
-        last one stops, the grace period is armed — and re-armed from scratch
-        after any later burst of work, which is what makes activity reset it.
+        working. `grace_deadline` holds the rule; this is the poll around it.
 
         Polled from the tick rather than pushed by the windows: the answer is a
         set-emptiness check per window, and reading it live means no missed
@@ -1073,12 +1068,16 @@ class App(Adw.Application):
         the machine awake with nothing left to work for.
         """
         working = self._sessions_working()
-        if working:
-            if self._caffeine_deadline is not None:
-                self._caffeine_deadline = None  # back to work: the grace is off
-                self._sync_caffeine_windows()  # ...and its countdown with it
-        elif self._caffeine_deadline is None:
-            self._caffeine_deadline = GLib.get_monotonic_time() + ACTIVE_GRACE_S * 1_000_000
+        deadline = grace_deadline(
+            working=working,
+            deadline=self._caffeine_deadline,
+            now=GLib.get_monotonic_time(),
+            grace=ACTIVE_GRACE_S * 1_000_000,  # the poll's clock is µs
+        )
+        if deadline != self._caffeine_deadline:
+            # The countdown just appeared (work stopped) or went away (it
+            # started again); every header needs to hear about it.
+            self._caffeine_deadline = deadline
             self._sync_caffeine_windows()
         return working
 
