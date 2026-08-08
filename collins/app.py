@@ -388,7 +388,8 @@ row.session-child.active-tab:hover {
    (16px margin + 1px border) comes back as a margin on the content box, so
    the timestamp, the hover buttons and a long folder path all line up with
    the rows above and below instead of sliding out to the panel edge too. */
-row.session-child.active-tab > box {
+row.session-child.active-tab > box,
+row.session-child.active-tab > revealer > box {
   margin-right: 17px;
 }
 /* ...and the counter-margin rides the same 200ms clock as the card's own
@@ -396,8 +397,31 @@ row.session-child.active-tab > box {
    right inset at every frame of the handoff and the content never visibly
    drifts. (Only near-constant: the 1px border-right is discrete, border-style
    not being animatable -- a one-pixel step nobody can see.) */
-row.session-child > box {
+row.session-child > box,
+row.session-child > revealer > box {
   transition: margin-right 200ms ease;
+}
+/* The revealer is a "New Thread" row's alone (see PlaceholderRow), which is
+   why the two rules above have to reach through it: a placeholder can be the
+   selected tab like any other row, and its content has the same right inset
+   to keep. */
+
+/* A "New Thread" row arriving in the list (see PlaceholderRow.slide_in): the
+   row hands its height to the revealer inside it for the length of the slide,
+   so the slot grows from nothing as the content slides down out from behind
+   the project header, and the rows below move down ahead of it rather than
+   after it. The body inside keeps the 34px the row gives up, so the moment
+   the slide ends and the class comes off, the row is already exactly as tall
+   as its own min-height would make it and nothing moves: 26px here plus the
+   4px the body is margined by top and bottom (see PlaceholderRow) is the
+   row's own 34. Only a placeholder has a revealer, so the body rule is safe
+   to state unconditionally -- and it has to be, being what the row measures
+   once .arriving is gone. */
+row.session-child.arriving {
+  min-height: 0;
+}
+row.session-child > revealer > box {
+  min-height: 26px;
 }
 
 /* A row on its way to the archive (see SessionRow.begin_archiving): the
