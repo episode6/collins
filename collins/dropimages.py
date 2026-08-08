@@ -5,7 +5,9 @@
 An image dragged in as raw data (from a browser, a screenshot tool, an
 image viewer) has no path an @-mention could name, so a copy is written
 here and the mention points at the copy. Dropped *files* are mentioned in
-place — only the text built for them (mention_text) lives here.
+place — only the text built for them (mention_text) lives here, along with
+how that text joins whatever is already typed (leading_space, which the
+attach-file button shares).
 
 Kept GTK-free (like editorfiles.py/gitinfo.py) so this stays unit-testable
 headless; terminal.py owns the drop target and turns Gdk values into the
@@ -23,10 +25,17 @@ from __future__ import annotations
 
 import os
 import time
+import unicodedata
 from collections.abc import Callable
 from pathlib import Path
 
 PRUNE_AFTER_SECONDS = 7 * 24 * 60 * 60  # a week: past any plausible submit
+
+# Characters a terminal draws inside the cell of the character before them:
+# combining marks (Mn/Me — accents, the variation selector that asks for the
+# emoji form) and format controls (Cf — the zero-width joiner in a composed
+# emoji). They advance no column.
+_ZERO_WIDTH_CATEGORIES = frozenset({"Mn", "Me", "Cf"})
 
 # Bounds the rename loop when a burst of drops lands in the same second;
 # hitting it means something is wrong (a clock stuck at one value), and
@@ -51,6 +60,51 @@ def mention_text(paths: list[str], file_reference: Callable[[str], str | None]) 
         else:
             tokens.append(reference + " ")
     return "".join(tokens), failed
+
+
+def leading_space(text_before_cursor: str, cursor_column: int) -> str:
+    """The space to type in front of a mention, or "" when none is wanted.
+
+    A mention added to a half-written sentence has to keep its distance:
+    typed straight in it glues itself onto the word the cursor sits after
+    ("look at@main.py"), where the CLI reads no mention token at all.
+
+    *text_before_cursor* is the input line from its start up to the cursor,
+    as the terminal has it, and its last character is the whole test. An
+    empty input box ends in the whitespace its own prompt marker is drawn
+    with (Claude's ❯ and a no-break space) — and so does one showing only
+    the agent's dim suggestion, whose cursor stays at the marker — while a
+    sentence the user already left a space on ends in that space. None of
+    those wants another one.
+
+    *cursor_column* covers the case the text can't speak for: a cursor past
+    the end of the written line, where the blank cells in between are
+    whitespace the terminal doesn't bother reporting. It is a count of
+    *cells*, not of characters, so the comparison goes through cell_width —
+    a line of CJK reaches a far higher column than it has characters, and
+    reading that as a gap left a mention glued to the last one.
+    """
+    if not text_before_cursor or cell_width(text_before_cursor) < cursor_column:
+        return ""
+    return "" if text_before_cursor[-1].isspace() else " "
+
+
+def cell_width(text: str) -> int:
+    """How many terminal cells *text* occupies.
+
+    A terminal counts columns in cells, and not every character is one cell
+    wide: CJK and most emoji take two, and a combining mark or a joiner
+    takes none — it decorates the character before it. Enough to line a
+    string up with a cursor column; the terminal's own tables are the real
+    authority, and where they disagree the caller errs toward adding the
+    space rather than gluing a mention on (see leading_space).
+    """
+    width = 0
+    for char in text:
+        if unicodedata.category(char) in _ZERO_WIDTH_CATEGORIES:
+            continue
+        width += 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+    return width
 
 
 def default_directory() -> Path:

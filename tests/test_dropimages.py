@@ -4,11 +4,17 @@ import time
 
 from collins.dropimages import (
     PRUNE_AFTER_SECONDS,
+    cell_width,
     default_directory,
+    leading_space,
     mention_text,
     prune_stale,
     save_png,
 )
+
+# Claude Code draws its input box as a ❯ and a no-break space (the space
+# below is that one, not an ordinary one), then whatever has been typed.
+_PROMPT = "❯ "
 
 # A fixed moment keeps the expected file names stable; the exact date is
 # irrelevant, only that every test agrees on it.
@@ -40,6 +46,69 @@ def test_mention_text_counts_refused_names_and_keeps_the_rest():
 def test_mention_text_all_refused_or_empty():
     assert mention_text(["\x1b.png"], _fake_reference) == ("", 1)
     assert mention_text([], _fake_reference) == ("", 0)
+
+
+# -- leading_space ------------------------------------------------------------
+
+
+def test_leading_space_none_for_an_empty_input_box():
+    # The cursor sits right after the marker, whose no-break space is the
+    # last character before it — the box holds nothing of the user's.
+    assert leading_space(_PROMPT, len(_PROMPT)) == ""
+
+
+def test_leading_space_separates_a_half_written_sentence():
+    line = _PROMPT + "look at"
+    assert leading_space(line, len(line)) == " "
+
+
+def test_leading_space_none_when_the_sentence_already_ends_in_one():
+    line = _PROMPT + "look at "
+    assert leading_space(line, len(line)) == ""
+
+
+def test_leading_space_separates_mid_sentence_and_after_punctuation():
+    # The cursor moved back into the sentence: only what precedes it counts.
+    assert leading_space(_PROMPT + "look at", len(_PROMPT) + 4) == " "
+    line = _PROMPT + "compare these:"
+    assert leading_space(line, len(line)) == " "
+
+
+def test_leading_space_none_past_the_end_of_the_written_line():
+    # A cursor beyond what the terminal reported: the cells in between are
+    # blank, so the mention already has its distance.
+    assert leading_space(_PROMPT + "look at", 40) == ""
+    assert leading_space("", 0) == ""
+
+
+def test_leading_space_separates_a_sentence_ending_in_a_wide_character():
+    # Measured from VTE: 見て sits at cursor column 6 on a line of only four
+    # characters. Counting characters instead of cells read that as a cursor
+    # past the end of the line, and glued the mention onto the て.
+    line = _PROMPT + "見て"
+    assert leading_space(line, 6) == " "
+    assert leading_space(_PROMPT + "look 🚀", 9) == " "
+
+
+def test_leading_space_none_after_a_wide_character_and_a_space():
+    assert leading_space(_PROMPT + "見て ", 7) == ""
+
+
+# -- cell_width ---------------------------------------------------------------
+
+
+def test_cell_width_counts_cells_not_characters():
+    assert cell_width("look at") == 7
+    assert cell_width("見て") == 4  # two cells each
+    assert cell_width("🚀") == 2
+    assert cell_width(_PROMPT) == 2  # the ❯ and the no-break space, one each
+
+
+def test_cell_width_ignores_marks_and_joiners():
+    assert cell_width("é") == 1  # e + combining acute
+    assert cell_width("‍") == 0  # a zero-width joiner on its own
+    assert cell_width("👩‍🚀") == 4  # two emoji joined; VTE draws both
+    assert cell_width("") == 0
 
 
 # -- default_directory --------------------------------------------------------

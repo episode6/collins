@@ -1923,7 +1923,8 @@ class TerminalTab(Gtk.Box):
         for *path* into the input box — typed, never submitted, so the user
         says what they want done with it. The trailing space both
         terminates the CLI's mention token and leaves the cursor ready for
-        that sentence.
+        that sentence; the leading one keeps the token off the end of a
+        sentence already being written (see _mention_leading_space).
 
         The path resolves against the agent's cwd right now, not the
         directory the tab started in — an agent that has cd'd into a
@@ -1943,8 +1944,38 @@ class TerminalTab(Gtk.Box):
         if reference is None:
             self.feed_message(_("Add to chat isn't available for this file"))
             return
-        self.feed_child_text(reference + " ")
+        self.feed_child_text(self._mention_leading_space() + reference + " ")
         GLib.idle_add(self._focus_terminal_after_add_to_chat)
+
+    def _mention_leading_space(self) -> str:
+        """A space to put in front of a mention about to be typed, when the
+        input box has a sentence in it already (dropimages.leading_space
+        decides; this finds what it reads).
+
+        That is the line the cursor is on, up to the cursor — the same
+        screen `takes_prompt` reads, but read differently: this question is
+        asked mid-sentence, where the prompt marker is no longer the last
+        thing on the line, so what counts is the character immediately
+        before the cursor rather than where the marker sits. A cursor at
+        column 0 has nothing before it to read.
+        """
+        column, row = self.terminal.get_cursor_position()
+        if column <= 0:
+            return ""
+        return dropimages.leading_space(self._row_text(row, column), column)
+
+    def _row_text(self, row: int, end_column: int) -> str:
+        """What row *row* says from its start up to *end_column* (exclusive).
+
+        The column is a count of cells, not of characters — a wide character
+        advances it by two — so callers comparing the two have to say which
+        they mean (dropimages.cell_width). Trailing cells that were never
+        written aren't reported at all, which is how a cursor sitting past
+        the end of a line gives a string shorter than its own column.
+        """
+        line = self.terminal.get_text_range_format(Vte.Format.TEXT, row, 0, row, end_column)
+        text = line[0] if isinstance(line, tuple) else line
+        return text or ""
 
     def _focus_terminal_after_add_to_chat(self) -> bool:
         """Move focus to the agent terminal once the "Add to chat" menu is
@@ -2049,8 +2080,8 @@ class TerminalTab(Gtk.Box):
 
     def _mention_dropped_paths(self, paths: list[str]) -> bool:
         """Type a mention token for each path into the input box — typed,
-        never submitted, mirroring "Add to chat" (see _on_editor_add_to_chat
-        for why the trailing space and the missing takes_prompt gate). Paths
+        never submitted, mirroring "Add to chat" (see add_file_to_chat for
+        why the spaces around them and the missing takes_prompt gate). Paths
         the provider refuses to reference (a control character in the name —
         see file_reference) are reported by count, not echoed: those names
         are exactly the untrusted bytes feed_message must not write to the
@@ -2070,7 +2101,7 @@ class TerminalTab(Gtk.Box):
             )
         if not text:
             return False
-        self.feed_child_text(text)
+        self.feed_child_text(self._mention_leading_space() + text)
         self.grab_terminal_focus()
         return True
 
@@ -2107,16 +2138,13 @@ class TerminalTab(Gtk.Box):
         if self._child_pid is None:
             return False
         column, row = self.terminal.get_cursor_position()
-        line = self.terminal.get_text_range_format(
-            Vte.Format.TEXT, row, 0, row, self.terminal.get_column_count()
-        )
-        text = line[0] if isinstance(line, tuple) else line
+        text = self._row_text(row, self.terminal.get_column_count())
         # What the line says is enough to say yes to an empty input, and that
         # is the answer nearly every time this is asked; only a line that reads
         # as written-in is worth a second look at how it was drawn.
-        if self.provider.takes_prompt(text or "", column):
+        if self.provider.takes_prompt(text, column):
             return True
-        return self.provider.takes_prompt(text or "", column, self._tail_is_dim(row, column))
+        return self.provider.takes_prompt(text, column, self._tail_is_dim(row, column))
 
     def _tail_is_dim(self, row: int, column: int) -> bool:
         """Whether the line from *column* to the end of *row* is drawn dim.
