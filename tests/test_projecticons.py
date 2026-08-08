@@ -115,6 +115,38 @@ def test_data_rejects_active_content(tmp_path):
         assert project_icon_data(tmp_path) is None
 
 
+def test_data_accepts_inline_png_data_uris(tmp_path):
+    # A hand-shipped icon may embed its own raster artwork as a
+    # data:image/png href — projects only reach the sidebar once trusted.
+    for payload in (
+        b'<image href="data:image/png;base64,iVBORw0KGgo="/>',
+        b'<image xlink:href="data:image/png;base64,iVBORw0KGgo="/>',
+    ):
+        good = _SVG.replace(b"/>", b">" + payload + b"</svg>")
+        _write_icon(tmp_path, good)
+        assert project_icon_data(tmp_path) == good
+
+
+def test_data_rejects_non_png_data_uris(tmp_path):
+    # PNG is the only subtype with a carve-out. image/svg+xml in particular
+    # stays refused: it is XML whose base64 payload could carry the
+    # script/handler content the plain-text checks can't see. Other raster
+    # codecs, lookalike subtypes, other media types, whitespace-smuggled
+    # URIs, and CSS url() are refused too.
+    for payload in (
+        b'<image href="data:image/svg+xml;base64,PHN2Zz48c2NyaXB0Lz48L3N2Zz4="/>',
+        b'<image xlink:href="data:image/svg+xml,<svg onload=x()/>"/>',
+        b'<image href="data:image/jpeg;base64,/9j/4AA="/>',
+        b'<image href="data:image/webp,x"/>',
+        b'<image href="data:image/png-evil;base64,AA=="/>',
+        b'<image href="data:text/html,<script>alert(1)</script>"/>',
+        b'<image href=" data:image/png;base64,iVBORw0KGgo="/>',
+        b'<rect style="fill:url(data:image/png;base64,AA==)"/>',
+    ):
+        _write_icon(tmp_path, _SVG.replace(b"/>", b">" + payload + b"</svg>"))
+        assert project_icon_data(tmp_path) is None
+
+
 def test_data_keeps_internal_references(tmp_path):
     good = _SVG.replace(
         b"/>",

@@ -50,6 +50,22 @@ def test_extract_rejects_active_content():
         assert icongen.extract_svg(_SVG.replace("<rect/>", payload)) is None
 
 
+def test_extract_rejects_data_uris():
+    # Hand-shipped on-disk icons may embed data:image/* rasters, but a
+    # generated icon is pure vector art: every data: href is refused here
+    # even though usable_icon_bytes would let the image one through.
+    for payload in (
+        '<image href="data:image/png;base64,iVBORw0KGgo="/>',
+        '<image xlink:href="data:image/png;base64,iVBORw0KGgo="/>',
+        '<image href="data:text/html,x"/>',
+    ):
+        doc = _SVG.replace("<rect/>", payload)
+        assert icongen.extract_svg(doc) is None
+    assert projecticons.usable_icon_bytes(
+        _SVG.replace("<rect/>", '<image href="data:image/png;base64,iVBORw0KGgo="/>').encode()
+    )
+
+
 def test_extract_keeps_internal_references():
     # Inline gradients and <use> reuse point at local fragments — the one
     # kind of reference a self-contained icon legitimately makes. The root
