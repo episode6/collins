@@ -94,6 +94,12 @@ _LAUNCH_SWEEP_DELAY_MS = 2500
 # works until the next archive replaces it.
 _UNDO_TOAST_SECONDS = 4
 
+# How soon after Ctrl+J opened the terminal panel a second Ctrl+J counts as a
+# double-tap and swaps the panel bottom↔right instead of closing it again (see
+# _toggle_panel). Long enough for a deliberate second tap, short enough that a
+# later Ctrl+J still plainly means "hide the panel".
+_PANEL_DOUBLE_TAP_US = 500_000
+
 # Quit-time backgrounding, which runs one session at a time. How long to wait
 # for a tab's session id to land before giving up and exiting it cleanly, how
 # often to re-check while waiting, and how long to let one handoff hold the
@@ -296,6 +302,11 @@ class MainWindow(Adw.ApplicationWindow):
         self._bg_queue_done = 0
         self._bg_queue_total = 0
         self._bg_queue_dialog: Adw.AlertDialog | None = None
+        # The tab whose terminal panel the last Ctrl+J opened, and when — a
+        # second Ctrl+J on the same tab within _PANEL_DOUBLE_TAP_US swaps the
+        # panel's position rather than closing it (see _toggle_panel).
+        self._panel_opened_tab: TerminalTab | None = None
+        self._panel_opened_at = 0
         self._switcher: QuickSwitcher | None = None
         self._quickopen: QuickOpenDialog | None = None
         # Set while the app pushes shared Caffeine state into this window's
@@ -986,6 +997,8 @@ class MainWindow(Adw.ApplicationWindow):
             "copy-tab-session-id": lambda *_: self._copy_tab_session_id(),
             "close-menu-tab": lambda *_: self._close_menu_tab(),
             "toggle-panel": lambda *_: self._toggle_panel(),
+            # Ctrl+J's own action: same toggle, but double-tap aware.
+            "tap-panel": lambda *_: self._toggle_panel(double_tap=True),
             "swap-panel": lambda *_: self._swap_panel(),
             "clear-panel": lambda *_: self._clear_panel(),
             "toggle-editor": lambda *_: self._toggle_editor(),
@@ -1146,7 +1159,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control><Shift>z", "win.undo-archive"),
             ("<Control><Shift>k", "win.quick-switch"),
             ("<Control><Shift>e", "win.toggle-tab-emoji"),
-            ("<Control>j", "win.toggle-panel"),
+            ("<Control>j", "win.tap-panel"),
             ("<Control>k", "win.clear-panel"),
             ("F9", "win.toggle-sidebar"),
             ("F8", "win.toggle-editor"),
@@ -2047,6 +2060,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._progress_watches.pop(page, None)
         self._fresh_spawns.discard(page)
         self._baseline_captures.pop(page, None)
+        if page.get_child() is self._panel_opened_tab:  # no Ctrl+J chain to continue
+            self._panel_opened_tab = None
         self._sync_process_poll()
 
     def _on_page_title_changed(self, page: Adw.TabPage, _pspec) -> None:
@@ -3259,10 +3274,29 @@ class MainWindow(Adw.ApplicationWindow):
         tab = page.get_child() if page is not None else None
         return tab if isinstance(tab, TerminalTab) else None
 
-    def _toggle_panel(self) -> None:
+    def _toggle_panel(self, double_tap: bool = False) -> None:
+        """Show or hide this tab's terminal panel. From Ctrl+J (`double_tap`)
+        a second press right after one that opened the panel moves it
+        bottom↔right instead of closing it — the double-tap lands the panel
+        where the swap button would put it. That swap ends the chain, so a
+        third press hides the panel again and undoes an unmeant double-tap.
+        The footer button toggles plainly: a double-click there is a click
+        too many, not a request to move the panel."""
         tab = self._current_terminal_tab()
-        if tab is not None:  # a freshly opened panel uses the last-used mode
-            tab.toggle_panel(self.state.get_setting("panel_position"))
+        if tab is None:
+            return
+        now = GLib.get_monotonic_time()
+        if (
+            double_tap
+            and tab is self._panel_opened_tab
+            and now - self._panel_opened_at < _PANEL_DOUBLE_TAP_US
+        ):
+            self._panel_opened_tab = None
+            self._swap_panel()
+            return
+        tab.toggle_panel(self.state.get_setting("panel_position"))  # freshly opened: last-used mode
+        self._panel_opened_tab = tab if double_tap and tab.panel_visible else None
+        self._panel_opened_at = now
 
     def _swap_panel(self) -> None:
         tab = self._current_terminal_tab()
