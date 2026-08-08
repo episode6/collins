@@ -261,6 +261,26 @@ def test_write_config_produces_the_shim_invocation(monkeypatch, tmp_path):
     assert (package_parent / "collins" / "mcp_shim.py").is_file()
 
 
+def test_infrastructure_cmdlines_match_the_written_config(monkeypatch, tmp_path):
+    """The busy poll ignores exactly what the CLI is told to spawn: the two
+    are derived from one server table, and this pins that they can't drift —
+    a server added to the config without a matching ignore entry would keep
+    every session's busy pole up forever."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    path = mcptools.write_config("org.example.Collins")
+    config = json.loads(Path(path).read_text(encoding="utf-8"))
+    expected = {
+        " ".join([server["command"], *server["args"]])
+        for server in config["mcpServers"].values()
+        if server["type"] == "stdio"
+    }
+    assert mcptools.infrastructure_cmdlines() == expected
+
+
+def test_infrastructure_cmdlines_cover_the_shim():
+    assert any("collins.mcp_shim" in c for c in mcptools.infrastructure_cmdlines())
+
+
 def test_write_config_keeps_the_runtime_dir_private(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     path = mcptools.write_config("org.example.Collins")

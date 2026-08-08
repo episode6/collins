@@ -495,6 +495,41 @@ def test_forward_session_carries_metadata_without_archiving_original(app_state):
     assert not fresh.is_archived("new")
 
 
+def test_process_baseline_roundtrip(app_state):
+    state = app_state.AppState()
+    state.set_process_baseline("sid", {"python3 -m collins.mcp_shim", "a-server --stdio"})
+
+    fresh = app_state.AppState()
+    assert fresh.get_process_baseline("sid") == {"python3 -m collins.mcp_shim", "a-server --stdio"}
+    assert fresh.get_process_baseline("unknown") == set()
+    assert fresh.get_process_baseline("") == set()
+
+
+def test_process_baseline_unchanged_set_never_touches_the_disk(app_state, monkeypatch):
+    # The setter runs from a 2-second poll; re-recording the same set (in any
+    # iteration order) must not rewrite state.json every tick.
+    state = app_state.AppState()
+    state.set_process_baseline("sid", ["b", "a"])
+    saves = []
+    monkeypatch.setattr(state, "save", lambda: saves.append(1))
+    state.set_process_baseline("sid", {"a", "b"})
+    state.set_process_baseline("", ["ignored entirely"])
+    assert saves == []
+    state.set_process_baseline("sid", {"a", "b", "c"})
+    assert saves == [1]
+
+
+def test_forward_session_carries_the_process_baseline(app_state):
+    # A fork is the same CLI plumbing under a new id; losing the baseline
+    # there would resurrect the busy pole the moment the fork re-attaches.
+    state = app_state.AppState()
+    state.set_process_baseline("old", ["plumbing --stdio"])
+    state.forward_session("old", "new")
+
+    fresh = app_state.AppState()
+    assert fresh.get_process_baseline("new") == {"plumbing --stdio"}
+
+
 def test_forward_session_never_clobbers_target_metadata(app_state):
     state = app_state.AppState()
     state.set_name("old", "Old name")

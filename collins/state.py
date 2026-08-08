@@ -199,6 +199,14 @@ class AppState:
         # mergeable?, unresolved? — see to_record). The status in one is the
         # last that was fetched, not the current one.
         self.session_prs: dict[str, list] = {}
+        # session id -> cmdlines of the processes the CLI had spawned under
+        # itself before anything was ever submitted to it — its MCP servers,
+        # plumbing that must not read as "the agent left something running".
+        # Captured on tabs Collins spawns fresh, applied by the busy poll on
+        # every tab (see MainWindow._poll_process_activity). Persisted because
+        # the set is fixed at CLI startup: a tab re-attaching to that same
+        # process later can trust it verbatim.
+        self.process_baselines: dict[str, list[str]] = {}
         # old session id -> the id its conversation continued under (Claude's
         # /bg has been observed forking a backgrounded session to a fresh
         # background session id; in-place detaches add no entries here).
@@ -251,6 +259,9 @@ class AppState:
         self.session_prs = {
             k: v for k, v in (data.get("session_prs") or {}).items() if isinstance(v, list)
         }
+        self.process_baselines = {
+            k: v for k, v in (data.get("process_baselines") or {}).items() if isinstance(v, list)
+        }
         self.session_forwards = {
             k: v for k, v in (data.get("session_forwards") or {}).items() if isinstance(v, str)
         }
@@ -275,6 +286,7 @@ class AppState:
             "panel_states": self.panel_states,
             "editor_states": self.editor_states,
             "session_prs": self.session_prs,  # order is the payload — never sort
+            "process_baselines": self.process_baselines,
             "session_forwards": self.session_forwards,
             "pending_detaches": self.pending_detaches,
             "settings": self.settings,
@@ -474,6 +486,13 @@ class AppState:
             # The same conversation under a new id: the PRs it opened are the
             # fork's too, and the fork's transcript doesn't repeat them.
             self.session_prs[new_id] = list(self.session_prs[old_id])
+        if old_id in self.process_baselines and new_id not in self.process_baselines:
+            # A fork is a fresh CLI process with no pristine capture window of
+            # its own (it resumes a conversation already underway), so the
+            # original's plumbing baseline is the best available. A fork
+            # spawned with *fewer* servers is harmless — extra entries just
+            # never match anything.
+            self.process_baselines[new_id] = list(self.process_baselines[old_id])
         self.save()
 
     # -- pending /bg detaches ----------------------------------------------
@@ -500,6 +519,23 @@ class AppState:
 
     def get_pending_detaches(self) -> dict[str, dict]:
         return dict(self.pending_detaches)
+
+    def get_process_baseline(self, session_id: str) -> set[str]:
+        """The plumbing cmdlines captured for this session, empty when none
+        were (a session attached from outside, or from before capture)."""
+        return set(self.process_baselines.get(session_id) or [])
+
+    def set_process_baseline(self, session_id: str, cmdlines: Iterable[str]) -> None:
+        """Record the plumbing baseline for a session. Sorted so repeat
+        captures of the same set are recognized without a write; called from
+        a 2-second poll, so the no-change case must not touch the disk."""
+        if not session_id:
+            return
+        value = sorted(set(cmdlines))
+        if self.process_baselines.get(session_id) == value:
+            return
+        self.process_baselines[session_id] = value
+        self.save()
 
     def forward_chain(self, session_id: str) -> list[str]:
         """Every id this conversation has run under from `session_id` onwards,

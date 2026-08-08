@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import shlex
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 
 import gi
@@ -2972,14 +2972,29 @@ class TerminalTab(Gtk.Box):
         """
         return any(pid in ancestors for pid in self._candidate_pids())
 
-    def has_background_descendant(self) -> bool:
+    def has_background_descendant(self, ignore: Collection[str] = frozenset()) -> bool:
         """Whether the agent has something still running below it right now —
         a tool call in flight, or a background job (a dev server, a long
         build) it started and left running. An extra "still working" signal
         for a session whose terminal has otherwise gone quiet; see
-        `ActivityTracker` in activity.py."""
+        `ActivityTracker` in activity.py.
+
+        *ignore* is the session's plumbing baseline — cmdlines of the MCP
+        servers the CLI keeps alive for its whole life, which are children of
+        the agent but never work (see proctree.has_live_descendant)."""
         cli = getattr(self.provider, "cli", "") or ""
-        return any(proctree.has_live_descendant(pid, cli) for pid in self._candidate_pids())
+        return any(proctree.has_live_descendant(pid, cli, ignore) for pid in self._candidate_pids())
+
+    def background_descendant_cmdlines(self) -> set[str]:
+        """The cmdlines of everything running directly below this tab's agent
+        right now. Sampled while nothing has ever been submitted to a freshly
+        spawned tab, this is the agent's own plumbing — the baseline
+        `has_background_descendant` is later told to ignore."""
+        cli = getattr(self.provider, "cli", "") or ""
+        cmdlines: set[str] = set()
+        for pid in self._candidate_pids():
+            cmdlines |= proctree.descendant_cmdlines(pid, cli)
+        return cmdlines
 
     # -- helpers -----------------------------------------------------------
 
