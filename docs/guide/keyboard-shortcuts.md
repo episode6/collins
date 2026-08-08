@@ -21,7 +21,7 @@ fork. Last modified: 2026-08-08. Full change history: git log for this file.
 | `Ctrl+Shift+Z` | Undo the last archive (until another session is archived) |
 | `Ctrl+Shift+E` | Toggle a 😊 marker on the current tab |
 | `Shift+Enter` | Insert a newline in the agent's prompt |
-| `Ctrl+J` | Show/hide the terminal panel |
+| `Ctrl+J` | Show/hide the terminal panel — pressed twice in quick succession it opens the panel and moves it bottom ↔ right |
 | `Ctrl+K` | Clear the terminal panel (screen and saved history) |
 | `F8` | Show/hide the editor panel (brings a popped-out editor back first) |
 | `Ctrl+Shift+O` | Quick open — fuzzy-find a file in the project, opened in the editor |

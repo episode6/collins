@@ -247,7 +247,10 @@ Every tab has a second, plain-shell terminal area — no agent auto-launched —
 that lives below or beside the agent terminal, with **tabs of its own**:
 
 - Toggle it with `Ctrl+J` or the buttons in the tab footer; `Ctrl+K` clears it
-  (screen and saved history).
+  (screen and saved history). **Tap `Ctrl+J` twice** in quick succession and
+  the panel opens *and* swaps sides — bottom ↔ right — so you can put it where
+  you want it without reaching for the swap button. A third tap hides it
+  again.
 - The panel's tab row has a **+ button** that opens another shell tab and
   switches to it; each tab's **✕** closes it (and deletes its saved history),
   asking first if a command is still running in it. Closing the last tab
