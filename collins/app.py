@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-07. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -151,6 +151,27 @@ row.session-child {
      coarser rhythm above it */
   min-height: 34px;
   font-size: 0.9em;
+  /* the .active-tab handoff (below) animates instead of snapping: the fill
+     fades while the card slides out to the panel edge -- or back in, on the
+     row giving the highlight up, which is why the transition sits here on the
+     base rule rather than on .active-tab. The two radius longhands are spelled
+     out because they are what actually changes; the same clock also runs the
+     content box's counter-margin (see the > box rule below), keeping the row's
+     content pinned while only the card edge moves. Hover shares the
+     background-color transition, softening on and off, and the three
+     card-outline border sides fade with it (visible only on outlined rows,
+     hover being what brightens them). The guide line -- border-left-color --
+     is deliberately not in this list: it is the status channel, and every
+     signal it carries is designed around instant or self-animated changes
+     (the unread pulse, the busy pole's stripes showing through a border that
+     must go transparent the moment they start), so a transition there would
+     smear one signal into the next. GTK drops CSS transitions when the
+     desktop's animations are off, so reduced motion gets the old instant
+     switch for free. */
+  transition: background-color 200ms ease, margin-right 200ms ease,
+    border-top-right-radius 200ms ease, border-bottom-right-radius 200ms ease,
+    border-top-color 200ms ease, border-right-color 200ms ease,
+    border-bottom-color 200ms ease;
 }
 /* neither the archive/close button nor the selection-mode check may hold the
    row open at its stock size: entering selection mode must not resize rows */
@@ -201,6 +222,13 @@ row.session-child:hover {
    tab to return to, and their guide line is what says they are still going. */
 row.session-child:not(.running) .session-title {
   opacity: 0.55;
+}
+/* ...and the dim fades on and off rather than snapping, on the same clock as
+   the card transitions above: opening a tab brightens the title as the card
+   outline draws in, closing one dims it as the outline dissolves. The
+   transition sits on the bare class so it runs in both directions. */
+.session-title {
+  transition: opacity 200ms ease;
 }
 /* a finished run nobody has looked at yet (see SessionItem.unread): the guide
    line breathes green -- the run is done and its result is waiting -- until
@@ -361,6 +389,14 @@ row.session-child.active-tab:hover {
    the rows above and below instead of sliding out to the panel edge too. */
 row.session-child.active-tab > box {
   margin-right: 17px;
+}
+/* ...and the counter-margin rides the same 200ms clock as the card's own
+   margin (see row.session-child above), so the two sum to a near-constant
+   right inset at every frame of the handoff and the content never visibly
+   drifts. (Only near-constant: the 1px border-right is discrete, border-style
+   not being animatable -- a one-pixel step nobody can see.) */
+row.session-child > box {
+  transition: margin-right 200ms ease;
 }
 
 /* The session list's scrollbar rides the panel's right edge. Stock Adwaita
