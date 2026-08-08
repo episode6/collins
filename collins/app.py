@@ -18,6 +18,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
+from . import ghwelcome
 from .caffeine import duration_seconds
 from .i18n import _
 from .prefs import apply_color_scheme
@@ -873,6 +874,9 @@ class App(Adw.Application):
                     True,
                     seconds=duration_seconds(self.state.get_setting("caffeine_launch_timer") or ""),
                 )
+            # Once per install, and only on a launch: an extra window is not a
+            # first impression, and neither is one opened from a notification.
+            ghwelcome.maybe_show(window, self.state)
         window.present()
 
 

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-07. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -78,6 +78,11 @@ DEFAULT_SETTINGS = {
     # git projects, isolating their edits from the live checkout. Per-project
     # overrides live in AppState.project_worktree.
     "worktree_new_sessions": False,
+    # Whether the "better with the GitHub CLI" notice has been waved off for
+    # good. Set only by its own "Don't show this again" box — until that is
+    # ticked it appears on every launch that finds gh missing or signed out,
+    # and it never appears on a launch that doesn't (see ghwelcome).
+    "gh_welcome_dismissed": False,
     # What to do instead of the confirmation dialog when a running session's
     # tab has to close: ask (the dialog, as before) | exit | background.
     "archive_running_session": "ask",  # archiving a session whose tab is busy

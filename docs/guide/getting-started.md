@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-27. Full change history: git log for this file.
+fork. Last modified: 2026-08-08. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -13,6 +13,13 @@ Collins is a GTK4 app. You'll need:
 - **Python ≥ 3.10**
 - **GTK 4**, **libadwaita ≥ 1.5**, **VTE** (the GTK 4 build), and **PyGObject**
 - The [`claude` CLI](https://claude.com/claude-code) on your `PATH`
+
+Optional, but worth having: the [**GitHub CLI**](https://cli.github.com/)
+(`gh`), signed in. It is what Collins asks about the pull requests your
+sessions open — state, CI, conflicts, unanswered comments — and what carries
+out everything the PR menus offer. Without it a pull request is a number and
+nothing else, and Collins says so on every launch that finds `gh` missing or
+signed out — until you install it, or tick *Don't show this again*.
 
 Install the system libraries with your distro's package manager:
 

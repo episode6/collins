@@ -524,6 +524,23 @@ def _mark_icon(icon_name: str, css_class: str | None) -> Gtk.Widget:
     return icon
 
 
+def action_icon(key: str) -> Gtk.Widget:
+    """The mark action *key* carries in the menu, in the menu's mark column.
+
+    For anywhere that lists actions *outside* a menu — the GitHub CLI notice
+    shows a few of them to say what gh unlocks — so the icons there are the
+    ones that will be on the rows themselves.
+
+    An action with no mark of its own still takes the column's width, so a
+    list stays a column either way. The menu's own rows reach that same width
+    by indenting the label instead (see `_action_row`), which is the one place
+    the two paths part company: a row there is a button and an empty image in
+    it would be one more thing for a click to land on. Here there is no
+    click, so an empty image is the simpler way to hold the space.
+    """
+    return _mark_icon(*_ACTION_ICONS.get(key, ("", None)))
+
+
 def _action_row(
     popover: Gtk.Popover, pr: PullRequest, action: practions.Action, host: ActionHost
 ) -> Gtk.Widget:

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-07. Full change history: git log for this file.
+fork. Last modified: 2026-08-08. Full change history: git log for this file.
 -->
 
 # Features
@@ -191,6 +191,17 @@ agents' own session files are never modified.
   it can't be sent, the item is still in the menu — **greyed out, saying
   why** — because what a pull request offers is a question about the pull
   request, not about what its terminal happens to be showing.
+- All of that runs on the [**GitHub CLI**](https://cli.github.com/) (`gh`):
+  it is what every question about a pull request is asked with, and what every
+  action here is carried out by. Without it the chips still appear — the
+  numbers come off the session's own transcript — and stay blank, with nothing
+  to do about them. So **a launch that finds `gh` missing or signed out says
+  so**, showing the marks and the actions it is holding back, and pointing at
+  the install (or, when it is only the login that's missing, at the one
+  command that fixes it). It comes back on the next such launch — installing
+  something is a thing to do later, not while a dialog is up — until you tick
+  **Don't show this again**, which is the only thing that retires it. Setting
+  `gh` up retires it too, by leaving nothing to say.
 - **Rename** tabs, **copy the session ID**, or **fork** a session
   (`--fork-session`) from the right-click menu.
 - **Shift+Enter** inserts a newline in the agent's prompt.

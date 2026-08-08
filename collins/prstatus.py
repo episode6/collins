@@ -621,6 +621,19 @@ def gh_json(args: list[str], cwd: str | None = None) -> object | None:
         return None
 
 
+def gh_succeeds(args: list[str]) -> bool:
+    """Whether one `gh` call exited 0 — its output never read, never logged.
+
+    For a question whose whole answer is the exit code, and whose output is
+    better not carried around: `gh auth token` says whether this machine has
+    GitHub credentials at all (see ghsetup) and prints one to do it. False
+    when gh isn't installed either, so a caller that needs to tell the two
+    apart asks `shutil.which` first.
+    """
+    result = _gh(args)
+    return result is not None and result.returncode == 0
+
+
 def gh_run(args: list[str]) -> tuple[bool, str]:
     """One `gh` call run for what it *does*: ``(it worked, what to say if not)``.
 
