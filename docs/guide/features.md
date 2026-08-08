@@ -369,8 +369,10 @@ Toggle it in Preferences (*Show Claude usage*).
 - **Desktop notifications the session raises itself** — the agent calls
   Collins' `notify_user` tool when it wants you back (see [Tools a session can
   call](#tools-a-session-can-call)), and the notification is titled with the
-  session, so clicking it jumps straight to that tab. Nothing is guessed from
-  a quiet terminal: a notification means the agent asked for you.
+  session, so clicking it jumps straight to that tab. It also flags that
+  session's sidebar row, so the ask outlives the notification: miss the popup
+  and the row is still holding it. Nothing is guessed from a quiet terminal: a
+  notification means the agent asked for you.
 - **Session details** (right-click → *Details…*): message and tool-call counts,
   models used, token totals, timestamps, transcript size — plus a **recent
   activity** peek of the last messages, so you can identify a session without
@@ -392,7 +394,9 @@ is running in:
 
 - **`notify_user(message)`** — a desktop notification titled with the session,
   which flashes the session's tab and sidebar row on the way out and raises
-  that tab when clicked.
+  that tab when clicked. The row is left flagged too — its guide line breathes
+  green once the agent stops — so a notification you missed is still waiting
+  in the sidebar when you get back.
 - **`set_session_title(title)`** — the session names itself, in the tab and
   the sidebar, and renames itself again when the work pivots.
 - **`open_in_editor(path, line?)`** — put a file on your screen in the

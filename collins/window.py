@@ -2834,6 +2834,37 @@ class MainWindow(Adw.ApplicationWindow):
                 continue
             self.store.set_unread(row_id, True)
 
+    def _flag_unread(self, page: Adw.TabPage) -> None:
+        """Flag every row standing for this tab unread, whatever its session is
+        doing right now.
+
+        The forced counterpart of _clear_unread, and the `notify_user` tool's
+        lasting in-app trace: the desktop notification is the desktop's to keep
+        or drop, and the bell-flash is over in a second, so without this a user
+        who comes back to the app a few minutes later has nothing in the window
+        telling them which session called for them.
+
+        Unlike the finish edge (_on_session_finished) this skips nothing. An
+        agent that notifies mid-turn is still running by definition — waiting
+        on the user is exactly when it asks — and a run being handed to the
+        background is no reason to swallow a request it made while it still had
+        a tab. From here the flag lives by the ordinary rules: the first
+        keystroke, click or return to the tab reads it, and _sync_status takes
+        it off a row whose tab goes away.
+
+        The pulse itself waits for the pole: a busy row's guide line is the
+        barber pole, which outranks the green (see the .unread CSS in app.py),
+        so a mid-turn notification's flag surfaces the moment the turn ends —
+        which is the moment the row has nothing else to say.
+        """
+        placeholder_id = self._placeholder_pages.get(page)
+        if placeholder_id is not None:
+            self.sidebar.set_placeholder_unread(placeholder_id, True)
+        session_id = self._session_id_of(page)
+        if session_id:
+            for row_id in self.store.rows_representing(session_id):
+                self.store.set_unread(row_id, True)
+
     def _clear_unread(self, page: Adw.TabPage) -> None:
         """The user is at this tab (selected it, or typed into it): whatever
         finished in it has been seen, on every row standing for it."""
@@ -3492,6 +3523,13 @@ class MainWindow(Adw.ApplicationWindow):
         marks the ringing tab and row in-app, where a desktop notification
         says nothing.
 
+        The row is also flagged unread on the way through (_flag_unread). The
+        flash says "this session" for the second it lasts; the flag says it
+        until someone looks, which is the point of a notification the user was
+        away for. A tab still waiting on its session id gets the flag on its
+        placeholder row, and that hands over to the real row when the store's
+        scan lands (see _apply_resolved_sessions).
+
         A tab whose session the store hasn't discovered yet still notifies —
         refusing because Collins is mid-scan would defeat the point — with
         its own title as the notification id and an empty focus target,
@@ -3501,10 +3539,13 @@ class MainWindow(Adw.ApplicationWindow):
 
         False when the window has no application to send through (a window
         under test) — the tool reports that rather than claiming a
-        notification the user never got.
+        notification the user never got. The in-app cues are raised either
+        way: they are what a user in front of the app actually sees.
         """
         page = self.tab_view.get_page(tab)
         self._flash_session(page)
+        if page is not None:
+            self._flag_unread(page)
         app = self.get_application()
         if app is None or page is None:
             return False
