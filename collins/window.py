@@ -46,6 +46,7 @@ from .caffeine import (
     toggle_tooltip,
 )
 from .chatsessionview import ChatSessionTab
+from .doubletap import DoubleTap
 from .editorwindow import EditorWindow
 from .flash import flash
 from .formatting import blast_radius_body
@@ -302,11 +303,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._bg_queue_done = 0
         self._bg_queue_total = 0
         self._bg_queue_dialog: Adw.AlertDialog | None = None
-        # The tab whose terminal panel the last Ctrl+J opened, and when — a
-        # second Ctrl+J on the same tab within _PANEL_DOUBLE_TAP_US swaps the
-        # panel's position rather than closing it (see _toggle_panel).
-        self._panel_opened_tab: TerminalTab | None = None
-        self._panel_opened_at = 0
+        # Remembers the tab whose terminal panel the last Ctrl+J opened, so a
+        # second Ctrl+J on it swaps the panel's position rather than closing
+        # it (see _toggle_panel).
+        self._panel_tap = DoubleTap(_PANEL_DOUBLE_TAP_US)
         self._switcher: QuickSwitcher | None = None
         self._quickopen: QuickOpenDialog | None = None
         # Set while the app pushes shared Caffeine state into this window's
@@ -2060,8 +2060,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._progress_watches.pop(page, None)
         self._fresh_spawns.discard(page)
         self._baseline_captures.pop(page, None)
-        if page.get_child() is self._panel_opened_tab:  # no Ctrl+J chain to continue
-            self._panel_opened_tab = None
+        self._panel_tap.forget(page.get_child())  # no Ctrl+J chain to continue
         self._sync_process_poll()
 
     def _on_page_title_changed(self, page: Adw.TabPage, _pspec) -> None:
@@ -3286,17 +3285,12 @@ class MainWindow(Adw.ApplicationWindow):
         if tab is None:
             return
         now = GLib.get_monotonic_time()
-        if (
-            double_tap
-            and tab is self._panel_opened_tab
-            and now - self._panel_opened_at < _PANEL_DOUBLE_TAP_US
-        ):
-            self._panel_opened_tab = None
+        if double_tap and self._panel_tap.follows(tab, now):
             self._swap_panel()
             return
         tab.toggle_panel(self.state.get_setting("panel_position"))  # freshly opened: last-used mode
-        self._panel_opened_tab = tab if double_tap and tab.panel_visible else None
-        self._panel_opened_at = now
+        # Only a Ctrl+J that leaves the panel open has a swap to follow it.
+        self._panel_tap.arm(tab if double_tap and tab.panel_visible else None, now)
 
     def _swap_panel(self) -> None:
         tab = self._current_terminal_tab()
