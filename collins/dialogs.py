@@ -16,7 +16,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from . import editorfiles
+from . import editorfiles, icongen
 from .chats import is_chat_cwd
 from .formatting import display_path, format_size, format_timestamp, format_tokens
 from .i18n import _, ngettext
@@ -27,6 +27,7 @@ from .sessions import (
     configured_mcp_servers,
     read_mcp_config,
 )
+from .svgtexture import svg_texture
 
 
 def rename_dialog(parent: Gtk.Widget, body: str, current: str, on_save: Callable[[str], None]) -> None:
@@ -657,3 +658,175 @@ def details_dialog(parent: Gtk.Widget, session: Session, title: str) -> None:
         GLib.idle_add(populate, details, mcp_servers)
 
     threading.Thread(target=work, daemon=True).start()
+
+
+# -- project icon generation --------------------------------------------------
+
+
+def generate_icon_dialog(
+    parent: Gtk.Widget, cwd: str, project_name: str, on_saved: Callable[[], None]
+) -> None:
+    """Generate a project-icon.svg for *cwd* and preview it before saving.
+
+    A headless claude run (collins.icongen) starts the moment the dialog
+    opens. The result is previewed at dialog size and at the 16px the
+    sidebar actually renders; the entry takes adjustment requests, and
+    Regenerate re-runs the model with the previous attempt and that feedback
+    in the prompt. Nothing is written until Save — Cancel (or closing the
+    dialog any other way) aborts whatever run is in flight. *on_saved* fires
+    after a successful save, so the caller can refresh the sidebar.
+    """
+    # svg: the latest accepted attempt (what Save writes, what a revision
+    # builds on). run: the in-flight generation, if any. gen: a counter so a
+    # superseded run's late result is recognized and dropped.
+    state: dict = {"svg": None, "run": None, "gen": 0}
+
+    spinner = Gtk.Spinner(spinning=True, width_request=32, height_request=32, halign=Gtk.Align.CENTER)
+    loading_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, valign=Gtk.Align.CENTER)
+    loading_box.append(spinner)
+    loading_box.append(Gtk.Label(label=_("Generating icon…")))
+
+    big = Gtk.Image(pixel_size=128, halign=Gtk.Align.CENTER)
+    small = Gtk.Image(pixel_size=16, valign=Gtk.Align.CENTER)
+    small_caption = Gtk.Label(label=_("At sidebar size"))
+    small_caption.add_css_class("dim-label")
+    small_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.CENTER)
+    small_row.append(small)
+    small_row.append(small_caption)
+    preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, valign=Gtk.Align.CENTER)
+    preview_box.append(big)
+    preview_box.append(small_row)
+
+    # First-attempt failures land here, where the preview would have been.
+    failure = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, valign=Gtk.Align.CENTER)
+    failure.add_css_class("error")
+
+    stack = Gtk.Stack(height_request=200, vexpand=True)
+    stack.add_named(loading_box, "loading")
+    stack.add_named(preview_box, "preview")
+    stack.add_named(failure, "failure")
+
+    entry = Gtk.Entry(hexpand=True, placeholder_text=_("Optional adjustments, e.g. “make it blue”"))
+    regen = Gtk.Button(label=_("Regenerate"), sensitive=False)
+    entry_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    entry_row.append(entry)
+    entry_row.append(regen)
+
+    # A regenerate that fails after a good attempt keeps the preview (and
+    # Save) and reports here instead of on the failure page.
+    status = Gtk.Label(wrap=True, xalign=0, visible=False)
+    status.add_css_class("error")
+
+    content = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        spacing=12,
+        margin_top=12,
+        margin_bottom=18,
+        margin_start=18,
+        margin_end=18,
+    )
+    content.append(stack)
+    content.append(entry_row)
+    content.append(status)
+
+    cancel = Gtk.Button(label=_("Cancel"))
+    save = Gtk.Button(label=_("Save"), sensitive=False)
+    save.add_css_class("suggested-action")
+    header = Adw.HeaderBar(show_start_title_buttons=False, show_end_title_buttons=False)
+    header.set_title_widget(Adw.WindowTitle(title=_("Generate Icon"), subtitle=project_name))
+    header.pack_start(cancel)
+    header.pack_end(save)
+
+    view = Adw.ToolbarView()
+    view.add_top_bar(header)
+    view.set_content(content)
+
+    dialog = Adw.Dialog(title=_("Generate Icon"))
+    dialog.set_content_width(420)
+    dialog.set_child(view)
+
+    def start() -> None:
+        state["gen"] += 1
+        gen = state["gen"]
+        if state["run"] is not None:
+            state["run"].cancel()
+        run = icongen.IconRun()
+        state["run"] = run
+        regen.set_sensitive(False)
+        save.set_sensitive(False)
+        status.set_visible(False)
+        stack.set_visible_child_name("loading")
+        feedback = entry.get_text()
+        previous = state["svg"]
+
+        def work() -> None:
+            try:
+                prompt = icongen.build_prompt(
+                    cwd, project_name, feedback=feedback, previous_svg=previous
+                )
+                svg = run.run(prompt)
+            except icongen.IconGenCancelled:
+                return
+            except Exception as err:  # IconGenError, OSError, ...
+                GLib.idle_add(fail, gen, str(err))
+            else:
+                GLib.idle_add(land, gen, svg)
+
+        threading.Thread(target=work, name="icon-gen", daemon=True).start()
+
+    def land(gen: int, svg: bytes) -> bool:
+        if gen != state["gen"]:
+            return GLib.SOURCE_REMOVE
+        texture = svg_texture(svg, 128)
+        if texture is None:
+            return fail(gen, _("the generated SVG could not be rendered"))
+        state["svg"] = svg
+        state["run"] = None
+        big.set_from_paintable(texture)
+        small.set_from_paintable(svg_texture(svg, 16))
+        stack.set_visible_child_name("preview")
+        regen.set_sensitive(True)
+        save.set_sensitive(True)
+        return GLib.SOURCE_REMOVE
+
+    def fail(gen: int, message: str) -> bool:
+        if gen != state["gen"]:
+            return GLib.SOURCE_REMOVE
+        state["run"] = None
+        text = _("Icon generation failed: {error}").format(error=message)
+        if state["svg"] is None:
+            failure.set_label(text)
+            stack.set_visible_child_name("failure")
+        else:
+            status.set_label(text)
+            status.set_visible(True)
+            stack.set_visible_child_name("preview")
+            save.set_sensitive(True)
+        regen.set_sensitive(True)
+        return GLib.SOURCE_REMOVE
+
+    def on_save(*_a) -> None:
+        svg = state["svg"]
+        if svg is None:
+            return
+        try:
+            icongen.save_icon(cwd, svg)
+        except OSError as err:
+            status.set_label(_("Saving failed: {error}").format(error=err))
+            status.set_visible(True)
+            return
+        dialog.close()
+        on_saved()
+
+    cancel.connect("clicked", lambda *_a: dialog.close())
+    save.connect("clicked", on_save)
+    regen.connect("clicked", lambda *_a: start())
+    entry.connect("activate", lambda *_a: start() if regen.get_sensitive() else None)
+    # Closing by any route (Cancel, Esc, the close after a save) kills
+    # whatever run is still burning tokens; cancelling a finished or absent
+    # run is a no-op.
+    dialog.connect("closed", lambda *_a: state["run"] and state["run"].cancel())
+
+    dialog.present(parent)
+    dialog.set_focus(entry)
+    start()

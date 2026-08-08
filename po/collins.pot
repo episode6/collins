@@ -500,11 +500,42 @@ msgstr ""
 msgid "Auto-generate session titles"
 msgstr ""
 
-#: collins/prefs.py:175
+#: collins/prefs.py:337
 msgid ""
 "Summarize each new session's first prompt into a short title using the "
-"claude CLI (haiku); pre-existing sessions are titled locally from their "
-"prompt"
+"claude CLI; pre-existing sessions are titled locally from their prompt"
+msgstr ""
+
+#: collins/prefs.py:369
+msgid "Claude models"
+msgstr ""
+
+#: collins/prefs.py:370
+msgid "Models the app's own headless claude runs ask for"
+msgstr ""
+
+#: collins/prefs.py:376
+msgid "Session title model"
+msgstr ""
+
+#: collins/prefs.py:377
+msgid "Model that summarizes each new session's first prompt into its name"
+msgstr ""
+
+#: collins/prefs.py:381
+msgid "Icon generation model"
+msgstr ""
+
+#: collins/prefs.py:382
+msgid "Model that designs project icons in the sidebar's Generate Icon dialog"
+msgstr ""
+
+#: collins/prefs.py:379
+msgid "Default (latest Haiku)"
+msgstr ""
+
+#: collins/prefs.py:385
+msgid "Default (latest Sonnet)"
 msgstr ""
 
 #: collins/prefs.py:253
@@ -1751,6 +1782,40 @@ msgstr ""
 
 #: collins/dialogs.py:189
 msgid "Move Editor"
+msgstr ""
+
+#: collins/dialogs.py:687
+msgid "Generating icon…"
+msgstr ""
+
+#: collins/dialogs.py:691
+msgid "At sidebar size"
+msgstr ""
+
+#: collins/dialogs.py:709
+msgid "Optional adjustments, e.g. “make it blue”"
+msgstr ""
+
+#: collins/dialogs.py:710
+msgid "Regenerate"
+msgstr ""
+
+#: collins/dialogs.py:736 collins/dialogs.py:744 collins/sidebar.py:1815
+msgid "Generate Icon"
+msgstr ""
+
+#: collins/dialogs.py:782
+msgid "the generated SVG could not be rendered"
+msgstr ""
+
+#: collins/dialogs.py:796
+#, python-brace-format
+msgid "Icon generation failed: {error}"
+msgstr ""
+
+#: collins/dialogs.py:815
+#, python-brace-format
+msgid "Saving failed: {error}"
 msgstr ""
 
 #: collins/editor.py:979

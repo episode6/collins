@@ -10,6 +10,7 @@ sidebar owns turning the path into a widget.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 PROJECT_ICON_FILENAME = "project-icon.svg"
@@ -17,6 +18,21 @@ PROJECT_ICON_FILENAME = "project-icon.svg"
 # An icon rendered at 16px has no business being large; anything bigger is
 # assumed to be a mistake (or not really an icon) and ignored.
 _MAX_ICON_BYTES = 256 * 1024
+
+# An icon is inert artwork. Anything that could run or fetch when the SVG is
+# rendered somewhere less careful than librsvg (which executes none of it) is
+# refused outright: script elements, event-handler attributes, and references
+# to anything outside the document — an href or CSS url() may only point at a
+# local #fragment, which is all inline gradients and <use> reuse need. xmlns
+# declarations carry their URLs in xmlns attributes, so they pass.
+_SVG_ACTIVE_CONTENT = re.compile(
+    rb"<\s*script"
+    rb"|\bon[a-z]+\s*="
+    rb"|\b(?:xlink:)?href\s*=\s*[\"'](?!#)"
+    rb"|\burl\s*\(\s*[\"']?\s*(?!#)"
+    rb"|@import\b",
+    re.IGNORECASE,
+)
 
 
 def project_icon_path(cwd: str | Path | None) -> Path | None:
@@ -42,9 +58,9 @@ def project_icon_path(cwd: str | Path | None) -> Path | None:
 def project_icon_data(cwd: str | Path | None) -> bytes | None:
     """The raw bytes of the project's icon, if it ships a plausible one.
 
-    Beyond project_icon_path's checks, the content must look like plain
-    SVG/XML text — see _looks_like_svg. Reading and vetting the bytes here
-    keeps the sidebar from ever handing a raw repo file to an image loader.
+    Beyond project_icon_path's checks, the content must pass
+    usable_icon_bytes. Reading and vetting the bytes here keeps the sidebar
+    from ever handing a raw repo file to an image loader.
     """
     path = project_icon_path(cwd)
     if path is None:
@@ -53,13 +69,22 @@ def project_icon_data(cwd: str | Path | None) -> bytes | None:
         data = path.read_bytes()
     except OSError:
         return None
-    if not 0 < len(data) <= _MAX_ICON_BYTES:  # re-check: the stat was a race ago
-        return None
-    return data if _looks_like_svg(data) else None
+    return data if usable_icon_bytes(data) else None
+
+
+def usable_icon_bytes(data: bytes) -> bool:
+    """The one gate icon bytes pass before any parser, preview, or save sees
+    them, wherever they came from — a repo's on-disk project-icon.svg or a
+    model reply (icongen.extract_svg): plausible size (the size cap re-checks
+    what project_icon_path could only stat a race ago), XML-shaped SVG text,
+    and none of the active content an icon has no business carrying."""
+    if not 0 < len(data) <= _MAX_ICON_BYTES:
+        return False
+    return _looks_like_svg(data) and not _SVG_ACTIVE_CONTENT.search(data)
 
 
 def _looks_like_svg(data: bytes) -> bool:
-    """Cheap gate before repo-controlled bytes reach any parser: reject
+    """Cheap shape gate before repo-controlled bytes reach any parser: reject
     gzip (an svgz could expand far past the size cap) and anything that
     isn't XML-shaped text with an <svg> element near the top (a crafted
     binary for some other image codec)."""

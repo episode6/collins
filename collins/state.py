@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-05. Full change history: git log for this file.
+# fork. Last modified: 2026-08-07. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -60,6 +60,12 @@ DEFAULT_SETTINGS = {
     # the env half only takes effect for tabs opened after a change.
     "progress_termprop": True,
     "auto_title_sessions": True,  # summarize each new session's first prompt into a short title
+    # Claude models for the app's own headless runs, as --model values.
+    # "" = automatic: the newest model of the setting's preferred tier, or
+    # the weakest model offered should that tier ever be dropped (see
+    # claudemodels.resolve_model).
+    "title_model": "",  # session title generation ("" = newest Haiku)
+    "icon_model": "",  # the sidebar's Generate Icon ("" = newest Sonnet)
     # Retitle a session to its newest pull request's title as PRs are
     # detected (see SessionStore.apply_pr_title). Fills the generated-name
     # slot, so a manual rename always wins.

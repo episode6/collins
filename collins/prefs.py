@@ -9,15 +9,16 @@ from __future__ import annotations
 import shlex
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
-from . import apppicker, editor, footerapps, prefssearch
+from . import apppicker, claudemodels, editor, footerapps, prefssearch
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label
 from .i18n import LANGUAGES, N_, _
 from .state import AppState
@@ -334,8 +335,8 @@ class PreferencesDialog(Adw.Dialog):
             title=_("Auto-generate session titles"),
             subtitle=_(
                 "Summarize each new session's first prompt into a short title "
-                "using the claude CLI (haiku); pre-existing sessions are "
-                "titled locally from their prompt"
+                "using the claude CLI; pre-existing sessions are titled "
+                "locally from their prompt"
             ),
         )
         self._auto_title_row.set_active(bool(state.get_setting("auto_title_sessions")))
@@ -363,6 +364,35 @@ class PreferencesDialog(Adw.Dialog):
         self._pr_launch_row.connect("notify::active", self._on_pr_launch_changed)
         sidebar_group.add(self._pr_launch_row)
         page.add(sidebar_group)
+
+        models_group = _SearchableGroup(
+            title=_("Claude models"),
+            description=_("Models the app's own headless claude runs ask for"),
+        )
+        self._model_rows: dict[str, Adw.ComboRow] = {}
+        self._model_default_labels: dict[str, str] = {}
+        for key, title, subtitle, default_label in (
+            (
+                "title_model",
+                _("Session title model"),
+                _("Model that summarizes each new session's first prompt into its name"),
+                _("Default (latest Haiku)"),
+            ),
+            (
+                "icon_model",
+                _("Icon generation model"),
+                _("Model that designs project icons in the sidebar's Generate Icon dialog"),
+                _("Default (latest Sonnet)"),
+            ),
+        ):
+            row = Adw.ComboRow(title=title, subtitle=subtitle)
+            # A placeholder until the live list lands (see _populate_model_rows).
+            row.set_model(Gtk.StringList.new([default_label]))
+            self._model_rows[key] = row
+            self._model_default_labels[key] = default_label
+            models_group.add(_searchable(row, "haiku", "sonnet", "opus"))
+        page.add(models_group)
+        self._populate_model_rows(state)
 
         self._footer_apps_group = _SearchableGroup(
             title=_("Footer apps"),
@@ -741,6 +771,36 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_auto_title_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("auto_title_sessions", row.get_active())
+
+    def _populate_model_rows(self, state: AppState) -> None:
+        """Fill the model pickers from a live Models API query, off the main
+        loop; the CLI's own aliases stand in when the API can't be asked."""
+
+        def work() -> None:
+            models = claudemodels.available_models() or list(claudemodels.FALLBACK_MODELS)
+            GLib.idle_add(apply_models, models)
+
+        def apply_models(models: list[claudemodels.ClaudeModel]) -> bool:
+            for key, row in self._model_rows.items():
+                current = (state.get_setting(key) or "").strip()
+                ids = [""] + [m.id for m in models]
+                labels = [self._model_default_labels[key]] + [m.display_name for m in models]
+                if current and current not in ids:
+                    # A saved model the API no longer lists stays visible and
+                    # selected rather than silently snapping to the default.
+                    ids.append(current)
+                    labels.append(current)
+                row.set_model(Gtk.StringList.new(labels))
+                row.set_selected(ids.index(current))
+                row.connect("notify::selected", self._on_model_row_changed, key, ids)
+            return GLib.SOURCE_REMOVE
+
+        threading.Thread(target=work, name="prefs-models", daemon=True).start()
+
+    def _on_model_row_changed(
+        self, row: Adw.ComboRow, _pspec, key: str, ids: list[str]
+    ) -> None:
+        self._state.set_setting(key, ids[row.get_selected()])
         self._on_change()
 
     def _on_pr_title_changed(self, row: Adw.SwitchRow, _pspec) -> None:

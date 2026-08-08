@@ -394,3 +394,47 @@ def test_a_dead_end_reference_falls_through_to_the_next_one():
     assert wait_until(lambda: bool(runner.prompts))
     assert [ref.args for ref, _ in fetcher.calls] == [("42", "--repo", "src/app.py"), ("183",)]
     assert '"Rename from the file tree"' in runner.prompts[0]
+
+
+# -- scratch_workdir ----------------------------------------------------------
+
+
+def test_scratch_workdirs_are_private_and_cleaned_up(app_state, monkeypatch, tmp_path):
+    # Concurrent headless runs (a title and an icon generation, or two icon
+    # generations) each get their own workdir, and each cleanup removes only
+    # its own run's transcript project.
+    import collins.sessions as sessions_mod
+
+    projects = tmp_path / "claude-projects"
+    projects.mkdir()
+    monkeypatch.setattr(sessions_mod, "CLAUDE_PROJECTS_DIR", projects)
+
+    with titles.scratch_workdir() as one, titles.scratch_workdir() as two:
+        assert one != two
+        assert one.parent == titles.scratch_dir() == two.parent
+        assert one.is_dir() and two.is_dir()
+        # What each run's CLI would leave behind in ~/.claude/projects.
+        transcripts = [projects / titles._project_dirname(w) for w in (one, two)]
+        for t in transcripts:
+            t.mkdir()
+            (t / "x.jsonl").write_text("{}", encoding="utf-8")
+    assert not one.exists() and not two.exists()
+    assert all(not t.exists() for t in transcripts)
+
+
+def test_scratch_workdir_survives_missing_transcript(app_state, monkeypatch, tmp_path):
+    # A run that never wrote a transcript (CLI missing, cancelled early)
+    # still cleans up without raising.
+    import collins.sessions as sessions_mod
+
+    monkeypatch.setattr(sessions_mod, "CLAUDE_PROJECTS_DIR", tmp_path / "nowhere")
+    with titles.scratch_workdir() as workdir:
+        pass
+    assert not workdir.exists()
+
+
+def test_is_scratch_project_covers_per_run_children(app_state):
+    assert titles.is_scratch_project(titles.scratch_project_dirname())
+    child = titles._project_dirname(titles.scratch_dir() / "abc123")
+    assert titles.is_scratch_project(child)
+    assert not titles.is_scratch_project("-home-user-alpha")

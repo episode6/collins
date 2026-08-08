@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-06. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -29,7 +29,7 @@ from .sessions import (
     transcript_is_stub,
 )
 from .sessions import parse_details as _claude_parse_details
-from .titles import scratch_project_dirname
+from .titles import is_scratch_project
 
 # How Claude Code opens the line it takes a prompt on: a caret and a no-break
 # space (an ordinary space is what its *other* prompts use), followed by the
@@ -589,11 +589,11 @@ class ClaudeProvider(Provider):
         base = self.projects_dir
         if not base.is_dir():
             return found
-        # Headless title-generation runs (titles.py) write transcripts under
-        # this project; surfacing them would re-trigger titling forever.
-        scratch = scratch_project_dirname()
+        # Headless title and icon-generation runs (titles.py, icongen.py)
+        # write transcripts under per-run scratch projects; surfacing them
+        # would re-trigger titling forever.
         for project_dir in base.iterdir():
-            if not project_dir.is_dir() or project_dir.name == scratch:
+            if not project_dir.is_dir() or is_scratch_project(project_dir.name):
                 continue
             for jsonl in project_dir.glob("*.jsonl"):
                 if not _UUID_RE.match(jsonl.stem):

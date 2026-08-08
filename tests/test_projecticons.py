@@ -101,6 +101,29 @@ def test_data_requires_svg_element_near_the_top(tmp_path):
     assert project_icon_data(tmp_path) is None
 
 
+def test_data_rejects_active_content(tmp_path):
+    # An icon is inert artwork; scripts, event handlers, and references to
+    # anything outside the document are refused before a parser sees them.
+    for payload in (
+        b"<script>alert(1)</script>",
+        b'<image href="https://evil.example/x.png"/>',
+        b'<use xlink:href="file:///etc/passwd"/>',
+        b'<rect style="fill:url(http://evil.example/f)"/>',
+        b'<rect onload="x()"/>',
+    ):
+        _write_icon(tmp_path, _SVG.replace(b"/>", b">" + payload + b"</svg>"))
+        assert project_icon_data(tmp_path) is None
+
+
+def test_data_keeps_internal_references(tmp_path):
+    good = _SVG.replace(
+        b"/>",
+        b'><defs><linearGradient id="g"/></defs><rect fill="url(#g)"/><use xlink:href="#g"/></svg>',
+    )
+    _write_icon(tmp_path, good)
+    assert project_icon_data(tmp_path) == good
+
+
 def test_data_none_when_no_icon(tmp_path):
     assert project_icon_data(tmp_path) is None
     assert project_icon_data(None) is None
