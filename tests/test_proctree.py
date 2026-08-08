@@ -117,11 +117,45 @@ def test_has_live_descendant_false_when_not_the_agent(tree):
     assert proctree.has_live_descendant(proc.pid, "claude") is False
 
 
+def test_ppid_of_a_spawned_child_is_this_process(tree):
+    proc, _parent_dir, _child_dir = tree("claude-wrapper", "claude-agent")
+    assert proctree.process_ppid(proc.pid) == os.getpid()
+
+
+def test_ancestors_of_a_grandchild_reach_back_to_this_process(tree):
+    """The MCP-shim shape: a leaf process traced up through every layer that
+    spawned it, so a membership test against a tab's own pids can claim it."""
+    proc, _parent_dir, _child_dir = tree("claude-wrapper", "claude-agent")
+    grandchild = proctree.process_children(proc.pid)[0]
+    ancestors = proctree.ancestor_pids(grandchild)
+    assert grandchild in ancestors
+    assert proc.pid in ancestors
+    assert os.getpid() in ancestors
+
+
+def test_ancestor_limit_stops_the_climb(tree):
+    proc, _parent_dir, _child_dir = tree("claude-wrapper", "claude-agent")
+    grandchild = proctree.process_children(proc.pid)[0]
+    assert proctree.ancestor_pids(grandchild, limit=1) == {grandchild}
+
+
+def test_ancestors_of_a_dead_pid_hold_only_that_pid():
+    """The walk can't read a dead pid's parent, but the pid itself stays in
+    the set — a membership test against it simply never matches a live tab."""
+    assert proctree.ancestor_pids(2**31 - 1) == {2**31 - 1}
+
+
 def test_missing_pids_are_not_fatal():
     assert proctree.process_cwd(None) is None
     assert proctree.process_cwd(0) is None
     assert proctree.process_cwd(-1) is None
     assert proctree.process_children(2**31 - 1) == []
+    assert proctree.process_ppid(2**31 - 1) is None
+    assert proctree.process_ppid(0) is None
+    assert proctree.process_ppid(-1) is None
+    assert proctree.ancestor_pids(0) == set()
+    assert proctree.ancestor_pids(-1) == set()
+    assert proctree.ancestor_pids(1) == set()
     assert proctree.is_agent_process(2**31 - 1, "claude") is False
     assert proctree.agent_descendant_cwd(2**31 - 1, "claude") is None
     assert proctree.has_live_descendant(2**31 - 1, "claude") is False
