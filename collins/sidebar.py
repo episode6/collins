@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-07. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -91,6 +91,18 @@ _UNREAD_CSS = "unread"
 # the detached and unread colors use. The busy pole outranks it too, so a
 # resumed session moves instead of sitting on a stale interruption.
 _INTERRUPTED_CSS = "interrupted"
+
+# When SessionRow.begin_archiving hands a row its second act — collapsing the
+# slot the slide-out emptied — relative to the slide's start. A shade past the
+# 250ms transform/opacity transition (see row.session-child.archiving in
+# app.py), so the slide finishes before the ground moves under it.
+_ARCHIVE_COLLAPSE_MS = 260
+# ...and when the whole ghost-out has played: the collapse above plus its
+# 200ms min-height/border transition. What the window waits before landing a
+# tabless archive (see _archive_session there) — with no tab to shut down
+# there is no natural delay, and an archive landing sooner rebuilds the list
+# right over the animation's first frames.
+ARCHIVE_GHOST_MS = _ARCHIVE_COLLAPSE_MS + 200
 
 # How far a project header's icon sits from the row's own left edge: the
 # theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
@@ -503,6 +515,8 @@ class SessionRow(Gtk.ListBoxRow):
         # it would change anything the user can see. No button.
         archive_btn.set_visible(sidebar.store.forward_state(item.session) != "moved")
         self._archive_btn = archive_btn
+        # Timeout for the ghost-out's second phase (see begin_archiving).
+        self._archive_collapse: int | None = None
 
         self._prs: list[PullRequest] = []
         self._pr_fetch = 0  # generation: a slow fetch can't land on a later opening
@@ -785,6 +799,52 @@ class SessionRow(Gtk.ListBoxRow):
                    "and any handoff in progress finishes")
         )
 
+    def begin_archiving(self, settled: bool = False) -> None:
+        """Ghost the row out ahead of its archive actually landing.
+
+        Archiving a session whose tab is open first shuts that tab down, which
+        can take seconds — so the row acknowledges the click now: it slides out
+        of the panel (the .archiving class, a CSS transition), and once the
+        slide has finished the emptied slot closes up (.archiving-gone plus
+        hiding the content box, so the row's height is all animatable
+        min-height and border). The zero-height row then waits in the list for
+        the rebuild that really removes it — or for restore_archiving, if
+        closing the tab is cancelled.
+
+        `settled` is for a rebuild that lands mid-wait (see _rebuild_rows): the
+        replacement widget takes both classes before it is ever mapped, so it
+        starts collapsed instead of replaying the animation.
+        """
+        if self._archive_collapse is not None or self.has_css_class("archiving"):
+            return
+        self.add_css_class("archiving")
+        # An invisible row shouldn't answer clicks or offer tooltips.
+        self.set_sensitive(False)
+        if settled:
+            self._collapse_archiving()
+        else:
+            self._archive_collapse = GLib.timeout_add(
+                _ARCHIVE_COLLAPSE_MS, self._collapse_archiving
+            )
+
+    def _collapse_archiving(self) -> bool:
+        self._archive_collapse = None
+        self.add_css_class("archiving-gone")
+        self.get_child().set_visible(False)
+        return GLib.SOURCE_REMOVE
+
+    def restore_archiving(self) -> None:
+        """Bring back a row whose archive was cancelled: an instant snap on
+        purpose — the classes leave with their transitions, so nothing slides
+        back in slow motion under a user who just said "keep it"."""
+        if self._archive_collapse is not None:
+            GLib.source_remove(self._archive_collapse)
+            self._archive_collapse = None
+        self.remove_css_class("archiving")
+        self.remove_css_class("archiving-gone")
+        self.get_child().set_visible(True)
+        self.set_sensitive(True)
+
     def _on_status_changed(self, item: SessionItem, _pspec) -> None:
         # The row itself carries the status: a session running in a tab keeps
         # its title at full strength (the class the dimming rule tests for),
@@ -859,6 +919,10 @@ class SessionSidebar(Gtk.Box):
         self._collapsed: set[tuple] = set()
         self._selection_mode = False
         self._selected: set[str] = set()
+        # Sessions mid-archive whose rows are ghosted out (see begin_archiving):
+        # deliberately in-memory only — a refresh restoring a ghost early is an
+        # accepted cosmetic miss, not state worth persisting.
+        self._archiving: set[str] = set()
         self._rows: dict[str, SessionRow] = {}
         self._header_rows: dict[tuple, GroupHeaderRow] = {}
         # The stand-in row under each group that has nothing else in it.
@@ -1196,6 +1260,19 @@ class SessionSidebar(Gtk.Box):
                 self._row_order.append(item.session_id)
                 self.list.append(row)
         self._apply_selection_to_rows()
+        # Rows mid-archive stay ghosted across a rebuild — rebuilds happen for
+        # unrelated reasons in the seconds an archive takes, and each one
+        # replaces the ghost with a fresh, fully visible widget. Ids whose
+        # archive has since landed drop out here: with "show archived" off the
+        # row is gone from the list, and with it on the row should return as an
+        # ordinary archived row rather than stay a ghost.
+        self._archiving = {
+            sid
+            for sid in self._archiving
+            if sid in self._rows and not self.store.state.is_archived(sid)
+        }
+        for sid in self._archiving:
+            self._rows[sid].begin_archiving(settled=True)
         self._update_collapse_button()
         # A rebuild inside the flash window replaced the flashing row with a
         # fresh widget that never got the CSS class — and bells often ride in
@@ -1358,6 +1435,28 @@ class SessionSidebar(Gtk.Box):
             row.add_css_class("active-tab")
         if session_id is not None and not clicked_here:
             self._scroll_row_into_view(session_id)
+
+    def begin_archiving(self, session_id: str) -> None:
+        """Slide a session's row out ahead of its archive landing.
+
+        Called by the window as it starts an archive (see _archive_session
+        there), which can take seconds when a tab has to shut down first: the
+        row answers now, and the id is remembered so a rebuild in the waiting
+        window re-ghosts the replacement row instead of popping it back.
+        """
+        row = self._rows.get(session_id)
+        if row is None:
+            return
+        self._archiving.add(session_id)
+        row.begin_archiving()
+
+    def clear_archiving(self, session_id: str) -> None:
+        """The archive was cancelled (its tab-close dialog declined): whatever
+        stage of ghosting the row reached, bring it back."""
+        self._archiving.discard(session_id)
+        row = self._rows.get(session_id)
+        if row is not None:
+            row.restore_archiving()
 
     def flash_row(self, row_id: str) -> None:
         """Visual bell relay: flash the row standing for a ringing session (or

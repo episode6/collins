@@ -399,6 +399,33 @@ row.session-child > box {
   transition: margin-right 200ms ease;
 }
 
+/* A row on its way to the archive (see SessionRow.begin_archiving): the
+   archive itself can take seconds when the session's tab has to shut its
+   agent down first, so the row answers the click at once by sliding out of
+   the panel to the left as it fades. The translation doesn't measure the
+   panel; it only has to outrun the fade, and past 440px the row is gone at
+   any plausible panel width. ease-in, not ease: leaving accelerates. */
+row.session-child.archiving {
+  transform: translateX(-440px);
+  opacity: 0;
+  transition: transform 250ms ease-in, opacity 250ms ease-in;
+}
+/* ...then, the slide done (sidebar.py adds this class and hides the row's
+   content box), the emptied slot closes up. With the content gone the row's
+   height is nothing but min-height and its two horizontal borders, and all
+   of it animates to zero -- so by the time the archive really lands and the
+   rebuild drops the row, there is no longer anything on screen to notice
+   disappearing. Cancelling the close instead brings the row back whole:
+   classes off, content shown, and with them gone these transitions don't
+   run, so the return is an instant snap rather than a reverse slide. */
+row.session-child.archiving.archiving-gone {
+  min-height: 0;
+  border-top-width: 0;
+  border-bottom-width: 0;
+  transition: min-height 200ms ease, border-top-width 200ms ease,
+    border-bottom-width 200ms ease;
+}
+
 /* The session list's scrollbar rides the panel's right edge. Stock Adwaita
    insets its trough from that edge (4px as the thin overlay indicator, 8px
    once the pointer nears it and it expands), which leaves the bar floating in

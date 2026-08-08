@@ -60,7 +60,7 @@ from .sessions import (
     session_from_file,
     worktree_project_root,
 )
-from .sidebar import SessionSidebar
+from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar
 from .state import AppState, clamp_window_size, editor_pops_out
 from .store import SessionStore, emptied_projects
 from .switcher import QuickSwitcher
@@ -2098,7 +2098,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.tab_view.close_page(page)
 
         def cancelled() -> None:
-            self._archive_on_close.pop(page, None)  # cancelled: keep the session visible
+            self._archive_cancelled(page)  # cancelled: keep the session visible
 
         tab = page.get_child()
         self._ask_save_editors([tab] if isinstance(tab, TerminalTab) else [], proceed, cancelled)
@@ -2216,7 +2216,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         def cancelled() -> None:
             self._close_asking.discard(page)
-            self._archive_on_close.pop(page, None)  # cancelled: keep the session visible
+            self._archive_cancelled(page)  # cancelled: keep the session visible
 
         self._ask_save_editors([tab], after_editor, cancelled)
 
@@ -2275,7 +2275,7 @@ class MainWindow(Adw.ApplicationWindow):
         confirm_label = _("Exit Session") if agent_busy else _("Close Tab")
         def dismiss() -> None:
             self._close_asking.discard(page)
-            self._archive_on_close.pop(page, None)  # cancelled: keep the session visible
+            self._archive_cancelled(page)  # cancelled: keep the session visible
 
         dialogs.confirm_dialog(
             self,
@@ -3409,6 +3409,10 @@ class MainWindow(Adw.ApplicationWindow):
                 if page not in self._close_asking:
                     self._ask_editor_then_tab_close(page, tab)
                 return True
+            # Every ask that could still cancel this close is behind us: a
+            # close carrying an archive starts its row's slide out here, not
+            # under a dialog that might yet keep the session.
+            self._begin_archive_ghost(page)
             if agent_busy:  # confirmed: start a graceful exit in the background
                 self._graceful_close(page)
                 view.close_page_finish(page, False)  # keep the tab until it exits cleanly
@@ -3419,6 +3423,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._close_asking.discard(page)
         self._close_ok.discard(page)
         self._bg_ok.discard(page)
+        # Ghosting again just before the archive lands is a no-op for the
+        # closes that came through the gate above, and the backstop for any
+        # that skipped it (a pre-confirmed re-entry): the ghost then bridges
+        # the moment between the archive below and the rebuild removing the
+        # row, instead of the row popping out mid-list.
+        self._begin_archive_ghost(page)
         archive_session_id = self._archive_on_close.pop(page, None)
         if archive_session_id:
             self.store.set_archived(archive_session_id, True)
@@ -3612,6 +3622,23 @@ class MainWindow(Adw.ApplicationWindow):
         if isinstance(tab, TerminalTab) and tab.session_id:
             self._archive_session(tab.session_id)
 
+    def _begin_archive_ghost(self, page: Adw.TabPage) -> None:
+        """Start the slide-out of the row whose archive rides this close, if
+        one does (see _archive_session and the sidebar's begin_archiving).
+        Idempotent — the close flow re-enters _on_close_page while a graceful
+        exit drains, and the row ignores a second ask."""
+        session_id = self._archive_on_close.get(page)
+        if session_id is not None and not self.store.show_archived:
+            self.sidebar.begin_archiving(session_id)
+
+    def _archive_cancelled(self, page: Adw.TabPage) -> None:
+        """A close that was carrying an archive got declined: forget the
+        archive and bring the session's ghosted row back (see the sidebar's
+        begin_archiving)."""
+        session_id = self._archive_on_close.pop(page, None)
+        if session_id is not None:
+            self.sidebar.clear_archiving(session_id)
+
     def _archive_session(self, session_id: str) -> None:
         archived = not self.state.is_archived(session_id)
         page = self._page_for(session_id) if archived else None
@@ -3619,7 +3646,10 @@ class MainWindow(Adw.ApplicationWindow):
             # Close the tab through the normal close-page flow, so a busy tab
             # still gets its confirmation dialog — and archive the session
             # only once the tab really closes: cancelling the dialog keeps it
-            # visible.
+            # visible. The row's slide-out (_begin_archive_ghost) waits for
+            # that flow too: it starts from _on_close_page once every ask that
+            # could still cancel the close is behind it, never under a dialog
+            # still deciding.
             self._archive_on_close[page] = session_id
             behavior = self.state.get_setting("archive_running_session")
             if behavior == "exit":
@@ -3633,6 +3663,22 @@ class MainWindow(Adw.ApplicationWindow):
             # "ask" — or backgrounding was chosen but isn't available for this
             # tab right now: the dialog says why and offers the alternatives.
             self.tab_view.close_page(page)
+            return
+        # Tabless: no dialog can interpose, so the row slides out right away
+        # (only when archiving will actually remove it from the list — with
+        # "show archived" on it stays, as an ordinary archived row). The
+        # archive itself then waits for the animation: with no tab to shut
+        # down there is no natural delay, and landing it now would rebuild
+        # the list right over the slide's first frames. The row is already
+        # insensitive, so nothing can double-book it while it waits.
+        if archived and not self.store.show_archived:
+            self.sidebar.begin_archiving(session_id)
+
+            def land() -> bool:
+                self.store.set_archived(session_id, True)
+                return GLib.SOURCE_REMOVE
+
+            GLib.timeout_add(ARCHIVE_GHOST_MS, land)
             return
         self.store.set_archived(session_id, archived)
 
