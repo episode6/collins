@@ -1710,7 +1710,13 @@ class TerminalTab(Gtk.Box):
         number.add_css_class("caption")
         number.add_css_class("dim-label")
         chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        chip.append(prmenu.status_icon(pr))
+        # Centered, not stretched: the badge sits at the bottom of the mark's
+        # allocation, and a mark left to fill the footer row would put it flush
+        # against the window's bottom edge. The base icon draws centered either
+        # way, so only the badge moves — up, off the edge.
+        mark = prmenu.status_icon(pr)
+        mark.set_valign(Gtk.Align.CENTER)
+        chip.append(mark)
         chip.append(number)
         chip.set_tooltip_text(
             describe(pr) + "\n" + pr.url + "\n"
