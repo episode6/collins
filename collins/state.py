@@ -97,7 +97,10 @@ DEFAULT_SETTINGS = {
     "show_usage_panel": True,  # Claude subscription usage bars under the session list
     "usage_panel_collapsed": False,  # usage panel folded down to its heading line
     "footer_apps": [],  # desktop-file IDs of apps launchable from each tab's footer
-    "caffeine_on_launch": False,  # start with Caffeine Mode on (inhibit suspend/idle)
+    # Whether Caffeine Mode holds the screen on too (idle inhibit) or only
+    # keeps the computer from suspending, leaving the screen free to blank.
+    "caffeine_keep_screen_on": True,
+    "caffeine_on_launch": False,  # start with Caffeine Mode on (see app.py's inhibitor)
     "caffeine_launch_timer": "indefinite",  # shut-off timer armed at launch (see caffeine.py)
     "sidebar_width": 300,  # persisted sidebar pane width in px
     "panel_position": "bottom",  # secondary terminal panel placement: bottom | right

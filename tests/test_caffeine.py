@@ -6,6 +6,7 @@ from collins.caffeine import (
     duration_label,
     duration_seconds,
     format_remaining,
+    toggle_tooltip,
 )
 
 
@@ -37,6 +38,23 @@ def test_labels():
     assert duration_label("12h") == "12 hours"
     assert duration_label(INDEFINITE) == "Indefinitely"
     assert duration_label("nonsense") == "Indefinitely"
+
+
+@pytest.mark.parametrize("on", [False, True])
+def test_tooltip_only_promises_the_screen_when_it_is_kept_on(on):
+    kept = toggle_tooltip(on=on, keep_screen_on=True)
+    free = toggle_tooltip(on=on, keep_screen_on=False)
+    assert "screen" in kept and "screen" in free  # both say what happens to it
+    assert kept != free
+    # Whatever the setting, the computer staying awake is never in doubt.
+    assert "computer" in kept and "computer" in free
+
+
+def test_tooltip_distinguishes_on_from_off():
+    for keep_screen_on in (True, False):
+        assert toggle_tooltip(on=True, keep_screen_on=keep_screen_on) != toggle_tooltip(
+            on=False, keep_screen_on=keep_screen_on
+        )
 
 
 @pytest.mark.parametrize(

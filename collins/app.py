@@ -764,6 +764,9 @@ class App(Adw.Application):
         # never silently keep the machine awake unless the user explicitly
         # opted in via the caffeine_on_launch setting.
         self._caffeine_cookie: int | None = None
+        # The flags that cookie was taken under, so a settings change can tell
+        # whether the inhibitor it's holding is still the right one.
+        self._caffeine_flags_held: Gtk.ApplicationInhibitFlags | None = None
         # The optional shut-off timer: when it's running, a monotonic deadline
         # (µs) and the once-a-second source that both drives every window's
         # countdown and turns Caffeine Mode off on reaching it.
@@ -817,23 +820,57 @@ class App(Adw.Application):
         self._cancel_caffeine_timer()
         if enabled != self.caffeine_enabled:
             if enabled:
-                # inhibit() returns 0 when the platform can't inhibit; treating
-                # that as "still off" makes every window's toggle snap back.
-                self._caffeine_cookie = (
-                    self.inhibit(
-                        self.get_active_window(),
-                        Gtk.ApplicationInhibitFlags.SUSPEND | Gtk.ApplicationInhibitFlags.IDLE,
-                        _("Caffeine Mode is on"),
-                    )
-                    or None
-                )
+                self._take_caffeine_inhibit()
             else:
                 self.uninhibit(self._caffeine_cookie)
                 self._caffeine_cookie = None
+                self._caffeine_flags_held = None
         # Nothing to count down to if the inhibit didn't take (or was refused).
         if seconds and self.caffeine_enabled:
             self._caffeine_deadline = GLib.get_monotonic_time() + seconds * 1_000_000
             self._caffeine_tick = GLib.timeout_add_seconds(1, self._on_caffeine_tick)
+        self._sync_caffeine_windows()
+
+    def _caffeine_flags(self) -> Gtk.ApplicationInhibitFlags:
+        """What Caffeine Mode holds off. SUSPEND always — the machine staying
+        awake is the whole point — plus IDLE, which is what also keeps the
+        screen lit, only while the user wants the screen kept on."""
+        flags = Gtk.ApplicationInhibitFlags.SUSPEND
+        if self.state.get_setting("caffeine_keep_screen_on"):
+            flags |= Gtk.ApplicationInhibitFlags.IDLE
+        return flags
+
+    def _take_caffeine_inhibit(self) -> None:
+        """Claim the inhibitor under the current setting, replacing any we
+        already hold. The new one is taken before the old is dropped, so the
+        machine is never briefly free to sleep in between."""
+        previous = self._caffeine_cookie
+        flags = self._caffeine_flags()
+        # inhibit() returns 0 when the platform can't inhibit; treating that as
+        # "still off" makes every window's toggle snap back.
+        self._caffeine_cookie = (
+            self.inhibit(self.get_active_window(), flags, _("Caffeine Mode is on")) or None
+        )
+        self._caffeine_flags_held = flags if self._caffeine_cookie is not None else None
+        if previous is not None:
+            self.uninhibit(previous)
+
+    def refresh_caffeine_inhibit(self) -> None:
+        """Re-take the inhibitor when the keep-the-screen-on setting changed
+        under a Caffeine Mode that is already running, so the new answer lands
+        without the user toggling the cup off and on. The shut-off timer is
+        left alone — only what's being inhibited changes, not for how long.
+
+        Safe to call whenever the setting may have moved: every window is
+        resynced either way, since the button's tooltip says what the setting
+        promises even while Caffeine Mode is off.
+        """
+        if self.caffeine_enabled and self._caffeine_flags() != self._caffeine_flags_held:
+            self._take_caffeine_inhibit()
+            if not self.caffeine_enabled:
+                # The replacement was refused: Caffeine Mode is off now, so
+                # drop the countdown with it and let the toggles snap back.
+                self._cancel_caffeine_timer()
         self._sync_caffeine_windows()
 
     def _cancel_caffeine_timer(self) -> None:

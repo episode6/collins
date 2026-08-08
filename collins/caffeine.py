@@ -1,8 +1,9 @@
-"""Caffeine Mode's shut-off timer: the durations on offer, and how long is left.
+"""Caffeine Mode's shut-off timer and what it promises to keep awake.
 
 The button's context menu, the launch setting and the header countdown all read
 their options from here, so the three can never drift apart on what "3 hours"
-means or which durations exist.
+means or which durations exist. The button's wording lives here too, so it can
+never promise a screen that the current setting lets go dark.
 """
 
 from __future__ import annotations
@@ -39,6 +40,22 @@ def duration_label(key: str) -> str:
         return _("Indefinitely")
     hours = seconds // 3600
     return _("1 hour") if hours == 1 else _("{n} hours").format(n=hours)
+
+
+def toggle_tooltip(*, on: bool, keep_screen_on: bool) -> str:
+    """The Caffeine button's tooltip.
+
+    Whole sentences per case rather than a stitched-together one: translators
+    get the sentence, and the wording never claims the screen stays on when
+    the setting only holds off suspend.
+    """
+    if on:
+        if keep_screen_on:
+            return _("Caffeine Mode is on — the computer and screen will stay awake")
+        return _("Caffeine Mode is on — the computer will stay awake, the screen may turn off")
+    if keep_screen_on:
+        return _("Caffeine Mode: keep the computer awake and the screen on")
+    return _("Caffeine Mode: keep the computer awake, letting the screen turn off")
 
 
 def format_remaining(seconds: float) -> str:
