@@ -18,12 +18,13 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import ghwelcome, tooltipmute
+from . import ghwelcome, mcpserver, mcptools, proctree, providers, tooltipmute
 from .caffeine import duration_seconds
 from .i18n import _
 from .prefs import apply_color_scheme
 from .state import AppState
 from .store import SessionStore
+from .terminal import TerminalTab
 from .window import MainWindow, session_window
 
 # Bundled icons (e.g. tab-close-symbolic); found by name when installed.
@@ -777,6 +778,8 @@ class App(Adw.Application):
         self.store = SessionStore(self.state)
         self.store.start()
 
+        self._start_mcp_service()
+
         focus = Gio.SimpleAction.new("focus-session", GLib.VariantType("s"))
         focus.connect("activate", self._on_focus_session)
         self.add_action(focus)
@@ -785,6 +788,92 @@ class App(Adw.Application):
         new_window.connect("activate", lambda *_: self._new_window())
         self.add_action(new_window)
         self.set_accels_for_action("app.new-window", ["<Control><Shift>n"])
+
+    # -- session MCP tools ---------------------------------------------------
+    #
+    # The socket service every launched session's MCP shim relays tool calls
+    # through (mcpserver/mcptools/mcp_shim). The service and the handlers live
+    # here because dispatch needs what only the app has: every window, every
+    # tab, and the /proc ancestry walk that ties a calling shim back to the
+    # tab whose shell spawned its `claude`.
+
+    def _start_mcp_service(self) -> None:
+        """Bring up the tool socket and the `--mcp-config` file it's named in.
+
+        Any failure logs and leaves providers.MCP_CONFIG_PATH unset, so
+        launched commands come out exactly as they did before the feature —
+        the tools are conveniences, never load-bearing.
+        """
+        self._mcp_service: mcpserver.SessionToolService | None = None
+        app_id = self.get_application_id()
+        service = mcpserver.SessionToolService(
+            mcptools.socket_path(app_id),
+            list_tools=lambda: mcptools.TOOLS,
+            dispatch=self._mcp_dispatch,
+        )
+        try:
+            service.start()
+        except (GLib.Error, OSError):
+            logging.getLogger(__name__).exception("session MCP socket unavailable")
+            return
+        config = mcptools.write_config(app_id)
+        if config is None:
+            logging.getLogger(__name__).error("session MCP config not writable")
+            service.stop()
+            return
+        self._mcp_service = service
+        providers.MCP_CONFIG_PATH = config
+
+    def do_shutdown(self) -> None:
+        # Stops accepting and unlinks the socket; mcp.json stays behind on
+        # purpose — the app-id-keyed path is stable across restarts, so a
+        # session that outlives this run reconnects to the next one, and
+        # until then its shim degrades to clean "Collins is not running"
+        # errors rather than breaking the session.
+        if self._mcp_service is not None:
+            self._mcp_service.stop()
+        Adw.Application.do_shutdown(self)
+
+    def _mcp_tab_for_pid(self, shim_pid: int) -> tuple[MainWindow, TerminalTab] | None:
+        """The window and tab whose terminal the calling shim descends from.
+
+        None for anything that wasn't launched from a tab's shell: a
+        daemon-hosted background job (ancestry tops out at systemd), a chat
+        session, a tab that has since closed. Resolved fresh per call —
+        pids recycle, and a walk of every open tab is cheap.
+        """
+        ancestors = proctree.ancestor_pids(shim_pid)
+        for window in self.get_windows():
+            if not isinstance(window, MainWindow):
+                continue
+            for i in range(window.tab_view.get_n_pages()):
+                tab = window.tab_view.get_nth_page(i).get_child()
+                if isinstance(tab, TerminalTab) and tab.owns_pid_ancestors(ancestors):
+                    return window, tab
+        return None
+
+    def _mcp_dispatch(self, pid: int, tool: str, args: object) -> tuple[bool, str]:
+        """Run one tool call from the shim at *pid*: (ok, message-or-error).
+
+        Arguments are re-validated here — the socket is reachable by any
+        local process, so the CLI's own schema enforcement is not a boundary.
+        Error strings are agent-facing English, deliberately untranslated.
+        """
+        error = mcptools.validate_args(tool, args)
+        if error is not None:
+            return False, error
+        found = self._mcp_tab_for_pid(pid)
+        if found is None:
+            return False, "This claude process wasn't launched from a Collins tab"
+        window, tab = found
+        if tool == "set_session_title":
+            if not tab.session_id:
+                return False, (
+                    "The session isn't resolved in Collins yet — try again in a moment"
+                )
+            window.rename_session_tab(tab.session_id, args["title"])
+            return True, "Session renamed."
+        return False, f"Unknown tool: {tool}"  # unreachable: validate_args gates
 
     def _apply_scheme_css(self) -> None:
         """Load the scheme's colors. Runs at startup and on every light/dark

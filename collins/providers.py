@@ -65,6 +65,14 @@ _WORKTREE_EXIT_OTHER_OPTION = "Remove worktree"
 # double-resuming) a live job. See ClaudeProvider.background_agents.
 _BACKGROUND_TERMINAL_STATES = frozenset({"done", "error", "failed", "stopped"})
 
+# The `--mcp-config` file that gives launched sessions the app's own MCP tools
+# (see mcptools/mcpserver). Set by app.py only once the whole chain — runtime
+# dir, socket service, config file — is actually up; None means commands go
+# out exactly as they did before the feature existed. Read-live module state,
+# like sessions.CLAUDE_PROJECTS_DIR: the provider registry is module-level
+# singletons built at import time, so constructor arguments can't carry this.
+MCP_CONFIG_PATH: str | None = None
+
 
 @dataclass(frozen=True)
 class SessionOptions:
@@ -116,6 +124,9 @@ class Provider:
     cli: str = ""  # executable name looked up on PATH
     icon_name: str = ""  # bundled symbolic icon for sidebar rows
     supports_fork: bool = False
+    # Whether this agent's CLI accepts `--mcp-config`, i.e. whether launched
+    # sessions can be handed the Collins tool server. Mirrors supports_fork.
+    supports_mcp_config: bool = False
 
     @property
     def projects_dir(self) -> Path:
@@ -159,6 +170,18 @@ class Provider:
     def discover(self) -> list[Session]:
         raise NotImplementedError
 
+    def _mcp_config_flag(self) -> str:
+        """The ` --mcp-config <path>` suffix for launched commands, or "".
+
+        Every command that starts or resumes a session through this provider
+        carries it (the CLI registers the config on --resume/--continue too,
+        verified 2026-08-08) — except `attach`, which accepts no flags at all
+        and doesn't need any: it joins a process that already has its servers.
+        """
+        if self.supports_mcp_config and MCP_CONFIG_PATH:
+            return f" --mcp-config {shlex.quote(MCP_CONFIG_PATH)}"
+        return ""
+
     def resume_command(self, session_id: str, fork: bool = False) -> str | None:
         """Shell command to type into the terminal to resume a session."""
         cli = shutil.which(self.cli)
@@ -167,7 +190,7 @@ class Provider:
         cmd = f"{shlex.quote(cli)} --resume {shlex.quote(session_id)}"
         if fork and self.supports_fork:
             cmd += " --fork-session"
-        return cmd
+        return cmd + self._mcp_config_flag()
 
     def new_command(self, options=None) -> str | None:
         """Shell command to start a fresh session, optionally with advanced
@@ -175,7 +198,7 @@ class Provider:
         cli = shutil.which(self.cli)
         if cli is None:
             return None
-        return " ".join([shlex.quote(cli), *self._option_flags(options)])
+        return " ".join([shlex.quote(cli), *self._option_flags(options)]) + self._mcp_config_flag()
 
     def _option_flags(self, options) -> list[str]:
         """Translate SessionOptions into this agent's CLI flags. Base: none."""
@@ -184,7 +207,7 @@ class Provider:
     def continue_command(self) -> str | None:
         """Shell command to continue the most recent session in the cwd."""
         cli = shutil.which(self.cli)
-        return f"{shlex.quote(cli)} --continue" if cli else None
+        return f"{shlex.quote(cli)} --continue{self._mcp_config_flag()}" if cli else None
 
     def session_models(self) -> list[tuple[str, str]]:
         """(flag value, label) model choices for the advanced dialog; the first
@@ -293,6 +316,7 @@ class ClaudeProvider(Provider):
     cli = "claude"
     icon_name = "agent-claude-symbolic"
     supports_fork = True
+    supports_mcp_config = True
 
     @property
     def projects_dir(self) -> Path:
@@ -562,6 +586,8 @@ class ClaudeProvider(Provider):
             "--permission-mode", "default",
             "--permission-prompt-tool", "stdio",
         ]
+        if self.supports_mcp_config and MCP_CONFIG_PATH:
+            argv += ["--mcp-config", MCP_CONFIG_PATH]
         if session_id:
             argv += ["--resume", session_id]
         return argv

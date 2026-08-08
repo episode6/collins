@@ -3515,6 +3515,19 @@ class MainWindow(Adw.ApplicationWindow):
         if session is not None:
             self._prompt_rename_session(session)
 
+    def rename_session_tab(self, session_id: str, title: str) -> None:
+        """Rename a session and retitle its open tab — the rename dialog's
+        save path, callable without the dialog. The session MCP tools use it
+        for `set_session_title`: the rename lands in the manual-name slot,
+        so it permanently stops auto-titling for the session, exactly as a
+        hand rename does (a session naming itself has strictly better
+        information than TitleGenerator guessing from the first prompt)."""
+        self.store.rename(session_id, title)
+        session = self.store.get_session(session_id)
+        page = self._page_for(session_id)
+        if session is not None and page is not None:
+            page.set_title(self._tab_title(session))
+
     def _prompt_rename_session(self, session: Session) -> None:
         # Prefilled with the name the session goes by right now, whoever wrote
         # it — a manual rename, an auto-title, the first words of the prompt —

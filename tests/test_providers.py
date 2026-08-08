@@ -460,6 +460,88 @@ def test_claude_file_reference_refuses_control_characters():
     assert claude.file_reference("/p/evil\x1b]0;x\x07.py", "/p") is None
 
 
+# -- the session MCP tools' --mcp-config flag ---------------------------------
+#
+# providers.MCP_CONFIG_PATH is set by app.py only once the socket service and
+# config file are actually up; until then (and on any failure) it stays None
+# and every command below must come out exactly as it did before the feature.
+
+
+@pytest.fixture
+def mcp_config_set(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(providers, "MCP_CONFIG_PATH", "/run/user/1/collins/id/mcp.json")
+    monkeypatch.setattr(
+        ClaudeProvider, "background_agents", lambda self, include_finished=False: []
+    )
+
+
+def test_launch_commands_carry_the_mcp_config(mcp_config_set):
+    claude = ClaudeProvider()
+    suffix = " --mcp-config /run/user/1/collins/id/mcp.json"
+    assert claude.new_command() == "/usr/bin/claude" + suffix
+    assert claude.resume_command("abc") == "/usr/bin/claude --resume abc" + suffix
+    assert (
+        claude.resume_command("abc", fork=True)
+        == "/usr/bin/claude --resume abc --fork-session" + suffix
+    )
+    assert claude.continue_command() == "/usr/bin/claude --continue" + suffix
+
+
+def test_chat_command_carries_the_mcp_config(mcp_config_set):
+    argv = ClaudeProvider().chat_command("sess-42")
+    index = argv.index("--mcp-config")
+    assert argv[index + 1] == "/run/user/1/collins/id/mcp.json"
+    assert argv[-2:] == ["--resume", "sess-42"]  # resume args stay terminal
+
+
+def test_a_spaced_config_path_is_quoted(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(providers, "MCP_CONFIG_PATH", "/tmp/my dir/mcp.json")
+    assert ClaudeProvider().new_command().endswith(" --mcp-config '/tmp/my dir/mcp.json'")
+
+
+def test_no_mcp_config_flag_while_unset(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(
+        ClaudeProvider, "background_agents", lambda self, include_finished=False: []
+    )
+    assert providers.MCP_CONFIG_PATH is None  # the module default
+    claude = ClaudeProvider()
+    assert "--mcp-config" not in claude.new_command()
+    assert "--mcp-config" not in claude.resume_command("abc")
+    assert "--mcp-config" not in claude.continue_command()
+    assert "--mcp-config" not in claude.chat_command()
+
+
+def test_base_providers_never_carry_the_mcp_config(monkeypatch):
+    """The capability flag gates the append, so a provider whose CLI has no
+    --mcp-config flag is untouched even while the path is set."""
+
+    class OtherAgent(Provider):
+        cli = "other"
+
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(providers, "MCP_CONFIG_PATH", "/run/collins/mcp.json")
+    assert OtherAgent().new_command() == "/usr/bin/other"
+    assert OtherAgent().resume_command("abc") == "/usr/bin/other --resume abc"
+
+
+def test_attach_carries_no_mcp_config(monkeypatch):
+    """`claude attach` accepts no flags at all — and needs none: it joins a
+    daemon process that already has the servers from its own launch."""
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(providers, "MCP_CONFIG_PATH", "/run/collins/mcp.json")
+    monkeypatch.setattr(
+        ClaudeProvider,
+        "background_agents",
+        lambda self, include_finished=False: [
+            BackgroundAgent(session_id="abc", job_id="abc12345", cwd="/p")
+        ],
+    )
+    assert ClaudeProvider().resume_command("abc") == "/usr/bin/claude attach abc12345"
+
+
 def test_new_command_worktree_flag(monkeypatch):
     from collins.providers import SessionOptions
     monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
