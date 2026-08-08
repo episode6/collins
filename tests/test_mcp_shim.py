@@ -243,6 +243,34 @@ def test_eof_on_stdin_exits_cleanly(shim_factory):
     assert shim.proc.returncode == 0
 
 
+def test_broken_stdout_still_exits_cleanly():
+    """The CLI closing our stdout mid-teardown must read as shutdown on every
+    reply path — including the parse-error one, where garbage arrives on
+    stdin after nobody is listening anymore."""
+    env = os.environ.copy()
+    env.pop("COLLINS_MCP_SOCKET", None)
+    env["PYTHONPATH"] = str(_REPO_ROOT)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "collins.mcp_shim"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+    try:
+        proc.stdout.close()  # the read end goes away; any reply write now EPIPEs
+        proc.stdin.write(b"this is not json\n")
+        proc.stdin.flush()
+        proc.stdin.close()
+        proc.wait(timeout=10)
+        assert proc.returncode == 0
+        assert proc.stderr.read() == b""
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+
+
 # ---- degradation without Collins ---------------------------------------------
 
 

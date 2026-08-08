@@ -251,17 +251,24 @@ def main() -> int:
         if not line.strip():
             continue
         try:
-            msg = json.loads(line)
-        except ValueError:
-            _error(None, -32700, "Parse error")
-            continue
-        try:
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                _error(None, -32700, "Parse error")
+                continue
             if isinstance(msg, dict):
                 _handle(link, msg)
             else:
                 _error(None, -32600, "Invalid Request")
         except BrokenPipeError:
-            return 0  # the CLI went away mid-reply
+            # The CLI went away mid-reply; every reply path lands here. Point
+            # stdout at devnull so the interpreter's exit-time flush of the
+            # half-written buffer can't raise the same error again.
+            try:
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            except OSError:
+                pass
+            return 0
 
 
 if __name__ == "__main__":
