@@ -32,6 +32,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import footerapps, openwith, prmenu
 from .chats import is_chat_cwd
+from .copylabel import open_uri
 from .flash import FLASH_MS, flash
 from .formatting import format_size
 from .i18n import _
@@ -502,7 +503,9 @@ class SessionRow(Gtk.ListBoxRow):
         # ellipsis shows, from a row whose tab needn't be open (or exist) to
         # read it, and consumes the click that would otherwise open the session.
         # A session with no PRs has no mark, and the title starts where the
-        # check would leave it.
+        # check would leave it. A right-click on the mark skips the list and
+        # opens the newest PR in the browser, the way a footer chip does — see
+        # _on_right_click, which is where that click lands.
         self._pr_menu = prmenu.new_popover(Gtk.PositionType.BOTTOM)
         pr_btn = Gtk.MenuButton(valign=Gtk.Align.CENTER, popover=self._pr_menu)
         pr_btn.add_css_class("flat")
@@ -743,7 +746,15 @@ class SessionRow(Gtk.ListBoxRow):
         if not self._prs:
             return
         self._pr_btn.set_child(prmenu.combined_icon(self._prs))
-        self._pr_btn.set_tooltip_text(describe_all(self._prs))
+        # Which PR a right-click opens is worth naming when the mark stands for
+        # several: the tooltip already lists them, so the hint points at the
+        # one at the end of that list.
+        hint = (
+            _("Right-click to open")
+            if len(self._prs) == 1
+            else _("Right-click to open #{number}").format(number=self._prs[-1].number)
+        )
+        self._pr_btn.set_tooltip_text(describe_all(self._prs) + "\n" + hint)
 
     def _fill_pr_menu(self, _button: Gtk.MenuButton) -> None:
         """Put the saved list up at once, and refresh it behind a spinner.
@@ -963,7 +974,38 @@ class SessionRow(Gtk.ListBoxRow):
             self.remove_css_class(_INTERRUPTED_CSS)
 
     def _on_right_click(self, _gesture, _n_press: int, x: float, y: float) -> None:
+        """The session's menu — unless the click was on the PR mark.
+
+        The mark carries the shortcut a footer chip does: a plain click opens
+        what this session's pull requests amount to, a right-click goes
+        straight to the newest of them in the browser (a saved list is
+        oldest-first). The row's own gesture is what decides, because it is
+        what receives the click: GtkMenuButton listens for the primary button
+        only, so a secondary click on the mark reaches the row regardless.
+        """
+        url = self._newest_pr_url() if self._on_pr_mark(x, y) else None
+        if url:
+            open_uri(self, url)
+            return
         self._sidebar.show_row_menu(self, x, y)
+
+    def _on_pr_mark(self, x: float, y: float) -> bool:
+        """Is (*x*, *y*), in row coordinates, on the PR mark?
+
+        Picked rather than measured: the mark is covered by its own icon, so
+        unlike a row (which is mostly its own padding) there is a widget under
+        every pixel of it to find.
+        """
+        widget = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while widget is not None and widget is not self:
+            if widget is self._pr_btn:
+                return True
+            widget = widget.get_parent()
+        return False
+
+    def _newest_pr_url(self) -> str | None:
+        """The link to the most recently opened of this session's PRs."""
+        return self._prs[-1].url if self._prs else None
 
 
 class SessionSidebar(Gtk.Box):

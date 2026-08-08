@@ -1408,7 +1408,16 @@ def test_describe_all_counts_the_ones_it_stops_naming():
     prs = [_pr(n, state="OPEN") for n in range(prstatus._MAX_TOOLTIP_PRS + 3)]
     lines = describe_all(prs).splitlines()
     assert len(lines) == prstatus._MAX_TOOLTIP_PRS + 1
-    assert lines[-1] == "and 3 more"
+    assert lines[-2] == "and 3 more"
+
+
+def test_describe_all_names_the_newest_however_long_the_list():
+    prs = [_pr(n, state="OPEN") for n in range(prstatus._MAX_TOOLTIP_PRS + 3)]
+    lines = describe_all(prs).splitlines()
+    # The one a right-click on the mark opens, so the hint under this list can
+    # be read against it.
+    assert lines[-1] == describe(prs[-1])
+    assert lines[0] == describe(prs[0])
 
 
 # -- sweep (what the sidebar's refresh button runs over every listed row) ----

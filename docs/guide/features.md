@@ -36,6 +36,9 @@ fork. Last modified: 2026-08-08. Full change history: git log for this file.
   the same list (and the same per-PR actions) the tab footer's caret shows —
   or, when the session has just the one pull request, that PR's actions
   directly, since a list of one only ever leads to the same place.
+  **Right-clicking the mark skips the list** and opens the session's most
+  recent PR in your browser, the way a right-click on a footer chip does; the
+  tooltip's last line names which one that is.
 - **Refresh** (the header's ↻) re-reads the session list *and* every listed
   session's pull requests: each one's checks, conflicts and unanswered
   comments, plus a **branch lookup** that picks up PRs opened by hand, which no
