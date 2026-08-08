@@ -11,10 +11,14 @@ from collins import mcptools
 # ---- the tool table ----------------------------------------------------------
 
 
-def test_v1_serves_only_set_session_title():
+def test_serves_exactly_the_landed_tools():
     """The list is app-served, so nothing lands here before its handler does —
     advertising a dead tool would invite calls that can only fail."""
-    assert [tool["name"] for tool in mcptools.TOOLS] == ["set_session_title"]
+    assert [tool["name"] for tool in mcptools.TOOLS] == [
+        "set_session_title",
+        "open_in_editor",
+        "show_image",
+    ]
 
 
 def test_every_tool_schema_is_a_closed_object():
@@ -72,6 +76,38 @@ def test_unexpected_argument_is_rejected():
         "set_session_title", {"title": "ok", "surprise": True}
     )
     assert "surprise" in error
+
+
+def test_open_in_editor_args():
+    assert mcptools.validate_args("open_in_editor", {"path": "collins/app.py"}) is None
+    assert (
+        mcptools.validate_args("open_in_editor", {"path": "/tmp/x.py", "line": 12})
+        is None
+    )
+    assert "path" in mcptools.validate_args("open_in_editor", {})
+    assert "empty" in mcptools.validate_args("open_in_editor", {"path": ""})
+
+
+def test_open_in_editor_line_must_be_a_positive_integer():
+    """Lines are 1-based on the wire (matching how references are written);
+    the handler converts to the editor's 0-based cursor."""
+    assert "integer" in mcptools.validate_args(
+        "open_in_editor", {"path": "x.py", "line": "12"}
+    )
+    assert "integer" in mcptools.validate_args(
+        "open_in_editor", {"path": "x.py", "line": True}
+    )
+    assert "at least 1" in mcptools.validate_args(
+        "open_in_editor", {"path": "x.py", "line": 0}
+    )
+
+
+def test_show_image_args():
+    assert mcptools.validate_args("show_image", {"path": "shot.png"}) is None
+    assert "path" in mcptools.validate_args("show_image", {})
+    assert "line" in mcptools.validate_args(
+        "show_image", {"path": "shot.png", "line": 3}
+    )
 
 
 # ---- the dispatch skeleton ---------------------------------------------------

@@ -325,7 +325,7 @@ def test_tools_list_is_served_by_the_app(shim_factory, tmp_path):
     shim = make_shim(path)
     shim.handshake()
     tools = shim.request("tools/list")["result"]["tools"]
-    assert [tool["name"] for tool in tools] == ["set_session_title"]
+    assert [tool["name"] for tool in tools] == [tool["name"] for tool in mcptools.TOOLS]
     assert tools[0]["inputSchema"]["required"] == ["title"]
 
 
