@@ -3281,7 +3281,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
         win = self._editor_windows.get(tab)
         if win is not None:
-            win.close()  # (a) popped out: dock it back (close-request docks)
+            win.dock_back()  # (a) popped out: bring it back as an open panel
             return
         if not tab.editor_visible and self._editor_opens_popped_out():
             self._pop_out_editor(tab)  # (b) on a small screen: open undocked
@@ -3387,16 +3387,17 @@ class MainWindow(Adw.ApplicationWindow):
             state=self.state,
             title=pane.root.name,
             icon_name=self.get_icon_name(),
-            on_dock_back=lambda _pane: self._dock_editor_back(tab),
+            on_dock_back=lambda _pane, show_panel: self._dock_editor_back(tab, show_panel),
         )
         self._editor_windows[tab] = win
         win.present()
 
-    def _dock_editor_back(self, tab: TerminalTab) -> None:
+    def _dock_editor_back(self, tab: TerminalTab, show_panel: bool = True) -> None:
         """The EditorWindow released its pane (its close-request, or a forced
-        release below): put it back in the tab, open at its old width."""
+        release below): put it back in the tab, open at its old width — or
+        closed, when the window was simply closed rather than docked back."""
         self._editor_windows.pop(tab, None)
-        tab.reattach_editor()
+        tab.reattach_editor(show=show_panel)
 
     def _release_editor_window(self, tab: TerminalTab) -> None:
         """Force a tab's popped-out editor home without going through the WM:
