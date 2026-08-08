@@ -625,7 +625,12 @@ class MainWindow(Adw.ApplicationWindow):
     def _busy_tab_count(self) -> int:
         """Tabs the quit confirmation should count as active sessions. An
         unstarted New Thread (empty input box, first prompt never sent) has
-        nothing going on, so it doesn't make quitting a question."""
+        nothing going on, so it doesn't make quitting a question — and a
+        quit with only such tabs open takes _on_close_request's nothing-busy
+        fast path, tearing the CLI down with the window (pty hangup) rather
+        than draining it through a graceful exit. That is deliberate: with
+        no first prompt ever sent there is no transcript or state to wind
+        down, and the graceful drain would keep the window up for it."""
         count = 0
         for i in range(self.tab_view.get_n_pages()):
             tab = self.tab_view.get_nth_page(i).get_child()
@@ -2197,7 +2202,11 @@ class MainWindow(Adw.ApplicationWindow):
             if not self._page_alive(page):
                 self._close_asking.discard(page)
                 return
-            if tab.has_running_command() or tab.panel_has_running_command():
+            busy = (
+                (tab.has_running_command() and not tab.unstarted_thread())
+                or tab.panel_has_running_command()
+            )
+            if busy:
                 self._ask_tab_close(page, tab)  # manages _close_asking itself
                 return
             self._close_asking.discard(page)
