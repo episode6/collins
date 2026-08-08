@@ -40,6 +40,7 @@ from .bgstatus import (
 )
 from .caffeine import (
     DURATION_KEYS,
+    countdown_tooltip,
     duration_label,
     duration_seconds,
     format_remaining,
@@ -2069,14 +2070,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.caffeine_btn.set_icon_name(
             "caffeine-cup-full-symbolic" if on else "caffeine-cup-empty-symbolic"
         )
+        keep_screen_on = bool(self.state.get_setting("caffeine_keep_screen_on"))
         if remaining is None:
-            tooltip = toggle_tooltip(
-                on=on, keep_screen_on=bool(self.state.get_setting("caffeine_keep_screen_on"))
-            )
+            tooltip = toggle_tooltip(on=on, keep_screen_on=keep_screen_on)
         else:
-            tooltip = _("Caffeine Mode turns off in {time}").format(
-                time=format_remaining(remaining)
-            )
+            tooltip = countdown_tooltip(remaining, keep_screen_on=keep_screen_on)
         self.caffeine_btn.set_tooltip_text(tooltip)
         self.caffeine_timer.set_visible(remaining is not None)
         if remaining is not None:

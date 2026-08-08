@@ -843,15 +843,23 @@ class App(Adw.Application):
     def _take_caffeine_inhibit(self) -> None:
         """Claim the inhibitor under the current setting, replacing any we
         already hold. The new one is taken before the old is dropped, so the
-        machine is never briefly free to sleep in between."""
-        previous = self._caffeine_cookie
+        machine is never briefly free to sleep in between.
+
+        inhibit() returns 0 when the platform can't inhibit. Turning Caffeine
+        Mode on, that has to read as "still off", or every window's toggle
+        stays lit over a machine that will happily sleep. Swapping the flags
+        under a running Caffeine Mode it must not: the inhibitor we already
+        hold is still good, so keep it and leave the setting to land on the
+        next attempt rather than letting the screen question turn the whole
+        thing off.
+        """
         flags = self._caffeine_flags()
-        # inhibit() returns 0 when the platform can't inhibit; treating that as
-        # "still off" makes every window's toggle snap back.
-        self._caffeine_cookie = (
-            self.inhibit(self.get_active_window(), flags, _("Caffeine Mode is on")) or None
-        )
-        self._caffeine_flags_held = flags if self._caffeine_cookie is not None else None
+        cookie = self.inhibit(self.get_active_window(), flags, _("Caffeine Mode is on")) or None
+        if cookie is None:
+            return  # refused: whatever we were holding (if anything) stands
+        previous = self._caffeine_cookie
+        self._caffeine_cookie = cookie
+        self._caffeine_flags_held = flags
         if previous is not None:
             self.uninhibit(previous)
 
@@ -867,10 +875,6 @@ class App(Adw.Application):
         """
         if self.caffeine_enabled and self._caffeine_flags() != self._caffeine_flags_held:
             self._take_caffeine_inhibit()
-            if not self.caffeine_enabled:
-                # The replacement was refused: Caffeine Mode is off now, so
-                # drop the countdown with it and let the toggles snap back.
-                self._cancel_caffeine_timer()
         self._sync_caffeine_windows()
 
     def _cancel_caffeine_timer(self) -> None:

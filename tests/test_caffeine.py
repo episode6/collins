@@ -3,6 +3,7 @@ import pytest
 from collins.caffeine import (
     DURATION_KEYS,
     INDEFINITE,
+    countdown_tooltip,
     duration_label,
     duration_seconds,
     format_remaining,
@@ -55,6 +56,14 @@ def test_tooltip_distinguishes_on_from_off():
         assert toggle_tooltip(on=True, keep_screen_on=keep_screen_on) != toggle_tooltip(
             on=False, keep_screen_on=keep_screen_on
         )
+
+
+@pytest.mark.parametrize("keep_screen_on", [True, False])
+def test_countdown_tooltip_carries_the_time_and_the_screen(keep_screen_on):
+    tooltip = countdown_tooltip(3600, keep_screen_on=keep_screen_on)
+    assert format_remaining(3600) in tooltip
+    assert "screen" in tooltip
+    assert tooltip != countdown_tooltip(3600, keep_screen_on=not keep_screen_on)
 
 
 @pytest.mark.parametrize(

@@ -58,6 +58,19 @@ def toggle_tooltip(*, on: bool, keep_screen_on: bool) -> str:
     return _("Caffeine Mode: keep the computer awake, letting the screen turn off")
 
 
+def countdown_tooltip(seconds: float, *, keep_screen_on: bool) -> str:
+    """The Caffeine button's tooltip while a shut-off timer is running: when it
+    ends, and — as everywhere else — what stays awake until it does."""
+    time = format_remaining(seconds)
+    if keep_screen_on:
+        return _("Caffeine Mode turns off in {time} — computer and screen stay awake").format(
+            time=time
+        )
+    return _("Caffeine Mode turns off in {time} — computer stays awake, screen may turn off").format(
+        time=time
+    )
+
+
 def format_remaining(seconds: float) -> str:
     """A countdown as m:ss, growing to h:mm:ss while an hour or more is left."""
     total = max(0, int(seconds))
