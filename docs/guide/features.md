@@ -406,6 +406,13 @@ other MCP tool. They only ever touch Collins' own windows: nothing is read
 back to the agent, nothing is written to your repo, and nothing leaves the
 machine.
 
+**Each one has its own switch** in Preferences → *Session tools*, all on by
+default. A tool switched off isn't offered to the sessions Collins starts
+from then on — it simply isn't in their `/mcp` list — and a session that was
+already running when you flipped the switch is refused if it calls it anyway.
+Switching one back on reaches a session the next time it starts, since the
+tool list is handed over once at startup.
+
 ## Starting sessions
 
 - **New session** (tab icon in the header, or `Ctrl+Shift+T`) starts a fresh
@@ -503,8 +510,9 @@ Tokyo Night, Monokai, One Dark…), the editor's **color scheme**, **font**,
 and **line numbers**/**hidden files** toggles, the app's **color scheme**
 (system / light / dark), the **language** (English, Magyar, Deutsch,
 Español, Français), the sidebar's **Show folder path**, **Show Claude
-usage**, and **Auto-generate session titles** toggles — reachable from the
-sidebar menu or `Ctrl+,`.
+usage**, and **Auto-generate session titles** toggles, and a switch for each
+of the **session tools** the agent can call — reachable from the sidebar menu
+or `Ctrl+,`.
 
 A **search bar across the top** filters the whole screen as you type, and it
 has the focus the moment preferences opens, so the way to a setting is to type

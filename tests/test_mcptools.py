@@ -35,6 +35,39 @@ def test_tool_schema_lookup():
     assert mcptools.tool_schema("no_such_tool") is None
 
 
+# ---- the per-tool switches ---------------------------------------------------
+
+
+def test_every_tool_has_a_setting_defaulting_on():
+    defaults = mcptools.default_tool_settings()
+    assert defaults == {f"mcp_tool_{tool['name']}": True for tool in mcptools.TOOLS}
+    assert all(value is True for value in defaults.values())
+
+
+def test_default_settings_carry_every_tool_switch():
+    """The switches only exist because state folds them in — a tool added to
+    the table with no setting behind it would read as off."""
+    from collins import state
+
+    for tool in mcptools.TOOLS:
+        key = mcptools.tool_setting_key(tool["name"])
+        assert state.DEFAULT_SETTINGS[key] is True
+
+
+def test_enabled_tools_serves_only_what_is_switched_on():
+    served = mcptools.enabled_tools(lambda name: name != "show_image")
+    assert [tool["name"] for tool in served] == [
+        "set_session_title",
+        "open_in_editor",
+        "notify_user",
+    ]
+
+
+def test_enabled_tools_can_serve_nothing_at_all():
+    assert mcptools.enabled_tools(lambda _name: False) == []
+    assert mcptools.enabled_tools(lambda _name: True) == mcptools.TOOLS
+
+
 # ---- validation --------------------------------------------------------------
 
 
@@ -186,6 +219,49 @@ def test_run_tool_call_advertised_but_unhandled_tool_is_a_clean_error():
     )
     assert ok is False
     assert "Unknown tool" in message
+
+
+def test_run_tool_call_refuses_a_switched_off_tool_without_resolving():
+    """A session handed the tool before the switch was flipped keeps calling
+    it; the call is refused here, and the caller is never resolved."""
+    walked = []
+
+    ok, message = mcptools.run_tool_call(
+        "set_session_title", {"title": "hi"},
+        find_tab=lambda: walked.append(True) or "tab-a",
+        handlers={"set_session_title": _rename_ok},
+        is_enabled=lambda _name: False,
+    )
+    assert ok is False
+    assert message == mcptools.disabled_error("set_session_title")
+    assert "set_session_title" in message and "Collins" in message
+    assert walked == []
+
+
+def test_run_tool_call_switch_is_per_tool():
+    ok, message = mcptools.run_tool_call(
+        "set_session_title", {"title": "hi"},
+        find_tab=lambda: "tab-a",
+        handlers={"set_session_title": _rename_ok},
+        is_enabled=lambda name: name == "set_session_title",
+    )
+    assert (ok, message) == (True, "renamed tab-a to hi")
+
+
+def test_run_tool_call_validates_before_consulting_the_switch():
+    """A malformed call fails on its arguments whether the tool is on or off:
+    the switch is app state, and the error shape shouldn't leak it."""
+    asked = []
+
+    ok, message = mcptools.run_tool_call(
+        "set_session_title", {},
+        find_tab=lambda: "tab-a",
+        handlers={},
+        is_enabled=lambda name: asked.append(name) or False,
+    )
+    assert ok is False
+    assert "title" in message
+    assert asked == []
 
 
 def test_run_tool_call_returns_the_handlers_failure():

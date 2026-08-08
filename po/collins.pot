@@ -1887,3 +1887,48 @@ msgstr ""
 #: collins/ghwelcome.py:254
 msgid "Don't show this again"
 msgstr ""
+
+#: collins/prefs.py:661
+msgid "Session tools"
+msgstr ""
+
+#: collins/prefs.py:663
+msgid ""
+"Tools a session can call to drive Collins. Turning one off takes effect "
+"immediately; sessions already running are only offered the tool again once "
+"they restart"
+msgstr ""
+
+#: collins/prefs.py:88
+msgid "Name its own session"
+msgstr ""
+
+#: collins/prefs.py:89
+msgid "set_session_title — the session titles its own tab and sidebar row"
+msgstr ""
+
+#: collins/prefs.py:92
+msgid "Open files in the editor"
+msgstr ""
+
+#: collins/prefs.py:93
+msgid "open_in_editor — put a file from the project on screen, at a line"
+msgstr ""
+
+#: collins/prefs.py:96
+msgid "Show images"
+msgstr ""
+
+#: collins/prefs.py:97
+msgid "show_image — a screenshot, plot, or render in the in-app lightbox"
+msgstr ""
+
+#: collins/prefs.py:100
+msgid "Send desktop notifications"
+msgstr ""
+
+#: collins/prefs.py:101
+msgid ""
+"notify_user — a notification titled with the session; clicking it opens the "
+"tab"
+msgstr ""
