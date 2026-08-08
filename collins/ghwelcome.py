@@ -66,6 +66,11 @@ _CONTENT_WIDTH_PX = 400
 # Between the rows of one list. Tight: they are one thing said six times, and
 # the dialog has two lists in it.
 _ROW_SPACING_PX = 3
+# How long the "Don't show this again" box stays out of the tab ring after the
+# dialog is built (see `_arm_silence_focus`). The scroll it would otherwise
+# cause starts ~50ms in and settles by ~250ms; a second is clear of that on a
+# slower machine and still nowhere near a first Tab.
+_FOCUSABLE_AFTER_MS = 1000
 
 
 def _samples() -> tuple[tuple[PullRequest, str], ...]:
@@ -200,6 +205,7 @@ def _dialog(status: str, state: AppState) -> Adw.AlertDialog:
     dialog.set_response_appearance(done, Adw.ResponseAppearance.SUGGESTED)
     dialog.set_default_response(done)
     dialog.connect("response", _on_response, silence, state)
+    _arm_silence_focus(silence)
     return dialog
 
 
@@ -247,14 +253,33 @@ def _content(missing: bool, silence: Gtk.CheckButton) -> Gtk.Widget:
 def _silence_check() -> Gtk.CheckButton:
     """The box that retires the notice, at the bottom where the answers are.
 
-    Unticked, and left focusable — an AlertDialog puts focus on its default
-    response as it presents (see the rename dialogs), so the box is a Tab away
-    for a keyboard rather than in the way of a space bar aimed at the button.
+    Unticked, and unfocusable for the first moment of the dialog's life — see
+    `_arm_silence_focus`, which gives it back.
     """
     check = Gtk.CheckButton(label=_("Don't show this again"))
     check.add_css_class("caption")
     check.set_margin_top(4)
+    check.set_can_focus(False)
     return check
+
+
+def _arm_silence_focus(check: Gtk.CheckButton) -> None:
+    """Put the box back in the tab ring, once doing so can't move the dialog.
+
+    An AlertDialog keeps its body and extra child in a scrolled window, which
+    is what saves this notice on a screen too short for it. But a scrolled
+    window animates itself to reveal a focusable child as the dialog presents,
+    and the box is both the only focusable thing in here and the last thing in
+    it: the dialog would glide, over about a quarter of a second, from its
+    heading down to its own tail — everything it exists to show scrolled off
+    the top. (Focus lands on the default response, correctly; it is the reveal
+    that moves.) Undoing that afterwards means racing an animation, and
+    leaving the box unfocusable means taking it off the keyboard.
+
+    So it is unfocusable only while that pass happens, and focusable a second
+    later — far past the animation, and far short of anyone reaching for Tab.
+    """
+    GLib.timeout_add(_FOCUSABLE_AFTER_MS, lambda: check.set_can_focus(True) or GLib.SOURCE_REMOVE)
 
 
 def _group(rows: Iterable[Gtk.Widget]) -> Gtk.Widget:
