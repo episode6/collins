@@ -8,7 +8,6 @@ import pytest
 
 from collins import mcptools
 
-
 # ---- the tool table ----------------------------------------------------------
 
 
