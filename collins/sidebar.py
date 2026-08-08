@@ -104,9 +104,10 @@ _ARCHIVE_COLLAPSE_MS = 260
 # right over the animation's first frames.
 ARCHIVE_GHOST_MS = _ARCHIVE_COLLAPSE_MS + 200
 
-# How long a new thread's row takes to slide down out from behind its project
-# header (see PlaceholderRow.slide_in). The archive's own slide, read
-# backwards: a row leaves in 250ms, so a row arrives in 250ms too.
+# How long an arriving row takes to slide down out from behind the row above
+# it — a new thread's placeholder, or a session Undo just un-archived (see
+# _slide_row_in). The archive's own slide, read backwards: a row leaves in
+# 250ms, so a row arrives in 250ms too.
 _ARRIVE_MS = 250
 
 # How far a project header's icon sits from the row's own left edge: the
@@ -323,12 +324,59 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         source.set_icon(Gtk.WidgetPaintable.new(self), 0, 0)
 
 
+def _arrive_by_slide(row: Gtk.ListBoxRow, body: Gtk.Widget) -> None:
+    """Give `row` an arrival: instead of appearing, it grows out from under
+    the row above it, `body` sliding down as if it had been behind that row
+    all along. What a new thread's placeholder plays as it is added, and a
+    session row restored by Undo plays on its way back from the archive.
+
+    The body goes into a revealer with nothing revealed, which measures zero
+    and clips what is sliding through it — the whole trick: neither a widget
+    margin (negative ones do nothing in GTK4) nor a CSS transform would take
+    the content out of the row's height, so the slot would stand open at full
+    height while the text slid into it. The row gives up its own min-height
+    for the duration too (.arriving, in app.py), so the slot grows with the
+    revealer instead of standing open at full height from the first frame,
+    and the rows below slide down ahead of the arrival rather than after it.
+    With the desktop's animations off the revealer snaps and child-revealed
+    lands at once, so nothing here needs a reduced-motion branch of its own.
+    """
+    revealer = Gtk.Revealer(
+        transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
+        transition_duration=_ARRIVE_MS,
+        reveal_child=False,
+    )
+    revealer.set_child(body)
+    row.set_child(revealer)
+    row.add_css_class("arriving")
+
+    def on_arrived(rev: Gtk.Revealer, _pspec) -> None:
+        # The slide done, hand the row's height back to its own min-height —
+        # a no-op in pixels, the body inside carrying the same height (see
+        # row.session-child > revealer > box in app.py), so the row doesn't
+        # jump as the class comes off.
+        if rev.get_child_revealed():
+            row.remove_css_class("arriving")
+
+    revealer.connect("notify::child-revealed", on_arrived)
+
+    def start() -> bool:
+        revealer.set_reveal_child(True)
+        return GLib.SOURCE_REMOVE
+
+    # An idle later, so the row is mapped by the time the reveal starts: a
+    # revealer told to open before it is on screen has nowhere to animate
+    # and simply appears open.
+    GLib.idle_add(start)
+
+
 class PlaceholderRow(Gtk.ListBoxRow):
     """Transient stand-in for a just-opened tab whose session id is still
     unknown (no transcript on disk yet). Swapped for a real SessionRow once
     the store discovers the session.
 
-    `arriving` plays the row in rather than having it appear: see slide_in.
+    `arriving` plays the row in rather than having it appear: see
+    _arrive_by_slide.
     """
 
     def __init__(
@@ -368,52 +416,10 @@ class PlaceholderRow(Gtk.ListBoxRow):
         )
         box.append(close_btn)
 
-        # The content sits in a revealer so the row can arrive by sliding down
-        # out from behind its project header (see slide_in). A revealer with
-        # nothing revealed measures zero and clips what is sliding through it,
-        # which is the whole trick: neither a widget margin (negative ones do
-        # nothing in GTK4) nor a CSS transform would take the content out of
-        # the row's height, so the slot would stand open at full height while
-        # the text slid into it.
-        self._revealer = Gtk.Revealer(
-            transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
-            transition_duration=_ARRIVE_MS,
-            reveal_child=not arriving,
-        )
-        self._revealer.set_child(box)
-        self.set_child(self._revealer)
         if arriving:
-            self.slide_in()
-
-    def slide_in(self) -> None:
-        """Play the row in: it grows out from under the project header above
-        it, the words appearing as if they had been behind it all along.
-
-        The row gives up its own min-height for the duration (.arriving, in
-        app.py), so the slot grows with the revealer instead of standing open
-        at full height from the first frame and the rows below slide down
-        ahead of it. With the desktop's animations off the revealer snaps and
-        child-revealed lands at once, so nothing here needs a reduced-motion
-        branch of its own.
-        """
-        self.add_css_class("arriving")
-        self._revealer.connect("notify::child-revealed", self._on_arrived)
-        # An idle later, so the row is mapped by the time the reveal starts: a
-        # revealer told to open before it is on screen has nowhere to animate
-        # and simply appears open.
-        GLib.idle_add(self._start_arrival)
-
-    def _start_arrival(self) -> bool:
-        self._revealer.set_reveal_child(True)
-        return GLib.SOURCE_REMOVE
-
-    def _on_arrived(self, revealer: Gtk.Revealer, _pspec) -> None:
-        """The slide done, hand the row's height back to its own min-height —
-        a no-op in pixels, the body inside carrying the same height (see
-        row.session-child > revealer > box in app.py), so the row doesn't jump
-        as the class comes off."""
-        if revealer.get_child_revealed():
-            self.remove_css_class("arriving")
+            _arrive_by_slide(self, box)
+        else:
+            self.set_child(box)
 
 
 class NewThreadRow(Gtk.ListBoxRow):
@@ -465,7 +471,13 @@ class NewThreadRow(Gtk.ListBoxRow):
 
 
 class SessionRow(Gtk.ListBoxRow):
-    def __init__(self, item: SessionItem, sidebar: SessionSidebar) -> None:
+    """`arriving` plays the row in rather than having it appear — what a
+    session restored by Undo gets, coming back from the archive it just left:
+    see _arrive_by_slide."""
+
+    def __init__(
+        self, item: SessionItem, sidebar: SessionSidebar, arriving: bool = False
+    ) -> None:
         super().__init__()
         self.item = item
         self._sidebar = sidebar
@@ -645,7 +657,10 @@ class SessionRow(Gtk.ListBoxRow):
         self._path_label = path_label
         box.append(path_label)
 
-        self.set_child(box)
+        if arriving:
+            _arrive_by_slide(self, box)
+        else:
+            self.set_child(box)
 
         # Property bindings: released automatically when either side is finalized.
         flags = GObject.BindingFlags.SYNC_CREATE
@@ -970,11 +985,18 @@ class SessionSidebar(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.store = store
         self._view = Adw.ToolbarView(vexpand=True)
-        self.append(self._view)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        inner.append(self._view)
         # Claude subscription usage readout, tucked under the session list.
         self.usage_panel = UsagePanel(store.state)
         self.usage_panel.set_visible(bool(store.state.get_setting("show_usage_panel")))
-        self.append(self.usage_panel)
+        inner.append(self.usage_panel)
+        # Where the window's "session archived" snackbar floats: over the
+        # panel's own bottom edge — usage panel included — rather than the
+        # window's, so the toast reads as the list acknowledging what it just
+        # did instead of as an app-wide banner.
+        self.toast_overlay = Adw.ToastOverlay(child=inner, vexpand=True)
+        self.append(self.toast_overlay)
         self._collapsed: set[tuple] = set()
         self._selection_mode = False
         self._selected: set[str] = set()
@@ -1003,6 +1025,11 @@ class SessionSidebar(Gtk.Box):
         # the same trade the archive ghost makes in reverse, and the window a
         # rebuild would have to hit is a quarter of a second wide.
         self._arriving_placeholders: set[str] = set()
+        # Sessions whose row should play the same arrival when it next gets
+        # built — the ones Undo is bringing back from the archive: set just
+        # before the un-archive lands (see begin_arrival) and spent by the
+        # rebuild that follows it, on the placeholder set's terms above.
+        self._arriving_sessions: set[str] = set()
         self._active_session_id: str | None = None
         # "Why can't this session be sent a prompt right now?", for a row's PR
         # actions (see SessionRow._pr_host) — the empty string when it can.
@@ -1320,7 +1347,9 @@ class SessionSidebar(Gtk.Box):
                 self._row_order.append(pid)
                 self.list.append(prow)
             for item in items_by_group.get(key, []):
-                row = SessionRow(item, self)
+                arriving = item.session_id in self._arriving_sessions
+                self._arriving_sessions.discard(item.session_id)
+                row = SessionRow(item, self, arriving=arriving)
                 row.set_margin_start(child_indent)
                 if item.session_id == self._active_session_id:
                     row.add_css_class("active-tab")
@@ -1525,6 +1554,15 @@ class SessionSidebar(Gtk.Box):
         row = self._rows.get(session_id)
         if row is not None:
             row.restore_archiving()
+
+    def begin_arrival(self, session_id: str) -> None:
+        """Have a session's row slide in from above when it is next built.
+
+        Called by the window just before Undo lands an un-archive (see
+        _undo_archive there): the restore reorders the store, and the rebuild
+        that follows plays the returning row in instead of popping it into
+        place."""
+        self._arriving_sessions.add(session_id)
 
     def flash_row(self, row_id: str) -> None:
         """Visual bell relay: flash the row standing for a ringing session (or

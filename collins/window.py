@@ -83,6 +83,11 @@ _APP_TITLE = "Collins"
 # time anyone has read the panel.
 _LAUNCH_SWEEP_DELAY_MS = 2500
 
+# How long the "session archived" snackbar offers its Undo button before
+# sliding away (see _offer_undo). The undo itself lives longer: Ctrl+Shift+Z
+# works until the next archive replaces it.
+_UNDO_TOAST_SECONDS = 4
+
 # Quit-time backgrounding, which runs one session at a time. How long to wait
 # for a tab's session id to land before giving up and exiting it cleanly, how
 # often to re-check while waiting, and how long to let one handoff hold the
@@ -227,6 +232,14 @@ class MainWindow(Adw.ApplicationWindow):
         # Archive requested for an open session: applied only once its tab
         # really closes (page -> session id).
         self._archive_on_close: dict[Adw.TabPage, str] = {}
+        # What Undo (the snackbar's button, and Ctrl+Shift+Z) would restore:
+        # the session ids of the last archive that landed. Replaced by the
+        # next archive, emptied when the sessions come back — by Undo itself,
+        # or by restoring or trashing them some other way (see _drop_undo).
+        # Deliberately outliving its snackbar: the shortcut stays good after
+        # the toast times out, until the next archive re-arms it.
+        self._undo_archive: list[str] = []
+        self._undo_toast: Adw.Toast | None = None
         self._quitting = False  # window close confirmed; draining tabs
         self._quit_asking = False  # a quit dialog (editor save or session confirm) is open
         # One-shot pass for the reissued close after the quit flow's editor
@@ -968,6 +981,11 @@ class MainWindow(Adw.ApplicationWindow):
             ),
             "trash-archived": lambda *_: self._trash_archived(),
             "archive-current-session": lambda *_: self._archive_current_session(),
+            # Never disabled, even with nothing to undo: its shortcut must
+            # always land here and be swallowed — a shortcut whose action is
+            # disabled falls through, and Ctrl+Shift+Z falling through to a
+            # terminal would type into the agent (see _install_shortcuts).
+            "undo-archive": lambda *_: self._undo_archive_now(),
         }
         for name, callback in plain.items():
             action = Gio.SimpleAction(name=name)
@@ -1096,6 +1114,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control>Page_Up", "win.prev-tab"),
             ("<Control>comma", "win.preferences"),
             ("<Control><Shift>a", "win.archive-current-session"),
+            ("<Control><Shift>z", "win.undo-archive"),
             ("<Control><Shift>k", "win.quick-switch"),
             ("<Control><Shift>e", "win.toggle-tab-emoji"),
             ("<Control>j", "win.toggle-panel"),
@@ -1126,12 +1145,15 @@ class MainWindow(Adw.ApplicationWindow):
         def do_trash() -> None:
             self._apply_keep_projects(keep)
             errors = []
+            trashed = []
             for item in items:
                 error = self.store.trash(item.session_id)
                 if error:
                     errors.append(f"{item.display_name}: {error}")
                     continue
+                trashed.append(item.session_id)
                 self._forget_transcript(item.session_id)
+            self._drop_undo(trashed)
             if errors:
                 dialogs.error_dialog(self, _("Some transcripts could not be trashed"), "\n".join(errors))
 
@@ -1146,6 +1168,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_sidebar_archive_many(self, _sidebar, items: list[SessionItem]) -> None:
         self.store.archive_many([item.session_id for item in items])
+        self._offer_undo([item.session_id for item in items])
         for item in items:
             self._close_session_tab(item.session_id)
 
@@ -3432,6 +3455,7 @@ class MainWindow(Adw.ApplicationWindow):
         archive_session_id = self._archive_on_close.pop(page, None)
         if archive_session_id:
             self.store.set_archived(archive_session_id, True)
+            self._offer_undo([archive_session_id])
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
         self._echo_gates.pop(page, None)
@@ -3676,11 +3700,79 @@ class MainWindow(Adw.ApplicationWindow):
 
             def land() -> bool:
                 self.store.set_archived(session_id, True)
+                self._offer_undo([session_id])
                 return GLib.SOURCE_REMOVE
 
             GLib.timeout_add(ARCHIVE_GHOST_MS, land)
             return
         self.store.set_archived(session_id, archived)
+        if archived:
+            self._offer_undo([session_id])
+        else:
+            # Restored by hand: whatever Undo still held for this session is
+            # already done, and offering to "undo" it again would be noise.
+            self._drop_undo([session_id])
+
+    def _offer_undo(self, session_ids: list[str]) -> None:
+        """An archive just landed: arm Undo with it — replacing whatever the
+        previous archive armed — and float the snackbar that says so over the
+        bottom of the sessions panel."""
+        self._undo_archive = list(session_ids)
+        # One snackbar at a time: a fresh archive's toast replaces the last
+        # one instead of queueing behind it (the overlay's default), which
+        # would show it seconds after the archive it speaks for.
+        if self._undo_toast is not None:
+            self._undo_toast.dismiss()
+        if len(session_ids) == 1:
+            session = self.store.get_session(session_ids[0])
+            name = self.store.display_name(session) if session else session_ids[0][:8]
+            # Toast titles are markup by default, and session names are not.
+            title = _("Archived “{name}”").format(name=GLib.markup_escape_text(name))
+        else:
+            title = _("Archived {n} sessions").format(n=len(session_ids))
+        toast = Adw.Toast(
+            title=title, button_label=_("Undo"), timeout=_UNDO_TOAST_SECONDS
+        )
+        toast.set_action_name("win.undo-archive")
+        toast.connect("dismissed", self._on_undo_toast_dismissed)
+        self._undo_toast = toast
+        self.sidebar.toast_overlay.add_toast(toast)
+
+    def _on_undo_toast_dismissed(self, toast: Adw.Toast) -> None:
+        # Only the toast goes: the undo it advertised stays valid (see
+        # _undo_archive) — this just stops a later archive from dismissing a
+        # toast the overlay already dropped.
+        if self._undo_toast is toast:
+            self._undo_toast = None
+
+    def _drop_undo(self, session_ids: list[str]) -> None:
+        """Sessions Undo can no longer bring back — restored by hand, or
+        trashed outright: forget them, and take the snackbar down once
+        nothing armed is left."""
+        gone = set(session_ids)
+        remaining = [sid for sid in self._undo_archive if sid not in gone]
+        if remaining == self._undo_archive:
+            return
+        self._undo_archive = remaining
+        if not remaining and self._undo_toast is not None:
+            self._undo_toast.dismiss()
+
+    def _undo_archive_now(self) -> None:
+        """The snackbar's Undo button, and Ctrl+Shift+Z: bring back what the
+        last archive took. A quiet no-op with nothing armed — the shortcut
+        always lands here (see _install_actions)."""
+        session_ids, self._undo_archive = self._undo_archive, []
+        if self._undo_toast is not None:
+            self._undo_toast.dismiss()
+        if not session_ids:
+            return
+        if not self.store.show_archived:
+            # The rows are coming back into the list: have them slide in from
+            # above rather than pop, the archive's own exit played backwards.
+            # With "show archived" on they never left, and nothing animates.
+            for session_id in session_ids:
+                self.sidebar.begin_arrival(session_id)
+        self.store.restore_many(session_ids)
 
     def _on_archive_project(self, _action, param: GLib.Variant) -> None:
         name = param.get_string()
@@ -3721,6 +3813,9 @@ class MainWindow(Adw.ApplicationWindow):
         def do_trash() -> None:
             self._apply_keep_projects(keep)
             errors = self.store.trash_many([s.session_id for s in sessions])
+            self._drop_undo(
+                [s.session_id for s in sessions if s.session_id not in errors]
+            )
             for session in sessions:
                 if session.session_id in errors:
                     continue

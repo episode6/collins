@@ -401,22 +401,24 @@ row.session-child > box,
 row.session-child > revealer > box {
   transition: margin-right 200ms ease;
 }
-/* The revealer is a "New Thread" row's alone (see PlaceholderRow), which is
-   why the two rules above have to reach through it: a placeholder can be the
+/* The revealer is an arriving row's (see sidebar.py's _arrive_by_slide: a
+   "New Thread" placeholder, or a session row Undo restored), which is why
+   the two rules above have to reach through it: an arrived row can be the
    selected tab like any other row, and its content has the same right inset
    to keep. */
 
-/* A "New Thread" row arriving in the list (see PlaceholderRow.slide_in): the
-   row hands its height to the revealer inside it for the length of the slide,
+/* A row arriving in the list (see _arrive_by_slide in sidebar.py): the row
+   hands its height to the revealer inside it for the length of the slide,
    so the slot grows from nothing as the content slides down out from behind
-   the project header, and the rows below move down ahead of it rather than
-   after it. The body inside keeps the 34px the row gives up, so the moment
-   the slide ends and the class comes off, the row is already exactly as tall
+   the row above, and the rows below move down ahead of it rather than after
+   it. The body inside keeps the height the row gives up, so the moment the
+   slide ends and the class comes off, the row is already at least as tall
    as its own min-height would make it and nothing moves: 26px here plus the
-   4px the body is margined by top and bottom (see PlaceholderRow) is the
-   row's own 34. Only a placeholder has a revealer, so the body rule is safe
-   to state unconditionally -- and it has to be, being what the row measures
-   once .arriving is gone. */
+   4px the body is margined by top and bottom (see PlaceholderRow) is a
+   placeholder row's own 34, and a session row's body measures taller than
+   the floor on its own. Only an arriving row has a revealer, so the body
+   rule is safe to state unconditionally -- and it has to be, being what the
+   row measures once .arriving is gone. */
 row.session-child.arriving {
   min-height: 0;
 }

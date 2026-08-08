@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-06. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -501,6 +501,11 @@ class SessionStore(GObject.Object):
     def archive_many(self, session_ids: list[str]) -> None:
         for session_id in session_ids:
             self.state.set_archived(session_id, True)
+        self._apply()
+
+    def restore_many(self, session_ids: list[str]) -> None:
+        for session_id in session_ids:
+            self.state.set_archived(session_id, False)
         self._apply()
 
     def is_out_of_sight(self, session: Session) -> bool:

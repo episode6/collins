@@ -1142,6 +1142,18 @@ msgstr ""
 msgid "Archive session and close tab (Ctrl+Shift+A)"
 msgstr ""
 
+#: collins/window.py:3705
+msgid "Archived “{name}”"
+msgstr ""
+
+#: collins/window.py:3707
+msgid "Archived {n} sessions"
+msgstr ""
+
+#: collins/window.py:3709
+msgid "Undo"
+msgstr ""
+
 #: collins/window.py:217
 msgid "No session open"
 msgstr ""
