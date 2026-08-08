@@ -869,6 +869,7 @@ class App(Adw.Application):
                 "set_session_title": self._mcp_set_session_title,
                 "open_in_editor": self._mcp_open_in_editor,
                 "show_image": self._mcp_show_image,
+                "notify_user": self._mcp_notify_user,
             },
         )
 
@@ -927,6 +928,12 @@ class App(Adw.Application):
         on_open = (lambda: window.open_in_tab_editor(tab, path)) if can_edit else None
         present_image_lightbox(tab, path, can_open_in_editor=can_edit, on_open_in_editor=on_open)
         return True, "Image shown."
+
+    def _mcp_notify_user(self, found, args: dict) -> tuple[bool, str]:
+        window, tab = found
+        if not window.notify_session(tab, args["message"]):
+            return False, "Collins couldn't post a notification"
+        return True, "The user was notified."
 
     def _apply_scheme_css(self) -> None:
         """Load the scheme's colors. Runs at startup and on every light/dark

@@ -18,6 +18,7 @@ def test_serves_exactly_the_landed_tools():
         "set_session_title",
         "open_in_editor",
         "show_image",
+        "notify_user",
     ]
 
 
@@ -108,6 +109,20 @@ def test_show_image_args():
     assert "line" in mcptools.validate_args(
         "show_image", {"path": "shot.png", "line": 3}
     )
+
+
+def test_notify_user_args():
+    assert mcptools.validate_args("notify_user", {"message": "Ready to push?"}) is None
+    assert "message" in mcptools.validate_args("notify_user", {})
+    assert "empty" in mcptools.validate_args("notify_user", {"message": ""})
+    assert "string" in mcptools.validate_args("notify_user", {"message": 7})
+
+
+def test_overlong_notification_is_rejected():
+    """A body no notification shell would show in full is a mistake worth
+    telling the agent about, not silently truncating."""
+    assert mcptools.validate_args("notify_user", {"message": "x" * 500}) is None
+    assert "500" in mcptools.validate_args("notify_user", {"message": "x" * 501})
 
 
 # ---- the dispatch skeleton ---------------------------------------------------
