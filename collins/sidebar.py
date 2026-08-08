@@ -104,6 +104,11 @@ _ARCHIVE_COLLAPSE_MS = 260
 # right over the animation's first frames.
 ARCHIVE_GHOST_MS = _ARCHIVE_COLLAPSE_MS + 200
 
+# How long a new thread's row takes to slide down out from behind its project
+# header (see PlaceholderRow.slide_in). The archive's own slide, read
+# backwards: a row leaves in 250ms, so a row arrives in 250ms too.
+_ARRIVE_MS = 250
+
 # How far a project header's icon sits from the row's own left edge: the
 # theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
 _HEADER_ICON_OFFSET = 18
@@ -321,9 +326,18 @@ class GroupHeaderRow(Gtk.ListBoxRow):
 class PlaceholderRow(Gtk.ListBoxRow):
     """Transient stand-in for a just-opened tab whose session id is still
     unknown (no transcript on disk yet). Swapped for a real SessionRow once
-    the store discovers the session."""
+    the store discovers the session.
 
-    def __init__(self, placeholder_id: str, group_key: tuple, sidebar: SessionSidebar) -> None:
+    `arriving` plays the row in rather than having it appear: see slide_in.
+    """
+
+    def __init__(
+        self,
+        placeholder_id: str,
+        group_key: tuple,
+        sidebar: SessionSidebar,
+        arriving: bool = False,
+    ) -> None:
         super().__init__()
         self.placeholder_id = placeholder_id
         self.group_key = group_key
@@ -354,7 +368,52 @@ class PlaceholderRow(Gtk.ListBoxRow):
         )
         box.append(close_btn)
 
-        self.set_child(box)
+        # The content sits in a revealer so the row can arrive by sliding down
+        # out from behind its project header (see slide_in). A revealer with
+        # nothing revealed measures zero and clips what is sliding through it,
+        # which is the whole trick: neither a widget margin (negative ones do
+        # nothing in GTK4) nor a CSS transform would take the content out of
+        # the row's height, so the slot would stand open at full height while
+        # the text slid into it.
+        self._revealer = Gtk.Revealer(
+            transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
+            transition_duration=_ARRIVE_MS,
+            reveal_child=not arriving,
+        )
+        self._revealer.set_child(box)
+        self.set_child(self._revealer)
+        if arriving:
+            self.slide_in()
+
+    def slide_in(self) -> None:
+        """Play the row in: it grows out from under the project header above
+        it, the words appearing as if they had been behind it all along.
+
+        The row gives up its own min-height for the duration (.arriving, in
+        app.py), so the slot grows with the revealer instead of standing open
+        at full height from the first frame and the rows below slide down
+        ahead of it. With the desktop's animations off the revealer snaps and
+        child-revealed lands at once, so nothing here needs a reduced-motion
+        branch of its own.
+        """
+        self.add_css_class("arriving")
+        self._revealer.connect("notify::child-revealed", self._on_arrived)
+        # An idle later, so the row is mapped by the time the reveal starts: a
+        # revealer told to open before it is on screen has nowhere to animate
+        # and simply appears open.
+        GLib.idle_add(self._start_arrival)
+
+    def _start_arrival(self) -> bool:
+        self._revealer.set_reveal_child(True)
+        return GLib.SOURCE_REMOVE
+
+    def _on_arrived(self, revealer: Gtk.Revealer, _pspec) -> None:
+        """The slide done, hand the row's height back to its own min-height —
+        a no-op in pixels, the body inside carrying the same height (see
+        row.session-child > revealer > box in app.py), so the row doesn't jump
+        as the class comes off."""
+        if revealer.get_child_revealed():
+            self.remove_css_class("arriving")
 
 
 class NewThreadRow(Gtk.ListBoxRow):
@@ -937,6 +996,13 @@ class SessionSidebar(Gtk.Box):
         # Placeholders whose tab finished a run nobody has looked at, on the
         # same terms (see SessionItem.unread for the flag's meaning).
         self._unread_placeholders: set[str] = set()
+        # Placeholders whose row hasn't played its arrival yet: set as the
+        # placeholder is added and spent by the rebuild that first builds its
+        # row (see add_placeholder), so the slide happens once. A rebuild
+        # landing mid-slide replaces the row with one that is simply there —
+        # the same trade the archive ghost makes in reverse, and the window a
+        # rebuild would have to hit is a quarter of a second wide.
+        self._arriving_placeholders: set[str] = set()
         self._active_session_id: str | None = None
         # "Why can't this session be sent a prompt right now?", for a row's PR
         # actions (see SessionRow._pr_host) — the empty string when it can.
@@ -1240,7 +1306,9 @@ class SessionSidebar(Gtk.Box):
                 self._new_thread_rows[key] = new_thread
                 self.list.append(new_thread)
             for pid in placeholders_by_group.get(key, ()):
-                prow = PlaceholderRow(pid, key, self)
+                arriving = pid in self._arriving_placeholders
+                self._arriving_placeholders.discard(pid)
+                prow = PlaceholderRow(pid, key, self, arriving=arriving)
                 prow.set_margin_start(child_indent)
                 if pid == self._active_session_id:
                     prow.add_css_class("active-tab")
@@ -1556,8 +1624,21 @@ class SessionSidebar(Gtk.Box):
         return ("proj", project_name_for_cwd(cwd))
 
     def add_placeholder(self, placeholder_id: str, cwd: str) -> None:
-        """Show a transient "New Thread" row for a tab with no session yet."""
+        """Show a transient "New Thread" row for a tab with no session yet.
+
+        The row slides down out from behind its project header rather than
+        appearing under it (see PlaceholderRow.slide_in) — the sidebar answers
+        the click, and the new thread is where the eye already is.
+
+        Except where the group's "New Thread" offer row (see NewThreadRow) is
+        what it replaces: that row is already in the slot saying the same
+        words, so there is nothing to announce, and the offer row leaving as
+        the placeholder grew from nothing would jump every row below it up and
+        back down again.
+        """
         self._placeholders[placeholder_id] = cwd
+        if self._placeholder_group_key(cwd) not in self._new_thread_rows:
+            self._arriving_placeholders.add(placeholder_id)
         self._rebuild_rows()
         self._invalidate()
 
@@ -1605,6 +1686,7 @@ class SessionSidebar(Gtk.Box):
     def remove_placeholder(self, placeholder_id: str) -> None:
         self._busy_placeholders.discard(placeholder_id)
         self._unread_placeholders.discard(placeholder_id)
+        self._arriving_placeholders.discard(placeholder_id)
         if self._placeholders.pop(placeholder_id, None) is None:
             return
         self._rebuild_rows()
