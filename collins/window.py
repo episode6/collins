@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-07. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -623,11 +623,20 @@ class MainWindow(Adw.ApplicationWindow):
             self.state.set_editor_state(tab.session_id, state)
 
     def _busy_tab_count(self) -> int:
+        """Tabs the quit confirmation should count as active sessions. An
+        unstarted New Thread (empty input box, first prompt never sent) has
+        nothing going on, so it doesn't make quitting a question — and a
+        quit with only such tabs open takes _on_close_request's nothing-busy
+        fast path, tearing the CLI down with the window (pty hangup) rather
+        than draining it through a graceful exit. That is deliberate: with
+        no first prompt ever sent there is no transcript or state to wind
+        down, and the graceful drain would keep the window up for it."""
         count = 0
         for i in range(self.tab_view.get_n_pages()):
             tab = self.tab_view.get_nth_page(i).get_child()
             if isinstance(tab, TerminalTab) and (
-                tab.has_running_command() or tab.panel_has_running_command()
+                (tab.has_running_command() and not tab.unstarted_thread())
+                or tab.panel_has_running_command()
             ):
                 count += 1
         return count
@@ -2194,7 +2203,11 @@ class MainWindow(Adw.ApplicationWindow):
             if not self._page_alive(page):
                 self._close_asking.discard(page)
                 return
-            if tab.has_running_command() or tab.panel_has_running_command():
+            busy = (
+                (tab.has_running_command() and not tab.unstarted_thread())
+                or tab.panel_has_running_command()
+            )
+            if busy:
                 self._ask_tab_close(page, tab)  # manages _close_asking itself
                 return
             self._close_asking.discard(page)
@@ -2213,7 +2226,9 @@ class MainWindow(Adw.ApplicationWindow):
         dialog's concern — `_ask_editor_then_tab_close` already settled them
         with the Save Changes? dialog before asking here."""
         self._close_asking.add(page)
-        agent_busy = tab.has_running_command()
+        # An unstarted New Thread's agent doesn't count as active — with the
+        # panel also idle, the no-op branch below closes without asking.
+        agent_busy = tab.has_running_command() and not tab.unstarted_thread()
         panel_busy = tab.panel_has_running_command()
         if panel_busy:
             tab.show_panel()  # reveal what's about to be killed (a busy shell is never cd'd)
@@ -3382,7 +3397,12 @@ class MainWindow(Adw.ApplicationWindow):
                 # until the shell drains.
                 view.close_page_finish(page, False)
                 return True
-            if (agent_busy or panel_busy or editor_dirty) and page not in self._close_ok:
+            # A New Thread that never got its first prompt has nothing to
+            # lose: don't ask about it, just let the agent exit cleanly below.
+            needs_confirm = (
+                (agent_busy and not tab.unstarted_thread()) or panel_busy or editor_dirty
+            )
+            if needs_confirm and page not in self._close_ok:
                 # The agent session and/or the panel shell is busy, or the
                 # editor has unsaved changes: ask before losing any of it.
                 view.close_page_finish(page, False)  # keep the tab while we ask
