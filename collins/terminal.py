@@ -1143,7 +1143,7 @@ class TerminalTab(Gtk.Box):
             icon_name="mail-attachment-symbolic",
             halign=Gtk.Align.START,
             valign=Gtk.Align.END,
-            margin_start=10,
+            margin_start=5,
             margin_bottom=5,
             tooltip_text=_("Attach file to chat"),
         )
