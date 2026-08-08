@@ -1,7 +1,7 @@
 ---
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-31. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 # https://vitepress.dev/reference/default-theme-home-page
 layout: home
 
@@ -38,7 +38,7 @@ features:
     details: Give sessions custom names and tabs emoji prefixes. Everything is stored app-side; your agents' own data is never touched.
   - icon: 🔔
     title: Stays out of your way
-    details: Waiting badges, guide lines, and desktop notifications tell you when a background session needs you, so you can work across many at once.
+    details: Guide lines, barber-pole activity, and desktop notifications tell you when a background session needs you, so you can work across many at once.
   - icon: 📊
     title: Know your limits
     details: A Claude usage panel under the session list shows your subscription limits with reset countdowns — read from the claude CLI's own login.

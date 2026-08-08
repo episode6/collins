@@ -93,7 +93,8 @@ fork. Last modified: 2026-08-08. Full change history: git log for this file.
   with a tab pole; a detached session's yellow line stays put whatever its
   agent is doing. The pole follows the desktop's animation setting: with
   animations off, the line simply stays put.
-- **Interrupted badge** — a red stop icon marks sessions you stopped mid-task.
+- **A red guide line** marks a session you **stopped mid-task**, and it keeps
+  the red whether or not a tab is open — until the session gets going again.
 
 ![Sidebar with the Favorites section expanded](/img/sidebar-favorites.png)
 
@@ -375,11 +376,6 @@ Toggle it in Preferences (*Show Claude usage*).
   server configured in `~/.claude.json`, global and per-project.
 
 ![MCP servers browser](/img/mcp-servers.png)
-
-## Prompt cards
-
-When the agent asks a structured question in the terminal, a native option
-card overlays it — answer with a click instead of typing a number.
 
 ## Starting sessions
 
