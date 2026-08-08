@@ -107,6 +107,34 @@ TOOLS: list[dict] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "notify_user",
+        "description": (
+            "Send the user a desktop notification from this session, for when "
+            "you need them back: a question you're blocked on, or the finish "
+            "they asked to be told about. Collins titles it with the session "
+            "and clicking it opens this session's tab, so the message only "
+            "has to say the thing — 'Tests pass, ready to push?'. It "
+            "interrupts whatever they're doing, so don't narrate progress "
+            "with it, and don't repeat one the user hasn't come back from."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": (
+                        "What to tell the user; a sentence or two, since "
+                        "notifications are truncated on most desktops."
+                    ),
+                },
+            },
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 

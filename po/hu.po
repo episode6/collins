@@ -326,15 +326,6 @@ msgstr "Ablak bezárása, miközben ügynök-munkamenetek még futnak"
 msgid "Ask"
 msgstr "Rákérdezés"
 
-msgid "Notifications"
-msgstr "Értesítések"
-
-msgid "Notify when a session goes idle"
-msgstr "Értesítés, ha egy munkamenet tétlenné válik"
-
-msgid "Desktop notification when a background tab stops producing output"
-msgstr "Asztali értesítés, amikor egy háttérlap abbahagyja a kimenet előállítását"
-
 msgid "Remove from favorites"
 msgstr "Eltávolítás a kedvencekből"
 

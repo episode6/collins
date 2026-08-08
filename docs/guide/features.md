@@ -361,9 +361,11 @@ Toggle it in Preferences (*Show Claude usage*).
 
 ## Knowing what's happening
 
-- **Desktop notifications** when a background session goes quiet after
-  producing output — click to jump straight to that tab. (Off by default;
-  toggle in Preferences.)
+- **Desktop notifications the session raises itself** — the agent calls
+  Collins' `notify_user` tool when it wants you back (see [Tools a session can
+  call](#tools-a-session-can-call)), and the notification is titled with the
+  session, so clicking it jumps straight to that tab. Nothing is guessed from
+  a quiet terminal: a notification means the agent asked for you.
 - **Session details** (right-click → *Details…*): message and tool-call counts,
   models used, token totals, timestamps, transcript size — plus a **recent
   activity** peek of the last messages, so you can identify a session without
@@ -376,6 +378,28 @@ Toggle it in Preferences (*Show Claude usage*).
   server configured in `~/.claude.json`, global and per-project.
 
 ![MCP servers browser](/img/mcp-servers.png)
+
+## Tools a session can call
+
+Every session Collins starts is offered a small MCP server of Collins' own —
+`collins` in the session's `/mcp` list — so the agent can drive the window it
+is running in:
+
+- **`notify_user(message)`** — a desktop notification titled with the session,
+  which flashes the session's tab and sidebar row on the way out and raises
+  that tab when clicked.
+- **`set_session_title(title)`** — the session names itself, in the tab and
+  the sidebar, and renames itself again when the work pivots.
+- **`open_in_editor(path, line?)`** — put a file on your screen in the
+  session's own editor pane, instead of hoping you click a path in the
+  terminal.
+- **`show_image(path)`** — show a screenshot, plot, or render in the in-app
+  lightbox.
+
+Each tool asks for permission the first time a session calls it, like any
+other MCP tool. They only ever touch Collins' own windows: nothing is read
+back to the agent, nothing is written to your repo, and nothing leaves the
+machine.
 
 ## Starting sessions
 
@@ -463,7 +487,7 @@ Open additional windows from the New Session button's menu or with
 and live updates stay consistent across them.
 
 A session only ever runs in one tab. Clicking a session that another window
-already has open — or clicking its idle notification — raises that window and
+already has open — or clicking a notification it raised — raises that window and
 selects its tab instead of resuming the conversation a second time.
 
 ## Preferences
@@ -474,8 +498,8 @@ Tokyo Night, Monokai, One Dark…), the editor's **color scheme**, **font**,
 and **line numbers**/**hidden files** toggles, the app's **color scheme**
 (system / light / dark), the **language** (English, Magyar, Deutsch,
 Español, Français), the sidebar's **Show folder path**, **Show Claude
-usage**, and **Auto-generate session titles** toggles, and the
-idle-notification toggle — reachable from the sidebar menu or `Ctrl+,`.
+usage**, and **Auto-generate session titles** toggles — reachable from the
+sidebar menu or `Ctrl+,`.
 
 A **search bar across the top** filters the whole screen as you type, and it
 has the focus the moment preferences opens, so the way to a setting is to type
