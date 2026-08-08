@@ -3409,6 +3409,10 @@ class MainWindow(Adw.ApplicationWindow):
                 if page not in self._close_asking:
                     self._ask_editor_then_tab_close(page, tab)
                 return True
+            # Every ask that could still cancel this close is behind us: a
+            # close carrying an archive starts its row's slide out here, not
+            # under a dialog that might yet keep the session.
+            self._begin_archive_ghost(page)
             if agent_busy:  # confirmed: start a graceful exit in the background
                 self._graceful_close(page)
                 view.close_page_finish(page, False)  # keep the tab until it exits cleanly
@@ -3419,6 +3423,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._close_asking.discard(page)
         self._close_ok.discard(page)
         self._bg_ok.discard(page)
+        # Ghosting again just before the archive lands is a no-op for the
+        # closes that came through the gate above, and the backstop for any
+        # that skipped it (a pre-confirmed re-entry): the ghost then bridges
+        # the moment between the archive below and the rebuild removing the
+        # row, instead of the row popping out mid-list.
+        self._begin_archive_ghost(page)
         archive_session_id = self._archive_on_close.pop(page, None)
         if archive_session_id:
             self.store.set_archived(archive_session_id, True)
@@ -3612,6 +3622,15 @@ class MainWindow(Adw.ApplicationWindow):
         if isinstance(tab, TerminalTab) and tab.session_id:
             self._archive_session(tab.session_id)
 
+    def _begin_archive_ghost(self, page: Adw.TabPage) -> None:
+        """Start the slide-out of the row whose archive rides this close, if
+        one does (see _archive_session and the sidebar's begin_archiving).
+        Idempotent — the close flow re-enters _on_close_page while a graceful
+        exit drains, and the row ignores a second ask."""
+        session_id = self._archive_on_close.get(page)
+        if session_id is not None and not self.store.show_archived:
+            self.sidebar.begin_archiving(session_id)
+
     def _archive_cancelled(self, page: Adw.TabPage) -> None:
         """A close that was carrying an archive got declined: forget the
         archive and bring the session's ghosted row back (see the sidebar's
@@ -3622,19 +3641,15 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _archive_session(self, session_id: str) -> None:
         archived = not self.state.is_archived(session_id)
-        # The row slides out the moment the user asks (only when archiving
-        # will actually remove it from the list — with "show archived" on it
-        # stays, as an ordinary archived row): the archive can take seconds
-        # when a tab has to shut down first, and even the tabless path waits
-        # on a store refresh. Cancelling the close slides it back in.
-        if archived and not self.store.show_archived:
-            self.sidebar.begin_archiving(session_id)
         page = self._page_for(session_id) if archived else None
         if page is not None:
             # Close the tab through the normal close-page flow, so a busy tab
             # still gets its confirmation dialog — and archive the session
             # only once the tab really closes: cancelling the dialog keeps it
-            # visible.
+            # visible. The row's slide-out (_begin_archive_ghost) waits for
+            # that flow too: it starts from _on_close_page once every ask that
+            # could still cancel the close is behind it, never under a dialog
+            # still deciding.
             self._archive_on_close[page] = session_id
             behavior = self.state.get_setting("archive_running_session")
             if behavior == "exit":
@@ -3649,6 +3664,12 @@ class MainWindow(Adw.ApplicationWindow):
             # tab right now: the dialog says why and offers the alternatives.
             self.tab_view.close_page(page)
             return
+        # Tabless: no dialog can interpose, so the row slides out right away
+        # (only when archiving will actually remove it from the list — with
+        # "show archived" on it stays, as an ordinary archived row) while the
+        # store refresh that really drops it catches up.
+        if archived and not self.store.show_archived:
+            self.sidebar.begin_archiving(session_id)
         self.store.set_archived(session_id, archived)
 
     def _on_archive_project(self, _action, param: GLib.Variant) -> None:
