@@ -23,18 +23,19 @@ _MAX_ICON_BYTES = 256 * 1024
 # rendered somewhere less careful than librsvg (which executes none of it) is
 # refused outright: script elements, event-handler attributes, and references
 # to anything outside the document. An href may point at a local #fragment
-# (all inline gradients and <use> reuse need) or carry an inline data: URI
-# for a known *raster* subtype — projects only appear in the sidebar once
-# trusted, so an embedded raster is the project embedding its own artwork,
-# not a foreign fetch. The subtypes are enumerated rather than image/*:
-# image/svg+xml is XML whose base64 payload could smuggle the very script/
-# handler content the literal checks above can't see. CSS url() stays
-# #fragment-only (a data: URI does nothing useful there). xmlns declarations
-# carry their URLs in xmlns attributes, so they pass.
+# (all inline gradients and <use> reuse need) or carry an inline
+# data:image/png URI — projects only appear in the sidebar once trusted, so
+# an embedded raster is the project embedding its own artwork, not a foreign
+# fetch. PNG is the one embedded format allowed: image/svg+xml is XML whose
+# base64 payload could smuggle the very script/handler content the literal
+# checks above can't see, and the other raster codecs stay off the list
+# until an icon actually needs one. CSS url() stays #fragment-only (a data:
+# URI does nothing useful there). xmlns declarations carry their URLs in
+# xmlns attributes, so they pass.
 _SVG_ACTIVE_CONTENT = re.compile(
     rb"<\s*script"
     rb"|\bon[a-z]+\s*="
-    rb"|\b(?:xlink:)?href\s*=\s*[\"'](?!#|data:image/(?:png|jpe?g|gif|webp|bmp|x-icon)[;,])"
+    rb"|\b(?:xlink:)?href\s*=\s*[\"'](?!#|data:image/png[;,])"
     rb"|\burl\s*\(\s*[\"']?\s*(?!#)"
     rb"|@import\b",
     re.IGNORECASE,
@@ -92,9 +93,9 @@ def usable_icon_bytes(data: bytes) -> bool:
     preview sees them: plausible size (the size cap re-checks what
     project_icon_path could only stat a race ago), XML-shaped SVG text, and
     none of the active content an icon has no business carrying. Inline
-    data: hrefs for known raster subtypes are allowed — a hand-shipped icon
-    may embed its own raster artwork. Generated replies go through the
-    stricter usable_generated_icon_bytes instead."""
+    data:image/png hrefs are allowed — a hand-shipped icon may embed its own
+    raster artwork. Generated replies go through the stricter
+    usable_generated_icon_bytes instead."""
     if not 0 < len(data) <= _MAX_ICON_BYTES:
         return False
     return _looks_like_svg(data) and not _SVG_ACTIVE_CONTENT.search(data)
