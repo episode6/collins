@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-07. Full change history: git log for this file.
+fork. Last modified: 2026-08-08. Full change history: git log for this file.
 -->
 
 # Collins
@@ -85,6 +85,8 @@ sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5
 ```
 
 Plus the [`claude` CLI](https://claude.com/claude-code) on your `PATH` — Collins is a tool for Claude specifically.
+
+Optional: the [GitHub CLI](https://cli.github.com/) (`gh`), signed in. It is what every pull request mark and every pull request action above runs on; without it a PR is a number and nothing else, so a launch that finds `gh` missing or signed out says so — showing what it's holding back, and pointing at the install or the one command that signs you in — until you set it up or tick *Don't show this again*.
 
 ## Install
 

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-07. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 # SOME DESCRIPTIVE TITLE.
 # Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
@@ -1825,4 +1825,77 @@ msgstr ""
 
 #: collins/editor.py:980
 msgid "Follow"
+msgstr ""
+
+#: collins/ghwelcome.py:74
+msgid "Open, every check passed"
+msgstr ""
+
+#: collins/ghwelcome.py:78
+msgid "Checks still running"
+msgstr ""
+
+#: collins/ghwelcome.py:82
+msgid "A check failed"
+msgstr ""
+
+#: collins/ghwelcome.py:86
+msgid "A reviewer is waiting on a reply"
+msgstr ""
+
+#: collins/ghwelcome.py:90
+msgid "Draft, and the branch conflicts"
+msgstr ""
+
+#: collins/ghwelcome.py:92
+msgid "Merged"
+msgstr ""
+
+#: collins/ghwelcome.py:170
+msgid "Collins is better with the GitHub CLI"
+msgstr ""
+
+#: collins/ghwelcome.py:173
+msgid ""
+"Collins follows the pull requests your sessions open — and acts on them — "
+"through gh, GitHub's own command-line tool, which isn't installed here."
+msgstr ""
+
+#: collins/ghwelcome.py:178
+msgid ""
+"Collins follows the pull requests your sessions open — and acts on them — "
+"through gh, GitHub's own command-line tool, which is installed here but "
+"never signed in."
+msgstr ""
+
+#: collins/ghwelcome.py:185
+msgid "Not now"
+msgstr ""
+
+#: collins/ghwelcome.py:192
+msgid "Get the GitHub CLI"
+msgstr ""
+
+#: collins/ghwelcome.py:192
+msgid "Copy command"
+msgstr ""
+
+#: collins/ghwelcome.py:217
+msgid "With it, every session's pull requests carry their status:"
+msgstr ""
+
+#: collins/ghwelcome.py:219
+msgid "…and a click on one does something about it:"
+msgstr ""
+
+#: collins/ghwelcome.py:271
+msgid "Install it from cli.github.com — Collins picks it up the next time it starts."
+msgstr ""
+
+#: collins/ghwelcome.py:276
+msgid "Run this once in any terminal. Collins asks for no login of its own."
+msgstr ""
+
+#: collins/ghwelcome.py:254
+msgid "Don't show this again"
 msgstr ""
