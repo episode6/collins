@@ -812,7 +812,7 @@ class App(Adw.Application):
         app_id = self.get_application_id()
         service = mcpserver.SessionToolService(
             mcptools.socket_path(app_id),
-            list_tools=lambda: mcptools.TOOLS,
+            list_tools=lambda: mcptools.enabled_tools(self._mcp_tool_enabled),
             dispatch=self._mcp_dispatch,
         )
         try:
@@ -838,6 +838,13 @@ class App(Adw.Application):
             self._mcp_service.stop()
         Adw.Application.do_shutdown(self)
 
+    def _mcp_tool_enabled(self, name: str) -> bool:
+        """Whether the user leaves this tool switched on (Preferences →
+        Session tools). Read per list and per call, never cached: a session
+        keeps the tool list it was handed at startup, so the switch reaching
+        a running session at all depends on this being asked again."""
+        return bool(self.state.get_setting(mcptools.tool_setting_key(name)))
+
     def _mcp_tab_for_pid(self, shim_pid: int) -> tuple[MainWindow, TerminalTab] | None:
         """The window and tab whose terminal the calling shim descends from.
 
@@ -859,7 +866,7 @@ class App(Adw.Application):
     def _mcp_dispatch(self, pid: int, tool: str, args: object) -> tuple[bool, str]:
         """Run one tool call from the shim at *pid*: (ok, message-or-error).
 
-        The validate → identity → handler skeleton is mcptools.run_tool_call
+        The validate → switch → identity → handler skeleton is run_tool_call
         (GTK-free, so CI pins its branching); only the widget-touching halves
         live here. Error strings are agent-facing English, untranslated.
         """
@@ -873,6 +880,7 @@ class App(Adw.Application):
                 "show_image": self._mcp_show_image,
                 "notify_user": self._mcp_notify_user,
             },
+            is_enabled=self._mcp_tool_enabled,
         )
 
     def _mcp_set_session_title(self, found, args: dict) -> tuple[bool, str]:

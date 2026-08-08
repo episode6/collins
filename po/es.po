@@ -848,3 +848,33 @@ msgstr "Archivos del agente"
 msgid "Open {name} in the editor"
 msgstr "Abrir {name} en el editor"
 
+msgid "Session tools"
+msgstr "Herramientas de sesión"
+
+msgid "Tools a session can call to drive Collins. Turning one off takes effect immediately; sessions already running are only offered the tool again once they restart"
+msgstr "Herramientas que una sesión puede llamar para controlar Collins. Desactivar una surte efecto de inmediato; las sesiones ya en marcha solo vuelven a recibirla cuando se reinician"
+
+msgid "Name its own session"
+msgstr "Ponerle nombre a su propia sesión"
+
+msgid "set_session_title — the session titles its own tab and sidebar row"
+msgstr "set_session_title — la sesión titula su propia pestaña y su fila en la barra lateral"
+
+msgid "Open files in the editor"
+msgstr "Abrir archivos en el editor"
+
+msgid "open_in_editor — put a file from the project on screen, at a line"
+msgstr "open_in_editor — muestra en pantalla un archivo del proyecto, en una línea"
+
+msgid "Show images"
+msgstr "Mostrar imágenes"
+
+msgid "show_image — a screenshot, plot, or render in the in-app lightbox"
+msgstr "show_image — una captura, gráfico o render en el visor de la aplicación"
+
+msgid "Send desktop notifications"
+msgstr "Enviar notificaciones de escritorio"
+
+msgid "notify_user — a notification titled with the session; clicking it opens the tab"
+msgstr "notify_user — una notificación titulada con la sesión; al pulsarla se abre la pestaña"
+

@@ -848,3 +848,33 @@ msgstr "Ügynökfájlok"
 msgid "Open {name} in the editor"
 msgstr "A(z) {name} megnyitása a szerkesztőben"
 
+msgid "Session tools"
+msgstr "Munkamenet-eszközök"
+
+msgid "Tools a session can call to drive Collins. Turning one off takes effect immediately; sessions already running are only offered the tool again once they restart"
+msgstr "Eszközök, amelyeket egy munkamenet meghívhat a Collins vezérléséhez. A kikapcsolás azonnal érvénybe lép; a már futó munkamenetek csak újraindításuk után kapják vissza az eszközt"
+
+msgid "Name its own session"
+msgstr "Elnevezheti a saját munkamenetét"
+
+msgid "set_session_title — the session titles its own tab and sidebar row"
+msgstr "set_session_title — a munkamenet elnevezi a saját lapját és oldalsávsorát"
+
+msgid "Open files in the editor"
+msgstr "Fájlok megnyitása a szerkesztőben"
+
+msgid "open_in_editor — put a file from the project on screen, at a line"
+msgstr "open_in_editor — a projekt egy fájlját a képernyőre teszi, adott sornál"
+
+msgid "Show images"
+msgstr "Képek megjelenítése"
+
+msgid "show_image — a screenshot, plot, or render in the in-app lightbox"
+msgstr "show_image — képernyőkép, diagram vagy render az alkalmazás képnézegetőjében"
+
+msgid "Send desktop notifications"
+msgstr "Asztali értesítések küldése"
+
+msgid "notify_user — a notification titled with the session; clicking it opens the tab"
+msgstr "notify_user — a munkamenet nevét viselő értesítés; rákattintva megnyílik a lap"
+

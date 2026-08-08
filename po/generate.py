@@ -347,6 +347,25 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "A projekt nagy — csak az első {count} fájl kereshető.",
         "Agent files": "Ügynökfájlok",
         "Open {name} in the editor": "A(z) {name} megnyitása a szerkesztőben",
+        "Session tools": "Munkamenet-eszközök",
+        "Tools a session can call to drive Collins. Turning one off takes "
+        "effect immediately; sessions already running are only offered the "
+        "tool again once they restart":
+            "Eszközök, amelyeket egy munkamenet meghívhat a Collins vezérléséhez. "
+            "A kikapcsolás azonnal érvénybe lép; a már futó munkamenetek csak "
+            "újraindításuk után kapják vissza az eszközt",
+        "Name its own session": "Elnevezheti a saját munkamenetét",
+        "set_session_title — the session titles its own tab and sidebar row":
+            "set_session_title — a munkamenet elnevezi a saját lapját és oldalsávsorát",
+        "Open files in the editor": "Fájlok megnyitása a szerkesztőben",
+        "open_in_editor — put a file from the project on screen, at a line":
+            "open_in_editor — a projekt egy fájlját a képernyőre teszi, adott sornál",
+        "Show images": "Képek megjelenítése",
+        "show_image — a screenshot, plot, or render in the in-app lightbox":
+            "show_image — képernyőkép, diagram vagy render az alkalmazás képnézegetőjében",
+        "Send desktop notifications": "Asztali értesítések küldése",
+        "notify_user — a notification titled with the session; clicking it opens the tab":
+            "notify_user — a munkamenet nevét viselő értesítés; rákattintva megnyílik a lap",
     },
     "de": {
         "── restored panel history ──": "── wiederhergestellter Panel-Verlauf ──",
@@ -682,6 +701,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Großes Projekt — nur die ersten {count} Dateien sind durchsuchbar.",
         "Agent files": "Agent-Dateien",
         "Open {name} in the editor": "{name} im Editor öffnen",
+        "Session tools": "Sitzungswerkzeuge",
+        "Tools a session can call to drive Collins. Turning one off takes "
+        "effect immediately; sessions already running are only offered the "
+        "tool again once they restart":
+            "Werkzeuge, die eine Sitzung aufrufen kann, um Collins zu steuern. "
+            "Das Abschalten wirkt sofort; bereits laufende Sitzungen bekommen "
+            "das Werkzeug erst nach einem Neustart wieder angeboten",
+        "Name its own session": "Sitzung selbst benennen",
+        "set_session_title — the session titles its own tab and sidebar row":
+            "set_session_title — die Sitzung benennt ihren eigenen Tab und ihre "
+            "Zeile in der Seitenleiste",
+        "Open files in the editor": "Dateien im Editor öffnen",
+        "open_in_editor — put a file from the project on screen, at a line":
+            "open_in_editor — zeigt eine Datei des Projekts an, an einer bestimmten Zeile",
+        "Show images": "Bilder anzeigen",
+        "show_image — a screenshot, plot, or render in the in-app lightbox":
+            "show_image — ein Screenshot, Diagramm oder Render in der integrierten Lightbox",
+        "Send desktop notifications": "Desktop-Benachrichtigungen senden",
+        "notify_user — a notification titled with the session; clicking it opens the tab":
+            "notify_user — eine Benachrichtigung mit dem Sitzungsnamen; ein Klick "
+            "öffnet den Tab",
     },
     "es": {
         "── restored panel history ──": "── historial del panel restaurado ──",
@@ -1016,6 +1056,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "El proyecto es grande — solo se puede buscar entre los primeros {count} archivos.",
         "Agent files": "Archivos del agente",
         "Open {name} in the editor": "Abrir {name} en el editor",
+        "Session tools": "Herramientas de sesión",
+        "Tools a session can call to drive Collins. Turning one off takes "
+        "effect immediately; sessions already running are only offered the "
+        "tool again once they restart":
+            "Herramientas que una sesión puede llamar para controlar Collins. "
+            "Desactivar una surte efecto de inmediato; las sesiones ya en marcha "
+            "solo vuelven a recibirla cuando se reinician",
+        "Name its own session": "Ponerle nombre a su propia sesión",
+        "set_session_title — the session titles its own tab and sidebar row":
+            "set_session_title — la sesión titula su propia pestaña y su fila "
+            "en la barra lateral",
+        "Open files in the editor": "Abrir archivos en el editor",
+        "open_in_editor — put a file from the project on screen, at a line":
+            "open_in_editor — muestra en pantalla un archivo del proyecto, en una línea",
+        "Show images": "Mostrar imágenes",
+        "show_image — a screenshot, plot, or render in the in-app lightbox":
+            "show_image — una captura, gráfico o render en el visor de la aplicación",
+        "Send desktop notifications": "Enviar notificaciones de escritorio",
+        "notify_user — a notification titled with the session; clicking it opens the tab":
+            "notify_user — una notificación titulada con la sesión; al pulsarla "
+            "se abre la pestaña",
     },
     "fr": {
         "── restored panel history ──": "── historique du panneau restauré ──",
@@ -1352,6 +1413,26 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Le projet est volumineux — seuls les premiers {count} fichiers sont consultables.",
         "Agent files": "Fichiers de l’agent",
         "Open {name} in the editor": "Ouvrir {name} dans l’éditeur",
+        "Session tools": "Outils de session",
+        "Tools a session can call to drive Collins. Turning one off takes "
+        "effect immediately; sessions already running are only offered the "
+        "tool again once they restart":
+            "Outils qu’une session peut appeler pour piloter Collins. La "
+            "désactivation prend effet immédiatement ; les sessions déjà lancées "
+            "ne retrouvent l’outil qu’à leur prochain démarrage",
+        "Name its own session": "Nommer sa propre session",
+        "set_session_title — the session titles its own tab and sidebar row":
+            "set_session_title — la session nomme son propre onglet et sa ligne "
+            "dans la barre latérale",
+        "Open files in the editor": "Ouvrir des fichiers dans l’éditeur",
+        "open_in_editor — put a file from the project on screen, at a line":
+            "open_in_editor — affiche un fichier du projet à l’écran, à une ligne donnée",
+        "Show images": "Afficher des images",
+        "show_image — a screenshot, plot, or render in the in-app lightbox":
+            "show_image — une capture, un graphique ou un rendu dans la visionneuse intégrée",
+        "Send desktop notifications": "Envoyer des notifications de bureau",
+        "notify_user — a notification titled with the session; clicking it opens the tab":
+            "notify_user — une notification au nom de la session ; un clic ouvre l’onglet",
     },
 }
 

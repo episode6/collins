@@ -18,7 +18,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
-from . import apppicker, claudemodels, editor, footerapps, prefssearch
+from . import apppicker, claudemodels, editor, footerapps, mcptools, prefssearch
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label
 from .i18n import LANGUAGES, N_, _
 from .state import AppState
@@ -76,6 +76,31 @@ _RUNNING_BEHAVIORS = [
     ("exit", N_("Exit Session")),
     ("background", N_("Background Session")),
 ]
+
+# User-facing names for the tools Collins offers the sessions it starts, by
+# tool name (see mcptools.TOOLS). The table's own descriptions are written
+# for the agent and left untranslated by design, so the switches get labels
+# of their own: what the user gives up by turning one off, said in their
+# language. The tool's real name goes in the subtitle — it is what shows up
+# in the session's /mcp list and in its permission prompts.
+_MCP_TOOL_LABELS = {
+    "set_session_title": (
+        N_("Name its own session"),
+        N_("set_session_title — the session titles its own tab and sidebar row"),
+    ),
+    "open_in_editor": (
+        N_("Open files in the editor"),
+        N_("open_in_editor — put a file from the project on screen, at a line"),
+    ),
+    "show_image": (
+        N_("Show images"),
+        N_("show_image — a screenshot, plot, or render in the in-app lightbox"),
+    ),
+    "notify_user": (
+        N_("Send desktop notifications"),
+        N_("notify_user — a notification titled with the session; clicking it opens the tab"),
+    ),
+}
 
 
 def apply_color_scheme(value: str) -> None:
@@ -466,6 +491,8 @@ class PreferencesDialog(Adw.Dialog):
         new_sessions_group.add(self._worktree_row)
         page.add(new_sessions_group)
 
+        self._build_session_tools_group(state, page)
+
         running_group = _SearchableGroup(
             title=_("Running sessions"),
             description=_(
@@ -620,6 +647,41 @@ class PreferencesDialog(Adw.Dialog):
         editor_group.add(pop_out_row)
 
         page.add(editor_group)
+
+    def _build_session_tools_group(self, state: AppState, page: _SearchablePage) -> None:
+        """The on/off switch for each tool Collins offers a session (the
+        `collins` MCP server in the session's /mcp list).
+
+        Driven by mcptools.TOOLS, in the order sessions are served them, so a
+        tool added to the table can't ship without a switch — one with no
+        entry in _MCP_TOOL_LABELS falls back to its own name rather than
+        going unlisted.
+        """
+        group = _SearchableGroup(
+            title=_("Session tools"),
+            description=_(
+                "Tools a session can call to drive Collins. Turning one off "
+                "takes effect immediately; sessions already running are only "
+                "offered the tool again once they restart"
+            ),
+        )
+        self._mcp_tool_rows: dict[str, Adw.SwitchRow] = {}
+        for tool in mcptools.TOOLS:
+            name = tool["name"]
+            title, subtitle = _MCP_TOOL_LABELS.get(name, (name, ""))
+            row = Adw.SwitchRow(title=_(title), subtitle=_(subtitle) if subtitle else "")
+            row.set_active(bool(state.get_setting(mcptools.tool_setting_key(name))))
+            row.connect("notify::active", self._on_mcp_tool_changed, name)
+            self._mcp_tool_rows[name] = row
+            # The tool's name is in the subtitle already; "MCP" is the word a
+            # user is likeliest to search these by, and it appears nowhere in
+            # the group.
+            group.add(_searchable(row, "MCP", name))
+        page.add(group)
+
+    def _on_mcp_tool_changed(self, row: Adw.SwitchRow, _pspec, name: str) -> None:
+        self._state.set_setting(mcptools.tool_setting_key(name), row.get_active())
+        self._on_change()
 
     # -- search --------------------------------------------------------------
 

@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 # One frame on the shim↔app socket never legitimately approaches this; a line
@@ -146,6 +147,38 @@ def tool_schema(name: str) -> dict | None:
     return None
 
 
+def tool_setting_key(name: str) -> str:
+    """The settings key holding the on/off switch for the tool *name*.
+
+    One key per tool rather than a single list: state.DEFAULT_SETTINGS is
+    built from TOOLS through this function, so a tool added to the table
+    arrives with its own setting, defaulting on, and a tool removed from it
+    leaves a dead key behind that nothing reads.
+    """
+    return f"mcp_tool_{name}"
+
+
+def default_tool_settings() -> dict[str, bool]:
+    """Every tool's switch, all on — state.DEFAULT_SETTINGS folds this in."""
+    return {tool_setting_key(tool["name"]): True for tool in TOOLS}
+
+
+def enabled_tools(is_enabled: Callable[[str], bool]) -> list[dict]:
+    """The TOOLS entries *is_enabled* says a session may see.
+
+    What `tools/list` answers with, so a tool switched off is one the agent
+    is never told about rather than one it is told about and refused. A
+    session already running keeps the list it was handed at startup, which is
+    why `run_tool_call` gates calls too.
+    """
+    return [tool for tool in TOOLS if is_enabled(tool["name"])]
+
+
+def disabled_error(name: str) -> str:
+    """The agent-facing refusal for a tool the user has switched off."""
+    return f"{name} is turned off in Collins (Preferences → Session tools)"
+
+
 def validate_args(name: str, args: object) -> str | None:
     """An error message when *args* doesn't satisfy *name*'s schema, else None.
 
@@ -198,21 +231,34 @@ def _validate_value(key: str, value, spec: dict) -> str | None:
 NOT_FROM_TAB_ERROR = "This claude process wasn't launched from a Collins tab"
 
 
-def run_tool_call(tool: str, args: object, find_tab, handlers) -> tuple[bool, str]:
-    """One tool call's skeleton: validate, resolve identity, run the handler.
+def run_tool_call(
+    tool: str,
+    args: object,
+    find_tab,
+    handlers,
+    is_enabled: Callable[[str], bool] | None = None,
+) -> tuple[bool, str]:
+    """One tool call's skeleton: validate, check the switch, resolve identity,
+    run the handler.
 
     The branching lives here, GTK-free, so CI can pin its order and error
-    strings; app.py supplies the two halves that need widgets — `find_tab()`
-    (the pid→tab ancestry walk, returning None for a caller no tab owns) and
-    `handlers` (tool name → callable taking (found_tab, args) and returning
-    (ok, message)). Validation runs first and unconditionally: the socket is
-    reachable by any local process, so the CLI's own schema enforcement is
-    not a boundary. Identity comes second, so a bad call fails the same way
-    whoever makes it, leaking nothing about what tabs exist.
+    strings; app.py supplies the halves that need widgets or settings —
+    `find_tab()` (the pid→tab ancestry walk, returning None for a caller no
+    tab owns), `handlers` (tool name → callable taking (found_tab, args) and
+    returning (ok, message)), and `is_enabled` (the Preferences switch;
+    omitted means every tool is on). Validation runs first and
+    unconditionally: the socket is reachable by any local process, so the
+    CLI's own schema enforcement is not a boundary. The switch comes next —
+    it is a property of the tool, not of the caller, and a session that was
+    handed the tool before it was switched off is refused here rather than
+    acted on. Identity comes last, so a bad call fails the same way whoever
+    makes it, leaking nothing about what tabs exist.
     """
     error = validate_args(tool, args)
     if error is not None:
         return False, error
+    if is_enabled is not None and not is_enabled(tool):
+        return False, disabled_error(tool)
     found = find_tab()
     if found is None:
         return False, NOT_FROM_TAB_ERROR

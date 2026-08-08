@@ -16,6 +16,8 @@ import shutil
 from collections.abc import Iterable
 from pathlib import Path
 
+from . import mcptools
+
 _CONFIG_BASE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 _CONFIG_DIR = _CONFIG_BASE / "collins"
 # Pre-rebrand locations, newest first (collins ← agent-session-manager ← claude-session-manager).
@@ -118,6 +120,12 @@ DEFAULT_SETTINGS = {
     "editor_window_width": 1000,  # last popped-out editor window size (floating, unmaximized)
     "editor_window_height": 700,
     "editor_window_maximized": False,
+    # One switch per tool Collins offers the sessions it starts (see
+    # mcptools.TOOLS), all on: "mcp_tool_<name>". Keyed off the tool table so
+    # a new tool can't ship without its switch — off means the tool is left
+    # out of what a session is offered, and refused if an older session calls
+    # it anyway.
+    **mcptools.default_tool_settings(),
 }
 
 # Floor for a restored window, so a corrupt/absurd saved value can't produce
