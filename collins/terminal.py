@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-07. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -1143,7 +1143,7 @@ class TerminalTab(Gtk.Box):
             icon_name="mail-attachment-symbolic",
             halign=Gtk.Align.START,
             valign=Gtk.Align.END,
-            margin_start=10,
+            margin_start=5,
             margin_bottom=5,
             tooltip_text=_("Attach file to chat"),
         )
