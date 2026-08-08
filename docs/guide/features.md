@@ -93,9 +93,6 @@ fork. Last modified: 2026-08-08. Full change history: git log for this file.
   with a tab pole; a detached session's yellow line stays put whatever its
   agent is doing. The pole follows the desktop's animation setting: with
   animations off, the line simply stays put.
-- **Waiting badge** — an amber **?** marks sessions where the agent's last
-  message was a question awaiting your reply, so you can spot what needs you at
-  a glance.
 - **Interrupted badge** — a red stop icon marks sessions you stopped mid-task.
 
 ![Sidebar with the Favorites section expanded](/img/sidebar-favorites.png)

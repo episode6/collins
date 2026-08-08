@@ -261,12 +261,6 @@ class Provider:
         data source. Base: none."""
         return None
 
-    def answer_keystrokes(self, questions: list, option_index: int) -> str | None:
-        """Keystrokes that select option `option_index` of a structured prompt,
-        or None if this agent/shape can't be auto-answered (→ fall back to the
-        terminal). Base agents can't auto-answer."""
-        return None
-
     def takes_prompt(
         self, cursor_line: str, cursor_column: int, tail_is_dim: bool = False
     ) -> bool:
@@ -601,20 +595,6 @@ class ClaudeProvider(Provider):
         if not directory.is_dir():
             return []
         return [p for p in directory.glob("*.jsonl") if _UUID_RE.match(p.stem)]
-
-    def answer_keystrokes(self, questions: list, option_index: int) -> str | None:
-        # Reliable only for a single-question, single-select prompt: the first
-        # option starts highlighted in Claude's TUI, so arrow-down to the target
-        # and submit. Multi-select / multi-question fall back to the terminal.
-        if not questions or len(questions) != 1:
-            return None
-        q = questions[0]
-        if q.get("multiSelect"):
-            return None
-        options = q.get("options") or []
-        if not 0 <= option_index < len(options):
-            return None
-        return "\x1b[B" * option_index + "\r"
 
     def discover(self) -> list[Session]:
         found: list[Session] = []

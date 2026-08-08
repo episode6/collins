@@ -293,7 +293,7 @@ def test_configured_mcp_servers_missing_file(monkeypatch, tmp_path):
     assert configured_mcp_servers("/whatever") == []
 
 
-def test_tail_state_waiting(monkeypatch, tmp_path):
+def test_tail_state_of_an_ordinary_exchange_is_blank(monkeypatch, tmp_path):
     import collins.sessions as sessions_mod
 
     root = tmp_path / "projects" / "-home-u-proj"
@@ -312,13 +312,13 @@ def test_tail_state_waiting(monkeypatch, tmp_path):
         )
 
     # valid UUID-shaped stems are required by discovery
-    waiting_id = "11111111-1111-1111-1111-111111111111"
+    asked_id = "11111111-1111-1111-1111-111111111111"
     done_id = "22222222-2222-2222-2222-222222222222"
-    write(waiting_id, "Which database should I use, Postgres or SQLite?")
+    write(asked_id, "Which database should I use, Postgres or SQLite?")
     write(done_id, "Done — all tests pass.")
 
     states = {s.session_id: s.state for s in sessions_mod.discover_sessions()}
-    assert states[waiting_id] == "waiting"
+    assert states[asked_id] == ""  # a question is not a state the sidebar shows
     assert states[done_id] == ""
 
 
@@ -341,7 +341,7 @@ def test_tail_state_interrupted(monkeypatch, tmp_path):
     assert state == "interrupted"
 
 
-def test_tail_state_user_replied_after_question(monkeypatch, tmp_path):
+def test_tail_state_session_carried_on_after_the_interruption(monkeypatch, tmp_path):
     import collins.sessions as sessions_mod
 
     root = tmp_path / "projects" / "-home-u-proj"
@@ -349,14 +349,16 @@ def test_tail_state_user_replied_after_question(monkeypatch, tmp_path):
     monkeypatch.setattr(sessions_mod, "CLAUDE_PROJECTS_DIR", tmp_path / "projects")
     sid = "33333333-3333-3333-3333-333333333333"
     lines = [
-        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Which one?"}]}},
-        {"type": "user", "cwd": "/home/u/proj", "message": {"content": "the second one"}},
+        {"type": "user", "cwd": "/home/u/proj",
+         "message": {"content": "[Request interrupted by user]"}},
+        {"type": "user", "cwd": "/home/u/proj", "message": {"content": "do this instead"}},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "On it."}]}},
     ]
     (root / f"{sid}.jsonl").write_text(
         "\n".join(json.dumps(line) for line in lines), encoding="utf-8"
     )
     state = next(s.state for s in sessions_mod.discover_sessions() if s.session_id == sid)
-    assert state == ""  # user already replied → not waiting
+    assert state == ""  # the session moved on → no longer interrupted
 
 
 def _write_transcript(path, cwds):

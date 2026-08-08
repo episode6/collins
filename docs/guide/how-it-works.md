@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-07. Full change history: git log for this file.
+fork. Last modified: 2026-08-08. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -98,8 +98,7 @@ collins/
 ├── prmenu.py         # the PR list popover and its per-PR actions submenu
 ├── practions.py      # what a PR offers (merge, review, …) and the gh calls
 ├── panelhistory.py   # persisted panel scrollback
-├── promptcard.py     # native option cards over the terminal
-├── transcript.py     # tail transcripts for pending structured prompts
+├── transcript.py     # tail transcripts for touched files and PR links
 ├── switcher.py       # quick-switcher dialog
 ├── dialogs.py        # rename / emoji / confirm / details / MCP dialogs
 ├── prefs.py          # preferences dialog

@@ -50,7 +50,6 @@ from .linkpatterns import (  # noqa: E402
     resolve_wrapped_reference,
     token_at_column,
 )
-from .promptcard import build_question_card  # noqa: E402
 from .providers import Provider, get_provider  # noqa: E402
 from .prstatus import (  # noqa: E402
     PullRequest,
@@ -1095,9 +1094,6 @@ class TerminalTab(Gtk.Box):
         self._baselined_dirs: set[str] = set()  # dirs whose pre-existing transcripts are excluded
         self._known_transcripts: set[Path] = set()  # transcripts predating this tab
         self._updating = False  # an off-thread transcript parse is in flight
-        self._current_question_id: str | None = None  # question the card is showing
-        self._handled_question_id: str | None = None  # answered/dismissed; don't reshow
-        self._card: Gtk.Widget | None = None
         # Every _RootNameLinks watching a terminal inside this tab — the agent's
         # and one per panel shell — so a re-root can re-point them all. They
         # register themselves the first time they map, which is after this
@@ -1167,10 +1163,9 @@ class TerminalTab(Gtk.Box):
             tightening_threshold=_UNLIMITED_CLAMP_WIDTH,
         )
 
-        # The terminal is the single live view. When the agent asks a structured
-        # question (detected from the transcript), a native card overlays it.
-        # The "terminal-gutter" class paints the space the clamp leaves beside
-        # the terminal, kept in step with the terminal's own theme (themes.py).
+        # The terminal is the single live view. The "terminal-gutter" class
+        # paints the space the clamp leaves beside the terminal, kept in step
+        # with the terminal's own theme (themes.py).
         self._overlay = Gtk.Overlay()
         self._overlay.set_vexpand(True)
         self._overlay.add_css_class("terminal-gutter")
@@ -2200,20 +2195,18 @@ class TerminalTab(Gtk.Box):
         first += [""] * (rows - len(first))
         return tuple(first), (columns, rows)
 
-    # -- prompt card -------------------------------------------------------
+    # -- transcript --------------------------------------------------------
 
     def set_transcript_path(self, jsonl_path: str | Path | None) -> None:
-        """Tail a transcript to detect the agent's structured prompts. Used on
-        resume, and again once a brand-new session's file appears on disk."""
+        """Tail a transcript for what the tab reads out of it (touched files,
+        pull requests). Used on resume, and again once a brand-new session's
+        file appears on disk."""
         self._transcript.set_path(jsonl_path)
-        self._current_question_id = None
-        self._handled_question_id = None
         # Another session's PRs; re-read from the new transcript below, and
         # restored again by the window once this tab's session is known.
         self._tracked_prs = {}
         self._restored_prs = []
         self._refresh_pr_chips([])
-        self._hide_card()
         self._watch_transcript(jsonl_path)
 
     @property
@@ -2229,8 +2222,8 @@ class TerminalTab(Gtk.Box):
         under a project directory named for the new working directory, which
         moves the file out from under the monitor watching it. Nothing about
         the session changed, so unlike `set_transcript_path` this keeps the
-        chips, the pending card and everything already parsed — it only
-        re-aims the tail and the monitor at where the file lives now.
+        chips and everything already parsed — it only re-aims the tail and the
+        monitor at where the file lives now.
         """
         self._transcript.relocate(jsonl_path)
         self._watch_transcript(jsonl_path)
@@ -2376,7 +2369,6 @@ class TerminalTab(Gtk.Box):
         """
         self._updating = False
         self._pr_refresh_btn.set_sensitive(True)
-        self._check_prompt()
         if self._editor is not None:
             # Same pane object wherever it lives (in-tab or popped out).
             self._editor.set_agent_files(self._transcript.touched_files())
@@ -2392,44 +2384,6 @@ class TerminalTab(Gtk.Box):
         if lookup_empty:  # even with PRs still showing: none of them is this branch's
             self._sync_pr_refresh_tooltip(not_found=True)
         return GLib.SOURCE_REMOVE
-
-    def _check_prompt(self) -> None:
-        pending = self._transcript.pending_question()
-        if pending is None:
-            self._hide_card()
-            self._current_question_id = None
-            self._handled_question_id = None
-            return
-        qid = pending.tool_use_id
-        if qid in (self._current_question_id, self._handled_question_id):
-            return
-        self._hide_card()
-        self._current_question_id = qid
-        self._card = build_question_card(
-            pending.questions, self.provider, self._answer, self._dismiss_card
-        )
-        self._overlay.add_overlay(self._card)
-
-    def _hide_card(self) -> None:
-        if self._card is not None:
-            self._overlay.remove_overlay(self._card)
-            self._card = None
-
-    def _answer(self, questions: list, option_index: int) -> None:
-        self._handled_question_id = self._current_question_id
-        self._current_question_id = None
-        self._hide_card()
-        keys = self.provider.answer_keystrokes(questions, option_index)
-        if keys:
-            self.feed_child_text(keys)
-        else:
-            self.grab_terminal_focus()
-
-    def _dismiss_card(self) -> None:
-        self._handled_question_id = self._current_question_id
-        self._current_question_id = None
-        self._hide_card()
-        self.grab_terminal_focus()
 
     def _start_transcript_resolver(self, cwd: str | None) -> None:
         if not cwd:

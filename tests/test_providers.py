@@ -262,23 +262,6 @@ def test_background_exit_text():
     assert Provider().background_exit() is None
 
 
-def test_claude_answer_keystrokes_single_select():
-    q = [{"question": "Which DB?", "multiSelect": False,
-          "options": [{"label": "Postgres"}, {"label": "SQLite"}, {"label": "Mongo"}]}]
-    claude = ClaudeProvider()
-    assert claude.answer_keystrokes(q, 0) == "\r"               # first option: just submit
-    assert claude.answer_keystrokes(q, 2) == "\x1b[B\x1b[B\r"   # down twice, submit
-    assert claude.answer_keystrokes(q, 9) is None               # out of range
-
-
-def test_answer_keystrokes_fallback_cases():
-    claude = ClaudeProvider()
-    multi = [{"question": "Pick", "multiSelect": True, "options": [{"label": "a"}]}]
-    two = [{"question": "1", "options": [{"label": "a"}]}, {"question": "2", "options": [{"label": "b"}]}]
-    assert claude.answer_keystrokes(multi, 0) is None  # multi-select → terminal
-    assert claude.answer_keystrokes(two, 0) is None    # multiple questions → terminal
-
-
 def test_background_watch_dir():
     assert ClaudeProvider().background_watch_dir() == Path.home() / ".claude" / "jobs"
     # Base providers have no background agents → nothing to watch.

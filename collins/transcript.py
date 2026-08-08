@@ -1,24 +1,23 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
-"""Detect an agent's pending structured prompt by tailing its JSONL transcript.
+"""Read what a session is doing by tailing its JSONL transcript.
 
-Backs the question card: an ``AskUserQuestion`` tool_use whose id has no matching
-``tool_result`` yet is a live, unanswered prompt. Tailing is incremental (byte
-offset) so it stays cheap on large, actively-written transcripts.
+Two things come out of the same pass, which is what makes it cheap: the files
+the agent has written (see ``_TOUCH_TOOLS``), and the ``pr-link`` records Claude
+Code writes when a session opens or touches a pull request (see prstatus).
+Every distinct PR is kept, not just the last one — a session that opens three of
+them has three to show — in the order they first appear, which is the order they
+were opened.
 
-The same pass also picks up the ``pr-link`` records Claude Code writes when a
-session opens or touches a pull request (see prstatus), which costs nothing
-extra: the bytes are already being read and decoded here. Every distinct PR is
-kept, not just the last one — a session that opens three of them has three to
-show — in the order they first appear, which is the order they were opened.
+Tailing is incremental (byte offset) so it stays cheap on large, actively-written
+transcripts.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from .prstatus import PullRequest, parse_pr_link
@@ -36,18 +35,9 @@ _TOUCH_TOOLS = {
 _MAX_TOUCHED = 30  # most-recent-first; plenty for a list that shows a handful
 
 
-@dataclass
-class Question:
-    tool_use_id: str
-    questions: list = field(default_factory=list)  # AskUserQuestion `questions` payload
-
-
 class TranscriptModel:
     def __init__(self, jsonl_path: str | Path | None) -> None:
         self.path = Path(jsonl_path) if jsonl_path else None
-        self._questions: dict[str, list] = {}  # tool_use_id -> questions payload
-        self._order: list[str] = []  # question ids, arrival order
-        self._resolved: set[str] = set()  # tool_use_ids that have a tool_result
         self._prs: dict[str, PullRequest] = {}  # url -> PR, first-seen order
         self._touched: list[str] = []  # files written by the agent, newest first
         self._offset = 0
@@ -56,9 +46,6 @@ class TranscriptModel:
     def set_path(self, jsonl_path: str | Path | None) -> None:
         """(Re)point at a transcript — used once a new session's file appears."""
         self.path = Path(jsonl_path) if jsonl_path else None
-        self._questions = {}
-        self._order = []
-        self._resolved = set()
         self._prs = {}
         self._touched = []
         self._offset = 0
@@ -88,7 +75,6 @@ class TranscriptModel:
         except OSError:
             return False
         if size < self._offset:  # rewritten/truncated → start over
-            self._questions, self._order, self._resolved = {}, [], set()
             self._prs = {}
             self._touched = []
             self._offset, self._buf = 0, b""
@@ -131,22 +117,10 @@ class TranscriptModel:
         for block in content:
             if not isinstance(block, dict):
                 continue
-            btype = block.get("type")
-            if btype == "tool_use" and block.get("name") == "AskUserQuestion":
-                qid = block.get("id", "")
-                if qid and qid not in self._questions:
-                    self._questions[qid] = (block.get("input") or {}).get("questions", [])
-                    self._order.append(qid)
-                    changed = True
-            elif btype == "tool_use" and block.get("name") in _TOUCH_TOOLS:
+            if block.get("type") == "tool_use" and block.get("name") in _TOUCH_TOOLS:
                 key = _TOUCH_TOOLS[block.get("name")]
                 path = (block.get("input") or {}).get(key)
                 if isinstance(path, str) and path.strip() and self._record_touch(path.strip()):
-                    changed = True
-            elif btype == "tool_result":
-                rid = block.get("tool_use_id")
-                if rid and rid not in self._resolved:
-                    self._resolved.add(rid)
                     changed = True
         return changed
 
@@ -176,10 +150,3 @@ class TranscriptModel:
         off the main loop to add CI status.
         """
         return list(self._prs.values())
-
-    def pending_question(self) -> Question | None:
-        """The most recent AskUserQuestion still awaiting an answer, or None."""
-        for qid in reversed(self._order):
-            if qid not in self._resolved:
-                return Question(qid, self._questions[qid])
-        return None
