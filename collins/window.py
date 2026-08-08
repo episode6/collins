@@ -2098,7 +2098,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.tab_view.close_page(page)
 
         def cancelled() -> None:
-            self._archive_on_close.pop(page, None)  # cancelled: keep the session visible
+            self._archive_cancelled(page)  # cancelled: keep the session visible
 
         tab = page.get_child()
         self._ask_save_editors([tab] if isinstance(tab, TerminalTab) else [], proceed, cancelled)
@@ -2216,7 +2216,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         def cancelled() -> None:
             self._close_asking.discard(page)
-            self._archive_on_close.pop(page, None)  # cancelled: keep the session visible
+            self._archive_cancelled(page)  # cancelled: keep the session visible
 
         self._ask_save_editors([tab], after_editor, cancelled)
 
@@ -2275,7 +2275,7 @@ class MainWindow(Adw.ApplicationWindow):
         confirm_label = _("Exit Session") if agent_busy else _("Close Tab")
         def dismiss() -> None:
             self._close_asking.discard(page)
-            self._archive_on_close.pop(page, None)  # cancelled: keep the session visible
+            self._archive_cancelled(page)  # cancelled: keep the session visible
 
         dialogs.confirm_dialog(
             self,
@@ -3612,8 +3612,23 @@ class MainWindow(Adw.ApplicationWindow):
         if isinstance(tab, TerminalTab) and tab.session_id:
             self._archive_session(tab.session_id)
 
+    def _archive_cancelled(self, page: Adw.TabPage) -> None:
+        """A close that was carrying an archive got declined: forget the
+        archive and bring the session's ghosted row back (see the sidebar's
+        begin_archiving)."""
+        session_id = self._archive_on_close.pop(page, None)
+        if session_id is not None:
+            self.sidebar.clear_archiving(session_id)
+
     def _archive_session(self, session_id: str) -> None:
         archived = not self.state.is_archived(session_id)
+        # The row slides out the moment the user asks (only when archiving
+        # will actually remove it from the list — with "show archived" on it
+        # stays, as an ordinary archived row): the archive can take seconds
+        # when a tab has to shut down first, and even the tabless path waits
+        # on a store refresh. Cancelling the close slides it back in.
+        if archived and not self.store.show_archived:
+            self.sidebar.begin_archiving(session_id)
         page = self._page_for(session_id) if archived else None
         if page is not None:
             # Close the tab through the normal close-page flow, so a busy tab
