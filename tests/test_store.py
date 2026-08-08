@@ -38,6 +38,17 @@ def test_archived_sessions_individually_archived(store):
     assert [s.session_id for s in store.archived_sessions()] == [session_id]
 
 
+def test_restore_many_undoes_an_archive(store):
+    # What the archive snackbar's Undo (and Ctrl+Shift+Z) calls: the whole
+    # last-archived batch comes back at once.
+    ids = [s.session_id for s in store._last_sessions[:2]]
+    store.archive_many(ids)
+    assert sorted(s.session_id for s in store.archived_sessions()) == sorted(ids)
+
+    store.restore_many(ids)
+    assert store.archived_sessions() == []
+
+
 def test_archived_sessions_include_archived_projects(store):
     project = store._last_sessions[0].project_name
     store.set_project_archived(project, True)
