@@ -11,9 +11,10 @@ session.
 "Regenerate name" in the sidebar re-runs the model for one session on demand.
 
 Headless runs write their own transcripts under ``~/.claude/projects``, so
-they execute from a dedicated scratch directory: discovery skips that
-project (otherwise every title run would appear as a session and itself get
-queued for titling), and its transcripts are removed after each call.
+each one executes from its own child of a dedicated scratch directory (see
+scratch_workdir): discovery skips those projects (otherwise every title run
+would appear as a session and itself get queued for titling), and each run
+removes its own transcripts after the call.
 
 A prompt that is only about a pull request ("review PR 183") summarizes to a
 title that says nothing: a number is meaningless to anyone glancing down the
@@ -31,7 +32,9 @@ import re
 import shutil
 import subprocess
 import threading
-from collections.abc import Callable
+import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -106,15 +109,49 @@ _MAX_PR_LOOKUPS = 2
 
 
 def scratch_dir() -> Path:
-    """Working directory for headless title runs. Session discovery excludes
-    the ~/.claude/projects entry this maps to."""
+    """Parent of the working directories headless claude runs execute from.
+    Session discovery excludes every ~/.claude/projects entry this maps to."""
     return state._CONFIG_DIR / "title-scratch"
 
 
+def _project_dirname(path: Path) -> str:
+    """The ~/.claude/projects directory name Claude Code derives from *path*
+    (every non-alphanumeric char becomes '-')."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
+
+
 def scratch_project_dirname() -> str:
-    """The ~/.claude/projects directory name Claude Code derives from the
-    scratch dir (every non-alphanumeric char becomes '-')."""
-    return re.sub(r"[^A-Za-z0-9]", "-", str(scratch_dir()))
+    """The ~/.claude/projects directory name the scratch dir itself maps to."""
+    return _project_dirname(scratch_dir())
+
+
+def is_scratch_project(dirname: str) -> bool:
+    """True when a ~/.claude/projects entry belongs to a headless run — the
+    scratch dir itself or any per-run child scratch_workdir() creates under
+    it, whose derived names extend the scratch dir's own."""
+    return dirname.startswith(scratch_project_dirname())
+
+
+@contextmanager
+def scratch_workdir() -> Iterator[Path]:
+    """Working directory for one headless claude run, private to that run.
+
+    Runs overlap — a title run can take its whole timeout while an icon
+    generation runs, and two icon dialogs can generate at once — and each
+    run's cleanup deletes a whole transcript directory. One shared directory
+    would let whichever run finished first delete the transcript a
+    still-running CLI was writing, so every run gets its own child of
+    scratch_dir(); on exit the run's transcript project and the workdir
+    itself are removed.
+    """
+    workdir = scratch_dir() / uuid.uuid4().hex
+    workdir.mkdir(parents=True, exist_ok=True)
+    try:
+        yield workdir
+    finally:
+        # Drop the transcript the headless run just wrote, then the workdir.
+        shutil.rmtree(sessions.CLAUDE_PROJECTS_DIR / _project_dirname(workdir), ignore_errors=True)
+        shutil.rmtree(workdir, ignore_errors=True)
 
 
 def sanitize_title(text: str) -> str:
@@ -260,13 +297,11 @@ def _run_claude(prompt: str) -> str:
     cli = shutil.which("claude")
     if cli is None:
         raise TitleError("claude CLI not found on PATH", fatal=True)
-    workdir = scratch_dir()
-    workdir.mkdir(parents=True, exist_ok=True)
     # A fresh AppState per run so a just-changed preference applies to the
     # next title; state writes are atomic, so a mid-write read can't happen.
     # Titles are five words on a prompt excerpt — the Haiku tier's job.
     model = pick_model(state.AppState().get_setting("title_model"), prefer="haiku")
-    try:
+    with scratch_workdir() as workdir:
         result = subprocess.run(
             [cli, "-p", "--model", model],
             input=prompt,
@@ -275,13 +310,10 @@ def _run_claude(prompt: str) -> str:
             cwd=workdir,
             timeout=_TIMEOUT_S,
         )
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout).strip()
-            raise TitleError(f"claude exited {result.returncode}: {detail[:200]}")
-        return result.stdout
-    finally:
-        # Drop the transcript the headless run just wrote.
-        shutil.rmtree(sessions.CLAUDE_PROJECTS_DIR / scratch_project_dirname(), ignore_errors=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise TitleError(f"claude exited {result.returncode}: {detail[:200]}")
+    return result.stdout
 
 
 class TitleGenerator:

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 import json
 
@@ -57,10 +57,11 @@ def test_discover_finds_only_real_sessions(projects_dir):
     assert {s.session_id for s in sessions} == set(ids.values())
 
 
-def test_discover_skips_title_scratch_project(projects_dir, app_state):
-    # Headless title-generation runs write transcripts under the scratch
-    # project; they must never surface as sessions (that would re-trigger
-    # titling forever).
+def test_discover_skips_scratch_projects(projects_dir, app_state):
+    # Headless title and icon-generation runs write transcripts under
+    # per-run children of the scratch dir; none of them may surface as
+    # sessions (that would re-trigger titling forever). The scratch dir
+    # itself is covered too, for transcripts predating per-run children.
     import json as _json
     import uuid as _uuid
 
@@ -69,13 +70,17 @@ def test_discover_skips_title_scratch_project(projects_dir, app_state):
     from collins.titles import scratch_dir, scratch_project_dirname
 
     root, ids = projects_dir
-    scratch_project = root / scratch_project_dirname()
-    scratch_project.mkdir()
-    sid = str(_uuid.uuid4())
-    lines = make_transcript_lines(str(scratch_dir()), "Summarize the following coding-agent prompt")
-    (scratch_project / f"{sid}.jsonl").write_text(
-        "\n".join(_json.dumps(line) for line in lines), encoding="utf-8"
-    )
+    run_dir = scratch_dir() / "0f3a"  # what scratch_workdir() creates
+    for cwd, project in (
+        (scratch_dir(), root / scratch_project_dirname()),
+        (run_dir, root / (scratch_project_dirname() + "-0f3a")),
+    ):
+        project.mkdir()
+        sid = str(_uuid.uuid4())
+        lines = make_transcript_lines(str(cwd), "Summarize the following coding-agent prompt")
+        (project / f"{sid}.jsonl").write_text(
+            "\n".join(_json.dumps(line) for line in lines), encoding="utf-8"
+        )
     assert {s.session_id for s in discover_sessions()} == set(ids.values())
 
 

@@ -36,6 +36,31 @@ def test_extract_rejects_oversized():
     assert icongen.extract_svg(fat) is None
 
 
+def test_extract_rejects_active_content():
+    # The prompt's "no scripts, no external URLs" is an instruction to a
+    # model reading untrusted repo text; this is where it is enforced.
+    for payload in (
+        "<script>alert(1)</script>",
+        '<image href="https://evil.example/x.png"/>',
+        '<use xlink:href="https://evil.example/x.svg#a"/>',
+        '<rect style="fill:url(http://evil.example/f)"/>',
+        '<rect onclick="steal()"/>',
+        "<style>@import url(https://evil.example/x.css)</style>",
+    ):
+        assert icongen.extract_svg(_SVG.replace("<rect/>", payload)) is None
+
+
+def test_extract_keeps_internal_references():
+    # Inline gradients and <use> reuse point at local fragments — the one
+    # kind of reference a self-contained icon legitimately makes. The root
+    # element's xmlns URL (in _SVG already) passes too.
+    good = _SVG.replace(
+        "<rect/>",
+        '<defs><linearGradient id="g"/></defs><rect fill="url(#g)"/><use xlink:href="#g"/>',
+    )
+    assert icongen.extract_svg(good) == good.encode()
+
+
 # -- build_prompt -------------------------------------------------------------
 
 

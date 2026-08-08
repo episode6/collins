@@ -7,10 +7,13 @@ dialogs.generate_icon_dialog) that drives this module: build_prompt()
 describes the project to the model — its name, top-level entries and a
 README excerpt, all fenced off as untrusted data — together with the
 constraints projecticons enforces on icons it will actually show; IconRun
-executes one cancellable ``claude -p`` call from the same scratch directory
-the title generator uses, so the run's transcript never appears as a
-session; extract_svg() pulls the SVG document out of the reply and vets it
-with the same gates the sidebar applies to on-disk icon bytes.
+executes one cancellable ``claude -p`` call from its own child of the title
+generator's scratch directory (titles.scratch_workdir), so the run's
+transcript never appears as a session and concurrent runs never delete each
+other's; extract_svg() pulls the SVG document out of the reply and vets it
+with the same gate the sidebar applies to on-disk icon bytes
+(projecticons.usable_icon_bytes) — so the prompt's "no scripts, no external
+URLs" rule is enforced on the reply, not just asked of the model.
 
 Nothing touches the project directory until the user clicks Save —
 save_icon() is the only function here that writes into it.
@@ -26,10 +29,10 @@ import subprocess
 import threading
 from pathlib import Path
 
-from . import projecticons, sessions
+from . import projecticons
 from .claudemodels import pick_model
 from .state import AppState
-from .titles import scratch_dir, scratch_project_dirname
+from .titles import scratch_workdir
 
 # One SVG document, but the model may think about the design for a while.
 _TIMEOUT_S = 300
@@ -147,18 +150,19 @@ def extract_svg(reply: str) -> bytes | None:
     """The reply's SVG document as vetted bytes, or None.
 
     The model is told to reply with bare SVG, but a fenced or prefaced reply
-    still gives up its document. The result passes the same gates
-    projecticons applies to on-disk icons, so the preview and Save never see
-    bytes the sidebar itself would refuse.
+    still gives up its document. The result passes the same gate
+    projecticons applies to on-disk icons — size, SVG shape, and no active
+    content (scripts, event handlers, external references) — so the prompt's
+    hard requirements are enforced here rather than trusted to a model
+    reading untrusted repo text, and the preview and Save never see bytes
+    the sidebar itself would refuse.
     """
     start = reply.find("<svg")
     stop = reply.rfind("</svg>")
     if start < 0 or stop < start:
         return None
     data = reply[start : stop + len("</svg>")].encode("utf-8")
-    if not 0 < len(data) <= projecticons._MAX_ICON_BYTES:
-        return None
-    return data if projecticons._looks_like_svg(data) else None
+    return data if projecticons.usable_icon_bytes(data) else None
 
 
 def save_icon(cwd: str | Path, svg: bytes) -> Path:
@@ -205,39 +209,34 @@ class IconRun:
         cli = shutil.which("claude")
         if cli is None:
             raise IconGenError("claude CLI not found on PATH")
-        workdir = scratch_dir()
-        workdir.mkdir(parents=True, exist_ok=True)
         # Resolved per run (like titles), so a just-changed preference
         # applies to the next generation without a restart.
         model = pick_model(AppState().get_setting("icon_model"))
-        with self._lock:
-            if self._cancelled:
-                raise IconGenCancelled()
-            self._proc = subprocess.Popen(
-                [cli, "-p", "--model", model],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=workdir,
-            )
-        proc = self._proc
-        try:
+        with scratch_workdir() as workdir:
+            with self._lock:
+                if self._cancelled:
+                    raise IconGenCancelled()
+                self._proc = subprocess.Popen(
+                    [cli, "-p", "--model", model],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    cwd=workdir,
+                )
+            proc = self._proc
             try:
                 out, err = proc.communicate(prompt, timeout=_TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.communicate()
                 raise IconGenError(f"claude timed out after {_TIMEOUT_S}s") from None
-            if self._cancelled:
-                raise IconGenCancelled()
-            if proc.returncode != 0:
-                detail = (err or out).strip()
-                raise IconGenError(f"claude exited {proc.returncode}: {detail[:200]}")
-            svg = extract_svg(out)
-            if svg is None:
-                raise IconGenError("the reply contained no usable SVG")
-            return svg
-        finally:
-            # Drop the transcript the headless run just wrote.
-            shutil.rmtree(sessions.CLAUDE_PROJECTS_DIR / scratch_project_dirname(), ignore_errors=True)
+        if self._cancelled:
+            raise IconGenCancelled()
+        if proc.returncode != 0:
+            detail = (err or out).strip()
+            raise IconGenError(f"claude exited {proc.returncode}: {detail[:200]}")
+        svg = extract_svg(out)
+        if svg is None:
+            raise IconGenError("the reply contained no usable SVG")
+        return svg
