@@ -92,12 +92,33 @@ def test_unknown_ids_never_read_as_weakest():
     assert default_model(models) == "claude-opus-5"
 
 
-def test_default_with_no_list_is_the_sonnet_alias():
+def test_default_with_no_list_is_the_tier_alias():
     assert default_model([]) == "sonnet"
+    assert default_model([], prefer="haiku") == "haiku"
 
 
-def test_fallback_aliases_resolve_to_sonnet():
+def test_default_prefers_the_requested_tier():
+    models = [
+        _m("claude-sonnet-5", "2026-02-01"),
+        _m("claude-haiku-4-5", "2025-10-01"),
+        _m("claude-opus-5", "2026-07-24"),
+    ]
+    assert default_model(models, prefer="haiku") == "claude-haiku-4-5"
+
+
+def test_default_preferred_tier_dropped_falls_to_weakest():
+    models = [
+        _m("claude-sonnet-4-6", "2025-11-01"),
+        _m("claude-sonnet-5", "2026-02-01"),
+        _m("claude-opus-5", "2026-07-24"),
+    ]
+    # No Haiku offered: the weakest tier left is Sonnet, newest first.
+    assert default_model(models, prefer="haiku") == "claude-sonnet-5"
+
+
+def test_fallback_aliases_resolve_to_the_tier():
     assert default_model(list(FALLBACK_MODELS)) == "sonnet"
+    assert default_model(list(FALLBACK_MODELS), prefer="haiku") == "haiku"
 
 
 # -- resolve_model / pick_model ----------------------------------------------

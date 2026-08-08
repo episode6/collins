@@ -530,7 +530,11 @@ msgstr ""
 msgid "Model that designs project icons in the sidebar's Generate Icon dialog"
 msgstr ""
 
-#: collins/prefs.py:387 collins/prefs.py:783
+#: collins/prefs.py:379
+msgid "Default (latest Haiku)"
+msgstr ""
+
+#: collins/prefs.py:385
 msgid "Default (latest Sonnet)"
 msgstr ""
 

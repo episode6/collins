@@ -114,7 +114,7 @@ Unnamed sessions get a **title generated for them**:
   to **five words or fewer** by a headless `claude -p` run — the same CLI and
   login the whole app is based on, no extra credentials needed. The model it
   asks for is the *Session title model* preference; the default follows the
-  newest Sonnet.
+  newest Haiku.
 
 A prompt that only points at a pull request ("review PR 183") would summarize
 to a number nobody can read at a glance, so that PR's **title is fetched with

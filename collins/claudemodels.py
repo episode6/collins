@@ -10,8 +10,9 @@ cached for an hour; when it can't be made (logged out, offline), the CLI's
 own version-agnostic aliases keep the pickers and the settings usable.
 
 Both settings default to "" — automatic — which resolve_model() turns into
-the newest Sonnet-tier model, or, should Sonnet ever be dropped, the newest
-model of the weakest tier still offered.
+the newest model of that setting's preferred tier (Haiku for titles, Sonnet
+for icons), or, should the tier ever be dropped, the newest model of the
+weakest tier still offered.
 
 Kept GTK-free (like projecticons/titles) so the ranking and resolution
 logic is unit-testable headless.
@@ -146,31 +147,31 @@ def _tier(model_id: str) -> int:
     return len(_TIERS)
 
 
-def default_model(models: list[ClaudeModel]) -> str:
-    """The automatic choice: the newest Sonnet-tier model — or, should
-    Sonnet ever be dropped, the newest model of the weakest tier left.
-    With no list to choose from, the CLI's own "sonnet" alias."""
-    sonnets = [m for m in models if _tier(m.id) == _TIERS.index("sonnet")]
-    if sonnets:
-        return max(sonnets, key=lambda m: m.created_at).id
+def default_model(models: list[ClaudeModel], prefer: str = "sonnet") -> str:
+    """The automatic choice: the newest model of the *prefer* tier — or,
+    should that tier ever be dropped, the newest model of the weakest tier
+    left. With no list to choose from, the CLI's own alias for the tier."""
+    preferred = [m for m in models if _tier(m.id) == _TIERS.index(prefer)]
+    if preferred:
+        return max(preferred, key=lambda m: m.created_at).id
     if models:
         weakest = min(_tier(m.id) for m in models)
         pool = [m for m in models if _tier(m.id) == weakest]
         return max(pool, key=lambda m: m.created_at).id
-    return "sonnet"
+    return prefer
 
 
-def resolve_model(setting: str | None, models: list[ClaudeModel]) -> str:
+def resolve_model(setting: str | None, models: list[ClaudeModel], prefer: str = "sonnet") -> str:
     """What a headless run should pass to --model: the user's explicit
     choice when the setting holds one, else the automatic default."""
     setting = (setting or "").strip()
-    return setting or default_model(models)
+    return setting or default_model(models, prefer)
 
 
-def pick_model(setting: str | None) -> str:
+def pick_model(setting: str | None, prefer: str = "sonnet") -> str:
     """resolve_model over the live list. Blocking on first use (the list
     may need querying) — call from the worker thread that runs the CLI."""
     setting = (setting or "").strip()
     if setting:
         return setting  # an explicit choice needs no query at all
-    return default_model(available_models())
+    return default_model(available_models(), prefer)

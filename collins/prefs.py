@@ -370,22 +370,26 @@ class PreferencesDialog(Adw.Dialog):
             description=_("Models the app's own headless claude runs ask for"),
         )
         self._model_rows: dict[str, Adw.ComboRow] = {}
-        for key, title, subtitle in (
+        self._model_default_labels: dict[str, str] = {}
+        for key, title, subtitle, default_label in (
             (
                 "title_model",
                 _("Session title model"),
                 _("Model that summarizes each new session's first prompt into its name"),
+                _("Default (latest Haiku)"),
             ),
             (
                 "icon_model",
                 _("Icon generation model"),
                 _("Model that designs project icons in the sidebar's Generate Icon dialog"),
+                _("Default (latest Sonnet)"),
             ),
         ):
             row = Adw.ComboRow(title=title, subtitle=subtitle)
             # A placeholder until the live list lands (see _populate_model_rows).
-            row.set_model(Gtk.StringList.new([_("Default (latest Sonnet)")]))
+            row.set_model(Gtk.StringList.new([default_label]))
             self._model_rows[key] = row
+            self._model_default_labels[key] = default_label
             models_group.add(_searchable(row, "haiku", "sonnet", "opus"))
         page.add(models_group)
         self._populate_model_rows(state)
@@ -780,7 +784,7 @@ class PreferencesDialog(Adw.Dialog):
             for key, row in self._model_rows.items():
                 current = (state.get_setting(key) or "").strip()
                 ids = [""] + [m.id for m in models]
-                labels = [_("Default (latest Sonnet)")] + [m.display_name for m in models]
+                labels = [self._model_default_labels[key]] + [m.display_name for m in models]
                 if current and current not in ids:
                     # A saved model the API no longer lists stays visible and
                     # selected rather than silently snapping to the default.

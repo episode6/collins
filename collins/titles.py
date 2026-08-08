@@ -264,7 +264,8 @@ def _run_claude(prompt: str) -> str:
     workdir.mkdir(parents=True, exist_ok=True)
     # A fresh AppState per run so a just-changed preference applies to the
     # next title; state writes are atomic, so a mid-write read can't happen.
-    model = pick_model(state.AppState().get_setting("title_model"))
+    # Titles are five words on a prompt excerpt — the Haiku tier's job.
+    model = pick_model(state.AppState().get_setting("title_model"), prefer="haiku")
     try:
         result = subprocess.run(
             [cli, "-p", "--model", model],
