@@ -21,7 +21,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import __version__, chats, dialogs, editor, footerapps, openwith, panelhistory, trust
+from . import __version__, chats, dialogs, editor, footerapps, mcptools, openwith, panelhistory, trust
 from .activity import (
     PROCESS_IDLE_S,
     PROCESS_POLL_MS,
@@ -337,6 +337,16 @@ class MainWindow(Adw.ApplicationWindow):
         # submit, so even the ungated pole starters hold through the startup
         # paint. See _startup_held.
         self._fresh_spawns: set[Adw.TabPage] = set()
+        # Per fresh-spawn tab, the cmdlines seen running under its agent
+        # before anything was submitted: the CLI's own plumbing (MCP servers),
+        # absorbed by the process poll until the tab's gate arms and ignored
+        # by it ever after — a permanent server child must not keep the busy
+        # pole up for the life of the session. Persisted per session id so a
+        # later re-attach to the same process still knows its plumbing; the
+        # servers Collins itself configures are additionally ignored always
+        # (see mcptools.infrastructure_cmdlines).
+        self._baseline_captures: dict[Adw.TabPage, set[str]] = {}
+        self._infra_cmdlines = mcptools.infrastructure_cmdlines()
 
         self._install_actions()
         self._install_shortcuts()
@@ -1569,6 +1579,9 @@ class MainWindow(Adw.ApplicationWindow):
             # now, so nothing can be mid-turn behind it (unlike a tab bound
             # to an existing id, which may be attaching to a live agent).
             self._fresh_spawns.add(page)
+            # The poll must run before the session id resolves: this tab's
+            # pre-submit window is when its plumbing baseline is captured.
+            self._sync_process_poll()
         # "commit" is everything the app sends this terminal's child — the
         # keystrokes the user types, and the focus reports VTE emits on a tab
         # switch — so the redraw that answers one is not the agent working.
@@ -1717,6 +1730,12 @@ class MainWindow(Adw.ApplicationWindow):
             return  # another tab already owns this session
         self._pages[session_id] = page
         self._sync_process_poll()
+        # Anything absorbed into the plumbing baseline before the id was
+        # known has a home now. Usually a no-op: the id tends to resolve
+        # before the first submit, so ongoing captures persist themselves.
+        captured = self._baseline_captures.get(page)
+        if captured:
+            self.state.set_process_baseline(session_id, captured)
         # A `--continue` tab lands on a session that may already have PRs
         # saved; a brand-new one has none, and this is a no-op for it.
         tab.restore_prs(self.state.get_session_prs(session_id))
@@ -2025,6 +2044,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._spinner_watches.pop(page, None)
         self._progress_watches.pop(page, None)
         self._fresh_spawns.discard(page)
+        self._baseline_captures.pop(page, None)
+        self._sync_process_poll()
 
     def _on_page_title_changed(self, page: Adw.TabPage, _pspec) -> None:
         if page is self.tab_view.get_selected_page():
@@ -2787,8 +2808,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         A session with no tab has no terminal's process tree to walk — a
         detached agent's background jobs, if it has any, run under a process
-        this app was never the parent of and cannot see."""
-        wanted = bool(self._pages)
+        this app was never the parent of and cannot see. Fresh spawns count
+        as open before their session id resolves: their pristine window is
+        when the plumbing baseline is captured."""
+        wanted = bool(self._pages or self._fresh_spawns)
         if wanted and self._process_poll is None:
             self._process_poll = GLib.timeout_add(PROCESS_POLL_MS, self._poll_process_activity)
         elif not wanted and self._process_poll is not None:
@@ -2796,14 +2819,55 @@ class MainWindow(Adw.ApplicationWindow):
             self._process_poll = None
 
     def _poll_process_activity(self) -> bool:
-        if not self._pages:
+        if not self._pages and not self._fresh_spawns:
             self._process_poll = None
             return GLib.SOURCE_REMOVE
+        capturing = {page for page in self._fresh_spawns if self._absorb_baseline(page)}
         for session_id, page in list(self._pages.items()):
+            if page in capturing:
+                continue  # nothing ever submitted: children are plumbing, not work
             tab = page.get_child()
-            if isinstance(tab, TerminalTab) and tab.has_background_descendant():
+            if isinstance(tab, TerminalTab) and tab.has_background_descendant(
+                self._process_ignores(session_id, page)
+            ):
                 self._activity.mark(session_id, idle_s=PROCESS_IDLE_S)
         return GLib.SOURCE_CONTINUE
+
+    def _absorb_baseline(self, page: Adw.TabPage) -> bool:
+        """Fold what runs under a pristine fresh spawn's agent into its
+        plumbing baseline, reporting whether the capture window is still open.
+
+        The window is this tab's whole pre-submit life: the CLI starts its
+        stdio MCP servers asynchronously after launch, so a single early
+        snapshot could miss a slow one, but nothing the agent ever does can
+        be running before the first submit. The gate arming freezes the set
+        for good — from then on the servers persist for the CLI's lifetime,
+        and anything newly spawned really is work.
+        """
+        gate = self._echo_gates.get(page)
+        if gate is None or gate.armed:
+            return False
+        tab = page.get_child()
+        if not isinstance(tab, TerminalTab):
+            return False
+        seen = tab.background_descendant_cmdlines()
+        captured = self._baseline_captures.setdefault(page, set())
+        if seen - captured:
+            captured |= seen
+            if tab.session_id:
+                self.state.set_process_baseline(tab.session_id, captured)
+        return True
+
+    def _process_ignores(self, session_id: str, page: Adw.TabPage) -> set[str]:
+        """The cmdlines under this session's agent that are plumbing, not
+        work: its captured baseline (persisted, plus anything this tab
+        absorbed before the id resolved) and the MCP servers Collins itself
+        configures — the latter unconditionally, which alone covers sessions
+        from before their baseline was ever captured."""
+        ignores = self.state.get_process_baseline(session_id)
+        ignores |= self._baseline_captures.get(page, set())
+        ignores |= self._infra_cmdlines
+        return ignores
 
     # -- pre-emptive /bg status ----------------------------------------------
 

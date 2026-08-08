@@ -7,6 +7,7 @@ CI, which has no GTK stack (see tests/conftest.py).
 from __future__ import annotations
 
 import os
+from collections.abc import Collection
 
 # A session's process tree is a handful of levels deep at most; the cap only
 # stops a pathological tree (or a /proc that lies) from recursing forever.
@@ -85,12 +86,25 @@ def is_agent_process(pid: int, cli: str) -> bool:
     """
     if not cli:
         return False
+    cmdline = process_cmdline(pid)
+    return cmdline is not None and cli in cmdline
+
+
+def process_cmdline(pid: int) -> str | None:
+    """The full command line of *pid* as one space-joined string, or None
+    when it can't be read.
+
+    An *empty* cmdline also reads as None: that is what a zombie — exited,
+    not yet reaped — reports, and a process that no longer runs is not
+    evidence of anything happening.
+    """
     try:
         with open(f"/proc/{pid}/cmdline", "rb") as fh:
-            cmdline = fh.read().decode("utf-8", errors="replace")
+            raw = fh.read()
     except OSError:
-        return False
-    return cli in cmdline
+        return None
+    text = raw.rstrip(b"\0").replace(b"\0", b" ").decode("utf-8", errors="replace")
+    return text or None
 
 
 def _deepest_agent_pid(pid: int, cli: str, depth: int = _MAX_DEPTH) -> int | None:
@@ -124,14 +138,42 @@ def agent_descendant_cwd(pid: int, cli: str, depth: int = _MAX_DEPTH) -> str | N
     return process_cwd(agent_pid) if agent_pid is not None else None
 
 
-def has_live_descendant(pid: int, cli: str) -> bool:
+def descendant_cmdlines(pid: int, cli: str) -> set[str]:
+    """The cmdlines of everything running directly below the agent process at
+    or below *pid* — empty when *pid* is not an agent process, or when the
+    agent has spawned nothing. Zombies (whose cmdline reads empty) are not
+    running and don't appear.
+
+    This is both halves of the baseline scheme in one shape: sampled on a
+    freshly spawned tab it lists the agent's own plumbing (its MCP servers —
+    the baseline), and sampled later it lists plumbing plus whatever work is
+    in flight, ready to be compared against that baseline.
+    """
+    agent_pid = _deepest_agent_pid(pid, cli)
+    if agent_pid is None:
+        return set()
+    cmdlines = set()
+    for child in process_children(agent_pid):
+        cmdline = process_cmdline(child)
+        if cmdline is not None:
+            cmdlines.add(cmdline)
+    return cmdlines
+
+
+def has_live_descendant(pid: int, cli: str, ignore: Collection[str] = frozenset()) -> bool:
     """Whether the agent process at or below *pid* has spawned anything still
-    running below it right now.
+    running below it right now — anything beyond *ignore*, that is.
 
     A tool call in flight looks exactly like a background job the agent
     started and left running (a dev server, a long build): both are a live
     child of the agent process. Used as a "the session is still working"
     signal alongside terminal and transcript output — see `activity.py`.
+
+    Not every child is work, though: the CLI spawns its stdio MCP servers at
+    startup and keeps them for its whole life, so "has any child at all"
+    would read as busy forever on a session with MCP configured. *ignore*
+    carries the cmdlines of that known plumbing — the session's captured
+    baseline plus the servers Collins itself configures — and children
+    matching it don't count.
     """
-    agent_pid = _deepest_agent_pid(pid, cli)
-    return agent_pid is not None and bool(process_children(agent_pid))
+    return any(cmdline not in ignore for cmdline in descendant_cmdlines(pid, cli))

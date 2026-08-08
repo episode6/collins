@@ -117,6 +117,44 @@ def test_has_live_descendant_false_when_not_the_agent(tree):
     assert proctree.has_live_descendant(proc.pid, "claude") is False
 
 
+def test_has_live_descendant_ignores_baselined_plumbing(tree):
+    """The MCP-server shape: a child the CLI spawned for itself at startup and
+    keeps for its whole life. With its cmdline in the baseline it must not
+    read as the agent leaving work running — that child is why sessions with
+    MCP configured showed a busy pole forever."""
+    proc, _parent_dir, _child_dir = tree("claude-wrapper", "mcp-plumbing-server")
+    plumbing = proctree.descendant_cmdlines(proc.pid, "claude")
+    assert plumbing
+    assert proctree.has_live_descendant(proc.pid, "claude", ignore=plumbing) is False
+
+
+def test_has_live_descendant_sees_work_beyond_the_ignored_plumbing(tree):
+    proc, _parent_dir, _child_dir = tree("claude-wrapper", "some-build-script")
+    ignore = {"an unrelated baseline cmdline"}
+    assert proctree.has_live_descendant(proc.pid, "claude", ignore=ignore) is True
+
+
+def test_descendant_cmdlines_list_what_runs_below_the_agent(tree):
+    """The child's argv comes back space-joined, exactly as a captured
+    baseline will later be compared against it."""
+    proc, _parent_dir, _child_dir = tree("claude-wrapper", "some-build-script")
+    expected = f"{sys.executable} -c " + _CHILD.format(tag="some-build-script")
+    assert proctree.descendant_cmdlines(proc.pid, "claude") == {expected}
+
+
+def test_descendant_cmdlines_empty_when_not_the_agent(tree):
+    proc, _parent_dir, _child_dir = tree("unrelated-program", "also-unrelated")
+    assert proctree.descendant_cmdlines(proc.pid, "claude") == set()
+
+
+def test_process_cmdline_joins_argv_with_spaces(tree):
+    proc, _parent_dir, _child_dir = tree("claude-wrapper", "claude-agent")
+    cmdline = proctree.process_cmdline(proc.pid)
+    assert cmdline is not None
+    assert cmdline.startswith(f"{sys.executable} -c ")
+    assert "claude-wrapper" in cmdline
+
+
 def test_ppid_of_a_spawned_child_is_this_process(tree):
     proc, _parent_dir, _child_dir = tree("claude-wrapper", "claude-agent")
     assert proctree.process_ppid(proc.pid) == os.getpid()
@@ -159,6 +197,8 @@ def test_missing_pids_are_not_fatal():
     assert proctree.is_agent_process(2**31 - 1, "claude") is False
     assert proctree.agent_descendant_cwd(2**31 - 1, "claude") is None
     assert proctree.has_live_descendant(2**31 - 1, "claude") is False
+    assert proctree.process_cmdline(2**31 - 1) is None
+    assert proctree.descendant_cmdlines(2**31 - 1, "claude") == set()
 
 
 def test_self_is_an_agent_process_when_the_name_is_in_the_command_line():

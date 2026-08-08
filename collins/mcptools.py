@@ -242,6 +242,41 @@ def config_path(app_id: str) -> str:
     return os.path.join(runtime_dir(app_id), "mcp.json")
 
 
+def _stdio_servers(app_id: str) -> dict:
+    """The stdio MCP servers Collins configures, as mcp.json's mcpServers
+    value. One definition shared by `write_config` and
+    `infrastructure_cmdlines`, so what the CLI is told to spawn and what the
+    busy-tracking poll knows to ignore can never drift apart."""
+    return {
+        "collins": {
+            "type": "stdio",
+            "command": sys.executable,
+            "args": ["-m", "collins.mcp_shim"],
+            "env": {
+                "COLLINS_MCP_SOCKET": socket_path(app_id),
+                "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
+            },
+        },
+    }
+
+
+def infrastructure_cmdlines() -> frozenset[str]:
+    """The cmdlines (as /proc renders them: argv space-joined) of the server
+    processes the CLI spawns because Collins asked it to.
+
+    These are the CLI's plumbing, alive for a session's whole life, and must
+    never read as "the agent left something running" — the busy poll unions
+    them into every baseline it applies (see MainWindow's process poll), which
+    also covers sessions from before their baseline was ever captured. The
+    env block plays no part: it doesn't appear in a cmdline.
+    """
+    return frozenset(
+        " ".join([server["command"], *server["args"]])
+        for server in _stdio_servers("").values()
+        if server.get("type") == "stdio"
+    )
+
+
 def write_config(app_id: str) -> str | None:
     """Write the `--mcp-config` file and return its path, or None on failure.
 
@@ -251,19 +286,7 @@ def write_config(app_id: str) -> str | None:
     so it resolves for every install shape — system package, editable
     checkout, debug instance — without guessing at PATH.
     """
-    config = {
-        "mcpServers": {
-            "collins": {
-                "type": "stdio",
-                "command": sys.executable,
-                "args": ["-m", "collins.mcp_shim"],
-                "env": {
-                    "COLLINS_MCP_SOCKET": socket_path(app_id),
-                    "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
-                },
-            },
-        },
-    }
+    config = {"mcpServers": _stdio_servers(app_id)}
     path = Path(config_path(app_id))
     try:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
