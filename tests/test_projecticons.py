@@ -115,6 +115,30 @@ def test_data_rejects_active_content(tmp_path):
         assert project_icon_data(tmp_path) is None
 
 
+def test_data_accepts_inline_data_image(tmp_path):
+    # A hand-shipped icon may embed its own raster artwork as a data:image/*
+    # href — projects only reach the sidebar once trusted.
+    for payload in (
+        b'<image href="data:image/png;base64,iVBORw0KGgo="/>',
+        b'<image xlink:href="data:image/png;base64,iVBORw0KGgo="/>',
+    ):
+        good = _SVG.replace(b"/>", b">" + payload + b"</svg>")
+        _write_icon(tmp_path, good)
+        assert project_icon_data(tmp_path) == good
+
+
+def test_data_rejects_non_image_data_uris(tmp_path):
+    # Only data:image/* gets the carve-out; any other data: payload (or one
+    # smuggled behind leading whitespace, or through CSS url()) is refused.
+    for payload in (
+        b'<image href="data:text/html,<script>alert(1)</script>"/>',
+        b'<image href=" data:image/png;base64,iVBORw0KGgo="/>',
+        b'<rect style="fill:url(data:image/svg+xml,x)"/>',
+    ):
+        _write_icon(tmp_path, _SVG.replace(b"/>", b">" + payload + b"</svg>"))
+        assert project_icon_data(tmp_path) is None
+
+
 def test_data_keeps_internal_references(tmp_path):
     good = _SVG.replace(
         b"/>",

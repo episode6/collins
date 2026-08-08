@@ -22,15 +22,27 @@ _MAX_ICON_BYTES = 256 * 1024
 # An icon is inert artwork. Anything that could run or fetch when the SVG is
 # rendered somewhere less careful than librsvg (which executes none of it) is
 # refused outright: script elements, event-handler attributes, and references
-# to anything outside the document — an href or CSS url() may only point at a
-# local #fragment, which is all inline gradients and <use> reuse need. xmlns
+# to anything outside the document. An href may point at a local #fragment
+# (all inline gradients and <use> reuse need) or carry an inline data:image/*
+# URI — projects only appear in the sidebar once trusted, so an embedded
+# raster is the project embedding its own artwork, not a foreign fetch. CSS
+# url() stays #fragment-only (a data: URI does nothing useful there). xmlns
 # declarations carry their URLs in xmlns attributes, so they pass.
 _SVG_ACTIVE_CONTENT = re.compile(
     rb"<\s*script"
     rb"|\bon[a-z]+\s*="
-    rb"|\b(?:xlink:)?href\s*=\s*[\"'](?!#)"
+    rb"|\b(?:xlink:)?href\s*=\s*[\"'](?!#|data:image/)"
     rb"|\burl\s*\(\s*[\"']?\s*(?!#)"
     rb"|@import\b",
+    re.IGNORECASE,
+)
+
+# Generated icons are held to the original, stricter rule: pure vector art,
+# no data: URIs of any kind. The model designs from shapes and paths — an
+# embedded raster in a reply is never intentional artwork, and keeping the
+# generator's output free of opaque blobs keeps its previews reviewable.
+_SVG_DATA_HREF = re.compile(
+    rb"\b(?:xlink:)?href\s*=\s*[\"']data:",
     re.IGNORECASE,
 )
 
@@ -73,14 +85,24 @@ def project_icon_data(cwd: str | Path | None) -> bytes | None:
 
 
 def usable_icon_bytes(data: bytes) -> bool:
-    """The one gate icon bytes pass before any parser, preview, or save sees
-    them, wherever they came from — a repo's on-disk project-icon.svg or a
-    model reply (icongen.extract_svg): plausible size (the size cap re-checks
-    what project_icon_path could only stat a race ago), XML-shaped SVG text,
-    and none of the active content an icon has no business carrying."""
+    """The gate on-disk project-icon.svg bytes pass before any parser or
+    preview sees them: plausible size (the size cap re-checks what
+    project_icon_path could only stat a race ago), XML-shaped SVG text, and
+    none of the active content an icon has no business carrying. Inline
+    data:image/* hrefs are allowed — a hand-shipped icon may embed its own
+    raster artwork. Generated replies go through the stricter
+    usable_generated_icon_bytes instead."""
     if not 0 < len(data) <= _MAX_ICON_BYTES:
         return False
     return _looks_like_svg(data) and not _SVG_ACTIVE_CONTENT.search(data)
+
+
+def usable_generated_icon_bytes(data: bytes) -> bool:
+    """usable_icon_bytes, plus the generator-only rule: no data: hrefs at
+    all. This is the gate icongen.extract_svg applies to model replies, so
+    the design brief's "pure vector, no embedded images" requirement is
+    enforced rather than trusted to a model reading untrusted repo text."""
+    return usable_icon_bytes(data) and not _SVG_DATA_HREF.search(data)
 
 
 def _looks_like_svg(data: bytes) -> bool:

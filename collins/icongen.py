@@ -11,9 +11,11 @@ executes one cancellable ``claude -p`` call from its own child of the title
 generator's scratch directory (titles.scratch_workdir), so the run's
 transcript never appears as a session and concurrent runs never delete each
 other's; extract_svg() pulls the SVG document out of the reply and vets it
-with the same gate the sidebar applies to on-disk icon bytes
-(projecticons.usable_icon_bytes) — so the prompt's "no scripts, no external
-URLs" rule is enforced on the reply, not just asked of the model.
+with the generated-icon gate (projecticons.usable_generated_icon_bytes) —
+everything the sidebar requires of on-disk icon bytes plus a ban on data:
+URIs, so the prompt's "pure vector, no scripts, no external URLs, no
+embedded images" rules are enforced on the reply, not just asked of the
+model.
 
 Nothing touches the project directory until the user clicks Save —
 save_icon() is the only function here that writes into it.
@@ -56,6 +58,8 @@ _PROMPT_HEADER = (
     "Hard requirements:\n"
     "- Plain, fully self-contained SVG text: no scripts, no external URLs, "
     "no external images or fonts; inline any gradients.\n"
+    "- Pure vector art only: no data: URIs, no embedded raster images - "
+    "draw with shapes and paths.\n"
     '- Square canvas: width="128" height="128" viewBox="0 0 128 128".\n'
     "- The icon is rasterized at 16 pixels next to the project's name in a "
     "sidebar, so use one bold, simple motif with few elements and thick "
@@ -150,19 +154,20 @@ def extract_svg(reply: str) -> bytes | None:
     """The reply's SVG document as vetted bytes, or None.
 
     The model is told to reply with bare SVG, but a fenced or prefaced reply
-    still gives up its document. The result passes the same gate
-    projecticons applies to on-disk icons — size, SVG shape, and no active
-    content (scripts, event handlers, external references) — so the prompt's
-    hard requirements are enforced here rather than trusted to a model
-    reading untrusted repo text, and the preview and Save never see bytes
-    the sidebar itself would refuse.
+    still gives up its document. The result passes the generated-icon gate —
+    size, SVG shape, no active content (scripts, event handlers, external
+    references), and no data: URIs (stricter than what the sidebar accepts
+    from a hand-shipped on-disk icon) — so the prompt's hard requirements
+    are enforced here rather than trusted to a model reading untrusted repo
+    text, and the preview and Save never see bytes the sidebar itself would
+    refuse.
     """
     start = reply.find("<svg")
     stop = reply.rfind("</svg>")
     if start < 0 or stop < start:
         return None
     data = reply[start : stop + len("</svg>")].encode("utf-8")
-    return data if projecticons.usable_icon_bytes(data) else None
+    return data if projecticons.usable_generated_icon_bytes(data) else None
 
 
 def save_icon(cwd: str | Path, svg: bytes) -> Path:
