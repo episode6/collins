@@ -131,7 +131,7 @@ msgstr ""
 msgid "Click for actions"
 msgstr ""
 
-#: collins/prmenu.py:206 collins/terminal.py:1045
+#: collins/prmenu.py:299 collins/sidebar.py:753 collins/terminal.py:1723
 msgid "Right-click to open"
 msgstr ""
 

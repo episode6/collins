@@ -981,11 +981,19 @@ def describe_all(prs: Iterable[PullRequest]) -> str:
     earned the badge is in there with the rest. Bounded, like everything else
     built out of repository text — a session that has opened dozens of PRs
     still gets a tooltip rather than a wall.
+
+    A list too long to print keeps both of its ends: the oldest fill the top,
+    as ever, and the newest gets the last line whatever the count, because it
+    is the one the mark's right-click opens and the one the hint under this
+    list names (see SessionRow._sync_pr_mark). The tally in between says how
+    many were passed over on the way to it.
     """
     prs = list(prs)
-    lines = [describe(pr) for pr in prs[:_MAX_TOOLTIP_PRS]]
-    if len(prs) > _MAX_TOOLTIP_PRS:
-        lines.append(_("and {n} more").format(n=len(prs) - _MAX_TOOLTIP_PRS))
+    if len(prs) <= _MAX_TOOLTIP_PRS:
+        return "\n".join(describe(pr) for pr in prs)
+    lines = [describe(pr) for pr in prs[: _MAX_TOOLTIP_PRS - 1]]
+    lines.append(_("and {n} more").format(n=len(prs) - _MAX_TOOLTIP_PRS))
+    lines.append(describe(prs[-1]))
     return "\n".join(lines)
 
 

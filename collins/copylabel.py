@@ -1,5 +1,6 @@
-"""Click behaviour for the footer labels: copy the text (working directory,
-branch), or open a link (pull request)."""
+"""Click behaviour for anything standing in for text or a link: copy what it
+says (the footer's working directory and branch), or open where it points (a
+pull request, from a footer chip or a sidebar row's mark)."""
 
 from __future__ import annotations
 
