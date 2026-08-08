@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-07. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -2142,6 +2142,21 @@ class TerminalTab(Gtk.Box):
         is to look at the terminal.
         """
         return "" if self.takes_prompt() else _("This session isn't at an empty prompt.")
+
+    def unstarted_thread(self) -> bool:
+        """Whether this tab is still a New Thread with nothing in it: a
+        brand-new session — not resumed, forked or continued, and its first
+        prompt never sent, so no transcript has appeared to resolve a
+        session id — sitting at an empty input box right now. Closing one
+        loses nothing, so the window skips the active-session confirmation
+        for it. Anything typed into the box (takes_prompt says no) brings
+        the confirmation back."""
+        return (
+            self._resolver_cwd is not None
+            and self.session_id is None
+            and self._command_override is None
+            and self.takes_prompt()
+        )
 
     def worktree_exit_prompt_keystrokes(self) -> str | None:
         """Keystrokes that accept the agent's "leaving a worktree" dialog if
