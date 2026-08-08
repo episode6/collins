@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-06. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 import os
 import shutil
@@ -95,6 +95,26 @@ def test_resume_attaches_to_finished_resident_background_job(monkeypatch):
         ClaudeProvider().resume_command("finished-id")
         == "/usr/bin/claude attach finished-job"
     )
+
+
+def test_background_agents_never_hands_the_cli_our_tty(monkeypatch):
+    # The CLI puts a tty stdin into raw mode for its whole run and restores
+    # it only on a clean exit — an inherited stdin is the terminal the app
+    # was launched from, and one timeout-killed poll left that terminal
+    # raw/no-echo. stdin must be /dev/null so the CLI never touches it.
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    seen = {}
+
+    class Result:
+        stdout = "[]"
+
+    def fake_run(*args, **kwargs):
+        seen.update(kwargs)
+        return Result()
+
+    monkeypatch.setattr(providers.subprocess, "run", fake_run)
+    ClaudeProvider().background_agents()
+    assert seen["stdin"] == providers.subprocess.DEVNULL
 
 
 def test_background_agents_parses_agents_json(monkeypatch):
