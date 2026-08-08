@@ -5,7 +5,9 @@
 An image dragged in as raw data (from a browser, a screenshot tool, an
 image viewer) has no path an @-mention could name, so a copy is written
 here and the mention points at the copy. Dropped *files* are mentioned in
-place — only the text built for them (mention_text) lives here.
+place — only the text built for them (mention_text) lives here, along with
+how that text joins whatever is already typed (leading_space, which the
+attach-file button shares).
 
 Kept GTK-free (like editorfiles.py/gitinfo.py) so this stays unit-testable
 headless; terminal.py owns the drop target and turns Gdk values into the
@@ -51,6 +53,30 @@ def mention_text(paths: list[str], file_reference: Callable[[str], str | None]) 
         else:
             tokens.append(reference + " ")
     return "".join(tokens), failed
+
+
+def leading_space(text_before_cursor: str, cursor_column: int) -> str:
+    """The space to type in front of a mention, or "" when none is wanted.
+
+    A mention added to a half-written sentence has to keep its distance:
+    typed straight in it glues itself onto the word the cursor sits after
+    ("look at@main.py"), where the CLI reads no mention token at all.
+
+    *text_before_cursor* is the input line from its start up to the cursor,
+    as the terminal has it, and its last character is the whole test. An
+    empty input box ends in the whitespace its own prompt marker is drawn
+    with (Claude's ❯ and a no-break space) — and so does one showing only
+    the agent's dim suggestion, whose cursor stays at the marker — while a
+    sentence the user already left a space on ends in that space. None of
+    those wants another one.
+
+    *cursor_column* covers the case the text can't speak for: a cursor past
+    the end of the written line, where the blank cells in between are
+    whitespace the terminal doesn't bother reporting.
+    """
+    if not text_before_cursor or len(text_before_cursor) < cursor_column:
+        return ""
+    return "" if text_before_cursor[-1].isspace() else " "
 
 
 def default_directory() -> Path:

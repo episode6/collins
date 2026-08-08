@@ -5,10 +5,15 @@ import time
 from collins.dropimages import (
     PRUNE_AFTER_SECONDS,
     default_directory,
+    leading_space,
     mention_text,
     prune_stale,
     save_png,
 )
+
+# Claude Code draws its input box as a ❯ and a no-break space (the space
+# below is that one, not an ordinary one), then whatever has been typed.
+_PROMPT = "❯ "
 
 # A fixed moment keeps the expected file names stable; the exact date is
 # irrelevant, only that every test agrees on it.
@@ -40,6 +45,39 @@ def test_mention_text_counts_refused_names_and_keeps_the_rest():
 def test_mention_text_all_refused_or_empty():
     assert mention_text(["\x1b.png"], _fake_reference) == ("", 1)
     assert mention_text([], _fake_reference) == ("", 0)
+
+
+# -- leading_space ------------------------------------------------------------
+
+
+def test_leading_space_none_for_an_empty_input_box():
+    # The cursor sits right after the marker, whose no-break space is the
+    # last character before it — the box holds nothing of the user's.
+    assert leading_space(_PROMPT, len(_PROMPT)) == ""
+
+
+def test_leading_space_separates_a_half_written_sentence():
+    line = _PROMPT + "look at"
+    assert leading_space(line, len(line)) == " "
+
+
+def test_leading_space_none_when_the_sentence_already_ends_in_one():
+    line = _PROMPT + "look at "
+    assert leading_space(line, len(line)) == ""
+
+
+def test_leading_space_separates_mid_sentence_and_after_punctuation():
+    # The cursor moved back into the sentence: only what precedes it counts.
+    assert leading_space(_PROMPT + "look at", len(_PROMPT) + 4) == " "
+    line = _PROMPT + "compare these:"
+    assert leading_space(line, len(line)) == " "
+
+
+def test_leading_space_none_past_the_end_of_the_written_line():
+    # A cursor beyond what the terminal reported: the cells in between are
+    # blank, so the mention already has its distance.
+    assert leading_space(_PROMPT + "look at", 40) == ""
+    assert leading_space("", 0) == ""
 
 
 # -- default_directory --------------------------------------------------------

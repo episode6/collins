@@ -1923,7 +1923,8 @@ class TerminalTab(Gtk.Box):
         for *path* into the input box — typed, never submitted, so the user
         says what they want done with it. The trailing space both
         terminates the CLI's mention token and leaves the cursor ready for
-        that sentence.
+        that sentence; the leading one keeps the token off the end of a
+        sentence already being written (see _mention_leading_space).
 
         The path resolves against the agent's cwd right now, not the
         directory the tab started in — an agent that has cd'd into a
@@ -1943,8 +1944,27 @@ class TerminalTab(Gtk.Box):
         if reference is None:
             self.feed_message(_("Add to chat isn't available for this file"))
             return
-        self.feed_child_text(reference + " ")
+        self.feed_child_text(self._mention_leading_space() + reference + " ")
         GLib.idle_add(self._focus_terminal_after_add_to_chat)
+
+    def _mention_leading_space(self) -> str:
+        """A space to put in front of a mention about to be typed, when the
+        input box has a sentence in it already (dropimages.leading_space
+        decides; this finds what it reads).
+
+        That is the line the cursor is on, up to the cursor — the same
+        screen `takes_prompt` reads, but read differently: this question is
+        asked mid-sentence, where the prompt marker is no longer the last
+        thing on the line, so what counts is the character immediately
+        before the cursor rather than where the marker sits. A cursor at
+        column 0 has nothing before it to read.
+        """
+        column, row = self.terminal.get_cursor_position()
+        if column <= 0:
+            return ""
+        line = self.terminal.get_text_range_format(Vte.Format.TEXT, row, 0, row, column)
+        text = line[0] if isinstance(line, tuple) else line
+        return dropimages.leading_space(text or "", column)
 
     def _focus_terminal_after_add_to_chat(self) -> bool:
         """Move focus to the agent terminal once the "Add to chat" menu is
@@ -2049,8 +2069,8 @@ class TerminalTab(Gtk.Box):
 
     def _mention_dropped_paths(self, paths: list[str]) -> bool:
         """Type a mention token for each path into the input box — typed,
-        never submitted, mirroring "Add to chat" (see _on_editor_add_to_chat
-        for why the trailing space and the missing takes_prompt gate). Paths
+        never submitted, mirroring "Add to chat" (see add_file_to_chat for
+        why the spaces around them and the missing takes_prompt gate). Paths
         the provider refuses to reference (a control character in the name —
         see file_reference) are reported by count, not echoed: those names
         are exactly the untrusted bytes feed_message must not write to the
@@ -2070,7 +2090,7 @@ class TerminalTab(Gtk.Box):
             )
         if not text:
             return False
-        self.feed_child_text(text)
+        self.feed_child_text(self._mention_leading_space() + text)
         self.grab_terminal_focus()
         return True
 
