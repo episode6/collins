@@ -1580,13 +1580,16 @@ class MainWindow(Adw.ApplicationWindow):
             # to an existing id, which may be attaching to a live agent).
             self._fresh_spawns.add(page)
             # The poll must run before the session id resolves: this tab's
-            # pre-submit window is when its plumbing baseline is captured.
+            # pre-submit window is when its plumbing baseline is captured —
+            # and one snapshot lands right now, so even a submit inside the
+            # poll's first interval leaves a capture attempt behind it.
             self._sync_process_poll()
+            self._absorb_baseline(page)
         # "commit" is everything the app sends this terminal's child — the
         # keystrokes the user types, and the focus reports VTE emits on a tab
         # switch — so the redraw that answers one is not the agent working.
         # The text goes along so the gate can arm itself on the first submit.
-        tab.terminal.connect("commit", lambda _term, text, _size: gate.poked(text or ""))
+        tab.terminal.connect("commit", self._on_terminal_commit, page)
         tab.terminal.connect("contents-changed", self._on_terminal_output, page)
         # The agent's own busy signal, where the CLI and VTE both speak it —
         # see ProgressWatch (and _agent_tab_environment for how it's coaxed
@@ -2822,7 +2825,7 @@ class MainWindow(Adw.ApplicationWindow):
         if not self._pages and not self._fresh_spawns:
             self._process_poll = None
             return GLib.SOURCE_REMOVE
-        capturing = {page for page in self._fresh_spawns if self._absorb_baseline(page)}
+        capturing = {page for page in list(self._fresh_spawns) if self._absorb_baseline(page)}
         for session_id, page in list(self._pages.items()):
             if page in capturing:
                 continue  # nothing ever submitted: children are plumbing, not work
@@ -2843,7 +2846,13 @@ class MainWindow(Adw.ApplicationWindow):
         be running before the first submit. The gate arming freezes the set
         for good — from then on the servers persist for the CLI's lifetime,
         and anything newly spawned really is work.
+
+        Only a fresh spawn has a pristine window at all: a tab bound to an
+        existing session may be attaching to an agent already mid-turn, and
+        absorbing there could bake real work into the persisted baseline.
         """
+        if page not in self._fresh_spawns:
+            return False
         gate = self._echo_gates.get(page)
         if gate is None or gate.armed:
             return False
@@ -2868,6 +2877,25 @@ class MainWindow(Adw.ApplicationWindow):
         ignores |= self._baseline_captures.get(page, set())
         ignores |= self._infra_cmdlines
         return ignores
+
+    def _on_terminal_commit(self, _terminal, text: str, _size: int, page: Adw.TabPage) -> None:
+        """Everything the app sends this terminal's child, on its way to the
+        gate (see EchoGate.poked).
+
+        A carriage return in it is the arming edge — the last pristine
+        instant of a fresh spawn — so the baseline takes one final snapshot
+        first: a submit inside the poll's first 2 seconds would otherwise
+        close the capture window empty, and a user-configured MCP server
+        already running would read as work for the session's whole life. The
+        agent can't have spawned anything for this turn yet; the text reaches
+        it after this handler returns.
+        """
+        text = text or ""
+        if "\r" in text:
+            self._absorb_baseline(page)  # no-op unless pristine (armed gates bail)
+        gate = self._echo_gates.get(page)
+        if gate is not None:
+            gate.poked(text)
 
     # -- pre-emptive /bg status ----------------------------------------------
 
@@ -2979,6 +3007,9 @@ class MainWindow(Adw.ApplicationWindow):
             return Gdk.EVENT_PROPAGATE
         # Arm through the key itself, not just the "\r" the commit will carry:
         # this stays right however VTE ends up encoding Enter for the child.
+        # The baseline's last-instant snapshot rides the same edge (see
+        # _on_terminal_commit; armed gates make it a no-op).
+        self._absorb_baseline(page)
         if (gate := self._echo_gates.get(page)) is not None:
             gate.arm()
         for tracked in (self._session_id_of(page), self._placeholder_pages.get(page)):
