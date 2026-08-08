@@ -89,9 +89,6 @@ _CSS = b"""
 row.drop-above { box-shadow: inset 0 2px 0 0 @accent_bg_color; }
 row.drop-below { box-shadow: inset 0 -2px 0 0 @accent_bg_color; }
 
-/* session-row state badge */
-.waiting-badge { color: #e5a50a; }      /* Claude asked a question */
-
 /* make the active tab clearly stand out from inactive ones. Its background
    color is set dynamically, not here: themes._apply_dynamic_theme_css keeps
    it matched to the current terminal theme's background (see themes.py), so
@@ -482,7 +479,7 @@ row.session-child.archiving.archiving-gone {
   background-color: color-mix(in srgb, currentColor var(--border-opacity), var(--window-bg-color));
 }
 
-/* interactive prompt card overlaid on the terminal */
+/* a chat turn's card */
 .chat-card {
   background-color: @window_bg_color;
   border: 1px solid alpha(#D97757, 0.6);
@@ -494,12 +491,6 @@ row.session-child.archiving.archiving-gone {
   color: #D97757;
   font-weight: bold;
   font-size: 0.85em;
-}
-.chat-option {
-  padding: 8px 12px;
-}
-.chat-option-static {
-  padding: 4px 8px;
 }
 
 /* visual bell: a terminal's BEL tints the header bar, plus the ringing

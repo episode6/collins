@@ -641,21 +641,8 @@ msgid ""
 "to newly opened tabs)"
 msgstr ""
 
-#: collins/promptcard.py:46 collins/replayview.py:92
+#: collins/replayview.py:92
 msgid "Question"
-msgstr ""
-
-#: collins/promptcard.py:48
-#, python-brace-format
-msgid "{n} questions"
-msgstr ""
-
-#: collins/promptcard.py:65
-msgid "This prompt needs the terminal to answer."
-msgstr ""
-
-#: collins/promptcard.py:69
-msgid "Answer in terminal"
 msgstr ""
 
 #: collins/prstatus.py:90
@@ -728,10 +715,6 @@ msgstr ""
 
 #: collins/sidebar.py:230 collins/sidebar.py:792
 msgid "Archive session"
-msgstr ""
-
-#: collins/sidebar.py:307
-msgid "Claude is waiting for your reply"
 msgstr ""
 
 #: collins/sidebar.py:312

@@ -119,10 +119,6 @@ _HEADER_ICON_OFFSET = 18
 # is no taller than the plain menu items above and below it.
 _OPEN_WITH_ICON_PX = 16
 
-# The waiting state badge: matches the row's other symbolic icons (project
-# icon, action buttons), which all render at 16px.
-_STATE_BADGE_ICON_PX = 16
-
 
 def _session_child_indent(icon_size: int) -> int:
     """Left margin for a session row, so its card starts right where the icon
@@ -525,17 +521,6 @@ class SessionRow(Gtk.ListBoxRow):
         top.append(name_label)
         self._name_label = name_label
 
-        # Only the waiting state badges the row (interrupted colors the guide
-        # line instead — see _on_state_changed), so the badge is fixed here
-        # and only its visibility ever changes.
-        self._state_badge = Gtk.Image(valign=Gtk.Align.CENTER)
-        self._state_badge.set_from_icon_name("waiting-question-symbolic")
-        self._state_badge.add_css_class("waiting-badge")
-        self._state_badge.set_tooltip_text(_("Claude is waiting for your reply"))
-        self._state_badge.set_pixel_size(_STATE_BADGE_ICON_PX)
-        self._state_badge.set_margin_start(2)
-        top.append(self._state_badge)
-
         time_label = Gtk.Label(valign=Gtk.Align.CENTER)
         time_label.set_margin_start(8)  # keep the timestamp off a long title
         time_label.add_css_class("dim-label")
@@ -685,8 +670,8 @@ class SessionRow(Gtk.ListBoxRow):
         )
         self._on_can_background_changed(item, None)
 
-        # Status highlight, busy pole and state badge need CSS-class updates:
-        # plain signals, detached on unroot.
+        # Status highlight, busy pole and interrupted state need CSS-class
+        # updates: plain signals, detached on unroot.
         self._status_handler = item.connect("notify::status", self._on_status_changed)
         self._state_handler = item.connect("notify::state", self._on_state_changed)
         self._busy_handler = item.connect("notify::busy", self._on_busy_changed)
@@ -964,10 +949,8 @@ class SessionRow(Gtk.ListBoxRow):
             self.remove_css_class(_UNREAD_CSS)
 
     def _on_state_changed(self, item: SessionItem, _pspec) -> None:
-        # Waiting is a question to answer, so it stays an icon at the row's
-        # right edge; interrupted is a status, so it speaks through the guide
-        # line like the other statuses that color it (detached, unread).
-        self._state_badge.set_visible(item.state == "waiting")
+        # Interrupted is a status, so it speaks through the guide line like the
+        # other statuses that color it (detached, unread).
         if item.state == "interrupted":
             self.add_css_class(_INTERRUPTED_CSS)
         else:

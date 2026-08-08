@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -142,7 +142,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Notify when a session goes idle": "Értesítés, ha egy munkamenet tétlenné válik",
         "Desktop notification when a background tab stops producing output":
             "Asztali értesítés, amikor egy háttérlap abbahagyja a kimenet előállítását",
-        "Claude is waiting for your reply": "A Claude a válaszodra vár",
         "Remove from favorites": "Eltávolítás a kedvencekből",
         "Add to favorites": "Hozzáadás a kedvencekhez",
         "Sessions": "Munkamenetek",
@@ -211,10 +210,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "New session (Ctrl+Shift+T)": "Új munkamenet (Ctrl+Shift+T)",
         "Agent": "Ügynök",
         "Question": "Kérdés",
-        "{n} questions": "{n} kérdés",
-        "This prompt needs the terminal to answer.":
-            "Ezt a kérdést a terminálban kell megválaszolni.",
-        "Answer in terminal": "Válasz a terminálban",
         "New {name} native chat (experimental)…": "Új natív {name} csevegés (kísérleti)…",
         "Chat with {name} — every file edit and command asks your permission first.":
             "Csevegés a {name}-tal — minden fájlmódosítás és parancs előbb az engedélyedet kéri.",
@@ -481,7 +476,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Notify when a session goes idle": "Benachrichtigen, wenn eine Sitzung untätig wird",
         "Desktop notification when a background tab stops producing output":
             "Desktop-Benachrichtigung, wenn ein Hintergrund-Tab keine Ausgabe mehr erzeugt",
-        "Claude is waiting for your reply": "Claude wartet auf deine Antwort",
         "Remove from favorites": "Aus Favoriten entfernen",
         "Add to favorites": "Zu Favoriten hinzufügen",
         "Sessions": "Sitzungen",
@@ -551,10 +545,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "New session (Ctrl+Shift+T)": "Neue Sitzung (Strg+Umschalt+T)",
         "Agent": "Agent",
         "Question": "Frage",
-        "{n} questions": "{n} Fragen",
-        "This prompt needs the terminal to answer.":
-            "Diese Eingabe muss im Terminal beantwortet werden.",
-        "Answer in terminal": "Im Terminal antworten",
         "New {name} native chat (experimental)…": "Neuer nativer {name}-Chat (experimentell)…",
         "Chat with {name} — every file edit and command asks your permission first.":
             "Chat mit {name} — jede Dateiänderung und jeder Befehl fragt zuerst um Erlaubnis.",
@@ -826,7 +816,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Notify when a session goes idle": "Notificar cuando una sesión quede inactiva",
         "Desktop notification when a background tab stops producing output":
             "Notificación de escritorio cuando una pestaña en segundo plano deja de producir salida",
-        "Claude is waiting for your reply": "Claude está esperando tu respuesta",
         "Remove from favorites": "Quitar de favoritos",
         "Add to favorites": "Añadir a favoritos",
         "Sessions": "Sesiones",
@@ -896,10 +885,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "New session (Ctrl+Shift+T)": "Nueva sesión (Ctrl+Mayús+T)",
         "Agent": "Agente",
         "Question": "Pregunta",
-        "{n} questions": "{n} preguntas",
-        "This prompt needs the terminal to answer.":
-            "Esta petición debe responderse en la terminal.",
-        "Answer in terminal": "Responder en la terminal",
         "New {name} native chat (experimental)…": "Nuevo chat nativo de {name} (experimental)…",
         "Chat with {name} — every file edit and command asks your permission first.":
             "Chat con {name}: cada edición de archivo y comando pide tu permiso primero.",
@@ -1169,7 +1154,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Notify when a session goes idle": "Notifier lorsqu’une session devient inactive",
         "Desktop notification when a background tab stops producing output":
             "Notification de bureau lorsqu’un onglet en arrière-plan cesse de produire une sortie",
-        "Claude is waiting for your reply": "Claude attend votre réponse",
         "Remove from favorites": "Retirer des favoris",
         "Add to favorites": "Ajouter aux favoris",
         "Sessions": "Sessions",
@@ -1239,10 +1223,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "New session (Ctrl+Shift+T)": "Nouvelle session (Ctrl+Maj+T)",
         "Agent": "Agent",
         "Question": "Question",
-        "{n} questions": "{n} questions",
-        "This prompt needs the terminal to answer.":
-            "Cette invite doit être traitée dans le terminal.",
-        "Answer in terminal": "Répondre dans le terminal",
         "New {name} native chat (experimental)…": "Nouvelle discussion native {name} (expérimental)…",
         "Chat with {name} — every file edit and command asks your permission first.":
             "Discussion avec {name} — chaque modification de fichier et commande "

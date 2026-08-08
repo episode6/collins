@@ -1858,7 +1858,7 @@ class MainWindow(Adw.ApplicationWindow):
         session that enters a git worktree has its file re-homed under a new
         project directory. The tab resolved its path once, when the session
         started, and would otherwise tail a path that no longer exists for the
-        rest of the run — no PR chips, no prompt cards, no status.
+        rest of the run — no PR chips, no agent files, no status.
 
         Only a tab whose own path has gone missing is touched, and only when
         the store has found that same session somewhere that exists, so a tab

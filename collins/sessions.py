@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -75,7 +75,7 @@ class Session:
     mtime: float  # last activity (file mtime)
     created: float = 0.0  # session start (first transcript timestamp; mtime fallback)
     size: int = 0  # transcript size in bytes
-    state: str = ""  # "" or "waiting" (the agent's last message was a question)
+    state: str = ""  # "" or "interrupted" (see _tail_state)
     provider: str = "claude"  # provider id (see providers.py)
 
     @property
@@ -270,14 +270,16 @@ def resume_cwd(session: Session) -> str | None:
 def _tail_state(path: Path) -> str:
     """Cheaply read the transcript's tail to classify its state.
 
-    - "waiting": Claude's last message was a question with no user reply after.
     - "interrupted": the last event was the user stopping Claude mid-task.
     - "" otherwise.
+
+    Anything after the interruption — the agent picking back up, or the user
+    saying something else — means the session moved on, so the marker only
+    stands when it is the last thing in the transcript.
     """
     blob = _read_tail(path)
 
-    latest: str | None = None  # "assistant", "user", or "interrupted"
-    latest_assistant_text = ""
+    latest: str | None = None  # "other" or "interrupted"
     for line in blob.splitlines():
         try:
             entry = json.loads(line)
@@ -291,16 +293,11 @@ def _tail_state(path: Path) -> str:
         if "[Request interrupted by user" in text:
             latest = "interrupted"
         elif entry.get("type") == "assistant":
-            latest = "assistant"
-            latest_assistant_text = text
+            latest = "other"
         elif entry.get("type") == "user" and not text.startswith("<"):
-            latest = "user"  # a real user reply, not a tool result / command
+            latest = "other"  # a real user reply, not a tool result / command
 
-    if latest == "interrupted":
-        return "interrupted"
-    if latest == "assistant" and latest_assistant_text.rstrip().endswith("?"):
-        return "waiting"
-    return ""
+    return "interrupted" if latest == "interrupted" else ""
 
 
 def discover_sessions() -> list[Session]:
