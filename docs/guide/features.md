@@ -441,6 +441,11 @@ fills while it's on.
 - The **time left counts down** just left of the cup while a timer is running.
   Picking another duration restarts the clock, *Indefinitely* clears it, and
   turning Caffeine Mode off cancels it.
+- **Keep screen on** decides how far "awake" goes. On (the default) holds the
+  screen on as well; off lets the screen blank as usual while the computer
+  still can't sleep — handy for an overnight agent run you don't want lighting
+  up the room. It's in the same right-click menu as the timers, and in
+  Preferences, and flipping it lands on a Caffeine Mode that's already running.
 - Preferences → *Turn on at launch* starts every launch with Caffeine Mode on,
   and *Turn off after* arms one of the same durations at startup.
 

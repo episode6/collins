@@ -38,7 +38,14 @@ from .bgstatus import (
     background_blocker,
     match_background_fork,
 )
-from .caffeine import DURATION_KEYS, duration_label, duration_seconds, format_remaining
+from .caffeine import (
+    DURATION_KEYS,
+    countdown_tooltip,
+    duration_label,
+    duration_seconds,
+    format_remaining,
+    toggle_tooltip,
+)
 from .chatsessionview import ChatSessionTab
 from .editorwindow import EditorWindow
 from .flash import flash
@@ -1072,6 +1079,19 @@ class MainWindow(Adw.ApplicationWindow):
         caffeine_timer.connect("activate", self._on_caffeine_timer)
         self.add_action(caffeine_timer)
 
+        # …and the same menu's checkbox for the keep-the-screen-on setting,
+        # which Preferences also offers. Its state is refreshed from the
+        # setting each time the menu opens, so another window (or the
+        # Preferences dialog) changing it can't leave this one showing a
+        # stale tick.
+        self._caffeine_screen_action = Gio.SimpleAction.new_stateful(
+            "caffeine-screen",
+            None,
+            GLib.Variant.new_boolean(bool(self.state.get_setting("caffeine_keep_screen_on"))),
+        )
+        self._caffeine_screen_action.connect("activate", self._on_caffeine_screen)
+        self.add_action(self._caffeine_screen_action)
+
         send_prompt = Gio.SimpleAction(
             name="send-prompt", parameter_type=GLib.VariantType("(ss)")
         )
@@ -2021,14 +2041,34 @@ class MainWindow(Adw.ApplicationWindow):
         self._sync_caffeine_visuals()
 
     def _show_caffeine_menu(self) -> None:
-        """Right-click on the Caffeine button: how long to stay awake for."""
+        """Right-click on the Caffeine button: how long to stay awake for, and
+        whether staying awake includes the screen."""
         menu = Gio.Menu()
         for key in DURATION_KEYS:
             menu.append(duration_label(key), f"win.caffeine-timer::{key}")
+        # Flat, not a section of its own: a separator would push the menu past
+        # the height a popup gets allocated (see the file-tree menu).
+        menu.append(_("Keep screen on"), "win.caffeine-screen")
+        self._caffeine_screen_action.set_state(
+            GLib.Variant.new_boolean(bool(self.state.get_setting("caffeine_keep_screen_on")))
+        )
         popover = Gtk.PopoverMenu.new_from_model(menu)
         popover.set_parent(self.caffeine_btn)
         popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
         popover.popup()
+
+    def _on_caffeine_screen(self, action: Gio.SimpleAction, _param) -> None:
+        """The menu's checkbox: same setting Preferences writes, and it lands
+        on a Caffeine Mode that's already running rather than waiting for the
+        next time it's turned on."""
+        keep_on = not action.get_state().get_boolean()
+        action.set_state(GLib.Variant.new_boolean(keep_on))
+        self.state.set_setting("caffeine_keep_screen_on", keep_on)
+        app = self.get_application()
+        if hasattr(app, "refresh_caffeine_inhibit"):
+            app.refresh_caffeine_inhibit()  # resyncs every window's button too
+        else:
+            self._sync_caffeine_visuals()
 
     def _on_caffeine_timer(self, _action, param: GLib.Variant) -> None:
         """A duration was picked: turn Caffeine Mode on for that long, replacing
@@ -2053,16 +2093,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.caffeine_btn.set_icon_name(
             "caffeine-cup-full-symbolic" if on else "caffeine-cup-empty-symbolic"
         )
+        keep_screen_on = bool(self.state.get_setting("caffeine_keep_screen_on"))
         if remaining is None:
-            tooltip = (
-                _("Caffeine Mode is on — the computer will stay awake")
-                if on
-                else _("Caffeine Mode: keep the computer awake and the screen on")
-            )
+            tooltip = toggle_tooltip(on=on, keep_screen_on=keep_screen_on)
         else:
-            tooltip = _("Caffeine Mode turns off in {time}").format(
-                time=format_remaining(remaining)
-            )
+            tooltip = countdown_tooltip(remaining, keep_screen_on=keep_screen_on)
         self.caffeine_btn.set_tooltip_text(tooltip)
         self.caffeine_timer.set_visible(remaining is not None)
         if remaining is not None:
@@ -4020,6 +4055,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _apply_preferences(self) -> None:
         self._apply_settings_to_tabs()
+        app = self.get_application()
+        if hasattr(app, "refresh_caffeine_inhibit"):
+            # Keep-the-screen-on may have flipped under a running Caffeine Mode.
+            app.refresh_caffeine_inhibit()
         self.sidebar.refresh_folder_path()
         self.sidebar.refresh_usage_panel()
         self.sidebar.refresh_project_icon_size()

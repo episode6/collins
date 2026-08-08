@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-03. Full change history: git log for this file.
+# fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 import json
 
@@ -95,6 +95,15 @@ def test_pr_title_sessions_setting(app_state):
     assert state.get_setting("pr_title_sessions") is False  # opt-in only
     state.set_setting("pr_title_sessions", True)
     assert app_state.AppState().get_setting("pr_title_sessions") is True
+
+
+def test_caffeine_keep_screen_on_setting(app_state):
+    state = app_state.AppState()
+    # Default matches how Caffeine Mode behaved before the setting existed:
+    # the screen stays lit along with the computer.
+    assert state.get_setting("caffeine_keep_screen_on") is True
+    state.set_setting("caffeine_keep_screen_on", False)
+    assert app_state.AppState().get_setting("caffeine_keep_screen_on") is False
 
 
 def test_caffeine_on_launch_setting(app_state):
