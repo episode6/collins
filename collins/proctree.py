@@ -32,6 +32,50 @@ def process_children(pid: int) -> list[int]:
         return []
 
 
+def process_ppid(pid: int) -> int | None:
+    """The parent pid of *pid*, or None when it can't be read.
+
+    Parsed from /proc/<pid>/status rather than /proc/<pid>/stat: the stat
+    line embeds the command name in parentheses — a name that may itself
+    contain spaces and parentheses — so field-splitting stat is a hazard
+    the status file doesn't have.
+    """
+    try:
+        with open(f"/proc/{pid}/status") as fh:
+            for line in fh:
+                if line.startswith("PPid:"):
+                    return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+# The upward walk gets a looser cap than _MAX_DEPTH: an MCP shim's chain up
+# to the app crosses claude, its wrappers, the tab's shell and Collins
+# itself, and how deep that stack runs isn't ours to bound.
+_MAX_ANCESTORS = 32
+
+
+def ancestor_pids(pid: int, limit: int = _MAX_ANCESTORS) -> set[int]:
+    """*pid* plus every ancestor of it, following parent links toward init.
+
+    Membership tests against this set answer "was this process launched
+    from under that one?" — how a tool call arriving from an MCP shim is
+    traced back to the terminal tab whose shell spawned its `claude`. The
+    walk stops at pid 1, at an unreadable /proc entry (the set still holds
+    what was collected), or after *limit* steps, so a /proc that lies can't
+    loop forever.
+    """
+    seen: set[int] = set()
+    while pid > 1 and pid not in seen and len(seen) < limit:
+        seen.add(pid)
+        parent = process_ppid(pid)
+        if parent is None:
+            break
+        pid = parent
+    return seen
+
+
 def is_agent_process(pid: int, cli: str) -> bool:
     """Whether *pid* looks like the agent CLI rather than something it spawned.
 
