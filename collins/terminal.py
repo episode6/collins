@@ -1962,9 +1962,20 @@ class TerminalTab(Gtk.Box):
         column, row = self.terminal.get_cursor_position()
         if column <= 0:
             return ""
-        line = self.terminal.get_text_range_format(Vte.Format.TEXT, row, 0, row, column)
+        return dropimages.leading_space(self._row_text(row, column), column)
+
+    def _row_text(self, row: int, end_column: int) -> str:
+        """What row *row* says from its start up to *end_column* (exclusive).
+
+        The column is a count of cells, not of characters — a wide character
+        advances it by two — so callers comparing the two have to say which
+        they mean (dropimages.cell_width). Trailing cells that were never
+        written aren't reported at all, which is how a cursor sitting past
+        the end of a line gives a string shorter than its own column.
+        """
+        line = self.terminal.get_text_range_format(Vte.Format.TEXT, row, 0, row, end_column)
         text = line[0] if isinstance(line, tuple) else line
-        return dropimages.leading_space(text or "", column)
+        return text or ""
 
     def _focus_terminal_after_add_to_chat(self) -> bool:
         """Move focus to the agent terminal once the "Add to chat" menu is
@@ -2127,16 +2138,13 @@ class TerminalTab(Gtk.Box):
         if self._child_pid is None:
             return False
         column, row = self.terminal.get_cursor_position()
-        line = self.terminal.get_text_range_format(
-            Vte.Format.TEXT, row, 0, row, self.terminal.get_column_count()
-        )
-        text = line[0] if isinstance(line, tuple) else line
+        text = self._row_text(row, self.terminal.get_column_count())
         # What the line says is enough to say yes to an empty input, and that
         # is the answer nearly every time this is asked; only a line that reads
         # as written-in is worth a second look at how it was drawn.
-        if self.provider.takes_prompt(text or "", column):
+        if self.provider.takes_prompt(text, column):
             return True
-        return self.provider.takes_prompt(text or "", column, self._tail_is_dim(row, column))
+        return self.provider.takes_prompt(text, column, self._tail_is_dim(row, column))
 
     def _tail_is_dim(self, row: int, column: int) -> bool:
         """Whether the line from *column* to the end of *row* is drawn dim.

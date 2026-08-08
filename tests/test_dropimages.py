@@ -4,6 +4,7 @@ import time
 
 from collins.dropimages import (
     PRUNE_AFTER_SECONDS,
+    cell_width,
     default_directory,
     leading_space,
     mention_text,
@@ -78,6 +79,36 @@ def test_leading_space_none_past_the_end_of_the_written_line():
     # blank, so the mention already has its distance.
     assert leading_space(_PROMPT + "look at", 40) == ""
     assert leading_space("", 0) == ""
+
+
+def test_leading_space_separates_a_sentence_ending_in_a_wide_character():
+    # Measured from VTE: 見て sits at cursor column 6 on a line of only four
+    # characters. Counting characters instead of cells read that as a cursor
+    # past the end of the line, and glued the mention onto the て.
+    line = _PROMPT + "見て"
+    assert leading_space(line, 6) == " "
+    assert leading_space(_PROMPT + "look 🚀", 9) == " "
+
+
+def test_leading_space_none_after_a_wide_character_and_a_space():
+    assert leading_space(_PROMPT + "見て ", 7) == ""
+
+
+# -- cell_width ---------------------------------------------------------------
+
+
+def test_cell_width_counts_cells_not_characters():
+    assert cell_width("look at") == 7
+    assert cell_width("見て") == 4  # two cells each
+    assert cell_width("🚀") == 2
+    assert cell_width(_PROMPT) == 2  # the ❯ and the no-break space, one each
+
+
+def test_cell_width_ignores_marks_and_joiners():
+    assert cell_width("é") == 1  # e + combining acute
+    assert cell_width("‍") == 0  # a zero-width joiner on its own
+    assert cell_width("👩‍🚀") == 4  # two emoji joined; VTE draws both
+    assert cell_width("") == 0
 
 
 # -- default_directory --------------------------------------------------------
