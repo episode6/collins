@@ -18,7 +18,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import ghwelcome
+from . import ghwelcome, tooltipmute
 from .caffeine import duration_seconds
 from .i18n import _
 from .prefs import apply_color_scheme
@@ -721,6 +721,9 @@ class App(Adw.Application):
         )
         if _BUNDLED_ICONS.is_dir():  # running from source; installed icons live in the system theme
             Gtk.IconTheme.get_for_display(display).add_search_path(str(_BUNDLED_ICONS))
+
+        # No tooltips from the UI behind an open menu (see tooltipmute).
+        tooltipmute.install()
 
         # Scheme-dependent colors ride in their own provider so a light/dark
         # flip only reloads these few rules, never the stylesheet above.
