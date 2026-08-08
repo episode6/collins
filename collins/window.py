@@ -1678,17 +1678,18 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_bell(self, tab: TerminalTab) -> None:
         """Visual bell (the audible bell is VTE's own)."""
-        self.flash_session(tab)
+        self._flash_session(self.tab_view.get_page(tab))
 
-    def flash_session(self, tab: TerminalTab) -> None:
+    def _flash_session(self, page: Adw.TabPage | None) -> None:
         """Flash the header bar, and the ringing session's tab header and
         sidebar row — the two places that say which session wants attention
         when the bell isn't the selected tab's.
 
         Rung by a terminal's BEL and by the `notify_user` tool, which wants
-        the same "this session" cue for anyone still looking at the app."""
+        the same "this session" cue for anyone still looking at the app.
+        Takes the page rather than the tab so notify_session, which needs the
+        page anyway, doesn't look it up twice."""
         flash(self._content_header)
-        page = self.tab_view.get_page(tab)
         if page is None:
             return
         tab_widget = self._tab_widget(page)
@@ -3462,12 +3463,19 @@ class MainWindow(Adw.ApplicationWindow):
         marks the ringing tab and row in-app, where a desktop notification
         says nothing.
 
+        A tab whose session the store hasn't discovered yet still notifies —
+        refusing because Collins is mid-scan would defeat the point — with
+        its own title as the notification id and an empty focus target,
+        which lands on a Collins window rather than this session's tab. The
+        window is the first seconds of a brand-new tab, and a notification
+        the user can't click beats no notification at all.
+
         False when the window has no application to send through (a window
         under test) — the tool reports that rather than claiming a
         notification the user never got.
         """
         page = self.tab_view.get_page(tab)
-        self.flash_session(tab)
+        self._flash_session(page)
         app = self.get_application()
         if app is None or page is None:
             return False
