@@ -97,6 +97,12 @@ _INTERRUPTED_CSS = "interrupted"
 # 250ms transform/opacity transition (see row.session-child.archiving in
 # app.py), so the slide finishes before the ground moves under it.
 _ARCHIVE_COLLAPSE_MS = 260
+# ...and when the whole ghost-out has played: the collapse above plus its
+# 200ms min-height/border transition. What the window waits before landing a
+# tabless archive (see _archive_session there) — with no tab to shut down
+# there is no natural delay, and an archive landing sooner rebuilds the list
+# right over the animation's first frames.
+ARCHIVE_GHOST_MS = _ARCHIVE_COLLAPSE_MS + 200
 
 # How far a project header's icon sits from the row's own left edge: the
 # theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.

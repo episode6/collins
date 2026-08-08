@@ -60,7 +60,7 @@ from .sessions import (
     session_from_file,
     worktree_project_root,
 )
-from .sidebar import SessionSidebar
+from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar
 from .state import AppState, clamp_window_size, editor_pops_out
 from .store import SessionStore, emptied_projects
 from .switcher import QuickSwitcher
@@ -3666,10 +3666,20 @@ class MainWindow(Adw.ApplicationWindow):
             return
         # Tabless: no dialog can interpose, so the row slides out right away
         # (only when archiving will actually remove it from the list — with
-        # "show archived" on it stays, as an ordinary archived row) while the
-        # store refresh that really drops it catches up.
+        # "show archived" on it stays, as an ordinary archived row). The
+        # archive itself then waits for the animation: with no tab to shut
+        # down there is no natural delay, and landing it now would rebuild
+        # the list right over the slide's first frames. The row is already
+        # insensitive, so nothing can double-book it while it waits.
         if archived and not self.store.show_archived:
             self.sidebar.begin_archiving(session_id)
+
+            def land() -> bool:
+                self.store.set_archived(session_id, True)
+                return GLib.SOURCE_REMOVE
+
+            GLib.timeout_add(ARCHIVE_GHOST_MS, land)
+            return
         self.store.set_archived(session_id, archived)
 
     def _on_archive_project(self, _action, param: GLib.Variant) -> None:
