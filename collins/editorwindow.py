@@ -7,8 +7,11 @@ The pane is *reparented* here, never copied — the same widget instance moves
 out of the tab and back, so open buffers, cursor positions, dirty state and
 file monitors all survive both directions without any serialization. One
 editor per terminal tab, in one place at a time: while a pane lives here the
-tab's in-tab panel slot is empty, and closing this window (the headerbar
-button, the WM close button, or the tab's footer icon) docks it back.
+tab's in-tab panel slot is empty, and the pane docks back the moment this
+window goes away. Whether the tab's panel *opens* on the way back depends on
+which control ended it: the headerbar dock-back button and the tab's footer
+icon both ask for the editor back, so the panel opens; the WM close button
+means "done editing", so the pane docks back closed.
 """
 
 from __future__ import annotations
@@ -57,6 +60,7 @@ class EditorWindow(Adw.ApplicationWindow):
         self.state = state
         self._pane: Gtk.Widget | None = pane
         self._on_dock_back = on_dock_back
+        self._docking_back = False  # set by dock_back(); see _on_close_request
         self.set_title(title)
         self.set_icon_name(icon_name)
 
@@ -70,7 +74,7 @@ class EditorWindow(Adw.ApplicationWindow):
         # (window-new-symbolic): the headerbar is this window's status row.
         dock_btn = Gtk.Button(icon_name="view-restore-symbolic")
         dock_btn.set_tooltip_text(_("Move editor back into its tab"))
-        dock_btn.connect("clicked", lambda *_a: self.close())
+        dock_btn.connect("clicked", lambda *_a: self.dock_back())
         header = Adw.HeaderBar()
         header.pack_start(dock_btn)
 
@@ -93,15 +97,26 @@ class EditorWindow(Adw.ApplicationWindow):
 
     # -- docking back ----------------------------------------------------------
 
+    def dock_back(self) -> None:
+        """Put the editor back in its tab *as an open panel* — the headerbar
+        button's job, and the tab footer icon's. Closing the window is a
+        different intent (see _on_close_request), so the flag rides through
+        the close it triggers."""
+        self._docking_back = True
+        self.close()
+
     def _on_close_request(self, *_args) -> bool:
-        # Every close is a dock-back: the editor has no "close without
-        # docking" — its buffers belong to the tab, which is still open.
-        self.release_pane()
+        # The pane always goes home — its buffers belong to the tab, which is
+        # still open — but only an explicit dock-back reopens the tab's panel.
+        # Closing this window means "I'm done with the editor for now": it
+        # must never make a panel appear in the window behind it.
+        self.release_pane(show_panel=self._docking_back)
         return False
 
-    def release_pane(self) -> None:
+    def release_pane(self, show_panel: bool = True) -> None:
         """Hand the pane back to whoever owns the tab (idempotent): unparent
-        it from this window and invoke the dock-back callback. Called from
+        it from this window and invoke the dock-back callback, which reopens
+        the tab's editor panel unless *show_panel* is false. Called from
         close-request, and directly (followed by `destroy()`) when the main
         window needs the pane back without waiting on the WM — e.g. its own
         close must not leave an orphan editor window keeping the app alive."""
@@ -116,7 +131,7 @@ class EditorWindow(Adw.ApplicationWindow):
             GLib.source_remove(self._geometry_save_source)
         self._save_geometry()
         self._toolbar.set_content(None)
-        self._on_dock_back(pane)
+        self._on_dock_back(pane, show_panel)
 
     # -- geometry persistence ----------------------------------------------------
 

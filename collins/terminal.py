@@ -2711,17 +2711,25 @@ class TerminalTab(Gtk.Box):
         self._editor_toggle_btn.set_tooltip_text(_("Bring editor back into this tab"))
         return self._editor
 
-    def reattach_editor(self) -> None:
+    def reattach_editor(self, show: bool = True) -> None:
         """Dock the pane back where it was: same outer-paned slot, same
         remembered width, open even if it was closed when detached (a pane
-        the user was just using in a window shouldn't dock back to nothing)."""
+        the user asked back shouldn't dock back to nothing).
+
+        `show=False` docks it back closed: the editor window was closed, not
+        docked back, and dismissing a window must never make a panel appear
+        in the one behind it. The pane still comes home — its buffers belong
+        to the tab — the footer icon just reopens it in place."""
         if self._editor is None or not self._editor_detached:
             return
         self._editor_detached = False
         self._editor.set_detached(False)
         self._outer.set_end_child(self._editor)
         self._editor.set_visible(False)  # show_editor's no-op guard needs "closed"
-        self.show_editor()
+        if show:
+            self.show_editor()
+        else:
+            self._editor_toggle_btn.set_tooltip_text(_("Show editor panel"))
 
     def editor_dirty_count(self) -> int:
         return self._editor.dirty_count() if self._editor is not None else 0

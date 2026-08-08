@@ -342,10 +342,12 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 - **Pop it out** to a second monitor with the status row's detach button
   (rightmost): the whole editor — open files, cursors, unsaved changes —
   moves into a window of its own, and the in-tab panel disappears until it
-  comes back. Dock it back with the window's headerbar button, by closing
-  the window, or with the tab's footer icon (while the editor is popped
-  out, one click means "bring it back"). One editor per tab, in one place
-  at a time; the popped-out window remembers its own size.
+  comes back. Dock it back with the window's headerbar button or the tab's
+  footer icon (while the editor is popped out, one click means "bring it
+  back"). Closing the window instead just puts the editor away — the files
+  stay open, but the panel doesn't reappear in the window behind it until
+  you ask for it. One editor per tab, in one place at a time; the popped-out
+  window remembers its own size.
 
 If the footer icon is greyed out, the GtkSourceView 5 library the editor is
 built on isn't installed — the `.deb` pulls it in automatically, but a source
