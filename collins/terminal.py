@@ -2959,6 +2959,19 @@ class TerminalTab(Gtk.Box):
             proctree.agent_descendant_cwd(pid, cli) is not None for pid in self._candidate_pids()
         )
 
+    def owns_pid_ancestors(self, ancestors: set[int]) -> bool:
+        """Whether one of *ancestors* is a process this tab's terminal runs.
+
+        *ancestors* is a pid plus its whole parent chain (proctree.
+        ancestor_pids) — how a session MCP tool call is traced back to the
+        tab whose shell spawned its `claude`: the shim that sent it is a
+        child of that CLI, so the tab's own processes sit in its ancestry.
+        Both candidate ends are tested (see `_candidate_pids`); a daemon-
+        hosted process descends from systemd instead, matches no tab
+        anywhere, and gets the dispatcher's clean identity error.
+        """
+        return any(pid in ancestors for pid in self._candidate_pids())
+
     def has_background_descendant(self) -> bool:
         """Whether the agent has something still running below it right now —
         a tool call in flight, or a background job (a dev server, a long

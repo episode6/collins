@@ -74,6 +74,78 @@ def test_unexpected_argument_is_rejected():
     assert "surprise" in error
 
 
+# ---- the dispatch skeleton ---------------------------------------------------
+#
+# app.py's _mcp_dispatch delegates its branching here so the order and error
+# strings are pinned without a Gtk.Application: validation always runs first,
+# identity second, and only then a handler.
+
+
+def _rename_ok(found, args):
+    return True, f"renamed {found} to {args['title']}"
+
+
+def test_run_tool_call_reaches_the_handler():
+    ok, message = mcptools.run_tool_call(
+        "set_session_title", {"title": "hi"},
+        find_tab=lambda: "tab-a",
+        handlers={"set_session_title": _rename_ok},
+    )
+    assert (ok, message) == (True, "renamed tab-a to hi")
+
+
+def test_run_tool_call_validates_before_resolving_identity():
+    """A bad call must fail identically whoever makes it — resolving the
+    caller first would leak whether a tab owns it through the error shape."""
+    walked = []
+
+    def find_tab():
+        walked.append(True)
+        return "tab-a"
+
+    ok, message = mcptools.run_tool_call(
+        "set_session_title", {}, find_tab=find_tab, handlers={}
+    )
+    assert ok is False
+    assert "title" in message
+    assert walked == []  # never resolved
+
+
+def test_run_tool_call_rejects_unknown_tools_without_resolving():
+    ok, message = mcptools.run_tool_call(
+        "no_such_tool", {}, find_tab=lambda: "tab-a", handlers={}
+    )
+    assert ok is False
+    assert "Unknown tool" in message
+
+
+def test_run_tool_call_unowned_caller_gets_the_identity_error():
+    ok, message = mcptools.run_tool_call(
+        "set_session_title", {"title": "hi"},
+        find_tab=lambda: None,
+        handlers={"set_session_title": _rename_ok},
+    )
+    assert (ok, message) == (False, mcptools.NOT_FROM_TAB_ERROR)
+
+
+def test_run_tool_call_advertised_but_unhandled_tool_is_a_clean_error():
+    """A TOOLS entry whose handler hasn't landed must error, not crash."""
+    ok, message = mcptools.run_tool_call(
+        "set_session_title", {"title": "hi"}, find_tab=lambda: "tab-a", handlers={}
+    )
+    assert ok is False
+    assert "Unknown tool" in message
+
+
+def test_run_tool_call_returns_the_handlers_failure():
+    ok, message = mcptools.run_tool_call(
+        "set_session_title", {"title": "hi"},
+        find_tab=lambda: "tab-a",
+        handlers={"set_session_title": lambda found, args: (False, "not resolved yet")},
+    )
+    assert (ok, message) == (False, "not resolved yet")
+
+
 # ---- wire framing ------------------------------------------------------------
 
 
