@@ -223,6 +223,13 @@ row.session-child:hover {
 row.session-child:not(.running) .session-title {
   opacity: 0.55;
 }
+/* ...and the dim fades on and off rather than snapping, on the same clock as
+   the card transitions above: opening a tab brightens the title as the card
+   outline draws in, closing one dims it as the outline dissolves. The
+   transition sits on the bare class so it runs in both directions. */
+.session-title {
+  transition: opacity 200ms ease;
+}
 /* a finished run nobody has looked at yet (see SessionItem.unread): the guide
    line breathes green -- the run is done and its result is waiting -- until
    the user returns to the tab. It held that green still until the pull
