@@ -244,6 +244,55 @@ def test_distinct_app_ids_get_disjoint_dirs(monkeypatch, tmp_path):
     assert mcptools.runtime_dir("real") != mcptools.runtime_dir("debug-4242")
 
 
+def test_stable_ids_get_a_persistent_config_dir(monkeypatch, tmp_path):
+    """The CLI daemon records the --mcp-config path verbatim in a bg job's
+    respawn flags, so for real instances it must survive a reboot — while
+    the socket stays on the runtime dir, whose paths are short enough for
+    the kernel's unix-socket limit."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    for app_id in sorted(mcptools.STABLE_APP_IDS):
+        base = tmp_path / "data" / "collins" / app_id
+        assert mcptools.config_path(app_id) == str(base / "mcp.json")
+        assert mcptools.socket_path(app_id) == str(
+            tmp_path / "run" / "collins" / app_id / "mcp.sock"
+        )
+
+
+def test_generated_ids_keep_the_tmpfs_config_dir(monkeypatch, tmp_path):
+    """A capture run's id is minted fresh every time; persistent directories
+    for those would only accumulate. The E2E shape shares the app's prefix
+    on purpose — the split must be an allowlist, not a prefix match."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    for app_id in ("com.episode6.Collins.E2E.abc123", "org.example.Collins"):
+        assert mcptools.config_path(app_id) == str(
+            tmp_path / "run" / "collins" / app_id / "mcp.json"
+        )
+
+
+def test_persistent_config_dir_falls_back_to_local_share(monkeypatch, tmp_path):
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert mcptools.config_dir("com.episode6.Collins") == str(
+        tmp_path / ".local" / "share" / "collins" / "com.episode6.Collins"
+    )
+
+
+def test_write_config_for_a_stable_id_lands_in_the_data_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    path = mcptools.write_config("com.episode6.Collins")
+    assert path == str(tmp_path / "data" / "collins" / "com.episode6.Collins" / "mcp.json")
+    config = json.loads(Path(path).read_text(encoding="utf-8"))
+    server = config["mcpServers"]["collins"]
+    # The config moved; the socket it points at did not.
+    assert server["env"]["COLLINS_MCP_SOCKET"] == str(
+        tmp_path / "run" / "collins" / "com.episode6.Collins" / "mcp.sock"
+    )
+    assert stat.S_IMODE(os.stat(Path(path).parent).st_mode) == 0o700
+
+
 def test_write_config_produces_the_shim_invocation(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     path = mcptools.write_config("org.example.Collins")

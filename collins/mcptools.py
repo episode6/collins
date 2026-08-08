@@ -223,15 +223,47 @@ def decode_message(line: bytes | str) -> dict:
 
 
 def runtime_dir(app_id: str) -> str:
-    """The per-instance directory holding the socket and config.
+    """The per-instance directory holding the socket (and, for generated app
+    ids, the config — see `config_dir`).
 
     Keyed by app id, not per-run: the real app reuses a stable path across
     restarts (so a long-lived session's shim can reconnect after Collins
-    comes back), while debug instances — which generate fresh app ids — stay
-    fully isolated from it and from each other.
+    comes back), while capture harnesses — which generate fresh app ids —
+    stay fully isolated from it and from each other. The socket lives here
+    unconditionally: XDG_RUNTIME_DIR is guaranteed user-private, and its
+    paths stay short of the kernel's ~107-byte unix-socket limit (see
+    mcpserver.start), which paths under the home directory may not.
     """
     base = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
     return os.path.join(base, "collins", app_id)
+
+
+# The app ids a user's real instances run under: the installed app and the
+# start-debug checkout. Everything else — the screenshot harness mints a
+# fresh com.episode6.Collins.E2E.<run> id per capture — is a throwaway
+# whose files should die with the boot, so this is an allowlist (a prefix
+# match would claim the E2E ids too).
+STABLE_APP_IDS = frozenset({"com.episode6.Collins", "com.episode6.Collins.Debug"})
+
+
+def config_dir(app_id: str) -> str:
+    """Where this instance's mcp.json lives.
+
+    A stable id gets a persistent directory under the user's data dir: the
+    CLI daemon records the `--mcp-config` path verbatim in a background
+    job's respawn flags (~/.claude/jobs/<id>/state.json), and a path on
+    tmpfs dangles after a reboot until Collins happens to run again — a job
+    respawned in that window would launch pointing at a file that doesn't
+    exist. Nothing in the file is runtime-scoped (it names the interpreter,
+    the shim module, and the socket path, all stable), and `write_config`
+    rewrites it on every launch anyway. Generated ids keep the runtime dir:
+    their sessions are as disposable as the id, and persistent directories
+    for them would only accumulate.
+    """
+    if app_id in STABLE_APP_IDS:
+        base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+        return os.path.join(base, "collins", app_id)
+    return runtime_dir(app_id)
 
 
 def socket_path(app_id: str) -> str:
@@ -239,7 +271,7 @@ def socket_path(app_id: str) -> str:
 
 
 def config_path(app_id: str) -> str:
-    return os.path.join(runtime_dir(app_id), "mcp.json")
+    return os.path.join(config_dir(app_id), "mcp.json")
 
 
 def write_config(app_id: str) -> str | None:
