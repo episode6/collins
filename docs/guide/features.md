@@ -467,10 +467,10 @@ screen on while an agent works unattended — click it to toggle, and the cup
 fills while it's on.
 
 - **Right-click it for a timer**: *1 hour*, *2 hours*, *3 hours*, *6 hours*,
-  *12 hours*, *While active* or *Indefinitely*. Picking a duration turns
+  *12 hours*, *Until inactive* or *Indefinitely*. Picking a duration turns
   Caffeine Mode on for that long and turns it off again when the time runs out —
   so a long build can't leave the machine awake all week because you forgot.
-- **While active** hands the deadline to the sessions instead of the clock: as
+- **Until inactive** hands the deadline to the sessions instead of the clock: as
   long as at least one open tab is working — the same barber pole the session
   list shows — the machine stays awake, and five minutes after the last one
   stops, Caffeine Mode turns itself off. Any session picking work back up starts
