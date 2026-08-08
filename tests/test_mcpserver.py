@@ -372,7 +372,7 @@ def test_shim_to_service_end_to_end(tmp_path):
         return shim.proc.pid, tools, reply["result"]
 
     shim_pid, tools, result = run_with_client(tmp_path, client, dispatch=dispatch)
-    assert [t["name"] for t in tools] == ["set_session_title"]
+    assert [t["name"] for t in tools] == [t["name"] for t in mcptools.TOOLS]
     assert result == {"content": [{"type": "text", "text": "Session renamed."}], "isError": False}
     # The hello's pid is the shim's own — the /proc ancestry walk starts there.
     assert calls == [(shim_pid, "set_session_title", {"title": "A better name"})]

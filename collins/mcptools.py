@@ -52,6 +52,61 @@ TOOLS: list[dict] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "open_in_editor",
+        "description": (
+            "Open a file in this session's Collins editor pane, optionally at "
+            "a line — put a file on the user's screen instead of hoping they "
+            "click a path in the terminal. The file must be inside the "
+            "session's project."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "description": (
+                        "The file to open; a relative path resolves against "
+                        "the working directory, then the project root."
+                    ),
+                },
+                "line": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "1-based line to place the cursor on.",
+                },
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "show_image",
+        "description": (
+            "Show an image over this session's Collins window — screenshots, "
+            "plots, renders. Use it to say 'look at this' without waiting for "
+            "a click or launching an external viewer. Any readable image file "
+            "works, inside the project or not."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "description": (
+                        "The image file to show; a relative path resolves "
+                        "against the working directory, then the project root."
+                    ),
+                },
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 

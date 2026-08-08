@@ -3199,7 +3199,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._quickopen = QuickOpenDialog(
             tab.editor_root,
-            lambda path: self._open_in_tab_editor(tab, path),
+            lambda path: self.open_in_tab_editor(tab, path),
             show_hidden=bool(self.state.get_setting("editor_show_hidden_files")),
         )
         self._quickopen.connect("closed", lambda *_: setattr(self, "_quickopen", None))
@@ -3226,9 +3226,15 @@ class MainWindow(Adw.ApplicationWindow):
             if tab is None:
                 return
             self.tab_view.set_selected_page(self.tab_view.get_page(tab))
-        self._open_in_tab_editor(tab, path, cursor)
+        self.open_in_tab_editor(tab, path, cursor)
 
-    def _open_in_tab_editor(self, tab: TerminalTab, path: str, cursor: list | None = None) -> None:
+    def open_in_tab_editor(self, tab: TerminalTab, path: str, cursor: list | None = None) -> None:
+        """Open *path* in *tab*'s editor specifically, wherever that editor
+        lives right now (docked panel, popped-out window, or about to pop out
+        on a small screen). Public for the session MCP tools: an agent's
+        `open_in_editor` call must land in the calling session's own tab, so
+        the window-level `_open_in_editor` — which picks a tab by project
+        membership and may switch tabs — is the wrong door for it."""
         win = self._editor_windows.get(tab)
         if win is not None:
             win.present()  # the pane lives in its own window right now

@@ -18,9 +18,10 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import ghwelcome, mcpserver, mcptools, proctree, providers, tooltipmute
+from . import editorfiles, ghwelcome, mcpserver, mcptools, proctree, providers, tooltipmute
 from .caffeine import duration_seconds
 from .i18n import _
+from .lightbox import present_image_lightbox
 from .prefs import apply_color_scheme
 from .state import AppState
 from .store import SessionStore
@@ -868,7 +869,11 @@ class App(Adw.Application):
             tool,
             args,
             find_tab=lambda: self._mcp_tab_for_pid(pid),
-            handlers={"set_session_title": self._mcp_set_session_title},
+            handlers={
+                "set_session_title": self._mcp_set_session_title,
+                "open_in_editor": self._mcp_open_in_editor,
+                "show_image": self._mcp_show_image,
+            },
         )
 
     def _mcp_set_session_title(self, found, args: dict) -> tuple[bool, str]:
@@ -879,6 +884,53 @@ class App(Adw.Application):
             )
         window.rename_session_tab(tab.session_id, args["title"])
         return True, "Session renamed."
+
+    @staticmethod
+    def _mcp_resolve_file(tab, raw: str) -> str | None:
+        """The existing file a tool's path argument names, or None.
+
+        Relative paths try the running agent's cwd first (it may have cd'd
+        into a worktree), then the tab's project root — the same order
+        clickable file references resolve in (terminal._reference_roots).
+        """
+        expanded = os.path.expanduser(raw)
+        if os.path.isabs(expanded):
+            trials = [expanded]
+        else:
+            roots = [tab.current_agent_cwd(), tab.editor_root]
+            trials = [os.path.join(root, expanded) for root in roots if root]
+        for trial in trials:
+            if os.path.isfile(trial):
+                return os.path.normpath(trial)
+        return None
+
+    def _mcp_open_in_editor(self, found, args: dict) -> tuple[bool, str]:
+        window, tab = found
+        if tab.editor_root is None:  # GtkSourceView missing — no editor at all
+            return False, "This session's tab has no editor"
+        path = self._mcp_resolve_file(tab, args["path"])
+        if path is None:
+            return False, f"No such file: {args['path']}"
+        if not tab.can_open_in_editor(path):
+            return False, "That file is outside this session's project"
+        line = args.get("line")
+        window.open_in_tab_editor(tab, path, [line - 1, 0] if line else None)
+        return True, "Opened in the editor."
+
+    def _mcp_show_image(self, found, args: dict) -> tuple[bool, str]:
+        window, tab = found
+        path = self._mcp_resolve_file(tab, args["path"])
+        if path is None:
+            return False, f"No such file: {args['path']}"
+        if not editorfiles.is_image_path(path):
+            return False, f"Not an image Collins can display: {args['path']}"
+        # The clicked-image-reference recipe (terminal._present_image): the
+        # lightbox shows any readable image, project membership only gates
+        # its "Open in Editor" button.
+        can_edit = tab.can_open_in_editor(path)
+        on_open = (lambda: window.open_in_tab_editor(tab, path)) if can_edit else None
+        present_image_lightbox(tab, path, can_open_in_editor=can_edit, on_open_in_editor=on_open)
+        return True, "Image shown."
 
     def _apply_scheme_css(self) -> None:
         """Load the scheme's colors. Runs at startup and on every light/dark
