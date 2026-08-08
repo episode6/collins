@@ -139,6 +139,7 @@ data/
 └── install.sh                           # install launcher + icon for current user
 scripts/
 ├── build_deb.sh                         # build the .deb package into dist/
+├── install-debug-launcher.sh            # app-grid entry: pull this checkout, run debug
 └── make_demo_data.py                    # fake sessions for screenshots/demos
 ```
 
