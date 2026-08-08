@@ -8,6 +8,7 @@ GTK stack (see conftest.py).
 """
 
 import json
+import os
 import socket
 import threading
 
@@ -78,8 +79,10 @@ class Client:
         line = self.reader.readline()
         return json.loads(line) if line else None
 
-    def hello(self, pid: int = 4242) -> None:
-        self.send({"op": "hello", "pid": pid, "v": 1})
+    def hello(self, pid: int | None = None) -> None:
+        # The service verifies the declared pid against SO_PEERCRED, so an
+        # honest hello carries this process's own pid.
+        self.send({"op": "hello", "pid": os.getpid() if pid is None else pid, "v": 1})
 
 
 # ---- the protocol ------------------------------------------------------------
@@ -105,13 +108,13 @@ def test_call_reaches_dispatch_with_the_hello_pid(tmp_path):
 
     def client(sock_path, _service):
         c = Client(sock_path)
-        c.hello(pid=987)
+        c.hello()
         c.send({"op": "call", "id": 7, "tool": "set_session_title", "args": {"title": "hi"}})
         return c.read()
 
     reply = run_with_client(tmp_path, client, dispatch=dispatch)
     assert reply == {"id": 7, "ok": True, "message": "Renamed."}
-    assert seen == {"pid": 987, "tool": "set_session_title", "args": {"title": "hi"}}
+    assert seen == {"pid": os.getpid(), "tool": "set_session_title", "args": {"title": "hi"}}
 
 
 def test_dispatch_failure_becomes_an_error_reply(tmp_path):
@@ -180,6 +183,33 @@ def test_a_bad_first_frame_closes_the_connection(tmp_path, first_frame):
     assert run_with_client(tmp_path, client) is None
 
 
+def test_a_spoofed_hello_pid_closes_the_connection(tmp_path):
+    """The declared pid authorizes the call (the dispatcher walks /proc
+    ancestry from it to a tab), so it must be the peer's real pid per
+    SO_PEERCRED — a client claiming some other live process's pid (pid 1
+    always exists) is dropped, not believed."""
+
+    def client(sock_path, _service):
+        c = Client(sock_path)
+        c.hello(pid=1)
+        return c.read()
+
+    assert run_with_client(tmp_path, client) is None
+
+
+def test_an_honest_hello_pid_is_accepted(tmp_path):
+    """The counterpart guard: SO_PEERCRED verification must not reject the
+    genuine article (the shim always sends its own os.getpid())."""
+
+    def client(sock_path, _service):
+        c = Client(sock_path)
+        c.hello(pid=os.getpid())
+        c.send({"op": "list", "id": 1})
+        return c.read()
+
+    assert run_with_client(tmp_path, client)["ok"] is True
+
+
 def test_malformed_json_closes_the_connection(tmp_path):
     def client(sock_path, _service):
         c = Client(sock_path)
@@ -239,15 +269,15 @@ def test_a_second_connection_is_served_after_the_first_closes(tmp_path):
 def test_concurrent_connections_are_independent(tmp_path):
     def client(sock_path, _service):
         a, b = Client(sock_path), Client(sock_path)
-        a.hello(pid=1111)
-        b.hello(pid=2222)
-        a.send({"op": "call", "id": 1, "tool": "t", "args": {}})
-        b.send({"op": "call", "id": 1, "tool": "t", "args": {}})
+        a.hello()
+        b.hello()
+        a.send({"op": "call", "id": 1, "tool": "t", "args": {"who": "a"}})
+        b.send({"op": "call", "id": 2, "tool": "t", "args": {"who": "b"}})
         return a.read(), b.read()
 
     ra, rb = run_with_client(tmp_path, client)
-    assert "pid=1111" in ra["message"]
-    assert "pid=2222" in rb["message"]
+    assert ra["id"] == 1 and '"who": "a"' in ra["message"]
+    assert rb["id"] == 2 and '"who": "b"' in rb["message"]
 
 
 def test_stop_closes_established_connections(tmp_path):

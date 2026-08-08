@@ -17,8 +17,12 @@ peer that stops reading its replies stalls only itself, never this process.
 The socket sits in a user-private directory, but any local process of the
 user's can still connect — treat every frame as untrusted input: a peer
 whose first line isn't a well-formed hello, or that breaks framing in any
-way, is disconnected rather than guessed at. Argument validation against the
-tool schemas is the dispatcher's job (`mcptools.validate_args`), not ours.
+way, is disconnected rather than guessed at. The hello's pid is load-bearing
+for authorization (the dispatcher walks /proc ancestry from it to decide
+which tab a call may act on), so it is never taken on faith: it must match
+the peer's kernel-verified pid (SO_PEERCRED), or the connection is dropped.
+Argument validation against the tool schemas is the dispatcher's job
+(`mcptools.validate_args`), not ours.
 """
 
 from __future__ import annotations
@@ -141,18 +145,38 @@ class SessionToolService:
         self._send(client, reply)
 
     def _greet(self, client: _Client, message: dict) -> None:
-        """The connection's first frame must be a well-formed hello."""
+        """The connection's first frame must be a well-formed, honest hello.
+
+        The declared pid is checked against the peer's real pid as the kernel
+        reports it (SO_PEERCRED): the pid is what authorizes a call to act on
+        a specific tab, and any local process of the user's can open this
+        socket, so a client claiming another process's pid — say, a tab's
+        actual `claude` — must be dropped, not believed.
+        """
         pid = message.get("pid")
         if (
             message.get("op") != "hello"
             or not isinstance(pid, int)
             or isinstance(pid, bool)
             or pid <= 0
+            or pid != self._peer_pid(client.connection)
         ):
             self._close(client)
             return
         client.pid = pid
         self._read_next(client)
+
+    @staticmethod
+    def _peer_pid(connection: Gio.SocketConnection) -> int | None:
+        """The kernel's answer for who holds the other end of *connection*,
+        or None when it won't say (which fails the hello: this is Linux-only
+        code already — the dispatcher reads /proc — so credentials being
+        unavailable means something is wrong, not that we should trust the
+        peer's own claim instead)."""
+        try:
+            return connection.get_socket().get_credentials().get_unix_pid()
+        except GLib.Error:
+            return None
 
     def _reply_for(self, client: _Client, message: dict) -> dict | None:
         """The reply frame for one request, or None for a peer worth dropping."""

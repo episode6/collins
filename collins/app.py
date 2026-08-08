@@ -855,25 +855,25 @@ class App(Adw.Application):
     def _mcp_dispatch(self, pid: int, tool: str, args: object) -> tuple[bool, str]:
         """Run one tool call from the shim at *pid*: (ok, message-or-error).
 
-        Arguments are re-validated here — the socket is reachable by any
-        local process, so the CLI's own schema enforcement is not a boundary.
-        Error strings are agent-facing English, deliberately untranslated.
+        The validate → identity → handler skeleton is mcptools.run_tool_call
+        (GTK-free, so CI pins its branching); only the widget-touching halves
+        live here. Error strings are agent-facing English, untranslated.
         """
-        error = mcptools.validate_args(tool, args)
-        if error is not None:
-            return False, error
-        found = self._mcp_tab_for_pid(pid)
-        if found is None:
-            return False, "This claude process wasn't launched from a Collins tab"
+        return mcptools.run_tool_call(
+            tool,
+            args,
+            find_tab=lambda: self._mcp_tab_for_pid(pid),
+            handlers={"set_session_title": self._mcp_set_session_title},
+        )
+
+    def _mcp_set_session_title(self, found, args: dict) -> tuple[bool, str]:
         window, tab = found
-        if tool == "set_session_title":
-            if not tab.session_id:
-                return False, (
-                    "The session isn't resolved in Collins yet — try again in a moment"
-                )
-            window.rename_session_tab(tab.session_id, args["title"])
-            return True, "Session renamed."
-        return False, f"Unknown tool: {tool}"  # unreachable: validate_args gates
+        if not tab.session_id:
+            return False, (
+                "The session isn't resolved in Collins yet — try again in a moment"
+            )
+        window.rename_session_tab(tab.session_id, args["title"])
+        return True, "Session renamed."
 
     def _apply_scheme_css(self) -> None:
         """Load the scheme's colors. Runs at startup and on every light/dark

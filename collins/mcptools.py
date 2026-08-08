@@ -110,6 +110,35 @@ def _validate_value(key: str, value, spec: dict) -> str | None:
     return None
 
 
+# The identity error every tool shares: the caller's /proc ancestry reached
+# no open tab (a daemon-hosted bg job, a chat session, a tab since closed).
+NOT_FROM_TAB_ERROR = "This claude process wasn't launched from a Collins tab"
+
+
+def run_tool_call(tool: str, args: object, find_tab, handlers) -> tuple[bool, str]:
+    """One tool call's skeleton: validate, resolve identity, run the handler.
+
+    The branching lives here, GTK-free, so CI can pin its order and error
+    strings; app.py supplies the two halves that need widgets — `find_tab()`
+    (the pid→tab ancestry walk, returning None for a caller no tab owns) and
+    `handlers` (tool name → callable taking (found_tab, args) and returning
+    (ok, message)). Validation runs first and unconditionally: the socket is
+    reachable by any local process, so the CLI's own schema enforcement is
+    not a boundary. Identity comes second, so a bad call fails the same way
+    whoever makes it, leaking nothing about what tabs exist.
+    """
+    error = validate_args(tool, args)
+    if error is not None:
+        return False, error
+    found = find_tab()
+    if found is None:
+        return False, NOT_FROM_TAB_ERROR
+    handler = handlers.get(tool)
+    if handler is None:  # a TOOLS entry whose handler hasn't landed
+        return False, f"Unknown tool: {tool}"
+    return handler(found, args)
+
+
 def encode_message(message: dict) -> bytes:
     """One wire frame: compact JSON plus the terminating newline.
 
