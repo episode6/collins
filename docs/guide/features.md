@@ -442,8 +442,11 @@ fills while it's on.
   long as at least one open tab is working — the same barber pole the session
   list shows — the machine stays awake, and five minutes after the last one
   stops, Caffeine Mode turns itself off. Any session picking work back up starts
-  those five minutes over. Backgrounded (`/bg`) sessions don't count: they run
-  with no tab to watch, exactly as their still guide line says.
+  those five minutes over. Whatever keeps a pole up holds Caffeine Mode with
+  it, including a background process a session left running — a dev server, a
+  long build — but not the servers the agent runs for itself, which are
+  plumbing rather than work. Backgrounded (`/bg`) sessions don't count either:
+  they run with no tab to watch, exactly as their still guide line says.
 - The **time left counts down** just left of the cup while a timer is running.
   Picking another duration restarts the clock, *Indefinitely* clears it, and
   turning Caffeine Mode off cancels it. Following the sessions, the countdown

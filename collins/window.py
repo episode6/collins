@@ -2766,6 +2766,11 @@ class MainWindow(Adw.ApplicationWindow):
         app's _follow_activity). Only open tabs feed the tracker, so this is
         already blind to detached sessions, and a window being torn down has
         stopped its tracker before it gets here.
+
+        What counts as working is entirely the pole's business, which is what
+        keeps the two honest: the process poll's plumbing baseline (see
+        _process_ignores) means a session's own MCP servers don't hold the
+        machine awake, while a dev server it left running still does.
         """
         return bool(self._activity.busy())
 
