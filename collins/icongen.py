@@ -27,11 +27,9 @@ import threading
 from pathlib import Path
 
 from . import projecticons, sessions
+from .claudemodels import pick_model
+from .state import AppState
 from .titles import scratch_dir, scratch_project_dirname
-
-# CLI model alias: icon design is a notch above title summarizing, so it
-# gets the mid tier rather than TITLE_MODEL's haiku.
-ICON_MODEL = "sonnet"
 
 # One SVG document, but the model may think about the design for a while.
 _TIMEOUT_S = 300
@@ -209,11 +207,14 @@ class IconRun:
             raise IconGenError("claude CLI not found on PATH")
         workdir = scratch_dir()
         workdir.mkdir(parents=True, exist_ok=True)
+        # Resolved per run (like titles), so a just-changed preference
+        # applies to the next generation without a restart.
+        model = pick_model(AppState().get_setting("icon_model"))
         with self._lock:
             if self._cancelled:
                 raise IconGenCancelled()
             self._proc = subprocess.Popen(
-                [cli, "-p", "--model", ICON_MODEL],
+                [cli, "-p", "--model", model],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

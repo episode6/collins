@@ -3,9 +3,11 @@
 Sessions that already exist when the app launches get a cheap local title
 (the first words of their prompt, via ``fallback_title``). Sessions created
 while the app runs get their first prompt summarized to five words or fewer
-by a headless ``claude -p --model haiku`` run — the same CLI and login the
-whole app is built on, so no separate API credentials are needed. The store
-persists each result, so a title is generated exactly once per session.
+by a headless ``claude -p`` run — the same CLI and login the whole app is
+built on, so no separate API credentials are needed. The model comes from
+the "Session title model" preference (see claudemodels.pick_model). The
+store persists each result, so a title is generated exactly once per
+session.
 "Regenerate name" in the sidebar re-runs the model for one session on demand.
 
 Headless runs write their own transcripts under ``~/.claude/projects``, so
@@ -34,11 +36,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import prstatus, sessions, state
+from .claudemodels import pick_model
 
 log = logging.getLogger(__name__)
-
-# CLI model alias: version-agnostic, resolves to the current Haiku tier.
-TITLE_MODEL = "haiku"
 
 _TIMEOUT_S = 120
 _MAX_PROMPT_CHARS = 1000
@@ -262,9 +262,12 @@ def _run_claude(prompt: str) -> str:
         raise TitleError("claude CLI not found on PATH", fatal=True)
     workdir = scratch_dir()
     workdir.mkdir(parents=True, exist_ok=True)
+    # A fresh AppState per run so a just-changed preference applies to the
+    # next title; state writes are atomic, so a mid-write read can't happen.
+    model = pick_model(state.AppState().get_setting("title_model"))
     try:
         result = subprocess.run(
-            [cli, "-p", "--model", TITLE_MODEL],
+            [cli, "-p", "--model", model],
             input=prompt,
             capture_output=True,
             text=True,

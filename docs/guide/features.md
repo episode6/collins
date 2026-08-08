@@ -64,7 +64,9 @@ fork. Last modified: 2026-08-07. Full change history: git log for this file.
   it's right. Nothing is written until *Save*, which puts a
   `project-icon.svg` in the project root — the same file a project can ship
   by hand to replace the generic folder icon, so commit it and everyone gets
-  it.
+  it. The *Icon generation model* preference picks which Claude model designs
+  it (default: the newest Sonnet), from a list queried live when Preferences
+  opens.
 - A **search button** that opens a search box across the sidebar header,
   filtering by name, project, message preview, or session ID, plus a footer
   showing session, project, transcript-size, and open-tab counts.
@@ -109,8 +111,10 @@ Unnamed sessions get a **title generated for them**:
   (the first 10 words of the initial prompt) — the model never sees your
   backlog.
 - Sessions created while the app is running have their first prompt summarized
-  to **five words or fewer** by a headless `claude -p --model haiku` run — the
-  same CLI and login the whole app is based on, no extra credentials needed.
+  to **five words or fewer** by a headless `claude -p` run — the same CLI and
+  login the whole app is based on, no extra credentials needed. The model it
+  asks for is the *Session title model* preference; the default follows the
+  newest Sonnet.
 
 A prompt that only points at a pull request ("review PR 183") would summarize
 to a number nobody can read at a glance, so that PR's **title is fetched with

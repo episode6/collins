@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-02. Full change history: git log for this file.
+fork. Last modified: 2026-08-07. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -39,9 +39,10 @@ favorites, emoji, and panel state carry over.
 
 Pre-existing sessions are titled **locally** on launch (first words of the
 initial prompt) — no model call, so your backlog is never sent anywhere. Only
-sessions created while the app runs get a headless `claude -p --model haiku`
-summarization, executed in a scratch directory so the title runs don't appear
-as sessions themselves.
+sessions created while the app runs get a headless `claude -p` summarization
+(the model is the *Session title model* preference, defaulting to the newest
+Sonnet), executed in a scratch directory so the title runs don't appear as
+sessions themselves.
 
 ## Claude usage
 
@@ -89,7 +90,7 @@ collins/
 ├── providers.py      # agent CLI abstraction (currently Claude Code)
 ├── state.py          # app-side persistence
 ├── terminal.py       # VTE terminal tab + secondary shell panel
-├── titles.py         # auto-generated session titles (local + haiku)
+├── titles.py         # auto-generated session titles (local + claude)
 ├── usage.py          # Claude subscription usage fetch/parse
 ├── usagepanel.py     # the sidebar usage panel widget
 ├── gitinfo.py        # git branch for the tab footer; is the tree dirty?
