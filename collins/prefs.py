@@ -307,7 +307,11 @@ class PreferencesDialog(Adw.Dialog):
         # launch" doesn't have to mean "on until you remember it".
         self._caffeine_timer_row = Adw.ComboRow(
             title=_("Turn off after"),
-            subtitle=_("How long that launch-time Caffeine Mode runs before it turns itself off"),
+            subtitle=_(
+                "How long that launch-time Caffeine Mode runs before it turns "
+                "itself off. While active keeps it on until every session has "
+                "stopped working, and five minutes past that"
+            ),
         )
         duration_labels = [duration_label(key) for key in DURATION_KEYS]
         self._caffeine_timer_row.set_model(Gtk.StringList.new(duration_labels))

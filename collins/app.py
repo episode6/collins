@@ -19,7 +19,7 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import editorfiles, ghwelcome, mcpserver, mcptools, proctree, providers, tooltipmute
-from .caffeine import duration_seconds
+from .caffeine import ACTIVE_GRACE_S, duration_seconds, follows_activity
 from .i18n import _
 from .lightbox import present_image_lightbox
 from .prefs import apply_color_scheme
@@ -776,6 +776,11 @@ class App(Adw.Application):
         # countdown and turns Caffeine Mode off on reaching it.
         self._caffeine_deadline: int | None = None
         self._caffeine_tick: int | None = None
+        # The duration key Caffeine Mode was turned on under, kept only for the
+        # one option whose deadline isn't a fixed span: "while sessions are
+        # working" (see _follow_activity), where the tick keeps running with no
+        # deadline set for as long as something is busy.
+        self._caffeine_mode: str | None = None
 
         # Shared across all windows so scans/monitors aren't duplicated and
         # state.json writes don't race.
@@ -952,13 +957,22 @@ class App(Adw.Application):
         left = self._caffeine_deadline - GLib.get_monotonic_time()
         return max(0, -(-left // 1_000_000))  # round up, so a 1h timer opens at 1:00:00
 
-    def set_caffeine_enabled(self, enabled: bool, seconds: int | None = None) -> None:
+    @property
+    def caffeine_follows_activity(self) -> bool:
+        """Whether Caffeine Mode is running on the sessions rather than the
+        clock — what the button's tooltip says instead of a countdown while
+        something is still working."""
+        return self.caffeine_enabled and follows_activity(self._caffeine_mode or "")
+
+    def set_caffeine_enabled(self, enabled: bool, duration: str | None = None) -> None:
         """Toggle Caffeine Mode: inhibit suspend and screen blanking app-wide.
 
-        `seconds` arms a shut-off timer that turns Caffeine Mode off again when
-        it runs out; None leaves it on indefinitely. Any timer already running
-        is cancelled either way, so re-picking a duration restarts the clock and
-        a plain toggle never leaves a stale one armed.
+        `duration` is a key from caffeine.py: an hours option arms a shut-off
+        timer that turns Caffeine Mode off again when it runs out, WHILE_ACTIVE
+        ("While active") hands the deadline to the sessions themselves, and
+        None (a plain toggle) leaves it on indefinitely. Any timer already
+        running is cancelled either way, so re-picking a duration restarts the
+        clock and a plain toggle never leaves a stale one armed.
         """
         self._cancel_caffeine_timer()
         if enabled != self.caffeine_enabled:
@@ -969,9 +983,15 @@ class App(Adw.Application):
                 self._caffeine_cookie = None
                 self._caffeine_flags_held = None
         # Nothing to count down to if the inhibit didn't take (or was refused).
-        if seconds and self.caffeine_enabled:
-            self._caffeine_deadline = GLib.get_monotonic_time() + seconds * 1_000_000
-            self._caffeine_tick = GLib.timeout_add_seconds(1, self._on_caffeine_tick)
+        if self.caffeine_enabled:
+            seconds = duration_seconds(duration or "")
+            if follows_activity(duration or ""):
+                self._caffeine_mode = duration
+                self._follow_activity()  # sets the deadline if nothing is busy
+                self._caffeine_tick = GLib.timeout_add_seconds(1, self._on_caffeine_tick)
+            elif seconds:
+                self._caffeine_deadline = GLib.get_monotonic_time() + seconds * 1_000_000
+                self._caffeine_tick = GLib.timeout_add_seconds(1, self._on_caffeine_tick)
         self._sync_caffeine_windows()
 
     def _caffeine_flags(self) -> Gtk.ApplicationInhibitFlags:
@@ -1025,10 +1045,48 @@ class App(Adw.Application):
             GLib.source_remove(self._caffeine_tick)
         self._caffeine_tick = None
         self._caffeine_deadline = None
+        self._caffeine_mode = None
+
+    def _sessions_working(self) -> bool:
+        """Whether any window has a session working right now — the same
+        answer the sidebar's barber poles give. Only sessions with an open tab
+        can say: a detached one has no activity source at all, so a backgrounded
+        agent never holds Caffeine Mode on (and never did)."""
+        for window in self.get_windows():
+            working = getattr(window, "has_working_session", None)
+            if working is not None and working():
+                return True
+        return False
+
+    def _follow_activity(self) -> bool:
+        """Point the shut-off timer at the sessions, and say whether any is
+        working.
+
+        While something is: no deadline at all, so the headers show the mode's
+        tooltip rather than a countdown that would only ever be reset. When the
+        last one stops, the grace period is armed — and re-armed from scratch
+        after any later burst of work, which is what makes activity reset it.
+
+        Polled from the tick rather than pushed by the windows: the answer is a
+        set-emptiness check per window, and reading it live means no missed
+        signal — a window closing on a busy tab, a session torn down — can leave
+        the machine awake with nothing left to work for.
+        """
+        working = self._sessions_working()
+        if working:
+            if self._caffeine_deadline is not None:
+                self._caffeine_deadline = None  # back to work: the grace is off
+                self._sync_caffeine_windows()  # ...and its countdown with it
+        elif self._caffeine_deadline is None:
+            self._caffeine_deadline = GLib.get_monotonic_time() + ACTIVE_GRACE_S * 1_000_000
+            self._sync_caffeine_windows()
+        return working
 
     def _on_caffeine_tick(self) -> bool:
         """Once a second while a timer runs: redraw the countdowns, and turn
         Caffeine Mode off when the deadline passes."""
+        if follows_activity(self._caffeine_mode or "") and self._follow_activity():
+            return GLib.SOURCE_CONTINUE  # still working: nothing to count down
         if self.caffeine_remaining:
             self._sync_caffeine_windows()
             return GLib.SOURCE_CONTINUE
@@ -1082,8 +1140,7 @@ class App(Adw.Application):
             window.restore_last_session()
             if self.state.get_setting("caffeine_on_launch"):
                 self.set_caffeine_enabled(
-                    True,
-                    seconds=duration_seconds(self.state.get_setting("caffeine_launch_timer") or ""),
+                    True, duration=self.state.get_setting("caffeine_launch_timer") or ""
                 )
             # Once per install, and only on a launch: an extra window is not a
             # first impression, and neither is one opened from a notification.

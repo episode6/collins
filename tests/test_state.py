@@ -127,6 +127,16 @@ def test_caffeine_launch_timer_setting(app_state):
     assert duration_seconds(saved) == 10800
 
 
+def test_caffeine_launch_timer_can_follow_the_sessions(app_state):
+    from collins.caffeine import WHILE_ACTIVE, follows_activity
+
+    state = app_state.AppState()
+    state.set_setting("caffeine_launch_timer", WHILE_ACTIVE)
+    # It has to survive the round trip as the key itself: the app reads the
+    # saved string back to decide between a clock and the sessions.
+    assert follows_activity(app_state.AppState().get_setting("caffeine_launch_timer"))
+
+
 def test_running_session_behavior_settings(app_state):
     state = app_state.AppState()
     # Both default to today's behaviour: the confirmation dialog asks.
