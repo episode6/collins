@@ -158,11 +158,20 @@ row.session-child {
      out because they are what actually changes; the same clock also runs the
      content box's counter-margin (see the > box rule below), keeping the row's
      content pinned while only the card edge moves. Hover shares the
-     background-color transition, softening on and off. GTK drops CSS
-     transitions when the desktop's animations are off, so reduced motion gets
-     the old instant switch for free. */
+     background-color transition, softening on and off, and the three
+     card-outline border sides fade with it (visible only on outlined rows,
+     hover being what brightens them). The guide line -- border-left-color --
+     is deliberately not in this list: it is the status channel, and every
+     signal it carries is designed around instant or self-animated changes
+     (the unread pulse, the busy pole's stripes showing through a border that
+     must go transparent the moment they start), so a transition there would
+     smear one signal into the next. GTK drops CSS transitions when the
+     desktop's animations are off, so reduced motion gets the old instant
+     switch for free. */
   transition: background-color 200ms ease, margin-right 200ms ease,
-    border-top-right-radius 200ms ease, border-bottom-right-radius 200ms ease;
+    border-top-right-radius 200ms ease, border-bottom-right-radius 200ms ease,
+    border-top-color 200ms ease, border-right-color 200ms ease,
+    border-bottom-color 200ms ease;
 }
 /* neither the archive/close button nor the selection-mode check may hold the
    row open at its stock size: entering selection mode must not resize rows */
