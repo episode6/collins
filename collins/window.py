@@ -42,7 +42,6 @@ from .caffeine import (
     DURATION_KEYS,
     countdown_tooltip,
     duration_label,
-    duration_seconds,
     format_remaining,
     toggle_tooltip,
 )
@@ -2099,7 +2098,7 @@ class MainWindow(Adw.ApplicationWindow):
         whatever timer was running before."""
         app = self.get_application()
         if hasattr(app, "set_caffeine_enabled"):
-            app.set_caffeine_enabled(True, seconds=duration_seconds(param.get_string()))
+            app.set_caffeine_enabled(True, duration=param.get_string())
 
     def sync_caffeine_toggle(self) -> None:
         """Called by the app so every window's button tracks the shared state."""
@@ -2112,14 +2111,21 @@ class MainWindow(Adw.ApplicationWindow):
         self._sync_caffeine_visuals()
 
     def _sync_caffeine_visuals(self) -> None:
+        app = self.get_application()
         on = self.caffeine_btn.get_active()
-        remaining = getattr(self.get_application(), "caffeine_remaining", None) if on else None
+        remaining = getattr(app, "caffeine_remaining", None) if on else None
         self.caffeine_btn.set_icon_name(
             "caffeine-cup-full-symbolic" if on else "caffeine-cup-empty-symbolic"
         )
         keep_screen_on = bool(self.state.get_setting("caffeine_keep_screen_on"))
         if remaining is None:
-            tooltip = toggle_tooltip(on=on, keep_screen_on=keep_screen_on)
+            # No countdown under "while sessions are working" means something
+            # still is: the tooltip is the only place that can say so.
+            tooltip = toggle_tooltip(
+                on=on,
+                keep_screen_on=keep_screen_on,
+                while_active=bool(getattr(app, "caffeine_follows_activity", False)),
+            )
         else:
             tooltip = countdown_tooltip(remaining, keep_screen_on=keep_screen_on)
         self.caffeine_btn.set_tooltip_text(tooltip)
@@ -2751,6 +2757,22 @@ class MainWindow(Adw.ApplicationWindow):
         if self._launch_sweep_source is not None:
             GLib.source_remove(self._launch_sweep_source)
             self._launch_sweep_source = None
+
+    def has_working_session(self) -> bool:
+        """Whether any session in this window is working right now — exactly
+        what puts a barber pole on a row's guide line.
+
+        Read live by Caffeine Mode's "while sessions are working" (see the
+        app's _follow_activity). Only open tabs feed the tracker, so this is
+        already blind to detached sessions, and a window being torn down has
+        stopped its tracker before it gets here.
+
+        What counts as working is entirely the pole's business, which is what
+        keeps the two honest: the process poll's plumbing baseline (see
+        _process_ignores) means a session's own MCP servers don't hold the
+        machine awake, while a dev server it left running still does.
+        """
+        return bool(self._activity.busy())
 
     def _sync_row_busy(self, session_id: str) -> None:
         """Push the busy flag onto every row this session shows up as.
