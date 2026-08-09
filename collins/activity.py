@@ -36,6 +36,16 @@ configuration) that doesn't speak progress:
   holds the ungated sources through the startup paint — see
   `EchoGate.armed`.)
 
+A tab attached to a **background agent** has none of the above worth having:
+the agent is the daemon's child, spawned with a scrubbed environment, so it
+never sees the terminal declarations that make the CLI emit progress at all
+(see `terminal._agent_tab_environment`) — no termprop, ever. Its turn starts
+without a keystroke in the tab, which also leaves `EchoGate` unarmed and every
+relayed redraw discounted. That leaves the spinner it happens to be painting.
+`BackgroundBusyWatch` gives it back the agent's own word from the other
+direction: the agent list the app already polls reports a per-job busy status,
+and the window feeds it in for background agents with a tab open.
+
 All of them funnel into one tracker: "busy" means output seen within the
 source's idle window — `IDLE_S` for a terminal, which redraws continuously
 while its agent works, and `PROCESS_IDLE_S` for a process-tree sighting.
@@ -108,6 +118,20 @@ PROGRESS_IDLE_S = 60.0
 # the honest instant-down. A genuinely new turn is never held back: the Enter
 # pre-mark and the next busy hint both bypass this window.
 PROGRESS_QUIET_S = IDLE_S
+
+# How often the agent list is asked which background agents are working. It
+# shells out to the CLI (~0.4s of node startup, off the main thread), so the
+# window only runs it while a background agent actually has a tab open — the
+# only place the answer can show — and this is the resulting worst-case delay
+# before such a session's pole comes up.
+BACKGROUND_POLL_MS = 3000
+
+# How long one "busy" reading keeps a background session's pole up. Wider than
+# the poll interval plus the CLI call it waits on, so ordinary jitter never
+# opens a gap between two readings of the same still-working agent. It is only
+# the backstop: the reading that says the agent went idle ends the pole at
+# once, the way a progress termprop's clear does.
+BACKGROUND_IDLE_S = 10.0
 
 # How long a redraw goes on counting as the answer to something the app sent.
 # Measured on a live agent TUI, its reply lands 10-30ms after the bytes leave
@@ -443,13 +467,66 @@ class ProgressWatch:
             return "mark"
         if not self._spoken:
             return None
-        self._finished_at = self._clock()
+        self.turn_ended()
         return "finish"
 
     def quiet(self) -> bool:
         """Whether a turn just ended here, so a redraw arriving now is its
         trailing repaint rather than evidence of a new one."""
         return self._finished_at is not None and self._clock() - self._finished_at < self._quiet_s
+
+    def turn_ended(self) -> None:
+        """Another source called this tab's turn over — the agent list saw its
+        background agent go idle (see `BackgroundBusyWatch`), which a tab
+        attached to one gets instead of a termprop clear. Opens the same quiet
+        window, so the CLI's trailing repaints can't blip the pole back up
+        after the honest instant-down.
+
+        `_spoken` is deliberately untouched: this tab still hasn't announced
+        any progress of its own, and a clear it never speaks must not start
+        finishing runs on its word.
+        """
+        self._finished_at = self._clock()
+
+
+class BackgroundBusyWatch:
+    """The agent list's own word on which background agents are working.
+
+    `claude agents --json` carries a per-job ``status`` — busy while the agent
+    works, idle the moment it stops (measured steady across a 110s turn on
+    2.1.226, flipping only at the end) — and for a session running as a
+    background agent it is the only authoritative signal there is. The progress
+    OSC that every spawned tab announces its turns with never reaches one: the
+    daemon spawns background agents with the terminal declarations stripped, so
+    the CLI's emission gate is shut whatever the tab it is attached in does.
+
+    `reading` turns one poll into the pole actions it asks for: mark every
+    session reported busy, and finish the ones that were reported busy before
+    and aren't now — the agent itself saying the turn is over, which is what
+    lets this end a pole outright instead of waiting out an idle window.
+
+    Only what this watch marked can be finished by it. A pole some other
+    source raised is not its to end, and an agent it never saw working has no
+    run to complete — the same rule `ProgressWatch` applies to a tab that
+    never spoke a busy hint.
+    """
+
+    def __init__(self) -> None:
+        self._marked: set[str] = set()  # reported busy at the last reading
+
+    def reading(self, busy_ids: Iterable[str]) -> tuple[set[str], set[str]]:
+        """One poll's answer, as (to mark, to finish).
+
+        *busy_ids* is every session the agent list reports as a working
+        background agent. A session that drops out of the list entirely — its
+        job ended, its tab closed and the window stopped watching it — reads
+        the same as one that went idle: whatever it was doing, it isn't
+        doing it here any more.
+        """
+        busy = set(busy_ids)
+        finished = self._marked - busy
+        self._marked = busy
+        return busy, finished
 
 
 def _glib_add_timeout(interval_ms: int, callback: Callable[[], bool]) -> int:

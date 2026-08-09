@@ -6,6 +6,7 @@ import pytest
 from collins import bgstatus
 from collins.bgstatus import (
     BackgroundStatusPoller,
+    fetch_background_busy_ids,
     fetch_background_ids,
     match_background_fork,
 )
@@ -109,6 +110,20 @@ def test_fetch_background_ids_unions_providers(monkeypatch):
         ],
     )
     assert fetch_background_ids() == {"s1", "s2"}
+
+
+def test_fetch_background_busy_ids_keeps_only_the_working_ones(monkeypatch):
+    monkeypatch.setattr(bgstatus, "available_providers", lambda: [ClaudeProvider()])
+    monkeypatch.setattr(
+        ClaudeProvider,
+        "background_agents",
+        lambda self: [
+            BackgroundAgent(session_id="working", job_id="j1", cwd="/p", busy=True),
+            # Listed and alive, but waiting on the user rather than working.
+            BackgroundAgent(session_id="waiting", job_id="j2", cwd="/q"),
+        ],
+    )
+    assert fetch_background_busy_ids() == {"working"}
 
 
 # -- pairing a backgrounded session with its agent ----------------------------

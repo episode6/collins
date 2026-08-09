@@ -200,11 +200,19 @@ class BackgroundAgent:
 
     `job_id` is the short id the CLI's attach/logs subcommands expect —
     distinct from the session id, which they do not accept.
+
+    `busy` is the job's activity right now, from the same `status` field that
+    can't gate terminality (a job waiting on input is idle but very much
+    alive). As an activity signal it is exactly right, and it is the only one
+    a background agent has: nothing it prints announces its turns, because the
+    daemon spawns it without the terminal declarations the CLI's progress
+    emission is gated on. See activity.BackgroundBusyWatch.
     """
 
     session_id: str
     job_id: str
     cwd: str
+    busy: bool = False
 
 
 @dataclass(frozen=True)
@@ -712,6 +720,7 @@ class ClaudeProvider(Provider):
                         session_id=session_id,
                         job_id=job_id,
                         cwd=cwd if isinstance(cwd, str) else "",
+                        busy=a.get("status") == "busy",
                     )
                 )
         return found

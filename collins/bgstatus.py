@@ -12,6 +12,11 @@ flow). A ~20s timed poll exists as a fallback behind the
 `background_status_poll` setting, default off, so that if the watch dir stops
 working under a future CLI, flipping the setting restores a working state
 without a code change.
+
+The same agent list also says which of those agents is *working* right now
+(`fetch_background_busy_ids`), which the window polls on its own, much shorter
+beat while a background agent has a tab open — the watch dir stays silent for
+the whole length of a turn, so nothing here would wake for it.
 """
 
 from __future__ import annotations
@@ -87,6 +92,20 @@ def fetch_background_ids() -> set[str]:
     ids: set[str] = set()
     for provider in available_providers():
         ids.update(agent.session_id for agent in provider.background_agents())
+    return ids
+
+
+def fetch_background_busy_ids() -> set[str]:
+    """Session ids whose background agent says it is working right now, across
+    providers. Shells out to the agent CLI — never call on the main thread.
+
+    Finished jobs are left out (the default `background_agents()` pool): one
+    can't be working, and a job the CLI still lists as resident-but-done
+    reports itself idle anyway.
+    """
+    ids: set[str] = set()
+    for provider in available_providers():
+        ids.update(agent.session_id for agent in provider.background_agents() if agent.busy)
     return ids
 
 

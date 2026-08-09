@@ -142,6 +142,48 @@ def test_background_agents_parses_agents_json(monkeypatch):
     assert agents == [BackgroundAgent(session_id="bg-id", job_id="bg-job", cwd="/p")]
 
 
+def test_background_agents_reads_the_jobs_busy_status(monkeypatch):
+    # `status` is the CLI's activity indicator, distinct from the `state`
+    # lifecycle: it says busy for as long as the agent works (steady across a
+    # 110s turn on 2.1.226) and idle the moment it stops. It is the only
+    # busy signal a background agent has — nothing it prints announces its
+    # turns, since the daemon spawns it without the terminal declarations the
+    # CLI's progress emission is gated on.
+    import json
+
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    payload = json.dumps(
+        [
+            {
+                "sessionId": "working-id",
+                "id": "working-job",
+                "kind": "background",
+                "cwd": "/p",
+                "status": "busy",
+                "state": "working",
+            },
+            {
+                "sessionId": "waiting-id",
+                "id": "waiting-job",
+                "kind": "background",
+                "cwd": "/p",
+                "status": "idle",
+                "state": "blocked",
+            },
+            # An older CLI with no status field at all: not working, as far as
+            # anything here can tell.
+            {"sessionId": "quiet-id", "id": "quiet-job", "kind": "background", "cwd": "/p"},
+        ]
+    )
+
+    class Result:
+        stdout = payload
+
+    monkeypatch.setattr(providers.subprocess, "run", lambda *a, **k: Result())
+    busy = {a.session_id: a.busy for a in ClaudeProvider().background_agents()}
+    assert busy == {"working-id": True, "waiting-id": False, "quiet-id": False}
+
+
 def _agents_json_payload(finished_state: str) -> str:
     import json
 
