@@ -403,7 +403,10 @@ is running in:
   session's own editor pane, instead of hoping you click a path in the
   terminal.
 - **`show_image(path)`** — show a screenshot, plot, or render in the in-app
-  lightbox.
+  lightbox. The argument can also be an **`http(s)` URL**: Collins downloads
+  it (into your cache directory, cleared a day later) and shows the copy, so
+  the agent doesn't have to spend a `curl` and a temp file on a picture that
+  is already on the web.
 - **`attach_pr(url)`** — put a pull request on the session's footer and
   sidebar row, live CI status and all. Collins links the PRs that show up in
   a session's own output by itself; this is for one it can't see — a PR
@@ -412,9 +415,12 @@ is running in:
 
 Each tool asks for permission the first time a session calls it, like any
 other MCP tool. They only ever touch Collins' own windows: nothing is read
-back to the agent and nothing is written to your repo. The one that reaches
-past the window is `attach_pr`, and only to ask `gh` how the named PR is
-doing — the same fetch the footer's refresh button runs.
+back to the agent and nothing is written to your repo. Two reach past the
+window, and only when a session hands them something to reach for:
+`attach_pr` asks `gh` how the named PR is doing — the same fetch the
+footer's refresh button runs — and `show_image` given a URL fetches it, a
+plain GET with none of your cookies or credentials, capped at 25 MB and ten
+seconds. Switching either tool off stops its half.
 
 **Each one has its own switch** in Preferences → *Session tools*, all on by
 default. A tool switched off isn't offered to the sessions Collins starts

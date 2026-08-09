@@ -367,8 +367,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "open_in_editor — put a file from the project on screen, at a line":
             "open_in_editor — a projekt egy fájlját a képernyőre teszi, adott sornál",
         "Show images": "Képek megjelenítése",
-        "show_image — a screenshot, plot, or render in the in-app lightbox":
-            "show_image — képernyőkép, diagram vagy render az alkalmazás képnézegetőjében",
+        "show_image — a screenshot, plot, render, or image URL in the in-app lightbox":
+            "show_image — képernyőkép, diagram, render vagy képhivatkozás az alkalmazás képnézegetőjében",
         "Send desktop notifications": "Asztali értesítések küldése",
         "notify_user — a notification titled with the session; clicking it opens the tab":
             "notify_user — a munkamenet nevét viselő értesítés; rákattintva megnyílik a lap",
@@ -732,8 +732,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "open_in_editor — put a file from the project on screen, at a line":
             "open_in_editor — zeigt eine Datei des Projekts an, an einer bestimmten Zeile",
         "Show images": "Bilder anzeigen",
-        "show_image — a screenshot, plot, or render in the in-app lightbox":
-            "show_image — ein Screenshot, Diagramm oder Render in der integrierten Lightbox",
+        "show_image — a screenshot, plot, render, or image URL in the in-app lightbox":
+            "show_image — ein Screenshot, Diagramm, Render oder eine Bild-URL in der integrierten Lightbox",
         "Send desktop notifications": "Desktop-Benachrichtigungen senden",
         "notify_user — a notification titled with the session; clicking it opens the tab":
             "notify_user — eine Benachrichtigung mit dem Sitzungsnamen; ein Klick "
@@ -1097,8 +1097,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "open_in_editor — put a file from the project on screen, at a line":
             "open_in_editor — muestra en pantalla un archivo del proyecto, en una línea",
         "Show images": "Mostrar imágenes",
-        "show_image — a screenshot, plot, or render in the in-app lightbox":
-            "show_image — una captura, gráfico o render en el visor de la aplicación",
+        "show_image — a screenshot, plot, render, or image URL in the in-app lightbox":
+            "show_image — una captura, gráfico, render o URL de imagen en el visor de la aplicación",
         "Send desktop notifications": "Enviar notificaciones de escritorio",
         "notify_user — a notification titled with the session; clicking it opens the tab":
             "notify_user — una notificación titulada con la sesión; al pulsarla "
@@ -1464,8 +1464,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "open_in_editor — put a file from the project on screen, at a line":
             "open_in_editor — affiche un fichier du projet à l’écran, à une ligne donnée",
         "Show images": "Afficher des images",
-        "show_image — a screenshot, plot, or render in the in-app lightbox":
-            "show_image — une capture, un graphique ou un rendu dans la visionneuse intégrée",
+        "show_image — a screenshot, plot, render, or image URL in the in-app lightbox":
+            "show_image — une capture, un graphique, un rendu ou une URL d’image dans la visionneuse intégrée",
         "Send desktop notifications": "Envoyer des notifications de bureau",
         "notify_user — a notification titled with the session; clicking it opens the tab":
             "notify_user — une notification au nom de la session ; un clic ouvre l’onglet",

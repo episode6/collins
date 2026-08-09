@@ -261,6 +261,54 @@ def test_run_tool_call_advertised_but_unhandled_tool_is_a_clean_error():
     assert "Unknown tool" in message
 
 
+def test_run_tool_call_passes_a_deferred_answer_through():
+    """A handler that needs a worker thread (show_image fetching a URL)
+    returns the promise instead of the pair; the skeleton must hand it back
+    untouched for the service to wait on."""
+    pending = mcptools.DeferredResult()
+    result = mcptools.run_tool_call(
+        "show_image", {"path": "https://example.com/a.png"},
+        find_tab=lambda: "tab-a",
+        handlers={"show_image": lambda found, args: pending},
+    )
+    assert result is pending
+
+
+# ---- deferred answers --------------------------------------------------------
+
+
+def test_deferred_result_reaches_a_watcher_registered_first():
+    seen = []
+    pending = mcptools.DeferredResult()
+    pending.watch(lambda ok, text: seen.append((ok, text)))
+    assert pending.resolved is False
+    pending.resolve(True, "Image shown.")
+    assert seen == [(True, "Image shown.")]
+    assert pending.resolved is True
+
+
+def test_deferred_result_reaches_a_watcher_registered_late():
+    """The fetch can beat the service to it (a cached, instant answer); the
+    watcher still gets called, rather than waiting forever for a result that
+    already landed."""
+    seen = []
+    pending = mcptools.DeferredResult()
+    pending.resolve(False, "The server answered 404")
+    pending.watch(lambda ok, text: seen.append((ok, text)))
+    assert seen == [(False, "The server answered 404")]
+
+
+def test_deferred_result_keeps_its_first_answer():
+    """One call, one reply: a worker that answers twice must not put a second
+    frame on a wire the shim has already moved past."""
+    seen = []
+    pending = mcptools.DeferredResult()
+    pending.watch(lambda ok, text: seen.append((ok, text)))
+    pending.resolve(True, "Image shown.")
+    pending.resolve(False, "too late")
+    assert seen == [(True, "Image shown.")]
+
+
 def test_run_tool_call_refuses_a_switched_off_tool_without_resolving():
     """A session handed the tool before the switch was flipped keeps calling
     it; the call is refused here, and the caller is never resolved."""

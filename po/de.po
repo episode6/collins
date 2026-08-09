@@ -881,8 +881,8 @@ msgstr "open_in_editor — zeigt eine Datei des Projekts an, an einer bestimmten
 msgid "Show images"
 msgstr "Bilder anzeigen"
 
-msgid "show_image — a screenshot, plot, or render in the in-app lightbox"
-msgstr "show_image — ein Screenshot, Diagramm oder Render in der integrierten Lightbox"
+msgid "show_image — a screenshot, plot, render, or image URL in the in-app lightbox"
+msgstr "show_image — ein Screenshot, Diagramm, Render oder eine Bild-URL in der integrierten Lightbox"
 
 msgid "Send desktop notifications"
 msgstr "Desktop-Benachrichtigungen senden"

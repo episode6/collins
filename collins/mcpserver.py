@@ -13,6 +13,9 @@ is testable headless — CI has Gio/GLib but no GTK stack (tests/conftest.py).
 Everything runs on the GLib main loop; Gio's async socket API means no
 threads, and per connection the loop is strictly read → reply → read, so a
 peer that stops reading its replies stalls only itself, never this process.
+A dispatcher that can't answer at once (`mcptools.DeferredResult` — a
+`show_image` downloading a URL) just makes that reply late: the connection
+goes quiet until it lands, which is the same invariant, held longer.
 
 The socket sits in a user-private directory, but any local process of the
 user's can still connect — treat every frame as untrusted input: a peer
@@ -34,6 +37,18 @@ from gi.repository import Gio, GLib
 
 from . import mcptools
 
+# `_reply_for`'s third answer, beside a frame and a drop: the dispatcher took
+# the call but hasn't finished it (`mcptools.DeferredResult`), so this
+# connection simply goes quiet until it does.
+_PENDING = object()
+
+
+def _result_frame(rid, ok: bool, text: str) -> dict:
+    """One call's reply: the success message, or the error string."""
+    if ok:
+        return {"id": rid, "ok": True, "message": text}
+    return {"id": rid, "ok": False, "error": text}
+
 
 class _Client:
     """One connected shim: its streams, and the pid its hello declared."""
@@ -50,14 +65,15 @@ class SessionToolService:
 
     `list_tools()` returns the MCP tool table to serve; `dispatch(pid, tool,
     args)` runs one call and returns `(ok, text)` — the success message or the
-    error string. Both are invoked on the GLib main loop.
+    error string — or a `mcptools.DeferredResult` it will resolve with that
+    pair later. Both are invoked on the GLib main loop.
     """
 
     def __init__(
         self,
         socket_path: str,
         list_tools: Callable[[], list],
-        dispatch: Callable[[int, str, object], tuple[bool, str]],
+        dispatch: Callable[[int, str, object], mcptools.ToolResult],
     ) -> None:
         self._path = socket_path
         self._list_tools = list_tools
@@ -139,6 +155,8 @@ class SessionToolService:
             self._greet(client, message)
             return
         reply = self._reply_for(client, message)
+        if reply is _PENDING:
+            return  # a deferred call: _send happens when it resolves
         if reply is None:
             self._close(client)
             return
@@ -178,8 +196,9 @@ class SessionToolService:
         except GLib.Error:
             return None
 
-    def _reply_for(self, client: _Client, message: dict) -> dict | None:
-        """The reply frame for one request, or None for a peer worth dropping."""
+    def _reply_for(self, client: _Client, message: dict) -> dict | object | None:
+        """The reply frame for one request, `_PENDING` when the answer comes
+        later, or None for a peer worth dropping."""
         rid = message.get("id")
         if rid is None:
             return None
@@ -190,13 +209,20 @@ class SessionToolService:
             tool = message.get("tool")
             if not isinstance(tool, str) or not tool:
                 return {"id": rid, "ok": False, "error": "Missing tool name"}
-            ok, text = self._dispatch(client.pid, tool, message.get("args"))
-            if ok:
-                return {"id": rid, "ok": True, "message": text}
-            return {"id": rid, "ok": False, "error": text}
+            result = self._dispatch(client.pid, tool, message.get("args"))
+            if isinstance(result, mcptools.DeferredResult):
+                # Nothing is read from this client until the reply goes out,
+                # so a slow call stalls its own session and no other.
+                result.watch(
+                    lambda ok, text: self._send(client, _result_frame(rid, ok, text))
+                )
+                return _PENDING
+            return _result_frame(rid, *result)
         return None
 
     def _send(self, client: _Client, reply: dict) -> None:
+        if client not in self._clients:
+            return  # a deferred reply that outlived its connection
         try:
             data = mcptools.encode_message(reply)
         except ValueError:

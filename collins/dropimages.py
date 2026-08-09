@@ -107,29 +107,48 @@ def cell_width(text: str) -> int:
     return width
 
 
-def default_directory() -> Path:
-    """Where dropped-image copies are kept. Honors XDG_CACHE_HOME (the
-    same resolution GLib.get_user_cache_dir does) so tests and the
-    screenshot harness relocate it along with the rest of the app's
-    state."""
+def cache_directory() -> Path:
+    """The app's cache directory. Honors XDG_CACHE_HOME (the same resolution
+    GLib.get_user_cache_dir does) so tests and the screenshot harness
+    relocate it along with the rest of the app's state. Shared with
+    `remoteimages`, whose downloads live in a sibling folder."""
     base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
-    return Path(base) / "collins" / "dropped-images"
+    return Path(base) / "collins"
+
+
+def default_directory() -> Path:
+    """Where dropped-image copies are kept."""
+    return cache_directory() / "dropped-images"
 
 
 def save_png(data: bytes, directory: Path, timestamp: float | None = None) -> Path:
     """Write *data* to a fresh ``drop-YYYYMMDD-HHMMSS[-N].png`` under
+    *directory*; see `save_copy`."""
+    return save_copy(data, directory, "drop", ".png", timestamp)
+
+
+def save_copy(
+    data: bytes,
+    directory: Path,
+    prefix: str,
+    suffix: str,
+    timestamp: float | None = None,
+) -> Path:
+    """Write *data* to a fresh ``<prefix>-YYYYMMDD-HHMMSS[-N]<suffix>`` under
     *directory* (created if missing) and return its path.
 
     The name is timestamped so a directory listing reads as a history, and
-    opened with 'x' so two drops in the same second (or two app instances)
-    get distinct files instead of one clobbering the other.
+    opened with 'x' so two saves in the same second (or two app instances)
+    get distinct files instead of one clobbering the other. `remoteimages`
+    saves its downloads through this too, under its own prefix and whatever
+    suffix the fetched content type earned.
     """
     if timestamp is None:
         timestamp = time.time()
     directory.mkdir(parents=True, exist_ok=True)
-    stem = time.strftime("drop-%Y%m%d-%H%M%S", time.localtime(timestamp))
+    stem = time.strftime(f"{prefix}-%Y%m%d-%H%M%S", time.localtime(timestamp))
     for attempt in range(_MAX_NAME_ATTEMPTS):
-        name = f"{stem}.png" if attempt == 0 else f"{stem}-{attempt + 1}.png"
+        name = f"{stem}{suffix}" if attempt == 0 else f"{stem}-{attempt + 1}{suffix}"
         path = directory / name
         try:
             with open(path, "xb") as fh:
@@ -137,7 +156,7 @@ def save_png(data: bytes, directory: Path, timestamp: float | None = None) -> Pa
         except FileExistsError:
             continue
         return path
-    raise OSError(f"no free dropped-image name under {directory}")
+    raise OSError(f"no free image name under {directory}")
 
 
 def prune_stale(directory: Path, now: float | None = None) -> None:

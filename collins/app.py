@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 
 import gi
@@ -30,6 +31,7 @@ from . import (
     mcptools,
     proctree,
     providers,
+    remoteimages,
     tooltipmute,
 )
 from .caffeine import ACTIVE_GRACE_S, duration_seconds, follow_poll, follows_activity
@@ -960,16 +962,27 @@ class App(Adw.Application):
         window.open_in_tab_editor(tab, path, [line - 1, 0] if line else None)
         return True, "Opened in the editor."
 
-    def _mcp_show_image(self, found, args: dict) -> tuple[bool, str]:
+    def _mcp_show_image(self, found, args: dict) -> mcptools.ToolResult:
         window, tab = found
-        path = self._mcp_resolve_file(tab, args["path"])
+        raw = args["path"]
+        if remoteimages.looks_remote(raw):
+            return self._mcp_show_remote_image(window, tab, raw, args.get("caption"))
+        path = self._mcp_resolve_file(tab, raw)
         if path is None:
-            return False, f"No such file: {args['path']}"
+            return False, f"No such file: {raw}"
         if not editorfiles.is_image_path(path):
-            return False, f"Not an image Collins can display: {args['path']}"
-        # The clicked-image-reference recipe (terminal._present_image): the
-        # lightbox shows any readable image, project membership only gates
-        # its "Open in Editor" button.
+            return False, f"Not an image Collins can display: {raw}"
+        return self._mcp_present_image(window, tab, path, args.get("caption"), raw)
+
+    def _mcp_present_image(
+        self, window, tab, path: str, caption: str | None, origin: str
+    ) -> tuple[bool, str]:
+        """Float *path* over *tab*'s window, the way a clicked image
+        reference does (terminal._present_image): the lightbox shows any
+        readable image, project membership only gates its "Open in Editor"
+        button. *origin* is what the agent asked for — the file it named, or
+        the URL the copy came from — which is what a failed decode names on
+        the status page rather than the cache file nobody chose."""
         can_edit = tab.can_open_in_editor(path)
         on_open = (lambda: window.open_in_tab_editor(tab, path)) if can_edit else None
         present_image_lightbox(
@@ -977,9 +990,58 @@ class App(Adw.Application):
             path,
             can_open_in_editor=can_edit,
             on_open_in_editor=on_open,
-            caption=args.get("caption"),
+            caption=caption,
+            origin=origin,
         )
         return True, "Image shown."
+
+    def _mcp_show_remote_image(
+        self, window, tab, url: str, caption: str | None
+    ) -> mcptools.ToolResult:
+        """`show_image` given an http(s) URL: fetch it, then show the copy.
+
+        The download runs on a worker thread and the session's reply waits
+        for it (mcptools.DeferredResult) — a blocking fetch on the main loop
+        would freeze the window for as long as the server felt like taking.
+        The thread only fetches; the widget half runs back on the main loop
+        (GLib.idle_add), where the tab may by then be gone.
+        """
+        error = remoteimages.url_error(url)
+        if error is not None:
+            return False, error
+        deferred = mcptools.DeferredResult()
+        directory = remoteimages.default_directory()
+
+        def fetched(path: str | None, failure: str | None) -> bool:
+            if failure is not None:
+                deferred.resolve(False, failure)
+            elif tab.get_root() is None:  # the tab closed while we fetched
+                deferred.resolve(
+                    False, "That session's tab closed before the image arrived"
+                )
+            else:
+                try:
+                    deferred.resolve(
+                        *self._mcp_present_image(window, tab, path, caption, url)
+                    )
+                except Exception:  # noqa: BLE001 - the reply must land regardless
+                    # An unresolved call is a connection that never speaks
+                    # again, so the session would hang on it until its own
+                    # timeout; answer, then let the log carry the details.
+                    logging.getLogger(__name__).exception("show_image lightbox failed")
+                    deferred.resolve(False, f"Collins couldn't show {url}")
+            return GLib.SOURCE_REMOVE
+
+        def download() -> None:
+            try:
+                path = remoteimages.fetch_to_file(url, directory)
+            except remoteimages.FetchError as failure:
+                GLib.idle_add(fetched, None, str(failure))
+            else:
+                GLib.idle_add(fetched, str(path), None)
+
+        threading.Thread(target=download, name="show-image-fetch", daemon=True).start()
+        return deferred
 
     def _mcp_notify_user(self, found, args: dict) -> tuple[bool, str]:
         window, tab = found
