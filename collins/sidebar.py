@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -50,6 +50,7 @@ from .prstatus import (
 )
 from .scrolling import offset_into_view
 from .sessions import Session, project_name_for_cwd, resume_cwd, worktree_project_root
+from .state import merge_project_order
 from .store import SessionStore
 from .svgtexture import svg_texture
 from .usagepanel import UsagePanel
@@ -1307,9 +1308,19 @@ class SessionSidebar(Gtk.Box):
                     worktree_project_root(item.session.cwd) or item.session.cwd
                 )
 
+        # Transient "New Thread" rows for tabs whose session isn't resolved
+        # yet, grouped under the project of their working directory. A project
+        # with no sessions on disk still needs a header to hang them from.
+        placeholders_by_group: dict[tuple, list[str]] = {}
+        for pid, cwd in self._placeholders.items():
+            placeholders_by_group.setdefault(self._placeholder_group_key(cwd), []).append(pid)
+
         # Every header in display order: favorites pinned first, then all
         # projects — with or without visible session rows (empty ones keep
-        # their "new session" button reachable) — in the user's order.
+        # their "new session" button reachable) — in the user's order. A
+        # project that exists only as a placeholder is merged into that order
+        # exactly as the store will merge it once its first session is
+        # discovered, so its header doesn't move when that happens.
         headers: list[tuple[tuple, str, str | None]] = []
         if FAV_GROUP in items_by_group:
             headers.append((FAV_GROUP, _("Favorites"), None))
@@ -1317,24 +1328,25 @@ class SessionSidebar(Gtk.Box):
         # session without picking a folder" lives, sessions or not.
         headers.append((CHATS_GROUP, _("Chats"), None))
         empty_by_key = {key: (label, cwd) for key, label, cwd in self.store.empty_groups}
-        for name in self.store.resolved_project_order:
+        known_names = set(self.store.resolved_project_order)
+        display_order = merge_project_order(
+            self.store.state.get_project_order(),
+            self.store.resolved_project_order
+            + [
+                key[1]
+                for key in placeholders_by_group
+                if key[0] == "proj" and key[1] not in known_names
+            ],
+        )
+        for name in display_order:
             key = ("proj", name)
             if key in items_by_group:
                 headers.append((key, name, group_cwds.get(key)))
             elif key in empty_by_key:
                 headers.append((key, *empty_by_key[key]))
-
-        # Transient "New Thread" rows for tabs whose session isn't resolved
-        # yet, grouped under the project of their working directory. A project
-        # with no sessions on disk still needs a header to hang them from.
-        placeholders_by_group: dict[tuple, list[str]] = {}
-        for pid, cwd in self._placeholders.items():
-            placeholders_by_group.setdefault(self._placeholder_group_key(cwd), []).append(pid)
-        known_keys = {key for key, _label, _cwd in headers}
-        for key, pids in placeholders_by_group.items():
-            if key not in known_keys:
-                ph_cwd = self._placeholders[pids[0]]
-                headers.append((key, key[1], worktree_project_root(ph_cwd) or ph_cwd))
+            elif key in placeholders_by_group:
+                ph_cwd = self._placeholders[placeholders_by_group[key][0]]
+                headers.append((key, name, worktree_project_root(ph_cwd) or ph_cwd))
 
         # Expansion is persisted per group; unknown groups start collapsed.
         self._collapsed = {
@@ -1716,7 +1728,14 @@ class SessionSidebar(Gtk.Box):
         back down again.
         """
         self._placeholders[placeholder_id] = cwd
-        if self._placeholder_group_key(cwd) not in self._new_thread_rows:
+        key = self._placeholder_group_key(cwd)
+        if key[0] == "proj" and key[1] not in self.store.resolved_project_order:
+            # A project the sidebar has never shown starts life expanded — and
+            # persistently so, or the group would snap shut the moment its
+            # first session is discovered and the placeholder's temporary
+            # expansion (see _rebuild_rows) stops applying.
+            self.store.state.set_group_expanded(_group_state_key(key), True)
+        if key not in self._new_thread_rows:
             self._arriving_placeholders.add(placeholder_id)
         self._rebuild_rows()
         self._invalidate()
