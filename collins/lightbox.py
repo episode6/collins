@@ -482,8 +482,11 @@ class ImageLightbox(Gtk.Box):
         win_h = self._win[1]
         if self._caption is not None:
             avail_w = self._win[0] - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[0]
-            wrap_w = self._caption_wrap_w(round(self._image_size[0] * zoom), avail_w)
-            win_h -= self._caption_extra_h(wrap_w)
+            # The display width clamped to the space the slot can actually
+            # be pinned to — zoomed past the window edge, the raw width
+            # would overshoot the real wrap and under-reserve the caption.
+            disp_w = min(round(self._image_size[0] * zoom), avail_w)
+            win_h -= self._caption_extra_h(self._caption_wrap_w(disp_w, avail_w))
         display, strip_shown, chrome, slot = lightbox_zoom_slot(
             *self._image_size, zoom, self._chrome, self._win[0], win_h
         )
