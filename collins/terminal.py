@@ -1188,6 +1188,7 @@ class TerminalTab(Gtk.Box):
         self._paned.set_wide_handle(True)
         self._panel_sizes: dict[str, int] = {}  # this tab's panel px size per mode
         self._panel_apply_pending = False  # a programmatic divider set is queued
+        self._panel_apply_seq = 0  # invalidates superseded apply/settle chains
         self._panel_size_lookup = None  # mode -> app-wide last-set size (set by the window)
         self._size_emit_source: int | None = None  # debounce for panel-size-changed
         self._size_emit_mode: str | None = None  # mode whose size changed last
@@ -2668,21 +2669,57 @@ class TerminalTab(Gtk.Box):
     def _apply_panel_size(self) -> None:
         """Size the panel once the paned's own size is known: this tab's
         remembered size for the mode, else the app-wide last-set size, else
-        roughly a third of the paned."""
+        roughly a third of the paned.
+
+        The apply-pending gate stays up until the position sticks. Right
+        after a bottom↔right swap the panel's content still measures for the
+        old orientation (the VTE grid re-fits a frame or two later), so the
+        paned clamps the fresh position on the next allocation — and that
+        clamp arrives as a notify::position which _remember_panel_size would
+        record, silently overwriting the remembered size with the transient
+        one. Holding the gate and re-asserting across a few layout passes
+        keeps the clamp out of the books; if the size genuinely can't fit,
+        we give up without recording it, so the user's choice survives for
+        when there's room again."""
         self._panel_apply_pending = True
+        self._panel_apply_seq += 1
+        seq = self._panel_apply_seq
+        # get_position() reflects the *requested* value right after a set, so
+        # "did it stick?" can only be judged after the allocations that might
+        # clamp it — hence wall-clock re-assertions rather than one idle.
+        reasserts = [50, 150, 300]  # ms after the set; gate drops at the last
 
         def position() -> bool:
-            self._panel_apply_pending = False
+            if seq != self._panel_apply_seq:
+                return GLib.SOURCE_REMOVE  # a newer apply superseded this one
             total = self._paned_total()
             if total <= 0:
+                self._panel_apply_pending = False
                 return GLib.SOURCE_REMOVE
             size = self._panel_sizes.get(self._panel_mode()) or 0
             if size <= 0 and self._panel_size_lookup is not None:
                 size = self._panel_size_lookup(self._panel_mode()) or 0
             if 0 < size < total:
-                self._paned.set_position(total - size)
+                target = total - size
             else:  # nothing sensible remembered anywhere yet
-                self._paned.set_position(int(total * 0.62))
+                target = int(total * 0.62)
+            self._paned.set_position(target)
+            for i, delay in enumerate(reasserts):
+                GLib.timeout_add(delay, settle, target, i == len(reasserts) - 1)
+            return GLib.SOURCE_REMOVE
+
+        def settle(target: int, last: bool) -> bool:
+            if seq != self._panel_apply_seq:
+                return GLib.SOURCE_REMOVE
+            if last:
+                # Give up quietly whether or not it stuck — one more set here
+                # could clamp again *after* the gate drops and be recorded.
+                # The remembered size must survive a clamp it didn't cause.
+                self._panel_apply_pending = False
+            elif self._paned.get_position() != target:
+                # clamped by a stale minimum — re-assert now that the panel's
+                # content has had a layout pass to re-fit
+                self._paned.set_position(target)
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(position)
