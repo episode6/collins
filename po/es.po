@@ -890,3 +890,9 @@ msgstr "Enviar notificaciones de escritorio"
 msgid "notify_user — a notification titled with the session; clicking it opens the tab"
 msgstr "notify_user — una notificación titulada con la sesión; al pulsarla se abre la pestaña"
 
+msgid "Attach pull requests"
+msgstr "Adjuntar pull requests"
+
+msgid "attach_pr — put a pull request on the session's own footer and sidebar row"
+msgstr "attach_pr — coloca un pull request en el pie y la fila de la barra lateral de la sesión"
+

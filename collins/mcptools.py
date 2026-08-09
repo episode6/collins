@@ -147,6 +147,33 @@ TOOLS: list[dict] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "attach_pr",
+        "description": (
+            "Attach a GitHub pull request to this session in Collins, so it "
+            "shows on the session's footer and sidebar row with live CI "
+            "status. Collins links the PRs that appear in this session's own "
+            "output automatically — reach for this when one it can't see "
+            "belongs here: a PR opened by a subagent, opened outside this "
+            "session, or one this session is reviewing rather than authoring."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300,
+                    "description": (
+                        "The pull request's full URL, e.g. "
+                        "https://github.com/owner/repo/pull/123."
+                    ),
+                },
+            },
+            "required": ["url"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 

@@ -30,6 +30,7 @@ from collins.prstatus import (
     merge_ordered,
     newest_title,
     parse_pr_link,
+    parse_pr_url,
     refresh,
     resync,
     state_text,
@@ -143,6 +144,38 @@ def test_repository_is_optional():
 )
 def test_rejects_malformed_records(entry):
     assert parse_pr_link(entry) is None
+
+
+# -- parse_pr_url -----------------------------------------------------------
+
+
+def test_parse_pr_url_reads_number_and_repository_off_the_url():
+    pr = parse_pr_url(URL)
+    assert pr == PullRequest(number=55, url=URL, repository="episode6/collins")
+    assert pr.title is None and pr.state is None  # left for the next fetch
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "",
+        "https://github.com/episode6/collins/issues/55",
+        "https://github.com/episode6/collins/pull/55/files",
+        "https://github.com/episode6/collins/pull/",
+        "http://github.com/episode6/collins/pull/55",  # https only
+        "--version",  # the argv-injection shape _FETCHABLE exists for
+        None,
+        55,
+    ],
+)
+def test_parse_pr_url_rejects_anything_not_shaped_like_a_pr_page(url):
+    assert parse_pr_url(url) is None
+
+
+def test_parse_pr_url_accepts_what_a_record_round_trip_accepts():
+    """A URL accepted here must be one to_record will persist — attach_pr
+    hands its result straight down the prs-changed path."""
+    assert to_record(parse_pr_url(URL)) is not None
 
 
 # -- enrich -----------------------------------------------------------------

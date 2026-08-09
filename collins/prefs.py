@@ -100,6 +100,10 @@ _MCP_TOOL_LABELS = {
         N_("Send desktop notifications"),
         N_("notify_user — a notification titled with the session; clicking it opens the tab"),
     ),
+    "attach_pr": (
+        N_("Attach pull requests"),
+        N_("attach_pr — put a pull request on the session's own footer and sidebar row"),
+    ),
 }
 
 

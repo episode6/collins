@@ -1259,6 +1259,11 @@ class TerminalTab(Gtk.Box):
         # loop writes it.
         self._tracked_prs: dict[str, PullRequest] = {}
         self._restored_prs: list[PullRequest] = []  # this session's, from a previous run
+        # PRs the session named itself, via the attach_pr tool. Folded into
+        # every collection rather than written into _tracked_prs, which an
+        # in-flight update replaces wholesale when it lands (see attach_pr).
+        # Replaced wholesale too, for the same thread-safety reason.
+        self._attached_prs: dict[str, PullRequest] = {}
         self._footer_prs: list[PullRequest] = []  # what the chips currently show
         self._saved_pr_records: list[dict] = []  # last records handed to the window
         self._pr_discover = False  # a click's search, waiting for a free tick
@@ -1842,6 +1847,22 @@ class TerminalTab(Gtk.Box):
         self._merge_restored()
         self._request_update()
 
+    def attach_pr(self, pr: PullRequest) -> bool:
+        """Adopt a PR named from outside the transcript — the attach_pr
+        session tool. False when the tab already tracks it.
+
+        Kept in a dict of its own rather than written into _tracked_prs: an
+        update already in flight when the call lands replaces that wholesale,
+        so a direct write could be lost. _collect_prs folds these in on every
+        pass instead, and the update requested here gets the new chip its
+        title and status.
+        """
+        if pr.url in self._tracked_prs or pr.url in self._attached_prs:
+            return False
+        self._attached_prs = {**self._attached_prs, pr.url: pr}
+        self._request_update()
+        return True
+
     def _merge_restored(self) -> None:
         """Put this session's restored PRs back at the head of the tracked list.
 
@@ -2423,11 +2444,12 @@ class TerminalTab(Gtk.Box):
     def _collect_prs(self, found: PullRequest | None) -> list[PullRequest]:
         """Every PR this tab knows about, oldest first. On the update thread.
 
-        Three sources, in the order a PR can first be known from them: the list
-        restored from a previous run, the transcript's pr-links, and whatever
-        the refresh button just found on the branch. A URL is only ever added —
-        a PR the session opened stays on the row once the branch has moved on,
-        which is the whole point of showing all of them.
+        Four sources, in the order a PR can first be known from them: the list
+        restored from a previous run, the transcript's pr-links, the PRs the
+        session attached itself (the attach_pr tool), and whatever the refresh
+        button just found on the branch. A URL is only ever added — a PR the
+        session opened stays on the row once the branch has moved on, which is
+        the whole point of showing all of them.
 
         Uncapped, and it must stay that way even though the row isn't: cap the
         list here and the PRs trimmed off the front would come back from the
@@ -2439,6 +2461,9 @@ class TerminalTab(Gtk.Box):
         except Exception:
             links = []
         collected = merge_ordered(self._tracked_prs.values(), links)
+        for attached in self._attached_prs.values():
+            if all(pr.url != attached.url for pr in collected):
+                collected.append(attached)
         if found is not None and all(pr.url != found.url for pr in collected):
             collected.append(found)  # a PR nothing else knows about: it is the newest
         return collected

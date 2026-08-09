@@ -404,11 +404,17 @@ is running in:
   terminal.
 - **`show_image(path)`** — show a screenshot, plot, or render in the in-app
   lightbox.
+- **`attach_pr(url)`** — put a pull request on the session's footer and
+  sidebar row, live CI status and all. Collins links the PRs that show up in
+  a session's own output by itself; this is for one it can't see — a PR
+  opened by a subagent, opened outside the session, or one the session is
+  reviewing rather than authoring.
 
 Each tool asks for permission the first time a session calls it, like any
 other MCP tool. They only ever touch Collins' own windows: nothing is read
-back to the agent, nothing is written to your repo, and nothing leaves the
-machine.
+back to the agent and nothing is written to your repo. The one that reaches
+past the window is `attach_pr`, and only to ask `gh` how the named PR is
+doing — the same fetch the footer's refresh button runs.
 
 **Each one has its own switch** in Preferences → *Session tools*, all on by
 default. A tool switched off isn't offered to the sessions Collins starts
