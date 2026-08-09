@@ -161,10 +161,11 @@ def apply(text: str) -> bool:
     Tabs and workers inherit os.environ, so one application covers them all.
 
     Re-applying a changed answer swaps, not accumulates: the entry a
-    previous apply() added comes off first. Only that entry — a directory
-    already on PATH before any answer was never added, so it is never
-    removed, even when the old answer happened to live there. Applying ""
-    (rely on PATH alone) is the same swap with nothing to put back on.
+    previous apply() added comes off first. Only ever that entry — a
+    directory the user's own PATH already had was never added here, so it
+    is never removed, even when the old answer happened to live in it.
+    Applying "" (rely on PATH alone) is the same swap with nothing to put
+    back on.
     """
     global _appended
     text = text.strip()
