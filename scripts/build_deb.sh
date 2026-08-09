@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 # Build a Debian package: dist/collins_<version>_all.deb
 set -euo pipefail
 
@@ -61,7 +61,7 @@ Architecture: all
 Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, gir1.2-vte-3.91
 Recommends: gir1.2-glib-2.0
 Installed-Size: $INSTALLED_SIZE
-Maintainer: Máté Molnár <molnar.mate@zengo.eu>
+Maintainer: episode6 <support@episode6.com>
 Homepage: https://github.com/episode6/collins
 Description: Manage and resume AI coding agent sessions (GTK4 GUI)
  Native GTK4/libadwaita desktop app for the Claude Code CLI: browse all
