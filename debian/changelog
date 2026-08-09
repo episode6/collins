@@ -4,7 +4,7 @@ collins (0.1.0) noble; urgency=medium
     name, command (collins), app id (com.episode6.Collins), and config
     dir (~/.config/collins, migrated automatically from the old locations).
 
- -- Geoff Hackett <ghackett@gmail.com>  Sun, 26 Jul 2026 12:00:00 +0000
+ -- Geoff Hackett <ghackett@episode6.com>  Sun, 26 Jul 2026 12:00:00 +0000
 
 agent-session-manager (1.0.0) noble; urgency=medium
 

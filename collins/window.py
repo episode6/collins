@@ -4326,7 +4326,7 @@ class MainWindow(Adw.ApplicationWindow):
         about = Adw.AboutDialog(
             application_name="Collins",
             application_icon=_app_icon_name(self),
-            developer_name="Máté Molnár",
+            developer_name="episode6, Inc.",
             version=__version__,
             license_type=Gtk.License.GPL_3_0,
             comments=(
