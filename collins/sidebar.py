@@ -508,10 +508,10 @@ class SessionRow(Gtk.ListBoxRow):
         # and it is a button — clicking it opens the same list the tab footer's
         # ellipsis shows, from a row whose tab needn't be open (or exist) to
         # read it, and consumes the click that would otherwise open the session.
-        # A session with no PRs has no mark, and the title starts where the
-        # check would leave it. A right-click on the mark skips the list and
-        # opens the newest PR in the browser, the way a footer chip does — see
-        # _on_right_click, which is where that click lands.
+        # A session with no PRs shows the agent's own mark there instead (see
+        # below). A right-click on the mark skips the list and opens the newest
+        # PR in the browser, the way a footer chip does — see _on_right_click,
+        # which is where that click lands.
         self._pr_menu = prmenu.new_popover(Gtk.PositionType.BOTTOM)
         pr_btn = Gtk.MenuButton(valign=Gtk.Align.CENTER, popover=self._pr_menu)
         pr_btn.add_css_class("flat")
@@ -522,6 +522,19 @@ class SessionRow(Gtk.ListBoxRow):
         pr_btn.set_create_popup_func(self._fill_pr_menu)
         self._pr_btn = pr_btn
         top.append(pr_btn)
+
+        # The same slot when there are no pull requests to fill it: the agent
+        # running the session, at the mark's size and inset (see .agent-mark in
+        # app.py) so the two swap in place rather than shifting the title. Dim
+        # and not a button — it says what the row is, where the mark would say
+        # what there is to do about it, and every row would carry the same one.
+        agent_mark = Gtk.Image.new_from_icon_name(item.provider_icon)
+        agent_mark.set_pixel_size(prmenu.ROW_ICON_PX)
+        agent_mark.set_valign(Gtk.Align.CENTER)
+        agent_mark.add_css_class("agent-mark")
+        agent_mark.add_css_class("dim-label")
+        self._agent_mark = agent_mark
+        top.append(agent_mark)
 
         name_label = Gtk.Label(xalign=0.0, hexpand=True)
         # The title is what carries "this session has a tab open": app.py dims
@@ -736,8 +749,14 @@ class SessionRow(Gtk.ListBoxRow):
 
         Rebuilt rather than patched, like the footer's chips: which icons a
         mark is made of depends on the state it shows, and rows are cheap.
+
+        The slot is never empty: with nothing known about any pull request the
+        agent's mark stands there instead, and it steps aside the moment one
+        turns up (a provider with no icon of its own leaves the slot empty, as
+        it did before there was anything to put in it).
         """
         self._pr_btn.set_visible(bool(self._prs))
+        self._agent_mark.set_visible(not self._prs and bool(self.item.provider_icon))
         if not self._prs:
             return
         self._pr_btn.set_child(prmenu.combined_icon(self._prs))
