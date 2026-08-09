@@ -66,6 +66,38 @@ _BOX_PREFIX_CELLS = 2
 _BOX_MARGIN = 4
 
 
+def split_screen_rows(text: str, columns: int) -> list[str]:
+    """A terminal's joined plain-text screen read, split back into its rows.
+
+    VTE returns soft-wrapped screen rows joined into one logical line, and
+    entered_prompt's row indices (the cursor's above all) only line up when
+    every such line is put back on its row boundaries. The split counts
+    cells, never characters — a wide character fills two, so a brim-full
+    row of CJK is *fewer* characters than columns, and fixed-size character
+    chunks would drift every row after it. The cut falls exactly where the
+    terminal wrapped: a character that would overflow the row starts the
+    next one (which is also how a wide character leaves a straddled last
+    cell empty), and a zero-width mark stays with the character it
+    decorates.
+    """
+    rows: list[str] = []
+    for line in text.split("\n"):
+        if cell_width(line) <= columns:
+            rows.append(line)
+            continue
+        row = ""
+        cells = 0
+        for char in line:
+            width = cell_width(char)
+            if cells + width > columns:
+                rows.append(row)
+                row, cells = "", 0
+            row += char
+            cells += width
+        rows.append(row)
+    return rows
+
+
 def _box_rule(row: str) -> bool:
     """A full-width horizontal rule — the frame above and below the box."""
     return bool(row) and set(row) == {_BOX_RULE_CHAR}

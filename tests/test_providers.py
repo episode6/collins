@@ -16,6 +16,7 @@ from collins.providers import (
     Provider,
     available_providers,
     get_provider,
+    split_screen_rows,
 )
 
 # -- transcript resolution ----------------------------------------------------
@@ -554,6 +555,44 @@ def test_clear_keys_walk_to_the_end_and_erase_every_character():
 
 def test_base_providers_have_no_box_to_read_or_clear():
     assert Provider().entered_prompt(["❯\xa0typed"], 0, 80) is None
+
+
+def test_screen_rows_split_where_the_terminal_wrapped():
+    """VTE hands soft-wrapped rows back joined; the split must land on the
+    same boundaries the terminal wrapped at, counted in cells."""
+    # ASCII: a brim-full row is exactly `columns` characters.
+    assert split_screen_rows("x" * 200, 80) == ["x" * 80, "x" * 80, "x" * 40]
+    # Wide characters fill two cells each: 50 CJK chars are 100 cells, so
+    # the first row holds 40 characters, not 80 — character-count chunks
+    # would swallow the boundary and shift every row after it.
+    assert split_screen_rows("字" * 50, 80) == ["字" * 40, "字" * 10]
+    # A wide character that would straddle the last cell starts the next
+    # row, leaving that cell empty — the row before it is 79 cells.
+    assert split_screen_rows("x" * 79 + "字字", 80) == ["x" * 79, "字字"]
+    # A zero-width mark stays with the character it decorates, even when
+    # that character sits in the row's last cell.
+    assert split_screen_rows("x" * 80 + "́y", 80) == ["x" * 80 + "́", "y"]
+    # Lines that fit stay whole; blanks stay rows.
+    assert split_screen_rows("short\n\nnext", 80) == ["short", "", "next"]
+
+
+def test_wide_scrollback_above_the_box_does_not_shift_the_read():
+    """A soft-wrapped CJK line in the shell scrollback above the box comes
+    back joined; only a cell-counted split keeps the cursor index pointing
+    into the box."""
+    screen_text = "\n".join(
+        [
+            "字" * 50,  # two screen rows once split (100 cells at 80 columns)
+            "─" * 80,
+            "❯\xa0fix the flaky test",
+            "─" * 80,
+            "  ⏵⏵ auto mode on",
+        ]
+    )
+    rows = split_screen_rows(screen_text, 80)
+    assert rows[3] == "❯\xa0fix the flaky test"
+    prompt = ClaudeProvider().entered_prompt(rows, 3, 80)
+    assert prompt.text == "fix the flaky test"
 
 
 # -- the "leaving a worktree" dialog, at graceful-close time ------------------

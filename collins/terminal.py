@@ -50,7 +50,12 @@ from .linkpatterns import (  # noqa: E402
     resolve_wrapped_reference,
     token_at_column,
 )
-from .providers import EnteredPrompt, Provider, get_provider  # noqa: E402
+from .providers import (  # noqa: E402
+    EnteredPrompt,
+    Provider,
+    get_provider,
+    split_screen_rows,
+)
 from .prstatus import (  # noqa: E402
     PullRequest,
     describe,
@@ -2218,15 +2223,11 @@ class TerminalTab(Gtk.Box):
             Vte.Format.TEXT, top_row, 0, cursor_row + row_count, columns
         )
         text = screen[0] if isinstance(screen, tuple) else screen
-        rows: list[str] = []
-        for line in (text or "").split("\n"):
-            if len(line) <= columns:
-                rows.append(line)
-            else:
-                # Soft-wrapped screen rows come back joined (see
-                # _resolve_wrapped_at); full-width chunks restore them, and
-                # with them the row indexing the cursor position lives in.
-                rows.extend(line[i : i + columns] for i in range(0, len(line), columns))
+        # Soft-wrapped screen rows come back joined (as in
+        # _resolve_wrapped_at); splitting them back — by cells, since a
+        # wide character fills two — keeps the row indexing the cursor
+        # position lives in.
+        rows = split_screen_rows(text or "", columns)
         return self.provider.entered_prompt(rows, cursor_row - top_row, columns)
 
     def _on_copy_prompt(self, _btn) -> None:
@@ -2243,11 +2244,14 @@ class TerminalTab(Gtk.Box):
         prompt = self.entered_prompt()
         if prompt is None or not prompt.text.strip():
             return
+        keys = self.provider.clear_prompt_keys(prompt) if cut else ""
+        if cut and not keys:
+            # A provider that can read its box but not clear it safely:
+            # no half-cut that copies, leaves the text, and flashes done.
+            return
         self._copy_prompt_icon.get_clipboard().set(prompt.text)
-        if cut:
-            keys = self.provider.clear_prompt_keys(prompt)
-            if keys:
-                self.feed_child_text(keys)
+        if keys:
+            self.feed_child_text(keys)
         # The same confirmation rhythm as the copy labels beside it
         # (copylabel), told with the icon: a checkmark for a beat.
         self._copy_prompt_icon.set_from_icon_name("object-select-symbolic")
