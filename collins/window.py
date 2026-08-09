@@ -22,6 +22,8 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import (
+    APP_ID,
+    DEBUG_APP_ID,
     __version__,
     buildinfo,
     chats,
@@ -207,9 +209,9 @@ def _app_icon_name(window: Gtk.Window) -> str:
     recolored icon so the two apps read apart in a dock."""
     app = window.get_application()
     app_id = app.get_application_id() if app is not None else None
-    if app_id and app_id.startswith("com.episode6.Collins.Debug"):
-        return "com.episode6.Collins.Debug"
-    return "com.episode6.Collins"
+    if app_id and app_id.startswith(DEBUG_APP_ID):
+        return DEBUG_APP_ID
+    return APP_ID
 
 
 def session_window(

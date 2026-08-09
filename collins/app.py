@@ -19,6 +19,8 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import (
+    APP_ID,
+    DEBUG_APP_ID,
     buildinfo,
     clisetup,
     cliwelcome,
@@ -657,8 +659,6 @@ popover.menu button.open-with-row:hover {
 """
 
 
-APP_ID = "com.episode6.Collins"
-
 # Colors that must follow the light/dark scheme, keyed by "is dark". GTK CSS has
 # no working prefers-color-scheme query, so these are re-applied from a second
 # provider whenever the effective scheme flips (see _apply_scheme_css).
@@ -748,7 +748,7 @@ class App(Adw.Application):
         # The debug build (same id prefix _app_icon_name keys on) runs out of
         # a source checkout; note which commit — and whether the tree was
         # dirty — now, so the About dialog reports the launch-time state.
-        if (self.get_application_id() or "").startswith("com.episode6.Collins.Debug"):
+        if (self.get_application_id() or "").startswith(DEBUG_APP_ID):
             buildinfo.capture()
         display = Gdk.Display.get_default()
         provider = Gtk.CssProvider()
