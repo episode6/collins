@@ -432,9 +432,15 @@ class NewThreadRow(Gtk.ListBoxRow):
     outline a running or detached row is drawn in, through
     row.session-child:not(.running):not(.detached) — the group is empty, and
     an outlined row there would say otherwise.
+
+    `arriving` plays the row in rather than having it appear — what the offer
+    gets when the group's last visible row was just archived away, taking the
+    emptied slot over as the ghost-out finishes: see _arrive_by_slide.
     """
 
-    def __init__(self, group_key: tuple, cwd: str | None) -> None:
+    def __init__(
+        self, group_key: tuple, cwd: str | None, arriving: bool = False
+    ) -> None:
         super().__init__()
         self.group_key = group_key
         self.cwd = cwd
@@ -452,7 +458,10 @@ class NewThreadRow(Gtk.ListBoxRow):
         label.set_ellipsize(_ELLIPSIZE_END)
         box.append(label)
 
-        self.set_child(box)
+        if arriving:
+            _arrive_by_slide(self, box)
+        else:
+            self.set_child(box)
         self.set_tooltip_text(
             _("New chat")
             if group_key == CHATS_GROUP
@@ -1269,6 +1278,13 @@ class SessionSidebar(Gtk.Box):
 
     def _rebuild_rows(self) -> None:
         self._remember_scroll()
+        # Groups whose slots held session or placeholder rows in the build
+        # being torn down: a "New Thread" offer built into one of them now is
+        # taking over a slot the group's last row just vacated (the archive of
+        # a project's last visible session), so it slides in where an ordinary
+        # rebuild would snap it into place.
+        vacated_groups = {row.item.group_key for row in self._rows.values()}
+        vacated_groups.update(row.group_key for row in self._placeholder_rows.values())
         self.list.remove_all()
         self._rows = {}
         self._header_rows = {}
@@ -1353,7 +1369,7 @@ class SessionSidebar(Gtk.Box):
                 and not placeholders_by_group.get(key)
                 and (key == CHATS_GROUP or cwd)
             ):
-                new_thread = NewThreadRow(key, cwd)
+                new_thread = NewThreadRow(key, cwd, arriving=key in vacated_groups)
                 new_thread.set_margin_start(child_indent)
                 self._new_thread_rows[key] = new_thread
                 self.list.append(new_thread)
