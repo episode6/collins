@@ -128,14 +128,31 @@ def _valid_node(node: object) -> tuple[dict, int, int, int] | None:
 def _valid_tree(tree: object) -> dict | None:
     """The normalized tree, or None. The dock invariants hold or the tree
     falls: exactly one terminal leaf, at least one strip (a lone terminal
-    is the fresh default, not a layout), at most one home strip."""
+    is the fresh default, not a layout), at most one home strip, and no
+    two shell pages claiming the same history ordinal (they would share
+    one scrollback file, and the next save would fold one shell's text
+    over the other's)."""
     result = _valid_node(tree)
     if result is None:
         return None
     clean, terminals, strips, homes = result
     if terminals != 1 or strips < 1 or homes > 1:
         return None
+    hists = list(_iter_shell_hists(clean))
+    if len(hists) != len(set(hists)):
+        return None
     return clean
+
+
+def _iter_shell_hists(node: dict):
+    """Every shell page's history ordinal across a validated tree."""
+    if "strip" in node:
+        for page in node["strip"]["pages"]:
+            if page["kind"] == "shell":
+                yield page["hist"]
+    elif "split" in node:
+        yield from _iter_shell_hists(node["a"])
+        yield from _iter_shell_hists(node["b"])
 
 
 def validate(entry: object) -> dict | None:

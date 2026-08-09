@@ -62,6 +62,13 @@ def test_validate_drops_malformed_tree_keeps_memory():
         {"split": "h", "a": {"terminal": True}, "b": _strip([_shell(True)])},
         {"split": "h", "a": {"terminal": True}, "b": {"terminal": True}},  # two terminals
         _strip([_shell(0)]),  # no terminal at all
+        # duplicate shell ordinals — same strip, and across strips
+        {"split": "h", "a": {"terminal": True}, "b": _strip([_shell(0), _shell(0)])},
+        {
+            "split": "h",
+            "a": {"split": "v", "a": {"terminal": True}, "b": _strip([_shell(0), _shell(1)])},
+            "b": _strip([_shell(1)]),
+        },
         {  # two home strips
             "split": "h",
             "a": {"split": "v", "a": {"terminal": True}, "b": _strip([_shell(0)], home=True)},
