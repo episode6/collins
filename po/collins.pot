@@ -2067,3 +2067,23 @@ msgstr ""
 msgid ""
 "claude isn't on PATH — Collins will ask where it is at the next launch."
 msgstr ""
+
+#: collins/panelstrip.py:307
+msgid "Move to"
+msgstr ""
+
+#: collins/panelstrip.py:309
+msgid "Split Left"
+msgstr ""
+
+#: collins/panelstrip.py:310
+msgid "Split Right"
+msgstr ""
+
+#: collins/panelstrip.py:311
+msgid "Split Up"
+msgstr ""
+
+#: collins/panelstrip.py:312
+msgid "Split Down"
+msgstr ""

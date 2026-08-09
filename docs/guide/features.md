@@ -258,6 +258,11 @@ that lives below or beside the agent terminal, with **tabs of its own**:
   fresh tab.
 - Shells open in the agent's **current working directory** (worktree-aware),
   and the swap button moves the panel bottom ↔ right without restarting them.
+- **Right-click a panel tab to split** — Split Left / Right / Up / Down carves
+  a second strip of tabs on that side and moves the tab into it, so you can
+  keep shells below the terminal *and* beside it at once. The same menu's
+  **Move to** sends a tab to another strip, closing tabs included; a strip
+  whose last tab leaves disappears. Shells keep running through every move.
 - **Right-click the footer's terminal button** to open that same directory —
   the agent's live one, not the project root — in your desktop's own terminal
   instead, for the times a window of its own beats a panel. The terminal is

@@ -22,13 +22,20 @@ from .panelsizing import SizeMemory  # noqa: E402
 
 
 class PanedSizer(GObject.Object):
-    """Owns the remember/apply dance for one paned's end child.
+    """Owns the remember/apply dance for one paned's managed child.
 
     `key()` names the size the divider is currently expressing — the shell
     panel's flips between "bottom" and "right" with its orientation; a
     single-position paned returns a constant. `occupied()` gates
-    remembering on the end child actually showing: a hidden child leaves
-    the divider parked somewhere meaningless.
+    remembering on the managed child actually showing: a hidden child
+    leaves the divider parked somewhere meaningless.
+
+    The managed child — the one whose pixel size is remembered — is the
+    end child by default. A dock split that puts its panel left of (or
+    above) the fixed content manages the start child instead
+    (`end_child=False`); SizeMemory always thinks in "position of the
+    divider counted from the managed child's far edge", so both flavors
+    share the arithmetic via the position↔raw-position mirror below.
     """
 
     __gsignals__ = {
@@ -43,11 +50,13 @@ class PanedSizer(GObject.Object):
         paned: Gtk.Paned,
         key: Callable[[], str],
         occupied: Callable[[], bool],
+        end_child: bool = True,
     ) -> None:
         super().__init__()
         self._paned = paned
         self._key = key
         self._occupied = occupied
+        self._end_child = end_child
         self._lookup: Callable[[str], int] | None = None
         self._memory = SizeMemory()
         self._apply_pending = False  # a programmatic divider set is queued
@@ -81,6 +90,20 @@ class PanedSizer(GObject.Object):
         vertical = self._paned.get_orientation() == Gtk.Orientation.VERTICAL
         return self._paned.get_height() if vertical else self._paned.get_width()
 
+    def _mirrored(self) -> int:
+        """The live divider position in SizeMemory's space: counted so that
+        `total - position` is always the managed child's size. For an
+        end-managed paned that's the raw position; start-managed mirrors."""
+        position = self._paned.get_position()
+        return position if self._end_child else self._total() - position
+
+    def _raw(self, position: int) -> int:
+        """A SizeMemory-space position converted back to the paned's own.
+        Self-inverse, recomputed against the live total — as the paned
+        resizes, a start-managed conversion tracks the panel's size, not a
+        stale pixel offset."""
+        return position if self._end_child else self._total() - position
+
     def remember(self) -> None:
         """Record the end child's size for the current key. Skipped while an
         apply is still queued — the value it would read is a stale layout's,
@@ -89,7 +112,7 @@ class PanedSizer(GObject.Object):
         if not self._occupied() or self._apply_pending:
             return
         key = self._key()
-        size = self._memory.record(key, self._total(), self._paned.get_position())
+        size = self._memory.record(key, self._total(), self._mirrored())
         if size is None:
             return
         if self._emit_source is not None:
@@ -138,17 +161,25 @@ class PanedSizer(GObject.Object):
         # "did it stick?" can only be judged after the allocations that might
         # clamp it — hence wall-clock re-assertions rather than one idle.
         reasserts = [50, 150, 300]  # ms after the set; gate drops at the last
+        # A paned created this very frame (a fresh dock split) has no extent
+        # in the first idle; wait out its first allocation instead of giving
+        # up, bounded so a never-allocated paned can't hold the gate forever.
+        waits = [0]
 
         def position() -> bool:
             if seq != self._apply_seq:
                 return GLib.SOURCE_REMOVE  # a newer apply superseded this one
+            if self._total() <= 0 and waits[0] < 10:
+                waits[0] += 1
+                GLib.timeout_add(50, position)
+                return GLib.SOURCE_REMOVE
             key = self._key()
             fallback = (self._lookup(key) or 0) if self._lookup is not None else 0
             target = self._memory.target(key, self._total(), fallback)
             if target is None:
                 self._apply_pending = False
                 return GLib.SOURCE_REMOVE
-            self._paned.set_position(target)
+            self._paned.set_position(self._raw(target))
             for i, delay in enumerate(reasserts):
                 GLib.timeout_add(delay, settle, target, i == len(reasserts) - 1)
             return GLib.SOURCE_REMOVE
@@ -169,10 +200,10 @@ class PanedSizer(GObject.Object):
                 # could clamp again *after* the gate drops and be recorded.
                 # The remembered size must survive a clamp it didn't cause.
                 self._apply_pending = False
-            elif self._paned.get_position() != target:
-                # clamped by a stale minimum — re-assert now that the end
-                # child's content has had a layout pass to re-fit
-                self._paned.set_position(target)
+            elif self._paned.get_position() != self._raw(target):
+                # clamped by a stale minimum — re-assert now that the
+                # managed child's content has had a layout pass to re-fit
+                self._paned.set_position(self._raw(target))
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(position)
