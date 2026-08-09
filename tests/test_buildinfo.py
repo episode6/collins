@@ -95,9 +95,8 @@ def test_chip_is_build_metadata():
 def test_describe_clean_on_a_branch():
     info = BuildInfo(sha="abc1234", title="Fix the thing", branch="main", dirty=False)
     assert info.describe() == (
-        "Debug Build Info:\n"
-        "Commit: [abc1234] Fix the thing\n"
-        "Branch: main\n"
+        "<b>Commit:</b> [abc1234] Fix the thing\n"
+        "<b>Branch:</b> main\n"
         "\nThe worktree was clean at launch"
     )
 
@@ -105,8 +104,13 @@ def test_describe_clean_on_a_branch():
 def test_describe_dirty_and_detached():
     info = BuildInfo(sha="abc1234", title="Fix the thing", branch=None, dirty=True)
     assert info.describe() == (
-        "Debug Build Info:\n"
-        "Commit: [abc1234] Fix the thing\n"
-        "Branch: (detached HEAD)\n"
+        "<b>Commit:</b> [abc1234] Fix the thing\n"
+        "<b>Branch:</b> (detached HEAD)\n"
         "\nThe worktree had uncommitted changes at launch"
     )
+
+
+def test_describe_escapes_markup_in_git_strings():
+    info = BuildInfo(sha="abc1234", title="Map A -> B & C <fast>", branch="a<b", dirty=False)
+    assert "<b>Commit:</b> [abc1234] Map A -&gt; B &amp; C &lt;fast&gt;\n" in info.describe()
+    assert "<b>Branch:</b> a&lt;b\n" in info.describe()

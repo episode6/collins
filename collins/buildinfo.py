@@ -21,6 +21,7 @@ import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 
 from . import gitinfo
@@ -52,17 +53,19 @@ class BuildInfo:
         return f"+{self.sha}" + (".dirty" if self.dirty else "")
 
     def describe(self) -> str:
-        """The About-dialog paragraph. Deliberately not translated: it only
-        ever appears in the debug build, for whoever is developing Collins."""
+        """The About-dialog paragraph, as Pango markup (AdwAboutDialog parses
+        its comments as markup, so the git-sourced strings are escaped).
+        Deliberately not translated: it only ever appears in the debug build,
+        for whoever is developing Collins."""
         state = (
             "The worktree had uncommitted changes at launch"
             if self.dirty
             else "The worktree was clean at launch"
         )
         return (
-            "Debug Build Info:\n"
-            f"Commit: [{self.sha}] {self.title}\n"
-            f"Branch: {self.branch or '(detached HEAD)'}\n"
+            f"<b>Commit:</b> [{escape(self.sha, quote=False)}] "
+            f"{escape(self.title, quote=False)}\n"
+            f"<b>Branch:</b> {escape(self.branch or '(detached HEAD)', quote=False)}\n"
             f"\n{state}"
         )
 
