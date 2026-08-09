@@ -30,9 +30,12 @@ Two rules shape what counts as a good answer:
 
 Applying an answer means appending its directory to this process's PATH —
 appending, not prepending, so a directory someone once picked can never
-shadow `git` or `gh` for the rest of the app. Everything downstream
-(providers, titles, icongen, and every tab's shell, which inherits the
-environment) then finds the CLI the way it always did: `shutil.which`.
+shadow `git` or `gh` for the rest of the app. An answer can also change
+mid-run (Preferences); applying the new one first takes back the entry the
+old one added — only ever that entry, never a directory the user's own
+PATH brought. Everything downstream (providers, titles, icongen, and every
+tab's shell, which inherits the environment) then finds the CLI the way it
+always did: `shutil.which`.
 
 Gtk-free, like ghsetup, so it stays testable where GTK isn't.
 """
@@ -96,9 +99,20 @@ def known_locations() -> list[Path]:
     ]
 
 
+# The PATH entry this process appended for the current answer, if any —
+# what apply() takes back off before putting a changed answer's entry on.
+_appended: str | None = None
+
+
 def on_path() -> bool:
     """Whether the CLI is findable right now, PATH as it currently stands."""
     return shutil.which(CLI_NAME) is not None
+
+
+def found_at() -> str | None:
+    """Where a `claude` lookup lands right now, PATH as it stands — the
+    answer to "which one is actually in use?"."""
+    return shutil.which(CLI_NAME)
 
 
 def validate(text: str) -> str:
@@ -145,14 +159,28 @@ def apply(text: str) -> bool:
     here, and a directory someone picked in a dialog must never get to
     shadow `git` or `gh` for every subprocess the app runs from then on.
     Tabs and workers inherit os.environ, so one application covers them all.
+
+    Re-applying a changed answer swaps, not accumulates: the entry a
+    previous apply() added comes off first. Only that entry — a directory
+    already on PATH before any answer was never added, so it is never
+    removed, even when the old answer happened to live there. Applying ""
+    (rely on PATH alone) is the same swap with nothing to put back on.
     """
+    global _appended
     text = text.strip()
+    parts = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+    if _appended is not None:
+        if _appended in parts:
+            parts.remove(_appended)
+            os.environ["PATH"] = os.pathsep.join(parts)
+            log.info("clisetup: removed %s from PATH", _appended)
+        _appended = None
     if not text:
         return on_path()
     directory = str(Path(os.path.expanduser(text)).parent)
-    parts = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p]
     if directory not in parts:
         os.environ["PATH"] = os.pathsep.join([*parts, directory])
+        _appended = directory
         log.info("clisetup: added %s to PATH", directory)
     return on_path()
 

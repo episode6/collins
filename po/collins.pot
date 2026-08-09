@@ -2002,3 +2002,22 @@ msgid ""
 "path — it will work until that tool updates, and then this question comes "
 "back."
 msgstr ""
+
+#: collins/prefs.py:659
+msgid "Claude Code CLI"
+msgstr ""
+
+#: collins/prefs.py:660
+msgid ""
+"The claude command every session runs through. Leave empty to use the one "
+"on PATH. Tabs already open keep the CLI they started with"
+msgstr ""
+
+#: collins/prefs.py:718
+msgid "Using the claude found on PATH at {path}."
+msgstr ""
+
+#: collins/prefs.py:723
+msgid ""
+"claude isn't on PATH — Collins will ask where it is at the next launch."
+msgstr ""
