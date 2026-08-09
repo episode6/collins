@@ -23,7 +23,10 @@ Two rules shape what counts as a good answer:
 - A path with a version number in it is refused outright, for the same
   reason from the other side: it works today and breaks on the next
   update, silently returning the app to the blank sidebar — but this time
-  with a stored answer that looks authoritative.
+  with a stored answer that looks authoritative. One carve-out: inside a
+  version manager's tree (nvm, asdf) *every* path is versioned — there is
+  no stable launcher to demand — so those are accepted with a warning
+  instead of refused (VERSION_MANAGED, not VERSIONED).
 
 Applying an answer means appending its directory to this process's PATH —
 appending, not prepending, so a directory someone once picked can never
@@ -58,16 +61,25 @@ OK = "ok"
 MISSING = "missing"  # no executable file there
 BAD_NAME = "bad-name"  # an executable, but not one a `claude` lookup will find
 VERSIONED = "versioned"  # works now, breaks on the CLI's next self-update
+# A versioned path inside a version manager's tree: usable — no stable
+# alternative exists to insist on — but not validatable as one, so the ask
+# accepts it with a warning rather than a green check.
+VERSION_MANAGED = "version-managed"
 
 # A version number in a path component: "2.1.226", "v20.1.0",
 # "claude-1.2" — anything with two dot-separated runs of digits.
 _VERSION_RE = re.compile(r"\d+\.\d+")
 
+# Directory names that mark a version manager's tree. Exact component
+# matches, dotted or bare (~/.nvm at home, /opt/nvm in containers).
+_VERSION_MANAGER_DIRS = frozenset({".nvm", "nvm", ".asdf", "asdf"})
+
 # Where an installed CLI tends to be when PATH doesn't say. Ordered:
 # the official installer's stable launcher first, then its predecessor,
 # then the places an npm/user install lands. Deliberately absent: version
 # managers' trees (nvm, asdf, volta's tool dirs) — every path in them is
-# versioned, which validate() refuses anyway.
+# versioned, so none makes a pre-fill worth suggesting; one browsed to by
+# hand is accepted with a warning (VERSION_MANAGED).
 def known_locations() -> list[Path]:
     home = Path.home()
     return [
@@ -98,6 +110,14 @@ def validate(text: str) -> str:
     # *named* its version ("…/versions/2.1.226"), and "this path dies on
     # update" is the answer that explains what to point at instead.
     if any(_VERSION_RE.search(part) for part in path.parts):
+        if any(part in _VERSION_MANAGER_DIRS for part in path.parts):
+            # A version manager's tree offers nothing unversioned to point
+            # at instead, so this one is usable — but only the actual CLI
+            # is: a VERSION_MANAGED answer goes on PATH like any other, so
+            # the name still has to be the one everything looks up.
+            if path.name != CLI_NAME:
+                return BAD_NAME
+            return VERSION_MANAGED
         return VERSIONED
     if path.name != CLI_NAME:
         return BAD_NAME

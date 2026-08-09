@@ -1995,3 +1995,10 @@ msgstr ""
 #: collins/cliwelcome.py:174
 msgid "Choose the claude executable"
 msgstr ""
+
+#: collins/cliwelcome.py:157
+msgid ""
+"This is inside a version manager's tree, so Collins can't validate a stable "
+"path — it will work until that tool updates, and then this question comes "
+"back."
+msgstr ""

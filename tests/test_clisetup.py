@@ -71,9 +71,39 @@ def test_version_in_directory_is_versioned(home):
 
 
 def test_version_in_any_component_is_versioned(home):
-    # An nvm-style tree: the version rides in a parent directory.
-    path = _make_exec(home / ".nvm" / "versions" / "node" / "v20.1.0" / "bin" / "claude")
+    # The version riding in a parent directory counts too.
+    path = _make_exec(home / "tools" / "v20.1.0" / "bin" / "claude")
     assert clisetup.validate(str(path)) == clisetup.VERSIONED
+
+
+def test_nvm_tree_is_version_managed(home):
+    # Inside nvm there is no unversioned path to demand — usable, warned.
+    path = _make_exec(home / ".nvm" / "versions" / "node" / "v20.1.0" / "bin" / "claude")
+    assert clisetup.validate(str(path)) == clisetup.VERSION_MANAGED
+
+
+def test_asdf_tree_is_version_managed(home):
+    path = _make_exec(home / ".asdf" / "installs" / "nodejs" / "20.1.0" / "bin" / "claude")
+    assert clisetup.validate(str(path)) == clisetup.VERSION_MANAGED
+
+
+def test_bare_nvm_component_counts(home):
+    # /opt/nvm-style trees: the component match is dotted or bare.
+    path = _make_exec(home / "opt" / "nvm" / "versions" / "node" / "v20.1.0" / "bin" / "claude")
+    assert clisetup.validate(str(path)) == clisetup.VERSION_MANAGED
+
+
+def test_version_managed_still_requires_the_name(home):
+    # The answer goes on PATH like any other, so only the real CLI passes.
+    path = _make_exec(home / ".nvm" / "versions" / "node" / "v20.1.0" / "bin" / "claude-wrapper")
+    assert clisetup.validate(str(path)) == clisetup.BAD_NAME
+
+
+def test_unversioned_nvm_path_is_plain_ok(home):
+    # The carve-out is for versioned paths; an unversioned one in a
+    # manager's tree needs no warning.
+    path = _make_exec(home / ".nvm" / "bin" / "claude")
+    assert clisetup.validate(str(path)) == clisetup.OK
 
 
 def test_versioned_wins_over_bad_name(home):

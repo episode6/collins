@@ -122,16 +122,26 @@ def _dialog(window, state: AppState, store, then) -> Adw.AlertDialog:
     return dialog
 
 
+# The mark each verdict wears: green check for a path that will keep
+# working, yellow warning for one that works but can't be promised to
+# (a version manager's tree), red cross for one that won't.
+_MARKS = {
+    clisetup.OK: ("object-select-symbolic", "success"),
+    clisetup.VERSION_MANAGED: ("dialog-warning-symbolic", "warning"),
+}
+_BAD_MARK = ("window-close-symbolic", "error")
+
+
 def _update(dialog: Adw.AlertDialog, entry: Gtk.Entry, verdict: Gtk.Image, reason: Gtk.Label) -> None:
     """Re-judge the path on every keystroke: the mark, the reason, and
     whether the accept button is live."""
     status = clisetup.validate(entry.get_text())
-    ok = status == clisetup.OK
-    verdict.set_from_icon_name("object-select-symbolic" if ok else "window-close-symbolic")
-    _set_class(verdict, "success", ok)
-    _set_class(verdict, "error", not ok)
+    icon, style = _MARKS.get(status, _BAD_MARK)
+    verdict.set_from_icon_name(icon)
+    for name in ("success", "warning", "error"):
+        _set_class(verdict, name, name == style)
     reason.set_label(_reason_for(status, entry.get_text().strip()))
-    dialog.set_response_enabled("use", ok)
+    dialog.set_response_enabled("use", status in _MARKS)
 
 
 def _reason_for(status: str, text: str) -> str:
@@ -142,6 +152,12 @@ def _reason_for(status: str, text: str) -> str:
             "This path has a version number in it, so it would break the next time "
             "Claude Code updates itself. Point at a stable launcher instead — "
             "usually ~/.local/bin/claude."
+        )
+    if status == clisetup.VERSION_MANAGED:
+        return _(
+            "This is inside a version manager's tree, so Collins can't validate a "
+            "stable path — it will work until that tool updates, and then this "
+            "question comes back."
         )
     if status == clisetup.BAD_NAME:
         return _("That's an executable, but not one named “claude” — pick the claude launcher itself.")
