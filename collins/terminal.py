@@ -1477,6 +1477,10 @@ class TerminalTab(Gtk.Box):
         cut_prompt = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
         cut_prompt.connect("pressed", self._on_cut_prompt)
         copy_prompt_btn.add_controller(cut_prompt)
+        # A divider after it, like the ones flanking the branch: the button
+        # acts on the input box, while everything right of it describes the
+        # tab, so the two shouldn't read as one run.
+        copy_prompt_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
 
         self._cwd_label = Gtk.Label(xalign=0.0)
         self._cwd_label.set_ellipsize(Pango.EllipsizeMode.START)
@@ -1575,6 +1579,7 @@ class TerminalTab(Gtk.Box):
         # while the branch and PR labels are hidden.
         left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
         left.append(copy_prompt_btn)
+        left.append(copy_prompt_sep)
         left.append(self._cwd_label)
         left.append(self._branch_seps[0])
         left.append(self._branch_label)
