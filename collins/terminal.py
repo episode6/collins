@@ -2680,7 +2680,14 @@ class TerminalTab(Gtk.Box):
         one. Holding the gate and re-asserting across a few layout passes
         keeps the clamp out of the books; if the size genuinely can't fit,
         we give up without recording it, so the user's choice survives for
-        when there's room again."""
+        when there's room again.
+
+        While the gate is up, _remember_panel_size no-ops — including for
+        hide_panel and capture_panel_state, which then fall back to the
+        stored sizes. That's correct by construction: mid-settle, the stored
+        size for this mode is exactly the value being applied. A user who
+        grabs the divider inside the settle window wins immediately: settle
+        detects the drag and cedes (see below), rather than stomping it."""
         self._panel_apply_pending = True
         self._panel_apply_seq += 1
         seq = self._panel_apply_seq
@@ -2711,7 +2718,15 @@ class TerminalTab(Gtk.Box):
         def settle(target: int, last: bool) -> bool:
             if seq != self._panel_apply_seq:
                 return GLib.SOURCE_REMOVE
-            if last:
+            if self._paned_drag_active():
+                # The user grabbed the handle mid-settle: the position is
+                # theirs now, not a clamp's. Cancel the rest of the chain
+                # (the seq bump kills the queued timeouts), open the gate,
+                # and record where their drag has the divider so far.
+                self._panel_apply_seq += 1
+                self._panel_apply_pending = False
+                self._remember_panel_size()
+            elif last:
                 # Give up quietly whether or not it stuck — one more set here
                 # could clamp again *after* the gate drops and be recorded.
                 # The remembered size must survive a clamp it didn't cause.
@@ -2723,6 +2738,18 @@ class TerminalTab(Gtk.Box):
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(position)
+
+    def _paned_drag_active(self) -> bool:
+        """Whether the user is dragging the panel paned's own handle right
+        now. The paned's internal gestures only recognize presses that land
+        on the handle (presses elsewhere are denied and stay unrecognized),
+        so any recognized gesture here means a live divider drag."""
+        controllers = self._paned.observe_controllers()
+        for i in range(controllers.get_n_items()):
+            controller = controllers.get_item(i)
+            if isinstance(controller, Gtk.Gesture) and controller.is_recognized():
+                return True
+        return False
 
     # -- editor panel --------------------------------------------------------
 
