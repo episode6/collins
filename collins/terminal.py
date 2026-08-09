@@ -51,6 +51,7 @@ from .linkpatterns import (  # noqa: E402
     token_at_column,
 )
 from .panedsizer import PanedSizer  # noqa: E402
+from .panelstrip import PanelStrip  # noqa: E402
 from .providers import (  # noqa: E402
     EnteredPrompt,
     Provider,
@@ -680,15 +681,23 @@ class PanelTerminal(Gtk.Box):
     """The tab's secondary terminal: a plain shell with no agent auto-launched.
 
     Spawns lazily the first time it is shown and survives hide/show and
-    bottom↔right swaps; the shell is only lost when the tab itself closes."""
+    bottom↔right swaps; the shell is only lost when the tab itself closes.
+    The shell kind of PanelPage (see panelstrip): *number* is the 1-based
+    ordinal its tab title shows."""
+
+    page_kind = "shell"
 
     __gsignals__ = {
         # Emitted when the panel's shell exits (e.g. the user typed `exit`).
         "shell-exited": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # Emitted when the shell's terminal rings BEL (a PanelPage may emit
+        # this; the strip re-emits it for the window's visual bell).
+        "bell": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    def __init__(self) -> None:
+    def __init__(self, number: int = 1) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self._number = number
         self._child_pid: int | None = None
         self._spawned = False
         self._ever_spawned = False  # panel was used at some point in this tab's life
@@ -700,6 +709,7 @@ class PanelTerminal(Gtk.Box):
         self.terminal.set_scroll_on_keystroke(True)
         self.terminal.set_mouse_autohide(True)
         self.terminal.connect("child-exited", self._on_child_exited)
+        self.terminal.connect("bell", lambda *_: self.emit("bell"))
         _setup_links(self.terminal)
         _setup_smooth_scroll(self.terminal)
         _setup_scroll_zoom(self.terminal)
@@ -805,8 +815,22 @@ class PanelTerminal(Gtk.Box):
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
 
-    def grab_terminal_focus(self) -> None:
+    # -- PanelPage protocol (see panelstrip) -------------------------------
+
+    def page_title(self) -> str:
+        return _("Terminal {number}").format(number=self._number)
+
+    def page_icon(self) -> str | None:
+        return None
+
+    def grab_page_focus(self) -> None:
         self.terminal.grab_focus()
+
+    def has_page_focus(self) -> bool:
+        return self.terminal.has_focus()
+
+    def page_busy(self) -> bool:
+        return self.has_running_command()
 
     def _on_key_pressed(self, _ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
@@ -828,207 +852,6 @@ class PanelTerminal(Gtk.Box):
                 self.terminal.paste_clipboard()
                 return True
         return False
-
-
-class PanelTabs(Gtk.Box):
-    """The secondary panel's inner tab strip: one PanelTerminal per tab.
-
-    The tab row carries a + button (new shell tab, selected immediately), a
-    bottom/right swap button for the whole panel (win.swap-panel), and
-    each tab an X; shells survive hide/show and die with their tab. When the
-    last tab closes there is nothing left to show, so the owning TerminalTab
-    hides the whole panel (see "last-tab-closed")."""
-
-    __gsignals__ = {
-        # Emitted when a tab's X (or its shell exiting) removed the last tab.
-        "last-tab-closed": (GObject.SignalFlags.RUN_FIRST, None, ()),
-        # Emitted when any tab's terminal rings BEL, for the window's
-        # visual bell.
-        "bell": (GObject.SignalFlags.RUN_FIRST, None, ()),
-    }
-
-    def __init__(self) -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL)
-        self._settings: dict | None = None  # last applied; new tabs start from it
-        self._ever_spawned = False
-        self._next_number = 1  # "Terminal N" titles; resets when the strip empties
-        self._cwd_lookup = None  # () -> agent cwd, set by the owning tab
-        self._close_ok: set[Adw.TabPage] = set()  # busy closes the user confirmed
-        self._close_asking: set[Adw.TabPage] = set()  # a confirm dialog is up
-
-        self._view = Adw.TabView(vexpand=True)
-        self._view.connect("close-page", self._on_close_page)
-        # Clicking an inner tab should land the cursor in its shell.
-        self._view.connect("notify::selected-page", self._on_selected)
-
-        # autohide off: the bar is also where the + button lives, so it must
-        # stay up even with a single tab.
-        bar = Adw.TabBar(view=self._view, autohide=False)
-        bar.add_css_class("inline")
-        bar.set_expand_tabs(False)
-        add_btn = Gtk.Button(icon_name="list-add-symbolic")
-        add_btn.add_css_class("flat")
-        add_btn.set_tooltip_text(_("New terminal tab"))
-        add_btn.connect("clicked", lambda *_: self.new_tab())
-        swap_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
-        swap_btn.add_css_class("flat")
-        swap_btn.set_tooltip_text(_("Move terminal panel bottom/right"))
-        swap_btn.set_action_name("win.swap-panel")
-        end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        end_box.append(add_btn)
-        end_box.append(swap_btn)
-        bar.set_end_action_widget(end_box)
-
-        self.append(bar)
-        self.append(self._view)
-
-    @property
-    def ever_spawned(self) -> bool:
-        """A shell ran in some tab at some point in this session tab's life."""
-        return self._ever_spawned
-
-    @property
-    def tab_count(self) -> int:
-        return self._view.get_n_pages()
-
-    def tabs(self) -> list[PanelTerminal]:
-        return [
-            self._view.get_nth_page(i).get_child() for i in range(self._view.get_n_pages())
-        ]
-
-    def selected_tab(self) -> PanelTerminal | None:
-        page = self._view.get_selected_page()
-        return page.get_child() if page is not None else None
-
-    def set_cwd_lookup(self, lookup) -> None:
-        """`lookup() -> path` supplies the agent's current cwd for the shells
-        the + button (and open) start."""
-        self._cwd_lookup = lookup
-
-    def _cwd(self) -> str | None:
-        return self._cwd_lookup() if self._cwd_lookup is not None else None
-
-    def open(self, restore_texts: list[str] | None = None) -> None:
-        """Make sure at least one shell tab exists and points at the agent's
-        cwd. `restore_texts` (first open only) recreates one tab per saved
-        panel history, oldest first."""
-        if self.tab_count == 0:
-            for text in restore_texts or [None]:
-                self.new_tab(restore_text=text, select=False)
-            self._view.set_selected_page(self._view.get_nth_page(0))
-        else:
-            cwd = self._cwd()
-            for panel in self.tabs():
-                panel.open_shell(cwd)
-
-    def new_tab(self, restore_text: str | None = None, select: bool = True) -> PanelTerminal:
-        """Append a shell tab (its shell spawns right away) and optionally
-        select it. `restore_text` seeds the scrollback (session restore)."""
-        panel = PanelTerminal()
-        if self._settings is not None:
-            panel.apply_settings(self._settings)
-        panel.connect("shell-exited", self._on_shell_exited)
-        panel.terminal.connect("bell", lambda *_: self.emit("bell"))
-        page = self._view.append(panel)
-        page.set_title(_("Terminal {number}").format(number=self._next_number))
-        self._next_number += 1
-        panel.open_shell(self._cwd(), restore_text)
-        self._ever_spawned = True
-        if select:
-            self._view.set_selected_page(page)
-        return panel
-
-    def _find_page(self, panel: PanelTerminal) -> Adw.TabPage | None:
-        for i in range(self._view.get_n_pages()):
-            page = self._view.get_nth_page(i)
-            if page.get_child() is panel:
-                return page
-        return None
-
-    def _on_shell_exited(self, panel: PanelTerminal) -> None:
-        """Typing `exit` in a shell closes its tab (the tab would otherwise
-        sit on a dead screen). A shell already gone by teardown finds no
-        page and is a no-op."""
-        page = self._find_page(panel)
-        if page is not None:
-            self._view.close_page(page)
-
-    def _on_close_page(self, view: Adw.TabView, page: Adw.TabPage) -> bool:
-        panel = page.get_child()
-        if page not in self._close_ok and panel.has_running_command():
-            # The X on a busy shell asks first, mirroring the session tab's
-            # own close protection — a build shouldn't die to a stray click.
-            view.close_page_finish(page, False)  # keep the tab while we ask
-            if page not in self._close_asking:
-                self._ask_close_busy(page)
-            return True
-        self._close_ok.discard(page)
-        view.close_page_finish(page, True)
-        if view.get_n_pages() == 0:
-            self._next_number = 1  # an empty strip restarts the numbering
-            self.emit("last-tab-closed")
-        return True  # close_page_finish already ran
-
-    def _ask_close_busy(self, page: Adw.TabPage) -> None:
-        self._close_asking.add(page)
-        self._view.set_selected_page(page)  # show what's about to be killed
-
-        def do_close() -> None:
-            self._close_asking.discard(page)
-            # The tab may have emptied on its own while the dialog sat open
-            # (the command finished and the user typed `exit`).
-            if self._find_page(page.get_child()) is page:
-                self._close_ok.add(page)
-                self._view.close_page(page)
-
-        dialogs.confirm_dialog(
-            self,
-            _("Close tab with a running command?"),
-            _("A command is still running in this terminal tab and will be terminated."),
-            _("Close Tab"),
-            do_close,
-            on_dismiss=lambda: self._close_asking.discard(page),
-            default_response="confirm",
-        )
-
-    def _on_selected(self, *_args) -> None:
-        panel = self.selected_tab()
-        if panel is not None and self.get_mapped():
-            GLib.idle_add(panel.grab_terminal_focus)
-
-    def grab_terminal_focus(self) -> None:
-        panel = self.selected_tab()
-        if panel is not None:
-            panel.grab_terminal_focus()
-
-    def has_terminal_focus(self) -> bool:
-        return any(panel.terminal.has_focus() for panel in self.tabs())
-
-    def has_running_command(self) -> bool:
-        return any(panel.has_running_command() for panel in self.tabs())
-
-    def select_busy_tab(self) -> None:
-        """Bring the first tab with a live command to the front (the close
-        confirmation shows the panel to reveal what's about to be killed)."""
-        for panel in self.tabs():
-            if panel.has_running_command():
-                page = self._find_page(panel)
-                if page is not None:
-                    self._view.set_selected_page(page)
-                return
-
-    def capture_all(self) -> list[str]:
-        """Each tab's scrollback text, in tab order."""
-        return [panel.capture_contents() for panel in self.tabs()]
-
-    def clear_all(self) -> None:
-        for panel in self.tabs():
-            panel.clear()
-
-    def apply_settings(self, settings: dict) -> None:
-        self._settings = settings
-        for panel in self.tabs():
-            panel.apply_settings(settings)
 
 
 class TerminalTab(Gtk.Box):
@@ -1177,12 +1000,12 @@ class TerminalTab(Gtk.Box):
         self._overlay.add_css_class("terminal-gutter")
         self._overlay.set_child(self._width_clamp)
 
-        # Secondary plain-shell panel — an inner tab strip of shells — below
+        # Secondary panel — a strip of panel pages (shells, for now) — below
         # or beside the agent terminal. Swapping bottom↔right only flips the
         # paned's orientation, so the shells keep running.
-        self._panel = PanelTabs()
+        self._panel = PanelStrip(shell_factory=PanelTerminal)
         self._panel.set_visible(False)
-        self._panel.connect("last-tab-closed", lambda *_: self.hide_panel())
+        self._panel.connect("empty", lambda *_: self.hide_panel())
         self._panel.connect("bell", lambda *_: self.emit("bell"))
         self._panel.set_cwd_lookup(self.current_agent_cwd)
         panel_right = bool(settings) and settings.get("panel_position") == "right"
@@ -2655,13 +2478,13 @@ class TerminalTab(Gtk.Box):
             self._panel.set_visible(True)
             self._panel_sizer.apply()
         if focus:
-            GLib.idle_add(self._panel.grab_terminal_focus)
+            GLib.idle_add(self._panel.grab_page_focus)
 
     def hide_panel(self) -> None:
         if not self.panel_visible:
             return
         self._panel_sizer.remember()
-        refocus = self._panel.has_terminal_focus()
+        refocus = self._panel.has_page_focus()
         self._panel.set_visible(False)
         if refocus:
             self.grab_terminal_focus()
