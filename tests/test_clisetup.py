@@ -20,8 +20,10 @@ def _make_exec(path: Path) -> Path:
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
-    """A throwaway $HOME, so known_locations() and ~ point nowhere real."""
+    """A throwaway $HOME, so known_locations() and ~ point nowhere real.
+    Also a clean slate for apply()'s memory of what it added to PATH."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(clisetup, "_appended", None)
     return tmp_path
 
 
@@ -185,6 +187,41 @@ def test_apply_expands_tilde(home, monkeypatch):
 def test_apply_stale_dir_reports_not_found(home, monkeypatch):
     monkeypatch.setenv("PATH", "/nonexistent-for-test")
     assert clisetup.apply(str(home / "gone" / "claude")) is False
+
+
+def test_apply_swaps_a_changed_answer(home, monkeypatch):
+    # Preferences can change the answer mid-run: the old answer's entry
+    # comes off, the new one goes on — no accumulation.
+    a = _make_exec(home / "a" / "claude")
+    b = _make_exec(home / "b" / "claude")
+    monkeypatch.setenv("PATH", "/usr/bin")
+    assert clisetup.apply(str(a)) is True
+    assert clisetup.apply(str(b)) is True
+    assert os.environ["PATH"].split(os.pathsep) == ["/usr/bin", str(home / "b")]
+
+
+def test_apply_empty_takes_the_added_entry_back_off(home, monkeypatch):
+    # Clearing the setting means "rely on PATH alone" — including undoing
+    # the entry the old answer added to this process.
+    a = _make_exec(home / "a" / "claude")
+    monkeypatch.setenv("PATH", "/nonexistent-for-test")
+    assert clisetup.apply(str(a)) is True
+    assert clisetup.apply("") is False
+    assert os.environ["PATH"] == "/nonexistent-for-test"
+
+
+def test_apply_never_removes_a_directory_it_did_not_add(home, monkeypatch):
+    # The old answer lived in a directory the user's own PATH already had:
+    # changing the answer must not strip that directory (it may be feeding
+    # `git` and `gh` too).
+    a = _make_exec(home / "a" / "claude")
+    b = _make_exec(home / "b" / "claude")
+    monkeypatch.setenv("PATH", f"/usr/bin{os.pathsep}{home / 'a'}")
+    assert clisetup.apply(str(a)) is True  # already on PATH; nothing added
+    assert clisetup.apply(str(b)) is True
+    parts = os.environ["PATH"].split(os.pathsep)
+    assert str(home / "a") in parts
+    assert parts == ["/usr/bin", str(home / "a"), str(home / "b")]
 
 
 # -- apply_saved -------------------------------------------------------------

@@ -128,27 +128,29 @@ def _dialog(window, state: AppState, store, then) -> Adw.AlertDialog:
 
 # The mark each verdict wears: green check for a path that will keep
 # working, yellow warning for one that works but can't be promised to
-# (a version manager's tree), red cross for one that won't.
-_MARKS = {
+# (a version manager's tree), red cross for one that won't. Public, like
+# reason_for below: the Preferences row that lets a stored answer be
+# changed later (prefs) judges paths with the same marks and words.
+MARKS = {
     clisetup.OK: ("object-select-symbolic", "success"),
     clisetup.VERSION_MANAGED: ("dialog-warning-symbolic", "warning"),
 }
-_BAD_MARK = ("window-close-symbolic", "error")
+BAD_MARK = ("window-close-symbolic", "error")
 
 
 def _update(dialog: Adw.AlertDialog, entry: Gtk.Entry, verdict: Gtk.Image, reason: Gtk.Label) -> None:
     """Re-judge the path on every keystroke: the mark, the reason, and
     whether the accept button is live."""
     status = clisetup.validate(entry.get_text())
-    icon, style = _MARKS.get(status, _BAD_MARK)
+    icon, style = MARKS.get(status, BAD_MARK)
     verdict.set_from_icon_name(icon)
     for name in ("success", "warning", "error"):
         _set_class(verdict, name, name == style)
-    reason.set_label(_reason_for(status, entry.get_text().strip()))
-    dialog.set_response_enabled("use", status in _MARKS)
+    reason.set_label(reason_for(status, entry.get_text().strip()))
+    dialog.set_response_enabled("use", status in MARKS)
 
 
-def _reason_for(status: str, text: str) -> str:
+def reason_for(status: str, text: str) -> str:
     if status == clisetup.OK:
         return _("Found it — Collins will remember this location.")
     if status == clisetup.VERSIONED:

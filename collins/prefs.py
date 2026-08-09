@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -18,7 +18,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
-from . import apppicker, claudemodels, editor, footerapps, mcptools, prefssearch
+from . import apppicker, claudemodels, clisetup, cliwelcome, editor, footerapps, mcptools, prefssearch
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label
 from .i18n import LANGUAGES, N_, _
 from .state import AppState
@@ -212,6 +212,11 @@ class PreferencesDialog(Adw.Dialog):
 
         page = _SearchablePage(title=_("General"), icon_name="preferences-system-symbolic")
         self._page = page
+
+        # First, above everything: the CLI is the tool the app is about,
+        # and the row that answers "which claude is Collins running?"
+        # shouldn't take scrolling to find.
+        self._build_cli_group(state, page)
 
         terminal_group = _SearchableGroup(title=_("Terminal"))
 
@@ -647,6 +652,103 @@ class PreferencesDialog(Adw.Dialog):
         editor_group.add(pop_out_row)
 
         page.add(editor_group)
+
+    def _build_cli_group(self, state: AppState, page: _SearchablePage) -> None:
+        """Where the Claude Code CLI is — the same question the welcome
+        dialog asks a launch that can't find it (cliwelcome), now answerable
+        after the fact: point at a different install, or clear the box to
+        fall back to whatever PATH offers."""
+        group = _SearchableGroup(
+            title=_("Claude Code CLI"),
+            description=_(
+                "The claude command every session runs through. Leave empty "
+                "to use the one on PATH. Tabs already open keep the CLI they "
+                "started with"
+            ),
+        )
+        self._cli_row = Adw.EntryRow(title=_("Path to the claude executable"))
+        self._cli_verdict = Gtk.Image(valign=Gtk.Align.CENTER)
+        browse = Gtk.Button(label=_("Browse…"), valign=Gtk.Align.CENTER)
+        browse.add_css_class("flat")
+        browse.connect("clicked", self._on_cli_browse)
+        self._cli_row.add_suffix(self._cli_verdict)
+        self._cli_row.add_suffix(browse)
+        self._cli_row.set_text(state.get_setting(clisetup.PATH_SETTING) or "")
+        self._cli_row.connect("changed", self._on_cli_path_changed)
+        group.add(_searchable(self._cli_row, "claude", "CLI", "PATH", _("Browse…")))
+
+        # The verdict's reason, under the box like the welcome dialog's. A
+        # non-row child of a PreferencesGroup lands below the boxed list;
+        # added via the base class so the search filter never reads it as a
+        # row — it shows and hides with the group instead.
+        self._cli_reason = Gtk.Label(xalign=0.0, wrap=True)
+        self._cli_reason.add_css_class("caption")
+        self._cli_reason.add_css_class("dim-label")
+        self._cli_reason.set_margin_top(6)
+        self._cli_reason.set_margin_start(12)
+        self._cli_reason.set_margin_end(12)
+        Adw.PreferencesGroup.add(group, self._cli_reason)
+        page.add(group)
+        self._refresh_cli_row(save=False)
+
+    def _on_cli_path_changed(self, _row: Adw.EntryRow) -> None:
+        self._refresh_cli_row(save=True)
+
+    def _refresh_cli_row(self, save: bool) -> None:
+        """Judge the path in the box on cliwelcome's scale, keep it when it
+        would be accepted there, and say why either way.
+
+        Saved states are the acceptable ones — plus empty, which here means
+        "rely on PATH alone" (the setting's default). Anything else (a typo,
+        a half-typed path) just wears its red x while the stored answer
+        stays; closing preferences mid-typo loses nothing.
+        """
+        text = self._cli_row.get_text().strip()
+        status = clisetup.validate(text)
+        acceptable = not text or status in cliwelcome.MARKS
+        stored = self._state.get_setting(clisetup.PATH_SETTING) or ""
+        if save and acceptable and text != stored:
+            self._state.set_setting(clisetup.PATH_SETTING, text)
+            # Swaps the old answer's PATH entry for the new one's, so the
+            # next tab (and every headless claude run) picks up the change.
+            clisetup.apply(text)
+            self._on_change()
+        if text:
+            icon, style = cliwelcome.MARKS.get(status, cliwelcome.BAD_MARK)
+            reason = cliwelcome.reason_for(status, text)
+        elif clisetup.on_path():
+            icon, style = cliwelcome.MARKS[clisetup.OK]
+            reason = _("Using the claude found on PATH at {path}.").format(
+                path=clisetup.found_at()
+            )
+        else:
+            icon, style = cliwelcome.BAD_MARK
+            reason = _(
+                "claude isn't on PATH — Collins will ask where it is at the "
+                "next launch."
+            )
+        self._cli_verdict.set_from_icon_name(icon)
+        for name in ("success", "warning", "error"):
+            if name == style:
+                self._cli_verdict.add_css_class(name)
+            else:
+                self._cli_verdict.remove_css_class(name)
+        self._cli_reason.set_label(reason)
+
+    def _on_cli_browse(self, _button: Gtk.Button) -> None:
+        picker = Gtk.FileDialog(title=_("Choose the claude executable"))
+
+        def picked(picker: Gtk.FileDialog, result) -> None:
+            try:
+                file = picker.open_finish(result)
+            except Exception:
+                return  # dismissed
+            if file is not None and file.get_path():
+                # As picked — a symlink stays a symlink (see clisetup).
+                self._cli_row.set_text(file.get_path())
+                self._cli_row.set_position(-1)
+
+        picker.open(self.get_root(), None, picked)
 
     def _build_session_tools_group(self, state: AppState, page: _SearchablePage) -> None:
         """The on/off switch for each tool Collins offers a session (the
