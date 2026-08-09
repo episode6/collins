@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -2138,12 +2138,14 @@ class MainWindow(Adw.ApplicationWindow):
         )
         keep_screen_on = bool(self.state.get_setting("caffeine_keep_screen_on"))
         if remaining is None:
-            # No countdown under "while sessions are working" means something
-            # still is: the tooltip is the only place that can say so.
+            # No countdown under Until idle means something is still working —
+            # or the mode is dozing, its grace long spent: the tooltip is the
+            # only place that can tell the two apart.
             tooltip = toggle_tooltip(
                 on=on,
                 keep_screen_on=keep_screen_on,
                 while_active=bool(getattr(app, "caffeine_follows_activity", False)),
+                dozing=bool(getattr(app, "caffeine_dozing", False)),
             )
         else:
             tooltip = countdown_tooltip(remaining, keep_screen_on=keep_screen_on)

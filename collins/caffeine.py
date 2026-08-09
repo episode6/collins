@@ -11,13 +11,15 @@ from __future__ import annotations
 from .i18n import _
 
 INDEFINITE = "indefinite"  # stays on until it's turned off by hand
-WHILE_ACTIVE = "active"  # stays on while any session is working, plus a grace
+WHILE_ACTIVE = "active"  # holds while any session works (plus a grace), dozes in between
 
 # How long Caffeine Mode goes on holding the machine awake after the last
 # session stops working. Long enough to cover an agent that pauses to think
 # between turns or a run picked back up right away, short enough that a
 # finished night's work isn't kept awake for nothing. Any session going busy
 # again drops it: the grace only ever starts from the last moment of work.
+# Running out doesn't end the mode — it dozes, ready to hold again the next
+# time a session works (see `follow_poll`).
 ACTIVE_GRACE_S = 300
 
 # The timed options. Their keys ("1h", "2h"…) are persisted in state.json and
@@ -51,29 +53,52 @@ def follows_activity(key: str) -> bool:
     return key == WHILE_ACTIVE
 
 
-def grace_deadline(
-    *, working: bool, deadline: float | None, now: float, grace: float = ACTIVE_GRACE_S
-) -> float | None:
-    """Where a sessions-following Caffeine Mode's shut-off deadline sits.
+def follow_poll(
+    *,
+    working: bool,
+    holding: bool,
+    deadline: float | None,
+    now: float,
+    grace: float = ACTIVE_GRACE_S,
+) -> tuple[float | None, str | None]:
+    """One poll of a sessions-following Caffeine Mode: the grace deadline to
+    keep, and what to do with the inhibitor — ``"take"``, ``"release"`` or
+    None.
 
     The whole rule of `WHILE_ACTIVE`, kept here so it can be tested without a
-    display — the app polls it once a second and only has to notice when the
-    answer moves (see App._follow_activity):
+    display — the app polls it once a second and acts on what comes back (see
+    App._follow_activity). *holding* is whether the inhibitor is held right
+    now; the mode itself never ends here — only the user turns it off — it
+    swings between holding the machine awake and dozing:
 
-    - **working**: None. There is nothing to count down to while the machine is
-      still being used, and no countdown to show.
-    - **idle, with a grace already running**: that same deadline, untouched, so
-      it runs down smoothly instead of restarting on every poll.
-    - **idle, with none**: a fresh one, *grace* from now. This is what makes any
-      burst of work reset the wait — the work cleared the old deadline on its
-      way in, so the next quiet moment starts the five minutes over.
+    - **working**: no deadline — there is nothing to count down to while the
+      machine is still being used — and ``"take"`` if the inhibitor isn't
+      held: a session picked work back up under a dozing mode, so the machine
+      is claimed again, however long it was resting.
+    - **idle, dozing**: nothing. The machine is free to blank and sleep until
+      a session gives it a reason to be held again.
+    - **idle, holding, no deadline**: a fresh one, *grace* from now. This is
+      what makes any burst of work reset the wait — the work cleared the old
+      deadline on its way in, so the next quiet moment starts the five
+      minutes over.
+    - **idle, holding, deadline still ahead**: that same deadline, untouched,
+      so it runs down smoothly instead of restarting on every poll.
+    - **idle, holding, deadline reached**: ``"release"``, and the deadline
+      goes with it — the countdown gave way to a doze, not to the mode
+      turning off.
 
     *now* and *grace* only have to share a unit: the app polls in monotonic
     microseconds, while the default is `ACTIVE_GRACE_S` in seconds.
     """
     if working:
-        return None
-    return now + grace if deadline is None else deadline
+        return None, (None if holding else "take")
+    if not holding:
+        return None, None
+    if deadline is None:
+        return now + grace, None
+    if now >= deadline:
+        return None, "release"
+    return deadline, None
 
 
 def duration_label(key: str) -> str:
@@ -90,7 +115,9 @@ def duration_label(key: str) -> str:
     return _("1 hour") if hours == 1 else _("{n} hours").format(n=hours)
 
 
-def toggle_tooltip(*, on: bool, keep_screen_on: bool, while_active: bool = False) -> str:
+def toggle_tooltip(
+    *, on: bool, keep_screen_on: bool, while_active: bool = False, dozing: bool = False
+) -> str:
     """The Caffeine button's tooltip.
 
     Whole sentences per case rather than a stitched-together one: translators
@@ -101,8 +128,22 @@ def toggle_tooltip(*, on: bool, keep_screen_on: bool, while_active: bool = False
     there is no countdown to show, so the tooltip is where "it's on because a
     session is busy" gets said. Once they all stop, the grace period counts
     down like any other timer and `countdown_tooltip` takes over.
+
+    *dozing* is that same mode after the grace ran out: nothing is inhibited
+    right now, and saying so is what keeps the cup honest — the machine may
+    sleep until a session picks work back up.
     """
     if on:
+        if dozing:
+            if keep_screen_on:
+                return _(
+                    "Caffeine Mode is dozing until a session works again — "
+                    "then the computer and screen will stay awake"
+                )
+            return _(
+                "Caffeine Mode is dozing until a session works again — "
+                "then the computer will stay awake, the screen may turn off"
+            )
         if while_active:
             if keep_screen_on:
                 return _(

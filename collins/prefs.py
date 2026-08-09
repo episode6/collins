@@ -339,8 +339,9 @@ class PreferencesDialog(Adw.Dialog):
             title=_("Turn off after"),
             subtitle=_(
                 "How long that launch-time Caffeine Mode runs before it turns "
-                "itself off. Until idle keeps it on while any session is "
-                "still working, and five minutes past that"
+                "itself off. Until idle never does: it holds the computer "
+                "awake while any session is working (and five minutes past), "
+                "dozing in between"
             ),
         )
         duration_labels = [duration_label(key) for key in DURATION_KEYS]
