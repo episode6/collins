@@ -40,11 +40,15 @@ reference. "Open in Editor" only appears when the file is inside the
 clicking tab's editor project (the caller's call via `can_open_in_editor`).
 
 An optional caption ends the image column — under the image, and under the
-zoom bar too when that sits below a small image — wrapping to the column's
-width; the fit and centering math both count its height so a captioned
-image still lands centered with the caption on screen. Today only the
-show_image MCP tool passes one — the text is agent-supplied, which is why
-it renders as plain wrapped text.
+zoom bar too when that sits below a small image — wrapping to the image's
+width, but never to less than a readable floor: under a narrow portrait
+image the caption extends past the image's sides (centered) instead of
+stacking a tall sliver of text, which would also starve the fit math (a
+taller caption shrinks the fitted image, narrowing the caption further).
+The fit and centering math both count the caption's height at that wrap
+width, so a captioned image still lands centered with the caption on
+screen. Today only the show_image MCP tool passes one — the text is
+agent-supplied, which is why it renders as plain wrapped text.
 """
 
 from __future__ import annotations
@@ -77,6 +81,7 @@ _FALLBACK_WINDOW = (1200, 800)  # margins math when the window isn't realized
 _PANEL_SPACING = 6  # gap between the image, the button strip and a below-bar
 _ZOOMBAR_MARGIN = 12  # the floating bar's inset from the image's bottom edge
 _ZOOMBAR_FADE_DELAY_MS = 2000  # pointer-left-the-image grace before fading out
+_CAPTION_MIN_WRAP = 360  # a caption never wraps narrower than this, px (see module doc)
 
 
 class ImageLightbox(Gtk.Box):
@@ -139,10 +144,10 @@ class ImageLightbox(Gtk.Box):
         self._slot.set_vexpand(True)
 
         # The caption under the image: plain wrapped text (it is
-        # agent-supplied), centered, taking the image column's width. Its
-        # height is folded into the fit and centering math via
-        # _caption_extra_h so a captioned image still centers with the
-        # caption fully on screen.
+        # agent-supplied), centered, wrapping at the image's width floored
+        # by _CAPTION_MIN_WRAP (_caption_wrap_w). Its height at that width
+        # is folded into the fit and centering math via _caption_extra_h so
+        # a captioned image still centers with the caption fully on screen.
         self._caption: Gtk.Label | None = None
         if caption:
             self._caption = Gtk.Label(
@@ -151,7 +156,23 @@ class ImageLightbox(Gtk.Box):
                 justify=Gtk.Justification.CENTER,
                 halign=Gtk.Align.CENTER,
             )
+            # Pin the wrap width to _pin_panel's width request exactly: with
+            # NONE the label's natural width equals its minimum, so the
+            # request fixes both and every height-for-width measure agrees
+            # with the allocation. A free-wrapping label instead reports its
+            # minimum height at its minimum (longest-word) width, which
+            # inflates the panel's minimum past the pinned margins — the
+            # overflow then vexpands the slot into a letterbox around the
+            # picture.
+            self._caption.set_natural_wrap_mode(Gtk.NaturalWrapMode.NONE)
             self._caption.add_css_class("lightbox-caption")
+            if self._scroller is not None:
+                # The caption may be wider than a narrow image, which would
+                # stretch a FILL slot — and its shadow plate — to the
+                # caption's width. Centering the slot at its exact size
+                # (_apply_zoom keeps a size request on it) leaves the shadow
+                # hugging the picture.
+                self._slot.set_halign(Gtk.Align.CENTER)
 
         # The -/+ zoom bar floats over the image, anchored to its bottom —
         # which, the slot being pinned to min(display, screen), is the bottom
@@ -373,13 +394,36 @@ class ImageLightbox(Gtk.Box):
     def _set_fit_zoom(self, width: int, height: int) -> None:
         """The fitted display scale from lightbox_layout's content size (the
         image's fitted size once the shadow inset, chrome and any caption
-        come out)."""
+        come out). The caption's height depends on its wrap width, which
+        follows the fitted image's own width (_caption_wrap_w) — and that
+        width in turn depends on the fit, so the two are re-derived until
+        they agree. The zoom only shrinks round to round (a narrower wrap
+        can only make the caption taller), and the wrap floor stops the
+        shrinking, so a few rounds settle it."""
         fit_w = width - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[0]
         fit_h = height - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[1]
-        fit_h -= self._caption_extra_h(fit_w)
-        self._fit_zoom = min(
-            fit_w / max(self._image_size[0], 1), fit_h / max(self._image_size[1], 1), 1.0
-        )
+        zoom = 0.0
+        disp_w = fit_w
+        for _ in range(4):
+            cap_h = self._caption_extra_h(self._caption_wrap_w(disp_w, fit_w))
+            new_zoom = min(
+                fit_w / max(self._image_size[0], 1),
+                max(fit_h - cap_h, 1) / max(self._image_size[1], 1),
+                1.0,
+            )
+            if abs(new_zoom - zoom) < 0.001:
+                break
+            zoom = new_zoom
+            disp_w = round(self._image_size[0] * zoom)
+        self._fit_zoom = zoom
+
+    def _caption_wrap_w(self, image_w: int, avail_w: int) -> int:
+        """The width the caption wraps at when the image shows *image_w*
+        wide and the column may use up to *avail_w*: the image's width,
+        floored by _CAPTION_MIN_WRAP (as far as the space allows) so a
+        narrow image widens the caption past its sides instead of stacking
+        a tall sliver of text."""
+        return max(image_w, min(_CAPTION_MIN_WRAP, avail_w))
 
     def _caption_extra_h(self, width: int) -> int:
         """The caption's footprint in the image column: its wrapped height at
@@ -404,11 +448,24 @@ class ImageLightbox(Gtk.Box):
         if zoom == self._zoom or self._picture is None:
             return
         self._zoom = zoom
+        # The caption keeps its row: its height at this zoom's wrap width
+        # comes off the window height the slot may grow into, so zooming
+        # far in caps the image below the window edge instead of pushing
+        # the caption off it.
+        win_h = self._win[1]
+        if self._caption is not None:
+            avail_w = self._win[0] - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[0]
+            wrap_w = self._caption_wrap_w(round(self._image_size[0] * zoom), avail_w)
+            win_h -= self._caption_extra_h(wrap_w)
         display, strip_shown, chrome, slot = lightbox_zoom_slot(
-            *self._image_size, zoom, self._chrome, *self._win
+            *self._image_size, zoom, self._chrome, self._win[0], win_h
         )
         self._strip.set_visible(strip_shown)
         self._picture.set_size_request(*display)
+        if self._caption is not None:
+            # The slot is centered, not FILLed, under a caption (see
+            # __init__); this request is what gives it its exact size there.
+            self._slot.set_size_request(*slot)
         self._place_zoombar(
             lightbox_zoombar_inside(self._zoombar_h() + _ZOOMBAR_MARGIN, slot[1])
         )
@@ -431,7 +488,12 @@ class ImageLightbox(Gtk.Box):
         content_h = slot[1] + chrome[1]
         if not self._zoombar_inside:
             content_h += self._zoombar_h() + _PANEL_SPACING
-        content_h += self._caption_extra_h(slot[0])
+        if self._caption is not None:
+            avail_w = win_w - 2 * LIGHTBOX_SHADOW_PAD - chrome[0]
+            cap_w = self._caption_wrap_w(slot[0], avail_w)
+            self._caption.set_size_request(cap_w, -1)  # the wrap width, exactly
+            content_w = cap_w + chrome[0]
+            content_h += self._caption_extra_h(cap_w)
         left = max((win_w - content_w) // 2, LIGHTBOX_SHADOW_PAD)
         top = max((win_h - content_h) // 2, LIGHTBOX_SHADOW_PAD)
         self._panel.set_margin_start(left)
