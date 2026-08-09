@@ -21,7 +21,20 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import __version__, chats, dialogs, editor, footerapps, mcptools, openwith, panelhistory, trust
+from . import (
+    APP_ID,
+    DEBUG_APP_ID,
+    __version__,
+    buildinfo,
+    chats,
+    dialogs,
+    editor,
+    footerapps,
+    mcptools,
+    openwith,
+    panelhistory,
+    trust,
+)
 from .activity import (
     PROCESS_IDLE_S,
     PROCESS_POLL_MS,
@@ -196,9 +209,9 @@ def _app_icon_name(window: Gtk.Window) -> str:
     recolored icon so the two apps read apart in a dock."""
     app = window.get_application()
     app_id = app.get_application_id() if app is not None else None
-    if app_id and app_id.startswith("com.episode6.Collins.Debug"):
-        return "com.episode6.Collins.Debug"
-    return "com.episode6.Collins"
+    if app_id and app_id.startswith(DEBUG_APP_ID):
+        return DEBUG_APP_ID
+    return APP_ID
 
 
 def session_window(
@@ -4252,6 +4265,15 @@ class MainWindow(Adw.ApplicationWindow):
             website="https://github.com/episode6/collins",
             issue_url="https://github.com/episode6/collins/issues",
         )
+        # The debug build says which checkout it is running: commit, branch,
+        # and whether the tree was dirty — as captured at launch (buildinfo).
+        # The version chip on the front page carries the compact form; the
+        # commit title and branch read as a comments paragraph one tap in,
+        # on the Details page where AdwAboutDialog puts comments.
+        info = buildinfo.captured()
+        if info is not None:
+            about.set_version(__version__ + info.chip())
+            about.set_comments(about.get_comments() + "\n\n" + info.describe())
         # Third-party notices live in THIRD_PARTY_LICENSES.md; each of its
         # headings becomes a section under the dialog's own Legal page.
         for title, markup in legal_sections():

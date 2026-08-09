@@ -20,6 +20,8 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+from . import APP_ID, DEBUG_APP_ID
+
 # One frame on the shim↔app socket never legitimately approaches this; a line
 # that does is garbage or an attack, not a tool call. Mirrored in mcp_shim.py.
 MAX_LINE = 1024 * 1024
@@ -326,7 +328,7 @@ def runtime_dir(app_id: str) -> str:
 # fresh com.episode6.Collins.E2E.<run> id per capture — is a throwaway
 # whose files should die with the boot, so this is an allowlist (a prefix
 # match would claim the E2E ids too).
-STABLE_APP_IDS = frozenset({"com.episode6.Collins", "com.episode6.Collins.Debug"})
+STABLE_APP_IDS = frozenset({APP_ID, DEBUG_APP_ID})
 
 
 def config_dir(app_id: str) -> str:
