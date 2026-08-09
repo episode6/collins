@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-08. Full change history: git log for this file.
+fork. Last modified: 2026-08-09. Full change history: git log for this file.
 -->
 
 # Features
@@ -471,8 +471,8 @@ screen on while an agent works unattended — click it to toggle, and the cup
 fills while it's on. A plain click turns it on in *Until idle* mode, described
 below.
 
-- **Right-click it for a timer**: *1 hour*, *2 hours*, *3 hours*, *6 hours*,
-  *12 hours*, *Until idle* or *Indefinitely*. Picking a duration turns
+- **Right-click it for a timer**: *Until idle*, *1 hour*, *2 hours*, *3 hours*,
+  *6 hours*, *12 hours* or *Indefinitely*. Picking a duration turns
   Caffeine Mode on for that long and turns it off again when the time runs out —
   so a long build can't leave the machine awake all week because you forgot.
 - **Until idle**, the default, hands the deadline to the sessions instead of

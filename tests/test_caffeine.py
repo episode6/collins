@@ -16,7 +16,7 @@ from collins.caffeine import (
 
 
 def test_durations_offered():
-    assert DURATION_KEYS == ("1h", "2h", "3h", "6h", "12h", WHILE_ACTIVE, INDEFINITE)
+    assert DURATION_KEYS == (WHILE_ACTIVE, "1h", "2h", "3h", "6h", "12h", INDEFINITE)
 
 
 @pytest.mark.parametrize(

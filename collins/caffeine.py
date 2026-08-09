@@ -20,12 +20,13 @@ WHILE_ACTIVE = "active"  # stays on while any session is working, plus a grace
 # again drops it: the grace only ever starts from the last moment of work.
 ACTIVE_GRACE_S = 300
 
-# The timed options, in menu order. Their keys ("1h", "2h"…) are persisted in
-# state.json and used as menu action targets, so they must stay stable; the
-# labels are translated at call time instead of being stored.
+# The timed options. Their keys ("1h", "2h"…) are persisted in state.json and
+# used as menu action targets, so they must stay stable; the labels are
+# translated at call time instead of being stored.
 _HOURS = (1, 2, 3, 6, 12)
 
-DURATION_KEYS: tuple[str, ...] = tuple(f"{h}h" for h in _HOURS) + (WHILE_ACTIVE, INDEFINITE)
+# Menu and dropdown order: the default (Until idle) leads, then the clock.
+DURATION_KEYS: tuple[str, ...] = (WHILE_ACTIVE, *(f"{h}h" for h in _HOURS), INDEFINITE)
 
 
 def duration_seconds(key: str) -> int | None:
