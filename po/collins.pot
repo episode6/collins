@@ -963,6 +963,12 @@ msgstr ""
 msgid "Show/hide terminal panel (Ctrl+J)"
 msgstr ""
 
+msgid "Copy the prompt typed in the input box"
+msgstr ""
+
+msgid "Right-click to cut: copy it and clear the box"
+msgstr ""
+
 #: collins/terminal.py:544
 msgid "Move terminal panel bottom/right"
 msgstr ""

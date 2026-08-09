@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 
 import os
 import shutil
@@ -16,6 +16,7 @@ from collins.providers import (
     Provider,
     available_providers,
     get_provider,
+    split_screen_rows,
 )
 
 # -- transcript resolution ----------------------------------------------------
@@ -339,6 +340,259 @@ def test_claudes_other_prompts_are_not_the_input():
 def test_base_providers_never_claim_a_free_prompt():
     """An agent whose screen we can't read is the one worth not typing into."""
     assert Provider().takes_prompt("❯\xa0", 2) is False
+
+
+# -- reading the typed prompt back out of the input box -----------------------
+#
+# The screens below are real Claude Code renderings (v2.1.226), captured by
+# spawning the CLI in a headless VTE and typing into it — the same rows
+# TerminalTab.entered_prompt hands over. The box frames itself with
+# full-width rules; text rows keep two cells of frame on the left and two
+# clear on the right, so at 80 columns a row holds at most 76 cells of text
+# and only a mid-word token split fills them.
+
+
+def _screen(*box_rows: str, cols: int = 80) -> list[str]:
+    """A visible screen: header junk, the framed input box, the hint line."""
+    return [
+        "",
+        " ▐▛███▜▌   Claude Code v2.1.226",
+        "",
+        "─" * cols,
+        *box_rows,
+        "─" * cols,
+        "  ⏵⏵ auto mode on (shift+tab to cycle)",
+        "",
+    ]
+
+
+def _box_row(index: int) -> int:
+    """Screen index of the box's *index*-th row, as _screen laid it out."""
+    return 4 + index
+
+
+def test_a_single_line_prompt_reads_back_verbatim():
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen("❯\xa0fix the flaky test"), _box_row(0), 80
+    )
+    assert prompt.text == "fix the flaky test"
+    assert prompt.rows_below == 0
+
+
+def test_a_word_wrap_stitches_back_into_the_typed_space():
+    """The CLI moved "invalidated" down whole because it had no room left —
+    the break *is* the typed space, so the copy gets the space back."""
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen(
+            "❯\xa0please refactor the frobnicator module so that the widget cache is",
+            "  invalidated whenever the upstream configuration changes and add tests",
+        ),
+        _box_row(1),
+        80,
+    )
+    assert prompt.text == (
+        "please refactor the frobnicator module so that the widget cache is "
+        "invalidated whenever the upstream configuration changes and add tests"
+    )
+
+
+def test_a_typed_line_break_stays_a_line_break():
+    """"also" had plenty of room after "tests" — only a typed break puts it
+    on its own row."""
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen(
+            "❯\xa0please refactor the frobnicator module so that the widget cache is",
+            "  invalidated whenever the upstream configuration changes and add tests",
+            "  also update the docs",
+        ),
+        _box_row(2),
+        80,
+    )
+    assert prompt.text.endswith("add tests\nalso update the docs")
+
+
+def test_a_split_token_rejoins_without_a_space():
+    """A token longer than a row fills rows to the brim; the brim-full row is
+    the tell that nothing stood between the halves. The captured screen also
+    keeps the stray trailing cell the CLI left on the row above when the
+    typed break was converted (the drawn backslash's cell) — stripped, it
+    was never in the buffer."""
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen(
+            "❯\xa0first part",
+            "  also update the docs ",
+            "  " + "a" * 76,
+            "  " + "a" * 34,
+        ),
+        _box_row(3),
+        80,
+    )
+    assert prompt.text == "first part\nalso update the docs\n" + "a" * 110
+
+
+def test_surviving_trailing_cells_mark_a_typed_break():
+    """A wrap erases to the row's end, so trailing space cells only survive
+    where a typed break's backslash was drawn — and they outrank the fit
+    heuristic, which would read this nearly-full row before a short word
+    as a wrap."""
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen(
+            "❯\xa0" + "x" * 74 + " ",
+            "  and more",
+        ),
+        _box_row(1),
+        80,
+    )
+    assert prompt.text == "x" * 74 + "\nand more"
+
+
+def test_a_word_ending_flush_at_the_margin_is_still_a_wrap():
+    """Captured at 100 columns: "abcde" ends exactly at the 96-cell margin.
+    The row is brim-full, but the runs either side of the break are two
+    little words that could have shared a row — a split token couldn't."""
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen(
+            "❯\xa0" + "x" * 90 + " abcde",
+            "  next words",
+            cols=100,
+        ),
+        _box_row(1),
+        100,
+    )
+    assert prompt.text == "x" * 90 + " abcde next words"
+
+
+def test_a_break_before_a_row_filling_token_is_kept():
+    """A wrap would have filled the short row before the long token (the CLI
+    fills mid-token rather than leave a gap — probed), so a short row before
+    one reads as the typed break it was."""
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen(
+            "❯\xa0short line",
+            "  " + "b" * 76,
+            "  bb",
+        ),
+        _box_row(2),
+        80,
+    )
+    assert prompt.text == "short line\n" + "b" * 78
+
+
+def test_blank_and_indented_lines_are_typed_breaks():
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen(
+            "❯\xa0def f():",
+            "      return 1",
+            "",
+            "  call it twice",
+        ),
+        _box_row(3),
+        80,
+    )
+    assert prompt.text == "def f():\n    return 1\n\ncall it twice"
+
+
+def test_the_cursor_arrowed_back_up_still_reads_the_whole_box():
+    """rows_below is what clear_prompt_keys walks back down before erasing."""
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen(
+            "❯\xa0first line",
+            "  second line",
+            "  third line",
+        ),
+        _box_row(0),
+        80,
+    )
+    assert prompt.text == "first line\nsecond line\nthird line"
+    assert prompt.rows_below == 2
+
+
+def test_a_scrolled_box_yields_its_visible_tail():
+    """A box taller than the terminal scrolls with no on-screen tell — the
+    mark row simply shows the first visible line. What's visible is what
+    there is to copy."""
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen("❯\xa0line25", "  line26", "  tail"), _box_row(2), 80
+    )
+    assert prompt.text == "line25\nline26\ntail"
+
+
+def test_no_box_on_screen_reads_as_nothing():
+    claude = ClaudeProvider()
+    # A permission dialog: its caret is not the input's (ordinary space).
+    dialog = ["  Do you want to proceed?", "  ❯ 1. Yes", "    2. No", ""]
+    assert claude.entered_prompt(dialog, 1, 80) is None
+    # A cursor below the box (in the hint rows) walks up into the box's own
+    # rule before any mark row.
+    screen = _screen("❯\xa0typed text")
+    assert claude.entered_prompt(screen, _box_row(2), 80) is None
+    # A cursor index outside the screen reads as nothing at all.
+    assert claude.entered_prompt(screen, 99, 80) is None
+
+
+def test_clear_keys_walk_to_the_end_and_erase_every_character():
+    """Down per row below the cursor (no-ops once at the bottom — probed),
+    Ctrl+E to the line's end, then one backspace per character: a break
+    deletes as one, and — unlike Esc Esc — none of it can interrupt a
+    running turn."""
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen("❯\xa0first line", "  second"), _box_row(0), 80
+    )
+    keys = claude.clear_prompt_keys(prompt)
+    assert keys == "\x1b[B" + "\x05" + "\x7f" * len("first line\nsecond")
+
+
+def test_base_providers_have_no_box_to_read_or_clear():
+    assert Provider().entered_prompt(["❯\xa0typed"], 0, 80) is None
+
+
+def test_screen_rows_split_where_the_terminal_wrapped():
+    """VTE hands soft-wrapped rows back joined; the split must land on the
+    same boundaries the terminal wrapped at, counted in cells."""
+    # ASCII: a brim-full row is exactly `columns` characters.
+    assert split_screen_rows("x" * 200, 80) == ["x" * 80, "x" * 80, "x" * 40]
+    # Wide characters fill two cells each: 50 CJK chars are 100 cells, so
+    # the first row holds 40 characters, not 80 — character-count chunks
+    # would swallow the boundary and shift every row after it.
+    assert split_screen_rows("字" * 50, 80) == ["字" * 40, "字" * 10]
+    # A wide character that would straddle the last cell starts the next
+    # row, leaving that cell empty — the row before it is 79 cells.
+    assert split_screen_rows("x" * 79 + "字字", 80) == ["x" * 79, "字字"]
+    # A zero-width mark stays with the character it decorates, even when
+    # that character sits in the row's last cell.
+    assert split_screen_rows("x" * 80 + "́y", 80) == ["x" * 80 + "́", "y"]
+    # Lines that fit stay whole; blanks stay rows.
+    assert split_screen_rows("short\n\nnext", 80) == ["short", "", "next"]
+
+
+def test_wide_scrollback_above_the_box_does_not_shift_the_read():
+    """A soft-wrapped CJK line in the shell scrollback above the box comes
+    back joined; only a cell-counted split keeps the cursor index pointing
+    into the box."""
+    screen_text = "\n".join(
+        [
+            "字" * 50,  # two screen rows once split (100 cells at 80 columns)
+            "─" * 80,
+            "❯\xa0fix the flaky test",
+            "─" * 80,
+            "  ⏵⏵ auto mode on",
+        ]
+    )
+    rows = split_screen_rows(screen_text, 80)
+    assert rows[3] == "❯\xa0fix the flaky test"
+    prompt = ClaudeProvider().entered_prompt(rows, 3, 80)
+    assert prompt.text == "fix the flaky test"
 
 
 # -- the "leaving a worktree" dialog, at graceful-close time ------------------

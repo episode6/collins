@@ -437,6 +437,12 @@ msgstr "Dateimanager"
 msgid "Right-click to open this folder in your terminal"
 msgstr "Rechtsklick öffnet diesen Ordner in deinem Terminal"
 
+msgid "Copy the prompt typed in the input box"
+msgstr "Den in das Eingabefeld getippten Prompt kopieren"
+
+msgid "Right-click to cut: copy it and clear the box"
+msgstr "Rechtsklick zum Ausschneiden: kopieren und das Feld leeren"
+
 msgid "Open this folder in your file manager"
 msgstr "Diesen Ordner in deinem Dateimanager öffnen"
 

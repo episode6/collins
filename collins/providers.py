@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import sessions
+from .dropimages import cell_width
 from .sessions import (
     _UUID_RE,
     Session,
@@ -52,6 +53,112 @@ _PROMPT_HINT = 'Try "'
 # input prompt's own marker. See ClaudeProvider.worktree_exit_prompt.
 _WORKTREE_EXIT_SELECTED_RE = re.compile(r"❯\s*Keep worktree\b")
 _WORKTREE_EXIT_OTHER_OPTION = "Remove worktree"
+
+# How Claude Code frames its input box (probed live against 2.1.226 — the
+# captured screens are in test_providers): a full-width rule row above and
+# below, the prompt-mark row, and continuation rows opening with two plain
+# spaces. Each box row leaves _BOX_MARGIN cells unused: two for the
+# "❯ "/"  " prefix and a two-cell right margin — a row only ever reaches
+# `columns - _BOX_MARGIN` cells of text, and does reach it whenever the CLI
+# splits a too-long token mid-word.
+_BOX_RULE_CHAR = "─"
+_BOX_PREFIX_CELLS = 2
+_BOX_MARGIN = 4
+
+
+def split_screen_rows(text: str, columns: int) -> list[str]:
+    """A terminal's joined plain-text screen read, split back into its rows.
+
+    VTE returns soft-wrapped screen rows joined into one logical line, and
+    entered_prompt's row indices (the cursor's above all) only line up when
+    every such line is put back on its row boundaries. The split counts
+    cells, never characters — a wide character fills two, so a brim-full
+    row of CJK is *fewer* characters than columns, and fixed-size character
+    chunks would drift every row after it. The cut falls exactly where the
+    terminal wrapped: a character that would overflow the row starts the
+    next one (which is also how a wide character leaves a straddled last
+    cell empty), and a zero-width mark stays with the character it
+    decorates.
+    """
+    rows: list[str] = []
+    for line in text.split("\n"):
+        if cell_width(line) <= columns:
+            rows.append(line)
+            continue
+        row = ""
+        cells = 0
+        for char in line:
+            width = cell_width(char)
+            if cells + width > columns:
+                rows.append(row)
+                row, cells = "", 0
+            row += char
+            cells += width
+        rows.append(row)
+    return rows
+
+
+def _box_rule(row: str) -> bool:
+    """A full-width horizontal rule — the frame above and below the box."""
+    return bool(row) and set(row) == {_BOX_RULE_CHAR}
+
+
+def _box_body_row(row: str) -> bool:
+    """A row that can sit inside the input box below the mark row: a
+    two-space-prefixed continuation, or a blank (an empty typed line)."""
+    return not row.strip() or row.startswith("  ")
+
+
+def _wrap_join(c1: str, c2: str, width: int) -> str:
+    """What stood between two adjacent box rows in the typed text: nothing
+    (one token split mid-word at the edge), a space (a word wrap), or a
+    newline the user actually typed.
+
+    The CLI's renderer doesn't say which, so this reads it off the shapes
+    the probes established: a wrap only ever leaves a row short when moving
+    a whole word down would overflow it, and only fills a row to the brim
+    when splitting a token longer than the row. Everything else — a short
+    row before a word that had room to spare, a next row opening with a
+    blank or an indent, a next row opening with a token too long to have
+    ever shared a row — is a break the user typed.
+
+    Callers rule on the stronger evidence first: a row keeping trailing
+    space cells is a typed break (see entered_prompt), never asked here.
+    What stays unknowable is a break right after a row those cells were
+    repainted away from — with the row nearly full, or a word ending flush
+    at the margin, it reads as a wrap and the copied text gains a space
+    where the newline was.
+    """
+    run2 = c2.split(" ", 1)[0]
+    if not run2:
+        return "\n"  # blank or indented next row: only a typed break does that
+    if cell_width(c1) >= width - 1:  # full: some wrap (-1: a wide char can
+        # leave one cell it couldn't straddle)
+        run1 = c1.rsplit(" ", 1)[-1]
+        if run1 and cell_width(run1) + cell_width(run2) > width:
+            return ""  # the runs can't be two words that ever shared a row
+        return " "
+    if cell_width(run2) < width and cell_width(c1) + 1 + cell_width(run2) > width:
+        return " "  # the word was moved down whole; the break ate its space
+    return "\n"
+
+
+@dataclass(frozen=True)
+class EnteredPrompt:
+    """The prompt sitting unsent in an agent's input box, read off the screen.
+
+    `text` is the logical text the user typed: rows the CLI wrapped are
+    stitched back together, intentional line breaks stay newlines — so its
+    length is also how many characters the input buffer holds (a break
+    deletes as one character, like any other). `rows_below` is how many
+    screen rows of the box sit below the cursor — what a caller needs to
+    walk the cursor to the end before clearing. A box taller than the
+    terminal shows (and yields) only its visible tail; the CLI scrolls it
+    with no on-screen tell.
+    """
+
+    text: str
+    rows_below: int
 
 # `claude agents --json` job-lifecycle values that mean a background agent is
 # no longer running, undocumented like the rest of that field. `state` is the
@@ -290,6 +397,22 @@ class Provider:
         have no such dialog to detect."""
         return None
 
+    def entered_prompt(
+        self, rows: list[str], cursor_index: int, columns: int
+    ) -> EnteredPrompt | None:
+        """The prompt typed (and not yet sent) into this agent's input box,
+        reconstructed from the visible screen — *rows* are the screen's
+        rows, *cursor_index* the one the cursor is on. None when the screen
+        doesn't show an input box with the cursor in it. Base agents have no
+        input box Collins knows how to read."""
+        return None
+
+    def clear_prompt_keys(self, prompt: EnteredPrompt) -> str | None:
+        """Keystrokes that erase *prompt* — the entered_prompt read of this
+        same screen — from the input box, or None if this agent's box can't
+        be cleared safely. Base agents have no box to clear."""
+        return None
+
     def file_reference(
         self, path: str, cwd: str | None, start_line: int = 0, end_line: int = 0
     ) -> str | None:
@@ -376,6 +499,71 @@ class ClaudeProvider(Provider):
             return False
         rest = cursor_line[len(_PROMPT_MARK) :].strip()
         return not rest or tail_is_dim or rest.startswith(_PROMPT_HINT)
+
+    def entered_prompt(
+        self, rows: list[str], cursor_index: int, columns: int
+    ) -> EnteredPrompt | None:
+        """Claude Code's input box, read back into the text the user typed.
+
+        The box is the rows from the one opening with the prompt mark down
+        to the rule row under it; the cursor sits inside it whenever it
+        exists (a permission dialog or a menu draws no mark row, and the
+        walk up from the cursor hits the box's own rule first — so both
+        come back None rather than someone else's text). Each row's first
+        two cells are frame, not text; what stood between two rows is
+        _wrap_join's call — except that a mid-box row keeping trailing
+        space cells settles it first: a wrap erases to the row's end (its
+        break space is consumed, cells past it never written), so trailing
+        cells only survive where a typed break's backslash was drawn.
+        They're stripped from the text either way — the backslash was
+        never in the buffer, and only the last row can carry trailing
+        spaces the user really typed.
+
+        Callers gate on takes_prompt first: an *empty* box showing a dim
+        ghost suggestion reads exactly like typed text from here.
+        """
+        if not 0 <= cursor_index < len(rows):
+            return None
+        mark = None
+        for i in range(cursor_index, -1, -1):
+            if rows[i].startswith(_PROMPT_MARK):
+                mark = i
+                break
+            if not _box_body_row(rows[i]):
+                return None
+        if mark is None:
+            return None
+        end = len(rows) - 1
+        for i in range(mark + 1, len(rows)):
+            if _box_rule(rows[i]) or not _box_body_row(rows[i]):
+                end = i - 1
+                break
+        if cursor_index > end:
+            return None
+        raw = [row[_BOX_PREFIX_CELLS:] for row in rows[mark : end + 1]]
+        contents = [*(c.rstrip(" ") for c in raw[:-1]), raw[-1]]
+        width = columns - _BOX_MARGIN
+        text = contents[0]
+        for i, c2 in enumerate(contents[1:]):
+            c1 = contents[i]
+            broke = raw[i] != c1  # trailing cells survived: a typed break
+            text += ("\n" if broke else _wrap_join(c1, c2, width)) + c2
+        return EnteredPrompt(text=text, rows_below=end - cursor_index)
+
+    def clear_prompt_keys(self, prompt: EnteredPrompt) -> str | None:
+        """Erase the box: walk the cursor to the end (Down per row below it —
+        extras are no-ops with text in the box, probed — then Ctrl+E to the
+        line's end), and one backspace per character; a line break deletes
+        as one. All in one write: the pty stream keeps the order.
+
+        Backspaces rather than the Esc-Esc clear on purpose: Esc interrupts
+        a running turn, and the box takes typed text mid-turn — exactly when
+        cutting it must not cost the user their agent's work. A backspace
+        never means anything but the box, and one extra at an emptied box is
+        a no-op — though none are sent: a real trailing space dropped by the
+        stray-cell strip stays behind rather than risk eating hidden rows of
+        a box too tall for the screen (see EnteredPrompt)."""
+        return "\x1b[B" * prompt.rows_below + "\x05" + "\x7f" * len(prompt.text)
 
     def file_reference(
         self, path: str, cwd: str | None, start_line: int = 0, end_line: int = 0

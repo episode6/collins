@@ -176,6 +176,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "File Manager": "Fájlkezelő",
         "Right-click to open this folder in your terminal":
             "Jobb kattintással megnyithatod ezt a mappát a termináljában",
+        "Copy the prompt typed in the input box":
+            "A beviteli mezőbe írt prompt másolása",
+        "Right-click to cut: copy it and clear the box":
+            "Jobb kattintással kivágás: másolás után törli a mezőt",
         "Open this folder in your file manager":
             "A mappa megnyitása a fájlkezelőben",
         "No terminal application found": "Nem található terminálalkalmazás",
@@ -527,6 +531,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "File Manager": "Dateimanager",
         "Right-click to open this folder in your terminal":
             "Rechtsklick öffnet diesen Ordner in deinem Terminal",
+        "Copy the prompt typed in the input box":
+            "Den in das Eingabefeld getippten Prompt kopieren",
+        "Right-click to cut: copy it and clear the box":
+            "Rechtsklick zum Ausschneiden: kopieren und das Feld leeren",
         "Open this folder in your file manager":
             "Diesen Ordner in deinem Dateimanager öffnen",
         "No terminal application found": "Keine Terminal-Anwendung gefunden",
@@ -886,6 +894,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "File Manager": "Gestor de archivos",
         "Right-click to open this folder in your terminal":
             "Clic derecho para abrir esta carpeta en tu terminal",
+        "Copy the prompt typed in the input box":
+            "Copiar el prompt escrito en el cuadro de entrada",
+        "Right-click to cut: copy it and clear the box":
+            "Clic derecho para cortar: copiarlo y vaciar el cuadro",
         "Open this folder in your file manager":
             "Abrir esta carpeta en tu gestor de archivos",
         "No terminal application found": "No se encontró ninguna aplicación de terminal",
@@ -1243,6 +1255,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "File Manager": "Gestionnaire de fichiers",
         "Right-click to open this folder in your terminal":
             "Clic droit pour ouvrir ce dossier dans votre terminal",
+        "Copy the prompt typed in the input box":
+            "Copier le prompt saisi dans la zone de saisie",
+        "Right-click to cut: copy it and clear the box":
+            "Clic droit pour couper : le copier puis vider la zone",
         "Open this folder in your file manager":
             "Ouvrir ce dossier dans votre gestionnaire de fichiers",
         "No terminal application found": "Aucune application de terminal trouvée",
