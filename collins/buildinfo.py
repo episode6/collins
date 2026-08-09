@@ -54,11 +54,17 @@ class BuildInfo:
     def describe(self) -> str:
         """The About-dialog paragraph. Deliberately not translated: it only
         ever appears in the debug build, for whoever is developing Collins."""
-        where = f"on {self.branch}" if self.branch else "detached"
-        text = f"Debug build: {self.sha} “{self.title}” {where}"
-        if self.dirty:
-            text += "\nThe worktree had uncommitted changes at launch."
-        return text
+        state = (
+            "The worktree had uncommitted changes at launch"
+            if self.dirty
+            else "The worktree was clean at launch"
+        )
+        return (
+            "Debug Build Info:\n"
+            f"Commit: [{self.sha}] {self.title}\n"
+            f"Branch: {self.branch or '(detached HEAD)'}\n"
+            f"\n{state}"
+        )
 
 
 _captured: BuildInfo | None = None

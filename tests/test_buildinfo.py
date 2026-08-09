@@ -94,12 +94,19 @@ def test_chip_is_build_metadata():
 
 def test_describe_clean_on_a_branch():
     info = BuildInfo(sha="abc1234", title="Fix the thing", branch="main", dirty=False)
-    assert info.describe() == "Debug build: abc1234 “Fix the thing” on main"
+    assert info.describe() == (
+        "Debug Build Info:\n"
+        "Commit: [abc1234] Fix the thing\n"
+        "Branch: main\n"
+        "\nThe worktree was clean at launch"
+    )
 
 
 def test_describe_dirty_and_detached():
     info = BuildInfo(sha="abc1234", title="Fix the thing", branch=None, dirty=True)
     assert info.describe() == (
-        "Debug build: abc1234 “Fix the thing” detached"
-        "\nThe worktree had uncommitted changes at launch."
+        "Debug Build Info:\n"
+        "Commit: [abc1234] Fix the thing\n"
+        "Branch: (detached HEAD)\n"
+        "\nThe worktree had uncommitted changes at launch"
     )
