@@ -232,7 +232,10 @@ def _on_response(
         log.warning("clisetup: %s accepted but claude still not findable", text)
     # Now the launch that would have happened, happens: rescan (which also
     # arms the file monitors), reopen the remembered session, and let the
-    # GitHub notice take its turn.
+    # GitHub notice take its turn. restore_last_session is a second call —
+    # do_activate already made one, whose one-shot burned on the store's
+    # empty first scan — and deliberately so: it re-arms against the rescan,
+    # and open_session re-selects rather than duplicates an existing tab.
     store.refresh(force_rebuild=True)
     window.restore_last_session()
     then()

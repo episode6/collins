@@ -68,6 +68,10 @@ VERSION_MANAGED = "version-managed"
 
 # A version number in a path component: "2.1.226", "v20.1.0",
 # "claude-1.2" — anything with two dot-separated runs of digits.
+# Deliberately broad: it also catches a stable-but-dotted install like
+# /opt/myco/app-2.1/bin/claude, whose owner can rename or symlink around
+# the refusal — the cost of missing a versioned tree is a silently broken
+# stored answer, the cost of over-matching is one explained red x.
 _VERSION_RE = re.compile(r"\d+\.\d+")
 
 # Directory names that mark a version manager's tree. Exact component
