@@ -145,13 +145,14 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
 
 /* a session with something going on -- a tab open, or running detached -- is
    drawn as an outlined card with a left guide line; what a running one adds
-   is a full-strength title (every other row's dims), and (for a detached one)
-   a status color on that line. Every idle row keeps this same box with its
-   borders turned transparent -- all but the red guide line of an interrupted
-   one (see the :not(.running):not(.detached) rules below) -- so the border
-   box is identical in every status and a row never
-   shifts or resizes as its status changes; the selected tab's row is the one
-   exception, and it changes only horizontally (see .active-tab below).
+   is a light gray fill and a full-strength title (every other row's dims),
+   and (for a detached one) a status color on that line. Every idle row
+   keeps this same box with its borders turned transparent -- all but the red
+   guide line of an interrupted one (see the :not(.running):not(.detached)
+   rules below) -- so the border box is identical in every status and a row
+   never shifts or resizes as its status changes; the selected tab's row is
+   the one exception, and it changes only horizontally (see .active-tab
+   below).
    The left indent is a widget margin set in sidebar.py, not a CSS margin
    here: it tracks the configurable project-icon size, so the card always
    starts just past the icon of the project header above it. */
@@ -230,14 +231,22 @@ row.session-child:hover {
   border-color: alpha(currentColor, 0.3);
 }
 /* sessions running in an open tab are the ones the panel is really about, and
-   they say so through their titles: theirs read at full strength while every
-   other row's dims back. No fill carries this: the resting card looks the
-   same in every status, so the only filled rows in the list are the selected
-   tab's (orange, below) and whichever one the pointer is on, and neither has
-   to compete with a wash of gray for attention.
+   they say so twice over: a light gray fill sets the live rows apart from the
+   archive of past sessions as a group, and their titles read at full strength
+   while every other row's dims back. The fill rules must stay below the plain
+   :hover one, whose border-color shorthand would otherwise repaint the guide
+   line, and above the active-tab rules, which take over the fill for the one
+   session the selected tab is showing.
 
-   Detached (/bg) sessions dim with the rest. They are running, but there is no
-   tab to return to, and their guide line is what says they are still going. */
+   Detached (/bg) sessions dim with the rest and keep no fill. They are
+   running, but there is no tab to return to, and their guide line is what
+   says they are still going. */
+row.session-child.running {
+  background-color: alpha(currentColor, 0.13);
+}
+row.session-child.running:hover {
+  background-color: alpha(currentColor, 0.18);
+}
 row.session-child:not(.running) .session-title {
   opacity: 0.55;
 }
