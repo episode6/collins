@@ -33,7 +33,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import dialogs  # noqa: E402
-from .i18n import _  # noqa: E402
+from .i18n import _, ngettext  # noqa: E402
 
 
 class PanelStrip(Gtk.Box):
@@ -258,15 +258,45 @@ class PanelStrip(Gtk.Box):
             self._view.close_page(page)
 
     def _close_other_tabs(self) -> None:
-        """Close every page but the menu's own — through close_page, so each
-        busy page still gets its own confirmation."""
+        """Close every page but the menu's own. Busy pages are gathered
+        behind a single confirmation for the whole bulk — routing each
+        through its own close_page ask would stack one dialog per busy
+        page, each also flipping the visible tab."""
         keep = self._menu_target_page()
         if keep is None:
             return
-        for widget in self.pages():
-            page = self._find_page(widget)
-            if page is not None and page is not keep:
+        targets = [
+            page
+            for widget in self.pages()
+            if (page := self._find_page(widget)) is not None and page is not keep
+        ]
+        busy = [page for page in targets if page.get_child().page_busy()]
+        if not busy:
+            for page in targets:
                 self._view.close_page(page)
+            return
+        self._view.set_selected_page(busy[0])  # show what's about to be killed
+
+        def do_close() -> None:
+            for page in targets:
+                # A page may have emptied on its own while the dialog sat
+                # open (the command finished and the user typed `exit`).
+                if self._find_page(page.get_child()) is page:
+                    self._close_ok.add(page)
+                    self._view.close_page(page)
+
+        dialogs.confirm_dialog(
+            self,
+            _("Close tabs with running commands?"),
+            ngettext(
+                "A command is still running in one of these tabs and will be terminated.",
+                "Commands are still running in {count} of these tabs and will be terminated.",
+                len(busy),
+            ).format(count=len(busy)),
+            _("Close Tabs"),
+            do_close,
+            default_response="confirm",
+        )
 
     # -- focus and aggregates ------------------------------------------------
 
@@ -287,7 +317,7 @@ class PanelStrip(Gtk.Box):
     def has_running_command(self) -> bool:
         return any(shell.page_busy() for shell in self.shell_pages())
 
-    def select_busy_tab(self) -> None:
+    def select_busy_page(self) -> None:
         """Bring the first shell with a live command to the front (the close
         confirmation shows the panel to reveal what's about to be killed)."""
         for shell in self.shell_pages():

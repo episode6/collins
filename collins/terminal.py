@@ -2496,7 +2496,7 @@ class TerminalTab(Gtk.Box):
     def select_busy_panel_tab(self) -> None:
         """Front the inner panel tab whose shell is busy, so the close
         confirmation's "will be terminated" points at something visible."""
-        self._panel.select_busy_tab()
+        self._panel.select_busy_page()
 
     def _load_panel_history(self) -> list[str] | None:
         """Saved panel scrollbacks (one per inner tab, in tab order) for this
