@@ -94,6 +94,11 @@ _CSS = b"""
 .lightbox-shade button.lightbox-zoom:disabled {
   color: alpha(white, 0.4);
 }
+/* the agent-supplied caption under the image (show_image's caption arg);
+   the shade behind it is dark in both themes, so the text is light */
+.lightbox-shade .lightbox-caption {
+  color: alpha(white, 0.9);
+}
 
 /* insertion line while dragging a project header to a new position */
 row.drop-above { box-shadow: inset 0 2px 0 0 @accent_bg_color; }
@@ -950,7 +955,13 @@ class App(Adw.Application):
         # its "Open in Editor" button.
         can_edit = tab.can_open_in_editor(path)
         on_open = (lambda: window.open_in_tab_editor(tab, path)) if can_edit else None
-        present_image_lightbox(tab, path, can_open_in_editor=can_edit, on_open_in_editor=on_open)
+        present_image_lightbox(
+            tab,
+            path,
+            can_open_in_editor=can_edit,
+            on_open_in_editor=on_open,
+            caption=args.get("caption"),
+        )
         return True, "Image shown."
 
     def _mcp_notify_user(self, found, args: dict) -> tuple[bool, str]:

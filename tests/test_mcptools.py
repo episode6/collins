@@ -144,6 +144,24 @@ def test_show_image_args():
     )
 
 
+def test_show_image_caption_args():
+    assert (
+        mcptools.validate_args(
+            "show_image", {"path": "shot.png", "caption": "Before the fix"}
+        )
+        is None
+    )
+    assert "empty" in mcptools.validate_args(
+        "show_image", {"path": "shot.png", "caption": ""}
+    )
+    assert "string" in mcptools.validate_args(
+        "show_image", {"path": "shot.png", "caption": 7}
+    )
+    assert "300" in mcptools.validate_args(
+        "show_image", {"path": "shot.png", "caption": "x" * 301}
+    )
+
+
 def test_notify_user_args():
     assert mcptools.validate_args("notify_user", {"message": "Ready to push?"}) is None
     assert "message" in mcptools.validate_args("notify_user", {})
