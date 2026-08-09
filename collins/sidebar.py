@@ -2041,8 +2041,11 @@ class SessionSidebar(Gtk.Box):
         pr = newest_titled(saved_prs)
         if pr is not None:
             # Which PR the name would come from is worth naming when the
-            # session has several, the way the mark's own tooltip names the
-            # one a right-click opens.
+            # session has several. Not necessarily the one the mark's tooltip
+            # offers to open, which is the newest saved PR whether or not it
+            # has a title yet: a name can only come from a PR that has one, so
+            # while the newest PR's title is still in flight these two point at
+            # different numbers — each at the PR its own action would act on.
             pr_label = (
                 _("Rename to match PR")
                 if len(from_records(saved_prs)) == 1
