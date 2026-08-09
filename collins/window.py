@@ -71,6 +71,7 @@ from .licenses import legal_sections
 from .models import SessionItem
 from .prefs import PreferencesDialog
 from .providers import SessionOptions, available_providers, get_provider
+from .prstatus import newest_title
 from .quickopen import QuickOpenDialog
 from .replayview import ReplayTab
 from .sessions import (
@@ -1064,6 +1065,7 @@ class MainWindow(Adw.ApplicationWindow):
             "delete-session": self._on_delete_session,
             "open-ghostty": self._on_open_ghostty,
             "rename-session": self._on_rename_action,
+            "rename-to-pr": self._on_rename_to_pr,
             "repair-session": self._on_repair_action,
             "regenerate-name": lambda _a, p: self.store.regenerate_name(p.get_string()),
             "toggle-favorite": lambda _a, p: self.store.toggle_favorite(p.get_string()),
@@ -3848,6 +3850,21 @@ class MainWindow(Adw.ApplicationWindow):
         session = self._session_for(param)
         if session is not None:
             self._prompt_rename_session(session)
+
+    def _on_rename_to_pr(self, _action, param: GLib.Variant) -> None:
+        """Name a session after the newest PR it has open, on demand.
+
+        Into the manual slot, not the generated one pr_title_sessions writes:
+        somebody asked for this name by hand, so it outranks anything the
+        title generator would come up with later, exactly as typing the same
+        title into the rename dialog would. A session with no titled PR saved
+        is a no-op — the sidebar only offers the item when there is one, and
+        by the time the click lands the list is the same one it read.
+        """
+        session_id = param.get_string()
+        title = newest_title(self.state.get_session_prs(session_id))
+        if title:
+            self.rename_session_tab(session_id, title)
 
     def rename_session_tab(self, session_id: str, title: str) -> None:
         """Rename a session and retitle its open tab — the rename dialog's

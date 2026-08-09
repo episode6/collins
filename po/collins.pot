@@ -832,6 +832,14 @@ msgstr ""
 msgid "Regenerate name"
 msgstr ""
 
+#: collins/sidebar.py:2047
+msgid "Rename to match PR"
+msgstr ""
+
+#: collins/sidebar.py:2049
+msgid "Rename to match PR #{number}"
+msgstr ""
+
 #: collins/sidebar.py:781
 msgid "Remove from favorites"
 msgstr ""

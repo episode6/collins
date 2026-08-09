@@ -497,17 +497,25 @@ def from_records(records: object) -> list[PullRequest]:
     return [pr for record in records if (pr := from_record(record)) is not None]
 
 
-def newest_title(records: object) -> str | None:
-    """The newest saved PR's title, or None while no saved PR has one.
+def newest_titled(records: object) -> PullRequest | None:
+    """The newest saved PR that has a title, or None while none of them has.
 
-    What the pr_title_sessions setting renames a session to (see
-    SessionStore.apply_pr_title). A saved list is oldest-first, so the last
-    titled entry is the PR the session opened most recently; a PR whose title
-    hasn't arrived from `gh` yet (a bare pr-link, say) contributes nothing
-    until a refresh lands one.
+    The PR a session gets named after — by the pr_title_sessions setting (see
+    SessionStore.apply_pr_title) and by the row menu's "Rename to match PR",
+    which needs the whole PR rather than just its title so it can say which
+    one it means. A saved list is oldest-first, so the last titled entry is
+    the PR the session opened most recently; a PR whose title hasn't arrived
+    from `gh` yet (a bare pr-link, say) contributes nothing until a refresh
+    lands one.
     """
-    titles = [pr.title for pr in from_records(records) if pr.title]
-    return titles[-1] if titles else None
+    titled = [pr for pr in from_records(records) if pr.title]
+    return titled[-1] if titled else None
+
+
+def newest_title(records: object) -> str | None:
+    """The newest saved PR's title, or None while no saved PR has one."""
+    pr = newest_titled(records)
+    return pr.title if pr is not None else None
 
 
 def _load_cache() -> dict:

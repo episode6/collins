@@ -44,6 +44,7 @@ from .prstatus import (
     describe_all,
     from_records,
     known,
+    newest_titled,
     resync,
     sweep,
     to_records,
@@ -2031,6 +2032,28 @@ class SessionSidebar(Gtk.Box):
         edit_section = Gio.Menu()
         edit_section.append_item(item(_("Rename…"), "rename-session"))
         edit_section.append_item(item(_("Regenerate name"), "regenerate-name"))
+        # Only for a session whose PR list has a title in it: the rename has
+        # nothing to copy otherwise, and a PR nothing has been fetched for yet
+        # is a row the menu would be promising a name it can't produce. The
+        # pr_title_sessions setting does this by itself for every session; the
+        # item is for the one session somebody wants named that way with the
+        # setting off — or for putting the name back after a hand rename,
+        # which pins the manual slot the setting never writes.
+        saved_prs = self.store.state.get_session_prs(session_id)
+        pr = newest_titled(saved_prs)
+        if pr is not None:
+            # Which PR the name would come from is worth naming when the
+            # session has several. Not necessarily the one the mark's tooltip
+            # offers to open, which is the newest saved PR whether or not it
+            # has a title yet: a name can only come from a PR that has one, so
+            # while the newest PR's title is still in flight these two point at
+            # different numbers — each at the PR its own action would act on.
+            pr_label = (
+                _("Rename to match PR")
+                if len(from_records(saved_prs)) == 1
+                else _("Rename to match PR #{number}").format(number=pr.number)
+            )
+            edit_section.append_item(item(pr_label, "rename-to-pr"))
         fav_label = (
             _("Remove from favorites") if self.store.state.is_favorite(session_id) else _("Add to favorites")
         )
