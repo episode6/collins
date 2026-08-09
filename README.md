@@ -8,7 +8,7 @@ fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 [![CI](https://github.com/episode6/collins/actions/workflows/ci.yml/badge.svg)](https://github.com/episode6/collins/actions/workflows/ci.yml)
 
-Native GTK4/libadwaita desktop app to browse, name, and resume your [Claude Code](https://claude.com/claude-code) sessions in embedded terminal tabs.
+A vibecoded, native GTK4/libadwaita desktop app to manage and orchestrate all your [Claude Code](https://claude.com/claude-code) sessions.
 
 > My wife keeps referring to Claude as Collins by mistake. So now when she asks me if I'm talking to Collins, I can say yes.
 
@@ -18,6 +18,7 @@ Collins is a fork of [agent-session-manager](https://github.com/r4nd3l/agent-ses
 
 > **Unofficial community tool.** An independent community project, not affiliated with or endorsed by any agent vendor (including Anthropic).
 > It never modifies your agents' own session data — all app state lives in its own config file.
+> Fair warning: this app is entirely vibecoded — the code is written by Claude Code.
 
 ![Collins](data/screenshot.png)
 

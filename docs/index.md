@@ -7,7 +7,7 @@ layout: home
 
 hero:
   name: "Collins"
-  text: "A native home for your AI coding-agent sessions"
+  text: "A vibecoded agentic developement environment to manage, orchestrate and compliment all your Claude cli coding-agent sessions"
   tagline: Browse, name, and resume every Claude Code session on your machine — in embedded terminal tabs.
   image:
     src: /img/hero.png
@@ -53,7 +53,9 @@ Call it an **Agent-First IDE**, an **AI-Native Workspace**, or an **Agent
 Orchestrator** — Collins is an opinionated take on what a desktop workspace
 built around a coding agent should look like: the agent front and center,
 with your sessions organized around it. It is also, deliberately, a tool for
-**Claude** — there are no plans to support other agents.
+**Claude** — there are no plans to support other agents. And to be upfront
+about it: Collins is itself entirely vibecoded — the code is written by
+[Claude Code](https://claude.com/claude-code).
 
 ## Why "Collins"?
 
