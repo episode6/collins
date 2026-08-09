@@ -437,6 +437,12 @@ msgstr "Gestor de archivos"
 msgid "Right-click to open this folder in your terminal"
 msgstr "Clic derecho para abrir esta carpeta en tu terminal"
 
+msgid "Copy the prompt typed in the input box"
+msgstr "Copiar el prompt escrito en el cuadro de entrada"
+
+msgid "Right-click to cut: copy it and clear the box"
+msgstr "Clic derecho para cortar: copiarlo y vaciar el cuadro"
+
 msgid "Open this folder in your file manager"
 msgstr "Abrir esta carpeta en tu gestor de archivos"
 

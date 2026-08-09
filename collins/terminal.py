@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -50,7 +50,7 @@ from .linkpatterns import (  # noqa: E402
     resolve_wrapped_reference,
     token_at_column,
 )
-from .providers import Provider, get_provider  # noqa: E402
+from .providers import EnteredPrompt, Provider, get_provider  # noqa: E402
 from .prstatus import (  # noqa: E402
     PullRequest,
     describe,
@@ -1446,6 +1446,28 @@ class TerminalTab(Gtk.Box):
         """Slim status row under the terminal: the tab's live working
         directory and git branch, plus the buttons controlling the terminal
         panel."""
+        # Leading the row: copy the prompt typed into the agent's input box,
+        # rebuilt into the text the user actually entered (the CLI's own
+        # wrapping undone, typed line breaks kept — see entered_prompt).
+        # A right-click is the cut: the same copy, then the box is cleared.
+        self._copy_prompt_icon = Gtk.Image.new_from_icon_name("edit-copy-symbolic")
+        self._copy_prompt_icon.set_pixel_size(_PR_REFRESH_ICON_PX)
+        self._copy_prompt_icon.add_css_class("dim-label")
+        self._copy_prompt_flash = 0  # source id of a pending icon restore
+        copy_prompt_btn = Gtk.Button(child=self._copy_prompt_icon)
+        copy_prompt_btn.add_css_class("flat")
+        copy_prompt_btn.set_tooltip_text(
+            _("Copy the prompt typed in the input box")
+            + "\n"
+            + _("Right-click to cut: copy it and clear the box")
+        )
+        copy_prompt_btn.connect("clicked", self._on_copy_prompt)
+        # Its own gesture, like the terminal toggle's: a Gtk.Button only
+        # activates on the primary button, so the secondary never doubles up.
+        cut_prompt = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        cut_prompt.connect("pressed", self._on_cut_prompt)
+        copy_prompt_btn.add_controller(cut_prompt)
+
         self._cwd_label = Gtk.Label(xalign=0.0)
         self._cwd_label.set_ellipsize(Pango.EllipsizeMode.START)
         self._cwd_label.add_css_class("caption")
@@ -1542,6 +1564,7 @@ class TerminalTab(Gtk.Box):
         # cwd label) takes the slack so the buttons stay pinned right even
         # while the branch and PR labels are hidden.
         left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
+        left.append(copy_prompt_btn)
         left.append(self._cwd_label)
         left.append(self._branch_seps[0])
         left.append(self._branch_label)
@@ -2172,6 +2195,71 @@ class TerminalTab(Gtk.Box):
         is to look at the terminal.
         """
         return "" if self.takes_prompt() else _("This session isn't at an empty prompt.")
+
+    def entered_prompt(self) -> EnteredPrompt | None:
+        """The prompt typed into the agent's input box and not yet sent, or
+        None with no agent, an empty box (takes_prompt — which also rules
+        out the box's dim ghost suggestion, indistinguishable from typed
+        text in a plain-text read), or no box on screen at all.
+
+        The screen is read the way the other readers do — one cursor-anchored
+        snapshot, never adjustment-derived grid rows (see _resolve_wrapped_at
+        for why), split back into screen rows — but reaching *past* the
+        cursor too: continuation rows sit below it whenever the cursor was
+        arrowed back up into the box.
+        """
+        if self._child_pid is None or self.takes_prompt():
+            return None
+        _, cursor_row = self.terminal.get_cursor_position()
+        row_count = self.terminal.get_row_count()
+        columns = self.terminal.get_column_count()
+        top_row = max(0, cursor_row - row_count + 1)
+        screen = self.terminal.get_text_range_format(
+            Vte.Format.TEXT, top_row, 0, cursor_row + row_count, columns
+        )
+        text = screen[0] if isinstance(screen, tuple) else screen
+        rows: list[str] = []
+        for line in (text or "").split("\n"):
+            if len(line) <= columns:
+                rows.append(line)
+            else:
+                # Soft-wrapped screen rows come back joined (see
+                # _resolve_wrapped_at); full-width chunks restore them, and
+                # with them the row indexing the cursor position lives in.
+                rows.extend(line[i : i + columns] for i in range(0, len(line), columns))
+        return self.provider.entered_prompt(rows, cursor_row - top_row, columns)
+
+    def _on_copy_prompt(self, _btn) -> None:
+        self._copy_entered_prompt(cut=False)
+
+    def _on_cut_prompt(self, _gesture, _n_press: int, _x: float, _y: float) -> None:
+        self._copy_entered_prompt(cut=True)
+
+    def _copy_entered_prompt(self, cut: bool) -> None:
+        """The footer copy-prompt button: put the typed prompt on the
+        clipboard, and for the right-click cut also clear the input box.
+        Nothing typed (or no box to read) quietly does neither — the empty
+        clipboard write would only destroy what the user had on there."""
+        prompt = self.entered_prompt()
+        if prompt is None or not prompt.text.strip():
+            return
+        self._copy_prompt_icon.get_clipboard().set(prompt.text)
+        if cut:
+            keys = self.provider.clear_prompt_keys(prompt)
+            if keys:
+                self.feed_child_text(keys)
+        # The same confirmation rhythm as the copy labels beside it
+        # (copylabel), told with the icon: a checkmark for a beat.
+        self._copy_prompt_icon.set_from_icon_name("object-select-symbolic")
+        if self._copy_prompt_flash:
+            GLib.source_remove(self._copy_prompt_flash)
+
+        def restore() -> bool:
+            self._copy_prompt_flash = 0
+            self._copy_prompt_icon.set_from_icon_name("edit-copy-symbolic")
+            return GLib.SOURCE_REMOVE
+
+        self._copy_prompt_flash = GLib.timeout_add(1200, restore)
 
     def unstarted_thread(self) -> bool:
         """Whether this tab is still a New Thread with nothing in it: a

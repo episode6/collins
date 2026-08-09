@@ -437,6 +437,12 @@ msgstr "Fájlkezelő"
 msgid "Right-click to open this folder in your terminal"
 msgstr "Jobb kattintással megnyithatod ezt a mappát a termináljában"
 
+msgid "Copy the prompt typed in the input box"
+msgstr "A beviteli mezőbe írt prompt másolása"
+
+msgid "Right-click to cut: copy it and clear the box"
+msgstr "Jobb kattintással kivágás: másolás után törli a mezőt"
+
 msgid "Open this folder in your file manager"
 msgstr "A mappa megnyitása a fájlkezelőben"
 
