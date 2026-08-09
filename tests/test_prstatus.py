@@ -29,6 +29,7 @@ from collins.prstatus import (
     menu_name,
     merge_ordered,
     newest_title,
+    newest_titled,
     parse_pr_link,
     refresh,
     resync,
@@ -915,6 +916,25 @@ def test_newest_title_none_without_any_title():
     assert newest_title([{"number": 55, "url": URL}]) is None
     assert newest_title([]) is None
     assert newest_title("junk") is None
+
+
+def test_newest_titled_is_the_whole_pull_request():
+    """What the row menu's "Rename to match PR" reads: it names the PR the
+    rename would use, so a title on its own isn't enough."""
+    records = [
+        {"number": 40, "url": "https://github.com/episode6/collins/pull/40", "title": "Old work"},
+        {"number": 55, "url": URL, "title": "New work"},
+        {"number": 56, "url": "https://github.com/episode6/collins/pull/56"},
+    ]
+    pr = newest_titled(records)
+    assert pr is not None
+    assert (pr.number, pr.title) == (55, "New work")
+
+
+def test_newest_titled_none_without_any_title():
+    assert newest_titled([{"number": 55, "url": URL}]) is None
+    assert newest_titled([]) is None
+    assert newest_titled("junk") is None
 
 
 # -- merge_ordered (saved list + transcript links) --------------------------
