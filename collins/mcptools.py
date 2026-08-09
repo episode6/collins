@@ -103,6 +103,15 @@ TOOLS: list[dict] = [
                         "against the working directory, then the project root."
                     ),
                 },
+                "caption": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300,
+                    "description": (
+                        "A short caption shown under the image — what the "
+                        "user is looking at, or what to notice in it."
+                    ),
+                },
             },
             "required": ["path"],
             "additionalProperties": False,

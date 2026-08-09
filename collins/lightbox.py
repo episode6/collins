@@ -38,6 +38,13 @@ terminal._setup_links). Deliberately read-only — it can therefore show any
 readable path, including the /tmp screenshots agent output loves to
 reference. "Open in Editor" only appears when the file is inside the
 clicking tab's editor project (the caller's call via `can_open_in_editor`).
+
+An optional caption ends the image column — under the image, and under the
+zoom bar too when that sits below a small image — wrapping to the column's
+width; the fit and centering math both count its height so a captioned
+image still lands centered with the caption on screen. Today only the
+show_image MCP tool passes one — the text is agent-supplied, which is why
+it renders as plain wrapped text.
 """
 
 from __future__ import annotations
@@ -80,6 +87,7 @@ class ImageLightbox(Gtk.Box):
         path: str | Path,
         can_open_in_editor: bool = False,
         on_open_in_editor: Callable[[], None] | None = None,
+        caption: str | None = None,
     ) -> None:
         super().__init__()
         self._path = Path(path)
@@ -129,6 +137,21 @@ class ImageLightbox(Gtk.Box):
             )
         self._slot.set_hexpand(True)
         self._slot.set_vexpand(True)
+
+        # The caption under the image: plain wrapped text (it is
+        # agent-supplied), centered, taking the image column's width. Its
+        # height is folded into the fit and centering math via
+        # _caption_extra_h so a captioned image still centers with the
+        # caption fully on screen.
+        self._caption: Gtk.Label | None = None
+        if caption:
+            self._caption = Gtk.Label(
+                label=caption,
+                wrap=True,
+                justify=Gtk.Justification.CENTER,
+                halign=Gtk.Align.CENTER,
+            )
+            self._caption.add_css_class("lightbox-caption")
 
         # The -/+ zoom bar floats over the image, anchored to its bottom —
         # which, the slot being pinned to min(display, screen), is the bottom
@@ -240,11 +263,15 @@ class ImageLightbox(Gtk.Box):
         for btn in self._buttons:
             self._strip.append(btn)
         # The image column: the slot, plus the zoom bar when it sits below
-        # the image instead of floating inside it (_place_zoombar).
+        # the image instead of floating inside it (_place_zoombar), plus the
+        # caption. The caption stays last — _place_zoombar inserts the bar
+        # right after the slot so it hugs the image it zooms.
         self._image_col = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=_PANEL_SPACING
         )
         self._image_col.append(self._slot)
+        if self._caption is not None:
+            self._image_col.append(self._caption)
         self._panel = Gtk.Box(
             orientation=(
                 Gtk.Orientation.HORIZONTAL if side == "right" else Gtk.Orientation.VERTICAL
@@ -345,12 +372,24 @@ class ImageLightbox(Gtk.Box):
 
     def _set_fit_zoom(self, width: int, height: int) -> None:
         """The fitted display scale from lightbox_layout's content size (the
-        image's fitted size once the shadow inset and chrome come out)."""
+        image's fitted size once the shadow inset, chrome and any caption
+        come out)."""
         fit_w = width - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[0]
         fit_h = height - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[1]
+        fit_h -= self._caption_extra_h(fit_w)
         self._fit_zoom = min(
             fit_w / max(self._image_size[0], 1), fit_h / max(self._image_size[1], 1), 1.0
         )
+
+    def _caption_extra_h(self, width: int) -> int:
+        """The caption's footprint in the image column: its wrapped height at
+        *width* plus the column gap above it; 0 with no caption."""
+        if self._caption is None:
+            return 0
+        _min, nat, _mb, _nb = self._caption.measure(
+            Gtk.Orientation.VERTICAL, max(width, 1)
+        )
+        return nat + _PANEL_SPACING
 
     def _apply_zoom(self, zoom: float) -> None:
         """Set the display scale: the picture's size request becomes the
@@ -392,6 +431,7 @@ class ImageLightbox(Gtk.Box):
         content_h = slot[1] + chrome[1]
         if not self._zoombar_inside:
             content_h += self._zoombar_h() + _PANEL_SPACING
+        content_h += self._caption_extra_h(slot[0])
         left = max((win_w - content_w) // 2, LIGHTBOX_SHADOW_PAD)
         top = max((win_h - content_h) // 2, LIGHTBOX_SHADOW_PAD)
         self._panel.set_margin_start(left)
@@ -444,7 +484,9 @@ class ImageLightbox(Gtk.Box):
             self._slot.remove_overlay(self._zoombar)
             self._zoombar.set_margin_bottom(0)
             self._wake_zoombar()
-            self._image_col.append(self._zoombar)
+            # Right under the slot, so the bar hugs the image it zooms and
+            # any caption stays the column's last word.
+            self._image_col.insert_child_after(self._zoombar, self._slot)
 
     def _wake_zoombar(self) -> None:
         if self._fade_source:
@@ -528,5 +570,6 @@ def present_image_lightbox(
     path: str | Path,
     can_open_in_editor: bool = False,
     on_open_in_editor: Callable[[], None] | None = None,
+    caption: str | None = None,
 ) -> None:
-    ImageLightbox(path, can_open_in_editor, on_open_in_editor).present_over(parent)
+    ImageLightbox(path, can_open_in_editor, on_open_in_editor, caption).present_over(parent)
