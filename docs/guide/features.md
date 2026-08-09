@@ -487,13 +487,16 @@ below.
   *6 hours*, *12 hours* or *Indefinitely*. Picking a duration turns
   Caffeine Mode on for that long and turns it off again when the time runs out —
   so a long build can't leave the machine awake all week because you forgot.
+  *Until idle* carries a tick while it's the mode that's running, so the menu
+  says what a plain click armed; clicking the tick off turns Caffeine Mode off.
 - **Until idle**, the default, hands the deadline to the sessions instead of
   the clock: as long as at least one open tab is working — the same barber
   pole the session list shows — the machine stays awake. Five minutes after
   the last one stops, Caffeine Mode dozes: the machine is free to blank and
   sleep as usual, but the mode stays armed, and a session picking work back
   up — tomorrow morning included — takes hold of the machine again. Only
-  clicking the cup off ends it. Whatever keeps a pole up holds Caffeine Mode
+  clicking the cup off — or its tick in the menu — ends it. Whatever keeps a
+  pole up holds Caffeine Mode
   with it, including a background process a session left running — a dev
   server, a long build — but not the servers the agent runs for itself, which
   are plumbing rather than work. Backgrounded (`/bg`) sessions don't count

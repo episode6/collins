@@ -56,6 +56,7 @@ from .caffeine import (
     WHILE_ACTIVE,
     countdown_tooltip,
     duration_label,
+    follows_activity,
     format_remaining,
     toggle_tooltip,
 )
@@ -1111,6 +1112,17 @@ class MainWindow(Adw.ApplicationWindow):
         caffeine_timer.connect("activate", self._on_caffeine_timer)
         self.add_action(caffeine_timer)
 
+        # Until idle is the one duration the menu can show as picked: it is the
+        # mode the app keeps a name for (the clock options only leave a
+        # deadline behind, and the header countdown is where those show
+        # themselves). Its tick doubles as the off switch — ticking a running
+        # Until idle off is the same as clicking the button.
+        self._caffeine_idle_action = Gio.SimpleAction.new_stateful(
+            "caffeine-until-idle", None, GLib.Variant.new_boolean(False)
+        )
+        self._caffeine_idle_action.connect("activate", self._on_caffeine_until_idle)
+        self.add_action(self._caffeine_idle_action)
+
         # …and the same menu's checkbox for the keep-the-screen-on setting,
         # which Preferences also offers. Its state is refreshed from the
         # setting each time the menu opens, so another window (or the
@@ -2100,13 +2112,19 @@ class MainWindow(Adw.ApplicationWindow):
         whether staying awake includes the screen."""
         menu = Gio.Menu()
         for key in DURATION_KEYS:
-            menu.append(duration_label(key), f"win.caffeine-timer::{key}")
+            if follows_activity(key):
+                # Ticked while it's the running mode, so the menu shows what a
+                # plain click armed — and untickable, to turn it off again.
+                menu.append(duration_label(key), "win.caffeine-until-idle")
+            else:
+                menu.append(duration_label(key), f"win.caffeine-timer::{key}")
         # Flat, not a section of its own: a separator would push the menu past
         # the height a popup gets allocated (see the file-tree menu).
         menu.append(_("Keep screen on"), "win.caffeine-screen")
         self._caffeine_screen_action.set_state(
             GLib.Variant.new_boolean(bool(self.state.get_setting("caffeine_keep_screen_on")))
         )
+        self._sync_caffeine_menu_state()
         popover = Gtk.PopoverMenu.new_from_model(menu)
         popover.set_parent(self.caffeine_btn)
         popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
@@ -2124,6 +2142,19 @@ class MainWindow(Adw.ApplicationWindow):
             app.refresh_caffeine_inhibit()  # resyncs every window's button too
         else:
             self._sync_caffeine_visuals()
+
+    def _on_caffeine_until_idle(self, action: Gio.SimpleAction, _param) -> None:
+        """The menu's Until idle tick. Ticking it on arms the default mode, the
+        same as clicking the button; ticking it off turns Caffeine Mode off
+        rather than leaving it on with no duration picked. The state itself is
+        set from the app afterwards (`_sync_caffeine_menu_state`), so a refused
+        inhibit can't leave a tick standing over a mode that never started."""
+        app = self.get_application()
+        if hasattr(app, "set_caffeine_enabled"):
+            if action.get_state().get_boolean():
+                app.set_caffeine_enabled(False)
+            else:
+                app.set_caffeine_enabled(True, duration=WHILE_ACTIVE)
 
     def _on_caffeine_timer(self, _action, param: GLib.Variant) -> None:
         """A duration was picked: turn Caffeine Mode on for that long, replacing
@@ -2163,10 +2194,21 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             tooltip = countdown_tooltip(remaining, keep_screen_on=keep_screen_on)
         self.caffeine_btn.set_tooltip_text(tooltip)
+        self._sync_caffeine_menu_state()
         self.caffeine_timer.set_visible(remaining is not None)
         if remaining is not None:
             self.caffeine_timer.set_label(format_remaining(remaining))
             self.caffeine_timer.set_tooltip_text(tooltip)
+
+    def _sync_caffeine_menu_state(self) -> None:
+        """Point the Until idle tick at the app's mode. Called on every visual
+        refresh as well as when the menu opens, so a menu left open while the
+        mode changes elsewhere — another window, a timer running out — doesn't
+        keep showing a tick that no longer means anything."""
+        app = self.get_application()
+        self._caffeine_idle_action.set_state(
+            GLib.Variant.new_boolean(bool(getattr(app, "caffeine_follows_activity", False)))
+        )
 
     def _close_current_tab(self) -> None:
         page = self.tab_view.get_selected_page()
