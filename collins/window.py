@@ -135,6 +135,10 @@ _EXIT_NUDGE_TICKS = (5,)  # ~1.5s
 _EXIT_FORCE_TICKS = 10  # ~3s
 _BG_NUDGE_TICKS = (8, 24)  # ~2.4s / ~7.2s
 _BG_FORCE_TICKS = 40  # ~12s
+# ...and the budget the shell gets to act on the exit that follows the CLI's
+# own, counted from when it was fed. A shell has nothing to wind down, so this
+# is short: it is a safety net for an exit that never ran, not a wait.
+_SHELL_EXIT_TICKS = 6  # ~1.8s
 
 # Bare modifiers and locks: presses VTE sends nothing to the child for. They
 # don't count as "typing into the terminal" when a keystroke clears the
@@ -252,6 +256,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._confirmed_closes: set[Adw.TabPage] = set()
         self._closing_pages: dict[Adw.TabPage, int] = {}  # graceful close in progress -> attempts
         self._bg_closing: set[Adw.TabPage] = set()  # closing page is a /bg handoff, not an exit
+        self._shell_exiting: dict[Adw.TabPage, int] = {}  # shell told to exit -> ticks since
         self._close_asking: set[Adw.TabPage] = set()  # busy-tab confirm dialog open
         self._close_ok: set[Adw.TabPage] = set()  # user okayed closing the busy tab
         self._bg_ok: set[Adw.TabPage] = set()  # user chose to background the agent instead
@@ -2722,9 +2727,11 @@ class MainWindow(Adw.ApplicationWindow):
     def _poll_graceful(self, page: Adw.TabPage, tab: TerminalTab) -> bool:
         if page not in self._closing_pages:
             return GLib.SOURCE_REMOVE  # already closed
-        if not tab.has_running_command():
-            tab.feed_child_text("exit\r")  # close the shell → child-exited closes the tab
-            return GLib.SOURCE_REMOVE
+        # Once the shell has been told to exit the CLI is behind us for good:
+        # keep taking this branch rather than dropping back into the nudges
+        # below, which would aim a CLI's exit keystroke at a bare shell.
+        if page in self._shell_exiting or not tab.has_running_command():
+            return self._poll_shell_exit(page, tab)
         self._closing_pages[page] += 1
         backgrounding = page in self._bg_closing
         accept = tab.worktree_exit_prompt_keystrokes()
@@ -2752,6 +2759,35 @@ class MainWindow(Adw.ApplicationWindow):
         if self._closing_pages[page] >= (_BG_FORCE_TICKS if backgrounding else _EXIT_FORCE_TICKS):
             self._close_confirmed(page)
             return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    def _poll_shell_exit(self, page: Adw.TabPage, tab: TerminalTab) -> bool:
+        """The CLI is gone and the tab's shell has the terminal back. Ending
+        that shell is what closes the tab, so ask it to exit — once — and hold
+        the poll open until it does.
+
+        The exit is fed behind \\x15 (kill-line) because the shell can inherit
+        input the CLI never read. A CLI holding the terminal in mouse-tracking
+        mode has VTE writing a report into the pty every time the pointer
+        crosses the terminal, and one written in the moment between the CLI's
+        last read and its exit stays queued for whoever reads next — the
+        shell, which parks it on its input line. A bare "exit" then joins it
+        into one unknown command (``35;3;25Mexit``, from a real close), the
+        shell survives it, and the tab is stranded on a terminal full of
+        "command not found". Clearing the line first makes the exit the whole
+        of what the shell reads.
+
+        A shell that still hasn't gone by _SHELL_EXIT_TICKS gets force-closed
+        rather than left behind: input can always arrive after the kill-line
+        too, and this poll is the last thing watching the tab."""
+        ticks = self._shell_exiting.get(page, 0)
+        if ticks == 0:
+            tab.feed_child_text("\x15exit\r")  # child-exited closes the tab
+        elif ticks >= _SHELL_EXIT_TICKS:
+            log.info("close: shell ignored its exit; force-closing the tab")
+            self._close_confirmed(page)
+            return GLib.SOURCE_REMOVE
+        self._shell_exiting[page] = ticks + 1
         return GLib.SOURCE_CONTINUE
 
     def _chain(self, session_id: str) -> set[str]:
@@ -3763,6 +3799,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._confirmed_closes.discard(page)
         self._closing_pages.pop(page, None)
         self._bg_closing.discard(page)
+        self._shell_exiting.pop(page, None)
         self._close_asking.discard(page)
         self._close_ok.discard(page)
         self._bg_ok.discard(page)
