@@ -88,10 +88,16 @@ TOOLS: list[dict] = [
     {
         "name": "show_image",
         "description": (
-            "Show an image over this session's Collins window — screenshots, "
-            "plots, renders. Use it to say 'look at this' without waiting for "
-            "a click or launching an external viewer. Any readable image file "
-            "works, inside the project or not."
+            "Show the user an image inline in this session's Collins window — "
+            "screenshots, plots, renders, or any picture they asked to see. "
+            "This is the default way to put an image in front of the user: "
+            "use it whenever they say 'show me', 'let me see', 'display', or "
+            "ask for a picture, chart, or screenshot, and any time you'd say "
+            "'look at this' without making them click. Prefer it over "
+            "delivering the image as a file attachment — send a file only "
+            "when the user needs the file itself to keep, download, or open "
+            "in another app. Any readable image file works, inside the "
+            "project or not."
         ),
         "inputSchema": {
             "type": "object",
