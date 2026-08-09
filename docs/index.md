@@ -7,7 +7,7 @@ layout: home
 
 hero:
   name: "Collins"
-  text: "A vibecoded home for your AI coding-agent sessions"
+  text: "A vibecoded agentic developement environment to manage, orchestrate and compliment all your Claude cli coding-agent sessions"
   tagline: Browse, name, and resume every Claude Code session on your machine — in embedded terminal tabs.
   image:
     src: /img/hero.png
