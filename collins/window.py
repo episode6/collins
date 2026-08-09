@@ -2844,10 +2844,15 @@ class MainWindow(Adw.ApplicationWindow):
                 continue
             # A detaching session's CLI clears its progress hint on the way
             # out, which lands here as a finish — but the run is being handed
-            # to the background, not completing, and a detached row's line
-            # belongs to the yellow of its status (see _sync_status, which
-            # keeps the flag off rows with no tab).
-            if self._is_detached(row_id):
+            # to the background, not completing.
+            if self._detaching_now(row_id):
+                continue
+            # A detached row with no tab: its line belongs to the yellow of
+            # its status (see _sync_status, which keeps the flag off rows
+            # with no tab). Only tabless rows, though — a tab *attached to*
+            # its background agent is still listed as a running job, and its
+            # finishes are as real as any spawned tab's.
+            if self._is_detached(row_id) and self._page_for(row_id) is None:
                 continue
             self.store.set_unread(row_id, True)
 
