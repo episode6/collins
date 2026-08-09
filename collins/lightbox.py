@@ -404,7 +404,7 @@ class ImageLightbox(Gtk.Box):
         fit_h = height - 2 * LIGHTBOX_SHADOW_PAD - self._chrome[1]
         zoom = 0.0
         disp_w = fit_w
-        for _ in range(4):
+        for _round in range(4):
             cap_h = self._caption_extra_h(self._caption_wrap_w(disp_w, fit_w))
             new_zoom = min(
                 fit_w / max(self._image_size[0], 1),
