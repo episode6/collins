@@ -36,10 +36,13 @@ from . import (
     trust,
 )
 from .activity import (
+    BACKGROUND_IDLE_S,
+    BACKGROUND_POLL_MS,
     PROCESS_IDLE_S,
     PROCESS_POLL_MS,
     PROGRESS_IDLE_S,
     ActivityTracker,
+    BackgroundBusyWatch,
     EchoGate,
     ProgressWatch,
     SpinnerWatch,
@@ -49,6 +52,7 @@ from .bgstatus import (
     BLOCK_UNREGISTERED,
     BackgroundStatusPoller,
     background_blocker,
+    fetch_background_busy_ids,
     match_background_fork,
 )
 from .caffeine import (
@@ -349,6 +353,13 @@ class MainWindow(Adw.ApplicationWindow):
         # and left running with its own output going elsewhere. This poll
         # walks each open tab's process tree for one; see _sync_process_poll.
         self._process_poll: int | None = None
+        # The agent list's word on which background agents are working, for
+        # the sessions attached to one in a tab: their turns are announced by
+        # nothing on screen, so this is the only authoritative signal they
+        # have. See _sync_background_busy_poll and BackgroundBusyWatch.
+        self._bg_busy = BackgroundBusyWatch()
+        self._bg_busy_poll: int | None = None
+        self._bg_busy_fetching = False  # one CLI call in flight at a time
         # Per tab, the filter that keeps a terminal's answers to the app (an
         # echoed keystroke, a redraw after a tab switch or a resize) from
         # reading as the agent working.
@@ -1350,6 +1361,7 @@ class MainWindow(Adw.ApplicationWindow):
         if not fork:
             self._pages[bound_id] = page
             self._sync_process_poll()
+            self._sync_background_busy_poll()
             self._sync_status(bound_id)
             saved_panel = self.state.get_panel_state(bound_id)
             if saved_panel:  # reopen the panel the way this session left it
@@ -1787,6 +1799,7 @@ class MainWindow(Adw.ApplicationWindow):
             return  # another tab already owns this session
         self._pages[session_id] = page
         self._sync_process_poll()
+        self._sync_background_busy_poll()
         # Anything absorbed into the plumbing baseline before the id was
         # known has a home now. Usually a no-op: the id tends to resolve
         # before the first submit, so ongoing captures persist themselves.
@@ -2104,6 +2117,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._baseline_captures.pop(page, None)
         self._panel_tap.forget(page.get_child())  # no Ctrl+J chain to continue
         self._sync_process_poll()
+        self._sync_background_busy_poll()
 
     def _on_page_title_changed(self, page: Adw.TabPage, _pspec) -> None:
         if page is self.tab_view.get_selected_page():
@@ -2862,18 +2876,24 @@ class MainWindow(Adw.ApplicationWindow):
                 self._clear_backgrounding(session_id, "detach confirmed by the agent list")
         for session_id in changed:
             self._sync_status(session_id)
+        # A tab whose session just became (or stopped being) a listed
+        # background agent is what decides whether the busy poll runs at all.
+        self._sync_background_busy_poll()
 
     # -- "the agent is working right now" ------------------------------------
 
     def _stop_watchers(self) -> None:
         """Drop every timer that would outlive the window: the detach poller,
-        the activity sweep and the process poll all hold callbacks into a
-        window that is going away."""
+        the activity sweep, the process poll and the background-busy poll all
+        hold callbacks into a window that is going away."""
         self._bg_status.stop()
         self._activity.stop()
         if self._process_poll is not None:
             GLib.source_remove(self._process_poll)
             self._process_poll = None
+        if self._bg_busy_poll is not None:
+            GLib.source_remove(self._bg_busy_poll)
+            self._bg_busy_poll = None
         if self._launch_sweep_source is not None:
             GLib.source_remove(self._launch_sweep_source)
             self._launch_sweep_source = None
@@ -3013,6 +3033,68 @@ class MainWindow(Adw.ApplicationWindow):
             ):
                 self._activity.mark(session_id, idle_s=PROCESS_IDLE_S)
         return GLib.SOURCE_CONTINUE
+
+    def _sync_background_busy_poll(self) -> None:
+        """Ask the agent list what its background agents are doing only while
+        one of them has a tab open in this window.
+
+        That is the whole reach of the answer: a background session with no
+        tab keeps the still yellow guide line of its status whatever it is
+        doing (see the .detached CSS in app.py), and marking one would also
+        put it in front of Caffeine Mode's "while sessions are working" —
+        which has always meant the tabs this window is running. Cheap where it
+        buys nothing, then: no attached background agent, no CLI calls.
+        """
+        wanted = any(self._is_detached(session_id) for session_id in self._pages)
+        if wanted and self._bg_busy_poll is None:
+            self._bg_busy_poll = GLib.timeout_add(BACKGROUND_POLL_MS, self._poll_background_busy)
+            self._poll_background_busy()  # the first answer shouldn't wait a beat
+        elif not wanted and self._bg_busy_poll is not None:
+            GLib.source_remove(self._bg_busy_poll)
+            self._bg_busy_poll = None
+
+    def _poll_background_busy(self) -> bool:
+        """One tick: read the agent list off the main thread (it shells out to
+        the CLI), unless the last read is still in flight."""
+        if self._bg_busy_fetching:
+            return GLib.SOURCE_CONTINUE
+        self._bg_busy_fetching = True
+
+        def work() -> None:
+            try:
+                busy = fetch_background_busy_ids()
+            except Exception:  # noqa: BLE001 - a failed read is "no answer", not a crash
+                busy = None
+            GLib.idle_add(self._apply_background_busy, busy)
+
+        threading.Thread(target=work, daemon=True).start()
+        return GLib.SOURCE_CONTINUE
+
+    def _apply_background_busy(self, busy_ids: set[str] | None) -> bool:
+        """One tick's answer, back on the main thread.
+
+        Only agents with a tab here count, for the reasons _sync_background_
+        busy_poll gives — and dropping out of that set reads as the run
+        ending, which is right either way: the agent went idle, or its tab
+        closed and the pole went with it (a close clears the session first,
+        so the finish lands on nothing and flags nobody).
+        """
+        self._bg_busy_fetching = False
+        if busy_ids is None:
+            return GLib.SOURCE_REMOVE
+        watched = {sid for sid in busy_ids if self._page_for(sid) is not None}
+        marks, finishes = self._bg_busy.reading(watched)
+        for session_id in marks:
+            self._activity.mark(session_id, idle_s=BACKGROUND_IDLE_S)
+        for session_id in finishes:
+            # The agent called the turn over, so this tab's trailing repaints
+            # are not a new one — the same quiet window a termprop clear
+            # opens, which an attached background agent never gets to send.
+            page = self._page_for(session_id)
+            if page is not None and (watch := self._progress_watches.get(page)) is not None:
+                watch.turn_ended()
+            self._activity.finish(session_id)
+        return GLib.SOURCE_REMOVE
 
     def _absorb_baseline(self, page: Adw.TabPage) -> bool:
         """Fold what runs under a pristine fresh spawn's agent into its
@@ -3836,6 +3918,7 @@ class MainWindow(Adw.ApplicationWindow):
             if self._pages.get(session_id) is page:
                 self._pages.pop(session_id)
                 self._sync_process_poll()
+                self._sync_background_busy_poll()
             self._sync_status(session_id)
             # That painted the row from the cached agent list, which may
             # predate this conversation's background job finishing — nothing

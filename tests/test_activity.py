@@ -1,4 +1,10 @@
-from collins.activity import ActivityTracker, EchoGate, ProgressWatch, SpinnerWatch
+from collins.activity import (
+    ActivityTracker,
+    BackgroundBusyWatch,
+    EchoGate,
+    ProgressWatch,
+    SpinnerWatch,
+)
 
 
 class FakeClock:
@@ -244,6 +250,67 @@ def test_quiet_covers_the_beat_after_a_finish():
     assert watch.quiet()  # trailing repaints may not restart the pole
     clock.advance(2.5)
     assert not watch.quiet()  # the beat passed; inference is back in charge
+
+
+def test_another_source_can_open_the_same_quiet_window():
+    # A tab attached to a background agent never gets a termprop clear (the
+    # daemon spawns the agent without the declarations the CLI's progress
+    # emission is gated on), so the agent list's "went idle" ends its turn —
+    # and has to silence the trailing repaints the same way.
+    watch, clock = make_progress_watch(quiet_s=2.0)
+    watch.turn_ended()
+    assert watch.quiet()
+    clock.advance(2.5)
+    assert not watch.quiet()
+
+
+def test_a_turn_ended_elsewhere_does_not_make_the_tab_spoken_for():
+    # turn_ended is not this tab announcing progress: a later clear it never
+    # preceded with a busy hint still means nothing.
+    watch, _clock = make_progress_watch()
+    watch.turn_ended()
+    assert watch.reading(None) is None
+
+
+# -- BackgroundBusyWatch: the agent list's word on a detached agent -----------
+
+
+def test_every_busy_background_agent_is_marked():
+    watch = BackgroundBusyWatch()
+    assert watch.reading({"a", "b"}) == ({"a", "b"}, set())
+
+
+def test_an_agent_that_goes_idle_is_finished():
+    watch = BackgroundBusyWatch()
+    watch.reading({"a", "b"})
+    # `b` is still working; only `a`'s run is over.
+    assert watch.reading({"b"}) == ({"b"}, {"a"})
+
+
+def test_an_agent_that_leaves_the_list_is_finished_too():
+    # Its job ended, or its tab closed and the window stopped watching it:
+    # either way it isn't working here any more.
+    watch = BackgroundBusyWatch()
+    watch.reading({"a"})
+    assert watch.reading(set()) == (set(), {"a"})
+
+
+def test_an_agent_never_seen_working_has_no_run_to_finish():
+    # The same rule ProgressWatch applies to a tab that never spoke a busy
+    # hint: a pole this watch didn't raise is not its to cut down.
+    watch = BackgroundBusyWatch()
+    assert watch.reading(set()) == (set(), set())
+    watch.reading({"a"})
+    watch.reading(set())
+    assert watch.reading(set()) == (set(), set())  # finished once, not again
+
+
+def test_a_still_working_agent_is_marked_every_reading():
+    # The mark's idle window is a backstop, not a heartbeat's replacement:
+    # every poll refreshes it for as long as the agent is working.
+    watch = BackgroundBusyWatch()
+    for _ in range(3):
+        assert watch.reading(["a"]) == ({"a"}, set())
 
 
 def test_clear_stops_it_without_waiting():
