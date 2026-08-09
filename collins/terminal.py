@@ -22,7 +22,6 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa:
 
 from . import (  # noqa: E402
     apppicker,
-    dialogs,
     dropimages,
     editor,
     editorfiles,
