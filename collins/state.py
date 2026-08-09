@@ -79,6 +79,11 @@ DEFAULT_SETTINGS = {
     # git projects, isolating their edits from the live checkout. Per-project
     # overrides live in AppState.project_worktree.
     "worktree_new_sessions": False,
+    # Where the Claude Code CLI lives when PATH doesn't say — desktop
+    # launches don't get the folders a shell adds (see clisetup). Stored
+    # exactly as picked, symlinks unexpanded, so the installer's stable
+    # launcher survives the CLI's self-updates. "" = rely on PATH alone.
+    "claude_cli_path": "",
     # Whether the "better with the GitHub CLI" notice has been waved off for
     # good. Set only by its own "Don't show this again" box — until that is
     # ticked it appears on every launch that finds gh missing or signed out,

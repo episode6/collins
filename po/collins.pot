@@ -1932,3 +1932,66 @@ msgid ""
 "notify_user — a notification titled with the session; clicking it opens the "
 "tab"
 msgstr ""
+
+#: collins/cliwelcome.py:70
+msgid "Collins needs the Claude Code CLI"
+msgstr ""
+
+#: collins/cliwelcome.py:71
+msgid ""
+"Every session runs through the claude command, and it isn't on the PATH "
+"that launches from the desktop are given — that PATH doesn't include the "
+"folders your shell adds. Point Collins at the CLI once; the location is "
+"remembered from then on."
+msgstr ""
+
+#: collins/cliwelcome.py:83
+msgid "Path to the claude executable"
+msgstr ""
+
+#: collins/cliwelcome.py:86
+msgid "Browse…"
+msgstr ""
+
+#: collins/cliwelcome.py:104
+msgid "Quit"
+msgstr ""
+
+#: collins/cliwelcome.py:105
+msgid "Use This CLI"
+msgstr ""
+
+#: collins/cliwelcome.py:139
+msgid "Found it — Collins will remember this location."
+msgstr ""
+
+#: collins/cliwelcome.py:141
+msgid ""
+"This path has a version number in it, so it would break the next time "
+"Claude Code updates itself. Point at a stable launcher instead — usually "
+"~/.local/bin/claude."
+msgstr ""
+
+#: collins/cliwelcome.py:147
+msgid ""
+"That's an executable, but not one named “claude” — pick the claude launcher "
+"itself."
+msgstr ""
+
+#: collins/cliwelcome.py:149
+msgid ""
+"It wasn't in any of the usual places — enter or browse to where it's "
+"installed."
+msgstr ""
+
+#: collins/cliwelcome.py:150
+msgid "There's no executable file at this path."
+msgstr ""
+
+#: collins/cliwelcome.py:164
+msgid "No Claude Code yet? Get it at {link}, then come back."
+msgstr ""
+
+#: collins/cliwelcome.py:174
+msgid "Choose the claude executable"
+msgstr ""
