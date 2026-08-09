@@ -107,7 +107,7 @@ DEFAULT_SETTINGS = {
     # keeps the computer from suspending, leaving the screen free to blank.
     "caffeine_keep_screen_on": True,
     "caffeine_on_launch": False,  # start with Caffeine Mode on (see app.py's inhibitor)
-    "caffeine_launch_timer": "indefinite",  # shut-off timer armed at launch (see caffeine.py)
+    "caffeine_launch_timer": "active",  # shut-off timer armed at launch (see caffeine.py)
     "sidebar_width": 300,  # persisted sidebar pane width in px
     "panel_position": "bottom",  # secondary terminal panel placement: bottom | right
     "panel_size_bottom": 0,  # last-set panel height in px (0 = default fraction)

@@ -40,6 +40,7 @@ from .bgstatus import (
 )
 from .caffeine import (
     DURATION_KEYS,
+    WHILE_ACTIVE,
     countdown_tooltip,
     duration_label,
     format_remaining,
@@ -2075,9 +2076,10 @@ class MainWindow(Adw.ApplicationWindow):
             return
         app = self.get_application()
         if hasattr(app, "set_caffeine_enabled"):
-            # A plain click is deliberately untimed: the durations are what the
-            # button's context menu is for.
-            app.set_caffeine_enabled(button.get_active())
+            # A plain click arms the default mode, Until idle — off once the
+            # sessions have been quiet a while. The context menu is what picks
+            # a clock timer or Indefinitely instead. (Ignored turning off.)
+            app.set_caffeine_enabled(button.get_active(), duration=WHILE_ACTIVE)
         self._sync_caffeine_visuals()
 
     def _show_caffeine_menu(self) -> None:

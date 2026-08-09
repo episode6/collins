@@ -114,12 +114,12 @@ def test_caffeine_on_launch_setting(app_state):
 
 
 def test_caffeine_launch_timer_setting(app_state):
-    from collins.caffeine import DURATION_KEYS, duration_seconds
+    from collins.caffeine import DURATION_KEYS, duration_seconds, follows_activity
 
     state = app_state.AppState()
-    # Default keeps the pre-timer behaviour: on at launch means on until told
-    # otherwise.
-    assert state.get_setting("caffeine_launch_timer") == "indefinite"
+    # Default follows the sessions ("Until idle"): on at launch means on while
+    # there's work, not on until told otherwise.
+    assert follows_activity(state.get_setting("caffeine_launch_timer"))
     assert duration_seconds(state.get_setting("caffeine_launch_timer")) is None
     state.set_setting("caffeine_launch_timer", "3h")
     saved = app_state.AppState().get_setting("caffeine_launch_timer")

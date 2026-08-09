@@ -16,7 +16,7 @@ from collins.caffeine import (
 
 
 def test_durations_offered():
-    assert DURATION_KEYS == ("1h", "2h", "3h", "6h", "12h", WHILE_ACTIVE, INDEFINITE)
+    assert DURATION_KEYS == (WHILE_ACTIVE, "1h", "2h", "3h", "6h", "12h", INDEFINITE)
 
 
 @pytest.mark.parametrize(
@@ -104,7 +104,7 @@ def test_labels():
     assert duration_label("12h") == "12 hours"
     assert duration_label(INDEFINITE) == "Indefinitely"
     assert duration_label("nonsense") == "Indefinitely"
-    assert duration_label(WHILE_ACTIVE) == "Until inactive"
+    assert duration_label(WHILE_ACTIVE) == "Until idle"
 
 
 @pytest.mark.parametrize("on", [False, True])
