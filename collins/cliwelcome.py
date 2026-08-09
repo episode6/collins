@@ -76,7 +76,11 @@ def _dialog(window, state: AppState, store, then) -> Adw.AlertDialog:
         ),
     )
     # No way out but an answer (or Quit below): without the CLI every pane
-    # of the app is a convincing drawing of an empty one.
+    # of the app is a convincing drawing of an empty one. can_close=False
+    # refuses more than Escape: a response button's own close is refused
+    # too (the response still fires, over a dialog that stays up), and the
+    # host window's close() is blocked while the dialog is presented — so
+    # _on_response must force_close() on every answered path.
     dialog.set_can_close(False)
 
     entry = Gtk.Entry(hexpand=True)
@@ -214,7 +218,10 @@ def _on_response(
 ) -> None:
     if response == "quit":
         # The one other way out. Nothing is running (nothing could be), so
-        # this is the ordinary close path, not a forced exit.
+        # this is the ordinary close path, not a forced exit — but the
+        # dialog has to go down first: while it's presented, its
+        # can_close=False blocks the window's close too.
+        dialog.force_close()
         window.close()
         return
     if response != "use":
@@ -222,6 +229,11 @@ def _on_response(
         # emits it, but a programmatic force_close (tests, probes) does —
         # and it must not take the window down with it.
         return
+    # can_close=False also refused this click's own close, so the dialog is
+    # still up; take it down before then() presents the GitHub notice, which
+    # a lingering dialog would shadow. force_close from here emits no extra
+    # response.
+    dialog.force_close()
     text = entry.get_text().strip()
     # Stored as given — unexpanded, unresolved — so the stable launcher the
     # user pointed at is the thing remembered, not tonight's version of it.
