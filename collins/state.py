@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -10,13 +10,14 @@ modified.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
 
-from . import mcptools
+from . import mcptools, panelhistory, panellayout
 
 _CONFIG_BASE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 _CONFIG_DIR = _CONFIG_BASE / "collins"
@@ -204,7 +205,7 @@ class AppState:
         # deleting sessions doesn't cost you the folder.
         self.virtual_projects: dict[str, str] = {}
         self.expanded_groups: set[str] = set()  # sidebar groups the user expanded
-        self.panel_states: dict[str, dict] = {}  # per-session panel open/mode/sizes
+        self.panel_layouts: dict[str, dict] = {}  # per-session dock layout (see panellayout)
         self.editor_states: dict[str, dict] = {}  # per-session editor open/width/files/cursors
         # session id -> the PRs it has opened, oldest first, as prstatus
         # records ({number, url, repository?, title?, state?, checks?,
@@ -262,9 +263,19 @@ class AppState:
             k: v for k, v in (data.get("virtual_projects") or {}).items() if isinstance(v, str)
         }
         self.expanded_groups = set(data.get("expanded_groups") or [])
-        self.panel_states = {
-            k: v for k, v in (data.get("panel_states") or {}).items() if isinstance(v, dict)
+        self.panel_layouts = {
+            k: v for k, v in (data.get("panel_layout") or {}).items() if isinstance(v, dict)
         }
+        # Read-time, one-way migration of the pre-tree "panel_states" shape
+        # ({"open", "mode", "sizes"}): each entry becomes the two-node tree
+        # for its mode, sized by the shell history files on disk. The old
+        # key is dropped on the next save.
+        for sid, old in (data.get("panel_states") or {}).items():
+            if sid in self.panel_layouts or not isinstance(old, dict):
+                continue
+            entry = panellayout.from_legacy(old, panelhistory.ordinals(sid))
+            if entry:
+                self.panel_layouts[sid] = entry
         self.editor_states = {
             k: v for k, v in (data.get("editor_states") or {}).items() if isinstance(v, dict)
         }
@@ -295,7 +306,7 @@ class AppState:
             "project_order": self.project_order,  # order is the payload — never sort
             "virtual_projects": self.virtual_projects,
             "expanded_groups": sorted(self.expanded_groups),
-            "panel_states": self.panel_states,
+            "panel_layout": self.panel_layouts,
             "editor_states": self.editor_states,
             "session_prs": self.session_prs,  # order is the payload — never sort
             "process_baselines": self.process_baselines,
@@ -490,8 +501,10 @@ class AppState:
             self.emojis[new_id] = self.emojis[old_id]
         if old_id in self.favorites:
             self.favorites.add(new_id)
-        if old_id in self.panel_states and new_id not in self.panel_states:
-            self.panel_states[new_id] = dict(self.panel_states[old_id])
+        if old_id in self.panel_layouts and new_id not in self.panel_layouts:
+            # Deep copy: a layout entry nests its whole strip tree, and the
+            # two sessions' layouts must diverge independently from here.
+            self.panel_layouts[new_id] = copy.deepcopy(self.panel_layouts[old_id])
         if old_id in self.editor_states and new_id not in self.editor_states:
             self.editor_states[new_id] = dict(self.editor_states[old_id])
         if old_id in self.session_prs and new_id not in self.session_prs:
@@ -570,23 +583,24 @@ class AppState:
         to the latest id. Cycle-safe; returns the input when unforwarded."""
         return self.forward_chain(session_id)[-1]
 
-    # -- per-session panel state -------------------------------------------
+    # -- per-session panel layout ------------------------------------------
 
-    def get_panel_state(self, session_id: str) -> dict | None:
-        return self.panel_states.get(session_id)
+    def get_panel_layout(self, session_id: str) -> dict | None:
+        return self.panel_layouts.get(session_id)
 
-    def set_panel_state(self, session_id: str, state: dict | None) -> None:
-        """Persist a session's panel snapshot ({"open", "mode", "sizes"});
-        None or empty removes the entry. Tabs snapshot on every close, so an
-        unchanged snapshot is deliberately not rewritten to disk."""
-        if state:
-            if self.panel_states.get(session_id) == state:
+    def set_panel_layout(self, session_id: str, layout: dict | None) -> None:
+        """Persist a session's dock layout (a panellayout entry: mode,
+        sizes, split tree); None or empty removes the entry. Tabs snapshot
+        on every close, so an unchanged layout is deliberately not
+        rewritten to disk."""
+        if layout:
+            if self.panel_layouts.get(session_id) == layout:
                 return
-            self.panel_states[session_id] = state
+            self.panel_layouts[session_id] = layout
         else:
-            if session_id not in self.panel_states:
+            if session_id not in self.panel_layouts:
                 return
-            del self.panel_states[session_id]
+            del self.panel_layouts[session_id]
         self.save()
 
     # -- per-session editor state --------------------------------------------

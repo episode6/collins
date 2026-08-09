@@ -27,6 +27,7 @@ from . import (  # noqa: E402
     editorfiles,
     footerapps,
     panelhistory,
+    panellayout,
     prmenu,
     proctree,
     themes,
@@ -698,6 +699,11 @@ class PanelTerminal(Gtk.Box):
     def __init__(self, number: int = 1) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._number = number
+        # The persistent panel-history ordinal this shell saves its
+        # scrollback under (see panelhistory); assigned by the dock's shell
+        # factory, overwritten by layout restore. Never renumbered — pages
+        # move between strips, so a positional key would drift.
+        self.hist = 0
         self._child_pid: int | None = None
         self._spawned = False
         self._ever_spawned = False  # panel was used at some point in this tab's life
@@ -792,6 +798,11 @@ class PanelTerminal(Gtk.Box):
         self.terminal.reset(False, True)
         if self._spawned:
             self.terminal.feed_child(b"\x0c")
+
+    def page_state(self) -> dict:
+        """This shell's slot in a serialized dock layout (see panellayout):
+        its kind plus the history ordinal its scrollback file is keyed by."""
+        return {"kind": "shell", "hist": self.hist}
 
     def capture_contents(self) -> str:
         """The panel's current text contents including scrollback (plain text
@@ -2446,11 +2457,17 @@ class TerminalTab(Gtk.Box):
     def _make_panel_strip(self) -> PanelStrip:
         """The dock's strip factory: every strip spawns this tab's shells
         (numbered dock-wide) at the agent's current working directory."""
-        strip = PanelStrip(
-            shell_factory=lambda: PanelTerminal(self._dock.next_shell_number())
-        )
+        strip = PanelStrip(shell_factory=self._make_panel_shell)
         strip.set_cwd_lookup(self.current_agent_cwd)
         return strip
+
+    def _make_panel_shell(self) -> PanelTerminal:
+        """A new shell page, its tab-title number and its persistent
+        history ordinal both dock-assigned (layout restore overwrites the
+        ordinal with the saved one right after)."""
+        shell = PanelTerminal(self._dock.next_shell_number())
+        shell.hist = self._dock.next_hist_ordinal()
+        return shell
 
     @property
     def panel_visible(self) -> bool:
@@ -2472,7 +2489,13 @@ class TerminalTab(Gtk.Box):
         (session restore)."""
         if not self.panel_visible and default_mode in ("bottom", "right"):
             self._dock.set_home_position(default_mode)
-        restore = self._load_panel_history() if not self._dock.ever_spawned else None
+        restore = None
+        if not self._dock.ever_spawned:
+            texts = self._load_panel_history()
+            # First open with no saved layout: one shell per saved history
+            # file, oldest ordinal first (the shells take fresh ordinals —
+            # the files re-key to them on the next save).
+            restore = [texts[ordinal] for ordinal in sorted(texts)] or None
         self._dock.show_home(restore)
         if focus:
             GLib.idle_add(self._dock.focus_home)
@@ -2494,13 +2517,13 @@ class TerminalTab(Gtk.Box):
         """Cycle the focused panel page to the next strip (win.move-panel-page)."""
         self._dock.move_focused_page_next()
 
-    def _load_panel_history(self) -> list[str] | None:
-        """Saved panel scrollbacks (one per inner tab, in tab order) for this
-        session — forks don't restore (their panel would clash with the
-        original tab's) and never save."""
+    def _load_panel_history(self) -> dict[int, str]:
+        """Saved shell scrollbacks by history ordinal for this session —
+        forks don't restore (their panel would clash with the original
+        tab's) and never save."""
         if self.fork or not self.session_id:
-            return None
-        return panelhistory.load_all(self.session_id) or None
+            return {}
+        return panelhistory.load_all(self.session_id)
 
     def save_panel_history(self) -> None:
         """Persist each panel tab's scrollback so re-opening this session
@@ -2519,34 +2542,38 @@ class TerminalTab(Gtk.Box):
         if not self.fork and self.session_id:
             panelhistory.delete(self.session_id)
 
-    def capture_panel_state(self) -> dict | None:
-        """Snapshot the home strip's open/mode/sizes for per-session
-        persistence (satellite strips don't persist yet — the full layout
-        tree is a later PR). None when the panel was never used in this
-        tab, so a session's saved state survives tabs that never touched
-        it. Forks never persist (mirroring panel history)."""
-        sizes = self._dock.home_sizes()
-        if self.fork or (not self._dock.ever_spawned and not sizes):
+    def capture_panel_layout(self) -> dict | None:
+        """Snapshot the whole dock — home mode/sizes plus the split tree of
+        strips and their pages — for per-session persistence. None when the
+        panel was never used in this tab, so a session's saved layout
+        survives tabs that never touched it. Forks never persist
+        (mirroring panel history)."""
+        if self.fork:
             return None
-        state: dict = {"open": self.panel_visible, "mode": self._dock.home_position}
-        if sizes:
-            state["sizes"] = sizes
-        return state
+        return self._dock.capture_layout()
 
-    def restore_panel_state(self, state: dict) -> None:
-        """Re-apply a session's saved panel snapshot. Mode and sizes land in
-        this tab's own memory — restoring a session must not disturb the
-        app-wide defaults for new panels — and a panel saved open is shown
-        again (spawning its shell and restoring its saved history) without
-        stealing focus from the agent terminal."""
-        sizes = state.get("sizes")
-        if isinstance(sizes, dict):
-            self._dock.seed_home_sizes(sizes)
-        mode = state.get("mode")
+    def restore_panel_layout(self, layout: dict) -> None:
+        """Re-apply a session's saved dock layout. The stored entry is
+        untrusted: it is validated (a malformed tree falls back to the
+        fresh default) and pruned to the page kinds this build can restore.
+        Mode and sizes land in this tab's own memory — restoring a session
+        must not disturb the app-wide defaults for new panels — and a saved
+        tree rebuilds its strips (spawning shells, hidden ones included,
+        with their saved scrollback) without stealing focus from the agent
+        terminal."""
+        layout = panellayout.validate(layout)
+        if not layout:
+            return
+        layout = panellayout.prune(layout, {"shell"})
+        mode = layout.get("mode")
         if mode in ("bottom", "right"):
             self._dock.set_home_position(mode)
-        if state.get("open"):
-            self.show_panel(focus=False)
+        sizes = layout.get("sizes")
+        if sizes:
+            self._dock.seed_home_sizes(sizes)
+        tree = layout.get("tree")
+        if tree:
+            self._dock.restore_layout(tree, self._load_panel_history())
 
     def swap_panel(self) -> str:
         """Move the shells to the other home edge (bottom↔right) and return
@@ -2686,7 +2713,7 @@ class TerminalTab(Gtk.Box):
 
     def capture_editor_state(self) -> dict | None:
         """Snapshot the editor's open/width/files for per-session persistence,
-        mirroring capture_panel_state. None when the editor was never used in
+        mirroring capture_panel_layout. None when the editor was never used in
         this tab, so a session's saved state survives tabs that never touched
         it. Forks never persist."""
         if self.fork or self._editor is None:
@@ -2713,7 +2740,7 @@ class TerminalTab(Gtk.Box):
 
     def restore_editor_state(self, state: dict) -> None:
         """Re-apply a session's saved editor snapshot, mirroring
-        restore_panel_state. Width lands in this tab's own memory — restoring
+        restore_panel_layout. Width lands in this tab's own memory — restoring
         a session must not disturb the app-wide default for new tabs."""
         if self._editor is None:
             return

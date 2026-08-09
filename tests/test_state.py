@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 
 import json
 
@@ -217,41 +217,113 @@ def test_panel_size_settings_roundtrip(app_state):
     assert fresh.get_setting("panel_size_right") == 512
 
 
-def test_panel_state_roundtrip(app_state):
+_LAYOUT = {
+    "mode": "right",
+    "sizes": {"right": 300, "bottom": 240},
+    "tree": {
+        "split": "h",
+        "size": 300,
+        "managed": "b",
+        "a": {"terminal": True},
+        "b": {
+            "strip": {
+                "open": True,
+                "home": True,
+                "selected": 0,
+                "pages": [{"kind": "shell", "hist": 0}],
+            }
+        },
+    },
+}
+
+
+def test_panel_layout_roundtrip(app_state):
     state = app_state.AppState()
-    snap = {"open": True, "mode": "right", "sizes": {"right": 300, "bottom": 240}}
-    state.set_panel_state("sid", snap)
+    state.set_panel_layout("sid", _LAYOUT)
     fresh = app_state.AppState()
-    assert fresh.get_panel_state("sid") == snap
-    assert fresh.get_panel_state("other") is None
+    assert fresh.get_panel_layout("sid") == _LAYOUT
+    assert fresh.get_panel_layout("other") is None
 
 
-def test_panel_state_none_removes_entry(app_state):
+def test_panel_layout_none_removes_entry(app_state):
     state = app_state.AppState()
-    state.set_panel_state("sid", {"open": False, "mode": "bottom"})
-    state.set_panel_state("sid", None)
-    assert app_state.AppState().get_panel_state("sid") is None
+    state.set_panel_layout("sid", {"mode": "bottom"})
+    state.set_panel_layout("sid", None)
+    assert app_state.AppState().get_panel_layout("sid") is None
 
 
-def test_panel_state_unchanged_is_not_rewritten(app_state):
+def test_panel_layout_unchanged_is_not_rewritten(app_state):
     state = app_state.AppState()
-    snap = {"open": True, "mode": "bottom", "sizes": {"bottom": 200}}
-    state.set_panel_state("sid", snap)
+    state.set_panel_layout("sid", _LAYOUT)
     app_state._STATE_FILE.unlink()  # a redundant save would recreate the file
-    state.set_panel_state("sid", dict(snap))  # identical snapshot
-    state.set_panel_state("absent", None)  # removing a missing entry
+    state.set_panel_layout("sid", json.loads(json.dumps(_LAYOUT)))  # identical layout
+    state.set_panel_layout("absent", None)  # removing a missing entry
     assert not app_state._STATE_FILE.exists()
 
 
-def test_panel_state_ignores_corrupt_entries(app_state):
+def test_panel_layout_ignores_corrupt_entries(app_state):
     state = app_state.AppState()
-    state.set_panel_state("good", {"open": True, "mode": "bottom"})
+    state.set_panel_layout("good", {"mode": "bottom"})
     data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
-    data["panel_states"]["bad"] = "not-a-dict"
+    data["panel_layout"]["bad"] = "not-a-dict"
     app_state._STATE_FILE.write_text(json.dumps(data), encoding="utf-8")
     fresh = app_state.AppState()
-    assert fresh.get_panel_state("good") == {"open": True, "mode": "bottom"}
-    assert fresh.get_panel_state("bad") is None
+    assert fresh.get_panel_layout("good") == {"mode": "bottom"}
+    assert fresh.get_panel_layout("bad") is None
+
+
+def test_panel_states_migrate_to_layouts(app_state):
+    # A pre-tree state.json: the open panel becomes the two-node tree for
+    # its mode with one shell page per history file on disk, and the old
+    # key is dropped on the next save.
+    import collins.panelhistory as panelhistory
+
+    panelhistory.save_all("open-sid", {0: "one", 2: "three"})
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps(
+            {
+                "panel_states": {
+                    "open-sid": {"open": True, "mode": "bottom", "sizes": {"bottom": 300}},
+                    "closed-sid": {"open": False, "mode": "right", "sizes": {"right": 512}},
+                    "bad-sid": "not-a-dict",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = app_state.AppState()
+    migrated = state.get_panel_layout("open-sid")
+    assert migrated["mode"] == "bottom"
+    assert migrated["tree"]["split"] == "v"
+    assert migrated["tree"]["b"]["strip"]["pages"] == [
+        {"kind": "shell", "hist": 0},
+        {"kind": "shell", "hist": 2},
+    ]
+    # A closed panel keeps only its mode/size memory: nothing spawns until
+    # Ctrl+J, exactly the old behavior.
+    assert state.get_panel_layout("closed-sid") == {"mode": "right", "sizes": {"right": 512}}
+    assert state.get_panel_layout("bad-sid") is None
+    state.save()
+    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
+    assert "panel_states" not in data
+    assert set(data["panel_layout"]) == {"open-sid", "closed-sid"}
+
+
+def test_panel_layout_wins_over_stale_panel_states(app_state):
+    # Both keys present (a downgrade wrote the old shape after an upgrade
+    # wrote the new): the tree entry is the newer record and keeps ruling.
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps(
+            {
+                "panel_layout": {"sid": {"mode": "right"}},
+                "panel_states": {"sid": {"open": True, "mode": "bottom"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert app_state.AppState().get_panel_layout("sid") == {"mode": "right"}
 
 
 def test_editor_state_roundtrip(app_state):
@@ -487,7 +559,7 @@ def test_forward_session_carries_metadata_without_archiving_original(app_state):
     state.set_name("old", "My task")
     state.set_emoji("old", "🚀")
     state.toggle_favorite("old")
-    state.set_panel_state("old", {"open": True, "mode": "bottom"})
+    state.set_panel_layout("old", {"mode": "bottom", "sizes": {"bottom": 300}})
     state.set_editor_state("old", {"open": True, "files": ["/proj/a.py"]})
     state.forward_session("old", "new")
 
@@ -496,7 +568,7 @@ def test_forward_session_carries_metadata_without_archiving_original(app_state):
     assert fresh.get_name("new") == "My task"
     assert fresh.get_emoji("new") == "🚀"
     assert fresh.is_favorite("new")
-    assert fresh.get_panel_state("new") == {"open": True, "mode": "bottom"}
+    assert fresh.get_panel_layout("new") == {"mode": "bottom", "sizes": {"bottom": 300}}
     assert fresh.get_editor_state("new") == {"open": True, "files": ["/proj/a.py"]}
     # The stale original is NOT flagged archived here: the store derives its
     # row's fate from the forward (visible-but-disabled until the fork is

@@ -78,65 +78,80 @@ def test_trim_multibyte_safe(history, monkeypatch):
     assert "a" not in loaded
 
 
-# -- multi-tab (save_all / load_all) ----------------------------------------
+# -- multi-shell (save_all / load_all, keyed by ordinal) ---------------------
 
 
 def test_save_all_roundtrip(history):
-    history.save_all("sid-1", ["tab one", "tab two", "tab three"])
-    assert history.load_all("sid-1") == ["tab one", "tab two", "tab three"]
+    history.save_all("sid-1", {0: "shell zero", 1: "shell one", 2: "shell two"})
+    assert history.load_all("sid-1") == {0: "shell zero", 1: "shell one", 2: "shell two"}
 
 
 def test_load_all_missing_session(history):
-    assert history.load_all("nope") == []
+    assert history.load_all("nope") == {}
 
 
-def test_first_tab_keeps_legacy_filename(history):
-    # History saved before the panel grew tabs restores into the first tab.
+def test_ordinal_zero_keeps_legacy_filename(history):
+    # History saved before the panel grew tabs restores as ordinal 0.
     history.save("sid-1", "old single-panel history")
-    assert history.load_all("sid-1") == ["old single-panel history"]
-    history.save_all("sid-1", ["updated"])
+    assert history.load_all("sid-1") == {0: "old single-panel history"}
+    history.save_all("sid-1", {0: "updated"})
     assert history.load("sid-1") == "updated"
 
 
-def test_save_all_drops_closed_tabs(history):
-    history.save_all("sid-1", ["one", "two", "three"])
-    history.save_all("sid-1", ["one"])
-    assert history.load_all("sid-1") == ["one"]
+def test_legacy_positional_files_adopt_index_as_ordinal(history):
+    # Positional-era files were already named <session>.<index>.txt, so the
+    # adoption is just reading them under the same numbers.
+    history.save("sid-1", "one", 0)
+    history.save("sid-1", "two", 1)
+    assert history.load_all("sid-1") == {0: "one", 1: "two"}
+    assert history.ordinals("sid-1") == [0, 1]
+
+
+def test_ordinals_survive_gaps(history):
+    history.save_all("sid-1", {0: "one", 4: "five"})
+    assert history.ordinals("sid-1") == [0, 4]
+    assert history.load("sid-1", 4) == "five"
+
+
+def test_save_all_keep_set_drops_closed_shells(history):
+    history.save_all("sid-1", {0: "one", 1: "two", 2: "three"})
+    history.save_all("sid-1", {2: "three"})  # 0 and 1 closed; 2 keeps its key
+    assert history.load_all("sid-1") == {2: "three"}
 
 
 def test_save_all_empty_clears_everything(history):
-    history.save_all("sid-1", ["one", "two"])
-    history.save_all("sid-1", [])
-    assert history.load_all("sid-1") == []
+    history.save_all("sid-1", {0: "one", 1: "two"})
+    history.save_all("sid-1", {})
+    assert history.load_all("sid-1") == {}
 
 
-def test_save_all_skips_blank_tabs(history):
-    history.save_all("sid-1", ["one", " \n ", "three"])
-    assert history.load_all("sid-1") == ["one", "three"]
+def test_save_all_skips_blank_shells(history):
+    history.save_all("sid-1", {0: "one", 1: " \n ", 2: "three"})
+    assert history.load_all("sid-1") == {0: "one", 2: "three"}
 
 
-def test_delete_removes_all_tabs(history):
-    history.save_all("sid-1", ["one", "two"])
+def test_delete_removes_all_shells(history):
+    history.save_all("sid-1", {0: "one", 1: "two"})
     history.delete("sid-1")
-    assert history.load_all("sid-1") == []
+    assert history.load_all("sid-1") == {}
 
 
-def test_copy_copies_all_tabs(history):
-    history.save_all("old", ["one", "two"])
+def test_copy_keeps_ordinals(history):
+    history.save_all("old", {0: "one", 3: "four"})
     history.copy("old", "new")
-    assert history.load_all("new") == ["one", "two"]
-    assert history.load_all("old") == ["one", "two"]  # source untouched
+    assert history.load_all("new") == {0: "one", 3: "four"}
+    assert history.load_all("old") == {0: "one", 3: "four"}  # source untouched
 
 
-def test_copy_noop_when_target_has_any_tab(history):
-    history.save_all("old", ["one", "two"])
-    history.save("new", "already here", index=1)
+def test_copy_noop_when_target_has_any_shell(history):
+    history.save_all("old", {0: "one", 1: "two"})
+    history.save("new", "already here", ordinal=1)
     history.copy("old", "new")
-    assert history.load_all("new") == ["already here"]
+    assert history.load_all("new") == {1: "already here"}
 
 
-def test_tab_files_never_leak_across_sessions(history):
-    # "sid-1.2.txt" belongs to sid-1's third tab, not to a session that
+def test_shell_files_never_leak_across_sessions(history):
+    # "sid-1.2.txt" belongs to sid-1's ordinal 2, not to a session that
     # happens to share the filename prefix.
-    history.save_all("sid-1", ["one", "two", "three"])
-    assert history.load_all("sid-11") == []
+    history.save_all("sid-1", {0: "one", 1: "two", 2: "three"})
+    assert history.load_all("sid-11") == {}

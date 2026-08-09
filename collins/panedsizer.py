@@ -66,6 +66,13 @@ class PanedSizer(GObject.Object):
         # Dragging the divider records the new size for the current key.
         paned.connect("notify::position", lambda *_: self.remember())
 
+    @property
+    def manages_end(self) -> bool:
+        """Whether the managed child sits in the paned's end slot — the
+        layout serializer records it so a restored paned rebuilds with the
+        same arithmetic orientation."""
+        return self._end_child
+
     def set_lookup(self, lookup: Callable[[str], int] | None) -> None:
         """`lookup(key) -> px` supplies the app-wide last-set size, used
         for keys this paned hasn't sized itself yet."""

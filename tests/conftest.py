@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 
 import json
 import sys
@@ -130,6 +130,7 @@ def projects_dir(tmp_path, monkeypatch):
 @pytest.fixture
 def app_state(tmp_path, monkeypatch):
     """AppState isolated to a temp config dir."""
+    import collins.panelhistory as panelhistory_mod
     import collins.state as state_mod
 
     config_dir = tmp_path / "config"
@@ -139,4 +140,7 @@ def app_state(tmp_path, monkeypatch):
     monkeypatch.setattr(state_mod, "_OLD_CONFIG_DIRS", [old_dir, older_dir])
     monkeypatch.setattr(state_mod, "_STATE_FILE", config_dir / "state.json")
     monkeypatch.setattr(state_mod, "_LEGACY_NAMES_FILE", older_dir / "names.json")
+    # The panel_states migration counts shell history files; keep it off
+    # the real user's state dir.
+    monkeypatch.setattr(panelhistory_mod, "_HISTORY_DIR", tmp_path / "panel_history")
     return state_mod
