@@ -1302,6 +1302,11 @@ class MainWindow(Adw.ApplicationWindow):
             page = self._page_for(session.session_id)
             if page is not None:
                 self.tab_view.set_selected_page(page)
+                # Selecting a tab reads its finished run (_on_selected_page_changed),
+                # but selecting the tab that is already selected emits nothing —
+                # and a row clicked while its own tab is up is still the user
+                # saying they've looked at it. Clear it here too.
+                self._clear_unread(page)
                 return
             # Open in another window: jump to it rather than resuming the
             # conversation a second time here, which would leave two CLIs
@@ -1542,6 +1547,7 @@ class MainWindow(Adw.ApplicationWindow):
         page = self._placeholder_page(placeholder_id)
         if page is not None:
             self.tab_view.set_selected_page(page)
+            self._clear_unread(page)  # already-selected tabs emit no switch; see open_session
 
     def _on_sidebar_close_placeholder(self, _sidebar, placeholder_id: str) -> None:
         page = self._placeholder_page(placeholder_id)
@@ -3636,6 +3642,7 @@ class MainWindow(Adw.ApplicationWindow):
         if page is None:
             return False
         self.tab_view.set_selected_page(page)
+        self._clear_unread(page)  # already-selected tabs emit no switch; see open_session
         self.present()
         return True
 
