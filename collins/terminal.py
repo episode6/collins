@@ -42,7 +42,6 @@ from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch, has_changes  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 from .lightbox import present_image_lightbox  # noqa: E402
-from .panedsizer import PanedSizer  # noqa: E402
 from .linkpatterns import (  # noqa: E402
     FILE_PATTERN,
     URL_PATTERN,
@@ -51,6 +50,7 @@ from .linkpatterns import (  # noqa: E402
     resolve_wrapped_reference,
     token_at_column,
 )
+from .panedsizer import PanedSizer  # noqa: E402
 from .providers import (  # noqa: E402
     EnteredPrompt,
     Provider,
