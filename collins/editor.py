@@ -233,9 +233,7 @@ class EditorPane(Gtk.Box):
     # -- tab-bar double-click ------------------------------------------------
 
     def _on_tab_bar_pressed(self, _gesture, n_press: int, x: float, y: float) -> None:
-        """Double-clicking a tab shows its file in the desktop's file
-        manager — the same open_containing_folder reveal as the sidebar's
-        transcript action (MainWindow._on_reveal_transcript). Observed from
+        """Double-clicking a tab reveals its file in the tree. Observed from
         a capture-phase gesture that never claims the press, so the tab bar's
         own selection and drag-reorder handling keep working underneath."""
         if n_press != 2:
@@ -243,8 +241,7 @@ class EditorPane(Gtk.Box):
         page = self._tab_page_at(x, y)
         key = self._page_key.get(page) if page is not None else None
         if key is not None:
-            launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(key))
-            launcher.open_containing_folder(self.get_root(), None, None)
+            self._tree.reveal(key)
 
     def _tab_page_at(self, x: float, y: float) -> Adw.TabPage | None:
         """The page whose tab-bar header sits under (*x*, *y*), or None for
