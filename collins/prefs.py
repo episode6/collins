@@ -213,6 +213,11 @@ class PreferencesDialog(Adw.Dialog):
         page = _SearchablePage(title=_("General"), icon_name="preferences-system-symbolic")
         self._page = page
 
+        # First, above everything: the CLI is the tool the app is about,
+        # and the row that answers "which claude is Collins running?"
+        # shouldn't take scrolling to find.
+        self._build_cli_group(state, page)
+
         terminal_group = _SearchableGroup(title=_("Terminal"))
 
         font_row = Adw.ActionRow(title=_("Font"), subtitle=_("Applies to all terminal tabs"))
@@ -404,8 +409,6 @@ class PreferencesDialog(Adw.Dialog):
         self._pr_launch_row.connect("notify::active", self._on_pr_launch_changed)
         sidebar_group.add(self._pr_launch_row)
         page.add(sidebar_group)
-
-        self._build_cli_group(state, page)
 
         models_group = _SearchableGroup(
             title=_("Claude models"),

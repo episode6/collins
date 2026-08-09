@@ -2003,21 +2003,21 @@ msgid ""
 "back."
 msgstr ""
 
-#: collins/prefs.py:659
+#: collins/prefs.py:662
 msgid "Claude Code CLI"
 msgstr ""
 
-#: collins/prefs.py:660
+#: collins/prefs.py:663
 msgid ""
 "The claude command every session runs through. Leave empty to use the one "
 "on PATH. Tabs already open keep the CLI they started with"
 msgstr ""
 
-#: collins/prefs.py:718
+#: collins/prefs.py:721
 msgid "Using the claude found on PATH at {path}."
 msgstr ""
 
-#: collins/prefs.py:723
+#: collins/prefs.py:726
 msgid ""
 "claude isn't on PATH — Collins will ask where it is at the next launch."
 msgstr ""
