@@ -36,6 +36,7 @@ from .caffeine import ACTIVE_GRACE_S, duration_seconds, follow_poll, follows_act
 from .i18n import _
 from .lightbox import present_image_lightbox
 from .prefs import apply_color_scheme
+from .prstatus import parse_pr_url
 from .state import AppState
 from .store import SessionStore
 from .terminal import TerminalTab
@@ -913,6 +914,7 @@ class App(Adw.Application):
                 "open_in_editor": self._mcp_open_in_editor,
                 "show_image": self._mcp_show_image,
                 "notify_user": self._mcp_notify_user,
+                "attach_pr": self._mcp_attach_pr,
             },
             is_enabled=self._mcp_tool_enabled,
         )
@@ -984,6 +986,24 @@ class App(Adw.Application):
         if not window.notify_session(tab, args["message"]):
             return False, "Collins couldn't post a notification"
         return True, "The user was notified."
+
+    def _mcp_attach_pr(self, found, args: dict) -> tuple[bool, str]:
+        """Put a PR on the calling session's row without a gh call: the
+        dispatch runs on the main loop, so the number and repository are read
+        off the URL here and the tab's own update thread fetches title and
+        status right after. Persistence rides the existing prs-changed path,
+        which is keyed by session id — hence the resolution guard."""
+        _window, tab = found
+        if not tab.session_id:
+            return False, (
+                "The session isn't resolved in Collins yet — try again in a moment"
+            )
+        pr = parse_pr_url(args["url"])
+        if pr is None:
+            return False, f"Not a GitHub pull request URL: {args['url']}"
+        if not tab.attach_pr(pr):
+            return True, f"{pr.slug} is already attached to this session."
+        return True, f"Attached {pr.slug} to this session."
 
     def _apply_scheme_css(self) -> None:
         """Load the scheme's colors. Runs at startup and on every light/dark

@@ -129,8 +129,9 @@ _MAX_TOOLTIP_PRS = 8
 
 # Only fetch for URLs shaped like a PR page. The URL comes out of a transcript
 # — repo content, i.e. untrusted — and lands in an argv, so this also keeps a
-# value like "--version" from ever reaching `gh`. The group is the repository.
-_FETCHABLE = re.compile(r"https://[\w.-]+/([\w.-]+/[\w.-]+)/pull/\d+$")
+# value like "--version" from ever reaching `gh`. The groups are the
+# repository and the PR number.
+_FETCHABLE = re.compile(r"https://[\w.-]+/([\w.-]+/[\w.-]+)/pull/(\d+)$")
 
 # Branch names reach argv the same way, from a `git branch --show-current` in a
 # directory we didn't choose. git forbids a leading "-", but this is the code
@@ -323,6 +324,21 @@ def repository_for(url: str) -> str | None:
     """
     match = _FETCHABLE.match(url) if isinstance(url, str) else None
     return match.group(1) if match else None
+
+
+def parse_pr_url(url: str) -> PullRequest | None:
+    """A bare PullRequest built from a PR page URL, or None for anything else.
+
+    What the attach_pr session tool starts from: number and repository read
+    off the URL itself, everything else left blank for the next status fetch
+    to fill in. The gate is `_FETCHABLE` — the same one every URL passes
+    before reaching `gh` — so a URL accepted here is one the refresh
+    machinery can actually work with.
+    """
+    match = _FETCHABLE.match(url) if isinstance(url, str) else None
+    if match is None:
+        return None
+    return PullRequest(number=int(match.group(2)), url=url, repository=match.group(1))
 
 
 def parse_pr_link(entry: dict) -> PullRequest | None:

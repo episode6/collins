@@ -890,3 +890,9 @@ msgstr "Asztali értesítések küldése"
 msgid "notify_user — a notification titled with the session; clicking it opens the tab"
 msgstr "notify_user — a munkamenet nevét viselő értesítés; rákattintva megnyílik a lap"
 
+msgid "Attach pull requests"
+msgstr "Pull requestek csatolása"
+
+msgid "attach_pr — put a pull request on the session's own footer and sidebar row"
+msgstr "attach_pr — pull request elhelyezése a munkamenet saját láblécén és oldalsávsorán"
+

@@ -372,6 +372,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Send desktop notifications": "Asztali értesítések küldése",
         "notify_user — a notification titled with the session; clicking it opens the tab":
             "notify_user — a munkamenet nevét viselő értesítés; rákattintva megnyílik a lap",
+        "Attach pull requests": "Pull requestek csatolása",
+        "attach_pr — put a pull request on the session's own footer and sidebar row":
+            "attach_pr — pull request elhelyezése a munkamenet saját láblécén "
+            "és oldalsávsorán",
     },
     "de": {
         "── restored panel history ──": "── wiederhergestellter Panel-Verlauf ──",
@@ -734,6 +738,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "notify_user — a notification titled with the session; clicking it opens the tab":
             "notify_user — eine Benachrichtigung mit dem Sitzungsnamen; ein Klick "
             "öffnet den Tab",
+        "Attach pull requests": "Pull-Requests anheften",
+        "attach_pr — put a pull request on the session's own footer and sidebar row":
+            "attach_pr — setzt einen Pull-Request auf die Fußzeile und "
+            "Seitenleistenzeile der Sitzung",
     },
     "es": {
         "── restored panel history ──": "── historial del panel restaurado ──",
@@ -1095,6 +1103,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "notify_user — a notification titled with the session; clicking it opens the tab":
             "notify_user — una notificación titulada con la sesión; al pulsarla "
             "se abre la pestaña",
+        "Attach pull requests": "Adjuntar pull requests",
+        "attach_pr — put a pull request on the session's own footer and sidebar row":
+            "attach_pr — coloca un pull request en el pie y la fila de la "
+            "barra lateral de la sesión",
     },
     "fr": {
         "── restored panel history ──": "── historique du panneau restauré ──",
@@ -1457,6 +1469,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Send desktop notifications": "Envoyer des notifications de bureau",
         "notify_user — a notification titled with the session; clicking it opens the tab":
             "notify_user — une notification au nom de la session ; un clic ouvre l’onglet",
+        "Attach pull requests": "Attacher des pull requests",
+        "attach_pr — put a pull request on the session's own footer and sidebar row":
+            "attach_pr — place une pull request sur le pied de page et la "
+            "ligne de barre latérale de la session",
     },
 }
 

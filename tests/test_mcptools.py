@@ -19,6 +19,7 @@ def test_serves_exactly_the_landed_tools():
         "open_in_editor",
         "show_image",
         "notify_user",
+        "attach_pr",
     ]
 
 
@@ -60,6 +61,7 @@ def test_enabled_tools_serves_only_what_is_switched_on():
         "set_session_title",
         "open_in_editor",
         "notify_user",
+        "attach_pr",
     ]
 
 
@@ -167,6 +169,26 @@ def test_notify_user_args():
     assert "message" in mcptools.validate_args("notify_user", {})
     assert "empty" in mcptools.validate_args("notify_user", {"message": ""})
     assert "string" in mcptools.validate_args("notify_user", {"message": 7})
+
+
+def test_attach_pr_args():
+    assert (
+        mcptools.validate_args(
+            "attach_pr", {"url": "https://github.com/episode6/collins/pull/55"}
+        )
+        is None
+    )
+    assert "url" in mcptools.validate_args("attach_pr", {})
+    assert "empty" in mcptools.validate_args("attach_pr", {"url": ""})
+    assert "string" in mcptools.validate_args("attach_pr", {"url": 55})
+
+
+def test_overlong_attach_pr_url_is_rejected():
+    """The schema only bounds the string — whether it is a PR URL at all is
+    the handler's question (prstatus.parse_pr_url), so a rejection can name
+    the value."""
+    url = "https://github.com/o/r/pull/" + "5" * 300
+    assert "300" in mcptools.validate_args("attach_pr", {"url": url})
 
 
 def test_overlong_notification_is_rejected():

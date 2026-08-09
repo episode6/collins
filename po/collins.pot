@@ -1947,6 +1947,15 @@ msgid ""
 "tab"
 msgstr ""
 
+#: collins/prefs.py:104
+msgid "Attach pull requests"
+msgstr ""
+
+#: collins/prefs.py:105
+msgid ""
+"attach_pr — put a pull request on the session's own footer and sidebar row"
+msgstr ""
+
 #: collins/cliwelcome.py:70
 msgid "Collins needs the Claude Code CLI"
 msgstr ""
