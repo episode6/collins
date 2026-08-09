@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -21,7 +21,18 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import __version__, chats, dialogs, editor, footerapps, mcptools, openwith, panelhistory, trust
+from . import (
+    __version__,
+    buildinfo,
+    chats,
+    dialogs,
+    editor,
+    footerapps,
+    mcptools,
+    openwith,
+    panelhistory,
+    trust,
+)
 from .activity import (
     PROCESS_IDLE_S,
     PROCESS_POLL_MS,
@@ -4250,6 +4261,15 @@ class MainWindow(Adw.ApplicationWindow):
             website="https://github.com/episode6/collins",
             issue_url="https://github.com/episode6/collins/issues",
         )
+        # The debug build says which checkout it is running: commit, branch,
+        # and whether the tree was dirty — as captured at launch (buildinfo).
+        # The version chip on the front page carries the compact form; the
+        # commit title and branch read as a comments paragraph one tap in,
+        # on the Details page where AdwAboutDialog puts comments.
+        info = buildinfo.captured()
+        if info is not None:
+            about.set_version(__version__ + info.chip())
+            about.set_comments(about.get_comments() + "\n\n" + info.describe())
         # Third-party notices live in THIRD_PARTY_LICENSES.md; each of its
         # headings becomes a section under the dialog's own Legal page.
         for title, markup in legal_sections():

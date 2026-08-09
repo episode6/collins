@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -19,6 +19,7 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import (
+    buildinfo,
     clisetup,
     cliwelcome,
     editorfiles,
@@ -744,6 +745,11 @@ class App(Adw.Application):
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
+        # The debug build (same id prefix _app_icon_name keys on) runs out of
+        # a source checkout; note which commit — and whether the tree was
+        # dirty — now, so the About dialog reports the launch-time state.
+        if (self.get_application_id() or "").startswith("com.episode6.Collins.Debug"):
+            buildinfo.capture()
         display = Gdk.Display.get_default()
         provider = Gtk.CssProvider()
         provider.load_from_data(_CSS)
