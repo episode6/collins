@@ -8,7 +8,7 @@ fork. Last modified: 2026-08-08. Full change history: git log for this file.
 
 [![CI](https://github.com/episode6/collins/actions/workflows/ci.yml/badge.svg)](https://github.com/episode6/collins/actions/workflows/ci.yml)
 
-A vibecoded, native GTK4/libadwaita desktop app to manage and orchestrate all your [Claude Code](https://claude.com/claude-code) sessions.
+A vibecoded, native GTK4/libadwaita agentic development environment to manage, orchestrate and compliment all your [Claude Code](https://claude.com/claude-code) sessions.
 
 > My wife keeps referring to Claude as Collins by mistake. So now when she asks me if I'm talking to Collins, I can say yes.
 
