@@ -104,7 +104,7 @@ def test_labels():
     assert duration_label("12h") == "12 hours"
     assert duration_label(INDEFINITE) == "Indefinitely"
     assert duration_label("nonsense") == "Indefinitely"
-    assert duration_label(WHILE_ACTIVE) == "Until inactive"
+    assert duration_label(WHILE_ACTIVE) == "Until idle"
 
 
 @pytest.mark.parametrize("on", [False, True])

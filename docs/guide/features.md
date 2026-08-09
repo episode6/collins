@@ -468,18 +468,20 @@ tool list is handed over once at startup.
 
 The coffee cup at the right of the header keeps the computer awake and the
 screen on while an agent works unattended — click it to toggle, and the cup
-fills while it's on.
+fills while it's on. A plain click turns it on in *Until idle* mode, described
+below.
 
 - **Right-click it for a timer**: *1 hour*, *2 hours*, *3 hours*, *6 hours*,
-  *12 hours*, *Until inactive* or *Indefinitely*. Picking a duration turns
+  *12 hours*, *Until idle* or *Indefinitely*. Picking a duration turns
   Caffeine Mode on for that long and turns it off again when the time runs out —
   so a long build can't leave the machine awake all week because you forgot.
-- **Until inactive** hands the deadline to the sessions instead of the clock: as
-  long as at least one open tab is working — the same barber pole the session
-  list shows — the machine stays awake, and five minutes after the last one
-  stops, Caffeine Mode turns itself off. Any session picking work back up starts
-  those five minutes over. Whatever keeps a pole up holds Caffeine Mode with
-  it, including a background process a session left running — a dev server, a
+- **Until idle**, the default, hands the deadline to the sessions instead of
+  the clock: as long as at least one open tab is working — the same barber
+  pole the session list shows — the machine stays awake, and five minutes
+  after the last one stops, Caffeine Mode turns itself off. Any session
+  picking work back up starts those five minutes over. Whatever keeps a pole
+  up holds Caffeine Mode with it, including a background process a session
+  left running — a dev server, a
   long build — but not the servers the agent runs for itself, which are
   plumbing rather than work. Backgrounded (`/bg`) sessions don't count either:
   they run with no tab to watch, exactly as their still guide line says.
@@ -494,7 +496,8 @@ fills while it's on.
   up the room. It's in the same right-click menu as the timers, and in
   Preferences, and flipping it lands on a Caffeine Mode that's already running.
 - Preferences → *Turn on at launch* starts every launch with Caffeine Mode on,
-  and *Turn off after* arms one of the same durations at startup.
+  and *Turn off after* arms one of the same durations at startup (*Until idle*
+  unless you pick another).
 
 ## Multiple windows
 

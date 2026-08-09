@@ -81,7 +81,7 @@ def duration_label(key: str) -> str:
         # Short on purpose: it shares a menu with "12 hours", and Preferences
         # ellipsizes a value much longer than this. What it means is spelled
         # out in the button's tooltip and the setting's subtitle.
-        return _("Until inactive")
+        return _("Until idle")
     seconds = duration_seconds(key)
     if seconds is None:
         return _("Indefinitely")

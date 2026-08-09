@@ -990,10 +990,10 @@ class App(Adw.Application):
 
         `duration` is a key from caffeine.py: an hours option arms a shut-off
         timer that turns Caffeine Mode off again when it runs out, WHILE_ACTIVE
-        ("Until inactive") hands the deadline to the sessions themselves, and
-        None (a plain toggle) leaves it on indefinitely. Any timer already
-        running is cancelled either way, so re-picking a duration restarts the
-        clock and a plain toggle never leaves a stale one armed.
+        ("Until idle" — the default, what a plain click on the button arms)
+        hands the deadline to the sessions themselves, and None leaves it on
+        indefinitely. Any timer already running is cancelled either way, so
+        re-picking a duration restarts the clock and none is ever left stale.
         """
         self._cancel_caffeine_timer()
         if enabled != self.caffeine_enabled:
