@@ -17,7 +17,7 @@ from __future__ import annotations
 import threading
 import time
 
-from gi.repository import Gio, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from . import usage
 from .i18n import _
@@ -31,6 +31,8 @@ _MIN_REFRESH_GAP_S = 30
 _MAX_BARS = 4
 
 _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
+# Matches the archive-undo snackbar's timeout (window._UNDO_TOAST_SECONDS).
+_ERROR_TOAST_SECONDS = 4
 
 _ERROR_MESSAGES = {
     "no-credentials": lambda: _("Not logged in to Claude"),
@@ -146,7 +148,7 @@ class UsagePanel(Gtk.Box):
         refresh.add_css_class("usage-refresh")
         refresh.set_valign(Gtk.Align.CENTER)
         refresh.set_tooltip_text(_("Refresh usage"))
-        refresh.connect("clicked", lambda *_a: self._refresh())
+        refresh.connect("clicked", lambda *_a: self._refresh(manual=True))
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         header.append(toggle)
         header.append(self._spinner)
@@ -183,6 +185,8 @@ class UsagePanel(Gtk.Box):
 
         self._snapshot: usage.UsageSnapshot | None = None
         self._fetching = False
+        self._manual_fetch = False  # the in-flight fetch was user-requested
+        self._error_toast: Adw.Toast | None = None
         self._source: int | None = None
         self._suspended = False  # toplevel minimized / fully hidden
         self._locked = False  # session screen locked
@@ -280,7 +284,10 @@ class UsagePanel(Gtk.Box):
         self._refresh()
         return GLib.SOURCE_CONTINUE
 
-    def _refresh(self) -> None:
+    def _refresh(self, manual: bool = False) -> None:
+        # A click during an in-flight background fetch still claims its
+        # result: the user asked, so a failure owes them the snackbar.
+        self._manual_fetch = self._manual_fetch or manual
         if self._fetching:
             return
         self._fetching = True
@@ -298,22 +305,59 @@ class UsagePanel(Gtk.Box):
         threading.Thread(target=work, name="usage-fetch", daemon=True).start()
 
     def _on_result(self, result: object) -> bool:
+        manual, self._manual_fetch = self._manual_fetch, False
         self._fetching = False
         self._spinner.set_spinning(False)
         if isinstance(result, usage.UsageSnapshot):
             self._snapshot = result
             self._show_snapshot(result)
-        elif self._snapshot is not None:
+            # A success outdates whatever failure the snackbar still reports.
+            if self._error_toast is not None:
+                self._error_toast.dismiss()
+            return GLib.SOURCE_REMOVE
+        err = result if isinstance(result, usage.UsageError) else None
+        if self._snapshot is not None:
             # Keep showing stale data; just note its age in the tooltip.
             age_min = max(1, int((time.time() - self._snapshot.fetched_at) / 60))
             self._stack.set_tooltip_text(_("As of {n}m ago").format(n=age_min))
         else:
-            err = result if isinstance(result, usage.UsageError) else None
             message = _ERROR_MESSAGES.get(err.kind if err else "", None)
             self._status.set_text(message() if message else _("Usage unavailable"))
             self._status.set_tooltip_text(str(err) if err else None)
             self._stack.set_visible_child_name("status")
+        if manual:
+            self._toast_error(err)
         return GLib.SOURCE_REMOVE
+
+    def _toast_error(self, err: usage.UsageError | None) -> None:
+        """A refresh the user asked for failed: say so in a snackbar floated
+        over the sessions panel (the same overlay the archive-undo toast
+        uses). Background polls stay silent — an offline machine would
+        otherwise toast every poll. One snackbar at a time, as with undo: a
+        fresh failure replaces the last toast instead of queueing behind it.
+        """
+        overlay = self.get_ancestor(Adw.ToastOverlay)
+        if overlay is None:
+            return
+        if self._error_toast is not None:
+            self._error_toast.dismiss()
+        message = _ERROR_MESSAGES.get(err.kind if err else "", None)
+        toast = Adw.Toast(
+            title=message() if message else _("Couldn't refresh usage"),
+            button_label=_("Dismiss"),
+            timeout=_ERROR_TOAST_SECONDS,
+        )
+        # No action to run: the button only takes the toast down.
+        toast.connect("button-clicked", lambda t: t.dismiss())
+        toast.connect("dismissed", self._on_error_toast_dismissed)
+        self._error_toast = toast
+        overlay.add_toast(toast)
+
+    def _on_error_toast_dismissed(self, toast: Adw.Toast) -> None:
+        # Stops a later failure or success from dismissing a toast the
+        # overlay already dropped (mirrors the undo toast's bookkeeping).
+        if self._error_toast is toast:
+            self._error_toast = None
 
     # -- rendering ---------------------------------------------------------
 
