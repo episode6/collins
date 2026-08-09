@@ -220,6 +220,15 @@ row.session-child menubutton.pr-mark > button {
   min-width: 0;
   padding: 0 6px 0 0;
 }
+/* what stands in that slot when the session has no pull requests: the agent's
+   own mark (see SessionRow). Its margins put it exactly where the mark's base
+   icon sits -- 4px in from the guide line, which is the overhang combined_icon
+   reserves for a badge, and the same 6px off the title as above -- so a
+   session that opens its first PR trades one for the other without the title
+   moving under it. */
+row.session-child image.agent-mark {
+  margin: 0 6px 0 4px;
+}
 row.session-child checkbutton > check {
   min-height: 14px;
   min-width: 14px;
