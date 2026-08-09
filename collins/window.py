@@ -32,6 +32,7 @@ from . import (
     footerapps,
     mcptools,
     openwith,
+    paneldnd,
     panelhistory,
     trust,
 )
@@ -402,6 +403,9 @@ class MainWindow(Adw.ApplicationWindow):
         # The tab bar's own drag-to-reorder would put the two panes out of step
         # (see _on_page_reordered).
         self.tab_view.connect("page-reordered", self._on_page_reordered)
+        # Native tab DnD is process-global: without this, a panel-strip
+        # shell tab could be dropped onto the session tab bar (tabguard).
+        paneldnd.guard_view(self.tab_view, "session")
 
         tab_menu = Gio.Menu()
         tab_menu.append(_("Rename…"), "win.rename-tab")

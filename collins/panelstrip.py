@@ -37,7 +37,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import dialogs  # noqa: E402
+from . import dialogs, paneldnd  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 
 
@@ -128,12 +128,26 @@ class PanelStrip(Gtk.Box):
         end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         end_box.append(add_btn)
         end_box.append(swap_btn)
+        # The grip: drag it to dock the selected page against any leaf's
+        # edge (drop zones light up dock-wide). Inert without a page mover.
+        end_box.append(paneldnd.make_grip(self))
         bar.set_end_action_widget(end_box)
 
         self.append(bar)
         self.append(self._view)
 
     # -- pages -------------------------------------------------------------
+
+    @property
+    def tab_view(self) -> Adw.TabView:
+        """The strip's `Adw.TabView` — what registers with the tab-DnD
+        guard and what a guard bounce transfers pages into."""
+        return self._view
+
+    @property
+    def page_mover(self):
+        """The dock's move/split interface, or None while undocked."""
+        return self._page_mover
 
     @property
     def page_count(self) -> int:
@@ -147,8 +161,12 @@ class PanelStrip(Gtk.Box):
 
     def shell_pages(self) -> list:
         """The pages of kind shell, in tab order — the set the shell-wide
-        aggregates (capture/clear/busy) range over."""
-        return [page for page in self.pages() if page.page_kind == "shell"]
+        aggregates (capture/clear/busy) range over. `getattr`, not a bare
+        attribute: native tab DnD can land a *foreign* page (a session or
+        editor tab) here for the one main-loop turn before the tab guard
+        bounces it out, and every protocol touch in this class has to
+        shrug at it rather than raise (see tabguard)."""
+        return [page for page in self.pages() if getattr(page, "page_kind", None) == "shell"]
 
     def selected_page_widget(self):
         page = self._view.get_selected_page()
@@ -248,7 +266,7 @@ class PanelStrip(Gtk.Box):
 
     def _on_close_page(self, view: Adw.TabView, page: Adw.TabPage) -> bool:
         widget = page.get_child()
-        if page not in self._close_ok and widget.page_busy():
+        if page not in self._close_ok and getattr(widget, "page_busy", bool)():
             # The X on a busy page asks first, mirroring the session tab's
             # own close protection — a build shouldn't die to a stray click.
             view.close_page_finish(page, False)  # keep the tab while we ask
@@ -367,7 +385,7 @@ class PanelStrip(Gtk.Box):
             for widget in self.pages()
             if (page := self._find_page(widget)) is not None and page is not keep
         ]
-        busy = [page for page in targets if page.get_child().page_busy()]
+        busy = [page for page in targets if getattr(page.get_child(), "page_busy", bool)()]
         if not busy:
             for page in targets:
                 self._view.close_page(page)
@@ -398,18 +416,24 @@ class PanelStrip(Gtk.Box):
     # -- focus and aggregates ------------------------------------------------
 
     def _on_selected(self, *_args) -> None:
-        widget = self.selected_page_widget()
-        if widget is not None and self.get_mapped():
-            GLib.idle_add(widget.grab_page_focus)
+        # getattr: a just-dropped foreign page (see shell_pages) becomes
+        # the selection before the guard bounces it — nothing to focus.
+        grab = getattr(self.selected_page_widget(), "grab_page_focus", None)
+        if grab is not None and self.get_mapped():
+            GLib.idle_add(grab)
 
     def grab_page_focus(self) -> None:
         """Land the cursor in the selected page."""
-        widget = self.selected_page_widget()
-        if widget is not None:
-            widget.grab_page_focus()
+        grab = getattr(self.selected_page_widget(), "grab_page_focus", None)
+        if grab is not None:
+            grab()
 
     def has_page_focus(self) -> bool:
-        return any(page.has_page_focus() for page in self.pages())
+        return any(
+            page.has_page_focus()
+            for page in self.pages()
+            if hasattr(page, "has_page_focus")
+        )
 
     def has_running_command(self) -> bool:
         return any(shell.page_busy() for shell in self.shell_pages())
@@ -435,4 +459,5 @@ class PanelStrip(Gtk.Box):
     def apply_settings(self, settings: dict) -> None:
         self._settings = settings
         for page in self.pages():
-            page.apply_settings(settings)
+            if hasattr(page, "apply_settings"):  # see shell_pages
+                page.apply_settings(settings)

@@ -2087,3 +2087,7 @@ msgstr ""
 #: collins/panelstrip.py:312
 msgid "Split Down"
 msgstr ""
+
+#: collins/paneldnd.py:59
+msgid "Drag to move this tab to another edge"
+msgstr ""
