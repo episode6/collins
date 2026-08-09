@@ -48,9 +48,9 @@ taller caption shrinks the fitted image, narrowing the caption further).
 The fit and centering math both count the caption's height at that wrap
 width, so a captioned image still lands centered with the caption on
 screen — and the caption itself is capped at a quarter of the window's
-height (_limit_caption_lines), ellipsizing past its line budget rather
-than squeezing the image. Today only the show_image MCP tool passes one —
-the text is agent-supplied, which is why it renders as plain wrapped text.
+height (_limit_caption_height), scrolling past that rather than squeezing
+the image. Today only the show_image MCP tool passes one — the text is
+agent-supplied, which is why it renders as plain wrapped text.
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import editorfiles  # noqa: E402
 from .editorfiles import (  # noqa: E402
@@ -152,6 +152,7 @@ class ImageLightbox(Gtk.Box):
         # is folded into the fit and centering math via _caption_extra_h so
         # a captioned image still centers with the caption fully on screen.
         self._caption: Gtk.Label | None = None
+        self._caption_scroller: Gtk.ScrolledWindow | None = None
         if caption:
             self._caption = Gtk.Label(
                 label=caption,
@@ -168,10 +169,16 @@ class ImageLightbox(Gtk.Box):
             # overflow then vexpands the slot into a letterbox around the
             # picture.
             self._caption.set_natural_wrap_mode(Gtk.NaturalWrapMode.NONE)
-            # With a line budget (_limit_caption_lines), an over-long
-            # caption ends in … instead of squeezing the image.
-            self._caption.set_ellipsize(Pango.EllipsizeMode.END)
             self._caption.add_css_class("lightbox-caption")
+            # An over-long caption scrolls instead of squeezing the image:
+            # the scroller grows with the text (propagating its natural
+            # height) up to the quarter-window cap _limit_caption_height
+            # keeps current, and scrolls past it.
+            self._caption_scroller = Gtk.ScrolledWindow(child=self._caption)
+            self._caption_scroller.set_policy(
+                Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
+            )
+            self._caption_scroller.set_propagate_natural_height(True)
             if self._scroller is not None:
                 # The caption may be wider than a narrow image, which would
                 # stretch a FILL slot — and its shadow plate — to the
@@ -272,7 +279,7 @@ class ImageLightbox(Gtk.Box):
         if win_w <= 0 or win_h <= 0:
             win_w, win_h = _FALLBACK_WINDOW
         self._win = (win_w, win_h)
-        self._limit_caption_lines()
+        self._limit_caption_height()
         strip_r = LIGHTBOX_BUTTON_STRIP if side == "right" else 0
         strip_b = LIGHTBOX_BUTTON_STRIP if side == "below" else 0
         # Panel chrome around the image slot: the strip's reservation on its
@@ -298,8 +305,8 @@ class ImageLightbox(Gtk.Box):
             orientation=Gtk.Orientation.VERTICAL, spacing=_PANEL_SPACING
         )
         self._image_col.append(self._slot)
-        if self._caption is not None:
-            self._image_col.append(self._caption)
+        if self._caption_scroller is not None:
+            self._image_col.append(self._caption_scroller)
         self._panel = Gtk.Box(
             orientation=(
                 Gtk.Orientation.HORIZONTAL if side == "right" else Gtk.Orientation.VERTICAL
@@ -385,7 +392,7 @@ class ImageLightbox(Gtk.Box):
         # new floor) and the slot re-caps to the new edges.
         at_fit = self._zoom is not None and abs(self._zoom - self._fit_zoom) < 0.001
         self._win = (w, h)
-        self._limit_caption_lines()
+        self._limit_caption_height()
         side = "right" if self._chrome[0] else "below"
         _side, width, height = lightbox_layout(*self._image_size, w, h, side)
         self._set_fit_zoom(width, height)
@@ -433,27 +440,27 @@ class ImageLightbox(Gtk.Box):
         a tall sliver of text."""
         return max(image_w, min(_CAPTION_MIN_WRAP, avail_w))
 
-    def _limit_caption_lines(self) -> None:
-        """Budget the caption's lines so it never grows taller than
-        1/_CAPTION_WINDOW_FRACTION of the window: the ellipsize mode set in
-        __init__ truncates past the budget. Re-derived whenever self._win
-        does, and before any caption measuring, so the fit and centering
-        math only ever see the capped height."""
-        if self._caption is None:
-            return
-        _w, line_h = self._caption.create_pango_layout("Mg").get_pixel_size()
-        max_h = self._win[1] // _CAPTION_WINDOW_FRACTION
-        self._caption.set_lines(max(max_h // max(line_h, 1), 1))
+    def _limit_caption_height(self) -> None:
+        """Cap the caption's scroller so it never grows taller than
+        1/_CAPTION_WINDOW_FRACTION of the window — text past the cap
+        scrolls. Re-derived whenever self._win does, and mirrored in
+        _caption_extra_h, so the fit and centering math only ever see the
+        capped height."""
+        if self._caption_scroller is not None:
+            self._caption_scroller.set_max_content_height(
+                self._win[1] // _CAPTION_WINDOW_FRACTION
+            )
 
     def _caption_extra_h(self, width: int) -> int:
-        """The caption's footprint in the image column: its wrapped height at
-        *width* plus the column gap above it; 0 with no caption."""
+        """The caption's footprint in the image column: its wrapped height
+        at *width*, capped the way its scroller is (_limit_caption_height),
+        plus the column gap above it; 0 with no caption."""
         if self._caption is None:
             return 0
         _min, nat, _mb, _nb = self._caption.measure(
             Gtk.Orientation.VERTICAL, max(width, 1)
         )
-        return nat + _PANEL_SPACING
+        return min(nat, self._win[1] // _CAPTION_WINDOW_FRACTION) + _PANEL_SPACING
 
     def _apply_zoom(self, zoom: float) -> None:
         """Set the display scale: the picture's size request becomes the
