@@ -18,7 +18,17 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import editorfiles, ghwelcome, mcpserver, mcptools, proctree, providers, tooltipmute
+from . import (
+    clisetup,
+    cliwelcome,
+    editorfiles,
+    ghwelcome,
+    mcpserver,
+    mcptools,
+    proctree,
+    providers,
+    tooltipmute,
+)
 from .caffeine import ACTIVE_GRACE_S, duration_seconds, follows_activity, grace_deadline
 from .i18n import _
 from .lightbox import present_image_lightbox
@@ -779,6 +789,9 @@ class App(Adw.Application):
         # state.json writes don't race.
         self.state = AppState()
         apply_color_scheme(self.state.get_setting("color_scheme"))
+        # A remembered CLI location goes on PATH before anything looks for
+        # the CLI — the store's first scan is the very next line.
+        clisetup.apply_saved(self.state)
         self.store = SessionStore(self.state)
         self.store.start()
 
@@ -1151,7 +1164,15 @@ class App(Adw.Application):
                 )
             # Once per install, and only on a launch: an extra window is not a
             # first impression, and neither is one opened from a notification.
-            ghwelcome.maybe_show(window, self.state)
+            # The agent CLI comes first and blocks until answered (there is
+            # no app without it); the GitHub notice takes its turn after —
+            # immediately when the CLI is already in place.
+            cliwelcome.maybe_show(
+                window,
+                self.state,
+                self.store,
+                then=lambda: ghwelcome.maybe_show(window, self.state),
+            )
         window.present()
 
 
