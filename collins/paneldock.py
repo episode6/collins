@@ -212,9 +212,21 @@ class PanelDock(Adw.Bin):
                 rec.sizer.set_remembered(mode, size)
 
     def _home_rec(self) -> _PaneRec | None:
+        """The record of the paned dividing the home strip's branch from
+        the terminal's — the divider whose position *is* the home strip
+        size. Not simply the home leaf's parent: splitting a tab inside
+        the home strip inserts new splits between the leaf and that
+        divider, so walk up to the nearest ancestor whose other side
+        holds the terminal."""
         if self._home_strip is None:
             return None
-        return self._panes.get(self._tree.find(self._home_strip).parent)
+        node = self._tree.find(self._home_strip)
+        while node.parent is not None:
+            parent = node.parent
+            if self._contains_terminal(parent.sibling_of(node)):
+                return self._panes.get(parent)
+            node = parent
+        return None
 
     def _create_home_strip(self) -> None:
         strip = self._new_strip()
