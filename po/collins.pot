@@ -2089,5 +2089,5 @@ msgid "Split Down"
 msgstr ""
 
 #: collins/paneldnd.py:59
-msgid "Drag to move this tab to another edge"
+msgid "Drag to move this tab: drop on an edge to split, on a strip to join"
 msgstr ""

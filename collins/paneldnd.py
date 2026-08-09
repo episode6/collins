@@ -56,7 +56,7 @@ def make_grip(strip) -> Gtk.Widget:
     undocked strip has nowhere to move pages to."""
     grip = Gtk.Image.new_from_icon_name("list-drag-handle-symbolic")
     grip.add_css_class("dim-label")
-    grip.set_tooltip_text(_("Drag to move this tab to another edge"))
+    grip.set_tooltip_text(_("Drag to move this tab: drop on an edge to split, on a strip to join"))
     grip.set_cursor(Gdk.Cursor.new_from_name("grab"))
 
     source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
@@ -147,7 +147,10 @@ class DropZones(Gtk.Widget):
         for widget, allowed in self._model:
             ok, bounds = widget.compute_bounds(self)
             if not ok or not widget.get_mapped():
-                leaves.append((0, 0, 0, 0, ()))  # unhittable placeholder
+                # Negative size so no point can sit inside it — a zero-size
+                # rect at the origin would still contain (0, 0) exactly and
+                # swallow a drop on the overlay's top-left corner.
+                leaves.append((0.0, 0.0, -1.0, -1.0, ()))
             else:
                 leaves.append(
                     (bounds.get_x(), bounds.get_y(), bounds.get_width(), bounds.get_height(), allowed)

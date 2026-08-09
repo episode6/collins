@@ -80,6 +80,15 @@ def test_hit_center_over_terminal_is_no_zone_only_if_disallowed():
     assert hit(LEAVES, 200, 150) in ((0, z) for z in EDGE_ZONES)
 
 
+def test_hit_negative_size_placeholder_contains_no_point():
+    # The overlay marks unmapped leaves with a negative-size rect at the
+    # origin; it must not swallow a drop at exactly (0, 0) — that corner
+    # belongs to whatever real leaf sits there.
+    leaves = [(0.0, 0.0, -1.0, -1.0, ()), (0, 0, 400, 300, EDGE_ZONES)]
+    assert hit(leaves, 0, 0) is not None
+    assert hit(leaves, 0, 0)[0] == 1
+
+
 def test_hit_leaf_with_no_zones_swallows_the_point():
     # A drag's single-page source strip allows nothing: pointing at it
     # hits no zone, and does NOT fall through to a leaf behind it.
