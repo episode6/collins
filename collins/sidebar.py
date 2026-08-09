@@ -1748,11 +1748,13 @@ class SessionSidebar(Gtk.Box):
         """
         self._placeholders[placeholder_id] = cwd
         key = self._placeholder_group_key(cwd)
-        if key[0] == "proj" and key[1] not in self.store.resolved_project_order:
-            # A project the sidebar has never shown starts life expanded — and
-            # persistently so, or the group would snap shut the moment its
-            # first session is discovered and the placeholder's temporary
-            # expansion (see _rebuild_rows) stops applying.
+        if not self.store.state.is_group_expanded(_group_state_key(key)):
+            # Starting a thread in a collapsed group expands it for real —
+            # persistently, or the group would snap shut the moment the
+            # session is discovered and the placeholder's temporary expansion
+            # (see _rebuild_rows) stops applying. This also covers a project
+            # the sidebar has never shown, which starts life collapsed like
+            # any unknown group.
             self.store.state.set_group_expanded(_group_state_key(key), True)
         if key not in self._new_thread_rows:
             self._arriving_placeholders.add(placeholder_id)
