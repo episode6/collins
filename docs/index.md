@@ -7,7 +7,7 @@ layout: home
 
 hero:
   name: "Collins"
-  text: "A native home for your AI coding-agent sessions"
+  text: "A vibecoded home for your AI coding-agent sessions"
   tagline: Browse, name, and resume every Claude Code session on your machine — in embedded terminal tabs.
   image:
     src: /img/hero.png
@@ -45,9 +45,6 @@ features:
   - icon: 🐧
     title: Native GTK4
     details: Built with GTK4, libadwaita, and VTE. Installs as a .deb or runs from source. GPL-3.0, open source.
-  - icon: ✨
-    title: Completely vibe-coded
-    details: Every line of Collins was written by Claude Code — the very agent the app manages, working in the very sessions it keeps track of. Humans steered; Claude typed.
 ---
 
 ## An opinionated, Claude-first workspace
@@ -56,14 +53,9 @@ Call it an **Agent-First IDE**, an **AI-Native Workspace**, or an **Agent
 Orchestrator** — Collins is an opinionated take on what a desktop workspace
 built around a coding agent should look like: the agent front and center,
 with your sessions organized around it. It is also, deliberately, a tool for
-**Claude** — there are no plans to support other agents.
-
-## Completely vibe-coded
-
-Collins isn't just built *for* Claude — it's built *by* Claude. Every line of
-this app was written by [Claude Code](https://claude.com/claude-code), the
-very agent Collins exists to manage, working in the very sessions Collins
-keeps track of. Humans steered; Claude typed.
+**Claude** — there are no plans to support other agents. And to be upfront
+about it: Collins is itself entirely vibecoded — the code is written by
+[Claude Code](https://claude.com/claude-code).
 
 ## Why "Collins"?
 
