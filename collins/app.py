@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-09. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -29,7 +29,7 @@ from . import (
     providers,
     tooltipmute,
 )
-from .caffeine import ACTIVE_GRACE_S, duration_seconds, follows_activity, grace_deadline
+from .caffeine import ACTIVE_GRACE_S, duration_seconds, follow_poll, follows_activity
 from .i18n import _
 from .lightbox import present_image_lightbox
 from .prefs import apply_color_scheme
@@ -779,10 +779,11 @@ class App(Adw.Application):
         # countdown and turns Caffeine Mode off on reaching it.
         self._caffeine_deadline: int | None = None
         self._caffeine_tick: int | None = None
-        # The duration key Caffeine Mode was turned on under, kept only for the
-        # one option whose deadline isn't a fixed span: "while sessions are
-        # working" (see _follow_activity), where the tick keeps running with no
-        # deadline set for as long as something is busy.
+        # The duration key Caffeine Mode was turned on under, set only for the
+        # one option whose deadline isn't a fixed span: Until idle (see
+        # _follow_activity). For that mode this is the on-flag itself — it
+        # outlives the inhibitor across a doze, when the cookie is dropped but
+        # the mode keeps watching — and only turning the mode off clears it.
         self._caffeine_mode: str | None = None
 
         # Shared across all windows so scans/monitors aren't duplicated and
@@ -967,12 +968,15 @@ class App(Adw.Application):
 
     @property
     def caffeine_enabled(self) -> bool:
-        return self._caffeine_cookie is not None
+        """Whether Caffeine Mode is on, as the user sees it: an inhibitor
+        held, or an Until-idle mode dozing — still armed, just not holding
+        the machine while nothing works."""
+        return self._caffeine_cookie is not None or self._caffeine_mode is not None
 
     @property
     def caffeine_remaining(self) -> int | None:
-        """Seconds left before Caffeine Mode turns itself off, or None when no
-        timer is running (it stays on until someone turns it off)."""
+        """Seconds left before Caffeine Mode turns itself off (or, following
+        the sessions, dozes off), or None when no countdown is running."""
         if self._caffeine_deadline is None:
             return None
         left = self._caffeine_deadline - GLib.get_monotonic_time()
@@ -985,24 +989,31 @@ class App(Adw.Application):
         something is still working."""
         return self.caffeine_enabled and follows_activity(self._caffeine_mode or "")
 
+    @property
+    def caffeine_dozing(self) -> bool:
+        """Whether a sessions-following Caffeine Mode is armed but not
+        holding: the grace ran out with everything idle, so the machine is
+        free to blank and sleep until a session picks work back up. The
+        tooltip's honesty flag — a dozing cup must not promise a lit screen."""
+        return self._caffeine_mode is not None and self._caffeine_cookie is None
+
     def set_caffeine_enabled(self, enabled: bool, duration: str | None = None) -> None:
         """Toggle Caffeine Mode: inhibit suspend and screen blanking app-wide.
 
         `duration` is a key from caffeine.py: an hours option arms a shut-off
         timer that turns Caffeine Mode off again when it runs out, WHILE_ACTIVE
         ("Until idle" — the default, what a plain click on the button arms)
-        hands the deadline to the sessions themselves, and None leaves it on
-        indefinitely. Any timer already running is cancelled either way, so
-        re-picking a duration restarts the clock and none is ever left stale.
+        follows the sessions instead — holding the machine awake while they
+        work, dozing while they rest — and never turns off on its own. Any
+        timer already running is cancelled either way, so re-picking a
+        duration restarts the clock and none is ever left stale.
         """
         self._cancel_caffeine_timer()
         if enabled != self.caffeine_enabled:
             if enabled:
                 self._take_caffeine_inhibit()
             else:
-                self.uninhibit(self._caffeine_cookie)
-                self._caffeine_cookie = None
-                self._caffeine_flags_held = None
+                self._release_caffeine_inhibit()
         # Nothing to count down to if the inhibit didn't take (or was refused).
         if self.caffeine_enabled:
             key = duration or ""
@@ -1047,6 +1058,16 @@ class App(Adw.Application):
         if previous is not None:
             self.uninhibit(previous)
 
+    def _release_caffeine_inhibit(self) -> None:
+        """Let go of the inhibitor, if one is held. Says nothing about the
+        mode: turning Caffeine Mode off comes through here, but so does an
+        Until-idle mode starting a doze, which stays armed."""
+        if self._caffeine_cookie is None:
+            return
+        self.uninhibit(self._caffeine_cookie)
+        self._caffeine_cookie = None
+        self._caffeine_flags_held = None
+
     def refresh_caffeine_inhibit(self) -> None:
         """Re-take the inhibitor when the keep-the-screen-on setting changed
         under a Caffeine Mode that is already running, so the new answer lands
@@ -1055,9 +1076,11 @@ class App(Adw.Application):
 
         Safe to call whenever the setting may have moved: every window is
         resynced either way, since the button's tooltip says what the setting
-        promises even while Caffeine Mode is off.
+        promises even while Caffeine Mode is off. A dozing mode holds nothing
+        to re-take — the new flags simply apply when work next claims the
+        machine.
         """
-        if self.caffeine_enabled and self._caffeine_flags() != self._caffeine_flags_held:
+        if self._caffeine_cookie is not None and self._caffeine_flags() != self._caffeine_flags_held:
             self._take_caffeine_inhibit()
         self._sync_caffeine_windows()
 
@@ -1079,34 +1102,51 @@ class App(Adw.Application):
                 return True
         return False
 
-    def _follow_activity(self) -> bool:
-        """Point the shut-off timer at the sessions, and say whether any is
-        working. `grace_deadline` holds the rule; this is the poll around it.
+    def _follow_activity(self) -> None:
+        """Point the inhibitor at the sessions. `follow_poll` holds the rule;
+        this is the poll around it, doing whatever it says: take the machine
+        back (work resumed under a doze), let it go (the grace ran out — the
+        mode stays armed), or leave the running countdown be.
 
         Polled from the tick rather than pushed by the windows: the answer is a
         set-emptiness check per window, and reading it live means no missed
-        signal — a window closing on a busy tab, a session torn down — can leave
-        the machine awake with nothing left to work for.
+        signal — a window closing on a busy tab, a session torn down — can
+        leave the machine awake with nothing left to work for, or dozing
+        through a session that picked work back up.
         """
-        working = self._sessions_working()
-        deadline = grace_deadline(
-            working=working,
+        deadline, action = follow_poll(
+            working=self._sessions_working(),
+            holding=self._caffeine_cookie is not None,
             deadline=self._caffeine_deadline,
             now=GLib.get_monotonic_time(),
             grace=ACTIVE_GRACE_S * 1_000_000,  # the poll's clock is µs
         )
-        if deadline != self._caffeine_deadline:
-            # The countdown just appeared (work stopped) or went away (it
-            # started again); every header needs to hear about it.
-            self._caffeine_deadline = deadline
+        changed = deadline != self._caffeine_deadline
+        self._caffeine_deadline = deadline
+        if action == "take":
+            # A refused take (the platform can't inhibit) leaves the cookie
+            # unset, and the next poll simply asks again.
+            self._take_caffeine_inhibit()
+            changed = True
+        elif action == "release":
+            self._release_caffeine_inhibit()
+            changed = True
+        if changed:
+            # The countdown appeared, went away, or gave way to a doze — and
+            # a doze starting or ending reword the tooltip too; every header
+            # needs to hear about it.
             self._sync_caffeine_windows()
-        return working
 
     def _on_caffeine_tick(self) -> bool:
         """Once a second while a timer runs: redraw the countdowns, and turn
-        Caffeine Mode off when the deadline passes."""
-        if follows_activity(self._caffeine_mode or "") and self._follow_activity():
-            return GLib.SOURCE_CONTINUE  # still working: nothing to count down
+        Caffeine Mode off when the deadline passes. A sessions-following mode
+        never turns off here — the poll swings it between holding and dozing
+        until the user ends it, so its tick runs for the mode's whole life."""
+        if follows_activity(self._caffeine_mode or ""):
+            self._follow_activity()
+            if self.caffeine_remaining is not None:
+                self._sync_caffeine_windows()  # a grace is counting down
+            return GLib.SOURCE_CONTINUE
         if self.caffeine_remaining:
             self._sync_caffeine_windows()
             return GLib.SOURCE_CONTINUE

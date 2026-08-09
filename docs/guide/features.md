@@ -477,19 +477,21 @@ below.
   so a long build can't leave the machine awake all week because you forgot.
 - **Until idle**, the default, hands the deadline to the sessions instead of
   the clock: as long as at least one open tab is working — the same barber
-  pole the session list shows — the machine stays awake, and five minutes
-  after the last one stops, Caffeine Mode turns itself off. Any session
-  picking work back up starts those five minutes over. Whatever keeps a pole
-  up holds Caffeine Mode with it, including a background process a session
-  left running — a dev server, a long build — but not the servers the agent
-  runs for itself, which are plumbing rather than work. Backgrounded (`/bg`)
-  sessions don't count either: they run with no tab to watch, exactly as
-  their still guide line says.
+  pole the session list shows — the machine stays awake. Five minutes after
+  the last one stops, Caffeine Mode dozes: the machine is free to blank and
+  sleep as usual, but the mode stays armed, and a session picking work back
+  up — tomorrow morning included — takes hold of the machine again. Only
+  clicking the cup off ends it. Whatever keeps a pole up holds Caffeine Mode
+  with it, including a background process a session left running — a dev
+  server, a long build — but not the servers the agent runs for itself, which
+  are plumbing rather than work. Backgrounded (`/bg`) sessions don't count
+  either: they run with no tab to watch, exactly as their still guide line
+  says.
 - The **time left counts down** just left of the cup while a timer is running.
   Picking another duration restarts the clock, *Indefinitely* clears it, and
   turning Caffeine Mode off cancels it. Following the sessions, the countdown
   appears only once they have all stopped — it's the five minutes left before
-  Caffeine Mode gives up.
+  Caffeine Mode dozes off.
 - **Keep screen on** decides how far "awake" goes. On (the default) holds the
   screen on as well; off lets the screen blank as usual while the computer
   still can't sleep — handy for an overnight agent run you don't want lighting
