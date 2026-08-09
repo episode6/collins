@@ -94,7 +94,10 @@ _MCP_TOOL_LABELS = {
     ),
     "show_image": (
         N_("Show images"),
-        N_("show_image — a screenshot, plot, or render in the in-app lightbox"),
+        # The URL half is disclosure, not detail: it is the only tool that
+        # sends Collins to an address the agent chose (attach_pr reaches the
+        # network too, but only to ask gh about a GitHub PR).
+        N_("show_image — a screenshot, plot, render, or image URL in the in-app lightbox"),
     ),
     "notify_user": (
         N_("Send desktop notifications"),

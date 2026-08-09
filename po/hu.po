@@ -881,8 +881,8 @@ msgstr "open_in_editor — a projekt egy fájlját a képernyőre teszi, adott s
 msgid "Show images"
 msgstr "Képek megjelenítése"
 
-msgid "show_image — a screenshot, plot, or render in the in-app lightbox"
-msgstr "show_image — képernyőkép, diagram vagy render az alkalmazás képnézegetőjében"
+msgid "show_image — a screenshot, plot, render, or image URL in the in-app lightbox"
+msgstr "show_image — képernyőkép, diagram, render vagy képhivatkozás az alkalmazás képnézegetőjében"
 
 msgid "Send desktop notifications"
 msgstr "Asztali értesítések küldése"

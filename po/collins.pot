@@ -1933,8 +1933,8 @@ msgstr ""
 msgid "Show images"
 msgstr ""
 
-#: collins/prefs.py:97
-msgid "show_image — a screenshot, plot, or render in the in-app lightbox"
+#: collins/prefs.py:99
+msgid "show_image — a screenshot, plot, render, or image URL in the in-app lightbox"
 msgstr ""
 
 #: collins/prefs.py:100

@@ -34,10 +34,14 @@ a button closes, as does Esc (a capture-phase key controller on the window,
 so focus doesn't matter).
 
 Presented when a clicked file reference turns out to be an image (see
-terminal._setup_links). Deliberately read-only — it can therefore show any
-readable path, including the /tmp screenshots agent output loves to
-reference. "Open in Editor" only appears when the file is inside the
-clicking tab's editor project (the caller's call via `can_open_in_editor`).
+terminal._setup_links), and by the `show_image` session tool — which may
+hand over a copy it downloaded for a URL the agent named (remoteimages.py),
+in which case `origin` carries that URL so a failed decode names what the
+agent asked for rather than the cache file. Deliberately read-only — it can
+therefore show any readable path, including the /tmp screenshots agent
+output loves to reference. "Open in Editor" only appears when the file is
+inside the clicking tab's editor project (the caller's call via
+`can_open_in_editor`).
 
 An optional caption ends the image column — under the image, and under the
 zoom bar too when that sits below a small image — wrapping to the image's
@@ -96,9 +100,15 @@ class ImageLightbox(Gtk.Box):
         can_open_in_editor: bool = False,
         on_open_in_editor: Callable[[], None] | None = None,
         caption: str | None = None,
+        origin: str | None = None,
     ) -> None:
         super().__init__()
         self._path = Path(path)
+        # What the image is called when it can't be shown: the file's own
+        # name, unless the caller knows the path is a stand-in for something
+        # the user would recognize better (show_image's downloaded copy of a
+        # URL — see remoteimages.py — whose cache name means nothing).
+        self._origin = origin or self._path.name
         self._on_open_in_editor = on_open_in_editor
         self._overlay: Gtk.Overlay | None = None
         self._esc: Gtk.EventControllerKey | None = None
@@ -141,7 +151,7 @@ class ImageLightbox(Gtk.Box):
             self._slot = Adw.StatusPage(
                 icon_name="image-missing-symbolic",
                 title=_("Couldn't display image"),
-                description=self._path.name,
+                description=self._origin,
             )
         self._slot.set_hexpand(True)
         self._slot.set_vexpand(True)
@@ -663,5 +673,8 @@ def present_image_lightbox(
     can_open_in_editor: bool = False,
     on_open_in_editor: Callable[[], None] | None = None,
     caption: str | None = None,
+    origin: str | None = None,
 ) -> None:
-    ImageLightbox(path, can_open_in_editor, on_open_in_editor, caption).present_over(parent)
+    ImageLightbox(
+        path, can_open_in_editor, on_open_in_editor, caption, origin
+    ).present_over(parent)

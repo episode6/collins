@@ -88,10 +88,17 @@ TOOLS: list[dict] = [
     {
         "name": "show_image",
         "description": (
-            "Show an image over this session's Collins window — screenshots, "
-            "plots, renders. Use it to say 'look at this' without waiting for "
-            "a click or launching an external viewer. Any readable image file "
-            "works, inside the project or not."
+            "Show the user an image inline in this session's Collins window — "
+            "screenshots, plots, renders, or any picture they asked to see. "
+            "This is the default way to put an image in front of the user: "
+            "use it whenever they say 'show me', 'let me see', 'display', or "
+            "ask for a picture, chart, or screenshot, and any time you'd say "
+            "'look at this' without making them click. Prefer it over "
+            "delivering the image as a file attachment — send a file only "
+            "when the user needs the file itself to keep, download, or open "
+            "in another app. Any readable image file works, inside the "
+            "project or not, and so does an http(s) URL — Collins fetches "
+            "it, so don't spend a download of your own first."
         ),
         "inputSchema": {
             "type": "object",
@@ -101,8 +108,9 @@ TOOLS: list[dict] = [
                     "minLength": 1,
                     "maxLength": 4096,
                     "description": (
-                        "The image file to show; a relative path resolves "
-                        "against the working directory, then the project root."
+                        "The image to show: a file path, or an http(s) URL "
+                        "Collins downloads. A relative path resolves against "
+                        "the working directory, then the project root."
                     ),
                 },
                 "caption": {
@@ -264,6 +272,48 @@ def _validate_value(key: str, value, spec: dict) -> str | None:
     return None
 
 
+class DeferredResult:
+    """A tool call whose answer isn't ready yet.
+
+    Handlers return one of these instead of `(ok, text)` when finishing the
+    call means work that must not run on the main loop — today only
+    `show_image` fetching a URL. The service holds that connection's reply
+    until `resolve` is called (from the main loop, once the worker is done),
+    which keeps the read → reply → read invariant intact: the session waits
+    on its own call and nobody else's is delayed.
+
+    `resolve` may be called at most once meaningfully — the first answer
+    wins, so a late arrival can't overwrite a timeout's, and a worker that
+    resolves twice is a bug that stays quiet on the wire.
+    """
+
+    def __init__(self) -> None:
+        self._result: tuple[bool, str] | None = None
+        self._watcher: Callable[[bool, str], None] | None = None
+
+    @property
+    def resolved(self) -> bool:
+        return self._result is not None
+
+    def resolve(self, ok: bool, text: str) -> None:
+        if self._result is not None:
+            return
+        self._result = (ok, text)
+        if self._watcher is not None:
+            self._watcher(ok, text)
+
+    def watch(self, callback: Callable[[bool, str], None]) -> None:
+        """Call *callback* with the result — now if it's already in, else as
+        soon as it lands. One watcher: the connection waiting on the reply."""
+        self._watcher = callback
+        if self._result is not None:
+            callback(*self._result)
+
+
+# What a handler (and so `run_tool_call`) answers with: the result, or the
+# promise of one.
+ToolResult = tuple[bool, str] | DeferredResult
+
 # The identity error every tool shares: the caller's /proc ancestry reached
 # no open tab (a daemon-hosted bg job, a chat session, a tab since closed).
 NOT_FROM_TAB_ERROR = "This claude process wasn't launched from a Collins tab"
@@ -275,7 +325,7 @@ def run_tool_call(
     find_tab,
     handlers,
     is_enabled: Callable[[str], bool] | None = None,
-) -> tuple[bool, str]:
+) -> ToolResult:
     """One tool call's skeleton: validate, check the switch, resolve identity,
     run the handler.
 
@@ -283,7 +333,8 @@ def run_tool_call(
     strings; app.py supplies the halves that need widgets or settings —
     `find_tab()` (the pid→tab ancestry walk, returning None for a caller no
     tab owns), `handlers` (tool name → callable taking (found_tab, args) and
-    returning (ok, message)), and `is_enabled` (the Preferences switch;
+    returning (ok, message), or a `DeferredResult` when the answer needs a
+    worker thread), and `is_enabled` (the Preferences switch;
     omitted means every tool is on). Validation runs first and
     unconditionally: the socket is reachable by any local process, so the
     CLI's own schema enforcement is not a boundary. The switch comes next —

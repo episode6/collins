@@ -9,6 +9,7 @@ GTK stack (see conftest.py).
 
 import json
 import os
+import select
 import socket
 import threading
 
@@ -142,6 +143,75 @@ def test_requests_are_answered_in_order_on_one_connection(tmp_path):
     first, second = run_with_client(tmp_path, client)
     assert first["id"] == 1
     assert second["id"] == 2
+
+
+def test_a_deferred_call_is_answered_when_it_resolves(tmp_path):
+    """A dispatcher that needs a worker (show_image fetching a URL) hands
+    back a promise; the connection stays silent until it lands, then carries
+    the same frame a direct answer would have."""
+    pending = mcptools.DeferredResult()
+
+    def dispatch(pid, tool, args):
+        return pending
+
+    def client(sock_path, _service):
+        c = Client(sock_path)
+        c.hello()
+        c.send({"op": "call", "id": 4, "tool": "show_image", "args": {}})
+        # Nothing on the wire yet: the call is still out. Peeked with select
+        # rather than a timed read — a timeout leaves the buffered reader
+        # unusable for the read that matters.
+        assert not select.select([c.sock], [], [], 0.2)[0]
+        GLib.idle_add(pending.resolve, True, "Image shown.")
+        return c.read()
+
+    reply = run_with_client(tmp_path, client, dispatch=dispatch)
+    assert reply == {"id": 4, "ok": True, "message": "Image shown."}
+
+
+def test_a_deferred_failure_becomes_an_error_reply(tmp_path):
+    pending = mcptools.DeferredResult()
+
+    def client(sock_path, _service):
+        c = Client(sock_path)
+        c.hello()
+        c.send({"op": "call", "id": 5, "tool": "show_image", "args": {}})
+        GLib.idle_add(pending.resolve, False, "The server answered 404")
+        return c.read()
+
+    reply = run_with_client(tmp_path, client, dispatch=lambda *_a: pending)
+    assert reply == {"id": 5, "ok": False, "error": "The server answered 404"}
+
+
+def test_a_deferred_call_survives_the_session_hanging_up(tmp_path):
+    """The shim gives a call 15s; a fetch that outlives it comes back to a
+    connection that's gone. Resolving must land nowhere, not raise — and the
+    service must keep serving everyone else."""
+    pending = mcptools.DeferredResult()
+
+    def client(sock_path, _service):
+        first = Client(sock_path)
+        first.hello()
+        first.send({"op": "call", "id": 6, "tool": "show_image", "args": {}})
+        first.sock.close()
+        # Nothing is being read from that connection while its call is out,
+        # so the hangup only surfaces when the late reply is written to it.
+        done = threading.Event()
+
+        def answer():
+            pending.resolve(True, "Image shown.")
+            done.set()
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add(50, answer)
+        assert done.wait(_TIMEOUT_S)
+        second = Client(sock_path)
+        second.hello()
+        second.send({"op": "list", "id": 7})
+        return second.read()
+
+    reply = run_with_client(tmp_path, client, dispatch=lambda *_a: pending)
+    assert reply["id"] == 7 and reply["ok"] is True
 
 
 def test_missing_tool_name_is_an_error_not_a_disconnect(tmp_path):
