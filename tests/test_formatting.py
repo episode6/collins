@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 
 from collins.formatting import blast_radius_body, format_relative, md_to_pango
 
-
 # -- md_to_pango: the markdown PR bodies and comments lean on -----------------
 
 
