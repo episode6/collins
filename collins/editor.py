@@ -123,7 +123,7 @@ class EditorPane(Gtk.Box):
         # names. Re-assert the default once, from an idle after the first
         # map, when the real allocation exists; later maps leave whatever
         # width the user has dragged it to. Same first-show race as the
-        # outer editor paned's apply-pending gate (see _apply_editor_width).
+        # outer editor paned's apply-pending gate (see PanedSizer.apply).
         map_handler: list[int] = []
 
         def _on_first_map(widget: Gtk.Paned) -> None:

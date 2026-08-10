@@ -50,6 +50,7 @@ from .linkpatterns import (  # noqa: E402
     resolve_wrapped_reference,
     token_at_column,
 )
+from .panedsizer import PanedSizer  # noqa: E402
 from .providers import (  # noqa: E402
     EnteredPrompt,
     Provider,
@@ -1191,14 +1192,15 @@ class TerminalTab(Gtk.Box):
         )
         # The hairline divider is hard to grab; use the wide handle throughout.
         self._paned.set_wide_handle(True)
-        self._panel_sizes: dict[str, int] = {}  # this tab's panel px size per mode
-        self._panel_apply_pending = False  # a programmatic divider set is queued
-        self._panel_apply_seq = 0  # invalidates superseded apply/settle chains
-        self._panel_size_lookup = None  # mode -> app-wide last-set size (set by the window)
-        self._size_emit_source: int | None = None  # debounce for panel-size-changed
-        self._size_emit_mode: str | None = None  # mode whose size changed last
-        # Dragging the divider records the new panel size for the current mode.
-        self._paned.connect("notify::position", lambda *_: self._remember_panel_size())
+        # Remembers this tab's panel px size per mode and re-applies it
+        # safely on show/swap; re-emitted as panel-size-changed so the
+        # window can persist the app-wide default.
+        self._panel_sizer = PanedSizer(
+            self._paned, key=self._panel_mode, occupied=lambda: self.panel_visible
+        )
+        self._panel_sizer.connect(
+            "size-changed", lambda _s, mode, size: self.emit("panel-size-changed", mode, size)
+        )
         self._paned.set_start_child(self._overlay)
         self._paned.set_end_child(self._panel)
         self._paned.set_resize_start_child(True)
@@ -1222,10 +1224,6 @@ class TerminalTab(Gtk.Box):
         self.link_root: str = editor_root
         self._editor = editor.EditorPane(editor_root) if editor.HAVE_GTKSOURCE else None
         self._editor_detached = False  # pane reparented into its own EditorWindow
-        self._editor_width = 0  # this tab's last-set editor width, px (0 = none yet)
-        self._editor_apply_pending = False  # a programmatic divider set is queued
-        self._editor_width_lookup = None  # () -> app-wide last-set width (set by the window)
-        self._editor_width_emit_source: int | None = None  # debounce for editor-size-changed
         self._outer = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
         self._outer.set_wide_handle(True)
         self._outer.set_resize_start_child(True)
@@ -1248,7 +1246,15 @@ class TerminalTab(Gtk.Box):
         self._editor_follow_pending: str | None = None
         self._editor_follow_ticks = 0
         self._editor_follow_settled: str | None = None
-        self._outer.connect("notify::position", lambda *_: self._remember_editor_width())
+        # The editor paned's counterpart to _panel_sizer — one fixed key,
+        # since the editor column only ever has the one position. Its
+        # size-changed re-emits as editor-size-changed (minus the key).
+        self._outer_sizer = PanedSizer(
+            self._outer, key=lambda: "editor", occupied=lambda: self.editor_visible
+        )
+        self._outer_sizer.connect(
+            "size-changed", lambda _s, _key, size: self.emit("editor-size-changed", size)
+        )
         self.append(self._outer)
 
         self._footer_cwd: str | None = None  # last value shown in the footer
@@ -2647,14 +2653,14 @@ class TerminalTab(Gtk.Box):
         self._panel.open(restore)
         if not self.panel_visible:
             self._panel.set_visible(True)
-            self._apply_panel_size()
+            self._panel_sizer.apply()
         if focus:
             GLib.idle_add(self._panel.grab_terminal_focus)
 
     def hide_panel(self) -> None:
         if not self.panel_visible:
             return
-        self._remember_panel_size()
+        self._panel_sizer.remember()
         refocus = self._panel.has_terminal_focus()
         self._panel.set_visible(False)
         if refocus:
@@ -2700,12 +2706,14 @@ class TerminalTab(Gtk.Box):
         None when the panel was never used in this tab, so a session's saved
         state survives tabs that never touched the panel. Forks never
         persist (mirroring panel history)."""
-        if self.fork or (not self._panel.ever_spawned and not self._panel_sizes):
+        sizes = self._panel_sizer.snapshot()
+        if self.fork or (not self._panel.ever_spawned and not sizes):
             return None
-        self._remember_panel_size()  # capture the live divider position
+        self._panel_sizer.remember()  # capture the live divider position
         state: dict = {"open": self.panel_visible, "mode": self._panel_mode()}
-        if self._panel_sizes:
-            state["sizes"] = dict(self._panel_sizes)
+        sizes = self._panel_sizer.snapshot()
+        if sizes:
+            state["sizes"] = sizes
         return state
 
     def restore_panel_state(self, state: dict) -> None:
@@ -2717,9 +2725,7 @@ class TerminalTab(Gtk.Box):
         sizes = state.get("sizes")
         if isinstance(sizes, dict):
             for mode in ("bottom", "right"):
-                size = sizes.get(mode)
-                if isinstance(size, int) and size > 0:
-                    self._panel_sizes[mode] = size
+                self._panel_sizer.set_remembered(mode, sizes.get(mode))
         mode = state.get("mode")
         if mode in ("bottom", "right"):
             self._set_panel_mode(mode)
@@ -2729,13 +2735,13 @@ class TerminalTab(Gtk.Box):
     def swap_panel(self) -> str:
         """Move the panel bottom↔right (the shell keeps running) and return
         the new position: "bottom" or "right"."""
-        self._remember_panel_size()  # capture the outgoing mode's panel size
+        self._panel_sizer.remember()  # capture the outgoing mode's panel size
         to_bottom = self._paned.get_orientation() == Gtk.Orientation.HORIZONTAL
         self._paned.set_orientation(
             Gtk.Orientation.VERTICAL if to_bottom else Gtk.Orientation.HORIZONTAL
         )
         if self.panel_visible:
-            self._apply_panel_size()
+            self._panel_sizer.apply()
         return "bottom" if to_bottom else "right"
 
     def _set_panel_mode(self, mode: str) -> None:
@@ -2749,129 +2755,10 @@ class TerminalTab(Gtk.Box):
         vertical = self._paned.get_orientation() == Gtk.Orientation.VERTICAL
         return "bottom" if vertical else "right"
 
-    def _paned_total(self) -> int:
-        vertical = self._paned.get_orientation() == Gtk.Orientation.VERTICAL
-        return self._paned.get_height() if vertical else self._paned.get_width()
-
     def set_panel_size_lookup(self, lookup) -> None:
         """`lookup(mode) -> px` supplies the app-wide last-set panel size,
         used for modes this tab hasn't sized itself yet."""
-        self._panel_size_lookup = lookup
-
-    def _remember_panel_size(self) -> None:
-        """Record the panel's size for the current mode. Skipped while an
-        apply is still queued — the value it would read is the previous
-        mode's, and saving it would corrupt this mode's remembered size."""
-        if not self.panel_visible or self._panel_apply_pending:
-            return
-        total = self._paned_total()
-        if total <= 0:
-            return
-        mode = self._panel_mode()
-        size = total - self._paned.get_position()
-        if size > 0 and self._panel_sizes.get(mode) != size:
-            self._panel_sizes[mode] = size
-            if self._size_emit_source is not None:
-                GLib.source_remove(self._size_emit_source)
-                if self._size_emit_mode != mode:
-                    # A different mode's update is still pending (resize, then
-                    # swap within the debounce): flush it now rather than drop
-                    # it — each mode's default must be preserved independently.
-                    self._emit_size_changed()
-            self._size_emit_mode = mode
-            self._size_emit_source = GLib.timeout_add(500, self._emit_size_changed)
-
-    def _emit_size_changed(self) -> bool:
-        self._size_emit_source = None
-        mode = self._size_emit_mode
-        if mode in self._panel_sizes:
-            self.emit("panel-size-changed", mode, self._panel_sizes[mode])
-        return GLib.SOURCE_REMOVE
-
-    def _apply_panel_size(self) -> None:
-        """Size the panel once the paned's own size is known: this tab's
-        remembered size for the mode, else the app-wide last-set size, else
-        roughly a third of the paned.
-
-        The apply-pending gate stays up until the position sticks. Right
-        after a bottom↔right swap the panel's content still measures for the
-        old orientation (the VTE grid re-fits a frame or two later), so the
-        paned clamps the fresh position on the next allocation — and that
-        clamp arrives as a notify::position which _remember_panel_size would
-        record, silently overwriting the remembered size with the transient
-        one. Holding the gate and re-asserting across a few layout passes
-        keeps the clamp out of the books; if the size genuinely can't fit,
-        we give up without recording it, so the user's choice survives for
-        when there's room again.
-
-        While the gate is up, _remember_panel_size no-ops — including for
-        hide_panel and capture_panel_state, which then fall back to the
-        stored sizes. That's correct by construction: mid-settle, the stored
-        size for this mode is exactly the value being applied. A user who
-        grabs the divider inside the settle window wins immediately: settle
-        detects the drag and cedes (see below), rather than stomping it."""
-        self._panel_apply_pending = True
-        self._panel_apply_seq += 1
-        seq = self._panel_apply_seq
-        # get_position() reflects the *requested* value right after a set, so
-        # "did it stick?" can only be judged after the allocations that might
-        # clamp it — hence wall-clock re-assertions rather than one idle.
-        reasserts = [50, 150, 300]  # ms after the set; gate drops at the last
-
-        def position() -> bool:
-            if seq != self._panel_apply_seq:
-                return GLib.SOURCE_REMOVE  # a newer apply superseded this one
-            total = self._paned_total()
-            if total <= 0:
-                self._panel_apply_pending = False
-                return GLib.SOURCE_REMOVE
-            size = self._panel_sizes.get(self._panel_mode()) or 0
-            if size <= 0 and self._panel_size_lookup is not None:
-                size = self._panel_size_lookup(self._panel_mode()) or 0
-            if 0 < size < total:
-                target = total - size
-            else:  # nothing sensible remembered anywhere yet
-                target = int(total * 0.62)
-            self._paned.set_position(target)
-            for i, delay in enumerate(reasserts):
-                GLib.timeout_add(delay, settle, target, i == len(reasserts) - 1)
-            return GLib.SOURCE_REMOVE
-
-        def settle(target: int, last: bool) -> bool:
-            if seq != self._panel_apply_seq:
-                return GLib.SOURCE_REMOVE
-            if self._paned_drag_active():
-                # The user grabbed the handle mid-settle: the position is
-                # theirs now, not a clamp's. Cancel the rest of the chain
-                # (the seq bump kills the queued timeouts), open the gate,
-                # and record where their drag has the divider so far.
-                self._panel_apply_seq += 1
-                self._panel_apply_pending = False
-                self._remember_panel_size()
-            elif last:
-                # Give up quietly whether or not it stuck — one more set here
-                # could clamp again *after* the gate drops and be recorded.
-                # The remembered size must survive a clamp it didn't cause.
-                self._panel_apply_pending = False
-            elif self._paned.get_position() != target:
-                # clamped by a stale minimum — re-assert now that the panel's
-                # content has had a layout pass to re-fit
-                self._paned.set_position(target)
-            return GLib.SOURCE_REMOVE
-
-        GLib.idle_add(position)
-
-    def _paned_drag_active(self) -> bool:
-        """Whether the user is dragging the panel paned's own handle right
-        now. The paned's internal gestures only recognize presses that land
-        on the handle (presses elsewhere are denied and stay unrecognized),
-        so any recognized gesture here means a live divider drag."""
-        controllers = self._paned.observe_controllers()
-        for i in range(controllers.get_n_items()):
-            controller = controllers.get_item(i)
-            if isinstance(controller, Gtk.Gesture) and controller.is_recognized():
-                return True
-        return False
+        self._panel_sizer.set_lookup(lookup)
 
     # -- editor panel --------------------------------------------------------
 
@@ -2900,13 +2787,13 @@ class TerminalTab(Gtk.Box):
         if self._editor is None or self._editor_detached or self.editor_visible:
             return
         self._editor.set_visible(True)
-        self._apply_editor_width()
+        self._outer_sizer.apply()
         self._editor_toggle_btn.set_tooltip_text(_("Hide editor panel"))
 
     def hide_editor(self) -> None:
         if self._editor is None or not self.editor_visible:
             return
-        self._remember_editor_width()
+        self._outer_sizer.remember()
         self._editor.set_visible(False)
         self._editor_toggle_btn.set_tooltip_text(_("Show editor panel"))
 
@@ -2917,7 +2804,7 @@ class TerminalTab(Gtk.Box):
         and the footer icon means "bring it back" — until reattach_editor."""
         if self._editor is None or self._editor_detached:
             return None
-        self._remember_editor_width()  # dock-back reopens at this width
+        self._outer_sizer.remember()  # dock-back reopens at this width
         self._editor_detached = True
         self._outer.set_end_child(None)
         self._editor.set_visible(True)  # it may have been hidden along with the panel
@@ -2995,56 +2882,7 @@ class TerminalTab(Gtk.Box):
     def set_editor_width_lookup(self, lookup) -> None:
         """`lookup() -> px` supplies the app-wide last-set editor width, used
         for tabs that haven't sized their own editor yet."""
-        self._editor_width_lookup = lookup
-
-    def _remember_editor_width(self) -> None:
-        """Record the editor's width off the divider. Skipped while an apply
-        is still queued: revealing the pane re-lays the paned out at its
-        default fraction before `_apply_editor_width`'s idle callback runs,
-        and remembering *that* width poisons the very value the apply is
-        about to read — the settings lookup then never wins, and the
-        fraction gets persisted app-wide (the first-show width bug)."""
-        if not self.editor_visible or self._editor_apply_pending:
-            return
-        total = self._outer.get_width()
-        if total <= 0:
-            return
-        width = total - self._outer.get_position()
-        if width <= 0 or width == self._editor_width:
-            return
-        self._editor_width = width
-        if self._editor_width_emit_source is not None:
-            GLib.source_remove(self._editor_width_emit_source)
-        self._editor_width_emit_source = GLib.timeout_add(500, self._emit_editor_width_changed)
-
-    def _emit_editor_width_changed(self) -> bool:
-        self._editor_width_emit_source = None
-        self.emit("editor-size-changed", self._editor_width)
-        return GLib.SOURCE_REMOVE
-
-    def _apply_editor_width(self) -> None:
-        """Size the editor panel once the outer paned's own size is known:
-        this tab's remembered width, else the app-wide last-set width, else
-        roughly a third of the paned. A simplified copy of
-        `_apply_panel_size` — one position, no per-mode bookkeeping, but the
-        same apply-pending gate (see `_remember_editor_width`)."""
-        self._editor_apply_pending = True
-
-        def position() -> bool:
-            self._editor_apply_pending = False
-            total = self._outer.get_width()
-            if total <= 0:
-                return GLib.SOURCE_REMOVE
-            width = self._editor_width or 0
-            if width <= 0 and self._editor_width_lookup is not None:
-                width = self._editor_width_lookup() or 0
-            if 0 < width < total:
-                self._outer.set_position(total - width)
-            else:
-                self._outer.set_position(int(total * 0.62))
-            return GLib.SOURCE_REMOVE
-
-        GLib.idle_add(position)
+        self._outer_sizer.set_lookup(lambda _key: lookup())
 
     def capture_editor_state(self) -> dict | None:
         """Snapshot the editor's open/width/files for per-session persistence,
@@ -3055,7 +2893,7 @@ class TerminalTab(Gtk.Box):
             return None
         if not self.editor_visible and not self._editor_detached and not self._editor.open_paths():
             return None
-        self._remember_editor_width()
+        self._outer_sizer.remember()
         # A popped-out editor counts as open: the window itself isn't
         # persisted, so the session restores with the panel showing in-tab.
         state: dict = {
@@ -3068,8 +2906,9 @@ class TerminalTab(Gtk.Box):
         active = self._editor.active_path()
         if active:
             state["active"] = active
-        if self._editor_width:
-            state["width"] = self._editor_width
+        width = self._outer_sizer.remembered("editor")
+        if width:
+            state["width"] = width
         return state
 
     def restore_editor_state(self, state: dict) -> None:
@@ -3078,9 +2917,7 @@ class TerminalTab(Gtk.Box):
         a session must not disturb the app-wide default for new tabs."""
         if self._editor is None:
             return
-        width = state.get("width")
-        if isinstance(width, int) and width > 0:
-            self._editor_width = width
+        self._outer_sizer.set_remembered("editor", state.get("width"))
         files = state.get("files")
         if isinstance(files, list) and files:
             cursors = state.get("cursors")
