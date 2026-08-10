@@ -2196,3 +2196,21 @@ msgstr ""
 #: collins/prview.py:449
 msgid "Pull request"
 msgstr ""
+
+#: collins/prview.py:230
+msgid "Files"
+msgstr ""
+
+#: collins/prview.py:596
+msgid "No changed files."
+msgstr ""
+
+#: collins/prview.py:692
+msgid "no diff — binary or too large"
+msgstr ""
+
+#: collins/prview.py:703
+msgid "{n} line"
+msgid_plural "{n} lines"
+msgstr[0] ""
+msgstr[1] ""

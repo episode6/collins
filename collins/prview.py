@@ -4,12 +4,15 @@
 
 `PrViewPage` is the `pr` kind of PanelPage (see panelstrip): a panel-dock tab
 beside the agent terminal showing what the PR's own page would — header,
-description, checks, conversation — off the `gh` auth Collins already has.
-The data is `prdetail.fetch`'s reply, fetched on a worker thread on first
-show, on the Refresh button, and (throttled) whenever the page comes back
-into view; the widgets here only ever render what that GTK-free layer parsed
-and bounded. Failures keep the last-loaded content under an inline banner —
-stale beats blank, as everywhere in the PR stack.
+description, checks, conversation, and the per-file diff — off the `gh` auth
+Collins already has. Two views under one switcher: **Conversation** (the
+description, checks and timeline column) and **Files** (a navigation list
+beside every file's patch in a GtkSource diff buffer, styled by the editor's
+own scheme setting). The data is `prdetail.fetch`'s reply, fetched on a
+worker thread on first show, on the Refresh button, and (throttled) whenever
+the page comes back into view; the widgets here only ever render what that
+GTK-free layer parsed and bounded. Failures keep the last-loaded content
+under an inline banner — stale beats blank, as everywhere in the PR stack.
 
 Everything shown is repository content and therefore untrusted: bodies go
 through `formatting.md_to_pango`'s escaping (with the plain-text fallback on
@@ -32,6 +35,9 @@ from gi.repository import Adw, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from . import prdetail, prmenu  # noqa: E402
 from .copylabel import open_tooltip, open_uri  # noqa: E402
+# GtkSource arrives through editor, where the require_version and the
+# friendly missing-typelib exit live (it is a hard dependency everywhere).
+from .editor import GtkSource, style_scheme  # noqa: E402
 from .formatting import format_relative, format_timestamp, md_to_pango  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 from .prstatus import PullRequest  # noqa: E402
@@ -45,6 +51,13 @@ _FOCUS_REFRESH_MIN_US = 10 * 1_000_000
 # prdetail's storage bound: a label this long is already a scroll of its own,
 # and Pango layout cost grows with every character the main loop hands it.
 _RENDER_CAP = 20_000
+# A patch past this many lines starts collapsed and only builds its buffer on
+# first expand: GtkSource renders it fine, but a fetch landing a handful of
+# eagerly built multi-thousand-line buffers would wedge the main loop.
+_LARGE_PATCH_LINES = 2_000
+# The file list's share of the Files view until the user drags the divider —
+# the editor gives its file tree the same kind of sliver (_TREE_INITIAL_WIDTH).
+_FILE_LIST_WIDTH = 170
 
 def _verdict(state: str) -> tuple[str, str | None, str]:
     """A review's verdict as its card heading: icon, color class, wording.
@@ -166,25 +179,70 @@ class PrViewPage(Adw.Bin):
         self._banner = Gtk.Revealer(child=banner_box)
         self._banner.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
 
-        # -- content ---------------------------------------------------------
+        # -- conversation -----------------------------------------------------
         self._content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self._content.set_margin_top(10)
         self._content.set_margin_bottom(10)
         self._content.set_margin_start(10)
         self._content.set_margin_end(10)
-        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        column.append(self._banner)
-        column.append(self._content)
-        self._scroller = Gtk.ScrolledWindow(child=column, vexpand=True)
+        self._scroller = Gtk.ScrolledWindow(child=self._content, vexpand=True)
         self._scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self._scroller.set_focusable(True)
 
+        # -- files ------------------------------------------------------------
+        # The diff buffers follow the editor's style-scheme setting (or the
+        # app's light/dark when it says "follow"), fanned in via apply_settings
+        # and the style manager — the same pair editor.py listens to.
+        self._scheme_setting = ""
+        style_manager = Adw.StyleManager.get_default()
+        self._dark = style_manager.get_dark()
+        self._dark_id = style_manager.connect("notify::dark", self._on_dark_changed)
+        self.connect("destroy", self._on_destroy)
+
+        self._sections: list[_FileSection] = []
+        self._file_list = Gtk.ListBox()
+        self._file_list.add_css_class("navigation-sidebar")
+        self._file_list.connect("row-activated", self._on_file_row)
+        list_scroller = Gtk.ScrolledWindow(child=self._file_list, vexpand=True)
+        list_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._files_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self._files_column.set_margin_top(10)
+        self._files_column.set_margin_bottom(10)
+        self._files_column.set_margin_start(10)
+        self._files_column.set_margin_end(10)
+        self._files_scroller = Gtk.ScrolledWindow(
+            child=self._files_column, vexpand=True, hexpand=True
+        )
+        self._files_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._files_scroller.set_focusable(True)
+        files_paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
+        files_paned.set_start_child(list_scroller)
+        files_paned.set_resize_start_child(False)
+        files_paned.set_end_child(self._files_scroller)
+        files_paned.set_position(_FILE_LIST_WIDTH)
+
+        # -- the two views under one switcher ---------------------------------
+        self._stack = Adw.ViewStack(vexpand=True)
+        self._stack.add_titled_with_icon(
+            self._scroller, "conversation", _("Conversation"), "chat-bubble-symbolic"
+        )
+        self._stack.add_titled_with_icon(files_paned, "files", _("Files"), "ft-file-symbolic")
+        switcher = Adw.ViewSwitcher(stack=self._stack)
+        switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+        switcher.set_halign(Gtk.Align.CENTER)
+
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        column.append(self._banner)  # above the stack: it speaks for both views
+        column.append(self._stack)
+
         view = Adw.ToolbarView()
         view.add_top_bar(header)
-        view.set_content(self._scroller)
+        view.add_top_bar(switcher)
+        view.set_content(column)
         self.set_child(view)
 
         self._show_loading()
+        self._files_placeholder(_("Nothing loaded yet."))
         self._sync_header()
         # First shown (and every re-show): read the PR. "map" covers the
         # strip appearing, this tab being selected, and the session tab
@@ -213,7 +271,10 @@ class PrViewPage(Adw.Bin):
         return prmenu.state_icon_name(self._pr.state)
 
     def grab_page_focus(self) -> None:
-        self._scroller.grab_focus()
+        if self._stack.get_visible_child_name() == "files":
+            self._files_scroller.grab_focus()
+        else:
+            self._scroller.grab_focus()
 
     def has_page_focus(self) -> bool:
         root = self.get_root()
@@ -224,7 +285,12 @@ class PrViewPage(Adw.Bin):
         return False  # nothing running: a PR page is cheap to refetch
 
     def apply_settings(self, settings: dict) -> None:
-        pass  # renders in the app font and theme; nothing terminal-ish here
+        """Only the editor's style scheme matters here: the diff buffers wear
+        it. Everything else renders in the app font and theme already."""
+        scheme = settings.get("editor_style_scheme") or ""
+        if scheme != self._scheme_setting:
+            self._scheme_setting = scheme
+            self._apply_scheme()
 
     def page_state(self) -> dict:
         """This page's slot in a serialized dock layout (see panellayout):
@@ -287,6 +353,7 @@ class PrViewPage(Adw.Bin):
         self._pr = detail.summary
         self._sync_header()
         self._rebuild()
+        self._rebuild_files()
         self.emit("title-changed")
         return GLib.SOURCE_REMOVE
 
@@ -500,6 +567,203 @@ class PrViewPage(Adw.Bin):
         box.append(label)
         box.append(more)
         return box
+
+    # -- the files view --------------------------------------------------------
+
+    def _clear_files(self) -> None:
+        self._sections = []
+        child = self._files_column.get_first_child()
+        while child is not None:
+            self._files_column.remove(child)
+            child = self._files_column.get_first_child()
+        row = self._file_list.get_row_at_index(0)
+        while row is not None:
+            self._file_list.remove(row)
+            row = self._file_list.get_row_at_index(0)
+
+    def _files_placeholder(self, text: str) -> None:
+        self._clear_files()
+        label = Gtk.Label(label=text)
+        label.add_css_class("dim-label")
+        label.set_margin_top(24)
+        self._files_column.append(label)
+
+    def _rebuild_files(self) -> None:
+        detail = self._detail
+        self._clear_files()
+        if not detail.files:
+            self._files_placeholder(_("No changed files."))
+            return
+        scheme = style_scheme(self._scheme_setting, self._dark)
+        for file in detail.files:
+            section = _FileSection(file, scheme)
+            self._sections.append(section)
+            self._files_column.append(section)
+            self._file_list.append(self._file_row(file))
+
+    def _file_row(self, file: prdetail.PrFile) -> Gtk.Widget:
+        """One navigation-list row: the path, then its +/− counts."""
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        path = Gtk.Label(label=file.path, xalign=0.0, hexpand=True)
+        path.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        path.set_tooltip_text(file.path)
+        path.add_css_class("caption")
+        row.append(path)
+        row.append(_count_label(f"+{file.additions}", "pr-checks-passed"))
+        row.append(_count_label(f"−{file.deletions}", "pr-checks-failed"))
+        return row
+
+    def _on_file_row(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
+        index = row.get_index()
+        if not 0 <= index < len(self._sections):
+            return
+        section = self._sections[index]
+        section.reveal()  # a collapsed big patch was asked for by name
+        self._scroll_to_section(section)
+
+    def _scroll_to_section(self, section: Gtk.Widget) -> None:
+        """Put *section*'s top at the top of the Files scroll.
+
+        Placed twice: a just-built (or just-expanded) diff buffer reports
+        estimated heights first, so the first placement lands short — the
+        PRIORITY_LOW re-issue runs after layout settles and corrects it
+        (the scroll_to_iter lesson from the editor, box-scroll flavored).
+        """
+
+        def place() -> bool:
+            ok, bounds = section.compute_bounds(self._files_scroller)
+            if ok:
+                adj = self._files_scroller.get_vadjustment()
+                target = adj.get_value() + bounds.get_y()
+                adj.set_value(max(0.0, min(target, adj.get_upper() - adj.get_page_size())))
+            return GLib.SOURCE_REMOVE
+
+        place()
+        GLib.idle_add(place, priority=GLib.PRIORITY_LOW)
+
+    # -- appearance ------------------------------------------------------------
+
+    def _on_dark_changed(self, manager: Adw.StyleManager, _pspec) -> None:
+        self._dark = manager.get_dark()
+        if not self._scheme_setting:  # "" = following the app's scheme
+            self._apply_scheme()
+
+    def _apply_scheme(self) -> None:
+        scheme = style_scheme(self._scheme_setting, self._dark)
+        for section in self._sections:
+            section.set_scheme(scheme)
+
+    def _on_destroy(self, *_args) -> None:
+        # The style manager outlives any page; a closed one must let go.
+        if self._dark_id is not None:
+            Adw.StyleManager.get_default().disconnect(self._dark_id)
+            self._dark_id = None
+
+
+class _FileSection(Gtk.Box):
+    """One file of the diff: a header row (path, +/− counts), then the patch
+    in a GtkSource diff buffer.
+
+    A patch past `_LARGE_PATCH_LINES` starts collapsed showing its line count
+    and only builds its buffer on first expand; a file with no patch at all —
+    binary, an over-cap diff, or a failed diff call — is the header alone
+    with a stat-only note (see prdetail.PrFile).
+    """
+
+    def __init__(self, file: prdetail.PrFile, scheme: GtkSource.StyleScheme | None) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.add_css_class("pr-file-section")
+        self._file = file
+        self._scheme = scheme
+        self._buffer: GtkSource.Buffer | None = None
+        self._expander: Gtk.Expander | None = None
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
+        path = Gtk.Label(label=file.path, xalign=0.0, hexpand=True)
+        path.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        path.set_tooltip_text(file.path)
+        path.add_css_class("pr-file-path")
+        header.append(path)
+        header.append(_count_label(f"+{file.additions}", "pr-checks-passed"))
+        header.append(_count_label(f"−{file.deletions}", "pr-checks-failed"))
+
+        if file.patch is None:
+            note = Gtk.Label(label=_("no diff — binary or too large"))
+            note.add_css_class("caption")
+            note.add_css_class("dim-label")
+            header.append(note)
+            self.append(header)
+            return
+
+        lines = file.patch.count("\n")
+        large = lines > _LARGE_PATCH_LINES
+        if large:
+            count = Gtk.Label(
+                label=ngettext("{n} line", "{n} lines", lines).format(n=lines)
+            )
+            count.add_css_class("caption")
+            count.add_css_class("dim-label")
+            header.append(count)
+        expander = Gtk.Expander(label_widget=header)
+        expander.set_expanded(not large)
+        self._expander = expander
+        self.append(expander)
+        if large:
+            expander.connect("notify::expanded", self._on_expanded)
+        else:
+            expander.set_child(self._diff_widget())
+
+    def reveal(self) -> None:
+        """Expand (building the buffer if this is the first time)."""
+        if self._expander is not None:
+            self._expander.set_expanded(True)
+
+    def set_scheme(self, scheme: GtkSource.StyleScheme | None) -> None:
+        """Restyle a built buffer now; a lazy one picks *scheme* up on build."""
+        self._scheme = scheme
+        if self._buffer is not None and scheme is not None:
+            self._buffer.set_style_scheme(scheme)
+
+    def _on_expanded(self, expander: Gtk.Expander, _pspec) -> None:
+        if expander.get_expanded() and expander.get_child() is None:
+            expander.set_child(self._diff_widget())
+
+    def _diff_widget(self) -> Gtk.Widget:
+        """The patch in a read-only GtkSource view, diff-highlighted.
+
+        Its own horizontal scroll (natural height propagated, no vertical
+        bar) so a long diff line pans within the section instead of forcing
+        the whole panel wide — the page's column scroller never scrolls
+        sideways.
+        """
+        buffer = GtkSource.Buffer()
+        language = GtkSource.LanguageManager.get_default().get_language("diff")
+        if language is not None:
+            buffer.set_language(language)
+        if self._scheme is not None:
+            buffer.set_style_scheme(self._scheme)
+        buffer.set_text(self._file.patch)
+        self._buffer = buffer
+        view = GtkSource.View(buffer=buffer)
+        view.set_editable(False)
+        view.set_cursor_visible(False)
+        view.set_monospace(True)
+        view.set_left_margin(6)
+        view.set_right_margin(6)
+        view.set_top_margin(4)
+        view.set_bottom_margin(4)
+        scroller = Gtk.ScrolledWindow(child=view, hexpand=True)
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scroller.set_propagate_natural_height(True)
+        return scroller
+
+
+def _count_label(text: str, css_class: str) -> Gtk.Label:
+    """A +n/−n caption in the checks-passed green or checks-failed red."""
+    label = Gtk.Label(label=text)
+    label.add_css_class("caption")
+    label.add_css_class(css_class)
+    return label
 
 
 def _set_md(label: Gtk.Label, text: str) -> None:
