@@ -1261,6 +1261,21 @@ msgstr ""
 msgid "Close Tab"
 msgstr ""
 
+#: collins/panelstrip.py:290
+msgid "Close tabs with running commands?"
+msgstr ""
+
+#: collins/panelstrip.py:291
+msgid "A command is still running in one of these tabs and will be terminated."
+msgid_plural ""
+"Commands are still running in {count} of these tabs and will be terminated."
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/panelstrip.py:296
+msgid "Close Tabs"
+msgstr ""
+
 #: collins/window.py:1036
 msgid "Background Session"
 msgstr ""
