@@ -72,10 +72,13 @@ def md_to_pango(text: str, links: bool = False) -> str:
     text = _HEADING_RE.sub(lambda m: f"<b>{m.group(1)}</b>", text)
     text = _BLOCKQUOTE_RE.sub(_blockquote_markup, text)
     text = _BOLD_RE.sub(lambda m: f"<b>{m.group(1)}</b>", text)
+    # Bullets before single-star italics: a star bullet's marker is a lone *
+    # at line start, and the italic pass would otherwise claim it as an
+    # opening delimiter whenever another * appears later on the line.
+    text = _BULLET_RE.sub(lambda m: f"{m.group(1)}• ", text)
     text = _ITALIC_STAR_RE.sub(lambda m: f"<i>{m.group(1)}</i>", text)
     text = _ITALIC_UNDER_RE.sub(lambda m: f"<i>{m.group(1)}</i>", text)
     text = _STRIKE_RE.sub(lambda m: f"<s>{m.group(1)}</s>", text)
-    text = _BULLET_RE.sub(lambda m: f"{m.group(1)}• ", text)
     text = _renumber_lists(text)
     for i, markup in enumerate(stash):
         text = text.replace(f"{_SENT_A}{i}{_SENT_B}", markup)

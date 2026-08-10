@@ -53,6 +53,12 @@ def test_md_blockquote_leaves_neighbouring_lines_alone():
     )
 
 
+def test_md_star_bullet_keeps_its_marker_next_to_italics():
+    # The bullet's lone * must not become an italic delimiter for a later
+    # *span* on the same line (caught in PR 267's review).
+    assert md_to_pango("* first *word* rest") == "• first <i>word</i> rest"
+
+
 def test_md_numbered_lists_count_as_rendered():
     # GitHub's rule: authors write "1." all the way down, renderers count.
     assert md_to_pango("1. first\n1. second\n1. third") == "1. first\n2. second\n3. third"
