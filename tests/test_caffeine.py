@@ -66,12 +66,15 @@ def test_the_grace_setting_is_in_minutes():
     assert grace_seconds(1) == 60
     assert grace_seconds(30) == 1800
     assert grace_seconds("15") == 900  # a hand-edited state.json still counts
+    assert grace_seconds(15.0) == 900  # a whole number of minutes, however typed
 
 
-@pytest.mark.parametrize("bad", [None, "", "soon", "2.5", 0, -5])
+@pytest.mark.parametrize("bad", [None, "", "soon", "2.5", 2.5, 0, -5])
 def test_a_bad_grace_setting_falls_back_to_the_default(bad):
     # Garbage must never read as a zero-length grace that lets the machine
-    # sleep the instant work stops — the default is the honest fallback.
+    # sleep the instant work stops — the default is the honest fallback. A
+    # fractional value counts as garbage too: whole minutes only, never a
+    # silent truncation to fewer than asked for.
     assert grace_seconds(bad) == ACTIVE_GRACE_S
 
 

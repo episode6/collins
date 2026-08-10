@@ -53,13 +53,16 @@ def grace_seconds(minutes: object) -> int:
     """The Until-idle grace in seconds, from the minutes setting.
 
     Anything that doesn't read as a whole minute or more — a hand-edited
-    setting, a stale type from an older state.json — falls back to the
-    five-minute default rather than becoming a zero-length grace that would
-    let the machine sleep the instant work stops. Kept next to the rule it
-    feeds (`follow_poll`) so the sanitizing can be tested without a display.
+    setting, a fractional value, a stale type from an older state.json —
+    falls back to the five-minute default rather than becoming a zero-length
+    (or silently rounded-down) grace that lets the machine sleep sooner than
+    anything asked for. Kept next to the rule it feeds (`follow_poll`) so the
+    sanitizing can be tested without a display.
     """
     try:
         value = int(minutes)  # type: ignore[call-overload]
+        if value != float(minutes):  # type: ignore[arg-type]
+            return ACTIVE_GRACE_S  # fractional: whole minutes only, no truncating
     except (TypeError, ValueError):
         return ACTIVE_GRACE_S
     if value < 1:
