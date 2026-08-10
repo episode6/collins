@@ -35,9 +35,7 @@ from gi.repository import Adw, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from . import prdetail, prmenu  # noqa: E402
 from .copylabel import open_tooltip, open_uri  # noqa: E402
-# GtkSource arrives through editor, where the require_version and the
-# friendly missing-typelib exit live (it is a hard dependency everywhere).
-from .editor import GtkSource, style_scheme  # noqa: E402
+from .editor import GtkSource, style_scheme  # noqa: E402 — require_version + friendly exit live there
 from .formatting import format_relative, format_timestamp, md_to_pango  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 from .prstatus import PullRequest  # noqa: E402
