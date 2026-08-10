@@ -2,19 +2,21 @@
 
 """Drop-zone geometry for the panel dock's edge docking, GTK-free.
 
-While a panel page is being dragged by its strip's grip, the dock overlays
-drop zones on every visible leaf: four edge zones (split that leaf and put
-the page in a new strip there) and, on strips only, a center zone (join as
-a tab). This module is the pure geometry — which zone a pointer position
-lands in, and the rectangle to highlight for it — so the rules are
-unit-testable without a display. The GTK realization (`DropZones` in
-paneldnd.py) feeds it leaf bounds and draws whatever it answers.
+While a panel page's tab is being dragged, the dock overlays drop zones
+on every visible leaf: four edge zones (split that leaf and put the page
+in a new strip there) and, on strips only, a center zone (join as a tab
+at the pointer's position — which is also how tabs reorder within their
+own strip). This module is the pure geometry — which zone a pointer
+position lands in, the rectangle to highlight for it, and where among a
+row of tabs a drop inserts — so the rules are unit-testable without a
+display. The GTK realization (`DropZones` in paneldnd.py) feeds it leaf
+bounds and draws whatever it answers.
 
 A zone is one of "left" | "right" | "above" | "below" | "center", matching
 `docktree.split` sides. Each leaf carries its own set of *allowed* zones —
-the terminal never offers center, a drag's source strip never offers a
-zone that would reassemble the same layout — and a pointer over a leaf
-with no allowed zone hits nothing.
+the terminal never offers center, a single-page drag source offers
+nothing (every drop would reassemble the same layout) — and a pointer
+over a leaf with no allowed zone hits nothing.
 """
 
 from __future__ import annotations
@@ -66,6 +68,16 @@ def hit(leaves, x: float, y: float) -> tuple[int, str] | None:
             zone = zone_at(width, height, x - lx, y - ly, allowed)
             return None if zone is None else (index, zone)
     return None
+
+
+def insert_index(centers, x: float) -> int:
+    """Where a tab dropped at *x* inserts among tabs whose horizontal
+    centers are *centers* (in the same coordinate space, any order): before
+    the first tab whose center lies right of the drop point. The result
+    counts every listed tab — a same-strip reorder subtracts the dragged
+    tab itself when it started left of the target (see
+    PanelStrip.reorder_to)."""
+    return sum(1 for center in centers if center < x)
 
 
 def zone_rect(

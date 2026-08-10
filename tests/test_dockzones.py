@@ -4,7 +4,7 @@
 
 import pytest
 
-from collins.dockzones import EDGE_ZONES, hit, zone_at, zone_rect
+from collins.dockzones import EDGE_ZONES, hit, insert_index, zone_at, zone_rect
 
 ALL = EDGE_ZONES + ("center",)
 
@@ -94,6 +94,26 @@ def test_hit_leaf_with_no_zones_swallows_the_point():
     # hits no zone, and does NOT fall through to a leaf behind it.
     leaves = [(0, 0, 400, 100, ())]
     assert hit(leaves, 200, 50) is None
+
+
+# -- insert_index ------------------------------------------------------------
+
+
+def test_insert_index_counts_tabs_left_of_the_drop():
+    centers = [50, 150, 250]
+    assert insert_index(centers, 10) == 0  # before every tab
+    assert insert_index(centers, 100) == 1  # between the first two
+    assert insert_index(centers, 200) == 2
+    assert insert_index(centers, 900) == 3  # past every tab: append
+
+
+def test_insert_index_with_no_tabs_appends():
+    assert insert_index([], 120) == 0
+
+
+def test_insert_index_ignores_center_order():
+    # Callers pass centers as found; only the count left of x matters.
+    assert insert_index([250, 50, 150], 100) == 1
 
 
 # -- zone_rect ---------------------------------------------------------------

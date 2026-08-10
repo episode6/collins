@@ -128,11 +128,9 @@ class PanelStrip(Gtk.Box):
         end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         end_box.append(add_btn)
         end_box.append(swap_btn)
-        # The grip: drag it to dock the selected page against any leaf's
-        # edge (drop zones light up dock-wide). Inert without a page mover.
-        end_box.append(paneldnd.make_grip(self))
         bar.set_end_action_widget(end_box)
 
+        self._bar = bar
         self.append(bar)
         self.append(self._view)
 
@@ -143,6 +141,12 @@ class PanelStrip(Gtk.Box):
         """The strip's `Adw.TabView` — what registers with the tab-DnD
         guard and what a guard bounce transfers pages into."""
         return self._view
+
+    @property
+    def tab_bar(self) -> Adw.TabBar:
+        """The strip's inline `Adw.TabBar` — walked for the private tab
+        widgets the per-tab drag sources ride on (see paneldnd)."""
+        return self._bar
 
     @property
     def page_mover(self):
@@ -231,11 +235,27 @@ class PanelStrip(Gtk.Box):
         if page is not None:
             self._view.set_selected_page(page)
 
+    def reorder_to(self, widget, insert_index: int) -> None:
+        """Reorder *widget*'s tab to sit before the tab currently at
+        *insert_index* (an index that counts the moved tab itself, as
+        dockzones.insert_index yields): moving right, the departure shifts
+        everything after it left by one, so the final position is one less
+        than the insertion point."""
+        page = self._find_page(widget)
+        if page is None:
+            return
+        current = self._view.get_page_position(page)
+        position = insert_index - 1 if current < insert_index else insert_index
+        self._view.reorder_page(page, max(position, 0))
+
     # -- page signal lifecycle ----------------------------------------------
 
     def _on_page_attached(self, _view, page: Adw.TabPage, _position) -> None:
         """Wire the page's optional signals to *this* strip — on creation
-        and again whenever a transfer lands it here."""
+        and again whenever a transfer lands it here — and give its tab the
+        drag handle. Both are gated to protocol pages: a foreign tab that
+        native DnD drops here for the one turn before the guard bounces it
+        must leave unmarked and unwired (see shell_pages)."""
         widget = page.get_child()
         ids = []
         if GObject.signal_lookup("shell-exited", widget.__gtype__):
@@ -243,6 +263,9 @@ class PanelStrip(Gtk.Box):
         if GObject.signal_lookup("bell", widget.__gtype__):
             ids.append(widget.connect("bell", lambda *_: self.emit("bell")))
         self._page_signals[widget] = ids
+        if getattr(widget, "page_kind", None) is not None:
+            page.set_indicator_icon(Gio.ThemedIcon.new(paneldnd.HANDLE_ICON))
+            paneldnd.wire_tab_drag(self, widget)
 
     def _on_page_detached(self, _view, page: Adw.TabPage, _position) -> None:
         """Unwire a departing page (close or transfer-out) and report an
