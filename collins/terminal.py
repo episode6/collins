@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-10. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -70,6 +70,7 @@ from .prstatus import (  # noqa: E402
     to_records,
 )
 from .sessions import worktree_project_root  # noqa: E402
+from .shellinput import shell_command  # noqa: E402
 from .transcript import TranscriptModel  # noqa: E402
 
 _TRANSCRIPT_DEBOUNCE_MS = 400
@@ -786,8 +787,9 @@ class PanelTerminal(Gtk.Box):
             return  # don't interrupt whatever the user left running
         if proctree.process_cwd(self._child_pid) == cwd:
             return
-        # \x15 (kill-line) clears any half-typed input before the cd.
-        self.terminal.feed_child(f"\x15cd {shlex.quote(cwd)}\n".encode())
+        # The line reset clears any half-typed input before the cd; see
+        # shellinput for what else can be sitting on that line.
+        self.terminal.feed_child(shell_command(f"cd {shlex.quote(cwd)}\n").encode())
 
     def has_running_command(self) -> bool:
         return _has_running_command(self.terminal, self._child_pid)
