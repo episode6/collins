@@ -50,6 +50,7 @@ from .linkpatterns import (  # noqa: E402
     token_at_column,
 )
 from .panedsizer import PanedSizer  # noqa: E402
+from .paneldock import PanelDock  # noqa: E402
 from .panelstrip import PanelStrip  # noqa: E402
 from .providers import (  # noqa: E402
     EnteredPrompt,
@@ -999,36 +1000,24 @@ class TerminalTab(Gtk.Box):
         self._overlay.add_css_class("terminal-gutter")
         self._overlay.set_child(self._width_clamp)
 
-        # Secondary panel — a strip of panel pages (shells, for now) — below
-        # or beside the agent terminal. Swapping bottom↔right only flips the
-        # paned's orientation, so the shells keep running.
-        self._panel = PanelStrip(shell_factory=PanelTerminal)
-        self._panel.set_visible(False)
-        self._panel.connect("empty", lambda *_: self.hide_panel())
-        self._panel.connect("bell", lambda *_: self.emit("bell"))
-        self._panel.set_cwd_lookup(self.current_agent_cwd)
+        # The panel dock — strips of panel pages (shells, for now) split
+        # around the agent terminal in a tree of fixed-axis paneds. Pages
+        # move between strips by reparenting, so shells keep running; the
+        # old bottom↔right orientation flip is gone (swap now *moves* the
+        # shells to the other home edge). Divider sizes ride per-paned
+        # PanedSizers inside the dock; the home strip's re-emits here as
+        # panel-size-changed so the window can persist app-wide defaults.
         panel_right = bool(settings) and settings.get("panel_position") == "right"
-        self._paned = Gtk.Paned(
-            orientation=Gtk.Orientation.HORIZONTAL if panel_right else Gtk.Orientation.VERTICAL,
-            vexpand=True,
+        self._dock = PanelDock(
+            terminal=self._overlay,
+            strip_factory=self._make_panel_strip,
+            home_position="right" if panel_right else "bottom",
         )
-        # The hairline divider is hard to grab; use the wide handle throughout.
-        self._paned.set_wide_handle(True)
-        # Remembers this tab's panel px size per mode and re-applies it
-        # safely on show/swap; re-emitted as panel-size-changed so the
-        # window can persist the app-wide default.
-        self._panel_sizer = PanedSizer(
-            self._paned, key=self._panel_mode, occupied=lambda: self.panel_visible
+        self._dock.connect("bell", lambda *_: self.emit("bell"))
+        self._dock.connect(
+            "size-changed", lambda _d, mode, size: self.emit("panel-size-changed", mode, size)
         )
-        self._panel_sizer.connect(
-            "size-changed", lambda _s, mode, size: self.emit("panel-size-changed", mode, size)
-        )
-        self._paned.set_start_child(self._overlay)
-        self._paned.set_end_child(self._panel)
-        self._paned.set_resize_start_child(True)
-        self._paned.set_shrink_start_child(False)
-        self._paned.set_resize_end_child(False)
-        self._paned.set_shrink_end_child(False)
+        self._dock.set_focus_terminal(self.grab_terminal_focus)
 
         # Editor panel: a full-height right column beside the terminal↔shell
         # split above, in a new outer paned. Built now (but hidden) rather
@@ -1052,7 +1041,7 @@ class TerminalTab(Gtk.Box):
         self._outer.set_shrink_start_child(False)
         self._outer.set_resize_end_child(False)
         self._outer.set_shrink_end_child(False)
-        self._outer.set_start_child(self._paned)
+        self._outer.set_start_child(self._dock)
         if self._editor is not None:
             self._editor.set_visible(False)
             self._outer.set_end_child(self._editor)
@@ -1068,7 +1057,7 @@ class TerminalTab(Gtk.Box):
         self._editor_follow_pending: str | None = None
         self._editor_follow_ticks = 0
         self._editor_follow_settled: str | None = None
-        # The editor paned's counterpart to _panel_sizer — one fixed key,
+        # The editor paned's counterpart to the dock's sizers — one fixed key,
         # since the editor column only ever has the one position. Its
         # size-changed re-emits as editor-size-changed (minus the key).
         self._outer_sizer = PanedSizer(
@@ -2454,9 +2443,20 @@ class TerminalTab(Gtk.Box):
 
     # -- secondary terminal panel ------------------------------------------
 
+    def _make_panel_strip(self) -> PanelStrip:
+        """The dock's strip factory: every strip spawns this tab's shells
+        (numbered dock-wide) at the agent's current working directory."""
+        strip = PanelStrip(
+            shell_factory=lambda: PanelTerminal(self._dock.next_shell_number())
+        )
+        strip.set_cwd_lookup(self.current_agent_cwd)
+        return strip
+
     @property
     def panel_visible(self) -> bool:
-        return self._panel.get_visible()
+        """Whether the shells' home strip is showing — the state Ctrl+J
+        toggles. Satellite strips are always visible while they exist."""
+        return self._dock.home_visible
 
     def toggle_panel(self, default_mode: str | None = None) -> None:
         if self.panel_visible:
@@ -2465,38 +2465,34 @@ class TerminalTab(Gtk.Box):
             self.show_panel(default_mode)
 
     def show_panel(self, default_mode: str | None = None, focus: bool = True) -> None:
-        """Show the panel, starting (or re-pointing) its shell at the agent's
-        current working directory. `default_mode` ("bottom" | "right") opens
-        the panel in the app-wide last-used mode; None keeps the tab's own.
-        `focus=False` leaves keyboard focus where it is (session restore)."""
+        """Show the home strip, starting (or re-pointing) its shell at the
+        agent's current working directory. `default_mode` ("bottom" |
+        "right") opens it at the app-wide last-used home edge; None keeps
+        the tab's own. `focus=False` leaves keyboard focus where it is
+        (session restore)."""
         if not self.panel_visible and default_mode in ("bottom", "right"):
-            self._set_panel_mode(default_mode)
-        restore = self._load_panel_history() if not self._panel.ever_spawned else None
-        self._panel.open(restore)
-        if not self.panel_visible:
-            self._panel.set_visible(True)
-            self._panel_sizer.apply()
+            self._dock.set_home_position(default_mode)
+        restore = self._load_panel_history() if not self._dock.ever_spawned else None
+        self._dock.show_home(restore)
         if focus:
-            GLib.idle_add(self._panel.grab_page_focus)
+            GLib.idle_add(self._dock.focus_home)
 
     def hide_panel(self) -> None:
-        if not self.panel_visible:
-            return
-        self._panel_sizer.remember()
-        refocus = self._panel.has_page_focus()
-        self._panel.set_visible(False)
-        if refocus:
-            self.grab_terminal_focus()
+        self._dock.hide_home()
 
     def panel_has_running_command(self) -> bool:
-        """True when a command is running in any panel shell tab — even a
-        hidden panel's job is protected by the close confirmation."""
-        return self._panel.has_running_command()
+        """True when a command is running in any shell page of any strip —
+        even a hidden strip's job is protected by the close confirmation."""
+        return self._dock.has_running_command()
 
     def select_busy_panel_tab(self) -> None:
-        """Front the inner panel tab whose shell is busy, so the close
+        """Front the shell page whose command is live, so the close
         confirmation's "will be terminated" points at something visible."""
-        self._panel.select_busy_page()
+        self._dock.select_busy_shell()
+
+    def move_focused_panel_page(self) -> None:
+        """Cycle the focused panel page to the next strip (win.move-panel-page)."""
+        self._dock.move_focused_page_next()
 
     def _load_panel_history(self) -> list[str] | None:
         """Saved panel scrollbacks (one per inner tab, in tab order) for this
@@ -2510,30 +2506,29 @@ class TerminalTab(Gtk.Box):
         """Persist each panel tab's scrollback so re-opening this session
         restores them. A panel never opened in this tab leaves prior history
         untouched; tabs closed along the way drop out of the saved set."""
-        if self.fork or not self.session_id or not self._panel.ever_spawned:
+        if self.fork or not self.session_id or not self._dock.ever_spawned:
             return
-        panelhistory.save_all(self.session_id, self._panel.capture_all())
+        panelhistory.save_all(self.session_id, self._dock.capture_shell_texts())
 
     def clear_panel_history(self) -> None:
         """Wipe every panel tab's scrollback and the persisted history files.
         The onscreen buffers must go too — the save on tab/window close would
         otherwise re-dump them and resurrect the files. Also clears stale
         history from a previous run when the panel was never opened here."""
-        self._panel.clear_all()
+        self._dock.clear_shells()
         if not self.fork and self.session_id:
             panelhistory.delete(self.session_id)
 
     def capture_panel_state(self) -> dict | None:
-        """Snapshot the panel's open/mode/sizes for per-session persistence.
-        None when the panel was never used in this tab, so a session's saved
-        state survives tabs that never touched the panel. Forks never
-        persist (mirroring panel history)."""
-        sizes = self._panel_sizer.snapshot()
-        if self.fork or (not self._panel.ever_spawned and not sizes):
+        """Snapshot the home strip's open/mode/sizes for per-session
+        persistence (satellite strips don't persist yet — the full layout
+        tree is a later PR). None when the panel was never used in this
+        tab, so a session's saved state survives tabs that never touched
+        it. Forks never persist (mirroring panel history)."""
+        sizes = self._dock.home_sizes()
+        if self.fork or (not self._dock.ever_spawned and not sizes):
             return None
-        self._panel_sizer.remember()  # capture the live divider position
-        state: dict = {"open": self.panel_visible, "mode": self._panel_mode()}
-        sizes = self._panel_sizer.snapshot()
+        state: dict = {"open": self.panel_visible, "mode": self._dock.home_position}
         if sizes:
             state["sizes"] = sizes
         return state
@@ -2546,41 +2541,24 @@ class TerminalTab(Gtk.Box):
         stealing focus from the agent terminal."""
         sizes = state.get("sizes")
         if isinstance(sizes, dict):
-            for mode in ("bottom", "right"):
-                self._panel_sizer.set_remembered(mode, sizes.get(mode))
+            self._dock.seed_home_sizes(sizes)
         mode = state.get("mode")
         if mode in ("bottom", "right"):
-            self._set_panel_mode(mode)
+            self._dock.set_home_position(mode)
         if state.get("open"):
             self.show_panel(focus=False)
 
     def swap_panel(self) -> str:
-        """Move the panel bottom↔right (the shell keeps running) and return
-        the new position: "bottom" or "right"."""
-        self._panel_sizer.remember()  # capture the outgoing mode's panel size
-        to_bottom = self._paned.get_orientation() == Gtk.Orientation.HORIZONTAL
-        self._paned.set_orientation(
-            Gtk.Orientation.VERTICAL if to_bottom else Gtk.Orientation.HORIZONTAL
-        )
-        if self.panel_visible:
-            self._panel_sizer.apply()
-        return "bottom" if to_bottom else "right"
-
-    def _set_panel_mode(self, mode: str) -> None:
-        """Reorient a hidden panel; there's no divider on screen to capture."""
-        if mode != self._panel_mode():
-            self._paned.set_orientation(
-                Gtk.Orientation.VERTICAL if mode == "bottom" else Gtk.Orientation.HORIZONTAL
-            )
-
-    def _panel_mode(self) -> str:
-        vertical = self._paned.get_orientation() == Gtk.Orientation.VERTICAL
-        return "bottom" if vertical else "right"
+        """Move the shells to the other home edge (bottom↔right) and return
+        the new position. The strip relocates by reparenting — every shell
+        keeps running — and shell pages parked in satellite strips gather
+        back into the home strip on the way."""
+        return self._dock.swap_home()
 
     def set_panel_size_lookup(self, lookup) -> None:
-        """`lookup(mode) -> px` supplies the app-wide last-set panel size,
-        used for modes this tab hasn't sized itself yet."""
-        self._panel_sizer.set_lookup(lookup)
+        """`lookup(mode) -> px` supplies the app-wide last-set strip size,
+        seeding splits this tab hasn't sized itself yet."""
+        self._dock.set_size_lookup(lookup)
 
     # -- editor panel --------------------------------------------------------
 
@@ -2856,7 +2834,7 @@ class TerminalTab(Gtk.Box):
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
         self._apply_terminal_max_width(settings)
         self._set_footer_apps(settings.get("footer_apps") or [])
-        self._panel.apply_settings(settings)
+        self._dock.apply_settings(settings)
         if self._editor is not None:
             self._editor.apply_settings(settings)
 

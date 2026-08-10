@@ -16,12 +16,17 @@ widget implementing the duck-typed `PanelPage` protocol:
 
 A page may additionally emit "bell" (re-emitted by the strip for the
 window's visual bell) and "shell-exited" (shells: the process ended, so
-the page closes itself). The strip owns close protection for every kind:
-a busy page's X asks first, whatever the kind.
+the page closes itself). Those signals are wired on page-attached and
+unwired on page-detached, so they follow a page that moves between strips
+(`Adw.TabView.transfer_page` — reparenting without destroying, which is
+what keeps a moved shell running). The strip owns close protection for
+every kind: a busy page's X asks first, whatever the kind.
 
 Shell pages are created by the strip itself (the + button); the concrete
 shell class is injected as `shell_factory` so this module stays free of
-terminal.py (which imports it).
+terminal.py (which imports it). Moving and splitting need to see the
+whole dock, so those menu items call back into an injected *page mover*
+(the PanelDock) rather than anything strip-local.
 """
 
 from __future__ import annotations
@@ -40,10 +45,10 @@ class PanelStrip(Gtk.Box):
     """A tab strip of panel pages: `Adw.TabView` + inline `Adw.TabBar`.
 
     The tab row carries a + button (new shell page, selected immediately),
-    a bottom/right swap button for the whole panel (win.swap-panel), and
-    each tab an X; shells survive hide/show and die with their tab. When
-    the last page closes there is nothing left to show, so the owner hides
-    (eventually: collapses) the strip — see "empty"."""
+    a bottom/right swap button for the shells (win.swap-panel), and each
+    tab an X; shells survive hide/show and die with their tab. When the
+    last page closes (or transfers away) there is nothing left to show, so
+    the owner collapses the strip — see "empty"."""
 
     __gsignals__ = {
         # Emitted when a page's X (or a shell exiting) removed the last page.
@@ -53,30 +58,40 @@ class PanelStrip(Gtk.Box):
     }
 
     def __init__(self, shell_factory) -> None:
-        """`shell_factory(number) -> PanelPage` builds the shell page the +
-        button appends; *number* is the 1-based ordinal its title shows."""
+        """`shell_factory() -> PanelPage` builds the shell page the + button
+        appends (numbering lives with the dock, so titles stay unique when
+        pages move between strips)."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._shell_factory = shell_factory
         self._settings: dict | None = None  # last applied; new pages start from it
-        self._ever_spawned = False
-        self._next_number = 1  # "Terminal N" titles; resets when the strip empties
         self._cwd_lookup = None  # () -> agent cwd, set by the owning tab
+        self._page_mover = None  # the dock's move/split interface, if docked
+        self._move_targets: list = []  # (label, strip) stash for menu actions
         self._close_ok: set[Adw.TabPage] = set()  # busy closes the user confirmed
         self._close_asking: set[Adw.TabPage] = set()  # a confirm dialog is up
+        self._page_signals: dict = {}  # page widget -> its handler ids here
 
         self._view = Adw.TabView(vexpand=True)
         self._view.connect("close-page", self._on_close_page)
+        # Page signals ride attach/detach so they follow transfers.
+        self._view.connect("page-attached", self._on_page_attached)
+        self._view.connect("page-detached", self._on_page_detached)
         # Clicking a tab should land the cursor in its page.
         self._view.connect("notify::selected-page", self._on_selected)
 
         # Right-clicking a tab: bulk closes, on top of the X each tab already
-        # carries. Which tab was clicked arrives through "setup-menu" — the
-        # editor file strip's pattern (see EditorPane). Move/split items
-        # arrive with the dock; this menu is their future home.
+        # carries, plus the dock's move/split items when a page mover is
+        # wired. Which tab was clicked arrives through "setup-menu" — the
+        # editor file strip's pattern (see EditorPane). The move section is
+        # rebuilt on every open: its targets are whatever strips exist then.
         self._menu_page: Adw.TabPage | None = None
         tab_menu = Gio.Menu()
-        tab_menu.append(_("Close Tab"), "strip.close-tab")
-        tab_menu.append(_("Close other tabs"), "strip.close-other-tabs")
+        close_section = Gio.Menu()
+        close_section.append(_("Close Tab"), "strip.close-tab")
+        close_section.append(_("Close other tabs"), "strip.close-other-tabs")
+        tab_menu.append_section(None, close_section)
+        self._move_section = Gio.Menu()
+        tab_menu.append_section(None, self._move_section)
         self._view.set_menu_model(tab_menu)
         self._view.connect("setup-menu", self._on_setup_menu)
         self._tab_actions: dict[str, Gio.SimpleAction] = {}
@@ -89,6 +104,12 @@ class PanelStrip(Gtk.Box):
             action.connect("activate", lambda _a, _p, h=handler: h())
             group.add_action(action)
             self._tab_actions[name] = action
+        move_action = Gio.SimpleAction.new("move-to", GLib.VariantType.new("i"))
+        move_action.connect("activate", self._on_move_to)
+        group.add_action(move_action)
+        split_action = Gio.SimpleAction.new("split-page", GLib.VariantType.new("s"))
+        split_action.connect("activate", self._on_split_page)
+        group.add_action(split_action)
         self.insert_action_group("strip", group)
 
         # autohide off: the bar is also where the + button lives, so it must
@@ -113,11 +134,6 @@ class PanelStrip(Gtk.Box):
         self.append(self._view)
 
     # -- pages -------------------------------------------------------------
-
-    @property
-    def ever_spawned(self) -> bool:
-        """A shell ran in some page at some point in this session tab's life."""
-        return self._ever_spawned
 
     @property
     def page_count(self) -> int:
@@ -162,19 +178,15 @@ class PanelStrip(Gtk.Box):
     def new_shell(self, restore_text: str | None = None, select: bool = True):
         """Append a shell page (its shell spawns right away) and optionally
         select it. `restore_text` seeds the scrollback (session restore)."""
-        shell = self._shell_factory(self._next_number)
-        self._next_number += 1
+        shell = self._shell_factory()
         if self._settings is not None:
             shell.apply_settings(self._settings)
-        shell.connect("shell-exited", self._on_shell_exited)
-        shell.connect("bell", lambda *_: self.emit("bell"))
         page = self._view.append(shell)
         page.set_title(shell.page_title())
         icon = shell.page_icon()
         if icon:
             page.set_icon(Gio.ThemedIcon.new(icon))
         shell.open_shell(self._cwd(), restore_text)
-        self._ever_spawned = True
         if select:
             self._view.set_selected_page(page)
         return shell
@@ -185,6 +197,44 @@ class PanelStrip(Gtk.Box):
             if page.get_child() is widget:
                 return page
         return None
+
+    def transfer_to(self, widget, other: PanelStrip, position: int | None = None) -> None:
+        """Move *widget*'s tab into *other*, appending unless *position*
+        says where. The page widget is reparented, never destroyed — a
+        shell's process rides along."""
+        page = self._find_page(widget)
+        if page is not None:
+            if position is None:
+                position = other._view.get_n_pages()
+            self._view.transfer_page(page, other._view, position)
+
+    def select_widget(self, widget) -> None:
+        page = self._find_page(widget)
+        if page is not None:
+            self._view.set_selected_page(page)
+
+    # -- page signal lifecycle ----------------------------------------------
+
+    def _on_page_attached(self, _view, page: Adw.TabPage, _position) -> None:
+        """Wire the page's optional signals to *this* strip — on creation
+        and again whenever a transfer lands it here."""
+        widget = page.get_child()
+        ids = []
+        if GObject.signal_lookup("shell-exited", widget.__gtype__):
+            ids.append(widget.connect("shell-exited", self._on_shell_exited))
+        if GObject.signal_lookup("bell", widget.__gtype__):
+            ids.append(widget.connect("bell", lambda *_: self.emit("bell")))
+        self._page_signals[widget] = ids
+
+    def _on_page_detached(self, _view, page: Adw.TabPage, _position) -> None:
+        """Unwire a departing page (close or transfer-out) and report an
+        emptied strip — the owner collapses it. Detach is the one funnel
+        both paths share, so "empty" lives here rather than in close."""
+        widget = page.get_child()
+        for handler in self._page_signals.pop(widget, ()):
+            widget.disconnect(handler)
+        if self._view.get_n_pages() == 0:
+            self.emit("empty")
 
     # -- closing -----------------------------------------------------------
 
@@ -206,10 +256,7 @@ class PanelStrip(Gtk.Box):
                 self._ask_close_busy(page)
             return True
         self._close_ok.discard(page)
-        view.close_page_finish(page, True)
-        if view.get_n_pages() == 0:
-            self._next_number = 1  # an empty strip restarts the numbering
-            self.emit("empty")
+        view.close_page_finish(page, True)  # page-detached reports "empty"
         return True  # close_page_finish already ran
 
     def _ask_close_busy(self, page: Adw.TabPage) -> None:
@@ -236,6 +283,13 @@ class PanelStrip(Gtk.Box):
 
     # -- tab context menu ----------------------------------------------------
 
+    def set_page_mover(self, mover) -> None:
+        """Wire the dock's move/split interface: `move_targets(strip) ->
+        [(label, strip)]`, `move_page(strip, widget, target)` and
+        `split_page(strip, widget, side)`. Without one (a strip under test,
+        or mid-adoption) the menu simply has no move section."""
+        self._page_mover = mover
+
     def _on_setup_menu(self, view: Adw.TabView, page: Adw.TabPage | None) -> None:
         """The menu is opening on *page* — or closing, which is a None page
         and leaves the stashed one alone: the action fires after the popover
@@ -245,6 +299,49 @@ class PanelStrip(Gtk.Box):
             return
         self._menu_page = page
         self._tab_actions["close-other-tabs"].set_enabled(view.get_n_pages() > 1)
+        self._rebuild_move_section()
+
+    def _rebuild_move_section(self) -> None:
+        """The move/split half of the tab menu, recomputed per open: "Move
+        to" lists the dock's other strips by their selected page's title,
+        and the four Split items carve this strip's own node. The targets
+        stash pairs each menu index with its strip, so the action — firing
+        after the popover closes — still knows where to send the page."""
+        self._move_section.remove_all()
+        if self._page_mover is None:
+            return
+        self._move_targets = self._page_mover.move_targets(self)
+        if self._move_targets:
+            move_menu = Gio.Menu()
+            for index, (label, _strip) in enumerate(self._move_targets):
+                item = Gio.MenuItem.new(label, None)
+                item.set_action_and_target_value("strip.move-to", GLib.Variant("i", index))
+                move_menu.append_item(item)
+            self._move_section.append_submenu(_("Move to"), move_menu)
+        for label, side in (
+            (_("Split Left"), "left"),
+            (_("Split Right"), "right"),
+            (_("Split Up"), "above"),
+            (_("Split Down"), "below"),
+        ):
+            item = Gio.MenuItem.new(label, None)
+            item.set_action_and_target_value("strip.split-page", GLib.Variant("s", side))
+            self._move_section.append_item(item)
+
+    def _on_move_to(self, _action, param) -> None:
+        page = self._menu_target_page()
+        index = param.get_int32()
+        if page is None or self._page_mover is None:
+            return
+        if not 0 <= index < len(self._move_targets):
+            return  # the dock changed under the open menu
+        self._page_mover.move_page(self, page.get_child(), self._move_targets[index][1])
+
+    def _on_split_page(self, _action, param) -> None:
+        page = self._menu_target_page()
+        if page is None or self._page_mover is None:
+            return
+        self._page_mover.split_page(self, page.get_child(), param.get_string())
 
     def _menu_target_page(self) -> Adw.TabPage | None:
         page = self._menu_page

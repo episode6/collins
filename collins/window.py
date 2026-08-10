@@ -1029,6 +1029,10 @@ class MainWindow(Adw.ApplicationWindow):
             "tap-panel": lambda *_: self._toggle_panel(double_tap=True),
             "swap-panel": lambda *_: self._swap_panel(),
             "clear-panel": lambda *_: self._clear_panel(),
+            # Deliberately no default accelerator or menu surface yet: the
+            # dock's visible affordances (drag grip, drop zones) land with
+            # the DnD PR; until then this exists for custom keybindings.
+            "move-panel-page": lambda *_: self._move_panel_page(),
             "toggle-editor": lambda *_: self._toggle_editor(),
             "editor-save": lambda *_: self._editor_save(),
             "focus-editor": lambda *_: self._focus_editor(),
@@ -2422,8 +2426,9 @@ class MainWindow(Adw.ApplicationWindow):
         agent_busy = tab.has_running_command() and not tab.unstarted_thread()
         panel_busy = tab.panel_has_running_command()
         if panel_busy:
-            tab.show_panel()  # reveal what's about to be killed (a busy shell is never cd'd)
-            tab.select_busy_panel_tab()  # ...including fronting its inner tab
+            # Reveal what's about to be killed: fronts the busy shell's tab,
+            # showing its strip first if that strip is hidden.
+            tab.select_busy_panel_tab()
 
         def do_close(background: bool = False) -> None:
             self._close_asking.discard(page)
@@ -3496,13 +3501,13 @@ class MainWindow(Adw.ApplicationWindow):
         return tab if isinstance(tab, TerminalTab) else None
 
     def _toggle_panel(self, double_tap: bool = False) -> None:
-        """Show or hide this tab's terminal panel. From Ctrl+J (`double_tap`)
-        a second press right after one that opened the panel moves it
-        bottom↔right instead of closing it — the double-tap lands the panel
-        where the swap button would put it. That swap ends the chain, so a
-        third press hides the panel again and undoes an unmeant double-tap.
-        The footer button toggles plainly: a double-click there is a click
-        too many, not a request to move the panel."""
+        """Show or hide this tab's shell strip. From Ctrl+J (`double_tap`)
+        a second press right after one that opened the panel moves the
+        shells bottom↔right instead of closing it — the double-tap lands
+        the panel where the swap button would put it. That swap ends the
+        chain, so a third press hides the panel again and undoes an unmeant
+        double-tap. The footer button toggles plainly: a double-click there
+        is a click too many, not a request to move the panel."""
         tab = self._current_terminal_tab()
         if tab is None:
             return
@@ -3523,6 +3528,13 @@ class MainWindow(Adw.ApplicationWindow):
         tab = self._current_terminal_tab()
         if tab is not None:
             tab.clear_panel_history()
+
+    def _move_panel_page(self) -> None:
+        """Cycle the focused panel page to the next strip; a dock with one
+        strip (or none focused) has nowhere to cycle to and no-ops."""
+        tab = self._current_terminal_tab()
+        if tab is not None:
+            tab.move_focused_panel_page()
 
     def _toggle_editor(self) -> None:
         tab = self._current_terminal_tab()
