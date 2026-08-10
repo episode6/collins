@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-10. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -19,8 +19,8 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import apppicker, claudemodels, clisetup, cliwelcome, editor, footerapps, mcptools, prefssearch
-from .caffeine import DURATION_KEYS, INDEFINITE, duration_label
-from .i18n import LANGUAGES, N_, _
+from .caffeine import DURATION_KEYS, INDEFINITE, duration_label, grace_seconds
+from .i18n import LANGUAGES, N_, _, ngettext
 from .state import AppState
 from .themes import DEFAULT_THEME, THEME_NAMES, get_theme
 
@@ -346,6 +346,22 @@ class PreferencesDialog(Adw.Dialog):
         self._caffeine_screen_row.set_active(bool(state.get_setting("caffeine_keep_screen_on")))
         self._caffeine_screen_row.connect("notify::active", self._on_caffeine_screen_changed)
         caffeine_group.add(self._caffeine_screen_row)
+        # Minutes, not a duration key: the grace is a short wait, and a spin
+        # row keeps any length one drag away without a menu of guesses.
+        self._caffeine_grace_row = Adw.SpinRow.new_with_range(1, 120, 1)
+        self._caffeine_grace_row.set_title(_("Until idle grace period"))
+        self._caffeine_grace_row.set_subtitle(
+            _(
+                "How many minutes Until idle keeps the computer awake after "
+                "the last session stops working; any session picking work "
+                "back up restarts the wait"
+            )
+        )
+        self._caffeine_grace_row.set_value(
+            grace_seconds(state.get_setting("caffeine_idle_grace_minutes")) // 60
+        )
+        self._caffeine_grace_row.connect("notify::value", self._on_caffeine_grace_changed)
+        caffeine_group.add(self._caffeine_grace_row)
         self._caffeine_launch_row = Adw.SwitchRow(
             title=_("Turn on at launch"),
             subtitle=_(
@@ -360,12 +376,7 @@ class PreferencesDialog(Adw.Dialog):
         # launch" doesn't have to mean "on until you remember it".
         self._caffeine_timer_row = Adw.ComboRow(
             title=_("Turn off after"),
-            subtitle=_(
-                "How long that launch-time Caffeine Mode runs before it turns "
-                "itself off. Until idle never does: it holds the computer "
-                "awake while any session is working (and five minutes past), "
-                "dozing in between"
-            ),
+            subtitle=self._caffeine_timer_subtitle(),
         )
         duration_labels = [duration_label(key) for key in DURATION_KEYS]
         self._caffeine_timer_row.set_model(Gtk.StringList.new(duration_labels))
@@ -912,6 +923,29 @@ class PreferencesDialog(Adw.Dialog):
         self._state.set_setting("caffeine_on_launch", row.get_active())
         # Nothing to time when nothing is turned on at launch.
         self._caffeine_timer_row.set_sensitive(row.get_active())
+        self._on_change()
+
+    def _caffeine_timer_subtitle(self) -> str:
+        """The launch-timer row's subtitle, quoting the actual Until-idle
+        grace rather than a hardcoded five minutes, so the two rows can never
+        disagree about how long "idle" takes to arrive."""
+        minutes = grace_seconds(self._state.get_setting("caffeine_idle_grace_minutes")) // 60
+        return ngettext(
+            "How long that launch-time Caffeine Mode runs before it turns "
+            "itself off. Until idle never does: it holds the computer "
+            "awake while any session is working (and {n} minute past), "
+            "dozing in between",
+            "How long that launch-time Caffeine Mode runs before it turns "
+            "itself off. Until idle never does: it holds the computer "
+            "awake while any session is working (and {n} minutes past), "
+            "dozing in between",
+            minutes,
+        ).format(n=minutes)
+
+    def _on_caffeine_grace_changed(self, row: Adw.SpinRow, _pspec) -> None:
+        self._state.set_setting("caffeine_idle_grace_minutes", int(row.get_value()))
+        # The launch-timer subtitle quotes the grace; keep them agreeing.
+        self._caffeine_timer_row.set_subtitle(self._caffeine_timer_subtitle())
         self._on_change()
 
     def _on_caffeine_timer_changed(self, row: Adw.ComboRow, _pspec) -> None:

@@ -137,6 +137,17 @@ def test_caffeine_launch_timer_can_follow_the_sessions(app_state):
     assert follows_activity(app_state.AppState().get_setting("caffeine_launch_timer"))
 
 
+def test_caffeine_idle_grace_setting(app_state):
+    from collins.caffeine import ACTIVE_GRACE_S, grace_seconds
+
+    state = app_state.AppState()
+    # The default reproduces the grace as it was before it became a setting.
+    assert grace_seconds(state.get_setting("caffeine_idle_grace_minutes")) == ACTIVE_GRACE_S
+    state.set_setting("caffeine_idle_grace_minutes", 15)
+    # The app reads the saved minutes back through the same sanitizer.
+    assert grace_seconds(app_state.AppState().get_setting("caffeine_idle_grace_minutes")) == 900
+
+
 def test_running_session_behavior_settings(app_state):
     state = app_state.AppState()
     # Both default to today's behaviour: the confirmation dialog asks.
