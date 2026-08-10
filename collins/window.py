@@ -88,6 +88,7 @@ from .sessions import (
     session_from_file,
     worktree_project_root,
 )
+from .shellinput import shell_command
 from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar
 from .state import AppState, clamp_window_size, editor_pops_out
 from .store import SessionStore, emptied_projects
@@ -2789,23 +2790,21 @@ class MainWindow(Adw.ApplicationWindow):
         that shell is what closes the tab, so ask it to exit — once — and hold
         the poll open until it does.
 
-        The exit is fed behind \\x15 (kill-line) because the shell can inherit
-        input the CLI never read. A CLI holding the terminal in mouse-tracking
-        mode has VTE writing a report into the pty every time the pointer
-        crosses the terminal, and one written in the moment between the CLI's
-        last read and its exit stays queued for whoever reads next — the
-        shell, which parks it on its input line. A bare "exit" then joins it
-        into one unknown command (``35;3;25Mexit``, from a real close), the
-        shell survives it, and the tab is stranded on a terminal full of
-        "command not found". Clearing the line first makes the exit the whole
-        of what the shell reads.
+        The exit goes through shellinput.shell_command, which clears the
+        shell's input line first: the shell can inherit input the CLI never
+        read, and a bare "exit" landing on top of it joins into one unknown
+        command (``35;3;25Mexit``, from a real close) that the shell survives,
+        stranding the tab on a terminal full of "command not found". See
+        shellinput for the whole of the reasoning, the queued mouse reports
+        that cause it, and why the reset carries a leading space.
 
         A shell that still hasn't gone by _SHELL_EXIT_TICKS gets force-closed
-        rather than left behind: input can always arrive after the kill-line
+        rather than left behind: input can always arrive after the line reset
         too, and this poll is the last thing watching the tab."""
         ticks = self._shell_exiting.get(page, 0)
         if ticks == 0:
-            tab.feed_child_text("\x15exit\r")  # child-exited closes the tab
+            # child-exited closes the tab
+            tab.feed_child_text(shell_command("exit\r"))
         elif ticks >= _SHELL_EXIT_TICKS:
             log.info("close: shell ignored its exit; force-closing the tab")
             self._close_confirmed(page)
