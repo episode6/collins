@@ -28,7 +28,6 @@ from . import (
     buildinfo,
     chats,
     dialogs,
-    editor,
     footerapps,
     mcptools,
     openwith,
@@ -1061,12 +1060,6 @@ class MainWindow(Adw.ApplicationWindow):
         # every store refresh (archiving/restoring goes through one).
         self._trash_archived_action = self.lookup_action("trash-archived")
         self._sync_trash_archived_action()
-
-        # Soft dependency: no gtksourceview5 typelib means no editor pane in
-        # any tab (see TerminalTab.__init__), so these have nothing to act on.
-        if not editor.HAVE_GTKSOURCE:
-            for name in ("toggle-editor", "editor-save", "focus-editor", "quick-open"):
-                self.lookup_action(name).set_enabled(False)
 
         per_session = {
             "new-session-provider": lambda _a, p: self._choose_new_session_folder(
@@ -3608,7 +3601,7 @@ class MainWindow(Adw.ApplicationWindow):
         if self._quickopen is not None:  # already open — don't stack another
             return
         tab = self._current_terminal_tab()
-        if tab is None or tab.editor_root is None:
+        if tab is None:
             return
         self._quickopen = QuickOpenDialog(
             tab.editor_root,

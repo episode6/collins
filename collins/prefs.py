@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-10. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -319,8 +319,7 @@ class PreferencesDialog(Adw.Dialog):
         panels_group.add(self._tab_drag_row)
         page.add(panels_group)
 
-        if editor.HAVE_GTKSOURCE:
-            self._build_editor_group(state, page)
+        self._build_editor_group(state, page)
 
         appearance_group = _SearchableGroup(title=_("Appearance"))
         scheme_row = Adw.ComboRow(title=_("Color scheme"))

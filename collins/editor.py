@@ -3,17 +3,14 @@
 """The built-in editor panel: per-tab syntax-highlighted editing with a
 project file tree, real saving, and external-change handling.
 
-Soft dependency on GtkSourceView 5: importing this module never raises even
-when the `gtksourceview5` typelib isn't installed (see HAVE_GTKSOURCE) — the
-caller (terminal.py) degrades to a disabled editor button whose tooltip names
-the missing package, plus a startup log warning, instead of an app that won't
-launch, so an existing install survives the upgrade before its package
-manager catches up (see `gir1.2-gtksource-5` in debian/control).
+GtkSourceView 5 is a hard dependency — the PR view's diff rendering builds
+on it too, so nothing degrades without it. A missing typelib exits with an
+install hint instead of a traceback (the `.deb` and the AUR package both
+pull it in; only a source checkout can hit this).
 """
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import gi
@@ -25,16 +22,12 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 try:
     gi.require_version("GtkSource", "5")
     from gi.repository import GtkSource
-
-    HAVE_GTKSOURCE = True
 except (ValueError, ImportError):
-    GtkSource = None
-    HAVE_GTKSOURCE = False
-    logging.getLogger(__name__).warning(
-        "GtkSourceView 5 typelib not found — the editor panel is disabled. "
-        "Install it (Debian/Ubuntu: gir1.2-gtksource-5, Fedora/Arch: "
-        "gtksourceview5) and restart Collins to enable it."
-    )
+    raise SystemExit(
+        "Collins requires GtkSourceView 5, which isn't installed. Install it "
+        "(Debian/Ubuntu: gir1.2-gtksource-5, Fedora/Arch: gtksourceview5) "
+        "and relaunch."
+    ) from None
 
 from . import dialogs, editorfiles, fileclipboard, paneldnd  # noqa: E402
 from .filetree import FileTree  # noqa: E402
