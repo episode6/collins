@@ -2246,3 +2246,15 @@ msgstr ""
 #: collins/prview.py:802
 msgid "Request changes on {slug}"
 msgstr ""
+
+#: collins/practions.py:176 collins/prview.py:807
+msgid "Send “{prompt}” to this session"
+msgstr ""
+
+#: collins/prmenu.py:699 collins/prview.py:855
+msgid "Collins couldn't run that action."
+msgstr ""
+
+#: collins/prmenu.py:723 collins/prview.py:868
+msgid "{action} failed"
+msgstr ""
