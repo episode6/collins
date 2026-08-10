@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-10. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -66,9 +66,12 @@ from .prstatus import (  # noqa: E402
     enrich,
     from_records,
     invalidate,
+    known,
     merge_ordered,
+    parse_pr_url,
     to_records,
 )
+from .prview import PrViewPage  # noqa: E402
 from .sessions import worktree_project_root  # noqa: E402
 from .transcript import TranscriptModel  # noqa: E402
 
@@ -1029,6 +1032,7 @@ class TerminalTab(Gtk.Box):
             "size-changed", lambda _d, mode, size: self.emit("panel-size-changed", mode, size)
         )
         self._dock.set_focus_terminal(self.grab_terminal_focus)
+        self._dock.set_page_factory(self._make_panel_page)
 
         # Editor panel: a full-height right column beside the terminal↔shell
         # split above, in a new outer paned. Built now (but hidden) rather
@@ -1603,6 +1607,7 @@ class TerminalTab(Gtk.Box):
             has_changes=lambda: has_changes(self.current_agent_cwd()),
             send_prompt=self.inject_prompt,
             refresh=self._request_update,
+            view_pr=self.open_pr_page,
         )
 
     def _fill_pr_menu(self, _button: Gtk.MenuButton) -> None:
@@ -2469,6 +2474,56 @@ class TerminalTab(Gtk.Box):
         shell.hist = self._dock.next_hist_ordinal()
         return shell
 
+    # -- the native PR page --------------------------------------------------
+
+    def open_pr_page(self, pr: PullRequest) -> None:
+        """Show *pr*'s native page in a strip beside this session.
+
+        One page per URL per tab: asking for a PR whose page is already open
+        fronts that page (revealing its strip if hidden) and re-reads it,
+        rather than opening a twin.
+        """
+        page = self._find_pr_page(pr.url)
+        if page is not None:
+            self._dock.reveal_page(page)
+            page.refresh()
+            return
+        self._dock.open_page(self._make_pr_page(pr))
+
+    def open_pr_page_url(self, url: str) -> None:
+        """`open_pr_page` from a bare URL — the sidebar's way in, where the
+        window action carries only strings. The tab's own copy of the PR is
+        preferred (it has the title and status); a URL the tab isn't
+        tracking starts from what the summary cache knows."""
+        pr = next((p for p in self._footer_prs if p.url == url), None)
+        if pr is None:
+            pr = parse_pr_url(url)
+            if pr is None:
+                return
+            pr = known(pr)
+        self.open_pr_page(pr)
+
+    def _find_pr_page(self, url: str) -> PrViewPage | None:
+        for page in self._dock.pages():
+            if getattr(page, "page_kind", None) == "pr" and page.pr_url == url:
+                return page
+        return None
+
+    def _make_pr_page(self, pr: PullRequest) -> PrViewPage:
+        return PrViewPage(pr, host_factory=self._pr_action_host)
+
+    def _make_panel_page(self, page: dict):
+        """The dock's non-shell factory for layout restore (see
+        paneldock.set_page_factory). Only the pr kind exists today; its URL
+        is persisted state and therefore untrusted, so it re-passes the same
+        gate every PR URL passes before reaching gh."""
+        if page.get("kind") != "pr":
+            return None
+        pr = parse_pr_url(page.get("url"))
+        if pr is None:
+            return None
+        return self._make_pr_page(known(pr))
+
     @property
     def panel_visible(self) -> bool:
         """Whether the shells' home strip is showing — the state Ctrl+J
@@ -2564,7 +2619,7 @@ class TerminalTab(Gtk.Box):
         layout = panellayout.validate(layout)
         if not layout:
             return
-        layout = panellayout.prune(layout, {"shell"})
+        layout = panellayout.prune(layout, {"shell", "pr"})
         mode = layout.get("mode")
         if mode in ("bottom", "right"):
             self._dock.set_home_position(mode)

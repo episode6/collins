@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-10. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -1167,6 +1167,12 @@ class MainWindow(Adw.ApplicationWindow):
         )
         send_prompt.connect("activate", lambda _a, p: self._send_prompt(*p.unpack()))
         self.add_action(send_prompt)
+
+        view_pr = Gio.SimpleAction(
+            name="view-pr", parameter_type=GLib.VariantType("(ss)")
+        )
+        view_pr.connect("activate", lambda _a, p: self._view_pr(*p.unpack()))
+        self.add_action(view_pr)
 
         show_archived = Gio.SimpleAction.new_stateful(
             "show-archived", None, GLib.Variant.new_boolean(False)
@@ -2375,6 +2381,30 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self.tab_view.set_selected_page(self._page_for(session_id))
         tab.inject_prompt(prompt)
+
+    def _view_pr(self, session_id: str, url: str) -> None:
+        """A sidebar PR menu's "View in Collins": the PR's native page,
+        docked beside its session.
+
+        The page lives in the session tab's panel dock, so a session that
+        isn't open in a tab is opened first — the row said "show me this
+        session's PR", and the session comes with it. If open_session sent
+        the click to another window instead (the session is already open
+        there), the click is spent, like open_session's own no-op paths.
+        """
+        tab = self._session_tab(session_id)
+        if tab is None:
+            session = self.store.get_session(session_id)
+            if session is None:
+                return
+            self.open_session(session)
+            tab = self._session_tab(session_id)
+            if tab is None:
+                return
+        page = self._page_for(session_id)
+        if page is not None:
+            self.tab_view.set_selected_page(page)
+        tab.open_pr_page_url(url)
 
     def _session_tab(self, session_id: str) -> TerminalTab | None:
         """The terminal tab a session is open in, if it is open in one."""

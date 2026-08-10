@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-10. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -619,6 +619,11 @@ class SessionRow(Gtk.ListBoxRow):
                 "win.send-prompt", GLib.Variant("(ss)", (self.item.session_id, prompt))
             ),
             refresh=self._refresh_prs,
+            # The native page needs the session's tab; the window owns those,
+            # and opens the session first when the row's tab isn't up.
+            view_pr=lambda pr: self.activate_action(
+                "win.view-pr", GLib.Variant("(ss)", (self.item.session_id, pr.url))
+            ),
         )
         self.sync_prs()
 

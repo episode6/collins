@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-10. Full change history: git log for this file.
 
 # SOME DESCRIPTIVE TITLE.
 # Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
@@ -2105,4 +2105,94 @@ msgstr ""
 
 #: collins/paneldnd.py:59
 msgid "Drag to move this tab: drop on an edge to split, on a strip to join"
+msgstr ""
+
+#: collins/formatting.py:120
+msgid "just now"
+msgstr ""
+
+#: collins/formatting.py:122
+msgid "{n}m ago"
+msgstr ""
+
+#: collins/formatting.py:124
+msgid "{n}h ago"
+msgstr ""
+
+#: collins/formatting.py:126
+msgid "{n}d ago"
+msgstr ""
+
+#: collins/prmenu.py:531
+msgid "View in Collins"
+msgstr ""
+
+#: collins/prmenu.py:535
+msgid "Open this pull request's page beside the session"
+msgstr ""
+
+#: collins/prview.py:59
+msgid "Approved"
+msgstr ""
+
+#: collins/prview.py:63
+msgid "Changes requested"
+msgstr ""
+
+#: collins/prview.py:65
+msgid "Review dismissed"
+msgstr ""
+
+#: collins/prview.py:67
+msgid "Commented"
+msgstr ""
+
+#: collins/prview.py:117
+msgid "Reload this pull request"
+msgstr ""
+
+#: collins/prview.py:128
+msgid "Pull request actions"
+msgstr ""
+
+#: collins/prview.py:262
+msgid "Couldn't load this pull request — is the GitHub CLI signed in?"
+msgstr ""
+
+#: collins/prview.py:311
+msgid "Merges {head} into {base}"
+msgstr ""
+
+#: collins/prview.py:316
+msgid "{n} file"
+msgid_plural "{n} files"
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/prview.py:363
+msgid "Conversation"
+msgstr ""
+
+#: collins/prview.py:373
+msgid "No comments yet."
+msgstr ""
+
+#: collins/prview.py:382
+msgid "No description provided."
+msgstr ""
+
+#: collins/prview.py:389
+msgid "Checks"
+msgstr ""
+
+#: collins/prview.py:475
+msgid "Show more"
+msgstr ""
+
+#: collins/prview.py:243
+msgid "Nothing loaded yet."
+msgstr ""
+
+#: collins/prview.py:449
+msgid "Pull request"
 msgstr ""

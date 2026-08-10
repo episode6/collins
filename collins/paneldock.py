@@ -74,6 +74,7 @@ class PanelDock(Adw.Bin):
         self._settings: dict | None = None
         self._size_lookup = None  # (key) -> app-wide px seed, set by the window
         self._focus_terminal = None  # () -> None, grabs the agent VTE
+        self._page_factory = None  # (page_dict) -> PanelPage | None, for restore
         self._ever_spawned = False  # any shell ever ran in this dock
         self._next_shell = 1
         self._next_hist = 0  # next shell's persistent panel-history ordinal
@@ -100,6 +101,13 @@ class PanelDock(Adw.Bin):
         """`grab()` lands the cursor in the agent terminal — called when a
         strip that held focus hides or collapses."""
         self._focus_terminal = grab
+
+    def set_page_factory(self, factory) -> None:
+        """`factory(page_dict) -> PanelPage | None` conjures a non-shell page
+        from its serialized layout entry (see panellayout) during restore.
+        None drops the entry — an unknown kind, or state the factory won't
+        trust — and a strip left with nothing collapses right after."""
+        self._page_factory = factory
 
     def apply_settings(self, settings: dict) -> None:
         self._settings = settings
@@ -281,6 +289,64 @@ class PanelDock(Adw.Bin):
         if refocus:
             GLib.idle_add(strip.grab_page_focus)
 
+    # -- non-shell pages -----------------------------------------------------
+
+    def pages(self) -> list:
+        """Every page across every strip, in spatial-then-tab order."""
+        return [page for strip in self.strips() for page in strip.pages()]
+
+    def open_page(self, widget) -> None:
+        """Open a non-shell page as a tab in a strip beside the terminal:
+        the first strip right of it, else a new one split off the
+        terminal's right edge. The join-don't-split default keeps opening
+        five PRs from carving the dock into five slivers."""
+        strip = self._strip_right_of_terminal()
+        if strip is None:
+            strip = self._new_strip()
+            split = self._split_leaf(self._terminal, strip, "right")
+            self._panes[split].sizer.apply()
+        strip.add_page(widget)
+        self._reveal_strip(strip)
+        GLib.idle_add(widget.grab_page_focus)
+
+    def reveal_page(self, widget) -> None:
+        """Front an existing page: select its tab, and show its strip if it
+        is the hidden home strip (the one strip that can hide)."""
+        for strip in self.strips():
+            if widget in strip.pages():
+                strip.select_widget(widget)
+                self._reveal_strip(strip)
+                GLib.idle_add(widget.grab_page_focus)
+                return
+
+    def _reveal_strip(self, strip) -> None:
+        if strip is self._home_strip and not strip.get_visible():
+            strip.set_visible(True)
+            self._home_rec().sizer.apply()
+
+    def _strip_right_of_terminal(self):
+        """The first strip in the subtree right of the terminal, or None.
+
+        Walk up from the terminal leaf: the first horizontal split holding
+        the terminal's branch on the left has everything to its right in the
+        other branch, and that subtree's first strip (spatial order) is the
+        join target.
+        """
+        node = self._tree.find(self._terminal)
+        while node.parent is not None:
+            parent = node.parent
+            if parent.orientation == "h" and parent.slot_of(node) == "a":
+                strip = self._first_strip(parent.b)
+                if strip is not None:
+                    return strip
+            node = parent
+        return None
+
+    def _first_strip(self, node: Leaf | Split):
+        if isinstance(node, Leaf):
+            return node.value if node.value is not self._terminal else None
+        return self._first_strip(node.a) or self._first_strip(node.b)
+
     # -- shells across strips ----------------------------------------------
 
     def select_busy_shell(self) -> None:
@@ -377,9 +443,10 @@ class PanelDock(Adw.Bin):
         """Rebuild a saved split tree into this still-fresh dock (session
         restore, before the user could have split anything themselves).
         *tree* must be validated and pruned (see panellayout) — every page
-        in it is a kind this dock can conjure, today meaning shells, each
-        spawned with its saved scrollback from *shell_texts*. Hidden strips
-        rebuild hidden, their shells running."""
+        in it is a kind this dock can conjure: shells spawn with their saved
+        scrollback from *shell_texts*, other kinds come back through the
+        injected page factory. Hidden strips rebuild hidden, their shells
+        running."""
         if len(self._tree) > 1:
             return  # not fresh: the layout lost the race to a user action
         self._content.set_child(None)  # free the terminal for reparenting
@@ -398,6 +465,11 @@ class PanelDock(Adw.Bin):
                 rec.sizer.set_remembered(mode, size)
         for pane in self._panes.values():
             pane.sizer.apply()
+        for strip in self.strips():
+            # Every page a strip was saved with may have been refused by the
+            # page factory; the empty husk collapses like a live one would.
+            if strip.page_count == 0:
+                GLib.idle_add(self._collapse_strip, strip)
 
     def _restore_node(self, spec: dict, shell_texts: dict[int, str]) -> Leaf | Split:
         """Realize one saved node: leaves become the terminal or a freshly
@@ -409,12 +481,21 @@ class PanelDock(Adw.Bin):
             state = spec["strip"]
             strip = self._new_strip()
             for page in state["pages"]:
-                shell = strip.new_shell(
-                    restore_text=shell_texts.get(page["hist"]), select=False
-                )
-                shell.hist = page["hist"]
+                if page["kind"] == "shell":
+                    shell = strip.new_shell(
+                        restore_text=shell_texts.get(page["hist"]), select=False
+                    )
+                    shell.hist = page["hist"]
+                else:
+                    # Non-shell kinds come back through the injected factory
+                    # (see set_page_factory); state it won't trust is dropped,
+                    # and a strip that ends up with no pages at all collapses
+                    # right after restore (see restore_layout).
+                    widget = self._page_factory(page) if self._page_factory else None
+                    if widget is not None:
+                        strip.add_page(widget, select=False)
             widgets = strip.pages()
-            if 0 <= state["selected"] < len(widgets):
+            if widgets and 0 <= state["selected"] < len(widgets):
                 strip.select_widget(widgets[state["selected"]])
             if state["home"]:
                 self._home_strip = strip

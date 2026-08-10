@@ -124,7 +124,7 @@ _ACTION_ICONS = {
 
 @dataclass(frozen=True)
 class ActionHost:
-    """The session behind a PR menu, as the four things its actions need.
+    """The session behind a PR menu, as the few things its actions need.
 
     A PR's actions are mostly GitHub's business, but the ones that send a
     prompt are the session's: whether it is somewhere a prompt can be sent,
@@ -148,6 +148,10 @@ class ActionHost:
     send_prompt: Callable[[str], None]
     # An action changed the PR on GitHub; re-read its status.
     refresh: Callable[[], None]
+    # Open the PR's native page (prview) docked beside the session — the
+    # "View in Collins" row. None where no such page can be shown, and on the
+    # page's own actions menu, which mustn't offer to open itself again.
+    view_pr: Callable[[PullRequest], None] | None = None
 
 
 def new_popover(position: Gtk.PositionType) -> Gtk.Popover:
@@ -214,6 +218,25 @@ def _mark(
 def status_icon(pr: PullRequest) -> Gtk.Widget:
     """One PR's state and status as a mark, at the size the chips use."""
     return _mark(pr.state, pr.badge, MERGED_ICON_PX, BADGE_PX)
+
+
+def state_icon_name(state: str | None) -> str:
+    """The bare icon name for a PR state — for slots that take a themed icon
+    rather than a widget, like a panel page's tab. Color is the widget marks'
+    affordance; a tab icon carries the shape alone."""
+    return _BASE_ICONS.get(state or "", _BASE_FALLBACK)[0]
+
+
+def check_image(state: str, px: int = ROW_ICON_PX) -> Gtk.Widget:
+    """One CI check's verdict as a colored icon (see prdetail.PrCheck.state:
+    a prstatus badge name). The PR view's check rows reuse the badge
+    iconography at row-icon size, so a red x means the same thing everywhere."""
+    name, css_class = _BADGE_ICONS.get(state, _BADGE_ICONS[BADGE_PENDING])
+    image = Gtk.Image.new_from_icon_name(name)
+    image.set_pixel_size(px)
+    if css_class is not None:
+        image.add_css_class(css_class)
+    return image
 
 
 def combined_icon(prs: Iterable[PullRequest]) -> Gtk.Widget:
@@ -432,6 +455,8 @@ def show_actions(
     separator.set_margin_top(3)
     separator.set_margin_bottom(3)
     rows.append(separator)
+    if host.view_pr is not None:
+        rows.append(_view_row(popover, pr, host.view_pr))
     rows.append(_open_row(popover, pr))
     for action in practions.actions_for(pr, host.prompt_block(), host.has_changes):
         rows.append(_action_row(popover, pr, action, host))
@@ -488,6 +513,30 @@ def _header(pr: PullRequest, back: Callable[[], None] | None) -> Gtk.Widget:
     button.add_css_class("pr-menu-row")
     button.set_tooltip_text(_("Back to the pull requests"))
     button.connect("clicked", lambda *_a: back())
+    return button
+
+
+def _view_row(
+    popover: Gtk.Popover, pr: PullRequest, view: Callable[[PullRequest], None]
+) -> Gtk.Widget:
+    """The native way to read a PR: its page docked beside the session.
+
+    Listed above "Open on GitHub" — the in-app view is the nearer of the two
+    readings — and only when the host can show one (see ActionHost.view_pr).
+    """
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    row.append(_mark_icon("view-paged-symbolic", None))
+    row.append(Gtk.Label(label=_("View in Collins"), xalign=0.0, hexpand=True))
+    button = Gtk.Button(child=row)
+    button.add_css_class("flat")
+    button.add_css_class("pr-menu-row")
+    button.set_tooltip_text(_("Open this pull request's page beside the session"))
+
+    def clicked(*_args) -> None:
+        popover.popdown()
+        view(pr)
+
+    button.connect("clicked", clicked)
     return button
 
 
