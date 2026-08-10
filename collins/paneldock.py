@@ -77,6 +77,7 @@ class PanelDock(Adw.Bin):
         self._ever_spawned = False  # any shell ever ran in this dock
         self._next_shell = 1
         self._next_hist = 0  # next shell's persistent panel-history ordinal
+        self._restoring = False  # restore_layout is rebuilding the tree
         # The tree's widgets live in a content bin under a dock-wide
         # overlay; the drop zones ride the overlay so a grip drag can
         # target every leaf's edges at once (paneldnd.DropZones).
@@ -136,8 +137,10 @@ class PanelDock(Adw.Bin):
         """The 1-based ordinal for a new shell's tab title. Dock-wide, so
         titles stay unique across strips; restarts from 1 once no shell
         pages remain anywhere (an emptied dock, like an emptied strip
-        before it, starts counting over)."""
-        if not self.shell_pages():
+        before it, starts counting over). Not mid-restore, though: shells
+        rebuild before their strip enters the tree, so the emptiness test
+        would reset the count for every one of them ("Terminal 1" thrice)."""
+        if not self._restoring and not self.shell_pages():
             self._next_shell = 1
         number = self._next_shell
         self._next_shell += 1
@@ -380,7 +383,11 @@ class PanelDock(Adw.Bin):
         if len(self._tree) > 1:
             return  # not fresh: the layout lost the race to a user action
         self._content.set_child(None)  # free the terminal for reparenting
-        root = self._restore_node(tree, shell_texts)
+        self._restoring = True
+        try:
+            root = self._restore_node(tree, shell_texts)
+        finally:
+            self._restoring = False
         root.parent = None
         self._tree.root = root
         self._content.set_child(self._widget_of(root))

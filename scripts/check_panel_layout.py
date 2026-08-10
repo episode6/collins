@@ -193,6 +193,11 @@ def main() -> int:
         {shell.hist: shell.restored_text for shell in shells},
     )
     check("home marker restored", dock2._home_strip is not None and dock2.home_visible)
+    check(
+        "restored tab titles stay unique",
+        sorted(shell.number for shell in shells) == [1, 2],
+        [shell.number for shell in shells],
+    )
     relayout = dock2.capture_layout()
     check(
         "recapture keeps the structure",
