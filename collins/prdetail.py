@@ -147,7 +147,12 @@ def fetch(url: str) -> PullRequestDetail | None:
     """
     if prstatus.repository_for(url) is None:
         return None
-    data = prstatus.gh_json(["pr", "view", url, "--json", _GH_DETAIL_FIELDS])
+    # The action timeout, not the poll's: this is one on-demand call the user
+    # is waiting for, and a 19-field reply is the heavier half of the load.
+    data = prstatus.gh_json(
+        ["pr", "view", url, "--json", _GH_DETAIL_FIELDS],
+        timeout=prstatus._GH_ACTION_TIMEOUT_S,
+    )
     if not isinstance(data, dict):
         return None
     prstatus.absorb(url, data)

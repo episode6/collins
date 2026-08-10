@@ -3,6 +3,9 @@ one recorded `gh pr view --json` reply parsed into frozen records, the unified
 diff split per file, and the degradations (no diff, junk fields, hostile
 strings) that keep a load from failing whole."""
 
+import json
+import subprocess
+
 import pytest
 
 from collins import prdetail, prstatus
@@ -358,7 +361,7 @@ def gh(monkeypatch):
     view = {"value": None}
     diff = {"value": None}
 
-    def gh_json(args, cwd=None):
+    def gh_json(args, cwd=None, timeout=None):
         calls.append(args)
         return view["value"]
 
@@ -415,3 +418,21 @@ def test_fetch_survives_a_dead_or_oversized_diff(gh):
     detail = fetch(URL)
     assert detail is not None
     assert [f.patch for f in detail.files] == [None, None]
+
+
+def test_fetch_runs_both_calls_on_the_action_budget(monkeypatch):
+    """All the way down to subprocess.run: a load someone is waiting on gets
+    the action timeout for the heavy view reply and the diff alike, not the
+    poll's short one."""
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append((argv, kwargs))
+        stdout = "" if "diff" in argv else json.dumps(_reply())
+        return subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(prstatus.subprocess, "run", run)
+    assert fetch(URL) is not None
+    assert [kwargs["timeout"] for _argv, kwargs in seen] \
+        == [prstatus._GH_ACTION_TIMEOUT_S] * 2

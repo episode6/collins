@@ -683,6 +683,21 @@ def test_gh_text_hands_back_raw_stdout(monkeypatch):
     assert "shell" not in kwargs
 
 
+def test_gh_json_takes_a_timeout(monkeypatch):
+    """The poll budget stays the default; an on-demand caller can wait longer."""
+    seen = []
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(
+        prstatus.subprocess, "run",
+        lambda argv, **kw: seen.append(kw) or _completed("{}"),
+    )
+    assert prstatus.gh_json(["pr", "view", URL]) == {}
+    assert prstatus.gh_json(
+        ["pr", "view", URL], timeout=prstatus._GH_ACTION_TIMEOUT_S) == {}
+    assert [kw["timeout"] for kw in seen] \
+        == [prstatus._GH_TIMEOUT_S, prstatus._GH_ACTION_TIMEOUT_S]
+
+
 def test_gh_text_degrades_on_failure(monkeypatch):
     monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
     monkeypatch.setattr(prstatus.subprocess, "run", lambda *a, **kw: _completed("", 1))

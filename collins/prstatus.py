@@ -639,13 +639,19 @@ def _gh(
         return None
 
 
-def gh_json(args: list[str], cwd: str | None = None) -> object | None:
+def gh_json(
+    args: list[str], cwd: str | None = None, timeout: float = _GH_TIMEOUT_S
+) -> object | None:
     """One `gh` call, returning its parsed --json output. None on any failure.
 
     An object or a list, depending on the subcommand, so callers check the shape
-    they asked for.
+    they asked for. *timeout* defaults to the short poll budget — one fetch
+    among many, nobody waiting on it in particular; an on-demand call someone
+    *is* waiting on (prdetail's full view fetch) passes the action timeout
+    instead, so a heavy reply on a slow connection doesn't fail a load the
+    lighter calls would have survived.
     """
-    result = _gh(args, cwd)
+    result = _gh(args, cwd, timeout=timeout)
     if result is None:
         return None
     if result.returncode != 0:
@@ -711,8 +717,10 @@ def gh_text(args: list[str], max_bytes: int | None = None) -> str | None:
     takes GitHub longer than a status summary — and an optional *max_bytes*
     cap, over which the reply is dropped rather than returned: a caller with
     a cap has a cheaper fallback for the oversized case (prdetail degrades to
-    stat-only files), and a string that size shouldn't get to sit in memory
-    on the way there. Never call on the main thread.
+    stat-only files). The whole reply has already been buffered by the time
+    it can be measured, so the cap bounds what gets *kept* and handed on —
+    not the one spike while gh's output is read. Never call on the main
+    thread.
     """
     result = _gh(args, timeout=_GH_ACTION_TIMEOUT_S)
     if result is None:
