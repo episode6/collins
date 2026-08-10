@@ -109,6 +109,9 @@ DEFAULT_SETTINGS = {
     "caffeine_keep_screen_on": True,
     "caffeine_on_launch": False,  # start with Caffeine Mode on (see app.py's inhibitor)
     "caffeine_launch_timer": "active",  # shut-off timer armed at launch (see caffeine.py)
+    # Minutes the Until-idle mode keeps holding the machine awake after the
+    # last session stops working, before it dozes (see caffeine.grace_seconds).
+    "caffeine_idle_grace_minutes": 5,
     "sidebar_width": 300,  # persisted sidebar pane width in px
     "panel_position": "bottom",  # secondary terminal panel placement: bottom | right
     # Panel tabs drag by their own handle (join/reorder/split via the drop

@@ -34,7 +34,7 @@ from . import (
     remoteimages,
     tooltipmute,
 )
-from .caffeine import ACTIVE_GRACE_S, duration_seconds, follow_poll, follows_activity
+from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
 from .i18n import _
 from .lightbox import present_image_lightbox
 from .prefs import apply_color_scheme
@@ -1222,12 +1222,17 @@ class App(Adw.Application):
         leave the machine awake with nothing left to work for, or dozing
         through a session that picked work back up.
         """
+        # The grace is read fresh every poll, so a changed setting takes
+        # effect the next time the sessions go quiet — no toggle needed. A
+        # countdown already running keeps its old deadline (follow_poll never
+        # rewrites one), which beats yanking it around under the user.
+        grace_s = grace_seconds(self.state.get_setting("caffeine_idle_grace_minutes"))
         deadline, action = follow_poll(
             working=self._sessions_working(),
             holding=self._caffeine_cookie is not None,
             deadline=self._caffeine_deadline,
             now=GLib.get_monotonic_time(),
-            grace=ACTIVE_GRACE_S * 1_000_000,  # the poll's clock is µs
+            grace=grace_s * 1_000_000,  # the poll's clock is µs
         )
         changed = deadline != self._caffeine_deadline
         self._caffeine_deadline = deadline

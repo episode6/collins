@@ -14,13 +14,16 @@ INDEFINITE = "indefinite"  # stays on until it's turned off by hand
 WHILE_ACTIVE = "active"  # holds while any session works (plus a grace), dozes in between
 
 # How long Caffeine Mode goes on holding the machine awake after the last
-# session stops working. Long enough to cover an agent that pauses to think
-# between turns or a run picked back up right away, short enough that a
-# finished night's work isn't kept awake for nothing. Any session going busy
-# again drops it: the grace only ever starts from the last moment of work.
-# Running out doesn't end the mode — it dozes, ready to hold again the next
-# time a session works (see `follow_poll`).
+# session stops working — the default: the caffeine_idle_grace_minutes
+# setting lets the user stretch or shrink it (see `grace_seconds`). Long
+# enough to cover an agent that pauses to think between turns or a run picked
+# back up right away, short enough that a finished night's work isn't kept
+# awake for nothing. Any session going busy again drops it: the grace only
+# ever starts from the last moment of work. Running out doesn't end the mode
+# — it dozes, ready to hold again the next time a session works (see
+# `follow_poll`).
 ACTIVE_GRACE_S = 300
+DEFAULT_GRACE_MIN = ACTIVE_GRACE_S // 60  # the same default, as the setting's unit
 
 # The timed options. Their keys ("1h", "2h"…) are persisted in state.json and
 # used as menu action targets, so they must stay stable; the labels are
@@ -44,6 +47,24 @@ def duration_seconds(key: str) -> int | None:
         if key == f"{hours}h":
             return hours * 3600
     return None
+
+
+def grace_seconds(minutes: object) -> int:
+    """The Until-idle grace in seconds, from the minutes setting.
+
+    Anything that doesn't read as a whole minute or more — a hand-edited
+    setting, a stale type from an older state.json — falls back to the
+    five-minute default rather than becoming a zero-length grace that would
+    let the machine sleep the instant work stops. Kept next to the rule it
+    feeds (`follow_poll`) so the sanitizing can be tested without a display.
+    """
+    try:
+        value = int(minutes)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return ACTIVE_GRACE_S
+    if value < 1:
+        return ACTIVE_GRACE_S
+    return value * 60
 
 
 def follows_activity(key: str) -> bool:
@@ -79,8 +100,8 @@ def follow_poll(
       a session gives it a reason to be held again.
     - **idle, holding, no deadline**: a fresh one, *grace* from now. This is
       what makes any burst of work reset the wait — the work cleared the old
-      deadline on its way in, so the next quiet moment starts the five
-      minutes over.
+      deadline on its way in, so the next quiet moment starts the grace
+      over.
     - **idle, holding, deadline still ahead**: that same deadline, untouched,
       so it runs down smoothly instead of restarting on every poll.
     - **idle, holding, deadline reached**: ``"release"``, and the deadline

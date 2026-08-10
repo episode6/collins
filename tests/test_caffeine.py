@@ -2,6 +2,7 @@ import pytest
 
 from collins.caffeine import (
     ACTIVE_GRACE_S,
+    DEFAULT_GRACE_MIN,
     DURATION_KEYS,
     INDEFINITE,
     WHILE_ACTIVE,
@@ -11,6 +12,7 @@ from collins.caffeine import (
     follow_poll,
     follows_activity,
     format_remaining,
+    grace_seconds,
     toggle_tooltip,
 )
 
@@ -53,9 +55,24 @@ def test_only_the_exact_key_follows_the_sessions(key):
     assert not follows_activity(key)
 
 
-def test_grace_is_five_minutes():
+def test_grace_defaults_to_five_minutes():
     assert ACTIVE_GRACE_S == 300
     assert format_remaining(ACTIVE_GRACE_S) == "5:00"
+    assert DEFAULT_GRACE_MIN == 5
+    assert grace_seconds(DEFAULT_GRACE_MIN) == ACTIVE_GRACE_S
+
+
+def test_the_grace_setting_is_in_minutes():
+    assert grace_seconds(1) == 60
+    assert grace_seconds(30) == 1800
+    assert grace_seconds("15") == 900  # a hand-edited state.json still counts
+
+
+@pytest.mark.parametrize("bad", [None, "", "soon", "2.5", 0, -5])
+def test_a_bad_grace_setting_falls_back_to_the_default(bad):
+    # Garbage must never read as a zero-length grace that lets the machine
+    # sleep the instant work stops — the default is the honest fallback.
+    assert grace_seconds(bad) == ACTIVE_GRACE_S
 
 
 def test_working_sessions_leave_nothing_to_count_down():
