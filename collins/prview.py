@@ -240,7 +240,7 @@ class PrViewPage(Adw.Bin):
         self.set_child(view)
 
         self._show_loading()
-        self._files_placeholder(_("Nothing loaded yet."))
+        self._files_loading()
         self._sync_header()
         # First shown (and every re-show): read the PR. "map" covers the
         # strip appearing, this tab being selected, and the session tab
@@ -345,6 +345,7 @@ class PrViewPage(Adw.Bin):
             self._banner.set_reveal_child(True)
             if self._detail is None:
                 self._show_empty()
+                self._files_placeholder(_("Nothing loaded yet."))
             return GLib.SOURCE_REMOVE
         self._banner.set_reveal_child(False)
         self._detail = detail
@@ -585,6 +586,16 @@ class PrViewPage(Adw.Bin):
         label.add_css_class("dim-label")
         label.set_margin_top(24)
         self._files_column.append(label)
+
+    def _files_loading(self) -> None:
+        """The Conversation column's first-load spinner, Files flavored —
+        so a slow first fetch doesn't leave this tab looking idle."""
+        self._clear_files()
+        spinner = Gtk.Spinner(spinning=True)
+        spinner.set_size_request(24, 24)
+        spinner.set_halign(Gtk.Align.CENTER)
+        spinner.set_margin_top(24)
+        self._files_column.append(spinner)
 
     def _rebuild_files(self) -> None:
         detail = self._detail
