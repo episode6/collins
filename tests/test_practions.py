@@ -288,14 +288,23 @@ def test_checks_green_is_unknown_status_pessimistic():
 # -- what they run ----------------------------------------------------------
 
 
+class _Calls(list):
+    """The argv lists gh_run got, in order; `.stdins` is what each was fed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stdins: list[str | None] = []
+
+
 @pytest.fixture
 def gh(monkeypatch):
     """Stub gh_run; returns (calls, setter for what gh comes back with)."""
-    calls: list[list[str]] = []
+    calls = _Calls()
     reply: list[tuple[bool, str]] = [(True, "")]
 
-    def fake(args):
+    def fake(args, stdin=None):
         calls.append(args)
+        calls.stdins.append(stdin)
         return reply[0]
 
     monkeypatch.setattr(practions, "gh_run", fake)
@@ -339,6 +348,47 @@ def test_a_url_that_isnt_a_pr_never_reaches_gh(gh):
     assert perform(MERGE, _pr(url="--version")) is not None
     assert perform(READY, _pr(url="https://github.com/o/r/issues/9")) is not None
     assert calls == []
+
+
+def test_a_comment_body_travels_by_stdin(gh):
+    """The composer's text reaches gh as its input, never as an argv entry."""
+    calls, _serve = gh
+    assert practions.comment(_pr(), "Looks right to **me**.") is None
+    assert calls == [["pr", "comment", URL, "--body-file", "-"]]
+    assert calls.stdins == ["Looks right to **me**."]
+
+
+def test_an_approval_without_words_is_the_flag_alone(gh):
+    calls, _serve = gh
+    assert practions.review(_pr(), practions.APPROVE) is None
+    assert calls == [["pr", "review", URL, "--approve"]]
+    assert calls.stdins == [None]
+
+
+def test_a_review_body_travels_by_stdin_too(gh):
+    calls, _serve = gh
+    assert practions.review(_pr(), practions.REQUEST_CHANGES, "Not this way.") is None
+    assert calls == [["pr", "review", URL, "--request-changes", "--body-file", "-"]]
+    assert calls.stdins == ["Not this way."]
+
+
+def test_a_verdict_practions_never_named_is_refused(gh):
+    calls, _serve = gh
+    assert practions.review(_pr(), "--approve") is not None
+    assert calls == []
+
+
+def test_the_write_calls_refuse_a_non_pr_url_as_perform_does(gh):
+    calls, _serve = gh
+    assert practions.comment(_pr(url="--version"), "hi") is not None
+    assert practions.review(_pr(url="https://github.com/o/r/issues/9"), practions.APPROVE) is not None
+    assert calls == []
+
+
+def test_a_failed_post_comes_back_as_the_reason(gh):
+    _calls, serve = gh
+    serve((False, "Can not approve your own pull request"))
+    assert practions.review(_pr(), practions.APPROVE) == "Can not approve your own pull request"
 
 
 def test_the_prompts_sent_to_a_session_are_left_in_english():

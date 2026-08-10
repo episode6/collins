@@ -74,8 +74,10 @@ _MERGE_METHODS = (
 )
 _DEFAULT_MERGE_METHOD = "--squash"  # GitHub's own default for a new repository
 
-# The states in which a PR is still something you can act on.
-_LIVE = ("OPEN", "DRAFT")
+# The states in which a PR is still something you can act on. Public because
+# the composer (prview) asks it too: review verdicts are only offered while a
+# PR is one of these — GitHub refuses an approval on a merged pull request.
+LIVE = ("OPEN", "DRAFT")
 
 
 @dataclass(frozen=True)
@@ -165,7 +167,7 @@ def actions_for(
         # a branch GitHub can't merge. The rebase action below stands where
         # the merge would have — resolving is what makes merging offerable.
         actions.append(_merge_action(pr))
-    if pr.state in _LIVE and pr.conflicting:
+    if pr.state in LIVE and pr.conflicting:
         rebase_prompt = REBASE_PROMPT.format(number=pr.number)
         actions.append(
             Action(
@@ -176,7 +178,7 @@ def actions_for(
                 blocked=prompt_block,
             )
         )
-    if pr.state in _LIVE:
+    if pr.state in LIVE:
         actions.append(
             Action(
                 REVIEW,
@@ -288,6 +290,50 @@ def perform(key: str, pr: PullRequest) -> str | None:
     return _("Collins doesn't know how to do that.")  # unreachable; never a crash
 
 
+# The composer's two review verdicts (see prview): named rather than gh flags
+# so a widget never builds argv, and so a typo'd verdict is refused here
+# instead of handed to a subprocess.
+APPROVE = "approve"
+REQUEST_CHANGES = "request-changes"
+_VERDICT_FLAGS = {APPROVE: "--approve", REQUEST_CHANGES: "--request-changes"}
+
+
+def comment(pr: PullRequest, body: str) -> str | None:
+    """Post *body* on *pr* as an issue comment. None when it worked, else why not.
+
+    The body is free text typed in the app, so it travels to gh as stdin
+    (``--body-file -``), never as an argv entry — the shape of a command must
+    not depend on what somebody wrote in a text box. Never call on the main
+    thread.
+    """
+    return _refused(pr) or _run(["pr", "comment", pr.url, "--body-file", "-"], stdin=body)
+
+
+def review(pr: PullRequest, verdict: str, body: str = "") -> str | None:
+    """Submit a review of *pr*: APPROVE or REQUEST_CHANGES, with *body* if any.
+
+    None when it worked, else why not. The body rides stdin exactly as
+    `comment`'s does; without one the flag goes alone — which GitHub accepts
+    for an approval and refuses for requested changes, so the composer only
+    offers the latter over a written comment. Never call on the main thread.
+    """
+    flag = _VERDICT_FLAGS.get(verdict)
+    if flag is None:
+        return _("Collins doesn't know how to do that.")
+    args = ["pr", "review", pr.url, flag]
+    if body:
+        args += ["--body-file", "-"]
+    return _refused(pr) or _run(args, stdin=body or None)
+
+
+def _refused(pr: PullRequest) -> str | None:
+    """Why *pr* must not reach a subprocess at all — the gate `perform` opens
+    with, for the write calls that don't need the repository name back."""
+    if repository_for(pr.url) is None:
+        return _("{url} doesn't look like a pull request.").format(url=pr.url)
+    return None
+
+
 def merge_method(repository: str) -> str:
     """The gh flag naming a merge method *repository* actually allows.
 
@@ -307,6 +353,6 @@ def merge_method(repository: str) -> str:
     return _DEFAULT_MERGE_METHOD
 
 
-def _run(args: list[str]) -> str | None:
-    ok, message = gh_run(args)
+def _run(args: list[str], stdin: str | None = None) -> str | None:
+    ok, message = gh_run(args, stdin=stdin)
     return None if ok else message
