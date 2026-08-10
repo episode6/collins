@@ -52,8 +52,9 @@ from .tabguard import guard  # noqa: E402
 
 
 class PageDrag(GObject.Object):
-    """The content a grip drag carries: which page, from which strip.
-    In-process only — the dock's drop zones are the sole target."""
+    """The content a page drag carries — whether a tab's own handle or the
+    fallback grip started it: which page, from which strip. In-process
+    only — the dock's drop zones are the sole target."""
 
     __gtype_name__ = "CollinsPageDrag"
 
@@ -208,7 +209,7 @@ def insert_position(strip, relative_to: Gtk.Widget, x: float) -> int:
 
 
 class DropZones(Gtk.Widget):
-    """The dock-wide drop-zone overlay for grip drags.
+    """The dock-wide drop-zone overlay for page drags.
 
     Hidden (and untargetable) until the dock's `begin_page_drag` shows it
     with a model of `(leaf widget, allowed zones)` pairs; then a single

@@ -79,7 +79,7 @@ class PanelDock(Adw.Bin):
         self._next_hist = 0  # next shell's persistent panel-history ordinal
         self._restoring = False  # restore_layout is rebuilding the tree
         # The tree's widgets live in a content bin under a dock-wide
-        # overlay; the drop zones ride the overlay so a grip drag can
+        # overlay; the drop zones ride the overlay so a page drag can
         # target every leaf's edges at once (paneldnd.DropZones).
         self._content = Adw.Bin(child=terminal)
         self._zones = paneldnd.DropZones(self._on_zone_drop)
