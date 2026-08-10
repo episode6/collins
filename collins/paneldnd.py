@@ -1,24 +1,41 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
-"""Drag-and-drop for panel pages: the grip, the drop zones, the guard.
+"""Drag-and-drop for panel pages: per-tab drags, the drop zones, the guard.
 
 Three GTK pieces around the dock's move machinery, sharing this module
 because they share one story — how a panel page travels by pointer:
 
-- **The grip** (`make_grip`): a drag handle in each strip's tab bar that
-  starts a *custom* drag carrying the strip's selected page. Custom
-  because native Adwaita tab drags use internal content and cannot be
-  seen by our `Gtk.DropTarget`s — so edge docking gets its own drag,
-  with its own gtype (`PageDrag`).
+- **Per-tab drag sources** (`wire_tab_drag`): every strip tab carries a
+  *custom* drag of its own page — custom because native Adwaita tab drags
+  use internal content and cannot be seen by our `Gtk.DropTarget`s, so
+  the drop zones get their own drag with their own gtype (`PageDrag`).
+  The source rides the tab's private `AdwTab` widget (found by the same
+  fail-soft walk `MainWindow._tab_widget` uses for the tab flash), where
+  bubble-phase propagation reaches it *before* the `AdwTabBox` ancestor
+  that implements Adwaita's own tab drag: claiming the sequence there
+  kills the native drag outright — deliberately, since a native drag can
+  only reorder within a bar or land on another bar's guard, while this
+  one can join, reorder positionally, and split. The tab shows a
+  drag-handle indicator icon beside its title as the affordance.
+  Because all of it rides private widget internals, the
+  `panel_tab_drag_handles` setting can turn it off: `unwire_tab_drag`
+  reverses the mount, native tab dragging returns (nothing claims ahead
+  of it anymore), and each strip shows its end-of-bar grip
+  (`make_grip`) — the drag-the-selected-page fallback that speaks the
+  same drop-zone language.
 - **The drop zones** (`DropZones`): an overlay across the whole dock,
-  active only while a grip drag is in flight, that highlights and
+  active only while a page drag is in flight, that highlights and
   resolves edge/center zones over every visible leaf (geometry in
-  dockzones.py) and hands the drop to the dock.
+  dockzones.py) and hands the drop — with its pointer position, for
+  center-zone tab placement — to the dock.
 - **The guard wiring** (`guard_view`): connects an `Adw.TabView` to the
   process-wide `tabguard.guard`, bouncing pages that native Adwaita tab
   DnD drops into a view of the wrong group (policy and rationale in
-  tabguard.py). The bounce is a deferred `transfer_page`, suppressed in
-  the guard so its own detach/attach pair can't counter-bounce.
+  tabguard.py). Strip tabs no longer *start* native drags, but the
+  session tab bar and editor file tabs still do, and a strip's bar still
+  receives them — the guard stays their bouncer. The bounce is a
+  deferred `transfer_page`, suppressed in the guard so its own
+  detach/attach pair can't counter-bounce.
 """
 
 from __future__ import annotations
@@ -29,14 +46,15 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, GLib, GObject, Graphene, Gsk, Gtk  # noqa: E402
 
-from .dockzones import hit, zone_rect  # noqa: E402
+from .dockzones import hit, insert_index, zone_rect  # noqa: E402
 from .i18n import _  # noqa: E402
 from .tabguard import guard  # noqa: E402
 
 
 class PageDrag(GObject.Object):
-    """The content a grip drag carries: which page, from which strip.
-    In-process only — the dock's drop zones are the sole target."""
+    """The content a page drag carries — whether a tab's own handle or the
+    fallback grip started it: which page, from which strip. In-process
+    only — the dock's drop zones are the sole target."""
 
     __gtype_name__ = "CollinsPageDrag"
 
@@ -46,26 +64,99 @@ class PageDrag(GObject.Object):
         self.widget = widget
 
 
-# -- the grip ----------------------------------------------------------------
+# -- per-tab drag sources ----------------------------------------------------
+
+# The visible handle: shown as each tab's indicator icon, beside the title.
+HANDLE_ICON = "list-drag-handle-symbolic"
+
+
+def wire_tab_drag(strip, widget) -> None:
+    """Give *widget*'s tab in *strip* its own drag source, carrying the
+    page itself. Deferred an idle: the private `AdwTab` this rides on is
+    created by the tab bar's page-attached handler, which runs after the
+    strip's own (the strip connects to the view before the bar exists).
+    Transfers re-wire naturally — the destination bar builds a fresh
+    `AdwTab` and the destination strip's page-attached lands here again.
+    Fails soft: if a libadwaita bump renames the private type, the walk
+    finds nothing and moving falls back to the tab context menu."""
+
+    def wire() -> bool:
+        if not getattr(strip, "tab_drag_handles", True):
+            return GLib.SOURCE_REMOVE  # turned off while this idle was queued
+        tab = _find_tab(strip.tab_bar, widget)
+        if tab is not None and getattr(tab, "_collins_page_drag", None) is None:
+            source = _page_drag_source(
+                strip, lambda: widget if widget in strip.pages() else None
+            )
+            tab._collins_page_drag = source
+            tab.add_controller(source)
+        return GLib.SOURCE_REMOVE
+
+    GLib.idle_add(wire)
+
+
+def unwire_tab_drag(strip, widget) -> None:
+    """Undo `wire_tab_drag` for *widget*'s tab (the fallback setting turned
+    per-tab drags off): with no source claiming ahead of `AdwTabBox`'s own
+    gesture, native tab dragging simply resumes."""
+    tab = _find_tab(strip.tab_bar, widget)
+    source = getattr(tab, "_collins_page_drag", None) if tab is not None else None
+    if source is not None:
+        tab.remove_controller(source)
+        tab._collins_page_drag = None
+
+
+def _find_tab(bar: Adw.TabBar, widget) -> Gtk.Widget | None:
+    """The private `AdwTab` in *bar* whose page holds *widget*, or None.
+    Matched through the tab's page property, never by position: the tabs
+    sit in creation order in the widget tree, which reorders leave
+    behind (see MainWindow._tab_widget, the same walk)."""
+
+    def walk(node: Gtk.Widget) -> Gtk.Widget | None:
+        child = node.get_first_child()
+        while child is not None:
+            if child.__gtype__.name == "AdwTab":
+                # A just-closed tab lingers pageless while it animates out.
+                page = child.get_property("page")
+                if page is not None and page.get_child() is widget:
+                    return child
+            else:
+                found = walk(child)
+                if found is not None:
+                    return found
+            child = child.get_next_sibling()
+        return None
+
+    return walk(bar)
 
 
 def make_grip(strip) -> Gtk.Widget:
     """A drag handle for *strip*'s tab bar (end-action box): dragging it
-    carries the strip's selected page, lighting the dock's drop zones.
-    Inert (drag never starts) while the strip has no page mover — an
-    undocked strip has nowhere to move pages to."""
-    grip = Gtk.Image.new_from_icon_name("list-drag-handle-symbolic")
+    carries the strip's *selected* page, lighting the dock's drop zones.
+    The fallback affordance while `panel_tab_drag_handles` is off — the
+    strip keeps it hidden otherwise. Inert without a page mover (an
+    undocked strip has nowhere to move pages to)."""
+    grip = Gtk.Image.new_from_icon_name(HANDLE_ICON)
     grip.add_css_class("dim-label")
     grip.set_tooltip_text(_("Drag to move this tab: drop on an edge to split, on a strip to join"))
     grip.set_cursor(Gdk.Cursor.new_from_name("grab"))
+    grip.add_controller(_page_drag_source(strip, strip.selected_page_widget))
+    return grip
 
+
+def _page_drag_source(strip, resolve) -> Gtk.DragSource:
+    """A drag source carrying the page `resolve()` answers at press time —
+    a fixed page for a tab's own source (None once it left the strip), the
+    selected page for the grip. On a tab it rides bubble phase, so it
+    runs — and claims the drag — before the `AdwTabBox` ancestor whose
+    own bubble gesture would otherwise start Adwaita's native tab drag.
+    Inert while the strip has no page mover."""
     source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
     pending: dict = {}  # the payload between prepare and drag-begin
 
     def on_prepare(_source, _x, _y):
-        mover = strip.page_mover
-        widget = strip.selected_page_widget()
-        if mover is None or widget is None:
+        widget = resolve()
+        if strip.page_mover is None or widget is None:
             return None
         payload = PageDrag(strip, widget)
         pending["payload"] = payload
@@ -94,22 +185,39 @@ def make_grip(strip) -> Gtk.Widget:
     source.connect("prepare", on_prepare)
     source.connect("drag-begin", on_begin)
     source.connect("drag-end", on_end)
-    grip.add_controller(source)
-    return grip
+    return source
+
+
+def insert_position(strip, relative_to: Gtk.Widget, x: float) -> int:
+    """Where a center-zone drop at *x* (in *relative_to*'s coordinates)
+    inserts among *strip*'s tabs: before the first tab whose center lies
+    right of the pointer (dockzones.insert_index). Tabs the walk can't
+    find (private-type rename, an unmapped bar) don't count, degrading
+    toward append — the pre-positional behavior."""
+    centers = []
+    for page_widget in strip.pages():
+        tab = _find_tab(strip.tab_bar, page_widget)
+        if tab is None:
+            continue
+        ok, bounds = tab.compute_bounds(relative_to)
+        if ok:
+            centers.append(bounds.get_x() + bounds.get_width() / 2)
+    return insert_index(centers, x)
 
 
 # -- the drop zones ----------------------------------------------------------
 
 
 class DropZones(Gtk.Widget):
-    """The dock-wide drop-zone overlay for grip drags.
+    """The dock-wide drop-zone overlay for page drags.
 
     Hidden (and untargetable) until the dock's `begin_page_drag` shows it
     with a model of `(leaf widget, allowed zones)` pairs; then a single
     `Gtk.DropTarget` on the whole overlay resolves pointer position →
     (leaf, zone) against live leaf bounds and paints the would-be
-    placement. `on_drop(payload, leaf_widget, zone)` receives a landed
-    drop; the grip's drag-end hides the overlay again either way."""
+    placement. `on_drop(payload, leaf_widget, zone, x, y)` receives a
+    landed drop with its overlay-relative pointer position (center drops
+    place the tab by it); the drag's end hides the overlay either way."""
 
     def __init__(self, on_drop) -> None:
         super().__init__(visible=False)
@@ -183,7 +291,7 @@ class DropZones(Gtk.Widget):
             return False
         index, zone, _rect = active
         leaf_widget = self._model[index][0]
-        self._on_drop(value, leaf_widget, zone)
+        self._on_drop(value, leaf_widget, zone, x, y)
         return True
 
     def do_snapshot(self, snapshot: Gtk.Snapshot) -> None:

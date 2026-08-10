@@ -1033,9 +1033,9 @@ class MainWindow(Adw.ApplicationWindow):
             "tap-panel": lambda *_: self._toggle_panel(double_tap=True),
             "swap-panel": lambda *_: self._swap_panel(),
             "clear-panel": lambda *_: self._clear_panel(),
-            # Deliberately no default accelerator or menu surface yet: the
-            # dock's visible affordances (drag grip, drop zones) land with
-            # the DnD PR; until then this exists for custom keybindings.
+            # Deliberately no default accelerator or menu surface: the
+            # dock's visible affordances (per-tab drag handles, drop
+            # zones) cover moving; this exists for custom keybindings.
             "move-panel-page": lambda *_: self._move_panel_page(),
             "toggle-editor": lambda *_: self._toggle_editor(),
             "editor-save": lambda *_: self._editor_save(),

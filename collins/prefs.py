@@ -303,6 +303,22 @@ class PreferencesDialog(Adw.Dialog):
         terminal_group.add(_searchable(self._theme_expander, *THEME_NAMES))
         page.add(terminal_group)
 
+        # Its own group, not Terminal's: panels are growing page kinds
+        # beyond shells, and the tab-drag behavior applies to all of them.
+        panels_group = _SearchableGroup(title=_("Panels"))
+        self._tab_drag_row = Adw.SwitchRow(
+            title=_("Tab drag handles"),
+            subtitle=_(
+                "Drag any panel tab by its handle to move, reorder, or "
+                "split it. Relies on GTK internals — turn off to fall back "
+                "to plain tab dragging plus a drag grip on each panel"
+            ),
+        )
+        self._tab_drag_row.set_active(bool(state.get_setting("panel_tab_drag_handles")))
+        self._tab_drag_row.connect("notify::active", self._on_tab_drag_changed)
+        panels_group.add(self._tab_drag_row)
+        page.add(panels_group)
+
         if editor.HAVE_GTKSOURCE:
             self._build_editor_group(state, page)
 
@@ -908,6 +924,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_attach_overlay_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("attach_overlay_button", row.get_active())
+        self._on_change()
+
+    def _on_tab_drag_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("panel_tab_drag_handles", row.get_active())
         self._on_change()
 
     def _add_running_behavior_row(

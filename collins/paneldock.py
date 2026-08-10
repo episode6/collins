@@ -79,7 +79,7 @@ class PanelDock(Adw.Bin):
         self._next_hist = 0  # next shell's persistent panel-history ordinal
         self._restoring = False  # restore_layout is rebuilding the tree
         # The tree's widgets live in a content bin under a dock-wide
-        # overlay; the drop zones ride the overlay so a grip drag can
+        # overlay; the drop zones ride the overlay so a page drag can
         # target every leaf's edges at once (paneldnd.DropZones).
         self._content = Adw.Bin(child=terminal)
         self._zones = paneldnd.DropZones(self._on_zone_drop)
@@ -446,12 +446,13 @@ class PanelDock(Adw.Bin):
                 targets.append((selected.page_title(), other))
         return targets
 
-    def move_page(self, strip, widget, target) -> None:
-        """Move *widget*'s tab from *strip* into *target*, selecting and
-        focusing it there. The source collapses if that emptied it."""
+    def move_page(self, strip, widget, target, position: int | None = None) -> None:
+        """Move *widget*'s tab from *strip* into *target* — appending
+        unless *position* says where — selecting and focusing it there.
+        The source collapses if that emptied it."""
         if target is strip or target not in self._tree or strip not in self._tree:
             return
-        strip.transfer_to(widget, target)
+        strip.transfer_to(widget, target, position)
         target.select_widget(widget)
         GLib.idle_add(widget.grab_page_focus)
 
@@ -482,11 +483,12 @@ class PanelDock(Adw.Bin):
         GLib.idle_add(widget.grab_page_focus)
 
     def begin_page_drag(self, strip, widget) -> None:
-        """A grip drag started: light the drop zones over every visible
+        """A page drag started: light the drop zones over every visible
         leaf. The terminal offers its four edges (never center); the
-        drag's own strip offers edges only when a split would actually
-        change the layout — its single page splitting off itself just
-        collapses back to the same tree."""
+        drag's own strip joins in — center included, that's how tabs
+        reorder — only when it holds more than the dragged page, since a
+        single page's every drop on its own strip reassembles the same
+        layout."""
         model = []
         for leaf in self._tree.leaves():
             if not leaf.get_visible():
@@ -494,7 +496,7 @@ class PanelDock(Adw.Bin):
             if leaf is self._terminal:
                 allowed: tuple = EDGE_ZONES
             elif leaf is strip:
-                allowed = EDGE_ZONES if strip.page_count > 1 else ()
+                allowed = EDGE_ZONES + ("center",) if strip.page_count > 1 else ()
             else:
                 allowed = EDGE_ZONES + ("center",)
             model.append((leaf, allowed))
@@ -503,13 +505,18 @@ class PanelDock(Adw.Bin):
     def end_page_drag(self) -> None:
         self._zones.end()
 
-    def _on_zone_drop(self, payload, leaf, zone: str) -> None:
-        """A grip drop landed: center joins the target strip as a tab,
-        an edge splits the target leaf and moves the page there."""
-        if zone == "center":
-            self.move_page(payload.strip, payload.widget, leaf)
-        else:
+    def _on_zone_drop(self, payload, leaf, zone: str, x: float, y: float) -> None:
+        """A page drop landed: an edge splits the target leaf and moves
+        the page there; center joins the target strip as a tab at the
+        pointer's position — on the page's own strip, that's a reorder."""
+        if zone != "center":
             self.split_move(payload.strip, payload.widget, leaf, zone)
+            return
+        position = paneldnd.insert_position(leaf, self._zones, x)
+        if leaf is payload.strip:
+            leaf.reorder_to(payload.widget, position)
+        else:
+            self.move_page(payload.strip, payload.widget, leaf, position)
 
     def move_focused_page_next(self) -> None:
         """Cycle the focused page to the next strip (win.move-panel-page)."""
