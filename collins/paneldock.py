@@ -25,8 +25,11 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, GLib, GObject, Gtk  # noqa: E402
 
+from . import paneldnd  # noqa: E402
 from .docktree import DockTree, Leaf, Split  # noqa: E402
+from .dockzones import EDGE_ZONES  # noqa: E402
 from .panedsizer import PanedSizer  # noqa: E402
+from .tabguard import guard  # noqa: E402
 
 # The tree side a home strip splits off the terminal, per home position.
 _HOME_SIDES = {"bottom": "below", "right": "right"}
@@ -73,7 +76,16 @@ class PanelDock(Adw.Bin):
         self._focus_terminal = None  # () -> None, grabs the agent VTE
         self._ever_spawned = False  # any shell ever ran in this dock
         self._next_shell = 1
-        self.set_child(terminal)
+        # The tree's widgets live in a content bin under a dock-wide
+        # overlay; the drop zones ride the overlay so a grip drag can
+        # target every leaf's edges at once (paneldnd.DropZones).
+        self._content = Adw.Bin(child=terminal)
+        self._zones = paneldnd.DropZones(self._on_zone_drop)
+        overlay = Gtk.Overlay(child=self._content)
+        overlay.add_overlay(self._zones)
+        self.set_child(overlay)
+        # The guard group for this dock's strip views dies with the dock.
+        self.connect("destroy", lambda *_: guard.clear_fallback(self))
 
     # -- wiring ------------------------------------------------------------
 
@@ -305,16 +317,57 @@ class PanelDock(Adw.Bin):
         """Split *strip*'s own node on *side* and move *widget* into the
         new strip there. Splitting a single-page strip is a relocation:
         the emptied source collapses right after."""
-        if strip not in self._tree or side not in ("left", "right", "above", "below"):
+        self.split_move(strip, widget, strip, side)
+
+    def split_move(self, strip, widget, at_leaf, side: str) -> None:
+        """Split *at_leaf*'s node on *side* — any leaf, the terminal
+        included: edge-docking a drop above the agent is deliberately
+        expressible — and move *widget* from *strip* into the new strip
+        there."""
+        if (
+            strip not in self._tree
+            or at_leaf not in self._tree
+            or side not in ("left", "right", "above", "below")
+        ):
             return
         target = self._new_strip()
-        self._split_leaf(strip, target, side)
+        self._split_leaf(at_leaf, target, side)
         strip.transfer_to(widget, target)
         rec = self._panes.get(self._tree.find(target).parent)
         if rec is not None:
             rec.sizer.apply()
         target.select_widget(widget)
         GLib.idle_add(widget.grab_page_focus)
+
+    def begin_page_drag(self, strip, widget) -> None:
+        """A grip drag started: light the drop zones over every visible
+        leaf. The terminal offers its four edges (never center); the
+        drag's own strip offers edges only when a split would actually
+        change the layout — its single page splitting off itself just
+        collapses back to the same tree."""
+        model = []
+        for leaf in self._tree.leaves():
+            if not leaf.get_visible():
+                continue  # a hidden home strip has no on-screen edges
+            if leaf is self._terminal:
+                allowed: tuple = EDGE_ZONES
+            elif leaf is strip:
+                allowed = EDGE_ZONES if strip.page_count > 1 else ()
+            else:
+                allowed = EDGE_ZONES + ("center",)
+            model.append((leaf, allowed))
+        self._zones.begin(model)
+
+    def end_page_drag(self) -> None:
+        self._zones.end()
+
+    def _on_zone_drop(self, payload, leaf, zone: str) -> None:
+        """A grip drop landed: center joins the target strip as a tab,
+        an edge splits the target leaf and moves the page there."""
+        if zone == "center":
+            self.move_page(payload.strip, payload.widget, leaf)
+        else:
+            self.split_move(payload.strip, payload.widget, leaf, zone)
 
     def move_focused_page_next(self) -> None:
         """Cycle the focused page to the next strip (win.move-panel-page)."""
@@ -339,6 +392,11 @@ class PanelDock(Adw.Bin):
         strip.set_page_mover(self)
         strip.connect("bell", lambda *_: self.emit("bell"))
         strip.connect("empty", self._on_strip_empty)
+        # Native Adwaita tab DnD: this view accepts drops from this dock's
+        # other strips and bounces everything else (tabguard). The dock
+        # object is the group key; the fallback conjures a strip for a
+        # page whose source strip collapsed while it was being dragged.
+        paneldnd.guard_view(strip.tab_view, group=self, fallback=self._bounce_view)
         return strip
 
     def _on_strip_empty(self, strip) -> None:
@@ -359,9 +417,21 @@ class PanelDock(Adw.Bin):
             self._home_sizes.update(rec.sizer.snapshot())
             self._home_strip = None
         self._remove_leaf(strip)
+        guard.unregister(strip.tab_view)
         if refocus and self._focus_terminal is not None:
             self._focus_terminal()
         return GLib.SOURCE_REMOVE
+
+    def _bounce_view(self):
+        """The tab guard's fallback destination for this dock's pages: a
+        strip — recreated at home if every strip is gone, as happens when
+        a single-page strip's only tab is dragged out and dropped
+        somewhere it doesn't belong."""
+        strips = self.strips()
+        if not strips:
+            self._create_home_strip()
+            strips = self.strips()
+        return strips[0].tab_view
 
     # -- tree <-> widget mirroring -------------------------------------------
 
@@ -374,7 +444,7 @@ class PanelDock(Adw.Bin):
         widget = self._widget_of(node)
         parent = node.parent
         if parent is None:
-            self.set_child(widget)
+            self._content.set_child(widget)
         elif parent.slot_of(node) == "a":
             self._panes[parent].paned.set_start_child(widget)
         else:
@@ -386,7 +456,7 @@ class PanelDock(Adw.Bin):
         and any VTE children riding in it — alive across the move."""
         parent = node.parent
         if parent is None:
-            self.set_child(None)
+            self._content.set_child(None)
         elif parent.slot_of(node) == "a":
             self._panes[parent].paned.set_start_child(None)
         else:
@@ -454,7 +524,7 @@ class PanelDock(Adw.Bin):
         grand = parent.parent
         self._tree.remove(widget)
         if grand is None:
-            self.set_child(sibling_widget)
+            self._content.set_child(sibling_widget)
         elif grand.slot_of(sibling) == "a":
             self._panes[grand].paned.set_start_child(sibling_widget)
         else:

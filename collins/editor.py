@@ -36,7 +36,7 @@ except (ValueError, ImportError):
         "gtksourceview5) and restart Collins to enable it."
     )
 
-from . import dialogs, editorfiles, fileclipboard  # noqa: E402
+from . import dialogs, editorfiles, fileclipboard, paneldnd  # noqa: E402
 from .filetree import FileTree  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 
@@ -159,6 +159,10 @@ class EditorPane(Gtk.Box):
         tab_menu.append(_("Close all tabs"), "editor.close-all-tabs")
         self._tab_view.set_menu_model(tab_menu)
         self._tab_view.connect("setup-menu", self._on_tab_setup_menu)
+        # Native tab DnD is process-global: without this, a panel-strip
+        # shell tab could be dropped onto the file tab bar — or a file tab
+        # dragged into a strip (tabguard). Each editor is its own group.
+        paneldnd.guard_view(self._tab_view, self)
         tab_bar = Adw.TabBar(view=self._tab_view, autohide=False)
         self._tab_bar = tab_bar
         double_click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
