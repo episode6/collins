@@ -673,17 +673,17 @@ class MainWindow(Adw.ApplicationWindow):
             tab = self.tab_view.get_nth_page(i).get_child()
             if isinstance(tab, TerminalTab):
                 tab.save_panel_history()
-                self._save_panel_state(tab)
+                self._save_panel_layout(tab)
                 self._save_editor_state(tab)
 
-    def _save_panel_state(self, tab: TerminalTab) -> None:
-        """Persist the tab's panel open/mode/size for its session. A tab that
-        never used the panel leaves the session's saved state alone."""
+    def _save_panel_layout(self, tab: TerminalTab) -> None:
+        """Persist the tab's dock layout for its session. A tab that never
+        used the panel leaves the session's saved layout alone."""
         if tab.fork or not tab.session_id:
             return
-        state = tab.capture_panel_state()
-        if state is not None:
-            self.state.set_panel_state(tab.session_id, state)
+        layout = tab.capture_panel_layout()
+        if layout is not None:
+            self.state.set_panel_layout(tab.session_id, layout)
 
     def _save_editor_state(self, tab: TerminalTab) -> None:
         """Persist the tab's editor open/width/files for its session. A tab
@@ -1371,9 +1371,9 @@ class MainWindow(Adw.ApplicationWindow):
             self._sync_process_poll()
             self._sync_background_busy_poll()
             self._sync_status(bound_id)
-            saved_panel = self.state.get_panel_state(bound_id)
-            if saved_panel:  # reopen the panel the way this session left it
-                tab.restore_panel_state(saved_panel)
+            saved_panel = self.state.get_panel_layout(bound_id)
+            if saved_panel:  # rebuild the dock the way this session left it
+                tab.restore_panel_layout(saved_panel)
             saved_editor = self.state.get_editor_state(bound_id)
             if saved_editor:  # reopen the editor's files the way this session left them
                 tab.restore_editor_state(saved_editor)
@@ -3922,7 +3922,7 @@ class MainWindow(Adw.ApplicationWindow):
             # stay alive on an orphan editor window).
             self._release_editor_window(tab)
             tab.save_panel_history()  # before the widget (and its VTE buffer) is destroyed
-            self._save_panel_state(tab)
+            self._save_panel_layout(tab)
             self._save_editor_state(tab)
         session_id = self._session_id_of(page)
         if session_id:
@@ -4368,7 +4368,7 @@ class MainWindow(Adw.ApplicationWindow):
         if page is not None:
             self.tab_view.close_page(page)
         panelhistory.delete(session_id)
-        self.state.set_panel_state(session_id, None)
+        self.state.set_panel_layout(session_id, None)
         self.state.set_editor_state(session_id, None)
         self.state.set_session_prs(session_id, [])
 

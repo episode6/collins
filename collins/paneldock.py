@@ -76,6 +76,8 @@ class PanelDock(Adw.Bin):
         self._focus_terminal = None  # () -> None, grabs the agent VTE
         self._ever_spawned = False  # any shell ever ran in this dock
         self._next_shell = 1
+        self._next_hist = 0  # next shell's persistent panel-history ordinal
+        self._restoring = False  # restore_layout is rebuilding the tree
         # The tree's widgets live in a content bin under a dock-wide
         # overlay; the drop zones ride the overlay so a grip drag can
         # target every leaf's edges at once (paneldnd.DropZones).
@@ -135,13 +137,23 @@ class PanelDock(Adw.Bin):
         """The 1-based ordinal for a new shell's tab title. Dock-wide, so
         titles stay unique across strips; restarts from 1 once no shell
         pages remain anywhere (an emptied dock, like an emptied strip
-        before it, starts counting over)."""
-        if not self.shell_pages():
+        before it, starts counting over). Not mid-restore, though: shells
+        rebuild before their strip enters the tree, so the emptiness test
+        would reset the count for every one of them ("Terminal 1" thrice)."""
+        if not self._restoring and not self.shell_pages():
             self._next_shell = 1
         number = self._next_shell
         self._next_shell += 1
         self._ever_spawned = True
         return number
+
+    def next_hist_ordinal(self) -> int:
+        """The persistent panel-history ordinal for a new shell page.
+        Unlike the tab-title number, never reused within this dock's life:
+        a reused ordinal would adopt a closed shell's saved scrollback."""
+        ordinal = self._next_hist
+        self._next_hist += 1
+        return ordinal
 
     # -- the home strip ----------------------------------------------------
 
@@ -282,13 +294,143 @@ class PanelDock(Adw.Bin):
                 strip.select_busy_page()
                 return
 
-    def capture_shell_texts(self) -> list[str]:
-        """Every shell page's scrollback, in the dock's stable page order."""
-        return [shell.capture_contents() for shell in self.shell_pages()]
+    def capture_shell_texts(self) -> dict[int, str]:
+        """Every shell page's scrollback under its persistent history
+        ordinal — the explicit keep-set panelhistory.save_all prunes stale
+        files against."""
+        return {shell.hist: shell.capture_contents() for shell in self.shell_pages()}
 
     def clear_shells(self) -> None:
         for strip in self.strips():
             strip.clear_all()
+
+    # -- layout persistence --------------------------------------------------
+
+    def capture_layout(self) -> dict | None:
+        """The dock as a `panel_layout` entry (see panellayout): home mode
+        and sizes, plus the serialized split tree when any strip holds a
+        persistable page. None when the dock was never used at all, so a
+        session's saved layout survives tabs that never touched it."""
+        sizes = self.home_sizes()
+        tree = self._serialize_node(self._tree.root)
+        if tree == {"terminal": True}:
+            tree = None  # no strips (or none persistable): the fresh default
+        if tree is None and not sizes and not self._ever_spawned:
+            return None
+        entry: dict = {"mode": self._home_position}
+        if sizes:
+            entry["sizes"] = sizes
+        if tree is not None:
+            entry["tree"] = tree
+        return entry
+
+    def _serialize_node(self, node: Leaf | Split) -> dict | None:
+        """One tree node as its layout dict. A strip with nothing
+        persistable serializes to None and its split dissolves around it —
+        the same promotion an emptied strip's collapse performs live."""
+        if isinstance(node, Leaf):
+            if node.value is self._terminal:
+                return {"terminal": True}
+            return self._serialize_strip(node.value)
+        a = self._serialize_node(node.a)
+        b = self._serialize_node(node.b)
+        if a is None:
+            return b
+        if b is None:
+            return a
+        rec = self._panes[node]
+        rec.sizer.remember()
+        axis = "bottom" if node.orientation == "v" else "right"
+        return {
+            "split": node.orientation,
+            "size": rec.sizer.remembered(axis),
+            "managed": "b" if rec.sizer.manages_end else "a",
+            "a": a,
+            "b": b,
+        }
+
+    def _serialize_strip(self, strip) -> dict | None:
+        """One strip's layout dict, pages serialized by their own
+        `page_state`. A page without one (a foreign tab mid-bounce, a kind
+        that opted out) simply doesn't persist."""
+        pairs = [
+            (widget, state)
+            for widget in strip.pages()
+            if (state := getattr(widget, "page_state", lambda: None)())
+        ]
+        if not pairs:
+            return None
+        selected_widget = strip.selected_page_widget()
+        selected = next(
+            (i for i, (widget, _state) in enumerate(pairs) if widget is selected_widget), 0
+        )
+        return {
+            "strip": {
+                "open": bool(strip.get_visible()),
+                "home": strip is self._home_strip,
+                "selected": selected,
+                "pages": [state for _widget, state in pairs],
+            }
+        }
+
+    def restore_layout(self, tree: dict, shell_texts: dict[int, str]) -> None:
+        """Rebuild a saved split tree into this still-fresh dock (session
+        restore, before the user could have split anything themselves).
+        *tree* must be validated and pruned (see panellayout) — every page
+        in it is a kind this dock can conjure, today meaning shells, each
+        spawned with its saved scrollback from *shell_texts*. Hidden strips
+        rebuild hidden, their shells running."""
+        if len(self._tree) > 1:
+            return  # not fresh: the layout lost the race to a user action
+        self._content.set_child(None)  # free the terminal for reparenting
+        self._restoring = True
+        try:
+            root = self._restore_node(tree, shell_texts)
+        finally:
+            self._restoring = False
+        root.parent = None
+        self._tree.root = root
+        self._content.set_child(self._widget_of(root))
+        self._next_hist = max((shell.hist for shell in self.shell_pages()), default=-1) + 1
+        rec = self._home_rec()
+        if rec is not None:
+            for mode, size in self._home_sizes.items():
+                rec.sizer.set_remembered(mode, size)
+        for pane in self._panes.values():
+            pane.sizer.apply()
+
+    def _restore_node(self, spec: dict, shell_texts: dict[int, str]) -> Leaf | Split:
+        """Realize one saved node: leaves become the terminal or a freshly
+        populated strip, splits their paned — built bottom-up so
+        `_realize_split` finds both children's widgets in place."""
+        if "terminal" in spec:
+            return Leaf(self._terminal)
+        if "strip" in spec:
+            state = spec["strip"]
+            strip = self._new_strip()
+            for page in state["pages"]:
+                shell = strip.new_shell(
+                    restore_text=shell_texts.get(page["hist"]), select=False
+                )
+                shell.hist = page["hist"]
+            widgets = strip.pages()
+            if 0 <= state["selected"] < len(widgets):
+                strip.select_widget(widgets[state["selected"]])
+            if state["home"]:
+                self._home_strip = strip
+            if not state["open"]:
+                strip.set_visible(False)
+            return Leaf(strip)
+        split = Split(
+            spec["split"],
+            self._restore_node(spec["a"], shell_texts),
+            self._restore_node(spec["b"], shell_texts),
+        )
+        rec = self._realize_split(split, spec["managed"])
+        if spec["size"]:
+            axis = "bottom" if spec["split"] == "v" else "right"
+            rec.sizer.set_remembered(axis, spec["size"])
+        return split
 
     # -- moving pages and splitting -----------------------------------------
 
@@ -474,6 +616,16 @@ class PanelDock(Adw.Bin):
         leaf = self._tree.find(at_widget)
         self._unplace(leaf)
         split = self._tree.split(at_widget, new_widget, side)
+        new_leaf = split.a if split.a.value is new_widget else split.b
+        self._realize_split(split, split.slot_of(new_leaf))
+        self._place(split)
+        return split
+
+    def _realize_split(self, split: Split, managed_slot: str) -> _PaneRec:
+        """Build one split's paned and sizer, with the *managed_slot* child
+        the one whose pixel size is remembered (the strip a live split just
+        added; the recorded slot when restoring a saved layout). Both
+        children's widgets must already be realized."""
         vertical = split.orientation == "v"
         paned = Gtk.Paned(
             orientation=Gtk.Orientation.VERTICAL if vertical else Gtk.Orientation.HORIZONTAL,
@@ -482,32 +634,31 @@ class PanelDock(Adw.Bin):
         )
         paned.set_wide_handle(True)
         axis = "bottom" if vertical else "right"
-        new_leaf = split.a if split.a.value is new_widget else split.b
-        managed_end = new_leaf is split.b
+        managed = self._widget_of(split.a if managed_slot == "a" else split.b)
         sizer = PanedSizer(
             paned,
             key=lambda a=axis: a,
-            occupied=new_widget.get_visible,
-            end_child=managed_end,
+            occupied=managed.get_visible,
+            end_child=managed_slot == "b",
         )
         sizer.set_lookup(self._lookup_size)
-        sizer.connect("size-changed", self._on_strip_size_changed, new_widget)
-        self._panes[split] = _PaneRec(paned, sizer, new_widget)
+        sizer.connect("size-changed", self._on_strip_size_changed)
+        rec = _PaneRec(paned, sizer, managed)
+        self._panes[split] = rec
         # The terminal's side soaks up window resizes; the strip side keeps
         # its pixel size. A strip-only split gives the stretch to the
-        # pre-existing (unmanaged) side. Nothing is allowed to shrink away.
+        # unmanaged side. Nothing is allowed to shrink away.
         if self._contains_terminal(split.a) or self._contains_terminal(split.b):
             a_resize = self._contains_terminal(split.a)
         else:
-            a_resize = managed_end
+            a_resize = managed_slot == "b"
         paned.set_resize_start_child(a_resize)
         paned.set_resize_end_child(not a_resize)
         paned.set_shrink_start_child(False)
         paned.set_shrink_end_child(False)
         paned.set_start_child(self._widget_of(split.a))
         paned.set_end_child(self._widget_of(split.b))
-        self._place(split)
-        return split
+        return rec
 
     def _remove_leaf(self, widget) -> None:
         """Mirror `tree.remove`: dissolve the leaf's parent paned and
@@ -535,8 +686,9 @@ class PanelDock(Adw.Bin):
     def _lookup_size(self, key: str) -> int:
         return int(self._size_lookup(key) or 0) if self._size_lookup is not None else 0
 
-    def _on_strip_size_changed(self, _sizer, key: str, size: int, strip) -> None:
+    def _on_strip_size_changed(self, sizer, key: str, size: int) -> None:
         """Only the home strip's divider updates the app-wide axis seeds —
         satellite strips size themselves without shifting the defaults."""
-        if strip is self._home_strip:
+        rec = self._home_rec()
+        if rec is not None and rec.sizer is sizer:
             self.emit("size-changed", key, size)
