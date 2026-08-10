@@ -128,6 +128,12 @@ class PanelStrip(Gtk.Box):
         end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         end_box.append(add_btn)
         end_box.append(swap_btn)
+        # The fallback grip: hidden while per-tab drag handles are on (the
+        # default), shown when the panel_tab_drag_handles setting opts out
+        # of the private-API path (see paneldnd and _apply_tab_drag).
+        self._grip = paneldnd.make_grip(self)
+        self._grip.set_visible(False)
+        end_box.append(self._grip)
         bar.set_end_action_widget(end_box)
 
         self._bar = bar
@@ -147,6 +153,14 @@ class PanelStrip(Gtk.Box):
         """The strip's inline `Adw.TabBar` — walked for the private tab
         widgets the per-tab drag sources ride on (see paneldnd)."""
         return self._bar
+
+    @property
+    def tab_drag_handles(self) -> bool:
+        """Whether tabs drag by their own handles (the private-API path).
+        Off is the panel_tab_drag_handles fallback: native tab dragging
+        plus the end-of-bar grip."""
+        settings = self._settings or {}
+        return bool(settings.get("panel_tab_drag_handles", True))
 
     @property
     def page_mover(self):
@@ -263,7 +277,7 @@ class PanelStrip(Gtk.Box):
         if GObject.signal_lookup("bell", widget.__gtype__):
             ids.append(widget.connect("bell", lambda *_: self.emit("bell")))
         self._page_signals[widget] = ids
-        if getattr(widget, "page_kind", None) is not None:
+        if getattr(widget, "page_kind", None) is not None and self.tab_drag_handles:
             page.set_indicator_icon(Gio.ThemedIcon.new(paneldnd.HANDLE_ICON))
             paneldnd.wire_tab_drag(self, widget)
 
@@ -484,3 +498,23 @@ class PanelStrip(Gtk.Box):
         for page in self.pages():
             if hasattr(page, "apply_settings"):  # see shell_pages
                 page.apply_settings(settings)
+        self._apply_tab_drag()
+
+    def _apply_tab_drag(self) -> None:
+        """Bring the drag affordances in line with the setting, live: per-tab
+        handles come and go on every page, and the fallback grip shows
+        exactly when they're off."""
+        enabled = self.tab_drag_handles
+        self._grip.set_visible(not enabled)
+        for widget in self.pages():
+            if getattr(widget, "page_kind", None) is None:
+                continue  # see shell_pages
+            page = self._find_page(widget)
+            if enabled:
+                if page is not None and page.get_indicator_icon() is None:
+                    page.set_indicator_icon(Gio.ThemedIcon.new(paneldnd.HANDLE_ICON))
+                paneldnd.wire_tab_drag(self, widget)
+            else:
+                if page is not None:
+                    page.set_indicator_icon(None)
+                paneldnd.unwire_tab_drag(self, widget)

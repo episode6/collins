@@ -130,6 +130,23 @@ def our_source(widget) -> Gtk.DragSource | None:
     return None
 
 
+def _new_page_while_off_is_unwired(dock) -> bool:
+    """A shell opened while the fallback is active must not get a handle."""
+    dock2 = make_dock()
+    dock2.apply_settings({"panel_tab_drag_handles": False})
+    dock2.show_home()
+    strip = dock2.strips()[0]
+    drain()
+    widget = strip.pages()[0]
+    page = strip.tab_view.get_nth_page(0)
+    tab = paneldnd._find_tab(strip.tab_bar, widget)
+    return (
+        page.get_indicator_icon() is None
+        and (tab is None or our_source(tab) is None)
+        and strip._grip.get_visible()
+    )
+
+
 def main() -> int:
     print("wiring:")
     dock = make_dock()
@@ -188,6 +205,37 @@ def main() -> int:
     check("move left lands at the insert point", order() == start, order())
     home.reorder_to(c, 2)  # between the current first two? no — before itself: no-op zone
     check("reorder to own slot is a no-op", order() == start, order())
+
+    print("fallback setting:")
+    dock.apply_settings({"panel_tab_drag_handles": False})
+    drain()
+    off_tabs = [paneldnd._find_tab(home.tab_bar, w) for w in home.pages()]
+    check(
+        "sources unmounted when the setting turns off",
+        all(t is not None and our_source(t) is None for t in off_tabs),
+    )
+    check(
+        "indicators cleared",
+        all(
+            home.tab_view.get_nth_page(i).get_indicator_icon() is None
+            for i in range(home.page_count)
+        ),
+    )
+    check("fallback grip shown", home._grip.get_visible())
+    grip_src = our_source(home._grip)
+    check("grip carries a drag source", grip_src is not None)
+    dock.apply_settings({"panel_tab_drag_handles": True})
+    drain()
+    on_tabs = [paneldnd._find_tab(home.tab_bar, w) for w in home.pages()]
+    check(
+        "sources remounted when it turns back on",
+        all(t is not None and our_source(t) is not None for t in on_tabs),
+    )
+    check("grip hidden again", not home._grip.get_visible())
+    check(
+        "new pages while off stay unwired",
+        _new_page_while_off_is_unwired(dock),
+    )
 
     print("insert position from real bounds:")
     zones = dock._zones

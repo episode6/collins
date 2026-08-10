@@ -111,6 +111,10 @@ DEFAULT_SETTINGS = {
     "caffeine_launch_timer": "active",  # shut-off timer armed at launch (see caffeine.py)
     "sidebar_width": 300,  # persisted sidebar pane width in px
     "panel_position": "bottom",  # secondary terminal panel placement: bottom | right
+    # Panel tabs drag by their own handle (join/reorder/split via the drop
+    # zones). Rides private libadwaita widget internals, so off falls back
+    # to native tab dragging plus each strip's drag grip (see paneldnd).
+    "panel_tab_drag_handles": True,
     "panel_size_bottom": 0,  # last-set panel height in px (0 = default fraction)
     "panel_size_right": 0,  # last-set panel width in px (0 = default fraction)
     "window_width": 1280,  # last window size (floating, unmaximized)

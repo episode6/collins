@@ -464,6 +464,17 @@ msgid ""
 "terminal"
 msgstr ""
 
+#: collins/prefs.py:288
+msgid "Panel tab drag handles"
+msgstr ""
+
+#: collins/prefs.py:290
+msgid ""
+"Drag any panel tab by its handle to move, reorder, or split it. Relies on "
+"GTK internals — turn off to fall back to plain tab dragging plus a drag "
+"grip on each panel"
+msgstr ""
+
 #: collins/prefs.py:128
 msgid "Color theme"
 msgstr ""

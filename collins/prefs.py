@@ -282,6 +282,18 @@ class PreferencesDialog(Adw.Dialog):
         self._attach_overlay_row.connect("notify::active", self._on_attach_overlay_changed)
         terminal_group.add(self._attach_overlay_row)
 
+        self._tab_drag_row = Adw.SwitchRow(
+            title=_("Panel tab drag handles"),
+            subtitle=_(
+                "Drag any panel tab by its handle to move, reorder, or "
+                "split it. Relies on GTK internals — turn off to fall back "
+                "to plain tab dragging plus a drag grip on each panel"
+            ),
+        )
+        self._tab_drag_row.set_active(bool(state.get_setting("panel_tab_drag_handles")))
+        self._tab_drag_row.connect("notify::active", self._on_tab_drag_changed)
+        terminal_group.add(self._tab_drag_row)
+
         current_theme = state.get_setting("terminal_theme") or DEFAULT_THEME
         if current_theme not in THEME_NAMES:
             current_theme = DEFAULT_THEME
@@ -908,6 +920,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_attach_overlay_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("attach_overlay_button", row.get_active())
+        self._on_change()
+
+    def _on_tab_drag_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("panel_tab_drag_handles", row.get_active())
         self._on_change()
 
     def _add_running_behavior_row(
