@@ -11,8 +11,9 @@ initial immediately; the picture lands on it when (and if) its download does.
 One download per login per run, successes and failures both cached in
 memory: a panel rebuild must not re-fetch a row of avatars, and a login
 GitHub serves nothing for must not be asked again. Downloads run on daemon
-threads and never touch GTK — the widgets are filled from an idle callback,
-and both caches are only ever touched on the main loop.
+threads — at most `_GATE`-many in flight, so a many-author PR doesn't burst
+a socket per login — and never touch GTK: the widgets are filled from an
+idle callback, and both caches are only ever touched on the main loop.
 
 Logins are repository content, i.e. untrusted: only a string matching
 GitHub's own username alphabet may shape a URL (anything else — bot logins
@@ -43,6 +44,10 @@ _URL = "https://github.com/{login}.png?size={px}"
 _FETCH_PX = 128
 _MAX_BYTES = 512 * 1024  # an avatar past this isn't one
 _TIMEOUT_S = 10
+# How many downloads may be in flight at once: a PR with dozens of distinct
+# commenters shouldn't burst that many sockets. Threads past the gate just
+# wait their turn — they're daemon threads with nothing else to do.
+_GATE = threading.Semaphore(4)
 
 _textures: dict[str, Gdk.Texture | None] = {}  # login → picture; None = failed
 _waiting: dict[str, list[Adw.Avatar]] = {}  # fetch in flight → widgets to fill
@@ -77,7 +82,7 @@ def _fetch(login: str) -> None:
             _URL.format(login=login, px=_FETCH_PX),
             headers={"User-Agent": "collins"},
         )
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_S) as response:
+        with _GATE, urllib.request.urlopen(request, timeout=_TIMEOUT_S) as response:
             data = response.read(_MAX_BYTES + 1)
         if len(data) > _MAX_BYTES:
             data = None
