@@ -125,6 +125,11 @@ class PrViewPage(Adw.Bin):
         # id so they survive the rebuilds that replace the cards.
         self._thread_cards: list[tuple[prdetail.PrThread, Gtk.Widget]] = []
         self._thread_drafts: dict[str, str] = {}
+        # Thread ids with a mutation in flight. On the page rather than the
+        # card for the same reason the drafts are: a thread renders as twin
+        # cards (one per view) and a fetch can rebuild them mid-flight, and
+        # "one press, one mutation" has to hold across all of those copies.
+        self._thread_busy: set[str] = set()
         self._pending_reveal = False  # reveal_unresolved asked before data came
 
         # -- header ---------------------------------------------------------
@@ -582,8 +587,11 @@ class PrViewPage(Adw.Bin):
         """One review thread as a card, wired to this page's PR, drafts and
         post-refresh. Built per view — a widget has one parent, and a thread
         shows in both — so the shared draft dict is what keeps the copies
-        agreeing on a half-typed reply."""
-        return _ThreadCard(thread, self._pr, self._thread_drafts, self._posted)
+        agreeing on a half-typed reply, and the shared busy set what keeps
+        them from mutating the same thread twice."""
+        return _ThreadCard(
+            thread, self._pr, self._thread_drafts, self._thread_busy, self._posted
+        )
 
     # -- the files view --------------------------------------------------------
 
@@ -894,9 +902,12 @@ class _ThreadCard(Gtk.Box):
     under a spinner until the answer lands, a failure comes back as gh's own
     sentence with the text kept, and success hands off to the page's posted
     path, which re-reads everything. Every fetch rebuilds the cards
-    wholesale (and each thread gets one per view), so the reply draft lives
-    in the page's dict — *drafts*, keyed by thread id — rather than in this
-    widget: the composer's own rebuild lesson, thread-sized.
+    wholesale (and each thread gets one per view), so the per-thread state
+    lives in the page's containers rather than in this widget — the reply
+    draft in *drafts* and the in-flight guard in *busy*, both keyed by
+    thread id: the composer's own rebuild lesson, thread-sized, with the
+    guard held where a twin card in the other view (or a copy a mid-flight
+    fetch rebuilt) checks it too.
     """
 
     def __init__(
@@ -904,6 +915,7 @@ class _ThreadCard(Gtk.Box):
         thread: prdetail.PrThread,
         pr: PullRequest,
         drafts: dict[str, str],
+        busy: set[str],
         on_posted: Callable[[], None],
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -911,6 +923,7 @@ class _ThreadCard(Gtk.Box):
         self._thread = thread
         self._pr = pr
         self._drafts = drafts
+        self._busy = busy
         self._on_posted = on_posted
         self._posting = False
 
@@ -962,6 +975,10 @@ class _ThreadCard(Gtk.Box):
             self._text.get_buffer().set_text(draft)
             self._reveal.set_reveal_child(True)
         self._sync_post()
+        if thread.id in busy:
+            # Built while this thread's mutation is still in flight (a fetch
+            # rebuilt the cards under it): look as held as the original did.
+            self.set_sensitive(False)
 
     def _write_row(self) -> Gtk.Widget:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -1059,9 +1076,10 @@ class _ThreadCard(Gtk.Box):
         """One thread mutation off the main loop, this card held insensitive
         until it lands. *label* is the button's own word, for the failure
         dialog's heading; *sent_draft* says success should clear the reply."""
-        if self._posting:
-            return
+        if self._posting or self._thread.id in self._busy:
+            return  # this card, its twin in the other view, or a rebuilt copy
         self._posting = True
+        self._busy.add(self._thread.id)
         self.set_sensitive(False)
         self._spinner.set_visible(True)
         self._spinner.start()
@@ -1078,6 +1096,7 @@ class _ThreadCard(Gtk.Box):
 
     def _landed(self, label: str, error: str | None, sent_draft: bool) -> bool:
         self._posting = False
+        self._busy.discard(self._thread.id)
         self.set_sensitive(True)
         self._spinner.stop()
         self._spinner.set_visible(False)
