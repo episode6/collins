@@ -886,9 +886,22 @@ class SessionRow(Gtk.ListBoxRow):
             if not btn.get_mapped() or not btn.get_sensitive():
                 continue
             hit, bounds = btn.compute_bounds(self)
-            if not hit or not bounds.origin.x <= x <= bounds.origin.x + bounds.size.width:
+            if not hit:
                 continue
-            on_button = bounds.origin.y <= y <= bounds.origin.y + bounds.size.height
+            x0, x1 = bounds.origin.x, bounds.origin.x + bounds.size.width
+            if btn is self._pr_btn and not self.check.get_mapped():
+                # The mark is the row's leftmost widget, so its column can
+                # also grow sideways where the other buttons are hemmed in:
+                # left across the row's own padding to the guide line (unless
+                # selection mode has put the check there), and right through
+                # the title box's 2px spacing to the first letter.
+                x0, x1 = 0.0, x1 + 2.0
+            if not x0 <= x <= x1:
+                continue
+            on_button = (
+                bounds.origin.x <= x <= bounds.origin.x + bounds.size.width
+                and bounds.origin.y <= y <= bounds.origin.y + bounds.size.height
+            )
             return None if on_button and off_button else btn
         return None
 
