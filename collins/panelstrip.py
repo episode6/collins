@@ -179,14 +179,20 @@ class PanelStrip(Gtk.Box):
             self._view.get_nth_page(i).get_child() for i in range(self._view.get_n_pages())
         ]
 
+    def panel_pages(self) -> list:
+        """Every page that speaks the PanelPage protocol, in tab order —
+        what a whole-strip move (the swap merging this panel into another
+        strip) ranges over. `getattr`, not a bare attribute: native tab DnD
+        can land a *foreign* page (a session or editor tab) here for the one
+        main-loop turn before the tab guard bounces it out, and every
+        protocol touch in this class has to shrug at it rather than raise
+        (see tabguard)."""
+        return [page for page in self.pages() if getattr(page, "page_kind", None) is not None]
+
     def shell_pages(self) -> list:
         """The pages of kind shell, in tab order — the set the shell-wide
-        aggregates (capture/clear/busy) range over. `getattr`, not a bare
-        attribute: native tab DnD can land a *foreign* page (a session or
-        editor tab) here for the one main-loop turn before the tab guard
-        bounces it out, and every protocol touch in this class has to
-        shrug at it rather than raise (see tabguard)."""
-        return [page for page in self.pages() if getattr(page, "page_kind", None) == "shell"]
+        aggregates (capture/clear/busy) range over."""
+        return [page for page in self.panel_pages() if page.page_kind == "shell"]
 
     def selected_page_widget(self):
         page = self._view.get_selected_page()
@@ -203,14 +209,24 @@ class PanelStrip(Gtk.Box):
     def open(self, restore_texts: list[str] | None = None) -> None:
         """Make sure at least one shell page exists and points at the agent's
         cwd. `restore_texts` (first open only) recreates one shell per saved
-        panel history, oldest first."""
-        if self.page_count == 0:
+        panel history, oldest first.
+
+        The test is for *shells*, not pages: a strip can hold a PR tab and
+        no terminal — the dock adopts one as the panel's home rather than
+        splitting a second strip beside it — and Ctrl+J there still has to
+        produce the terminal it promises."""
+        shells = self.shell_pages()
+        if not shells:
+            first = None
             for text in restore_texts or [None]:
-                self.new_shell(restore_text=text, select=False)
-            self._view.set_selected_page(self._view.get_nth_page(0))
+                shell = self.new_shell(restore_text=text, select=False)
+                if first is None:
+                    first = shell
+            if first is not None:
+                self.select_widget(first)
         else:
             cwd = self._cwd()
-            for shell in self.shell_pages():
+            for shell in shells:
                 shell.open_shell(cwd)
 
     def new_shell(self, restore_text: str | None = None, select: bool = True):

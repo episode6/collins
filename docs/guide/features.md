@@ -250,6 +250,10 @@ that lives below or beside the agent terminal, with **tabs of its own**:
   (screen and saved history). **Tap `Ctrl+J` twice** in quick succession and
   the panel opens *and* swaps sides — bottom ↔ right, the whole panel — so you
   can put it where you want it in one gesture. A third tap hides it again.
+- Opening and swapping both **join what's already there**: if a strip of tabs
+  already sits on the side the panel is headed for — a PR docked to the right,
+  with the panel set to open right — the shell opens as another tab in it, and
+  that strip becomes the panel. Only an empty side gets a new strip of its own.
 - The panel's tab row has a **+ button** that opens another shell tab and
   switches to it; each tab's **✕** closes it (and deletes its saved history),
   asking first if a command is still running in it. Closing the last tab
