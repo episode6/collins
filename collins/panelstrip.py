@@ -24,9 +24,10 @@ every kind: a busy page's X asks first, whatever the kind.
 
 Shell pages are created by the strip itself (the + button); the concrete
 shell class is injected as `shell_factory` so this module stays free of
-terminal.py (which imports it). Moving and splitting need to see the
-whole dock, so those menu items call back into an injected *page mover*
-(the PanelDock) rather than anything strip-local.
+terminal.py (which imports it). Moving, splitting and rotating need to see
+the whole dock, so those menu items — and the tab row's rotate button —
+call back into an injected *page mover* (the PanelDock) rather than
+anything strip-local.
 """
 
 from __future__ import annotations
@@ -45,10 +46,11 @@ class PanelStrip(Gtk.Box):
     """A tab strip of panel pages: `Adw.TabView` + inline `Adw.TabBar`.
 
     The tab row carries a + button (new shell page, selected immediately),
-    a bottom/right swap button for the shells (win.swap-panel), and each
-    tab an X; shells survive hide/show and die with their tab. When the
-    last page closes (or transfers away) there is nothing left to show, so
-    the owner collapses the strip — see "empty"."""
+    a rotate button that sends the tab on top to the dock's other axis (any
+    kind of tab, not just shells), and each tab an X; shells survive
+    hide/show and die with their tab. When the last page closes (or
+    transfers away) there is nothing left to show, so the owner collapses
+    the strip — see "empty"."""
 
     __gsignals__ = {
         # Emitted when a page's X (or a shell exiting) removed the last page.
@@ -121,13 +123,13 @@ class PanelStrip(Gtk.Box):
         add_btn.add_css_class("flat")
         add_btn.set_tooltip_text(_("New terminal tab"))
         add_btn.connect("clicked", lambda *_: self.new_shell())
-        swap_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
-        swap_btn.add_css_class("flat")
-        swap_btn.set_tooltip_text(_("Move terminal panel bottom/right"))
-        swap_btn.set_action_name("win.swap-panel")
+        rotate_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
+        rotate_btn.add_css_class("flat")
+        rotate_btn.set_tooltip_text(_("Move this tab to the other side"))
+        rotate_btn.connect("clicked", lambda *_: self.rotate_selected())
         end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         end_box.append(add_btn)
-        end_box.append(swap_btn)
+        end_box.append(rotate_btn)
         # The fallback grip: hidden while per-tab drag handles are on (the
         # default), shown when the panel_tab_drag_handles setting opts out
         # of the private-API path (see paneldnd and _apply_tab_drag).
@@ -177,14 +179,20 @@ class PanelStrip(Gtk.Box):
             self._view.get_nth_page(i).get_child() for i in range(self._view.get_n_pages())
         ]
 
+    def panel_pages(self) -> list:
+        """Every page that speaks the PanelPage protocol, in tab order —
+        what a whole-strip move (the swap merging this panel into another
+        strip) ranges over. `getattr`, not a bare attribute: native tab DnD
+        can land a *foreign* page (a session or editor tab) here for the one
+        main-loop turn before the tab guard bounces it out, and every
+        protocol touch in this class has to shrug at it rather than raise
+        (see tabguard)."""
+        return [page for page in self.pages() if getattr(page, "page_kind", None) is not None]
+
     def shell_pages(self) -> list:
         """The pages of kind shell, in tab order — the set the shell-wide
-        aggregates (capture/clear/busy) range over. `getattr`, not a bare
-        attribute: native tab DnD can land a *foreign* page (a session or
-        editor tab) here for the one main-loop turn before the tab guard
-        bounces it out, and every protocol touch in this class has to
-        shrug at it rather than raise (see tabguard)."""
-        return [page for page in self.pages() if getattr(page, "page_kind", None) == "shell"]
+        aggregates (capture/clear/busy) range over."""
+        return [page for page in self.panel_pages() if page.page_kind == "shell"]
 
     def selected_page_widget(self):
         page = self._view.get_selected_page()
@@ -201,14 +209,24 @@ class PanelStrip(Gtk.Box):
     def open(self, restore_texts: list[str] | None = None) -> None:
         """Make sure at least one shell page exists and points at the agent's
         cwd. `restore_texts` (first open only) recreates one shell per saved
-        panel history, oldest first."""
-        if self.page_count == 0:
+        panel history, oldest first.
+
+        The test is for *shells*, not pages: a strip can hold a PR tab and
+        no terminal — the dock adopts one as the panel's home rather than
+        splitting a second strip beside it — and Ctrl+J there still has to
+        produce the terminal it promises."""
+        shells = self.shell_pages()
+        if not shells:
+            first = None
             for text in restore_texts or [None]:
-                self.new_shell(restore_text=text, select=False)
-            self._view.set_selected_page(self._view.get_nth_page(0))
+                shell = self.new_shell(restore_text=text, select=False)
+                if first is None:
+                    first = shell
+            if first is not None:
+                self.select_widget(first)
         else:
             cwd = self._cwd()
-            for shell in self.shell_pages():
+            for shell in shells:
                 shell.open_shell(cwd)
 
     def new_shell(self, restore_text: str | None = None, select: bool = True):
@@ -361,10 +379,21 @@ class PanelStrip(Gtk.Box):
 
     def set_page_mover(self, mover) -> None:
         """Wire the dock's move/split interface: `move_targets(strip) ->
-        [(label, strip)]`, `move_page(strip, widget, target)` and
-        `split_page(strip, widget, side)`. Without one (a strip under test,
-        or mid-adoption) the menu simply has no move section."""
+        [(label, strip)]`, `move_page(strip, widget, target)`,
+        `split_page(strip, widget, side)` and `rotate_page(strip, widget)`.
+        Without one (a strip under test, or mid-adoption) the menu simply
+        has no move section and the rotate button no-ops."""
         self._page_mover = mover
+
+    def rotate_selected(self) -> None:
+        """The tab row's rotate button: send the tab on top to the dock's
+        other axis — below the terminal to beside it, and back. Only that
+        one tab moves, whatever kind it is; its siblings stay put. Which
+        way "the other axis" runs is a fact about the whole dock, so an
+        undocked strip has nothing to rotate into."""
+        widget = self.selected_page_widget()
+        if widget is not None and self._page_mover is not None:
+            self._page_mover.rotate_page(self, widget)
 
     def _on_setup_menu(self, view: Adw.TabView, page: Adw.TabPage | None) -> None:
         """The menu is opening on *page* — or closing, which is a None page

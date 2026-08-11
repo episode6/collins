@@ -1678,6 +1678,7 @@ class MainWindow(Adw.ApplicationWindow):
         tab.connect("process-exited", self._on_process_exited, page)
         tab.connect("session-resolved", self._on_session_resolved, page)
         tab.connect("panel-size-changed", self._on_panel_size_changed)
+        tab.connect("panel-position-changed", self._on_panel_position_changed)
         tab.connect("editor-size-changed", self._on_editor_size_changed)
         tab.connect("editor-pop-out-requested", self._pop_out_editor)
         tab.connect("bell", self._on_bell)
@@ -1912,6 +1913,13 @@ class MainWindow(Adw.ApplicationWindow):
         key = f"panel_size_{mode}"
         if self.state.get_setting(key) != size:
             self.state.set_setting(key, size)
+
+    def _on_panel_position_changed(self, _tab: TerminalTab, mode: str) -> None:
+        """Rotating a tab took the panel with it (its old strip emptied):
+        the edge it landed on becomes the app-wide default, exactly as the
+        bottom/right swap sets it."""
+        if self.state.get_setting("panel_position") != mode:
+            self.state.set_setting("panel_position", mode)
 
     def _on_editor_size_changed(self, _tab: TerminalTab, size: int) -> None:
         """A divider was dragged: remember the width app-wide, so every
@@ -3597,8 +3605,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _toggle_panel(self, double_tap: bool = False) -> None:
         """Show or hide this tab's shell strip. From Ctrl+J (`double_tap`)
         a second press right after one that opened the panel moves the
-        shells bottom↔right instead of closing it — the double-tap lands
-        the panel where the swap button would put it. That swap ends the
+        shells bottom↔right instead of closing it — the whole panel, where
+        the tab row's rotate button moves one tab. That swap ends the
         chain, so a third press hides the panel again and undoes an unmeant
         double-tap. The footer button toggles plainly: a double-click there
         is a click too many, not a request to move the panel."""

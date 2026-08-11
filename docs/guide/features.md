@@ -254,16 +254,24 @@ that lives below or beside the agent terminal, with **tabs of its own**:
 
 - Toggle it with `Ctrl+J` or the buttons in the tab footer; `Ctrl+K` clears it
   (screen and saved history). **Tap `Ctrl+J` twice** in quick succession and
-  the panel opens *and* swaps sides — bottom ↔ right — so you can put it where
-  you want it without reaching for the swap button. A third tap hides it
-  again.
+  the panel opens *and* swaps sides — bottom ↔ right, the whole panel — so you
+  can put it where you want it in one gesture. A third tap hides it again.
+- Opening and swapping both **join what's already there**: if a strip of tabs
+  already sits on the side the panel is headed for — a PR docked to the right,
+  with the panel set to open right — the shell opens as another tab in it, and
+  that strip becomes the panel. Only an empty side gets a new strip of its own.
 - The panel's tab row has a **+ button** that opens another shell tab and
   switches to it; each tab's **✕** closes it (and deletes its saved history),
   asking first if a command is still running in it. Closing the last tab
   hides the panel — the footer's terminal button brings it back with a
   fresh tab.
 - Shells open in the agent's **current working directory** (worktree-aware),
-  and the swap button moves the panel bottom ↔ right without restarting them.
+  and none of the moves below restart them.
+- The tab row's **rotate button** sends the tab you're looking at to the
+  panel's other side — below the terminal to beside it, and back. Any kind of
+  tab rotates, not just shells, and only that one tab moves: its neighbours
+  stay where they are. If a strip already sits on the side it's headed for,
+  the tab joins it rather than carving out another one.
 - **Right-click a panel tab to split** — Split Left / Right / Up / Down carves
   a second strip of tabs on that side and moves the tab into it, so you can
   keep shells below the terminal *and* beside it at once. The same menu's

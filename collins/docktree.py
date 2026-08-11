@@ -103,6 +103,30 @@ class DockTree:
     def __len__(self) -> int:
         return sum(1 for _ in self._iter_leaves(self.root))
 
+    def separator_of(self, value: object, other: object) -> Split:
+        """The split that divides *value* from *other*: the nearest
+        ancestor of *value*'s leaf whose other branch holds *other*.
+
+        Its orientation is how the two are laid out relative to each other
+        — "h" side by side, "v" stacked — however deep either sits under
+        it, and its divider is the one whose position sizes one against
+        the other. Raises when nothing separates them (*other* missing, or
+        the same leaf)."""
+        node: Leaf | Split = self.find(value)
+        while node.parent is not None:
+            parent = node.parent
+            if self._holds(parent.sibling_of(node), other):
+                return parent
+            node = parent
+        raise ValueError(f"no split separates {value!r} from {other!r}")
+
+    def _holds(self, node: Leaf | Split, value: object) -> bool:
+        """Whether *value* is a leaf anywhere under *node*."""
+        return any(
+            leaf.value is value or leaf.value == value
+            for leaf in self._iter_leaves(node)
+        )
+
     def next_leaf(self, value: object) -> object:
         """The value after *value* in leaf order, wrapping around. With a
         single leaf this returns the value itself."""
