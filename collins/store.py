@@ -553,9 +553,18 @@ class SessionStore(GObject.Object):
     def add_project(self, cwd: str) -> None:
         """Put a directory in the sidebar before any session has run there:
         the same persisted empty header a kept project leaves behind, so the
-        group offers "new session here" without one having been started."""
+        group offers "new session here" without one having been started.
+
+        A project that already has sessions is already in the sidebar, and
+        is left alone: is_virtual_project means "no sessions left" to its
+        callers (the worktree toggle, "Remove project from sidebar"), and
+        the folder chooser defaults to the visible project's directory, so
+        re-adding a live project is an easy accident."""
+        name = project_name_for_cwd(cwd)
+        if any(s.project_name == name for s in self._last_sessions):
+            return
         root = worktree_project_root(cwd) or cwd
-        self.state.keep_virtual_projects({project_name_for_cwd(cwd): root})
+        self.state.keep_virtual_projects({name: root})
         self._apply()
 
     def forget_project(self, project_name: str) -> None:
