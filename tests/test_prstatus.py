@@ -658,6 +658,133 @@ def test_run_gh_gives_up_when_gh_is_absent(monkeypatch):
     assert prstatus._gh_missing is True
 
 
+def test_check_verdict_names_the_badge():
+    assert prstatus.check_verdict({"conclusion": "SUCCESS"}) == prstatus.BADGE_PASSED
+    assert prstatus.check_verdict({"state": "ERROR"}) == prstatus.BADGE_FAILED
+    assert prstatus.check_verdict({"conclusion": None, "status": "QUEUED"}) \
+        == prstatus.BADGE_PENDING
+
+
+# -- raw-output and stdin transport (the detail view's half) ------------------
+
+
+def test_gh_text_hands_back_raw_stdout(monkeypatch):
+    seen = []
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(
+        prstatus.subprocess, "run",
+        lambda argv, **kw: seen.append((argv, kw)) or _completed("diff --git a/x b/x\n"),
+    )
+    assert prstatus.gh_text(["pr", "diff", URL]) == "diff --git a/x b/x\n"
+    argv, kwargs = seen[0]
+    assert argv[1:] == ["pr", "diff", URL]
+    assert kwargs["timeout"] == prstatus._GH_ACTION_TIMEOUT_S  # a diff-sized wait
+    assert kwargs["errors"] == "replace"  # a diff carries whatever bytes the repo does
+    assert "shell" not in kwargs
+
+
+def test_gh_json_takes_a_timeout(monkeypatch):
+    """The poll budget stays the default; an on-demand caller can wait longer."""
+    seen = []
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(
+        prstatus.subprocess, "run",
+        lambda argv, **kw: seen.append(kw) or _completed("{}"),
+    )
+    assert prstatus.gh_json(["pr", "view", URL]) == {}
+    assert prstatus.gh_json(
+        ["pr", "view", URL], timeout=prstatus._GH_ACTION_TIMEOUT_S) == {}
+    assert [kw["timeout"] for kw in seen] \
+        == [prstatus._GH_TIMEOUT_S, prstatus._GH_ACTION_TIMEOUT_S]
+
+
+def test_gh_text_degrades_on_failure(monkeypatch):
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(prstatus.subprocess, "run", lambda *a, **kw: _completed("", 1))
+    assert prstatus.gh_text(["pr", "diff", URL]) is None
+
+
+def test_gh_text_drops_an_oversized_reply(monkeypatch):
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(prstatus.subprocess, "run", lambda *a, **kw: _completed("x" * 100))
+    assert prstatus.gh_text(["pr", "diff", URL], max_bytes=99) is None
+    assert prstatus.gh_text(["pr", "diff", URL], max_bytes=100) == "x" * 100
+
+
+def test_gh_run_feeds_stdin_rather_than_argv(monkeypatch):
+    """A comment body must never be an argv entry; it travels as gh's input."""
+    seen = []
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(
+        prstatus.subprocess, "run",
+        lambda argv, **kw: seen.append((argv, kw)) or _completed(),
+    )
+    ok, message = prstatus.gh_run(
+        ["pr", "comment", URL, "--body-file", "-"], stdin="A comment body.\n")
+    assert (ok, message) == (True, "")
+    argv, kwargs = seen[0]
+    assert kwargs["input"] == "A comment body.\n"
+    assert "A comment body.\n" not in argv
+
+
+# -- absorbing a detail fetch -------------------------------------------------
+
+# Shaped like the detail view's `gh pr view --json` reply (prdetail): a strict
+# superset of what the summary fetch asks for, extra fields and all.
+_DETAIL_REPLY = {
+    "number": 55,
+    "url": URL,
+    "title": "Delete hidden sessions",
+    "state": "OPEN",
+    "isDraft": False,
+    "body": "The full description — a field the summary fetch never asks for.",
+    "statusCheckRollup": [{"conclusion": "SUCCESS", "status": "COMPLETED"}],
+    "mergeable": "MERGEABLE",
+    "comments": [{"viewerDidAuthor": False, "isMinimized": False}],
+}
+
+
+def test_absorb_counts_as_a_fetch_of_our_own():
+    prstatus.absorb(URL, _DETAIL_REPLY)
+    pr = known(PullRequest(number=55, url=URL))
+    assert pr.title == "Delete hidden sessions"
+    assert (pr.state, pr.passed, pr.mergeable) == ("OPEN", 1, "MERGEABLE")
+    assert pr.unresolved is True
+
+
+def test_absorb_stamps_the_ttl(scheduled, clock):
+    """The poll right after opening the view must not refetch what the view
+    just loaded — and the TTL after that, polling resumes as normal."""
+    prstatus.absorb(URL, _DETAIL_REPLY)
+    pr = enrich(PullRequest(number=55, url=URL))
+    assert pr.title == "Delete hidden sessions"
+    assert scheduled == []
+    clock.advance(_TTL_S)
+    enrich(pr)
+    assert scheduled == [URL]
+
+
+def test_absorb_ignores_what_it_cannot_use():
+    prstatus.absorb("https://example.com/not-a-pr", _DETAIL_REPLY)
+    prstatus.absorb(URL, "junk")
+    prstatus.absorb(URL, None)
+    assert prstatus._statuses == {}
+
+
+def test_summarize_reduces_a_detail_reply():
+    pr = prstatus.summarize(URL, _DETAIL_REPLY)
+    assert (pr.number, pr.repository) == (55, "episode6/collins")
+    assert pr.title == "Delete hidden sessions"
+    assert (pr.passed, pr.failed, pr.pending) == (1, 0, 0)
+    assert pr.unresolved is True
+    assert prstatus._statuses == {}  # pure: absorb is the writing half
+
+
+def test_summarize_rejects_what_is_not_a_pr():
+    assert prstatus.summarize("https://example.com/x", _DETAIL_REPLY) is None
+    assert prstatus.summarize(URL, []) is None
+
+
 def test_run_gh_passes_the_url_as_an_argument(monkeypatch):
     """No shell, and the URL trails the subcommand — `gh pr view <url>` needs no
     repository cwd, which is what lets this run from anywhere."""

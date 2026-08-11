@@ -561,28 +561,36 @@ def _cached_status(url: str) -> dict | None:
     return entry if isinstance(entry, dict) else None
 
 
-def _counts(rollup: object) -> dict:
-    """Tally gh's statusCheckRollup contexts into passed/failed/pending.
+def check_verdict(check: dict) -> str:
+    """One statusCheckRollup context's verdict, as the badge name it counts as.
 
     A context with no verdict yet, or one whose run hasn't completed, is
     pending; anything unrecognized counts as a failure, so a state we've never
     heard of surfaces as something to look at rather than silently passing.
+    Handles both of gh's shapes — a CheckRun's conclusion/status pair and a
+    StatusContext's bare state. The names are BADGE_PASSED / BADGE_FAILED /
+    BADGE_PENDING: what `_counts` tallies, and what the PR view's check rows
+    (prdetail) key their icons on.
     """
-    passed = failed = pending = 0
+    verdict = str(check.get("conclusion") or check.get("state") or "").upper()
+    status = str(check.get("status") or "").upper()
+    if verdict in _PASSED:
+        return BADGE_PASSED
+    if verdict in _FAILED:
+        return BADGE_FAILED
+    if not verdict or verdict in _PENDING or status != "COMPLETED":
+        return BADGE_PENDING
+    return BADGE_FAILED
+
+
+def _counts(rollup: object) -> dict:
+    """Tally gh's statusCheckRollup contexts into passed/failed/pending."""
+    counts = {BADGE_PASSED: 0, BADGE_FAILED: 0, BADGE_PENDING: 0}
     for check in rollup if isinstance(rollup, list) else []:
-        if not isinstance(check, dict):
-            continue
-        verdict = str(check.get("conclusion") or check.get("state") or "").upper()
-        status = str(check.get("status") or "").upper()
-        if verdict in _PASSED:
-            passed += 1
-        elif verdict in _FAILED:
-            failed += 1
-        elif not verdict or verdict in _PENDING or status != "COMPLETED":
-            pending += 1
-        else:
-            failed += 1
-    return {"passed": passed, "failed": failed, "pending": pending}
+        if isinstance(check, dict):
+            counts[check_verdict(check)] += 1
+    return {"passed": counts[BADGE_PASSED], "failed": counts[BADGE_FAILED],
+            "pending": counts[BADGE_PENDING]}
 
 
 def _state(data: dict) -> str | None:
@@ -596,12 +604,19 @@ def _state(data: dict) -> str | None:
 
 
 def _gh(
-    args: list[str], cwd: str | None = None, timeout: float = _GH_TIMEOUT_S
+    args: list[str],
+    cwd: str | None = None,
+    timeout: float = _GH_TIMEOUT_S,
+    stdin: str | None = None,
 ) -> subprocess.CompletedProcess | None:
     """One `gh` call, run to completion. None when it couldn't be run at all.
 
     Never a shell, and never a caller-built string: *args* trails the gh binary
-    as argv, so nothing in it can become a second command.
+    as argv, so nothing in it can become a second command. *stdin*, when given,
+    is fed to gh as its standard input — how a comment body travels without
+    ever being an argument. Output is decoded with replacement rather than
+    strictly: a diff can carry any bytes a repository does, and one stray
+    non-UTF-8 line must not turn a reply into an exception.
     """
     global _gh_missing
     gh = shutil.which("gh")
@@ -614,21 +629,29 @@ def _gh(
             [gh, *args],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout,
             cwd=cwd,
+            input=stdin,
         )
     except (OSError, subprocess.SubprocessError) as err:
         log.debug("prstatus: gh %s failed: %s", " ".join(args), err)
         return None
 
 
-def gh_json(args: list[str], cwd: str | None = None) -> object | None:
+def gh_json(
+    args: list[str], cwd: str | None = None, timeout: float = _GH_TIMEOUT_S
+) -> object | None:
     """One `gh` call, returning its parsed --json output. None on any failure.
 
     An object or a list, depending on the subcommand, so callers check the shape
-    they asked for.
+    they asked for. *timeout* defaults to the short poll budget — one fetch
+    among many, nobody waiting on it in particular; an on-demand call someone
+    *is* waiting on (prdetail's full view fetch) passes the action timeout
+    instead, so a heavy reply on a slow connection doesn't fail a load the
+    lighter calls would have survived.
     """
-    result = _gh(args, cwd)
+    result = _gh(args, cwd, timeout=timeout)
     if result is None:
         return None
     if result.returncode != 0:
@@ -658,7 +681,7 @@ def gh_succeeds(args: list[str]) -> bool:
     return result is not None and result.returncode == 0
 
 
-def gh_run(args: list[str]) -> tuple[bool, str]:
+def gh_run(args: list[str], stdin: str | None = None) -> tuple[bool, str]:
     """One `gh` call run for what it *does*: ``(it worked, what to say if not)``.
 
     The reading half of this module can shrug a failure off — a chip without a
@@ -667,12 +690,16 @@ def gh_run(args: list[str]) -> tuple[bool, str]:
     That text comes from GitHub and from a repository, i.e. is untrusted, so it
     is capped before it is ever put in a dialog.
 
+    *stdin* is for the subcommands that read their input rather than take it —
+    ``gh pr comment --body-file -`` and kin — so a comment body written in the
+    app reaches gh without ever being an argv entry.
+
     Given longer than a status fetch gets: a merge waits on GitHub doing the
     merge. Never call on the main thread.
     """
     if shutil.which("gh") is None:
         return False, _("The GitHub CLI (gh) isn't installed, or isn't on PATH.")
-    result = _gh(args, timeout=_GH_ACTION_TIMEOUT_S)
+    result = _gh(args, timeout=_GH_ACTION_TIMEOUT_S, stdin=stdin)
     if result is None:
         return False, _("Collins couldn't run gh.")
     if result.returncode == 0:
@@ -680,6 +707,36 @@ def gh_run(args: list[str]) -> tuple[bool, str]:
     complaint = (result.stderr or result.stdout or "").strip()[:_MAX_GH_ERROR]
     log.info("prstatus: gh %s exited %s", " ".join(args), result.returncode)
     return False, complaint or _("gh exited with status {code}.").format(code=result.returncode)
+
+
+def gh_text(args: list[str], max_bytes: int | None = None) -> str | None:
+    """One `gh` call run for its raw stdout. None on any failure.
+
+    The transport for replies that aren't ``--json``: ``gh pr diff`` hands
+    back a patch, not a document. Given the action timeout — a whole diff
+    takes GitHub longer than a status summary — and an optional *max_bytes*
+    cap, over which the reply is dropped rather than returned: a caller with
+    a cap has a cheaper fallback for the oversized case (prdetail degrades to
+    stat-only files). The whole reply has already been buffered by the time
+    it can be measured, so the cap bounds what gets *kept* and handed on —
+    not the one spike while gh's output is read. Never call on the main
+    thread.
+    """
+    result = _gh(args, timeout=_GH_ACTION_TIMEOUT_S)
+    if result is None:
+        return None
+    if result.returncode != 0:
+        log.debug(
+            "prstatus: gh %s exited %s: %s",
+            " ".join(args),
+            result.returncode,
+            (result.stderr or result.stdout).strip()[:200],
+        )
+        return None
+    if max_bytes is not None and len(result.stdout.encode("utf-8", "replace")) > max_bytes:
+        log.info("prstatus: gh %s reply over %s bytes; dropped", " ".join(args), max_bytes)
+        return None
+    return result.stdout
 
 
 def _entry(data: dict) -> dict:
@@ -869,6 +926,37 @@ def enrich(pr: PullRequest | None) -> PullRequest | None:
     if pr is None:
         return None
     return _applied(pr, _own_status(pr.url) or _cached_status(pr.url))
+
+
+def absorb(url: str, data: object) -> None:
+    """Keep a full ``gh pr view`` reply someone else fetched as our own status.
+
+    The detail view (prdetail) asks for a superset of `_GH_FIELDS`, so its
+    reply answers everything a status fetch would have asked. Folding it in
+    stamps the TTL: opening the PR view updates the footer chip and sidebar
+    mark for free, and the poll that follows doesn't refetch what the view
+    just loaded. Anything that isn't a dict-shaped reply for a fetchable URL
+    is ignored — this is a bonus, never an error path.
+    """
+    if not isinstance(data, dict) or not isinstance(url, str) or not _FETCHABLE.match(url):
+        return
+    with _lock:
+        _statuses[url] = (_now(), _entry(data))
+
+
+def summarize(url: str, data: object) -> PullRequest | None:
+    """A full ``gh pr view`` reply reduced to an enriched summary PullRequest.
+
+    What prdetail hangs its detail record off: the same identity
+    `parse_pr_url` builds and the same status shaping a fetch of our own gets,
+    with the module's cache never read or written — `absorb` is the (separate)
+    writing half, so this stays pure enough to drive with recorded fixtures.
+    None when *url* isn't a PR page or *data* isn't a reply.
+    """
+    pr = parse_pr_url(url)
+    if pr is None or not isinstance(data, dict):
+        return None
+    return _applied(pr, _entry(data))
 
 
 def known(pr: PullRequest) -> PullRequest:
