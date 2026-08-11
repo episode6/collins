@@ -72,11 +72,11 @@ _FOCUS_REFRESH_MIN_US = 10 * 1_000_000
 # prdetail's storage bound: a label this long is already a scroll of its own,
 # and Pango layout cost grows with every character the main loop hands it.
 _RENDER_CAP = 20_000
-# Where the description folds by default: about the six lines the card shows
-# before "Show more", and the size past which a body plainly can't fit them
-# even without a newline (long paragraphs wrap).
-_FOLD_LINES = 6
-_FOLD_CHARS = 400
+# Where the description folds by default: about the eight lines the card
+# shows before "Show more", and the size past which a body plainly can't fit
+# them even without a newline (long paragraphs wrap).
+_FOLD_LINES = 8
+_FOLD_CHARS = 550
 # The title may wrap this far before it ellipsizes — a PR title is a sentence,
 # not a phrase, and one header line cut most of it off.
 _TITLE_LINES = 3
@@ -1324,15 +1324,21 @@ def _folded_body(text: str) -> Gtk.Widget:
     _set_md(preview, head.rstrip() + "…")
     full = _body_label(text)
     full.set_visible(False)
-    toggle = Gtk.Button(label=_("Show more"))
+    word = Gtk.Label(label=_("Show more"))
+    caret = Gtk.Image.new_from_icon_name("pan-down-symbolic")
+    inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+    inner.append(word)
+    inner.append(caret)
+    toggle = Gtk.Button(child=inner)
     toggle.add_css_class("flat")
     toggle.set_halign(Gtk.Align.START)
 
-    def flip(button: Gtk.Button) -> None:
+    def flip(_button: Gtk.Button) -> None:
         expanded = full.get_visible()
         full.set_visible(not expanded)
         preview.set_visible(expanded)
-        button.set_label(_("Show more") if expanded else _("Show less"))
+        word.set_label(_("Show more") if expanded else _("Show less"))
+        caret.set_from_icon_name("pan-down-symbolic" if expanded else "pan-up-symbolic")
 
     toggle.connect("clicked", flip)
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
