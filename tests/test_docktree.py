@@ -122,6 +122,59 @@ def test_leaves_are_in_spatial_order():
     assert tree.leaves() == ["s2", "term", "s1"]
 
 
+def test_separator_orientation_is_how_two_leaves_are_laid_out():
+    """What the panel's rotate button asks: is this strip stacked with the
+    terminal, or beside it? Either side of the split answers the same."""
+    tree = DockTree("term")
+    below = tree.split("term", "s1", "below")
+    beside = tree.split("term", "s2", "right")
+    assert tree.separator_of("s1", "term") is below
+    assert tree.separator_of("term", "s1") is below
+    assert tree.separator_of("s2", "term").orientation == "h"
+    assert beside.orientation == "h"
+
+
+def test_separator_is_the_dividing_split_not_the_nearest_parent():
+    """A tab split off inside the bottom strip inserts splits *under* the
+    divider that sizes the panel against the terminal: both halves still
+    answer "stacked", and both find that same outer divider."""
+    tree = DockTree("term")
+    outer = tree.split("term", "s1", "below")
+    inner = tree.split("s1", "s2", "right")
+    assert inner is not outer
+    assert tree.separator_of("s1", "term") is outer
+    assert tree.separator_of("s2", "term") is outer
+    assert tree.separator_of("s2", "s1") is inner
+
+
+def test_separator_of_unseparated_values_rejected():
+    tree = DockTree("term")
+    tree.split("term", "s1", "below")
+    with pytest.raises(ValueError):
+        tree.separator_of("s1", "ghost")  # not in the tree
+    with pytest.raises(ValueError):
+        tree.separator_of("s1", "s1")  # nothing divides a leaf from itself
+    with pytest.raises(ValueError):
+        tree.separator_of("ghost", "term")
+
+
+def test_separator_finds_widget_values():
+    """The branch scan compares values itself rather than going through
+    `find`, so it has to match widgets the same way (see
+    test_identity_match_beats_equality_for_widgets)."""
+
+    class Widget:  # widgets compare by identity
+        pass
+
+    term, s1, s2 = Widget(), Widget(), Widget()
+    tree = DockTree(term)
+    below = tree.split(term, s1, "below")
+    beside = tree.split(term, s2, "right")
+    assert tree.separator_of(s1, term) is below
+    assert tree.separator_of(s2, term) is beside
+    assert tree.separator_of(s1, s2) is below  # s2 rides the terminal's branch
+
+
 def test_next_leaf_cycles():
     tree = DockTree("term")
     tree.split("term", "s1", "below")

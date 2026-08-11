@@ -123,13 +123,13 @@ class PanelStrip(Gtk.Box):
         add_btn.add_css_class("flat")
         add_btn.set_tooltip_text(_("New terminal tab"))
         add_btn.connect("clicked", lambda *_: self.new_shell())
-        swap_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
-        swap_btn.add_css_class("flat")
-        swap_btn.set_tooltip_text(_("Move this tab to the other side"))
-        swap_btn.connect("clicked", lambda *_: self.rotate_selected())
+        rotate_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
+        rotate_btn.add_css_class("flat")
+        rotate_btn.set_tooltip_text(_("Move this tab to the other side"))
+        rotate_btn.connect("clicked", lambda *_: self.rotate_selected())
         end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         end_box.append(add_btn)
-        end_box.append(swap_btn)
+        end_box.append(rotate_btn)
         # The fallback grip: hidden while per-tab drag handles are on (the
         # default), shown when the panel_tab_drag_handles setting opts out
         # of the private-API path (see paneldnd and _apply_tab_drag).

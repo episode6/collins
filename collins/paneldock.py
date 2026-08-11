@@ -256,17 +256,15 @@ class PanelDock(Adw.Bin):
         the terminal's — the divider whose position *is* the home strip
         size. Not simply the home leaf's parent: splitting a tab inside
         the home strip inserts new splits between the leaf and that
-        divider, so walk up to the nearest ancestor whose other side
-        holds the terminal."""
+        divider, so it is the split *separating* the two (see
+        `DockTree.separator_of`)."""
         if self._home_strip is None:
             return None
-        node = self._tree.find(self._home_strip)
-        while node.parent is not None:
-            parent = node.parent
-            if self._contains_terminal(parent.sibling_of(node)):
-                return self._panes.get(parent)
-            node = parent
-        return None
+        try:
+            split = self._tree.separator_of(self._home_strip, self._terminal)
+        except ValueError:
+            return None  # the strip left the tree (a collapse in flight)
+        return self._panes.get(split)
 
     def _create_home_strip(self) -> None:
         strip = self._new_strip()
@@ -623,17 +621,12 @@ class PanelDock(Adw.Bin):
 
     def _strip_axis(self, strip) -> str:
         """Which axis *strip* sits on relative to the terminal (see
-        _OTHER_AXIS): the orientation of the nearest split that puts the
-        terminal on its other side. Strips nested deeper — a bottom strip
-        the user split left/right — answer for the branch they are in, so
-        both halves of a split panel rotate to the same place."""
-        node = self._tree.find(strip)
-        while node.parent is not None:
-            parent = node.parent
-            if self._contains_terminal(parent.sibling_of(node)):
-                return "bottom" if parent.orientation == "v" else "right"
-            node = parent
-        return self._home_position  # unreachable: the terminal is always in
+        _OTHER_AXIS): the orientation of the split that separates the two.
+        Strips nested deeper — a bottom strip the user split left/right —
+        answer for the branch they are in, so both halves of a split panel
+        rotate to the same place."""
+        split = self._tree.separator_of(strip, self._terminal)
+        return "bottom" if split.orientation == "v" else "right"
 
     def _axis_strip(self, axis: str, exclude=None):
         """A strip already on *axis*, or None. The home strip wins when it
