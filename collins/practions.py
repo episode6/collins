@@ -38,6 +38,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .i18n import _
+from .prdetail import THREAD_ID
 from .prstatus import PullRequest, gh_json, gh_run, repository_for
 
 # The actions themselves. Menu order is the order they are built in.
@@ -324,6 +325,74 @@ def review(pr: PullRequest, verdict: str, body: str = "") -> str | None:
     if body:
         args += ["--body-file", "-"]
     return _refused(pr) or _run(args, stdin=body or None)
+
+
+# The review-thread mutations (see prdetail.PrThread for where the ids come
+# from). GraphQL because that is the only surface threads exist on; variables
+# rather than string-building, like prdetail's query, so nothing typed or
+# fetched is ever spliced into mutation text.
+_REPLY_MUTATION = """\
+mutation($threadId: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(
+    input: {pullRequestReviewThreadId: $threadId, body: $body}
+  ) { comment { id } }
+}
+"""
+_RESOLVE_MUTATION = """\
+mutation($threadId: ID!) {
+  resolveReviewThread(input: {threadId: $threadId}) { thread { id } }
+}
+"""
+_UNRESOLVE_MUTATION = """\
+mutation($threadId: ID!) {
+  unresolveReviewThread(input: {threadId: $threadId}) { thread { id } }
+}
+"""
+
+
+def reply_in_thread(pr: PullRequest, thread_id: str, body: str) -> str | None:
+    """Post *body* as a reply in review thread *thread_id* on *pr*.
+
+    None when it worked, else why not. The body travels as ``-F body=@-`` —
+    gh reading the variable's value off stdin — so free text never becomes
+    an argv entry, exactly as `comment`'s does. Never call on the main
+    thread.
+    """
+    refusal = _refused(pr) or _bad_thread(thread_id)
+    if refusal:
+        return refusal
+    return _run(
+        [
+            "api", "graphql",
+            "-f", f"query={_REPLY_MUTATION}",
+            "-f", f"threadId={thread_id}",
+            "-F", "body=@-",
+        ],
+        stdin=body,
+    )
+
+
+def set_thread_resolved(pr: PullRequest, thread_id: str, resolved: bool) -> str | None:
+    """Mark review thread *thread_id* on *pr* resolved, or unresolved.
+
+    None when it worked, else why not. Never call on the main thread.
+    """
+    refusal = _refused(pr) or _bad_thread(thread_id)
+    if refusal:
+        return refusal
+    mutation = _RESOLVE_MUTATION if resolved else _UNRESOLVE_MUTATION
+    return _run(
+        ["api", "graphql", "-f", f"query={mutation}", "-f", f"threadId={thread_id}"]
+    )
+
+
+def _bad_thread(thread_id: str) -> str | None:
+    """Why *thread_id* must not reach a subprocess — the ids the mutations
+    take came from a GraphQL reply, and only what still looks like one may
+    go back out (see prdetail.THREAD_ID)."""
+    if not isinstance(thread_id, str) or not THREAD_ID.match(thread_id):
+        return _("Collins doesn't know how to do that.")
+    return None
 
 
 def _refused(pr: PullRequest) -> str | None:
