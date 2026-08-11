@@ -3,20 +3,27 @@
 Two buttons open this same list. The ellipsis beside the tab footer's PR chips
 — shown only while the row is too narrow for every chip — opens it for the tab
 in front of you, off a list its poll keeps current; the combined mark ahead of
-a sidebar row's title opens it for a session whose tab may not even be open,
-off the list saved for that session — which is why that one refreshes before it
-shows anything (see SessionRow._fill_pr_menu).
+a sidebar row's title opens it (on a right-click, and on a plain click for a
+session with no tab) for a session whose tab may not even be open, off the list
+saved for that session — which is why that one refreshes before it shows
+anything (see SessionRow._fill_pr_menu).
 
 The widgets live here rather than beside either caller so both get the same
 menu: the same mark column, the same ellipsizing title, the same click that
 opens the PR page and closes the menu behind it.
 
-Left-clicking a PR asks what to *do* with it; right-clicking one opens its
-page. That submenu is the same list of actions wherever it is opened from
-(practions decides what a PR offers, under an "Open on GitHub" row every PR
-has), so it is built here too: from a row it slides in over the list and leads
-back with a header row, and from a footer chip — which has no list behind it —
-it opens on the chip as a menu of its own.
+Left-clicking a PR in the list asks what to *do* with it; right-clicking one
+opens its page in the browser. A mark standing for one PR reads the other way
+round — the plain click opens that PR's page in Collins and the actions are its
+context menu (see attach_view and attach_actions, and SessionRow's mark, which
+does the same once its session has a tab to open the page in) — because a list
+is a question about which PR and a mark is not.
+
+That submenu is the same list of actions wherever it is opened from (practions
+decides what a PR offers, under an "Open on GitHub" row every PR has), so it is
+built here too: from a row it slides in over the list and leads back with a
+header row, and from a footer chip — which has no list behind it — it opens on
+the chip as a menu of its own.
 """
 
 from __future__ import annotations
@@ -470,8 +477,24 @@ def show_actions(
     popover.set_child(rows)
 
 
+def attach_view(
+    chip: Gtk.Widget, pr: PullRequest, view: Callable[[PullRequest], None]
+) -> None:
+    """Give a footer chip *pr*'s page on a plain click.
+
+    The pointer cursor comes with it: a chip that opens something on a click
+    should say so before it is clicked, the way the linked labels beside it do.
+    """
+    chip.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+    _on_click(chip, Gdk.BUTTON_PRIMARY, lambda: view(pr))
+
+
 def attach_actions(chip: Gtk.Widget, pr: PullRequest, host: ActionHost) -> None:
-    """Give a footer chip *pr*'s actions on a plain click.
+    """Give a footer chip *pr*'s actions on a right-click.
+
+    Where a context menu belongs, and it leaves the plain click free for the
+    thing a chip is most often clicked for — reading the PR (see attach_view).
+    Everything else the chip can do is in here, the browser included.
 
     The list's submenu has a popover to borrow; a chip has none, so each
     opening builds one on the chip and lets go of it when it closes — the
@@ -486,7 +509,7 @@ def attach_actions(chip: Gtk.Widget, pr: PullRequest, host: ActionHost) -> None:
         show_actions(popover, pr, host)
         popover.popup()
 
-    _on_click(chip, Gdk.BUTTON_PRIMARY, open_menu)
+    _on_click(chip, Gdk.BUTTON_SECONDARY, open_menu)
 
 
 def _header(pr: PullRequest, back: Callable[[], None] | None) -> Gtk.Widget:

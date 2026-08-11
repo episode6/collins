@@ -32,7 +32,6 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import footerapps, openwith, prmenu
 from .chats import is_chat_cwd
-from .copylabel import open_uri
 from .flash import FLASH_MS, flash
 from .formatting import format_size
 from .i18n import _
@@ -510,12 +509,17 @@ class SessionRow(Gtk.ListBoxRow):
         # ellipsis shows, from a row whose tab needn't be open (or exist) to
         # read it, and consumes the click that would otherwise open the session.
         # A session with no PRs shows the agent's own mark there instead (see
-        # below). A right-click on the mark skips the list and opens the newest
-        # PR in the browser, the way a footer chip does — see _on_right_click,
-        # which is where that click lands.
+        # below). A right-click always opens that list; a plain click opens it
+        # only for a session with no tab to jump to, and otherwise goes to the
+        # newest PR's page in the tab itself (see _on_column_release, which is
+        # where both clicks are decided).
         self._pr_menu = prmenu.new_popover(Gtk.PositionType.BOTTOM)
         pr_btn = Gtk.MenuButton(valign=Gtk.Align.CENTER, popover=self._pr_menu)
         pr_btn.add_css_class("flat")
+        # Built rather than set, so the hint tracks a tab that opened or closed
+        # since the mark was last rebuilt (see _on_pr_tooltip).
+        pr_btn.set_has_tooltip(True)
+        pr_btn.connect("query-tooltip", self._on_pr_tooltip)
         # .pr-mark trades a button's even padding for the placement a mark in a
         # line of text wants: tucked in against the guide line, held off the
         # title (see app.py, which styles the button node inside this one).
@@ -788,15 +792,6 @@ class SessionRow(Gtk.ListBoxRow):
         if not self._prs:
             return
         self._pr_btn.set_child(prmenu.combined_icon(self._prs))
-        # Which PR a right-click opens is worth naming when the mark stands for
-        # several: the tooltip already lists them, so the hint points at the
-        # one at the end of that list.
-        hint = (
-            _("Right-click to open")
-            if len(self._prs) == 1
-            else _("Right-click to open #{number}").format(number=self._prs[-1].number)
-        )
-        self._pr_btn.set_tooltip_text(describe_all(self._prs) + "\n" + hint)
 
     def _fill_pr_menu(self, _button: Gtk.MenuButton) -> None:
         """Put the saved list up at once, and refresh it behind a spinner.
@@ -906,8 +901,16 @@ class SessionRow(Gtk.ListBoxRow):
         return None
 
     def _on_column_press(self, gesture: Gtk.GestureClick, _n: int, x: float, y: float) -> None:
-        self._press_target = self._column_target(x, y, off_button=True)
-        if self._press_target is not None:
+        target = self._column_target(x, y, off_button=True)
+        # The mark proper is claimed too, but only when its click is the jump
+        # to the session's tab: a GtkMenuButton pops its popover on the press,
+        # which is before the release that decides a click happened at all.
+        # Left unclaimed the rest of the time, so the menu keeps opening on the
+        # press the way every other menu in the app does.
+        if target is None and self._pr_jumps() and self._on_pr_mark(x, y):
+            target = self._pr_btn
+        self._press_target = target
+        if target is not None:
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
     def _on_column_release(self, _gesture: Gtk.GestureClick, _n: int, x: float, y: float) -> None:
@@ -916,8 +919,14 @@ class SessionRow(Gtk.ListBoxRow):
         # "Elsewhere" means outside the button's extended column — a release
         # anywhere in it counts, including on the button proper, since the
         # claimed press means the button will never see this sequence itself.
-        if target is not None and self._column_target(x, y, off_button=False) is target:
-            target.activate()
+        if target is None or self._column_target(x, y, off_button=False) is not target:
+            return
+        # A claimed press on the mark is only ever the jump (see above), and a
+        # redirect from its column is the same click arriving from beside it.
+        if target is self._pr_btn and self._pr_jumps():
+            self._view_newest_pr()
+            return
+        target.activate()
 
     def _on_hover_enter(self, *_args) -> None:
         self._action_stack.set_visible_child_name("hover")
@@ -1062,20 +1071,67 @@ class SessionRow(Gtk.ListBoxRow):
             self.remove_css_class(_INTERRUPTED_CSS)
 
     def _on_right_click(self, _gesture, _n_press: int, x: float, y: float) -> None:
-        """The session's menu — unless the click was on the PR mark.
+        """The session's menu — unless the click was on the PR mark, which
+        answers with its own.
 
-        The mark carries the shortcut a footer chip does: a plain click opens
-        what this session's pull requests amount to, a right-click goes
-        straight to the newest of them in the browser (a saved list is
-        oldest-first). The row's own gesture is what decides, because it is
-        what receives the click: GtkMenuButton listens for the primary button
-        only, so a secondary click on the mark reaches the row regardless.
+        The mark's list is what a right-click there always gets, whatever the
+        plain click is doing for that row: a context menu that changed places
+        with the thing it is a menu of would be no context menu at all. The
+        row's own gesture is what opens it, because it is what receives the
+        click — GtkMenuButton listens for the primary button only, so a
+        secondary click on the mark reaches the row regardless.
         """
-        url = self._newest_pr_url() if self._on_pr_mark(x, y) else None
-        if url:
-            open_uri(self, url)
+        if self._prs and self._on_pr_mark(x, y):
+            self._pr_btn.popup()  # runs _fill_pr_menu first, as a plain click does
             return
         self._sidebar.show_row_menu(self, x, y)
+
+    def _pr_jumps(self) -> bool:
+        """Whether a plain click on the mark has a tab to jump to.
+
+        Asked at click time, not built into the row: a session's tab opens and
+        closes under a sidebar that is not rebuilt for either.
+        """
+        return bool(self._prs) and self._sidebar.has_tab(self.item.session_id)
+
+    def _view_newest_pr(self) -> None:
+        """Open the newest PR's page in the session's tab, raising both.
+
+        The newest because a saved list is oldest-first and the last one opened
+        is the one being worked on — the same PR the mark's own color leads
+        with. The window sees to the rest, including the tab being in another
+        window (see MainWindow.view_pr).
+        """
+        self.activate_action(
+            "win.view-pr",
+            GLib.Variant("(ssb)", (self.item.session_id, self._prs[-1].url, False)),
+        )
+
+    def _on_pr_tooltip(
+        self, _btn: Gtk.Widget, _x: int, _y: int, _keyboard: bool, tooltip: Gtk.Tooltip
+    ) -> bool:
+        """What the mark says on hover: its PRs, then what its clicks do.
+
+        The plain click is only named while there is a tab to jump to, and
+        names which PR it would land on when the mark stands for several —
+        the tooltip has just listed them, so the hint points into that list.
+        With no tab both buttons open the same menu, and a hint saying so twice
+        would be noise.
+        """
+        if not self._prs:
+            return False
+        lines = [describe_all(self._prs)]
+        if self._pr_jumps():
+            lines.append(
+                _("Click to view in Collins")
+                if len(self._prs) == 1
+                else _("Click to view #{number} in Collins").format(
+                    number=self._prs[-1].number
+                )
+            )
+        lines.append(_("Right-click for actions"))
+        tooltip.set_text("\n".join(lines))
+        return True
 
     def _on_pr_mark(self, x: float, y: float) -> bool:
         """Is (*x*, *y*), in row coordinates, on the PR mark?
@@ -1090,10 +1146,6 @@ class SessionRow(Gtk.ListBoxRow):
                 return True
             widget = widget.get_parent()
         return False
-
-    def _newest_pr_url(self) -> str | None:
-        """The link to the most recently opened of this session's PRs."""
-        return self._prs[-1].url if self._prs else None
 
 
 class SessionSidebar(Gtk.Box):
@@ -1184,6 +1236,11 @@ class SessionSidebar(Gtk.Box):
         # the same terms as the callables above; with no tab there is nothing
         # to tell, and the saved list stands on its own.
         self.prs_updated: Callable[[str, list], None] = lambda _session_id, _records: None
+        # "Is this session open in a tab, anywhere?" — what a row's PR mark
+        # asks to know whether a plain click has somewhere to jump to. Replaced
+        # by the window on the same terms as the callables above; until then no
+        # session is open in anything, so the mark's click stays a menu.
+        self.has_tab: Callable[[str], bool] = lambda _session_id: False
         # Whether a PR sweep is running (see refresh_pull_requests): one click
         # of the refresh button at a time, however long gh takes.
         self._pr_sweep = False
