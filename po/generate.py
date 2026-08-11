@@ -291,6 +291,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Click for actions": "Kattintson a műveletekhez",
         "Right-click to open": "Jobb kattintás a megnyitáshoz",
         "Click to view in Collins": "Kattintson a Collinsban való megtekintéshez",
+        "Click to view #{number} in Collins":
+            "Kattintson a(z) #{number} Collinsban való megtekintéshez",
         "Right-click for actions": "Jobb kattintás a műveletekhez",
         "Open on GitHub": "Megnyitás GitHubon",
         "Rebase / resolve conflicts": "Rebase / konfliktusok feloldása",
@@ -655,6 +657,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Click for actions": "Für Aktionen klicken",
         "Right-click to open": "Zum Öffnen rechtsklicken",
         "Click to view in Collins": "Zum Anzeigen in Collins klicken",
+        "Click to view #{number} in Collins":
+            "Zum Anzeigen von #{number} in Collins klicken",
         "Right-click for actions": "Für Aktionen rechtsklicken",
         "Open on GitHub": "Auf GitHub öffnen",
         "Rebase / resolve conflicts": "Rebase / Konflikte auflösen",
@@ -1022,6 +1026,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Click for actions": "Haz clic para ver las acciones",
         "Right-click to open": "Haz clic derecho para abrir",
         "Click to view in Collins": "Haz clic para verlo en Collins",
+        "Click to view #{number} in Collins":
+            "Haz clic para ver #{number} en Collins",
         "Right-click for actions": "Haz clic derecho para ver las acciones",
         "Open on GitHub": "Abrir en GitHub",
         "Rebase / resolve conflicts": "Rebase / resolver conflictos",
@@ -1390,6 +1396,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Click for actions": "Cliquer pour les actions",
         "Right-click to open": "Clic droit pour ouvrir",
         "Click to view in Collins": "Cliquer pour l'ouvrir dans Collins",
+        "Click to view #{number} in Collins":
+            "Cliquer pour ouvrir #{number} dans Collins",
         "Right-click for actions": "Clic droit pour les actions",
         "Open on GitHub": "Ouvrir sur GitHub",
         "Rebase / resolve conflicts": "Rebase / résoudre les conflits",

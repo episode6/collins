@@ -710,6 +710,9 @@ msgstr "Clic droit pour ouvrir"
 msgid "Click to view in Collins"
 msgstr "Cliquer pour l'ouvrir dans Collins"
 
+msgid "Click to view #{number} in Collins"
+msgstr "Cliquer pour ouvrir #{number} dans Collins"
+
 msgid "Right-click for actions"
 msgstr "Clic droit pour les actions"
 

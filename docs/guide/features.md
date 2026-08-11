@@ -32,12 +32,17 @@ fork. Last modified: 2026-08-11. Full change history: git log for this file.
   the badge on its corner says the loudest thing left to do — a red **✗** for a
   failed check or a conflicting branch, an amber **⚠** for comments waiting on
   a reply, an amber **●** for checks still running, and a green **✓** only when
-  every live PR has passed everything. Hovering names each PR; clicking opens
-  the same list (and the same per-PR actions) the tab footer's caret shows —
-  or, when the session has just the one pull request, that PR's actions
-  directly, since a list of one only ever leads to the same place.
-  **Right-clicking the mark skips the list** and opens the session's most
-  recent PR in your browser; the tooltip's last line names which one that is.
+  every live PR has passed everything. Hovering names each PR.
+  **Right-clicking the mark** always opens the same list (and the same per-PR
+  actions) the tab footer's caret shows — or, when the session has just the one
+  pull request, that PR's actions directly, since a list of one only ever leads
+  to the same place.
+  **A plain click on the mark jumps to the session's tab** — raising the window
+  it is in, if that is another one — and opens its most recently opened PR's
+  page there, beside the terminal. Only a session with no tab open answers a
+  plain click with the list instead: there is nowhere to jump to yet, so the
+  click falls back to what a right-click does. The tooltip says which of the
+  two you are about to get.
 - **Refresh** (the header's ↻) re-reads the session list *and* every listed
   session's pull requests: each one's checks, conflicts and unanswered
   comments, plus a **branch lookup** that picks up PRs opened by hand, which no

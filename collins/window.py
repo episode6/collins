@@ -541,6 +541,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.has_changes = self._session_has_changes
         self.sidebar.live_cwd = self._session_live_cwd
         self.sidebar.prs_updated = self._adopt_session_prs
+        self.sidebar.has_tab = self._session_has_tab
         self.sidebar.connect("open-session", self._on_sidebar_open)
         self.sidebar.connect("open-many", self._on_sidebar_open_many)
         self.sidebar.connect("trash-many", self._on_sidebar_trash_many)
@@ -1172,7 +1173,7 @@ class MainWindow(Adw.ApplicationWindow):
         view_pr = Gio.SimpleAction(
             name="view-pr", parameter_type=GLib.VariantType("(ssb)")
         )
-        view_pr.connect("activate", lambda _a, p: self._view_pr(*p.unpack()))
+        view_pr.connect("activate", lambda _a, p: self.view_pr(*p.unpack()))
         self.add_action(view_pr)
 
         show_archived = Gio.SimpleAction.new_stateful(
@@ -2422,19 +2423,26 @@ class MainWindow(Adw.ApplicationWindow):
         self.tab_view.set_selected_page(self._page_for(session_id))
         tab.inject_prompt(prompt)
 
-    def _view_pr(self, session_id: str, url: str, unresolved: bool) -> None:
-        """A sidebar PR menu's "View in Collins": the PR's native page,
-        docked beside its session. With *unresolved*, the page lands on its
-        first unresolved thread — the menu's deep-link row.
+    def view_pr(self, session_id: str, url: str, unresolved: bool) -> None:
+        """A sidebar PR mark's "View in Collins": the PR's native page, docked
+        beside its session. With *unresolved*, the page lands on its first
+        unresolved thread — the menu's deep-link row.
 
-        The page lives in the session tab's panel dock, so a session that
-        isn't open in a tab is opened first — the row said "show me this
-        session's PR", and the session comes with it. If open_session sent
-        the click to another window instead (the session is already open
-        there), the click is spent, like open_session's own no-op paths.
+        The page lives in the session tab's panel dock, so the tab is what this
+        follows. Another window holding it is handed the click — window and tab
+        raised first, so the page opens where the user is now looking — because
+        a session open over there is one this window must not resume a second
+        time (see session_window). Only with no tab anywhere does this window
+        open the session itself: the row said "show me this session's PR", and
+        the session comes with it.
         """
         tab = self._session_tab(session_id)
         if tab is None:
+            other = session_window(self.get_application(), session_id, skip=self)
+            if other is not None:
+                other.focus_session(session_id)
+                other.view_pr(session_id, url, unresolved)
+                return
             session = self.store.get_session(session_id)
             if session is None:
                 return
@@ -2446,6 +2454,19 @@ class MainWindow(Adw.ApplicationWindow):
         if page is not None:
             self.tab_view.set_selected_page(page)
         tab.open_pr_page_url(url, unresolved=unresolved)
+
+    def _session_has_tab(self, session_id: str) -> bool:
+        """Whether this session is open in a tab — in any window, not just this
+        one.
+
+        What the sidebar asks before sending a PR mark's plain click to
+        `view_pr` (see SessionSidebar.has_tab). Across windows because that is
+        where the click would land: a session another window is running is one
+        this window jumps to rather than opens, so it counts as open.
+        """
+        if self._session_tab(session_id) is not None:
+            return True
+        return session_window(self.get_application(), session_id, skip=self) is not None
 
     def _session_tab(self, session_id: str) -> TerminalTab | None:
         """The terminal tab a session is open in, if it is open in one."""

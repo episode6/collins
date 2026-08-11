@@ -710,6 +710,9 @@ msgstr "Jobb kattintás a megnyitáshoz"
 msgid "Click to view in Collins"
 msgstr "Kattintson a Collinsban való megtekintéshez"
 
+msgid "Click to view #{number} in Collins"
+msgstr "Kattintson a(z) #{number} Collinsban való megtekintéshez"
+
 msgid "Right-click for actions"
 msgstr "Jobb kattintás a műveletekhez"
 

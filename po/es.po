@@ -710,6 +710,9 @@ msgstr "Haz clic derecho para abrir"
 msgid "Click to view in Collins"
 msgstr "Haz clic para verlo en Collins"
 
+msgid "Click to view #{number} in Collins"
+msgstr "Haz clic para ver #{number} en Collins"
+
 msgid "Right-click for actions"
 msgstr "Haz clic derecho para ver las acciones"
 

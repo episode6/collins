@@ -3,19 +3,21 @@
 Two buttons open this same list. The ellipsis beside the tab footer's PR chips
 — shown only while the row is too narrow for every chip — opens it for the tab
 in front of you, off a list its poll keeps current; the combined mark ahead of
-a sidebar row's title opens it for a session whose tab may not even be open,
-off the list saved for that session — which is why that one refreshes before it
-shows anything (see SessionRow._fill_pr_menu).
+a sidebar row's title opens it (on a right-click, and on a plain click for a
+session with no tab) for a session whose tab may not even be open, off the list
+saved for that session — which is why that one refreshes before it shows
+anything (see SessionRow._fill_pr_menu).
 
 The widgets live here rather than beside either caller so both get the same
 menu: the same mark column, the same ellipsizing title, the same click that
 opens the PR page and closes the menu behind it.
 
 Left-clicking a PR in the list asks what to *do* with it; right-clicking one
-opens its page in the browser. A footer chip reads the other way round — a
-plain click opens the PR's page in Collins, and the actions are the chip's
-context menu (see attach_view and attach_actions) — because a chip is a PR and
-a row in the list is one of several.
+opens its page in the browser. A mark standing for one PR reads the other way
+round — the plain click opens that PR's page in Collins and the actions are its
+context menu (see attach_view and attach_actions, and SessionRow's mark, which
+does the same once its session has a tab to open the page in) — because a list
+is a question about which PR and a mark is not.
 
 That submenu is the same list of actions wherever it is opened from (practions
 decides what a PR offers, under an "Open on GitHub" row every PR has), so it is

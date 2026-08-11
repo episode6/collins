@@ -766,9 +766,9 @@ msgstr ""
 msgid "Select multiple sessions"
 msgstr ""
 
-#: collins/sidebar.py:755
+#: collins/sidebar.py:1129
 #, python-brace-format
-msgid "Right-click to open #{number}"
+msgid "Click to view #{number} in Collins"
 msgstr ""
 
 #: collins/sidebar.py:368
