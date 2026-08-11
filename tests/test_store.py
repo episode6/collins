@@ -167,6 +167,34 @@ def test_kept_project_persists_and_respects_archiving(store, app_state, monkeypa
     assert _empty_group_names(store) == ["beta"]
 
 
+def test_add_project_before_any_session(store, app_state):
+    # The sidebar's "Add project" button: a directory no session has ever
+    # run in lands as a persisted empty header with its folder attached.
+    store.add_project("/home/user/gamma")
+
+    assert _empty_group_names(store) == ["gamma"]
+    assert store.empty_groups[0][2] == "/home/user/gamma"
+    assert "gamma" in store.resolved_project_order
+    assert app_state.AppState().get_virtual_projects() == {"gamma": "/home/user/gamma"}
+
+
+def test_add_project_with_live_sessions_is_a_noop(store):
+    # The folder chooser defaults to the visible project's own directory, so
+    # "Add project" on a live project must not mark it virtual — the sidebar
+    # reads is_virtual_project as "no sessions left" (worktree toggle,
+    # "Remove project from sidebar").
+    store.add_project("/home/user/alpha")
+    assert not store.state.is_virtual_project("alpha")
+    assert _empty_group_names(store) == []
+
+
+def test_add_project_worktree_maps_to_repository(store):
+    # Adding a Claude-managed worktree is really adding its repository —
+    # matching how sessions in one are grouped.
+    store.add_project("/home/user/gamma/.claude/worktrees/wt")
+    assert store.state.get_virtual_projects() == {"gamma": "/home/user/gamma"}
+
+
 def test_trash_many_keeps_orphaned_forwards_archived(store, monkeypatch):
     monkeypatch.setattr(store_mod, "_trash_file", lambda path: None)
     original, fork = (s.session_id for s in store._last_sessions[:2])

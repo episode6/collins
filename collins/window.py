@@ -1032,6 +1032,7 @@ class MainWindow(Adw.ApplicationWindow):
             "set-tab-emoji": lambda *_: self._set_tab_emoji(),
             "toggle-tab-emoji": lambda *_: self._toggle_tab_emoji(),
             "open-session-file": lambda *_: self._open_session_file(),
+            "add-project": lambda *_: self._choose_add_project_folder(),
             "copy-tab-session-id": lambda *_: self._copy_tab_session_id(),
             "close-menu-tab": lambda *_: self._close_menu_tab(),
             "toggle-panel": lambda *_: self._toggle_panel(),
@@ -1485,6 +1486,37 @@ class MainWindow(Adw.ApplicationWindow):
         cwd = folder.get_path()
         self._start_new_session(cwd, getattr(self, "_new_session_provider", None))
 
+    def _choose_add_project_folder(self) -> None:
+        dialog = Gtk.FileDialog(title=_("Choose project directory"))
+        default = self._visible_project_dir()
+        if default:
+            dialog.set_initial_folder(Gio.File.new_for_path(default))
+        dialog.select_folder(self, None, self._on_add_project_folder)
+
+    def _on_add_project_folder(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            folder = dialog.select_folder_finish(result)
+        except GLib.Error:
+            return  # cancelled
+        cwd = folder.get_path()
+        # Same trust gate as a launch — adding a project is an invitation to
+        # run sessions in it — but the button says what actually happens next.
+        self._with_folder_trust(
+            cwd,
+            self._default_provider(),
+            lambda: self._add_project(cwd),
+            confirm_label=_("Trust and add"),
+        )
+
+    def _add_project(self, cwd: str) -> None:
+        """Put the chosen directory in the sidebar without starting a session:
+        it lands as an empty project header whose "new thread" row is the
+        invitation to start one later."""
+        # Unknown groups start collapsed; a project added by hand must arrive
+        # visible. (Key matches the sidebar's _group_state_key.)
+        self.state.set_group_expanded(f"proj:{project_name_for_cwd(cwd)}", True)
+        self.store.add_project(cwd)
+
     def _worktree_for_new_session(self, cwd: str) -> bool:
         """Whether a new session in `cwd` should launch with the worktree flag:
         the project's pinned choice, else the app setting — and never outside a
@@ -1494,7 +1526,13 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         return self.state.worktree_for_project(project_name_for_cwd(cwd))
 
-    def _with_folder_trust(self, cwd: str, provider, proceed: Callable[[], None]) -> None:
+    def _with_folder_trust(
+        self,
+        cwd: str,
+        provider,
+        proceed: Callable[[], None],
+        confirm_label: str | None = None,
+    ) -> None:
         """Run `proceed` once the folder is trusted, asking first the one time
         it isn't — and dropping the launch entirely if the answer is no.
 
@@ -1517,7 +1555,9 @@ class MainWindow(Adw.ApplicationWindow):
             trust.trust_dir(root)
             proceed()
 
-        dialogs.trust_folder_dialog(self, provider.name, root, accept)
+        dialogs.trust_folder_dialog(
+            self, provider.name, root, accept, confirm_label=confirm_label
+        )
 
     def _start_new_session(
         self, cwd: str, provider=None, options=None, worktree: bool | None = None

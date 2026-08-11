@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-07. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -416,6 +416,7 @@ def trust_folder_dialog(
     path: str,
     on_trust: Callable[[], None],
     on_decline: Callable[[], None] | None = None,
+    confirm_label: str | None = None,
 ) -> None:
     """The folder-trust question, asked before the first launch in a project
     Collins has never opened. Declining cancels the launch outright — no tab,
@@ -440,7 +441,7 @@ def trust_folder_dialog(
             "like your own code, a well-known open source project, or work from "
             "your team."
         ).format(agent=agent_name, path=display_path(path)),
-        _("Trust and open"),
+        confirm_label or _("Trust and open"),
         on_trust,
         on_dismiss=on_decline,
         destructive=False,
