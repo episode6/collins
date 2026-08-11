@@ -703,6 +703,16 @@ popover.menu button.open-with-row:hover {
   padding: 2px 6px;
   min-height: 26px;
 }
+/* the Files view's per-file sections: a quieter card than .pr-card, since a
+   built diff buffer brings its own scheme-colored background on top */
+.pr-file-section {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background-color: alpha(currentColor, 0.04);
+}
+.pr-file-path {
+  font-weight: bold;
+}
 """
 
 

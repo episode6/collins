@@ -42,6 +42,14 @@ _EXTERNAL_CHANGE_DEBOUNCE_MS = 300
 _TREE_INITIAL_WIDTH = 180
 
 
+def style_scheme(setting: str, dark: bool) -> GtkSource.StyleScheme | None:
+    """The GtkSource style scheme *setting* names — or, for "" (follow the
+    app), the Adwaita scheme matching *dark*. Shared with the PR view's diff
+    rendering, so an editor scheme choice restyles those buffers too."""
+    manager = GtkSource.StyleSchemeManager.get_default()
+    return manager.get_scheme(setting or ("Adwaita-dark" if dark else "Adwaita"))
+
+
 class _OpenFile:
     """One open buffer, independent of whether its tab-strip page is the one
     currently showing."""
@@ -1299,9 +1307,7 @@ class EditorPane(Gtk.Box):
                 self._apply_scheme(opened.buffer)
 
     def _apply_scheme(self, buffer: GtkSource.Buffer) -> None:
-        manager = GtkSource.StyleSchemeManager.get_default()
-        scheme_id = self._style_scheme_setting or ("Adwaita-dark" if self._dark else "Adwaita")
-        scheme = manager.get_scheme(scheme_id)
+        scheme = style_scheme(self._style_scheme_setting, self._dark)
         if scheme is not None:
             buffer.set_style_scheme(scheme)
 
