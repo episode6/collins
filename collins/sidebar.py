@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-10. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -1178,8 +1178,14 @@ class SessionSidebar(Gtk.Box):
         menu.append(_("MCP servers"), "win.mcp-servers")
         menu.append(_("Preferences"), "win.preferences")
         menu.append(_("About Collins"), "win.about")
-        # Menu and search share the left end, so the header's weight is even:
-        # two buttons on each side of the title.
+        # The additive action leads the left end, GNOME-style; menu and search
+        # follow, so the title carries three buttons on its left and two on
+        # its right.
+        self._add_project_btn = Gtk.Button(icon_name="folder-new-symbolic")
+        self._add_project_btn.set_tooltip_text(_("Add project"))
+        self._add_project_btn.set_action_name("win.add-project")
+        header.pack_start(self._add_project_btn)
+
         self._menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         header.pack_start(self._menu_btn)
 

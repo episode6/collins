@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -29,6 +29,7 @@ from .sessions import (
     Session,
     discover_sessions,
     is_discoverable_transcript,
+    project_name_for_cwd,
     worktree_project_root,
 )
 from .state import AppState, merge_project_order, move_in_order
@@ -547,6 +548,14 @@ class SessionStore(GObject.Object):
         self.state.keep_virtual_projects(
             {name: self.project_cwd(name) or "" for name in project_names}
         )
+        self._apply()
+
+    def add_project(self, cwd: str) -> None:
+        """Put a directory in the sidebar before any session has run there:
+        the same persisted empty header a kept project leaves behind, so the
+        group offers "new session here" without one having been started."""
+        root = worktree_project_root(cwd) or cwd
+        self.state.keep_virtual_projects({project_name_for_cwd(cwd): root})
         self._apply()
 
     def forget_project(self, project_name: str) -> None:
