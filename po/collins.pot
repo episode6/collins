@@ -135,11 +135,11 @@ msgstr ""
 msgid "Right-click to open"
 msgstr ""
 
-#: collins/terminal.py:1607
+#: collins/sidebar.py:1126 collins/terminal.py:1605
 msgid "Click to view in Collins"
 msgstr ""
 
-#: collins/terminal.py:1608
+#: collins/sidebar.py:1132 collins/terminal.py:1605
 msgid "Right-click for actions"
 msgstr ""
 
@@ -766,7 +766,7 @@ msgstr ""
 msgid "Select multiple sessions"
 msgstr ""
 
-#: collins/sidebar.py:1129
+#: collins/sidebar.py:1128
 #, python-brace-format
 msgid "Click to view #{number} in Collins"
 msgstr ""
