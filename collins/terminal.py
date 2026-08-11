@@ -72,7 +72,11 @@ from .prstatus import (  # noqa: E402
     to_records,
 )
 from .prview import PrViewPage  # noqa: E402
-from .sessions import worktree_project_root  # noqa: E402
+from .sessions import (  # noqa: E402
+    recreatable_worktree,
+    recreate_worktree,
+    worktree_project_root,
+)
 from .shellinput import shell_command  # noqa: E402
 from .transcript import TranscriptModel  # noqa: E402
 
@@ -1119,6 +1123,34 @@ class TerminalTab(Gtk.Box):
     # -- spawning ----------------------------------------------------------
 
     def _spawn(self, cwd: str | None, session_id: str | None) -> None:
+        if cwd is not None and session_id is not None and not Path(cwd).is_dir():
+            state = recreatable_worktree(self._transcript.path, cwd)
+            if state is not None:
+                # The CLI reaped this session's worktree when it last exited
+                # (it deletes untouched ones); resuming without it would
+                # relocate the session to the repository root for good.
+                # Recreate it first — same path, branch, base commit — so the
+                # resume lands back where the session left off. Off the main
+                # loop: `git worktree add` checks out a whole working tree.
+                # Until it finishes, readers see the worktree cwd and no
+                # initial command, same as a tab whose shell hasn't spawned.
+                self._cwd = cwd
+                self._initial_command = None
+                self.feed_message(
+                    _("recreating removed worktree {path}").format(path=cwd)
+                )
+
+                def recreate() -> None:
+                    recreate_worktree(state)
+                    # _finish_spawn re-checks the directory; on failure it
+                    # falls back to HOME with its usual warning.
+                    GLib.idle_add(self._finish_spawn, cwd, session_id)
+
+                threading.Thread(target=recreate, daemon=True).start()
+                return
+        self._finish_spawn(cwd, session_id)
+
+    def _finish_spawn(self, cwd: str | None, session_id: str | None) -> None:
         if cwd is None or not Path(cwd).is_dir():
             if cwd is not None:
                 self.feed_message(

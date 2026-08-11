@@ -953,6 +953,11 @@ msgstr ""
 msgid "warning: project dir {cwd} no longer exists, starting in HOME"
 msgstr ""
 
+#: collins/terminal.py:1139
+#, python-brace-format
+msgid "recreating removed worktree {path}"
+msgstr ""
+
 #: collins/terminal.py:357
 #, python-brace-format
 msgid "warning: `{cli}` not found in PATH — starting a plain shell"

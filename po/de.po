@@ -485,6 +485,9 @@ msgstr "Ausgewählte in Tabs öffnen"
 msgid "warning: project dir {cwd} no longer exists, starting in HOME"
 msgstr "Warnung: Projektverzeichnis {cwd} existiert nicht mehr, starte im HOME"
 
+msgid "recreating removed worktree {path}"
+msgstr "entfernter Worktree {path} wird neu erstellt"
+
 msgid "warning: `{cli}` not found in PATH — starting a plain shell"
 msgstr "Warnung: `{cli}` nicht im PATH gefunden — starte eine einfache Shell"
 
