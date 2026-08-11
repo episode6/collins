@@ -333,11 +333,11 @@ def recreate_worktree(state: dict) -> bool:
     if root is None:
         return False
 
-    def add(*args: str) -> bool:
+    def git(*args: str) -> bool:
         try:
             return (
                 subprocess.run(
-                    ["git", "-C", root, "worktree", "add", *args],
+                    ["git", "-C", root, *args],
                     capture_output=True,
                     timeout=60,
                 ).returncode
@@ -347,14 +347,15 @@ def recreate_worktree(state: dict) -> bool:
             return False
 
     branch = str(state["worktreeBranch"])
-    # -f, because git refuses a path it still has registered — a worktree
-    # deleted behind git's back rather than reaped by the CLI.
-    if not add("-f", "-b", branch, path, str(state["originalHeadCommit"])):
-        # The branch survived (the -b form refuses to clobber one), so it may
-        # hold commits the base doesn't: check it back out instead.
-        if not add("-f", path, branch):
-            return False
-    return Path(path).is_dir()
+    # -f in both forms, because git refuses a path it still has registered —
+    # a worktree deleted behind git's back rather than reaped by the CLI.
+    if git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"):
+        # The branch survived (a reap deletes it), so it may hold commits the
+        # base doesn't: check it back out instead of clobbering it.
+        ok = git("worktree", "add", "-f", path, branch)
+    else:
+        ok = git("worktree", "add", "-f", "-b", branch, path, str(state["originalHeadCommit"]))
+    return ok and Path(path).is_dir()
 
 
 def _tail_state(path: Path) -> str:
