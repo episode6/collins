@@ -2214,3 +2214,47 @@ msgid "{n} line"
 msgid_plural "{n} lines"
 msgstr[0] ""
 msgstr[1] ""
+
+#: collins/prview.py:723
+msgid "Add a comment"
+msgstr ""
+
+#: collins/prview.py:750
+msgid "Reply via Claude"
+msgstr ""
+
+#: collins/prview.py:764
+msgid "Request changes"
+msgstr ""
+
+#: collins/prview.py:773
+msgid "Approve"
+msgstr ""
+
+#: collins/prview.py:782
+msgid "Comment"
+msgstr ""
+
+#: collins/prview.py:799
+msgid "Comment on {slug}"
+msgstr ""
+
+#: collins/prview.py:800
+msgid "Approve {slug}"
+msgstr ""
+
+#: collins/prview.py:802
+msgid "Request changes on {slug}"
+msgstr ""
+
+#: collins/practions.py:176 collins/prview.py:807
+msgid "Send “{prompt}” to this session"
+msgstr ""
+
+#: collins/prmenu.py:699 collins/prview.py:855
+msgid "Collins couldn't run that action."
+msgstr ""
+
+#: collins/prmenu.py:723 collins/prview.py:868
+msgid "{action} failed"
+msgstr ""

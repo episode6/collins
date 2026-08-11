@@ -14,6 +14,12 @@ the page comes back into view; the widgets here only ever render what that
 GTK-free layer parsed and bounded. Failures keep the last-loaded content
 under an inline banner — stale beats blank, as everywhere in the PR stack.
 
+The Conversation column ends in the page's write half: a composer that posts
+its text as a comment or a review verdict through practions' write calls
+(bodies over stdin, never argv), with "Reply via Claude" beside them typing
+the COMMENTS prompt into the owning session instead — the composer is for
+answering a reviewer yourself, the prompt for making the agent do it.
+
 Everything shown is repository content and therefore untrusted: bodies go
 through `formatting.md_to_pango`'s escaping (with the plain-text fallback on
 malformed markup), only http(s) URLs ever reach a browser (prdetail already
@@ -25,20 +31,22 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import replace
 
 import gi
 
 gi.require_version("Adw", "1")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, GLib, GObject, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import prdetail, prmenu  # noqa: E402
+from . import dialogs, practions, prdetail, prmenu  # noqa: E402
 from .copylabel import open_tooltip, open_uri  # noqa: E402
 from .editor import GtkSource, style_scheme  # noqa: E402 — require_version + friendly exit live there
 from .formatting import format_relative, format_timestamp, md_to_pango  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
-from .prstatus import PullRequest  # noqa: E402
+from .prstatus import PullRequest, invalidate  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -186,6 +194,10 @@ class PrViewPage(Adw.Bin):
         self._scroller = Gtk.ScrolledWindow(child=self._content, vexpand=True)
         self._scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self._scroller.set_focusable(True)
+        # The write half, built once and re-appended across rebuilds: the
+        # rebuild that lands a background refresh must not eat a half-typed
+        # comment (see _Composer).
+        self._composer = _Composer(host_factory, self._posted)
 
         # -- files ------------------------------------------------------------
         # The diff buffers follow the editor's style-scheme setting (or the
@@ -445,6 +457,16 @@ class PrViewPage(Adw.Bin):
             empty = Gtk.Label(label=_("No comments yet."), xalign=0.0)
             empty.add_css_class("dim-label")
             self._content.append(empty)
+        self._composer.sync(self._pr)
+        self._content.append(self._composer)
+
+    def _posted(self) -> None:
+        """A comment or review just landed on GitHub: re-read everything that
+        shows this PR — the page itself (whose fetch re-absorbs into the
+        summary cache), and the summary the tab's own poll holds."""
+        invalidate(self.pr_url)
+        self._host_factory().refresh()
+        self.refresh()
 
     def _description_card(self, detail: prdetail.PullRequestDetail) -> Gtk.Widget:
         card = self._card(detail.author, detail.created_at)
@@ -667,6 +689,187 @@ class PrViewPage(Adw.Bin):
         if self._dark_id is not None:
             Adw.StyleManager.get_default().disconnect(self._dark_id)
             self._dark_id = None
+
+
+class _Composer(Gtk.Box):
+    """The Conversation view's write half: a comment box and its verdicts.
+
+    One per page, created once and re-appended across rebuilds — the rebuild
+    that lands a background refresh must not eat a half-typed comment. The
+    buttons run practions' write calls on a worker thread, the whole composer
+    held insensitive until the answer lands (one press, one post): Comment
+    posts the text as an issue comment, Approve / Request changes submit a
+    review with the text along. Comment and Request changes need words to go
+    — GitHub refuses both bare — so they grey out over an empty box; Approve
+    stands alone. A failure comes back as gh's own sentence in a dialog, the
+    text kept where it was typed; success clears the box and re-reads the PR.
+
+    "Reply via Claude" is the complement, not a competitor: it types the
+    COMMENTS prompt into the owning session instead, greyed with the reason
+    whenever the session can't take a prompt right now — the blocked action
+    rows' treatment, tooltip on a sensitive wrapper and all.
+    """
+
+    def __init__(
+        self, host_factory: Callable[[], prmenu.ActionHost], on_posted: Callable[[], None]
+    ) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.add_css_class("pr-card")
+        self._host_factory = host_factory
+        self._on_posted = on_posted
+        self._pr: PullRequest | None = None
+        self._posting = False
+
+        heading = Gtk.Label(label=_("Add a comment"), xalign=0.0)
+        heading.add_css_class("caption-heading")
+        self.append(heading)
+
+        self._text = Gtk.TextView()
+        self._text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._text.set_top_margin(6)
+        self._text.set_bottom_margin(6)
+        self._text.set_left_margin(8)
+        self._text.set_right_margin(8)
+        self._text.get_buffer().connect("changed", lambda *_a: self._sync_buttons())
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._on_key)
+        self._text.add_controller(keys)
+        entry = Gtk.ScrolledWindow(child=self._text)
+        entry.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        entry.set_has_frame(True)
+        # Room enough to read a few lines back; grows with the text between
+        # the two bounds, then scrolls rather than pushing the buttons away.
+        entry.set_min_content_height(64)
+        entry.set_max_content_height(220)
+        entry.set_propagate_natural_height(True)
+        self.append(entry)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        reply = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        reply.append(Gtk.Image.new_from_icon_name("agent-claude-symbolic"))
+        reply.append(Gtk.Label(label=_("Reply via Claude")))
+        self._reply_btn = Gtk.Button(child=reply)
+        self._reply_btn.add_css_class("flat")
+        self._reply_btn.connect("clicked", self._on_reply)
+        # Insensitive widgets are skipped when GTK picks what the pointer is
+        # over (the blocked action rows' lesson): the reason a greyed button
+        # is grey lives on this wrapper, which stays sensitive.
+        self._reply_wrap = Gtk.Box()
+        self._reply_wrap.append(self._reply_btn)
+        row.append(self._reply_wrap)
+        row.append(Gtk.Box(hexpand=True))
+        self._spinner = Gtk.Spinner()
+        self._spinner.set_visible(False)
+        row.append(self._spinner)
+        self._request_btn = Gtk.Button(label=_("Request changes"))
+        self._request_btn.connect(
+            "clicked",
+            lambda *_a: self._post(
+                _("Request changes"),
+                lambda pr, body: practions.review(pr, practions.REQUEST_CHANGES, body),
+            ),
+        )
+        row.append(self._request_btn)
+        self._approve_btn = Gtk.Button(label=_("Approve"))
+        self._approve_btn.connect(
+            "clicked",
+            lambda *_a: self._post(
+                _("Approve"),
+                lambda pr, body: practions.review(pr, practions.APPROVE, body),
+            ),
+        )
+        row.append(self._approve_btn)
+        self._comment_btn = Gtk.Button(label=_("Comment"))
+        self._comment_btn.add_css_class("suggested-action")
+        self._comment_btn.connect(
+            "clicked", lambda *_a: self._post(_("Comment"), practions.comment)
+        )
+        row.append(self._comment_btn)
+        self.append(row)
+        self._sync_buttons()
+
+    def sync(self, pr: PullRequest) -> None:
+        """Point the composer at *pr* as freshly fetched, and re-read the
+        session behind it. Verdicts only show for a live PR — GitHub refuses
+        a review on a merged or closed one, commenting stays open forever."""
+        self._pr = pr
+        live = pr.state in practions.LIVE
+        self._approve_btn.set_visible(live)
+        self._request_btn.set_visible(live)
+        self._comment_btn.set_tooltip_text(_("Comment on {slug}").format(slug=pr.slug))
+        self._approve_btn.set_tooltip_text(_("Approve {slug}").format(slug=pr.slug))
+        self._request_btn.set_tooltip_text(
+            _("Request changes on {slug}").format(slug=pr.slug)
+        )
+        prompt = practions.COMMENTS_PROMPT.format(number=pr.number)
+        block = self._host_factory().prompt_block()
+        self._reply_btn.set_sensitive(not block)
+        tooltip = _("Send “{prompt}” to this session").format(prompt=prompt)
+        self._reply_wrap.set_tooltip_text("\n".join(part for part in (tooltip, block) if part))
+        self._sync_buttons()
+
+    def _body(self) -> str:
+        buffer = self._text.get_buffer()
+        return buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True)
+
+    def _sync_buttons(self) -> None:
+        has_body = bool(self._body().strip())
+        self._comment_btn.set_sensitive(has_body)
+        self._request_btn.set_sensitive(has_body)
+
+    def _on_key(self, _controller, keyval: int, _keycode: int, state) -> bool:
+        # Ctrl+Enter comments, as on GitHub itself; a bare Enter stays a newline.
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and state & Gdk.ModifierType.CONTROL_MASK:
+            if self._comment_btn.get_sensitive():
+                self._post(_("Comment"), practions.comment)
+            return Gdk.EVENT_STOP
+        return Gdk.EVENT_PROPAGATE
+
+    def _on_reply(self, *_args) -> None:
+        pr = self._pr
+        if pr is None:
+            return
+        host = self._host_factory()
+        if host.prompt_block():  # sampled again: sync was a fetch ago
+            return
+        host.send_prompt(practions.COMMENTS_PROMPT.format(number=pr.number))
+
+    def _post(self, label: str, run: Callable[[PullRequest, str], str | None]) -> None:
+        """Run one write call off the main loop, the composer held insensitive
+        until it lands. *label* is the button's own word, for the failure
+        dialog's heading."""
+        pr = self._pr
+        if pr is None or self._posting:
+            return
+        body = self._body().strip()
+        self._posting = True
+        self.set_sensitive(False)
+        self._spinner.set_visible(True)
+        self._spinner.start()
+
+        def work() -> None:
+            try:
+                error = run(pr, body)
+            except Exception:  # a text box must never take the app down
+                log.debug("prview: posting to %s failed", pr.url, exc_info=True)
+                error = _("Collins couldn't run that action.")
+            GLib.idle_add(self._landed, label, error)
+
+        threading.Thread(target=work, name="pr-post", daemon=True).start()
+
+    def _landed(self, label: str, error: str | None) -> bool:
+        self._posting = False
+        self.set_sensitive(True)
+        self._spinner.stop()
+        self._spinner.set_visible(False)
+        if error:
+            root = self.get_root()
+            if root is not None:
+                dialogs.error_dialog(root, _("{action} failed").format(action=label), error)
+            return GLib.SOURCE_REMOVE
+        self._text.get_buffer().set_text("")  # posted: the box has done its job
+        self._on_posted()
+        return GLib.SOURCE_REMOVE
 
 
 class _FileSection(Gtk.Box):
