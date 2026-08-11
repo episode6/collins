@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-10. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -33,11 +33,7 @@ from . import (  # noqa: E402
     themes,
     vtehtml,
 )
-from .copylabel import (  # noqa: E402
-    copy_tooltip,
-    enable_copy_on_click,
-    enable_open_on_click,
-)
+from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch, has_changes  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
@@ -1586,8 +1582,11 @@ class TerminalTab(Gtk.Box):
         the PR needs doing. Icon before number, the way GitHub writes a PR.
 
         Every part of a chip answers for that PR and nothing else — the chips
-        are siblings on the row, so each number carries its own menu (on a
-        click) and its own link (on a right-click).
+        are siblings on the row, so each number carries its own page (on a
+        click) and its own menu (on a right-click). Reading the PR is what a
+        chip is usually clicked for, so it is what the plain click does; the
+        things to *do* about it — the browser among them — sit one right-click
+        away, the way a context menu sits behind anything else on the row.
         """
         number = Gtk.Label(label=f"#{pr.number}")
         number.add_css_class("caption")
@@ -1603,11 +1602,13 @@ class TerminalTab(Gtk.Box):
         chip.append(number)
         chip.set_tooltip_text(
             describe(pr) + "\n" + pr.url + "\n"
-            + _("Click for actions") + "\n" + _("Right-click to open")
+            + _("Click to view in Collins") + "\n" + _("Right-click for actions")
         )
-        enable_open_on_click(chip, lambda: pr.url, button=Gdk.BUTTON_SECONDARY)
-        # The chip is the shortest way to do something about a PR: the same
-        # actions the footer's PR list offers, opened on the chip itself.
+        # The chip is the shortest way to read a PR: its page docked beside the
+        # session, on a plain click.
+        prmenu.attach_view(chip, pr, self.open_pr_page)
+        # And the shortest way to do something about it: the same actions the
+        # footer's PR list offers, opened on the chip itself.
         prmenu.attach_actions(chip, pr, self._pr_action_host())
         return chip
 

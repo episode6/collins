@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-10. Full change history: git log for this file.
+fork. Last modified: 2026-08-11. Full change history: git log for this file.
 -->
 
 # Features
@@ -37,8 +37,7 @@ fork. Last modified: 2026-08-10. Full change history: git log for this file.
   or, when the session has just the one pull request, that PR's actions
   directly, since a list of one only ever leads to the same place.
   **Right-clicking the mark skips the list** and opens the session's most
-  recent PR in your browser, the way a right-click on a footer chip does; the
-  tooltip's last line names which one that is.
+  recent PR in your browser; the tooltip's last line names which one that is.
 - **Refresh** (the header's ↻) re-reads the session list *and* every listed
   session's pull requests: each one's checks, conflicts and unanswered
   comments, plus a **branch lookup** that picks up PRs opened by hand, which no
@@ -171,14 +170,16 @@ agents' own session files are never modified.
   copy) and the current **git branch** (⎇), plus the terminal-panel buttons.
 - **Pull request chips** trail the branch: one per PR the session has opened,
   each with its **CI mark** (✓ / ✗ / ●) or GitHub's merge mark, and each
-  opening that PR on click. The caret beside them lists every one with its
-  title — the same list a sidebar row's pull request mark opens.
-- **Right-click a chip** (or a PR in either list) for what to *do* with it:
-  mark a draft **ready for review**, **merge** it — or turn on **auto-merge**
-  while its checks are still running — or **ask Claude for a review** (a
-  `@claude review` comment, for repositories running the Claude Code GitHub
-  action). Left-clicking still opens the page, which is why nothing in the
-  menu does; a PR with nothing left to do says so rather than opening empty.
+  **opening that PR's page beside the session on click** — the same view the
+  menu's *View in Collins* reaches. The caret beside them lists every one with
+  its title — the same list a sidebar row's pull request mark opens.
+- **Right-click a chip** (or left-click a PR in either list) for what to *do*
+  with it: mark a draft **ready for review**, **merge** it — or turn on
+  **auto-merge** while its checks are still running — or **ask Claude for a
+  review** (a `@claude review` comment, for repositories running the Claude
+  Code GitHub action). Every one of those menus starts with the two ways to
+  read the PR — its page in Collins, and **Open on GitHub** — so a PR with
+  nothing left to do still opens onto something rather than onto a gap.
 - Four of those items are **sent to the session as a prompt** instead of run
   against GitHub: **address the CI errors** when that PR's CI is red,
   **rebase / resolve conflicts** when GitHub says the branch no longer merges,
