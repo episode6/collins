@@ -155,14 +155,21 @@ class PrViewPage(Adw.Bin):
         header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         header.add_css_class("pr-view-header")
 
+        # Everything in the row anchors to its top: the title may run to
+        # _TITLE_LINES, and the mark, number and buttons should ride its
+        # first line rather than float at the vertical middle of three.
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._mark_slot = Adw.Bin(child=prmenu.status_icon(pr))
-        self._mark_slot.set_valign(Gtk.Align.CENTER)
+        self._mark_slot.set_valign(Gtk.Align.START)
+        # Optically centers the mark (and the spinner below) on the title's
+        # first line of text.
+        self._mark_slot.set_margin_top(4)
         top.append(self._mark_slot)
         self._number = Gtk.Label(label=f"#{pr.number}")
         self._number.add_css_class("dim-label")
+        self._number.set_valign(Gtk.Align.START)
         top.append(self._number)
-        self._title = Gtk.Label(xalign=0.0, hexpand=True, selectable=True)
+        self._title = Gtk.Label(xalign=0.0, yalign=0.0, hexpand=True, selectable=True)
         self._title.add_css_class("pr-view-title")
         # Wrapping up to _TITLE_LINES before the ellipsis: a one-line header
         # cut most real titles off, and the tooltip still holds the whole.
@@ -174,20 +181,25 @@ class PrViewPage(Adw.Bin):
 
         self._spinner = Gtk.Spinner()
         self._spinner.set_visible(False)
+        self._spinner.set_valign(Gtk.Align.START)
+        self._spinner.set_margin_top(4)
         top.append(self._spinner)
         self._refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")
         self._refresh_btn.add_css_class("flat")
+        self._refresh_btn.set_valign(Gtk.Align.START)
         self._refresh_btn.set_tooltip_text(_("Reload this pull request"))
         self._refresh_btn.connect("clicked", lambda *_a: self.refresh())
         top.append(self._refresh_btn)
         github_btn = Gtk.Button(icon_name="github-symbolic")
         github_btn.add_css_class("flat")
+        github_btn.set_valign(Gtk.Align.START)
         github_btn.set_tooltip_text(open_tooltip(pr.url))
         github_btn.connect("clicked", lambda b: open_uri(b, self.pr_url))
         top.append(github_btn)
         self._menu = prmenu.new_popover(Gtk.PositionType.BOTTOM)
         menu_btn = Gtk.MenuButton(icon_name="view-more-horizontal-symbolic")
         menu_btn.add_css_class("flat")
+        menu_btn.set_valign(Gtk.Align.START)
         menu_btn.set_tooltip_text(_("Pull request actions"))
         menu_btn.set_popover(self._menu)
         menu_btn.set_create_popup_func(self._fill_menu)
