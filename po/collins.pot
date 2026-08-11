@@ -2258,3 +2258,51 @@ msgstr ""
 #: collins/prmenu.py:723 collins/prview.py:868
 msgid "{action} failed"
 msgstr ""
+
+#: collins/prmenu.py:563
+msgid "View unresolved comments"
+msgstr ""
+
+#: collins/prmenu.py:568
+msgid "Open this pull request's page at its first unresolved thread"
+msgstr ""
+
+#: collins/prview.py:925
+msgid "Outdated"
+msgstr ""
+
+#: collins/prview.py:928
+msgid "The code this thread commented on has changed"
+msgstr ""
+
+#: collins/prview.py:944
+msgid "Resolved"
+msgstr ""
+
+#: collins/prview.py:968 collins/prview.py:1047
+msgid "Reply"
+msgstr ""
+
+#: collins/prview.py:970
+msgid "Reply in this thread"
+msgstr ""
+
+#: collins/prview.py:978 collins/prview.py:1054
+msgid "Unresolve"
+msgstr ""
+
+#: collins/prview.py:978 collins/prview.py:1054
+msgid "Resolve"
+msgstr ""
+
+#: collins/prview.py:981
+msgid "Reopen this thread"
+msgstr ""
+
+#: collins/prview.py:981
+msgid "Mark this thread resolved"
+msgstr ""
+
+#: collins/prview.py:1004
+msgid "Post reply"
+msgstr ""

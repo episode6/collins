@@ -622,7 +622,12 @@ class SessionRow(Gtk.ListBoxRow):
             # The native page needs the session's tab; the window owns those,
             # and opens the session first when the row's tab isn't up.
             view_pr=lambda pr: self.activate_action(
-                "win.view-pr", GLib.Variant("(ss)", (self.item.session_id, pr.url))
+                "win.view-pr",
+                GLib.Variant("(ssb)", (self.item.session_id, pr.url, False)),
+            ),
+            view_unresolved=lambda pr: self.activate_action(
+                "win.view-pr",
+                GLib.Variant("(ssb)", (self.item.session_id, pr.url, True)),
             ),
         )
         self.sync_prs()

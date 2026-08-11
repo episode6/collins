@@ -12,7 +12,10 @@ from collins import prdetail, prstatus
 from collins.prdetail import (
     PrComment,
     PrReview,
+    PrThread,
     fetch,
+    fetch_threads,
+    file_threads,
     parse_detail,
     split_unified_diff,
 )
@@ -265,6 +268,191 @@ def test_repository_strings_stay_bounded():
     assert len(detail.files[0].path) == prdetail._MAX_PATH
 
 
+# -- review threads -----------------------------------------------------------
+
+
+def _thread_node(**overrides):
+    node = {
+        "id": "PRRT_kwDOTjjqB85abc123",
+        "isResolved": False,
+        "isOutdated": False,
+        "path": "collins/paneldnd.py",
+        "line": 12,
+        "comments": {"nodes": [_thread_comment()]},
+    }
+    node.update(overrides)
+    return node
+
+
+def _thread_comment(**overrides):
+    comment = {
+        "author": {"login": "reviewer"},
+        "createdAt": "2026-08-09T23:10:00Z",
+        "body": "Inline nit.",
+        "url": f"{URL}#discussion_r100",
+        "isMinimized": False,
+    }
+    comment.update(overrides)
+    return comment
+
+
+def _threads_reply(nodes, has_next=False, cursor=None):
+    return {"data": {"repository": {"pullRequest": {"reviewThreads": {
+        "pageInfo": {"hasNextPage": has_next, "endCursor": cursor},
+        "nodes": nodes,
+    }}}}}
+
+
+def _bare_thread(id, path, line, created, resolved=False):
+    return PrThread(
+        id=id, path=path, line=line, is_resolved=resolved, is_outdated=False,
+        comments=(PrComment("reviewer", created, "hm", ""),),
+    )
+
+
+@pytest.fixture
+def graphql(monkeypatch):
+    """Stub gh_json with a queue of GraphQL replies; returns (push, calls)."""
+    calls = []
+    replies = []
+
+    def gh_json(args, cwd=None, timeout=None):
+        calls.append(args)
+        return replies.pop(0) if replies else None
+
+    monkeypatch.setattr(prstatus, "gh_json", gh_json)
+    return replies.append, calls
+
+
+def test_threads_parse_whole(graphql):
+    push, _calls = graphql
+    push(_threads_reply([_thread_node()]))
+    (thread,) = fetch_threads(URL)
+    assert thread.id == "PRRT_kwDOTjjqB85abc123"
+    assert (thread.path, thread.line) == ("collins/paneldnd.py", 12)
+    assert (thread.is_resolved, thread.is_outdated) == (False, False)
+    (comment,) = thread.comments
+    assert (comment.author, comment.body) == ("reviewer", "Inline nit.")
+    assert comment.url == f"{URL}#discussion_r100"
+    assert thread.created_at == "2026-08-09T23:10:00Z"
+
+
+def test_threads_travel_as_typed_variables(graphql):
+    """Nothing is spliced into query text: the repository rides -f (raw
+    strings) and the number -F, gh typing it as the Int the query wants."""
+    push, calls = graphql
+    push(_threads_reply([]))
+    fetch_threads(URL)
+    (args,) = calls
+    assert args[:2] == ["api", "graphql"]
+    assert "owner=episode6" in args and "name=collins" in args
+    assert args[args.index("owner=episode6") - 1] == "-f"
+    assert args[args.index("number=263") - 1] == "-F"
+    assert not any(arg.startswith("cursor=") for arg in args)
+
+
+def test_threads_paginate_with_the_reply_cursor(graphql):
+    push, calls = graphql
+    push(_threads_reply([_thread_node()], has_next=True, cursor="CUR1"))
+    push(_threads_reply([_thread_node(id="PRRT_second")]))
+    threads = fetch_threads(URL)
+    assert [t.id for t in threads] == ["PRRT_kwDOTjjqB85abc123", "PRRT_second"]
+    assert "cursor=CUR1" in calls[1]
+
+
+def test_threads_stop_at_the_cap(graphql, monkeypatch):
+    monkeypatch.setattr(prdetail, "_MAX_THREADS", 2)
+    push, calls = graphql
+    push(_threads_reply(
+        [_thread_node(id="PRRT_a"), _thread_node(id="PRRT_b")],
+        has_next=True, cursor="CUR",
+    ))
+    assert len(fetch_threads(URL)) == 2
+    assert len(calls) == 1  # the cap made the next page not worth asking for
+
+
+def test_a_failed_later_page_keeps_the_earlier_ones(graphql):
+    push, _calls = graphql
+    push(_threads_reply([_thread_node()], has_next=True, cursor="CUR"))
+    push("not a reply")
+    assert len(fetch_threads(URL)) == 1
+
+
+def test_a_failed_first_page_is_no_threads(graphql):
+    push, _calls = graphql
+    push(None)
+    assert fetch_threads(URL) == ()
+
+
+def test_threads_need_a_pr_page_url(graphql):
+    _push, calls = graphql
+    assert fetch_threads("https://example.com/pull/1?x=--version") == ()
+    assert calls == []
+
+
+def test_a_cursor_that_doesnt_look_like_one_reads_as_the_last_page(graphql):
+    push, calls = graphql
+    push(_threads_reply([_thread_node()], has_next=True, cursor="x" * 600))
+    assert len(fetch_threads(URL)) == 1
+    assert len(calls) == 1
+
+
+def test_junk_thread_nodes_are_dropped(graphql):
+    """No id the mutations could name, no path to anchor under, or nothing
+    left to show once minimized and empty comments are skipped: not a card."""
+    push, _calls = graphql
+    push(_threads_reply([
+        "junk",
+        None,
+        _thread_node(id="not a node id"),
+        _thread_node(path=""),
+        _thread_node(comments={"nodes": [
+            _thread_comment(isMinimized=True), _thread_comment(body="")]}),
+        _thread_node(id="PRRT_ok"),
+    ]))
+    (thread,) = fetch_threads(URL)
+    assert thread.id == "PRRT_ok"
+
+
+def test_a_thread_line_must_be_a_positive_int(graphql):
+    push, _calls = graphql
+    push(_threads_reply([
+        _thread_node(id="PRRT_a", line=None),
+        _thread_node(id="PRRT_b", line=True),
+        _thread_node(id="PRRT_c", line=-4),
+        _thread_node(id="PRRT_d", line="7"),
+    ]))
+    assert [t.line for t in fetch_threads(URL)] == [None] * 4
+
+
+def test_a_thread_comment_url_must_be_http(graphql):
+    push, _calls = graphql
+    push(_threads_reply([_thread_node(comments={"nodes": [
+        _thread_comment(url="javascript:alert(1)")]})]))
+    (thread,) = fetch_threads(URL)
+    assert thread.comments[0].url == ""
+
+
+def test_threads_anchor_in_the_timeline_by_first_comment():
+    threads = (_bare_thread("PRRT_a", "x.py", 1, "2026-08-09T23:15:00Z"),)
+    reply = _reply(comments=[_comment()], reviews=[_review()])  # 23:00, 23:30
+    timeline = parse_detail(URL, reply, None, threads).timeline
+    assert [type(entry) for entry in timeline] == [PrComment, PrThread, PrReview]
+    assert parse_detail(URL, reply, None, threads).threads == threads
+
+
+def test_file_threads_order_by_line_unanchored_last():
+    threads = [
+        _bare_thread("PRRT_none", "a.py", None, "2026-08-09T23:00:00Z"),
+        _bare_thread("PRRT_late", "a.py", 9, "2026-08-09T23:00:00Z"),
+        _bare_thread("PRRT_early", "a.py", 2, "2026-08-09T23:00:00Z"),
+        _bare_thread("PRRT_other", "b.py", 1, "2026-08-09T23:00:00Z"),
+        _bare_thread("PRRT_tie", "a.py", 2, "2026-08-08T23:00:00Z"),
+    ]
+    assert [t.id for t in file_threads(threads, "a.py")] == [
+        "PRRT_tie", "PRRT_early", "PRRT_late", "PRRT_none"]
+
+
 # -- splitting the unified diff -----------------------------------------------
 
 
@@ -356,14 +544,16 @@ def test_preamble_and_empty_input_produce_nothing():
 
 @pytest.fixture
 def gh(monkeypatch):
-    """Stub both transport calls; returns (set_view, set_diff, calls)."""
+    """Stub the transport calls; returns (set_view, set_diff, calls). The
+    thread fetch answers "no reply" here — degrading to a threadless load,
+    which has its own tests above — so these stay about the view+diff pair."""
     calls = []
     view = {"value": None}
     diff = {"value": None}
 
     def gh_json(args, cwd=None, timeout=None):
         calls.append(args)
-        return view["value"]
+        return None if args[0] == "api" else view["value"]
 
     def gh_text(args, max_bytes=None):
         calls.append(args)
@@ -375,7 +565,7 @@ def gh(monkeypatch):
             lambda value: diff.update(value=value), calls)
 
 
-def test_fetch_asks_gh_twice_and_parses(gh):
+def test_fetch_asks_gh_three_times_and_parses(gh):
     set_view, set_diff, calls = gh
     set_view(_reply())
     set_diff(DIFF)
@@ -383,7 +573,19 @@ def test_fetch_asks_gh_twice_and_parses(gh):
     assert detail.summary.number == 263
     assert detail.files[0].patch is not None
     assert calls[0][:3] == ["pr", "view", URL]
-    assert calls[1] == ["pr", "diff", URL]
+    assert calls[1][:2] == ["api", "graphql"]  # the review threads
+    assert calls[2] == ["pr", "diff", URL]
+
+
+def test_fetch_hands_threads_to_the_detail(monkeypatch):
+    def gh_json(args, cwd=None, timeout=None):
+        return _threads_reply([_thread_node()]) if args[0] == "api" else _reply()
+
+    monkeypatch.setattr(prstatus, "gh_json", gh_json)
+    monkeypatch.setattr(prstatus, "gh_text", lambda args, max_bytes=None: DIFF)
+    detail = fetch(URL)
+    assert [t.id for t in detail.threads] == ["PRRT_kwDOTjjqB85abc123"]
+    assert any(isinstance(entry, PrThread) for entry in detail.timeline)
 
 
 def test_fetch_absorbs_into_the_summary_cache(gh):
@@ -420,10 +622,10 @@ def test_fetch_survives_a_dead_or_oversized_diff(gh):
     assert [f.patch for f in detail.files] == [None, None]
 
 
-def test_fetch_runs_both_calls_on_the_action_budget(monkeypatch):
+def test_fetch_runs_every_call_on_the_action_budget(monkeypatch):
     """All the way down to subprocess.run: a load someone is waiting on gets
-    the action timeout for the heavy view reply and the diff alike, not the
-    poll's short one."""
+    the action timeout for the heavy view reply, the thread query and the
+    diff alike, not the poll's short one."""
     seen = []
 
     def run(argv, **kwargs):
@@ -435,4 +637,4 @@ def test_fetch_runs_both_calls_on_the_action_budget(monkeypatch):
     monkeypatch.setattr(prstatus.subprocess, "run", run)
     assert fetch(URL) is not None
     assert [kwargs["timeout"] for _argv, kwargs in seen] \
-        == [prstatus._GH_ACTION_TIMEOUT_S] * 2
+        == [prstatus._GH_ACTION_TIMEOUT_S] * 3

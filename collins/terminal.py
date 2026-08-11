@@ -1591,6 +1591,7 @@ class TerminalTab(Gtk.Box):
             send_prompt=self.inject_prompt,
             refresh=self._request_update,
             view_pr=self.open_pr_page,
+            view_unresolved=lambda pr: self.open_pr_page(pr, unresolved=True),
         )
 
     def _fill_pr_menu(self, _button: Gtk.MenuButton) -> None:
@@ -2458,21 +2459,26 @@ class TerminalTab(Gtk.Box):
 
     # -- the native PR page --------------------------------------------------
 
-    def open_pr_page(self, pr: PullRequest) -> None:
+    def open_pr_page(self, pr: PullRequest, unresolved: bool = False) -> None:
         """Show *pr*'s native page in a strip beside this session.
 
         One page per URL per tab: asking for a PR whose page is already open
         fronts that page (revealing its strip if hidden) and re-reads it,
-        rather than opening a twin.
+        rather than opening a twin. With *unresolved*, the page lands on its
+        first unresolved thread — the badge's deep link — which a fresh page
+        honors as soon as its first fetch does.
         """
         page = self._find_pr_page(pr.url)
-        if page is not None:
+        if page is None:
+            page = self._make_pr_page(pr)
+            self._dock.open_page(page)
+        else:
             self._dock.reveal_page(page)
             page.refresh()
-            return
-        self._dock.open_page(self._make_pr_page(pr))
+        if unresolved:
+            page.reveal_unresolved()
 
-    def open_pr_page_url(self, url: str) -> None:
+    def open_pr_page_url(self, url: str, unresolved: bool = False) -> None:
         """`open_pr_page` from a bare URL — the sidebar's way in, where the
         window action carries only strings. The tab's own copy of the PR is
         preferred (it has the title and status); a URL the tab isn't
@@ -2483,7 +2489,7 @@ class TerminalTab(Gtk.Box):
             if pr is None:
                 return
             pr = known(pr)
-        self.open_pr_page(pr)
+        self.open_pr_page(pr, unresolved=unresolved)
 
     def _find_pr_page(self, url: str) -> PrViewPage | None:
         for page in self._dock.pages():

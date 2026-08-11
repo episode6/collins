@@ -20,6 +20,16 @@ its text as a comment or a review verdict through practions' write calls
 the COMMENTS prompt into the owning session instead — the composer is for
 answering a reviewer yourself, the prompt for making the agent do it.
 
+Review threads render as their own cards (`_ThreadCard`): anchored in the
+Conversation timeline by when they started, and again under their file's
+section in the Files view, each with the thread's write half — a reply
+composer behind a revealer, and Resolve/Unresolve. Resolved threads collapse
+behind an expander. Reply drafts live on the page keyed by thread id, so the
+rebuild that lands a background refresh never eats one — the main composer's
+lesson, thread-sized. `reveal_unresolved` is the unresolved badge's deep
+link: the Conversation view fronted and scrolled to the first unresolved
+thread, deferred until the first fetch when the page is fresh.
+
 Everything shown is repository content and therefore untrusted: bodies go
 through `formatting.md_to_pango`'s escaping (with the plain-text fallback on
 malformed markup), only http(s) URLs ever reach a browser (prdetail already
@@ -110,6 +120,12 @@ class PrViewPage(Adw.Bin):
         self._fetching = False
         self._fetch_gen = 0
         self._fetched_at = 0  # monotonic µs of the last fetch *attempt*
+        # The Conversation view's thread cards in timeline order — what the
+        # unresolved deep link scans — and the reply drafts, keyed by thread
+        # id so they survive the rebuilds that replace the cards.
+        self._thread_cards: list[tuple[prdetail.PrThread, Gtk.Widget]] = []
+        self._thread_drafts: dict[str, str] = {}
+        self._pending_reveal = False  # reveal_unresolved asked before data came
 
         # -- header ---------------------------------------------------------
         header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -314,6 +330,25 @@ class PrViewPage(Adw.Bin):
         "you asked for this page again"."""
         self._fetch(force=True)
 
+    def reveal_unresolved(self) -> None:
+        """Front the Conversation view at its first unresolved thread.
+
+        The unresolved badge's deep link (prmenu's "View unresolved comments"
+        row). Before the first fetch lands there is nothing to land on yet,
+        so the ask waits for it (see `_landed`); when no thread is unresolved
+        — the unanswered word was an issue comment — it lands at the
+        conversation's end, where the newest word is.
+        """
+        if self._detail is None:
+            self._pending_reveal = True
+            return
+        self._stack.set_visible_child_name("conversation")
+        target = next(
+            (card for thread, card in self._thread_cards if not thread.is_resolved),
+            None,
+        )
+        self._scroll_to(self._scroller, target)
+
     def _fetch(self, force: bool = False) -> None:
         """Load the PR off the main loop. Unforced calls (map events) are
         throttled once something is loaded, so flipping between tabs doesn't
@@ -366,6 +401,10 @@ class PrViewPage(Adw.Bin):
         self._rebuild()
         self._rebuild_files()
         self.emit("title-changed")
+        if self._pending_reveal:
+            # The deep link arrived before the page had anything to land on.
+            self._pending_reveal = False
+            self.reveal_unresolved()
         return GLib.SOURCE_REMOVE
 
     # -- header ---------------------------------------------------------------
@@ -378,6 +417,9 @@ class PrViewPage(Adw.Bin):
         host = replace(
             host,
             view_pr=None,
+            # The deep link stays, as an in-page jump: from here "view the
+            # unresolved comments" means scroll to them, not open a twin.
+            view_unresolved=lambda _pr: self.reveal_unresolved(),
             refresh=lambda base=host.refresh: (base(), self.refresh()),
         )
         prmenu.show_actions(self._menu, self._pr, host)
@@ -441,6 +483,11 @@ class PrViewPage(Adw.Bin):
     def _rebuild(self) -> None:
         detail = self._detail
         self._clear_content()
+        self._thread_cards = []
+        # Drafts for threads that no longer exist have nowhere to go back to.
+        alive = {thread.id for thread in detail.threads}
+        for gone in [key for key in self._thread_drafts if key not in alive]:
+            del self._thread_drafts[gone]
         self._content.append(self._description_card(detail))
         if detail.checks:
             self._content.append(self._checks_section(detail.checks))
@@ -449,7 +496,11 @@ class PrViewPage(Adw.Bin):
             heading.add_css_class("caption-heading")
             self._content.append(heading)
             for entry in detail.timeline:
-                if isinstance(entry, prdetail.PrReview):
+                if isinstance(entry, prdetail.PrThread):
+                    card = self._thread_card(entry)
+                    self._thread_cards.append((entry, card))
+                    self._content.append(card)
+                elif isinstance(entry, prdetail.PrReview):
                     self._content.append(self._review_card(entry))
                 else:
                     self._content.append(self._comment_card(entry))
@@ -469,9 +520,9 @@ class PrViewPage(Adw.Bin):
         self.refresh()
 
     def _description_card(self, detail: prdetail.PullRequestDetail) -> Gtk.Widget:
-        card = self._card(detail.author, detail.created_at)
+        card = _card(detail.author, detail.created_at)
         if detail.body:
-            card.append(self._body_label(detail.body))
+            card.append(_body_label(detail.body))
         else:
             none = Gtk.Label(label=_("No description provided."), xalign=0.0)
             none.add_css_class("dim-label")
@@ -506,8 +557,8 @@ class PrViewPage(Adw.Bin):
         return button
 
     def _comment_card(self, comment: prdetail.PrComment) -> Gtk.Widget:
-        card = self._card(comment.author, comment.created_at, url=comment.url)
-        card.append(self._body_label(comment.body))
+        card = _card(comment.author, comment.created_at, url=comment.url)
+        card.append(_body_label(comment.body))
         return card
 
     def _review_card(self, review: prdetail.PrReview) -> Gtk.Widget:
@@ -522,72 +573,17 @@ class PrViewPage(Adw.Bin):
         else:
             icon.add_css_class("dim-label")
             verdict.add_css_class("dim-label")
-        card = self._card(review.author, review.created_at, trailing=[icon, verdict])
+        card = _card(review.author, review.created_at, trailing=[icon, verdict])
         if review.body:
-            card.append(self._body_label(review.body))
+            card.append(_body_label(review.body))
         return card
 
-    def _card(
-        self,
-        author: str,
-        created_at: str,
-        url: str = "",
-        trailing: list[Gtk.Widget] | None = None,
-    ) -> Gtk.Box:
-        """One conversation card: a byline, then whatever the caller appends.
-
-        The byline is author, age (absolute stamp in the tooltip), and any
-        *trailing* widgets — a review's verdict rides there. With a *url*,
-        the age is a link to the entry on GitHub.
-        """
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        card.add_css_class("pr-card")
-        byline = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        who = Gtk.Label(label=author or _("unknown"), xalign=0.0)
-        who.add_css_class("caption-heading")
-        byline.append(who)
-        if url:
-            escaped = GLib.markup_escape_text(url)
-            when = Gtk.Label(xalign=0.0)
-            when.set_markup(
-                f'<a href="{escaped}">{GLib.markup_escape_text(format_relative(created_at))}</a>'
-            )
-        else:
-            when = Gtk.Label(label=format_relative(created_at), xalign=0.0)
-        when.add_css_class("caption")
-        when.add_css_class("dim-label")
-        when.set_tooltip_text(format_timestamp(created_at))
-        byline.append(when)
-        spacer = Gtk.Box(hexpand=True)
-        byline.append(spacer)
-        for widget in trailing or []:
-            byline.append(widget)
-        card.append(byline)
-        return card
-
-    def _body_label(self, text: str) -> Gtk.Widget:
-        """A markdown body as a selectable wrapped label; past the render cap
-        it starts folded behind "Show more" (the whole text is already
-        bounded by prdetail, this cap is about Pango layout cost)."""
-        label = Gtk.Label(xalign=0.0, selectable=True, wrap=True, hexpand=True)
-        label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        if len(text) <= _RENDER_CAP:
-            _set_md(label, text)
-            return label
-        _set_md(label, text[:_RENDER_CAP] + "…")
-        more = Gtk.Button(label=_("Show more"))
-        more.add_css_class("flat")
-        more.set_halign(Gtk.Align.START)
-
-        def show_all(button: Gtk.Button) -> None:
-            _set_md(label, text)
-            button.set_visible(False)
-
-        more.connect("clicked", show_all)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        box.append(label)
-        box.append(more)
-        return box
+    def _thread_card(self, thread: prdetail.PrThread) -> _ThreadCard:
+        """One review thread as a card, wired to this page's PR, drafts and
+        post-refresh. Built per view — a widget has one parent, and a thread
+        shows in both — so the shared draft dict is what keeps the copies
+        agreeing on a half-typed reply."""
+        return _ThreadCard(thread, self._pr, self._thread_drafts, self._posted)
 
     # -- the files view --------------------------------------------------------
 
@@ -628,6 +624,10 @@ class PrViewPage(Adw.Bin):
         scheme = style_scheme(self._scheme_setting, self._dark)
         for file in detail.files:
             section = _FileSection(file, scheme)
+            # The file's threads hang under its diff, top of the file first —
+            # visible even while a large patch stays collapsed.
+            for thread in prdetail.file_threads(detail.threads, file.path):
+                section.append(self._thread_card(thread))
             self._sections.append(section)
             self._files_column.append(section)
             self._file_list.append(self._file_row(file))
@@ -653,20 +653,29 @@ class PrViewPage(Adw.Bin):
         self._scroll_to_section(section)
 
     def _scroll_to_section(self, section: Gtk.Widget) -> None:
-        """Put *section*'s top at the top of the Files scroll.
+        """Put *section*'s top at the top of the Files scroll."""
+        self._scroll_to(self._files_scroller, section)
 
-        Placed twice: a just-built (or just-expanded) diff buffer reports
+    def _scroll_to(self, scroller: Gtk.ScrolledWindow, widget: Gtk.Widget | None) -> None:
+        """Put *widget*'s top at the top of *scroller* — or, with None, land
+        at the very end of the scroll.
+
+        Placed twice: a just-built (or just-expanded) buffer reports
         estimated heights first, so the first placement lands short — the
         PRIORITY_LOW re-issue runs after layout settles and corrects it
         (the scroll_to_iter lesson from the editor, box-scroll flavored).
         """
 
         def place() -> bool:
-            ok, bounds = section.compute_bounds(self._files_scroller)
+            adj = scroller.get_vadjustment()
+            end = adj.get_upper() - adj.get_page_size()
+            if widget is None:
+                adj.set_value(max(0.0, end))
+                return GLib.SOURCE_REMOVE
+            ok, bounds = widget.compute_bounds(scroller)
             if ok:
-                adj = self._files_scroller.get_vadjustment()
                 target = adj.get_value() + bounds.get_y()
-                adj.set_value(max(0.0, min(target, adj.get_upper() - adj.get_page_size())))
+                adj.set_value(max(0.0, min(target, end)))
             return GLib.SOURCE_REMOVE
 
         place()
@@ -872,6 +881,218 @@ class _Composer(Gtk.Box):
         return GLib.SOURCE_REMOVE
 
 
+class _ThreadCard(Gtk.Box):
+    """One review thread as a card: where it anchors, who said what, and the
+    thread's write half.
+
+    The header names the anchor (``path:line`` — the line is GitHub's, gone
+    when the code moved on) with an Outdated pill when it did; a resolved
+    thread collapses whole behind an expander wearing a green Resolved pill,
+    the way GitHub folds them. Under the comments sit Reply — a composer
+    behind a revealer, posting through `practions.reply_in_thread` — and
+    Resolve/Unresolve. One press, one mutation: the card holds insensitive
+    under a spinner until the answer lands, a failure comes back as gh's own
+    sentence with the text kept, and success hands off to the page's posted
+    path, which re-reads everything. Every fetch rebuilds the cards
+    wholesale (and each thread gets one per view), so the reply draft lives
+    in the page's dict — *drafts*, keyed by thread id — rather than in this
+    widget: the composer's own rebuild lesson, thread-sized.
+    """
+
+    def __init__(
+        self,
+        thread: prdetail.PrThread,
+        pr: PullRequest,
+        drafts: dict[str, str],
+        on_posted: Callable[[], None],
+    ) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.add_css_class("pr-card")
+        self._thread = thread
+        self._pr = pr
+        self._drafts = drafts
+        self._on_posted = on_posted
+        self._posting = False
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
+        anchor = thread.path if thread.line is None else f"{thread.path}:{thread.line}"
+        where = Gtk.Label(label=anchor, xalign=0.0, hexpand=True)
+        where.add_css_class("caption-heading")
+        where.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        where.set_tooltip_text(anchor)
+        header.append(where)
+        if thread.is_outdated:
+            outdated = Gtk.Label(label=_("Outdated"))
+            outdated.add_css_class("caption")
+            outdated.add_css_class("dim-label")
+            outdated.set_tooltip_text(_("The code this thread commented on has changed"))
+            header.append(outdated)
+
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        for comment in thread.comments:
+            block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            block.append(_byline(comment.author, comment.created_at, url=comment.url))
+            block.append(_body_label(comment.body))
+            body.append(block)
+        body.append(self._write_row())
+        body.append(self._reply_editor())
+
+        if thread.is_resolved:
+            check = Gtk.Image.new_from_icon_name("check-circle-fill-symbolic")
+            check.set_pixel_size(prmenu.MERGED_ICON_PX)
+            check.add_css_class("pr-checks-passed")
+            resolved = Gtk.Label(label=_("Resolved"))
+            resolved.add_css_class("caption")
+            resolved.add_css_class("pr-checks-passed")
+            header.append(check)
+            header.append(resolved)
+            expander = Gtk.Expander(label_widget=header)
+            expander.set_expanded(False)
+            body.set_margin_top(6)
+            expander.set_child(body)
+            self.append(expander)
+        else:
+            self.append(header)
+            self.append(body)
+
+        draft = drafts.get(thread.id, "")
+        if draft:
+            # A half-typed reply from before the rebuild: back where it was,
+            # composer open.
+            self._text.get_buffer().set_text(draft)
+            self._reveal.set_reveal_child(True)
+        self._sync_post()
+
+    def _write_row(self) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        reply = Gtk.Button(label=_("Reply"))
+        reply.add_css_class("flat")
+        reply.set_tooltip_text(_("Reply in this thread"))
+        reply.connect("clicked", self._on_reply_toggled)
+        row.append(reply)
+        row.append(Gtk.Box(hexpand=True))
+        self._spinner = Gtk.Spinner()
+        self._spinner.set_visible(False)
+        row.append(self._spinner)
+        resolved = self._thread.is_resolved
+        resolve = Gtk.Button(label=_("Unresolve") if resolved else _("Resolve"))
+        resolve.add_css_class("flat")
+        resolve.set_tooltip_text(
+            _("Reopen this thread") if resolved else _("Mark this thread resolved")
+        )
+        resolve.connect("clicked", lambda *_a: self._set_resolved(not resolved))
+        row.append(resolve)
+        return row
+
+    def _reply_editor(self) -> Gtk.Widget:
+        self._text = Gtk.TextView()
+        self._text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._text.set_top_margin(6)
+        self._text.set_bottom_margin(6)
+        self._text.set_left_margin(8)
+        self._text.set_right_margin(8)
+        self._text.get_buffer().connect("changed", self._on_draft_changed)
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._on_key)
+        self._text.add_controller(keys)
+        entry = Gtk.ScrolledWindow(child=self._text)
+        entry.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        entry.set_has_frame(True)
+        entry.set_min_content_height(48)
+        entry.set_max_content_height(160)
+        entry.set_propagate_natural_height(True)
+        self._post_btn = Gtk.Button(label=_("Post reply"))
+        self._post_btn.add_css_class("suggested-action")
+        self._post_btn.connect("clicked", lambda *_a: self._post_reply())
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        buttons.append(Gtk.Box(hexpand=True))
+        buttons.append(self._post_btn)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.append(entry)
+        box.append(buttons)
+        self._reveal = Gtk.Revealer(child=box)
+        self._reveal.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        return self._reveal
+
+    def _on_reply_toggled(self, *_args) -> None:
+        show = not self._reveal.get_reveal_child()
+        self._reveal.set_reveal_child(show)
+        if show:
+            self._text.grab_focus()
+
+    def _on_draft_changed(self, *_args) -> None:
+        self._drafts[self._thread.id] = self._body()
+        self._sync_post()
+
+    def _body(self) -> str:
+        buffer = self._text.get_buffer()
+        return buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True)
+
+    def _sync_post(self) -> None:
+        self._post_btn.set_sensitive(bool(self._body().strip()))
+
+    def _on_key(self, _controller, keyval: int, _keycode: int, state) -> bool:
+        # Ctrl+Enter posts, as in the page's own composer.
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and state & Gdk.ModifierType.CONTROL_MASK:
+            if self._post_btn.get_sensitive():
+                self._post_reply()
+            return Gdk.EVENT_STOP
+        return Gdk.EVENT_PROPAGATE
+
+    def _post_reply(self) -> None:
+        body = self._body().strip()
+        if not body:
+            return
+        self._post(
+            _("Reply"),
+            lambda: practions.reply_in_thread(self._pr, self._thread.id, body),
+            sent_draft=True,
+        )
+
+    def _set_resolved(self, resolved: bool) -> None:
+        self._post(
+            _("Resolve") if resolved else _("Unresolve"),
+            lambda: practions.set_thread_resolved(self._pr, self._thread.id, resolved),
+        )
+
+    def _post(self, label: str, run: Callable[[], str | None], sent_draft: bool = False) -> None:
+        """One thread mutation off the main loop, this card held insensitive
+        until it lands. *label* is the button's own word, for the failure
+        dialog's heading; *sent_draft* says success should clear the reply."""
+        if self._posting:
+            return
+        self._posting = True
+        self.set_sensitive(False)
+        self._spinner.set_visible(True)
+        self._spinner.start()
+
+        def work() -> None:
+            try:
+                error = run()
+            except Exception:  # a card must never take the app down
+                log.debug("prview: thread action on %s failed", self._pr.url, exc_info=True)
+                error = _("Collins couldn't run that action.")
+            GLib.idle_add(self._landed, label, error, sent_draft)
+
+        threading.Thread(target=work, name="pr-thread-post", daemon=True).start()
+
+    def _landed(self, label: str, error: str | None, sent_draft: bool) -> bool:
+        self._posting = False
+        self.set_sensitive(True)
+        self._spinner.stop()
+        self._spinner.set_visible(False)
+        if error:
+            root = self.get_root()
+            if root is not None:
+                dialogs.error_dialog(root, _("{action} failed").format(action=label), error)
+            return GLib.SOURCE_REMOVE
+        if sent_draft:
+            self._text.get_buffer().set_text("")
+            self._drafts.pop(self._thread.id, None)  # after set_text re-added it
+        self._on_posted()
+        return GLib.SOURCE_REMOVE
+
+
 class _FileSection(Gtk.Box):
     """One file of the diff: a header row (path, +/− counts), then the patch
     in a GtkSource diff buffer.
@@ -968,6 +1189,75 @@ class _FileSection(Gtk.Box):
         scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
         scroller.set_propagate_natural_height(True)
         return scroller
+
+
+def _byline(
+    author: str,
+    created_at: str,
+    url: str = "",
+    trailing: list[Gtk.Widget] | None = None,
+) -> Gtk.Widget:
+    """A card's byline: author, age (absolute stamp in the tooltip), then any
+    *trailing* widgets — a review's verdict rides there. With a *url*, the
+    age is a link to the entry on GitHub."""
+    byline = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    who = Gtk.Label(label=author or _("unknown"), xalign=0.0)
+    who.add_css_class("caption-heading")
+    byline.append(who)
+    if url:
+        escaped = GLib.markup_escape_text(url)
+        when = Gtk.Label(xalign=0.0)
+        when.set_markup(
+            f'<a href="{escaped}">{GLib.markup_escape_text(format_relative(created_at))}</a>'
+        )
+    else:
+        when = Gtk.Label(label=format_relative(created_at), xalign=0.0)
+    when.add_css_class("caption")
+    when.add_css_class("dim-label")
+    when.set_tooltip_text(format_timestamp(created_at))
+    byline.append(when)
+    byline.append(Gtk.Box(hexpand=True))
+    for widget in trailing or []:
+        byline.append(widget)
+    return byline
+
+
+def _card(
+    author: str,
+    created_at: str,
+    url: str = "",
+    trailing: list[Gtk.Widget] | None = None,
+) -> Gtk.Box:
+    """One conversation card: a byline, then whatever the caller appends."""
+    card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    card.add_css_class("pr-card")
+    card.append(_byline(author, created_at, url=url, trailing=trailing))
+    return card
+
+
+def _body_label(text: str) -> Gtk.Widget:
+    """A markdown body as a selectable wrapped label; past the render cap
+    it starts folded behind "Show more" (the whole text is already
+    bounded by prdetail, this cap is about Pango layout cost)."""
+    label = Gtk.Label(xalign=0.0, selectable=True, wrap=True, hexpand=True)
+    label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+    if len(text) <= _RENDER_CAP:
+        _set_md(label, text)
+        return label
+    _set_md(label, text[:_RENDER_CAP] + "…")
+    more = Gtk.Button(label=_("Show more"))
+    more.add_css_class("flat")
+    more.set_halign(Gtk.Align.START)
+
+    def show_all(button: Gtk.Button) -> None:
+        _set_md(label, text)
+        button.set_visible(False)
+
+    more.connect("clicked", show_all)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    box.append(label)
+    box.append(more)
+    return box
 
 
 def _count_label(text: str, css_class: str) -> Gtk.Label:

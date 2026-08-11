@@ -391,6 +391,61 @@ def test_a_failed_post_comes_back_as_the_reason(gh):
     assert practions.review(_pr(), practions.APPROVE) == "Can not approve your own pull request"
 
 
+# -- the review-thread mutations ---------------------------------------------
+
+THREAD = "PRRT_kwDOTjjqB85abc123"
+
+
+def test_a_thread_reply_body_travels_by_stdin(gh):
+    """The variable rides ``-F body=@-`` — gh reading it off stdin — so free
+    text never becomes an argv entry, exactly as a comment's doesn't."""
+    calls, _serve = gh
+    assert practions.reply_in_thread(_pr(), THREAD, "Fixed in the next push.") is None
+    (args,) = calls
+    assert args[:2] == ["api", "graphql"]
+    assert f"threadId={THREAD}" in args
+    assert args[args.index("body=@-") - 1] == "-F"
+    assert calls.stdins == ["Fixed in the next push."]
+    query = next(arg for arg in args if arg.startswith("query="))
+    assert "addPullRequestReviewThreadReply" in query
+
+
+def test_resolving_and_unresolving_pick_their_mutations(gh):
+    calls, _serve = gh
+    assert practions.set_thread_resolved(_pr(), THREAD, True) is None
+    assert practions.set_thread_resolved(_pr(), THREAD, False) is None
+    first = next(arg for arg in calls[0] if arg.startswith("query="))
+    second = next(arg for arg in calls[1] if arg.startswith("query="))
+    assert "resolveReviewThread" in first and "unresolveReviewThread" not in first
+    assert "unresolveReviewThread" in second
+    assert f"threadId={THREAD}" in calls[0]
+    assert calls.stdins == [None, None]
+
+
+def test_a_thread_id_that_isnt_one_never_reaches_gh(gh):
+    """Thread ids came out of a GraphQL reply; only what still looks like a
+    node id may go back out into an argv entry (prdetail.THREAD_ID)."""
+    calls, _serve = gh
+    assert practions.reply_in_thread(_pr(), "not an id!", "hi") is not None
+    assert practions.set_thread_resolved(_pr(), "two words", True) is not None
+    assert practions.set_thread_resolved(_pr(), "", True) is not None
+    assert calls == []
+
+
+def test_the_thread_calls_refuse_a_non_pr_url_too(gh):
+    calls, _serve = gh
+    assert practions.reply_in_thread(_pr(url="--version"), THREAD, "hi") is not None
+    assert practions.set_thread_resolved(_pr(url="--version"), THREAD, True) is not None
+    assert calls == []
+
+
+def test_a_failed_mutation_comes_back_as_the_reason(gh):
+    _calls, serve = gh
+    serve((False, "Resource not accessible by integration"))
+    assert practions.set_thread_resolved(_pr(), THREAD, True) \
+        == "Resource not accessible by integration"
+
+
 def test_the_prompts_sent_to_a_session_are_left_in_english():
     """They are read by the agent CLI, not by a person."""
     assert CI_PROMPT == "Address the ci error(s) on PR #{number}"

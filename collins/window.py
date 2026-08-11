@@ -1162,7 +1162,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.add_action(send_prompt)
 
         view_pr = Gio.SimpleAction(
-            name="view-pr", parameter_type=GLib.VariantType("(ss)")
+            name="view-pr", parameter_type=GLib.VariantType("(ssb)")
         )
         view_pr.connect("activate", lambda _a, p: self._view_pr(*p.unpack()))
         self.add_action(view_pr)
@@ -2375,9 +2375,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.tab_view.set_selected_page(self._page_for(session_id))
         tab.inject_prompt(prompt)
 
-    def _view_pr(self, session_id: str, url: str) -> None:
+    def _view_pr(self, session_id: str, url: str, unresolved: bool) -> None:
         """A sidebar PR menu's "View in Collins": the PR's native page,
-        docked beside its session.
+        docked beside its session. With *unresolved*, the page lands on its
+        first unresolved thread — the menu's deep-link row.
 
         The page lives in the session tab's panel dock, so a session that
         isn't open in a tab is opened first — the row said "show me this
@@ -2397,7 +2398,7 @@ class MainWindow(Adw.ApplicationWindow):
         page = self._page_for(session_id)
         if page is not None:
             self.tab_view.set_selected_page(page)
-        tab.open_pr_page_url(url)
+        tab.open_pr_page_url(url, unresolved=unresolved)
 
     def _session_tab(self, session_id: str) -> TerminalTab | None:
         """The terminal tab a session is open in, if it is open in one."""

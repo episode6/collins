@@ -8,13 +8,16 @@ module is the other altitude: everything the PR *page* shows — description,
 timeline, checks, per-file diffs — fetched only when a view asks for it, never
 polled, and never persisted (a diff must not end up in state.json).
 
-A load is two `gh` calls, both through prstatus's transport so the URL gate,
+A load is three `gh` calls, all through prstatus's transport so the URL gate,
 timeouts, argv-only policy and missing-gh latch stay in one place: one
-``gh pr view --json`` with the full field list, and one ``gh pr diff`` for the
-patch. The diff is the unbounded half, so it is the capped one, and over the
-cap — or on any diff-only failure — the load degrades to stat-only files
-rather than failing: the conversation half of the view doesn't owe its life to
-the patch. The view reply is also folded back into the summary layer
+``gh pr view --json`` with the full field list, one paginated ``gh api
+graphql`` for the review threads (the CLI's --json surface has no thread
+anchors or resolution state — GraphQL is the only way to them), and one
+``gh pr diff`` for the patch. Only the view reply is load-bearing: the diff is
+the unbounded half, so it is the capped one, and over the cap — or on any
+diff-only failure — the load degrades to stat-only files rather than failing,
+while a failed thread fetch degrades to a threadless conversation the same
+way. The view reply is also folded back into the summary layer
 (`prstatus.absorb`), so opening a PR updates its chip and mark for free.
 
 Everything parsed here is repository content — bodies, titles, branch names,
@@ -31,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from . import prstatus
@@ -62,6 +66,44 @@ _MAX_PATH = 500
 # later, and a repository must not get to hand Collins a javascript:/file: URI.
 _HTTP_URL = re.compile(r"^https?://", re.IGNORECASE)
 
+# What a GraphQL node id may look like before it is kept — and, later, before
+# practions puts one in an argv entry (base64ish, as GitHub mints them). Not a
+# gate against injection (ids only ever travel inside a ``key=value`` argv
+# entry) but against carrying anything that isn't plausibly an id at all.
+THREAD_ID = re.compile(r"^[A-Za-z0-9+/=_-]{1,200}$")
+
+# The review-thread fetch: the ceiling past which pagination stops (a PR with
+# more threads has outgrown a side panel; the cut is logged), and how long a
+# page cursor can be before it stops looking like one.
+_MAX_THREADS = 200
+_MAX_CURSOR = 500
+
+# The query itself, 50 threads a page with a 100-comment window each (server
+# capped; no second-level pagination). Variables rather than string-building:
+# everything Collins knows about the PR travels as a typed GraphQL variable,
+# never spliced into query text.
+_THREADS_QUERY = """\
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 50, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          comments(first: 100) {
+            nodes { author { login } createdAt body url isMinimized }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 # git's c-quoted path escapes, the non-octal half.
 _ESCAPES = {"n": "\n", "t": "\t", '"': '"', "\\": "\\"}
 _OCTAL = "01234567"
@@ -85,6 +127,30 @@ class PrReview:
     created_at: str
     state: str  # APPROVED / CHANGES_REQUESTED / COMMENTED / DISMISSED
     body: str
+
+
+@dataclass(frozen=True)
+class PrThread:
+    """One review thread: inline comments anchored to a file, resolvable.
+
+    Only GraphQL serves these (the --json surface flattens them away), and
+    only threads with something to show parse at all — a thread whose every
+    comment is minimized or empty is dropped whole, so *comments* is never
+    empty. *line* is None when GitHub has lost the anchor (an outdated thread
+    on rewritten code, or a file-level comment).
+    """
+
+    id: str  # the GraphQL node id the reply/resolve mutations take
+    path: str
+    line: int | None
+    is_resolved: bool
+    is_outdated: bool
+    comments: tuple[PrComment, ...]
+
+    @property
+    def created_at(self) -> str:
+        """When the thread started — what anchors it in the timeline."""
+        return self.comments[0].created_at
 
 
 @dataclass(frozen=True)
@@ -131,8 +197,9 @@ class PullRequestDetail:
     changed_files: int
     labels: tuple[str, ...]
     checks: tuple[PrCheck, ...]
-    timeline: tuple[PrComment | PrReview, ...]
+    timeline: tuple[PrComment | PrReview | PrThread, ...]
     files: tuple[PrFile, ...]
+    threads: tuple[PrThread, ...] = ()
 
 
 def fetch(url: str) -> PullRequestDetail | None:
@@ -140,10 +207,12 @@ def fetch(url: str) -> PullRequestDetail | None:
 
     None when the view reply can't be had — a URL that isn't a PR page, no
     gh, offline — and the caller keeps showing what it has (stale beats blank
-    here too). A failed or over-cap diff is *not* a failure: the files arrive
-    stat-only, patches None. The reply is folded into the summary cache on
-    the way through (`prstatus.absorb`), so the chip and mark update with the
-    view. Never call on the main thread — this waits on gh twice.
+    here too). A failed or over-cap diff is *not* a failure (the files arrive
+    stat-only, patches None), and neither is a failed thread fetch (the
+    conversation arrives threadless). The reply is folded into the summary
+    cache on the way through (`prstatus.absorb`), so the chip and mark update
+    with the view. Never call on the main thread — this waits on gh three
+    times.
     """
     if prstatus.repository_for(url) is None:
         return None
@@ -156,12 +225,64 @@ def fetch(url: str) -> PullRequestDetail | None:
     if not isinstance(data, dict):
         return None
     prstatus.absorb(url, data)
+    threads = fetch_threads(url)
     diff = prstatus.gh_text(["pr", "diff", url], max_bytes=MAX_DIFF_BYTES)
-    return parse_detail(url, data, diff)
+    return parse_detail(url, data, diff, threads)
 
 
-def parse_detail(url: str, data: dict, diff: str | None) -> PullRequestDetail | None:
-    """One gh view reply (and its diff, if any) as the record the view renders.
+def fetch_threads(url: str) -> tuple[PrThread, ...]:
+    """*url*'s review threads, fetched right now over GraphQL.
+
+    Paginated up to `_MAX_THREADS`, parsed tolerantly like everything else
+    here. Degrades rather than fails: a first page that can't be had is no
+    threads, a later one keeps the pages already fetched — the view renders
+    what there is either way. Never call on the main thread.
+    """
+    pr = prstatus.parse_pr_url(url)
+    if pr is None:
+        return ()
+    owner, _slash, name = pr.repository.partition("/")
+    threads: list[PrThread] = []
+    cursor: str | None = None
+    while True:
+        # owner/name/cursor as -f (raw strings), the number as -F so gh types
+        # it as the Int the query declares. Values only ever ride inside a
+        # key=value argv entry, never as their own.
+        args = [
+            "api", "graphql",
+            "-f", f"query={_THREADS_QUERY}",
+            "-f", f"owner={owner}",
+            "-f", f"name={name}",
+            "-F", f"number={pr.number}",
+        ]
+        if cursor is not None:
+            args += ["-f", f"cursor={cursor}"]
+        page = _threads_page(
+            prstatus.gh_json(args, timeout=prstatus._GH_ACTION_TIMEOUT_S)
+        )
+        if page is None:
+            log.info("prdetail: thread fetch for %s died %s threads in",
+                     url, len(threads))
+            break
+        nodes, cursor = page
+        for node in nodes:
+            thread = _thread(node)
+            if thread is not None:
+                threads.append(thread)
+        if cursor is None:
+            break
+        if len(threads) >= _MAX_THREADS:
+            log.info("prdetail: %s has over %s review threads; truncating",
+                     url, _MAX_THREADS)
+            break
+    return tuple(threads[:_MAX_THREADS])
+
+
+def parse_detail(
+    url: str, data: dict, diff: str | None, threads: tuple[PrThread, ...] = ()
+) -> PullRequestDetail | None:
+    """One gh view reply (with its diff and threads, if any) as the record the
+    view renders.
 
     Pure — module state is never touched — so recorded gh output drives it
     straight in tests. None only when *url*/*data* can't even identify a PR
@@ -183,27 +304,43 @@ def parse_detail(url: str, data: dict, diff: str | None) -> PullRequestDetail | 
         changed_files=_int(data.get("changedFiles")),
         labels=_labels(data.get("labels")),
         checks=_checks(data.get("statusCheckRollup")),
-        timeline=_timeline(data.get("comments"), data.get("reviews")),
+        timeline=_timeline(data.get("comments"), data.get("reviews"), threads),
         files=_files(data.get("files"), patches),
+        threads=threads,
     )
+
+
+def file_threads(threads: Iterable[PrThread], path: str) -> tuple[PrThread, ...]:
+    """The threads anchored in *path*, top of the file first.
+
+    How the Files view hangs a file's threads under its diff: ordered by
+    line, threads that have lost their anchor (line None) after the anchored
+    ones, ties broken by age so two threads on one line keep their history.
+    """
+    mine = [thread for thread in threads if thread.path == path]
+    mine.sort(key=lambda t: (t.line is None, t.line or 0, t.created_at))
+    return tuple(mine)
 
 
 # -- shaping the view reply ---------------------------------------------------
 
 
-def _timeline(comments: object, reviews: object) -> tuple[PrComment | PrReview, ...]:
-    """Comments and reviews as one column, oldest first.
+def _timeline(
+    comments: object, reviews: object, threads: tuple[PrThread, ...] = ()
+) -> tuple[PrComment | PrReview | PrThread, ...]:
+    """Comments, reviews and review threads as one column, oldest first.
 
     Minimized comments are dropped — GitHub collapses those as spam or
     off-topic, so they demand nothing (the same stance prstatus._unresolved
     takes) — and so is anything with nothing to show: an empty comment, an
     unsubmitted PENDING review, and the bodiless COMMENTED shell gh leaves
-    where a review's inline comments hang (those threads are v2's GraphQL
-    work; the shell alone would render as an empty card). gh's stamps are
-    ISO-8601 UTC, so sorting the strings is sorting the times, and the sort
-    is stable: entries one second can't split keep gh's own order.
+    where a review's inline comments hang (the threads themselves arrive
+    from GraphQL and anchor here by their first comment's stamp; the shell
+    alone would render as an empty card). gh's stamps are ISO-8601 UTC, so
+    sorting the strings is sorting the times, and the sort is stable:
+    entries one second can't split keep gh's own order.
     """
-    entries: list[PrComment | PrReview] = []
+    entries: list[PrComment | PrReview | PrThread] = list(threads)
     for comment in comments if isinstance(comments, list) else []:
         if not isinstance(comment, dict) or comment.get("isMinimized") is True:
             continue
@@ -235,6 +372,82 @@ def _timeline(comments: object, reviews: object) -> tuple[PrComment | PrReview, 
         )
     entries.sort(key=lambda entry: entry.created_at)
     return tuple(entries)
+
+
+def _threads_page(data: object) -> tuple[list, str | None] | None:
+    """One GraphQL reply's thread nodes and the cursor after them.
+
+    ``(nodes, cursor)`` — the cursor None on the last page, and the whole
+    answer None when *data* isn't the reply the query earns (an error, an
+    empty dict, a shape GitHub never sends): the caller stops there. A
+    cursor that doesn't look like one reads as "last page" rather than being
+    handed back to argv.
+    """
+    node: object = data
+    for key in ("data", "repository", "pullRequest", "reviewThreads"):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    if not isinstance(node, dict):
+        return None
+    nodes = node.get("nodes")
+    if not isinstance(nodes, list):
+        return None
+    info = node.get("pageInfo")
+    cursor = None
+    if isinstance(info, dict) and info.get("hasNextPage") is True:
+        after = info.get("endCursor")
+        if isinstance(after, str) and 0 < len(after) <= _MAX_CURSOR:
+            cursor = after
+    return nodes, cursor
+
+
+def _thread(node: object) -> PrThread | None:
+    """One reviewThreads node as a PrThread, or None when it isn't one.
+
+    Dropped rather than guessed at, like every malformed entry here: a
+    thread needs an id its mutations can name, a path to anchor under, and
+    at least one comment worth showing — minimized and empty ones are
+    skipped exactly as the timeline skips them.
+    """
+    if not isinstance(node, dict):
+        return None
+    thread_id = node.get("id")
+    if not isinstance(thread_id, str) or not THREAD_ID.match(thread_id):
+        return None
+    path = _path(node.get("path"))
+    if not path:
+        return None
+    comments = []
+    inner = node.get("comments")
+    nodes = inner.get("nodes") if isinstance(inner, dict) else None
+    for comment in nodes if isinstance(nodes, list) else []:
+        if not isinstance(comment, dict) or comment.get("isMinimized") is True:
+            continue
+        body = _text(comment.get("body"))
+        if not body:
+            continue
+        comments.append(
+            PrComment(
+                author=_author(comment.get("author")),
+                created_at=_line(comment.get("createdAt")),
+                body=body,
+                url=_http_url(comment.get("url")),
+            )
+        )
+    if not comments:
+        return None
+    line = node.get("line")
+    if not isinstance(line, int) or isinstance(line, bool) or line <= 0:
+        line = None
+    return PrThread(
+        id=thread_id,
+        path=path,
+        line=line,
+        is_resolved=node.get("isResolved") is True,
+        is_outdated=node.get("isOutdated") is True,
+        comments=tuple(comments),
+    )
 
 
 def _checks(rollup: object) -> tuple[PrCheck, ...]:

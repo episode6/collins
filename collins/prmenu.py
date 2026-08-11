@@ -152,6 +152,11 @@ class ActionHost:
     # "View in Collins" row. None where no such page can be shown, and on the
     # page's own actions menu, which mustn't offer to open itself again.
     view_pr: Callable[[PullRequest], None] | None = None
+    # The unresolved badge's deep link: the same page, landed at its first
+    # unresolved thread (prview.reveal_unresolved). Its row only shows while
+    # the PR awaits a reply; None hides it wherever no page can be shown —
+    # except on the page's own menu, where it stays as an in-page jump.
+    view_unresolved: Callable[[PullRequest], None] | None = None
 
 
 def new_popover(position: Gtk.PositionType) -> Gtk.Popover:
@@ -457,6 +462,8 @@ def show_actions(
     rows.append(separator)
     if host.view_pr is not None:
         rows.append(_view_row(popover, pr, host.view_pr))
+    if host.view_unresolved is not None and pr.awaiting_reply:
+        rows.append(_unresolved_row(popover, pr, host.view_unresolved))
     rows.append(_open_row(popover, pr))
     for action in practions.actions_for(pr, host.prompt_block(), host.has_changes):
         rows.append(_action_row(popover, pr, action, host))
@@ -531,6 +538,35 @@ def _view_row(
     button.add_css_class("flat")
     button.add_css_class("pr-menu-row")
     button.set_tooltip_text(_("Open this pull request's page beside the session"))
+
+    def clicked(*_args) -> None:
+        popover.popdown()
+        view(pr)
+
+    button.connect("clicked", clicked)
+    return button
+
+
+def _unresolved_row(
+    popover: Gtk.Popover, pr: PullRequest, view: Callable[[PullRequest], None]
+) -> Gtk.Widget:
+    """The unresolved badge's deep link: the native page, landed on the
+    conversation that is waiting.
+
+    Only built while the PR awaits a reply — the row answers the warning
+    triangle, and a menu offering to show unresolved comments on a PR with
+    none would be the app disagreeing with itself. Wears the badge's own
+    mark, so the row visibly answers it.
+    """
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    row.append(_mark_icon("alert-fill-symbolic", "pr-unresolved"))
+    row.append(Gtk.Label(label=_("View unresolved comments"), xalign=0.0, hexpand=True))
+    button = Gtk.Button(child=row)
+    button.add_css_class("flat")
+    button.add_css_class("pr-menu-row")
+    button.set_tooltip_text(
+        _("Open this pull request's page at its first unresolved thread")
+    )
 
     def clicked(*_args) -> None:
         popover.popdown()
