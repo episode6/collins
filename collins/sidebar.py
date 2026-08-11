@@ -719,6 +719,23 @@ class SessionRow(Gtk.ListBoxRow):
         right_click.connect("pressed", self._on_right_click)
         self.add_controller(right_click)
 
+        # The buttons above are ~20px targets centered in a 34px row, and GTK
+        # hit-testing stops at a widget's allocation — the strips above and
+        # below each button fall through to the row and open the session, which
+        # is the worst possible near-miss for "stop" or "archive". The row owns
+        # that height, so it redirects: a press in a button's column but off
+        # the button itself is claimed here (capture phase, so the ListBox
+        # never activates the row) and delivered to the button on release,
+        # release-in-column, like a real button press. Presses on the button
+        # proper are left alone — its own :active feedback and popup handling
+        # are better than a re-dispatch.
+        self._press_target: Gtk.Widget | None = None
+        column_click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
+        column_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        column_click.connect("pressed", self._on_column_press)
+        column_click.connect("released", self._on_column_release)
+        self.add_controller(column_click)
+
     def sync_prs(self) -> None:
         """Re-read the session's saved PRs; the mark is only there with one.
 
@@ -853,6 +870,54 @@ class SessionRow(Gtk.ListBoxRow):
             return False
         tooltip.set_text("\n".join(lines))
         return True
+
+    def _column_target(self, x: float, y: float, off_button: bool) -> Gtk.Widget | None:
+        """The button whose full-height column the point is in.
+
+        With `off_button`, a point on a button itself answers None: that press
+        belongs to the button. Only buttons that are mapped (the action
+        stack's hover page is up) and sensitive take redirects — a press over
+        a greyed-out background button should open the session, not silently
+        vanish.
+        """
+        if not 0 <= y <= self.get_height():
+            return None  # dragged off the row: no click
+        for btn in (self._pr_btn, self._stop_btn, self._bg_btn, self._archive_btn):
+            if not btn.get_mapped() or not btn.get_sensitive():
+                continue
+            hit, bounds = btn.compute_bounds(self)
+            if not hit:
+                continue
+            x0, x1 = bounds.origin.x, bounds.origin.x + bounds.size.width
+            if btn is self._pr_btn and not self.check.get_mapped():
+                # The mark is the row's leftmost widget, so its column can
+                # also grow sideways where the other buttons are hemmed in:
+                # left across the row's own padding to the guide line (unless
+                # selection mode has put the check there), and right through
+                # the title box's 2px spacing to the first letter.
+                x0, x1 = 0.0, x1 + 2.0
+            if not x0 <= x <= x1:
+                continue
+            on_button = (
+                bounds.origin.x <= x <= bounds.origin.x + bounds.size.width
+                and bounds.origin.y <= y <= bounds.origin.y + bounds.size.height
+            )
+            return None if on_button and off_button else btn
+        return None
+
+    def _on_column_press(self, gesture: Gtk.GestureClick, _n: int, x: float, y: float) -> None:
+        self._press_target = self._column_target(x, y, off_button=True)
+        if self._press_target is not None:
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+
+    def _on_column_release(self, _gesture: Gtk.GestureClick, _n: int, x: float, y: float) -> None:
+        target, self._press_target = self._press_target, None
+        # Same rule as a plain button: releasing elsewhere abandons the click.
+        # "Elsewhere" means outside the button's extended column — a release
+        # anywhere in it counts, including on the button proper, since the
+        # claimed press means the button will never see this sequence itself.
+        if target is not None and self._column_target(x, y, off_button=False) is target:
+            target.activate()
 
     def _on_hover_enter(self, *_args) -> None:
         self._action_stack.set_visible_child_name("hover")
