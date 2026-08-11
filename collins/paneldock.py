@@ -33,6 +33,10 @@ from .tabguard import guard  # noqa: E402
 
 # The tree side a home strip splits off the terminal, per home position.
 _HOME_SIDES = {"bottom": "below", "right": "right"}
+# What the rotate button flips: an axis, not a side. A strip divided from
+# the terminal vertically is on the "bottom" axis whether it sits above or
+# below it; horizontally, on the "right" axis whether left or right.
+_OTHER_AXIS = {"bottom": "right", "right": "bottom"}
 
 
 class _PaneRec:
@@ -54,6 +58,10 @@ class PanelDock(Adw.Bin):
         # The user resized the home strip: (mode, px) — the axis seed the
         # window persists app-wide (panel_size_bottom / panel_size_right).
         "size-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, int)),
+        # The home strip moved to the other axis under a rotation: (mode) —
+        # the app-wide panel_position default follows it, as it followed the
+        # bottom/right swap this button used to fire.
+        "home-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(self, terminal: Gtk.Widget, strip_factory, home_position: str) -> None:
@@ -562,6 +570,87 @@ class PanelDock(Adw.Bin):
             rec.sizer.apply()
         target.select_widget(widget)
         GLib.idle_add(widget.grab_page_focus)
+
+    def rotate_page(self, strip, widget) -> None:
+        """The tab row's rotate button: move *widget* from *strip* to the
+        dock's other axis, and nothing else with it. A tab below the
+        terminal lands beside it and back again — of whatever kind, since
+        this moves one page rather than gathering the shells the way
+        `swap_home` does.
+
+        An existing strip on the destination axis takes the tab as another
+        *tab* rather than being split around: rotating three shells over
+        one at a time reassembles them in one strip on the far side, not
+        three slivers. Only an axis with no strip at all splits the
+        terminal to make one.
+        """
+        if strip not in self._tree or widget not in strip.pages():
+            return
+        dest = _OTHER_AXIS[self._strip_axis(strip)]
+        target = self._axis_strip(dest, exclude=strip)
+        was_home = strip is self._home_strip
+        if was_home:
+            # Fold the home size away before the move can collapse the
+            # strip out from under `_home_rec` (see `_collapse_strip`).
+            rec = self._home_rec()
+            if rec is not None:
+                rec.sizer.remember()
+                self._home_sizes.update(rec.sizer.snapshot())
+        if target is not None:
+            self.move_page(strip, widget, target)
+            self._reveal_strip(target)  # never rotate into the hidden home
+        else:
+            self.split_move(strip, widget, self._terminal, _HOME_SIDES[dest])
+            target = self._strip_of(widget)
+        if was_home and strip.page_count == 0 and target is not None:
+            self._adopt_home(target, dest)
+
+    def _adopt_home(self, strip, position: str) -> None:
+        """Hand the home role to *strip* on *position*'s axis: the rotation
+        emptied the old home strip out, so without this Ctrl+J would go on
+        toggling a strip that no longer exists — conjuring a fresh one on
+        the old edge while the tab the user just rotated sits on the new
+        one. The home strip's remembered size comes along, so a panel
+        rotated bottom→right opens at the width it always had."""
+        self._home_strip = strip
+        self._home_position = position
+        rec = self._home_rec()
+        if rec is not None:
+            for mode, size in self._home_sizes.items():
+                rec.sizer.set_remembered(mode, size)
+            rec.sizer.apply()
+        self.emit("home-changed", position)
+
+    def _strip_axis(self, strip) -> str:
+        """Which axis *strip* sits on relative to the terminal (see
+        _OTHER_AXIS): the orientation of the nearest split that puts the
+        terminal on its other side. Strips nested deeper — a bottom strip
+        the user split left/right — answer for the branch they are in, so
+        both halves of a split panel rotate to the same place."""
+        node = self._tree.find(strip)
+        while node.parent is not None:
+            parent = node.parent
+            if self._contains_terminal(parent.sibling_of(node)):
+                return "bottom" if parent.orientation == "v" else "right"
+            node = parent
+        return self._home_position  # unreachable: the terminal is always in
+
+    def _axis_strip(self, axis: str, exclude=None):
+        """A strip already on *axis*, or None. The home strip wins when it
+        qualifies — a rotation should land in the panel Ctrl+J toggles
+        rather than beside it — otherwise the tree's spatial order picks."""
+        strips = [
+            other
+            for other in self.strips()
+            if other is not exclude and self._strip_axis(other) == axis
+        ]
+        if self._home_strip in strips:
+            return self._home_strip
+        return strips[0] if strips else None
+
+    def _strip_of(self, widget):
+        """The strip holding *widget*, or None."""
+        return next((strip for strip in self.strips() if widget in strip.pages()), None)
 
     def begin_page_drag(self, strip, widget) -> None:
         """A page drag started: light the drop zones over every visible

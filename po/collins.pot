@@ -1015,8 +1015,8 @@ msgstr ""
 msgid "Right-click to cut: copy it and clear the box"
 msgstr ""
 
-#: collins/terminal.py:544
-msgid "Move terminal panel bottom/right"
+#: collins/panelstrip.py:128
+msgid "Move this tab to the other side"
 msgstr ""
 
 #: collins/terminal.py:633

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-10. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -887,6 +887,10 @@ class TerminalTab(Gtk.Box):
         # where mode is "bottom" | "right" and size the new panel px size,
         # so the window can persist it as the app-wide default.
         "panel-size-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, int)),
+        # Emitted when rotating a tab re-homed the panel: "bottom" | "right",
+        # the edge the window persists as the app-wide default (as it does
+        # for the bottom/right swap Ctrl+J still fires).
+        "panel-position-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         # Emitted when either of the tab's terminals rings BEL, for the
         # window's visual bell.
         "bell": (GObject.SignalFlags.RUN_FIRST, None, ()),
@@ -1036,6 +1040,9 @@ class TerminalTab(Gtk.Box):
         self._dock.connect("bell", lambda *_: self.emit("bell"))
         self._dock.connect(
             "size-changed", lambda _d, mode, size: self.emit("panel-size-changed", mode, size)
+        )
+        self._dock.connect(
+            "home-changed", lambda _d, mode: self.emit("panel-position-changed", mode)
         )
         self._dock.set_focus_terminal(self.grab_terminal_focus)
         self._dock.set_page_factory(self._make_panel_page)
@@ -2654,9 +2661,10 @@ class TerminalTab(Gtk.Box):
 
     def swap_panel(self) -> str:
         """Move the shells to the other home edge (bottom↔right) and return
-        the new position. The strip relocates by reparenting — every shell
-        keeps running — and shell pages parked in satellite strips gather
-        back into the home strip on the way."""
+        the new position — Ctrl+J's double-tap, where the tab row's rotate
+        button moves a single tab. The strip relocates by reparenting —
+        every shell keeps running — and shell pages parked in satellite
+        strips gather back into the home strip on the way."""
         return self._dock.swap_home()
 
     def set_panel_size_lookup(self, lookup) -> None:
