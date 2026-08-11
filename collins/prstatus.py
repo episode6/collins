@@ -959,6 +959,29 @@ def summarize(url: str, data: object) -> PullRequest | None:
     return _applied(pr, _entry(data))
 
 
+def lookup_pr(args: tuple[str, ...], cwd: str | None = None) -> PullRequest | None:
+    """One ``gh pr view`` by whatever names the PR — a URL, a number with
+    ``--repo``, or a bare number asked from inside *cwd* — returning the PR
+    gh answers with, status folded in and remembered as a fetch of our own.
+
+    The one gh call doubles as verification: a number that belongs to an
+    issue, a repository the user can't see, or a gh that isn't there all
+    come back None rather than a PullRequest — which is what prattach leans
+    on before putting a prompt's say-so on a session's row. The URL gh
+    reports is the identity used, not the words that asked (a renamed
+    repository answers under its new name), and it still has to pass the
+    same `_FETCHABLE` gate every URL does. Never call on the main thread.
+    """
+    data = gh_json(["pr", "view", *args, "--json", "url," + _GH_FIELDS], cwd=cwd)
+    if not isinstance(data, dict) or not isinstance(data.get("url"), str):
+        return None
+    url = data["url"]
+    pr = summarize(url, data)
+    if pr is not None:
+        absorb(url, data)
+    return pr
+
+
 def known(pr: PullRequest) -> PullRequest:
     """*pr* with whatever status has already been fetched this run, if any.
 

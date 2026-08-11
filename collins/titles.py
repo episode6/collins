@@ -188,6 +188,25 @@ class PRReference:
     needs_cwd: bool = False
 
 
+def _iter_references(prompt: str) -> Iterator[tuple[str, PRReference]]:
+    """Every PR-shaped mention in *prompt*, tagged with which form matched
+    it: URLs first, then slugs, then bare numbers — most specific form first,
+    prompt order within each form."""
+    for match in _PR_URL.finditer(prompt):
+        url = match.group(0)
+        if repository := prstatus.repository_for(url):
+            # gh is asked by URL — it needs no repository and covers
+            # Enterprise hosts — but the label carries the short form, which
+            # is what a person would call it.
+            yield "url", PRReference(label=f"{repository}#{url.rsplit('/', 1)[-1]}", args=(url,))
+    for match in _PR_SLUG.finditer(prompt):
+        repository, number = match.group(1), match.group(2)
+        yield "slug", PRReference(label=f"{repository}#{number}", args=(number, "--repo", repository))
+    for match in _PR_NUMBER.finditer(prompt):
+        number = match.group(1) or match.group(2)  # one branch per alternative
+        yield "number", PRReference(label=f"#{number}", args=(number,), needs_cwd=True)
+
+
 def pr_references(prompt: str) -> list[PRReference]:
     """The pull requests *prompt* refers to, most specific form first.
 
@@ -195,7 +214,7 @@ def pr_references(prompt: str) -> list[PRReference]:
     repository it means, so it outranks a number written earlier in the same
     sentence. One reference per form is enough — a prompt that mentions
     several of the same shape is about the first it raises far more often
-    than not.
+    than not, and a title only has room for one anyway.
 
     Nothing here is certain. ``src/app.py#42`` has the shape of a repository
     and a number, and a bare number may belong to an issue rather than a PR.
@@ -203,24 +222,29 @@ def pr_references(prompt: str) -> list[PRReference]:
     comes back empty falls through to the next candidate, and a prompt that
     names none of them just goes out without context.
     """
+    first: dict[str, PRReference] = {}
+    for form, ref in _iter_references(prompt):
+        first.setdefault(form, ref)
+    return list(first.values())
+
+
+def pr_references_all(prompt: str) -> list[PRReference]:
+    """Every pull request *prompt* mentions, most specific forms first.
+
+    What attaching wants where titling wants one: "merge PR 12 and PR 34"
+    names two pull requests, and each has a claim to the session's row (see
+    prattach). Duplicates collapse on the label, which also folds a slug into
+    a URL naming the same PR — both spell ``owner/repo#12``. A bare number
+    can only be told apart from the qualified forms once it has been resolved
+    against a repository, so those wait for the caller's post-lookup URL
+    dedup.
+    """
+    seen: set[str] = set()
     refs: list[PRReference] = []
-    match = _PR_URL.search(prompt)
-    if match and (repository := prstatus.repository_for(match.group(0))):
-        url = match.group(0)
-        # gh is asked by URL — it needs no repository and covers Enterprise
-        # hosts — but the model is told the short form, which is what a person
-        # would call it.
-        refs.append(PRReference(label=f"{repository}#{url.rsplit('/', 1)[-1]}", args=(url,)))
-    match = _PR_SLUG.search(prompt)
-    if match:
-        repository, number = match.group(1), match.group(2)
-        refs.append(
-            PRReference(label=f"{repository}#{number}", args=(number, "--repo", repository))
-        )
-    match = _PR_NUMBER.search(prompt)
-    if match:
-        number = match.group(1) or match.group(2)  # one branch per alternative
-        refs.append(PRReference(label=f"#{number}", args=(number,), needs_cwd=True))
+    for _form, ref in _iter_references(prompt):
+        if ref.label not in seen:
+            seen.add(ref.label)
+            refs.append(ref)
     return refs
 
 
@@ -256,18 +280,11 @@ def _fetch_pr_title(ref: PRReference, cwd: str | None) -> str | None:
 def _visible_prompt(prompt: str) -> str:
     """As much of *prompt* as the model is given, cut on a word boundary.
 
-    Cutting blind would leave a half-word at the end, and a half-number is
-    worse than that: "PR 1834" sliced down to "PR 183" is not a truncated
-    reference, it is a reference to a different pull request — one the prompt
-    never mentioned, fetched and described as if it had been.
+    A blind cut could turn "PR 1834" into "PR 183" — a reference to a pull
+    request the prompt never mentioned, fetched and described as if it had
+    been. `sessions.cut_on_word` carries the careful version.
     """
-    if len(prompt) <= _MAX_PROMPT_CHARS:
-        return prompt
-    head = prompt[:_MAX_PROMPT_CHARS]
-    if head[-1].isspace() or prompt[_MAX_PROMPT_CHARS].isspace():
-        return head  # the cut already fell between two words
-    words = head.rsplit(None, 1)
-    return words[0] if len(words) > 1 else head  # one very long word: keep it
+    return sessions.cut_on_word(prompt, _MAX_PROMPT_CHARS)
 
 
 def quote_for_prompt(text: str) -> str:

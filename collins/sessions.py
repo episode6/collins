@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-10. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -168,6 +168,62 @@ def _scan_transcript(path: Path) -> tuple[str | None, str, float | None]:
     except OSError:
         pass
     return cwd, preview, created
+
+
+def cut_on_word(prompt: str, limit: int) -> str:
+    """At most *limit* characters of *prompt*, cut on a word boundary.
+
+    Cutting blind would leave a half-word at the end, and a half-number is
+    worse than that: "PR 1834" sliced down to "PR 183" is not a truncated
+    reference, it is a reference to a different pull request — one the prompt
+    never mentioned. Everything that reads prompts for references (session
+    titling, prompt PR attachment) cuts with this.
+    """
+    if len(prompt) <= limit:
+        return prompt
+    head = prompt[:limit]
+    if head[-1].isspace() or prompt[limit].isspace():
+        return head  # the cut already fell between two words
+    words = head.rsplit(None, 1)
+    return words[0] if len(words) > 1 else head  # one very long word: keep it
+
+
+# How much of a first prompt `first_user_prompt` hands back. Far past where
+# a prompt says what it is about, but a bound all the same: a pasted log can
+# make a first prompt arbitrarily large.
+_MAX_PROMPT_CHARS = 4000
+
+
+def first_user_prompt(path: Path) -> str:
+    """The session's first real user prompt, whole — bounded, not previewed.
+
+    `_scan_transcript`'s preview is cut down to a row subtitle, which is no
+    good to a reader hunting for a PR reference the prompt makes in its third
+    sentence (see prattach). Same rules otherwise: the first user entry whose
+    text isn't harness-injected, whitespace collapsed. Empty when there is no
+    such prompt or the file can't be read.
+    """
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            read = 0
+            for i, line in enumerate(fh):
+                read += len(line)
+                if i >= _MAX_SCAN_LINES or read > _MAX_SCAN_BYTES:
+                    break
+                try:
+                    entry = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(entry, dict) or entry.get("type") != "user":
+                    continue
+                message = entry.get("message") or {}
+                text = _extract_text(message.get("content")).strip()
+                # Skip harness-injected content (commands, reminders)
+                if text and not text.startswith("<"):
+                    return cut_on_word(" ".join(text.split()), _MAX_PROMPT_CHARS)
+    except OSError:
+        pass
+    return ""
 
 
 def transcript_is_stub(cwd: str | None, preview: str) -> bool:

@@ -26,6 +26,7 @@ from collins.prstatus import (
     from_records,
     invalidate,
     known,
+    lookup_pr,
     menu_name,
     merge_ordered,
     newest_title,
@@ -502,6 +503,65 @@ def test_discovery_asks_nothing_without_a_usable_branch(gh_json, cwd, branch):
     serve(_DISCOVERED)
     assert discover_pr(cwd, branch) is None
     assert calls == []
+
+
+# -- lookup_pr -----------------------------------------------------------------
+
+
+def test_lookup_answers_with_ghs_own_url(gh_json):
+    serve, calls = gh_json
+    serve(
+        {
+            "url": "https://github.com/episode6/collins/pull/74",
+            "title": "A fine change",
+            "state": "OPEN",
+            "isDraft": False,
+            "statusCheckRollup": [{"conclusion": "SUCCESS"}],
+        }
+    )
+    pr = lookup_pr(("74", "--repo", "episode6/collins"))
+    assert (pr.number, pr.repository) == (74, "episode6/collins")
+    assert (pr.title, pr.state, pr.passed) == ("A fine change", "OPEN", 1)
+    args, cwd = calls[0]
+    assert args[:3] == ["pr", "view", "74"]
+    assert args[args.index("--json") + 1].startswith("url,")  # identity rides the reply
+    assert cwd is None
+
+
+def test_lookup_runs_a_bare_number_in_its_directory(gh_json):
+    serve, calls = gh_json
+    serve({"url": "https://github.com/episode6/collins/pull/74", "state": "OPEN"})
+    assert lookup_pr(("74",), cwd="/home/me/dev/collins").number == 74
+    assert calls[0][1] == "/home/me/dev/collins"
+
+
+def test_lookup_status_counts_as_ours(gh_json, scheduled):
+    """The lookup's one call answered "how is its CI?" too; the poll that
+    follows must not refetch it."""
+    serve, _calls = gh_json
+    serve(
+        {
+            "url": "https://github.com/episode6/collins/pull/74",
+            "state": "OPEN",
+            "statusCheckRollup": [{"conclusion": "FAILURE"}],
+        }
+    )
+    pr = lookup_pr(("74", "--repo", "episode6/collins"))
+    scheduled.clear()
+    assert enrich(pr).badge == "failed"
+    assert scheduled == []
+
+
+def test_lookup_none_when_gh_cannot_answer(gh_json):
+    serve, _calls = gh_json
+    serve(None)  # no gh, not logged in, an issue number, ...
+    assert lookup_pr(("74", "--repo", "episode6/collins")) is None
+
+
+def test_lookup_rejects_an_answer_outside_the_gate(gh_json):
+    serve, _calls = gh_json
+    serve({"url": "https://example.com/not/a/pr", "state": "OPEN"})
+    assert lookup_pr(("74", "--repo", "episode6/collins")) is None
 
 
 def test_discovery_allows_the_branch_names_git_allows(gh_json):
