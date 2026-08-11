@@ -2329,3 +2329,21 @@ msgstr ""
 #: collins/prview.py:1004
 msgid "Post reply"
 msgstr ""
+
+#: collins/prview.py:1330
+msgid "Show less"
+msgstr ""
+
+#: collins/prefs.py:325
+msgid "Pull request view"
+msgstr ""
+
+#: collins/prefs.py:327
+msgid "Text size"
+msgstr ""
+
+#: collins/prefs.py:328
+msgid ""
+"Reading-text size in the pull request panel, as a percentage of the app "
+"font; buttons and menus keep the app size"
+msgstr ""

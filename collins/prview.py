@@ -30,6 +30,11 @@ lesson, thread-sized. `reveal_unresolved` is the unresolved badge's deep
 link: the Conversation view fronted and scrolled to the first unresolved
 thread, deferred until the first fetch when the page is fresh.
 
+Bylines lead with the author's picture (see avatars), the description folds
+past a few lines behind "Show more", and the page's reading text renders at
+the ``pr_font_scale`` setting's size — buttons and menus excepted — via one
+display-level provider keyed off the page's css class (`_apply_font_scale`).
+
 Everything shown is repository content and therefore untrusted: bodies go
 through `formatting.md_to_pango`'s escaping (with the plain-text fallback on
 malformed markup), only http(s) URLs ever reach a browser (prdetail already
@@ -51,7 +56,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import dialogs, practions, prdetail, prmenu  # noqa: E402
+from . import avatars, dialogs, practions, prdetail, prmenu  # noqa: E402
 from .copylabel import open_tooltip, open_uri  # noqa: E402
 from .editor import GtkSource, style_scheme  # noqa: E402 — require_version + friendly exit live there
 from .formatting import format_relative, format_timestamp, md_to_pango  # noqa: E402
@@ -67,6 +72,16 @@ _FOCUS_REFRESH_MIN_US = 10 * 1_000_000
 # prdetail's storage bound: a label this long is already a scroll of its own,
 # and Pango layout cost grows with every character the main loop hands it.
 _RENDER_CAP = 20_000
+# Where the description folds by default: about the eight lines the card
+# shows before "Show more", and the size past which a body plainly can't fit
+# them even without a newline (long paragraphs wrap).
+_FOLD_LINES = 8
+_FOLD_CHARS = 550
+# The title may wrap this far before it ellipsizes — a PR title is a sentence,
+# not a phrase, and one header line cut most of it off.
+_TITLE_LINES = 3
+# Byline avatars, GitHub's own inline size.
+_AVATAR_PX = 24
 # A patch past this many lines starts collapsed and only builds its buffer on
 # first expand: GtkSource renders it fine, but a fetch landing a handful of
 # eagerly built multi-thousand-line buffers would wedge the main loop.
@@ -114,6 +129,10 @@ class PrViewPage(Adw.Bin):
 
     def __init__(self, pr: PullRequest, host_factory) -> None:
         super().__init__()
+        # The text-scale hook: _apply_font_scale's display-wide rules key off
+        # this class, which is how a setting reaches every label in the page
+        # without touching each one (see the function's comment).
+        self.add_css_class("pr-view-page")
         self._pr = pr
         self._host_factory = host_factory
         self._detail: prdetail.PullRequestDetail | None = None
@@ -136,34 +155,51 @@ class PrViewPage(Adw.Bin):
         header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         header.add_css_class("pr-view-header")
 
+        # Everything in the row anchors to its top: the title may run to
+        # _TITLE_LINES, and the mark, number and buttons should ride its
+        # first line rather than float at the vertical middle of three.
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._mark_slot = Adw.Bin(child=prmenu.status_icon(pr))
-        self._mark_slot.set_valign(Gtk.Align.CENTER)
+        self._mark_slot.set_valign(Gtk.Align.START)
+        # Optically centers the mark (and the spinner below) on the title's
+        # first line of text.
+        self._mark_slot.set_margin_top(4)
         top.append(self._mark_slot)
         self._number = Gtk.Label(label=f"#{pr.number}")
         self._number.add_css_class("dim-label")
+        self._number.set_valign(Gtk.Align.START)
         top.append(self._number)
-        self._title = Gtk.Label(xalign=0.0, hexpand=True, selectable=True)
+        self._title = Gtk.Label(xalign=0.0, yalign=0.0, hexpand=True, selectable=True)
         self._title.add_css_class("pr-view-title")
+        # Wrapping up to _TITLE_LINES before the ellipsis: a one-line header
+        # cut most real titles off, and the tooltip still holds the whole.
+        self._title.set_wrap(True)
+        self._title.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self._title.set_lines(_TITLE_LINES)
         self._title.set_ellipsize(Pango.EllipsizeMode.END)
         top.append(self._title)
 
         self._spinner = Gtk.Spinner()
         self._spinner.set_visible(False)
+        self._spinner.set_valign(Gtk.Align.START)
+        self._spinner.set_margin_top(4)
         top.append(self._spinner)
         self._refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")
         self._refresh_btn.add_css_class("flat")
+        self._refresh_btn.set_valign(Gtk.Align.START)
         self._refresh_btn.set_tooltip_text(_("Reload this pull request"))
         self._refresh_btn.connect("clicked", lambda *_a: self.refresh())
         top.append(self._refresh_btn)
         github_btn = Gtk.Button(icon_name="github-symbolic")
         github_btn.add_css_class("flat")
+        github_btn.set_valign(Gtk.Align.START)
         github_btn.set_tooltip_text(open_tooltip(pr.url))
         github_btn.connect("clicked", lambda b: open_uri(b, self.pr_url))
         top.append(github_btn)
         self._menu = prmenu.new_popover(Gtk.PositionType.BOTTOM)
         menu_btn = Gtk.MenuButton(icon_name="view-more-horizontal-symbolic")
         menu_btn.add_css_class("flat")
+        menu_btn.set_valign(Gtk.Align.START)
         menu_btn.set_tooltip_text(_("Pull request actions"))
         menu_btn.set_popover(self._menu)
         menu_btn.set_create_popup_func(self._fill_menu)
@@ -316,12 +352,13 @@ class PrViewPage(Adw.Bin):
         return False  # nothing running: a PR page is cheap to refetch
 
     def apply_settings(self, settings: dict) -> None:
-        """Only the editor's style scheme matters here: the diff buffers wear
-        it. Everything else renders in the app font and theme already."""
+        """The editor's style scheme (the diff buffers wear it) and the page's
+        own text scale. Everything else renders in the app font and theme."""
         scheme = settings.get("editor_style_scheme") or ""
         if scheme != self._scheme_setting:
             self._scheme_setting = scheme
             self._apply_scheme()
+        _apply_font_scale(self.get_display(), settings.get("pr_font_scale"))
 
     def page_state(self) -> dict:
         """This page's slot in a serialized dock layout (see panellayout):
@@ -527,7 +564,7 @@ class PrViewPage(Adw.Bin):
     def _description_card(self, detail: prdetail.PullRequestDetail) -> Gtk.Widget:
         card = _card(detail.author, detail.created_at)
         if detail.body:
-            card.append(_body_label(detail.body))
+            card.append(_folded_body(detail.body))
         else:
             none = Gtk.Label(label=_("No description provided."), xalign=0.0)
             none.add_css_class("dim-label")
@@ -1216,10 +1253,13 @@ def _byline(
     url: str = "",
     trailing: list[Gtk.Widget] | None = None,
 ) -> Gtk.Widget:
-    """A card's byline: author, age (absolute stamp in the tooltip), then any
-    *trailing* widgets — a review's verdict rides there. With a *url*, the
-    age is a link to the entry on GitHub."""
+    """A card's byline: avatar, author, age (absolute stamp in the tooltip),
+    then any *trailing* widgets — a review's verdict rides there. With a
+    *url*, the age is a link to the entry on GitHub."""
     byline = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    face = avatars.avatar(author, _AVATAR_PX)
+    face.set_valign(Gtk.Align.CENTER)
+    byline.append(face)
     who = Gtk.Label(label=author or _("unknown"), xalign=0.0)
     who.add_css_class("caption-heading")
     byline.append(who)
@@ -1254,6 +1294,60 @@ def _card(
     return card
 
 
+def _folded_body(text: str) -> Gtk.Widget:
+    """The description's body, folded to `_FOLD_LINES` lines behind "Show
+    more" — a long description shouldn't push the conversation off screen.
+
+    A body that plainly fits the fold comes back as the plain label. The
+    expanded half is `_body_label`, so a pathological body keeps the render
+    cap's own second "Show more" step. The preview is truncated *text*, not
+    just an ellipsized label: `set_lines` is Pango's negative height, a
+    per-paragraph cap, so on a many-paragraph body the label alone would
+    show six lines of every paragraph. The line cap stays on as the bound
+    for the other shape — one huge paragraph.
+    """
+    if text.count("\n") < _FOLD_LINES and len(text) <= _FOLD_CHARS:
+        return _body_label(text)
+    # Whole lines while the budget lasts (a cut mid-line can sever a link's
+    # markdown and render it literal); only a first line over the budget by
+    # itself is cut mid-way.
+    head = ""
+    for line in text.split("\n")[:_FOLD_LINES]:
+        if head and len(head) + len(line) > _FOLD_CHARS:
+            break
+        head = f"{head}\n{line}" if head else line[:_FOLD_CHARS]
+    preview = Gtk.Label(xalign=0.0, selectable=True, wrap=True, hexpand=True)
+    preview.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+    preview.set_lines(_FOLD_LINES)
+    preview.set_ellipsize(Pango.EllipsizeMode.END)
+    # rstrip: an "…" after a kept blank line would render as its own line.
+    _set_md(preview, head.rstrip() + "…")
+    full = _body_label(text)
+    full.set_visible(False)
+    word = Gtk.Label(label=_("Show more"))
+    caret = Gtk.Image.new_from_icon_name("pan-down-symbolic")
+    inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+    inner.append(word)
+    inner.append(caret)
+    toggle = Gtk.Button(child=inner)
+    toggle.add_css_class("flat")
+    toggle.set_halign(Gtk.Align.START)
+
+    def flip(_button: Gtk.Button) -> None:
+        expanded = full.get_visible()
+        full.set_visible(not expanded)
+        preview.set_visible(expanded)
+        word.set_label(_("Show more") if expanded else _("Show less"))
+        caret.set_from_icon_name("pan-down-symbolic" if expanded else "pan-up-symbolic")
+
+    toggle.connect("clicked", flip)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    box.append(preview)
+    box.append(full)
+    box.append(toggle)
+    return box
+
+
 def _body_label(text: str) -> Gtk.Widget:
     """A markdown body as a selectable wrapped label; past the render cap
     it starts folded behind "Show more" (the whole text is already
@@ -1285,6 +1379,52 @@ def _count_label(text: str, css_class: str) -> Gtk.Label:
     label.add_css_class("caption")
     label.add_css_class(css_class)
     return label
+
+
+# The text-scale provider all PR pages share, display-wide: a provider added
+# to one widget's style context styles that widget alone in GTK4, so the only
+# way a scale can cascade through a page is a display rule keyed off the
+# page's css class. Bounds keep a corrupt setting from rendering the page
+# unreadable or absurd.
+_FONT_SCALE_MIN = 50
+_FONT_SCALE_MAX = 300
+_font_provider: Gtk.CssProvider | None = None
+_font_scale = 0  # percent last loaded into the provider
+
+
+def _apply_font_scale(display: Gdk.Display, percent: object) -> None:
+    """Load the pr_font_scale setting into the shared display provider.
+
+    Idempotent per value — every page calls this on every settings fan-out.
+    Font-size percentages compound through CSS inheritance, so scaling the
+    page root scales every label, text view and diff buffer while captions
+    keep their relative smallness; buttons and menus get the inverse scale,
+    canceling back to the app size — verdicts and menu rows shouldn't grow
+    with reading text (and are how the page is asked to *stop* being big).
+    """
+    global _font_provider, _font_scale
+    try:
+        percent = int(percent)  # settings files are user-editable text
+    except (TypeError, ValueError):
+        percent = 100
+    percent = min(max(percent, _FONT_SCALE_MIN), _FONT_SCALE_MAX)
+    if percent == _font_scale:
+        return
+    if _font_provider is None:
+        _font_provider = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(
+            display, _font_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+    _font_scale = percent
+    # Check rows are content that happens to be clickable (the row is the
+    # link), so they keep the reading scale — else a linked check would
+    # render smaller than a linkless one right below it.
+    inverse = 100.0 * 100.0 / percent
+    _font_provider.load_from_string(
+        f".pr-view-page {{ font-size: {percent}%; }}\n"
+        f".pr-view-page button:not(.pr-check-row), .pr-view-page popover"
+        f" {{ font-size: {inverse:.2f}%; }}\n"
+    )
 
 
 def _set_md(label: Gtk.Label, text: str) -> None:
