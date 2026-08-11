@@ -319,8 +319,7 @@ class PreferencesDialog(Adw.Dialog):
         panels_group.add(self._tab_drag_row)
         page.add(panels_group)
 
-        if editor.HAVE_GTKSOURCE:
-            self._build_editor_group(state, page)
+        self._build_editor_group(state, page)
 
         appearance_group = _SearchableGroup(title=_("Appearance"))
         scheme_row = Adw.ComboRow(title=_("Color scheme"))

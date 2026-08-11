@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-09. Full change history: git log for this file.
+fork. Last modified: 2026-08-10. Full change history: git log for this file.
 -->
 
 # Collins
@@ -71,7 +71,7 @@ Features:
 
 ## Requirements
 
-Python ≥ 3.10, GTK 4, libadwaita ≥ 1.5, VTE (GTK 4 build), PyGObject — from your distro's packages:
+Python ≥ 3.10, GTK 4, libadwaita ≥ 1.5, VTE (GTK 4 build), GtkSourceView 5, PyGObject — from your distro's packages:
 
 ```bash
 # Ubuntu / Debian

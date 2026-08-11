@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-09. Full change history: git log for this file.
+fork. Last modified: 2026-08-10. Full change history: git log for this file.
 -->
 
 # Features
@@ -353,12 +353,6 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   stay open, but the panel doesn't reappear in the window behind it until
   you ask for it. One editor per tab, in one place at a time; the popped-out
   window remembers its own size.
-
-If the footer icon is greyed out, the GtkSourceView 5 library the editor is
-built on isn't installed — the `.deb` pulls it in automatically, but a source
-checkout needs it installed by hand (Debian/Ubuntu: `gir1.2-gtksource-5`,
-Fedora: `gtksourceview5`, Arch: `gtksourceview5`). Install it and restart
-Collins; the button's tooltip says the same.
 
 ## Claude usage panel
 

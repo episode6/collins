@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-10. Full change history: git log for this file.
 
 # Maintainer: episode6 <support@episode6.com>
 # Contributor: Máté Molnár <molnar.mate@zengo.eu> (original agent-session-manager)
@@ -11,7 +11,7 @@ pkgdesc="Native GTK4 desktop app to manage and resume Claude Code sessions"
 arch=('any')
 url="https://github.com/episode6/collins"
 license=('GPL-3.0-or-later')
-depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'vte4')
+depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'vte4' 'gtksourceview5')
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
 optdepends=('claude-code: resume Claude Code sessions')
 # Refresh the sha256 when a v$pkgver tag exists (see packaging/aur/README.md).

@@ -981,8 +981,6 @@ class App(Adw.Application):
 
     def _mcp_open_in_editor(self, found, args: dict) -> tuple[bool, str]:
         window, tab = found
-        if tab.editor_root is None:  # GtkSourceView missing — no editor at all
-            return False, "This session's tab has no editor"
         path = self._mcp_resolve_file(tab, args["path"])
         if path is None:
             return False, f"No such file: {args['path']}"
