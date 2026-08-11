@@ -485,6 +485,9 @@ msgstr "Abrir seleccionadas en pestañas"
 msgid "warning: project dir {cwd} no longer exists, starting in HOME"
 msgstr "advertencia: el directorio del proyecto {cwd} ya no existe, iniciando en HOME"
 
+msgid "recreating removed worktree {path}"
+msgstr "recreando el worktree eliminado {path}"
+
 msgid "warning: `{cli}` not found in PATH — starting a plain shell"
 msgstr "advertencia: no se encontró `{cli}` en PATH — iniciando una shell simple"
 

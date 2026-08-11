@@ -485,6 +485,9 @@ msgstr "Ouvrir la sélection dans des onglets"
 msgid "warning: project dir {cwd} no longer exists, starting in HOME"
 msgstr "avertissement : le répertoire de projet {cwd} n’existe plus, démarrage dans HOME"
 
+msgid "recreating removed worktree {path}"
+msgstr "recréation du worktree supprimé {path}"
+
 msgid "warning: `{cli}` not found in PATH — starting a plain shell"
 msgstr "avertissement : `{cli}` introuvable dans le PATH — démarrage d’un shell simple"
 

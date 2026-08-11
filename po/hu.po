@@ -485,6 +485,9 @@ msgstr "Kijelöltek megnyitása lapokon"
 msgid "warning: project dir {cwd} no longer exists, starting in HOME"
 msgstr "figyelmeztetés: a(z) {cwd} projektkönyvtár már nem létezik, indítás a HOME-ban"
 
+msgid "recreating removed worktree {path}"
+msgstr "az eltávolított {path} munkafa újralétrehozása"
+
 msgid "warning: `{cli}` not found in PATH — starting a plain shell"
 msgstr "figyelmeztetés: a `{cli}` nem található a PATH-ban — egyszerű parancsértelmező indítása"
 

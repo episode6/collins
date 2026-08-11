@@ -198,6 +198,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open selected in tabs": "Kijelöltek megnyitása lapokon",
         "warning: project dir {cwd} no longer exists, starting in HOME":
             "figyelmeztetés: a(z) {cwd} projektkönyvtár már nem létezik, indítás a HOME-ban",
+        "recreating removed worktree {path}":
+            "az eltávolított {path} munkafa újralétrehozása",
         "warning: `{cli}` not found in PATH — starting a plain shell":
             "figyelmeztetés: a `{cli}` nem található a PATH-ban — egyszerű parancsértelmező indítása",
         "failed to start shell: {msg}": "nem sikerült elindítani a parancsértelmezőt: {msg}",
@@ -555,6 +557,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open selected in tabs": "Ausgewählte in Tabs öffnen",
         "warning: project dir {cwd} no longer exists, starting in HOME":
             "Warnung: Projektverzeichnis {cwd} existiert nicht mehr, starte im HOME",
+        "recreating removed worktree {path}":
+            "entfernter Worktree {path} wird neu erstellt",
         "warning: `{cli}` not found in PATH — starting a plain shell":
             "Warnung: `{cli}` nicht im PATH gefunden — starte eine einfache Shell",
         "failed to start shell: {msg}": "Shell konnte nicht gestartet werden: {msg}",
@@ -919,6 +923,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open selected in tabs": "Abrir seleccionadas en pestañas",
         "warning: project dir {cwd} no longer exists, starting in HOME":
             "advertencia: el directorio del proyecto {cwd} ya no existe, iniciando en HOME",
+        "recreating removed worktree {path}":
+            "recreando el worktree eliminado {path}",
         "warning: `{cli}` not found in PATH — starting a plain shell":
             "advertencia: no se encontró `{cli}` en PATH — iniciando una shell simple",
         "failed to start shell: {msg}": "no se pudo iniciar la shell: {msg}",
@@ -1281,6 +1287,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open selected in tabs": "Ouvrir la sélection dans des onglets",
         "warning: project dir {cwd} no longer exists, starting in HOME":
             "avertissement : le répertoire de projet {cwd} n’existe plus, démarrage dans HOME",
+        "recreating removed worktree {path}":
+            "recréation du worktree supprimé {path}",
         "warning: `{cli}` not found in PATH — starting a plain shell":
             "avertissement : `{cli}` introuvable dans le PATH — démarrage d’un shell simple",
         "failed to start shell: {msg}": "échec du démarrage du shell : {msg}",

@@ -1,8 +1,9 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-10. Full change history: git log for this file.
 
 import json
+import subprocess
 
 import pytest
 
@@ -13,9 +14,12 @@ from collins.sessions import (
     export_markdown,
     first_message_uuid,
     is_discoverable_transcript,
+    last_worktree_state,
     parse_details,
     project_name_for_cwd,
     read_mcp_config,
+    recreatable_worktree,
+    recreate_worktree,
     resume_cwd,
     session_from_file,
     transcript_is_stub,
@@ -505,3 +509,113 @@ def test_session_in_a_worktree_belongs_to_the_repository_project(tmp_path):
         mtime=0.0,
     )
     assert session.project_name == "repo"
+
+
+# -- reaped-worktree recovery ------------------------------------------------
+
+
+def _worktree_state_line(session: dict | None) -> str:
+    return json.dumps({"type": "worktree-state", "worktreeSession": session}) + "\n"
+
+
+def _git(root, *args):
+    subprocess.run(
+        ["git", "-c", "user.email=t@t.t", "-c", "user.name=t", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+
+
+def _worktree_repo(tmp_path):
+    """A git repo with one commit; returns (root, head_sha, worktree_state)."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    (root / "readme.md").write_text("hi", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "init")
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    state = {
+        "worktreePath": str(root / ".claude" / "worktrees" / "oasis"),
+        "worktreeName": "oasis",
+        "worktreeBranch": "worktree-oasis",
+        "originalHeadCommit": head,
+    }
+    return root, head, state
+
+
+def test_last_worktree_state_takes_last(tmp_path):
+    live = {"worktreePath": "/r/.claude/worktrees/x", "worktreeBranch": "worktree-x"}
+    p = tmp_path / "s.jsonl"
+    p.write_text(_worktree_state_line(live) + _worktree_state_line(None), encoding="utf-8")
+    assert last_worktree_state(p) is None  # relocated: the null record wins
+    p.write_text(_worktree_state_line(None) + _worktree_state_line(live), encoding="utf-8")
+    assert last_worktree_state(p) == live
+    p.write_text(json.dumps({"type": "user", "cwd": "/r"}) + "\n", encoding="utf-8")
+    assert last_worktree_state(p) is None  # no record at all
+    assert last_worktree_state(tmp_path / "missing.jsonl") is None
+
+
+def test_recreatable_worktree(tmp_path):
+    root, _head, state = _worktree_repo(tmp_path)
+    jsonl = tmp_path / "s.jsonl"
+    jsonl.write_text(_worktree_state_line(state), encoding="utf-8")
+    cwd = state["worktreePath"]
+
+    assert recreatable_worktree(jsonl, cwd) == state
+    # A different missing directory under the same worktrees root doesn't match.
+    assert recreatable_worktree(jsonl, str(root / ".claude" / "worktrees" / "other")) is None
+    # Not a Claude worktree path at all / repo gone / no transcript.
+    assert recreatable_worktree(jsonl, str(root / "sub")) is None
+    assert recreatable_worktree(None, cwd) is None
+    assert (
+        recreatable_worktree(jsonl, str(tmp_path / "gone" / ".claude" / "worktrees" / "x")) is None
+    )
+    # A relocated session (trailing null record) offers nothing to recreate.
+    jsonl.write_text(_worktree_state_line(state) + _worktree_state_line(None), encoding="utf-8")
+    assert recreatable_worktree(jsonl, cwd) is None
+
+
+def test_recreate_worktree_fresh(tmp_path):
+    _root, head, state = _worktree_repo(tmp_path)
+    assert recreate_worktree(state)
+    wt = state["worktreePath"]
+    out = subprocess.run(
+        ["git", "-C", wt, "rev-parse", "--abbrev-ref", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert out == "worktree-oasis"
+    sha = subprocess.run(
+        ["git", "-C", wt, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    assert sha == head
+
+
+def test_recreate_worktree_existing_branch(tmp_path):
+    """A surviving worktree-* branch (it had commits) is checked back out
+    rather than clobbered at the base commit."""
+    root, head, state = _worktree_repo(tmp_path)
+    _git(root, "branch", "worktree-oasis", head)
+    _git(root, "commit", "-qm", "extra", "--allow-empty")  # on main; branch stays at head
+    _git(root, "checkout", "-q", "worktree-oasis")
+    (root / "work.md").write_text("wip", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "work")
+    tip = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    _git(root, "checkout", "-q", "main")
+
+    assert recreate_worktree(state)
+    sha = subprocess.run(
+        ["git", "-C", state["worktreePath"], "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert sha == tip

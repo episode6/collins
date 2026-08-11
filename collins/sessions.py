@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-10. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -265,6 +266,96 @@ def resume_cwd(session: Session) -> str | None:
     if cwd and Path(cwd).is_dir():
         return cwd
     return session.cwd
+
+
+def last_worktree_state(path: Path) -> dict | None:
+    """The live worktree session the transcript currently records, or None.
+
+    The CLI appends a `worktree-state` record on every launch and resume; a
+    session that left its worktree — or was relocated out of it because the
+    directory went missing — gets a final record with `worktreeSession: null`.
+    Only the last record counts, so a relocated session reads as having no
+    worktree rather than the one it lost.
+    """
+    state: dict | None = None
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                # Cheap prefilter: the records are rare and small, the
+                # transcript can be megabytes.
+                if '"worktree-state"' not in line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if isinstance(entry, dict) and entry.get("type") == "worktree-state":
+                    session = entry.get("worktreeSession")
+                    state = session if isinstance(session, dict) else None
+    except OSError:
+        return None
+    return state
+
+
+def recreatable_worktree(jsonl_path: str | Path | None, cwd: str) -> dict | None:
+    """The worktree state a missing session cwd can be recreated from, or None.
+
+    Exiting the CLI reaps a session worktree it considers untouched — no
+    changes, no commits — deleting both the directory and its `worktree-*`
+    branch, so resuming later silently relocates the session to the repository
+    root. When the missing cwd is exactly the worktree the transcript still
+    records as current and the repository is still there, the worktree can be
+    put back before relaunching: a recreated worktree at the same path, branch
+    and base commit resumes seamlessly (verified against CLI 2.1.226).
+    """
+    if not jsonl_path:
+        return None
+    root = worktree_project_root(cwd)
+    if root is None or not Path(root, ".git").exists():
+        return None
+    state = last_worktree_state(Path(jsonl_path))
+    if not state:
+        return None
+    path = state.get("worktreePath")
+    if not isinstance(path, str) or os.path.normpath(path) != os.path.normpath(cwd):
+        return None
+    if not (state.get("worktreeBranch") and state.get("originalHeadCommit")):
+        return None
+    return state
+
+
+def recreate_worktree(state: dict) -> bool:
+    """Re-create a reaped session worktree at its recorded path, branch and
+    base commit. True when the directory exists afterwards. Runs git
+    subprocesses — call off the main loop."""
+    path = str(state["worktreePath"])
+    root = worktree_project_root(path)
+    if root is None:
+        return False
+
+    def git(*args: str) -> bool:
+        try:
+            return (
+                subprocess.run(
+                    ["git", "-C", root, *args],
+                    capture_output=True,
+                    timeout=60,
+                ).returncode
+                == 0
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    branch = str(state["worktreeBranch"])
+    # -f in both forms, because git refuses a path it still has registered —
+    # a worktree deleted behind git's back rather than reaped by the CLI.
+    if git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"):
+        # The branch survived (a reap deletes it), so it may hold commits the
+        # base doesn't: check it back out instead of clobbering it.
+        ok = git("worktree", "add", "-f", path, branch)
+    else:
+        ok = git("worktree", "add", "-f", "-b", branch, path, str(state["originalHeadCommit"]))
+    return ok and Path(path).is_dir()
 
 
 def _tail_state(path: Path) -> str:
