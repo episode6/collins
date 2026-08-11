@@ -215,17 +215,22 @@ class PanelStrip(Gtk.Box):
         """Append a shell page (its shell spawns right away) and optionally
         select it. `restore_text` seeds the scrollback (session restore)."""
         shell = self._shell_factory()
-        if self._settings is not None:
-            shell.apply_settings(self._settings)
-        page = self._view.append(shell)
-        page.set_title(shell.page_title())
-        icon = shell.page_icon()
-        if icon:
-            page.set_icon(Gio.ThemedIcon.new(icon))
+        self.add_page(shell, select=False)
         shell.open_shell(self._cwd(), restore_text)
         if select:
-            self._view.set_selected_page(page)
+            self.select_widget(shell)
         return shell
+
+    def add_page(self, widget, select: bool = True) -> None:
+        """Append any PanelPage as a tab — the non-shell kinds' way in (a
+        shell needs `new_shell`, which also spawns it). Settings fan out to
+        the new page like they do to the rest."""
+        if self._settings is not None:
+            widget.apply_settings(self._settings)
+        page = self._view.append(widget)
+        self._sync_tab(page)
+        if select:
+            self._view.set_selected_page(page)
 
     def _find_page(self, widget) -> Adw.TabPage | None:
         for i in range(self._view.get_n_pages()):
@@ -276,10 +281,26 @@ class PanelStrip(Gtk.Box):
             ids.append(widget.connect("shell-exited", self._on_shell_exited))
         if GObject.signal_lookup("bell", widget.__gtype__):
             ids.append(widget.connect("bell", lambda *_: self.emit("bell")))
+        if GObject.signal_lookup("title-changed", widget.__gtype__):
+            # A page whose title/icon follow live state (a PR page's state
+            # icon) re-syncs its tab whenever that state moves.
+            ids.append(widget.connect("title-changed", self._on_title_changed))
         self._page_signals[widget] = ids
         if getattr(widget, "page_kind", None) is not None and self.tab_drag_handles:
             page.set_indicator_icon(Gio.ThemedIcon.new(paneldnd.HANDLE_ICON))
             paneldnd.wire_tab_drag(self, widget)
+
+    def _sync_tab(self, page: Adw.TabPage) -> None:
+        """Bring a tab's title and icon in line with its page widget."""
+        widget = page.get_child()
+        page.set_title(widget.page_title())
+        icon = widget.page_icon()
+        page.set_icon(Gio.ThemedIcon.new(icon) if icon else None)
+
+    def _on_title_changed(self, widget) -> None:
+        page = self._find_page(widget)
+        if page is not None:
+            self._sync_tab(page)
 
     def _on_page_detached(self, _view, page: Adw.TabPage, _position) -> None:
         """Unwire a departing page (close or transfer-out) and report an

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-10. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -672,6 +672,36 @@ popover.menu button.open-with-row:hover {
    staying at full strength next to faded text. */
 .filetree-dim {
   opacity: 0.55;
+}
+
+/* native PR view panel page: header, conversation cards, label pills */
+.pr-view-header {
+  padding: 6px 10px;
+}
+.pr-view-title {
+  font-weight: bold;
+}
+.pr-card {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background-color: alpha(currentColor, 0.06);
+}
+.pr-label-pill {
+  padding: 0px 8px;
+  border-radius: 99px;
+  background-color: alpha(currentColor, 0.12);
+}
+/* the couldn't-load banner: content stays visible underneath, so this only
+   has to read as a note, not an error page */
+.pr-view-banner {
+  margin: 10px 10px 0px 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background-color: alpha(currentColor, 0.08);
+}
+.pr-check-row {
+  padding: 2px 6px;
+  min-height: 26px;
 }
 """
 
