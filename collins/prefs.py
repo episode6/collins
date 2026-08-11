@@ -321,6 +321,20 @@ class PreferencesDialog(Adw.Dialog):
 
         self._build_editor_group(state, page)
 
+        pr_view_group = _SearchableGroup(title=_("Pull request view"))
+        pr_scale_row = Adw.SpinRow.new_with_range(50, 300, 5)
+        pr_scale_row.set_title(_("Text size"))
+        pr_scale_row.set_subtitle(
+            _(
+                "Reading-text size in the pull request panel, as a percentage "
+                "of the app font; buttons and menus keep the app size"
+            )
+        )
+        pr_scale_row.set_value(int(state.get_setting("pr_font_scale") or 100))
+        pr_scale_row.connect("notify::value", self._on_pr_font_scale_changed)
+        pr_view_group.add(pr_scale_row)
+        page.add(pr_view_group)
+
         appearance_group = _SearchableGroup(title=_("Appearance"))
         scheme_row = Adw.ComboRow(title=_("Color scheme"))
         scheme_labels = [_(label) for _k, label, _s in _SCHEMES]
@@ -910,6 +924,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_terminal_max_width_changed(self, row: Adw.SpinRow, _pspec) -> None:
         self._state.set_setting("terminal_max_width", int(row.get_value()))
+        self._on_change()
+
+    def _on_pr_font_scale_changed(self, row: Adw.SpinRow, _pspec) -> None:
+        self._state.set_setting("pr_font_scale", int(row.get_value()))
         self._on_change()
 
     def _on_theme_radio(self, radio: Gtk.CheckButton, name: str) -> None:

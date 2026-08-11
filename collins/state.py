@@ -133,6 +133,9 @@ DEFAULT_SETTINGS = {
     "editor_show_line_numbers": True,
     "editor_show_hidden_files": True,
     "editor_pop_out_screen_width": 1600,  # scaled px; this wide or narrower opens popped out (0 = never)
+    # The native PR page's reading-text size, % of the app font. Buttons and
+    # menus keep the app size (see prview._apply_font_scale).
+    "pr_font_scale": 120,
     "editor_window_width": 1000,  # last popped-out editor window size (floating, unmaximized)
     "editor_window_height": 700,
     "editor_window_maximized": False,
