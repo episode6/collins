@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-10. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 import json
 import subprocess
@@ -10,9 +10,11 @@ import pytest
 from collins.sessions import (
     Session,
     configured_mcp_servers,
+    cut_on_word,
     discover_sessions,
     export_markdown,
     first_message_uuid,
+    first_user_prompt,
     is_discoverable_transcript,
     last_worktree_state,
     parse_details,
@@ -619,3 +621,49 @@ def test_recreate_worktree_existing_branch(tmp_path):
         text=True,
     ).stdout.strip()
     assert sha == tip
+
+
+def _prompt_transcript(tmp_path, *entries):
+    p = tmp_path / "s.jsonl"
+    p.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
+    return p
+
+
+def test_first_user_prompt_reads_past_the_preview_cut(tmp_path):
+    # The row preview stops at 120 characters; a PR mentioned after that
+    # point must still be readable (see prattach).
+    prompt = ("word " * 30).strip() + " then address the comments on PR 271"
+    path = _prompt_transcript(
+        tmp_path, {"type": "user", "message": {"role": "user", "content": prompt}}
+    )
+    assert first_user_prompt(path) == prompt
+
+
+def test_first_user_prompt_skips_harness_content(tmp_path):
+    path = _prompt_transcript(
+        tmp_path,
+        {
+            "type": "user",
+            "message": {"role": "user", "content": "<system-reminder>hi</system-reminder>"},
+        },
+        {"type": "assistant", "message": {"role": "assistant", "content": "hello"}},
+        {"type": "user", "message": {"role": "user", "content": "fix   the\nlogin bug"}},
+    )
+    assert first_user_prompt(path) == "fix the login bug"  # whitespace collapsed too
+
+
+def test_first_user_prompt_empty_when_there_is_none(tmp_path):
+    assert first_user_prompt(tmp_path / "missing.jsonl") == ""
+    path = _prompt_transcript(
+        tmp_path, {"type": "assistant", "message": {"role": "assistant", "content": "hello"}}
+    )
+    assert first_user_prompt(path) == ""
+
+
+def test_cut_on_word_never_splits_a_number():
+    # "review PR 1834" cut blind at 12 would read "review PR 18" — a
+    # reference to a pull request the prompt never mentioned.
+    assert cut_on_word("review PR 1834", 12) == "review PR"
+    assert cut_on_word("review PR 1834", 14) == "review PR 1834"
+    assert cut_on_word("review PR 1834", 10) == "review PR "  # cut fell on the boundary
+    assert cut_on_word("supercalifragilistic", 5) == "super"  # one long word: keep the head

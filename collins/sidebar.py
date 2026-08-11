@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-10. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -1151,6 +1151,7 @@ class SessionSidebar(Gtk.Box):
         self.insert_action_group("sidebar", actions)
 
         store.connect("refreshed", self._on_store_refreshed)
+        store.connect("prs-attached", self._on_prs_attached)
 
         # -- header ---------------------------------------------------------
         header = Adw.HeaderBar()
@@ -1578,6 +1579,16 @@ class SessionSidebar(Gtk.Box):
             if row is not None:
                 row.apply_prs(prs)
         return GLib.SOURCE_REMOVE
+
+    def _on_prs_attached(self, _store, session_id: str, _records: object) -> None:
+        """The store put a first prompt's PRs on a session (see prattach);
+        the row's mark re-reads the saved list it just wrote. `sync_prs`
+        rather than `apply_prs`: what was attached may be a bare PR still
+        waiting on its first status fetch, and the saved list plus `known`
+        is exactly the reading order the mark already trusts."""
+        row = self._rows.get(session_id)
+        if row is not None:
+            row.sync_prs()
 
     def _set_refresh_busy(self, busy: bool) -> None:
         """Turn the header's refresh button into a spinner while it works.

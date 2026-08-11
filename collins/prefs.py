@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-10. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -421,6 +421,17 @@ class PreferencesDialog(Adw.Dialog):
         self._auto_title_row.set_active(bool(state.get_setting("auto_title_sessions")))
         self._auto_title_row.connect("notify::active", self._on_auto_title_changed)
         sidebar_group.add(self._auto_title_row)
+        self._attach_prompt_prs_row = Adw.SwitchRow(
+            title=_("Attach pull requests named in prompts"),
+            subtitle=_(
+                "Put every pull request a new session's first prompt "
+                "mentions on that session's row, without waiting for the "
+                "agent to touch it"
+            ),
+        )
+        self._attach_prompt_prs_row.set_active(bool(state.get_setting("attach_prompt_prs")))
+        self._attach_prompt_prs_row.connect("notify::active", self._on_attach_prompt_prs_changed)
+        sidebar_group.add(self._attach_prompt_prs_row)
         self._pr_title_row = Adw.SwitchRow(
             title=_("Rename sessions after their pull requests"),
             subtitle=_(
@@ -1001,6 +1012,9 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_auto_title_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("auto_title_sessions", row.get_active())
+
+    def _on_attach_prompt_prs_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("attach_prompt_prs", row.get_active())
 
     def _populate_model_rows(self, state: AppState) -> None:
         """Fill the model pickers from a live Models API query, off the main

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-10. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -549,6 +549,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("close-placeholder", self._on_sidebar_close_placeholder)
         self.sidebar.connect("rows-reordered", lambda *_: self._sort_tabs())
         self.store.connect("refreshed", self._on_store_refreshed)
+        # First-prompt PRs (prattach): an open tab must adopt them, or its
+        # next poll re-saves its own list over the store's write.
+        self.store.connect(
+            "prs-attached",
+            lambda _store, session_id, records: self._adopt_session_prs(session_id, records),
+        )
 
         # Yellow "running detached" guide lines: keep the set of backgrounded session
         # ids fresh (see bgstatus.py for the trigger strategy).

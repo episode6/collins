@@ -228,6 +228,33 @@ def test_pr_references_keeps_the_less_specific_forms_as_fallbacks():
     assert [ref.args for ref in refs] == [("42", "--repo", "src/app.py"), ("183",)]
 
 
+def test_pr_references_all_collects_every_mention():
+    refs = titles.pr_references_all(
+        "merge PR 12 and pr #34, port episode6/collins#183, and review "
+        "https://github.com/episode6/collins/pull/200"
+    )
+    assert [ref.label for ref in refs] == [
+        "episode6/collins#200",  # forms keep their specificity order
+        "episode6/collins#183",
+        "#12",
+        "#34",
+    ]
+
+
+def test_pr_references_all_folds_a_slug_into_its_url():
+    refs = titles.pr_references_all(
+        "review episode6/collins#183 at https://github.com/episode6/collins/pull/183"
+    )
+    assert [ref.label for ref in refs] == ["episode6/collins#183"]
+    # The URL form won: it is the one gh can be asked about from anywhere.
+    assert refs[0].args == ("https://github.com/episode6/collins/pull/183",)
+
+
+def test_pr_references_all_drops_repeats():
+    refs = titles.pr_references_all("PR 12 fixes what PR 12 broke; see PR 34")
+    assert [ref.label for ref in refs] == ["#12", "#34"]
+
+
 def fetch_with(payload, ref, cwd):
     """Run the real _fetch_pr_title against a stubbed gh; returns
     (result, the calls gh got)."""

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -23,8 +23,9 @@ from gi.repository import Gio, GLib, GObject
 from . import chats, panelhistory
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
+from .prattach import PromptAttacher
 from .providers import available_providers
-from .prstatus import newest_title
+from .prstatus import from_records, newest_title, to_records
 from .sessions import (
     Session,
     discover_sessions,
@@ -85,6 +86,10 @@ class SessionStore(GObject.Object):
     __gsignals__ = {
         # order_changed: True when rows were re-spliced (UI must rebuild rows)
         "refreshed": (GObject.SignalFlags.RUN_FIRST, None, (bool,)),
+        # A session's first prompt named PRs and they were just saved to its
+        # list (see prattach): (session_id, records). The window adopts them
+        # into the session's open tab, the sidebar re-reads the row's mark.
+        "prs-attached": (GObject.SignalFlags.RUN_FIRST, None, (str, object)),
     }
 
     def __init__(self, state: AppState) -> None:
@@ -105,6 +110,10 @@ class SessionStore(GObject.Object):
         # Delivers on the worker thread; hop to the main loop before mutating.
         self._titles = TitleGenerator(
             lambda session_id, title: GLib.idle_add(self._on_title_generated, session_id, title)
+        )
+        # Same worker-thread delivery, same hop (see prattach).
+        self._prompt_prs = PromptAttacher(
+            lambda session_id, prs: GLib.idle_add(self._on_prompt_prs, session_id, prs)
         )
         self._items: dict[str, SessionItem] = {}
         self._last_sessions: list[Session] = []
@@ -149,6 +158,10 @@ class SessionStore(GObject.Object):
         if self._first_scan:
             self._first_scan = False
             self._backfill_names(sessions)
+            # The backlog's prompts predate the run and mostly carry their
+            # PRs already (via pr-links); only a session still waiting on its
+            # first prompt stays eligible, same as titling.
+            self._prompt_prs.skip(s.session_id for s in sessions if s.preview)
             # Trashing a chat session leaves (or fails to trash) its throwaway
             # directory; reap empty leftovers once per run.
             chats.sweep_orphan_chat_dirs({s.cwd for s in sessions if s.cwd})
@@ -156,6 +169,7 @@ class SessionStore(GObject.Object):
         self._apply()
         self._setup_monitors()  # pick up new project dirs
         self._request_titles(sessions)
+        self._request_prompt_prs(sessions)
         return GLib.SOURCE_REMOVE
 
     def _adopt_worktree_archives(self) -> None:
@@ -215,6 +229,37 @@ class SessionStore(GObject.Object):
                 and not self.state.get_generated_name(session_id)
             ):
                 self._titles.submit(session_id, session.preview, session.cwd)
+
+    def _request_prompt_prs(self, sessions: list[Session]) -> None:
+        """Queue first-prompt PR attachment for sessions that appeared while
+        the app runs — the launch backlog was marked skipped in _on_scanned.
+        The attacher ignores ids it has seen, so every refresh offers all of
+        them; a session whose first prompt hasn't landed yet has no preview
+        and is picked up when it does."""
+        if not self.state.get_setting("attach_prompt_prs"):
+            return
+        for session in sessions:
+            if session.preview:
+                self._prompt_prs.submit(session.session_id, session.jsonl_path, session.cwd)
+
+    def _on_prompt_prs(self, session_id: str, prs: list) -> bool:
+        """Land one first prompt's PRs (main loop; the attacher's callback
+        hops here). Saved-list order is respected — the prompt's PRs go after
+        whatever the session has already accumulated — and a PR both sides
+        know keeps the saved copy, which carries what has been learned since.
+        The prs-attached signal fans the write out to the open tab and the
+        sidebar row, which would otherwise re-save over it (see the sweep's
+        twin of this dance, SessionSidebar._prs_swept)."""
+        saved = from_records(self.state.get_session_prs(session_id))
+        have = {pr.url for pr in saved}
+        fresh = [pr for pr in prs if pr.url not in have]
+        if not fresh:
+            return GLib.SOURCE_REMOVE
+        records = to_records(saved + fresh)
+        self.state.set_session_prs(session_id, records)
+        self.apply_pr_title(session_id)
+        self.emit("prs-attached", session_id, records)
+        return GLib.SOURCE_REMOVE
 
     def regenerate_name(self, session_id: str) -> None:
         """Right-click → Regenerate name: re-title one session via the API,
