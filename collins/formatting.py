@@ -110,7 +110,16 @@ _MAX_URL = 2_000
 # screenshots are written. The image is what shows, so it parses as one
 # (the outer link is dropped: the picture opens in the lightbox, and the
 # link is a click away on GitHub).
-_LINKED_IMAGE_RE = re.compile(rf"\[!\[([^\]\n]*)\]\(({_MD_URL})\)\]\({_MD_URL}\)")
+#
+# The image's own URL still has to be http(s) — it is the one that gets
+# fetched — but the outer target may be anything a link can hold, relative
+# paths included. Holding *it* to http(s) too would only mean not matching:
+# the inner image would then parse on its own and leave the wrapper's `[`
+# and `](target)` around the picture as literal text.
+_LINK_TARGET = r"(?:\([^()\s]*\)|[^()\s])*"
+_LINKED_IMAGE_RE = re.compile(
+    rf"\[!\[([^\]\n]*)\]\(({_MD_URL})\)\]\({_LINK_TARGET}\)"
+)
 # One `<img>` tag. GitHub bodies mix HTML into markdown freely — an <img>
 # with a width= is the usual way to shrink a screenshot — and the markdown
 # pass never looked at tags at all, so today they render as literal text.

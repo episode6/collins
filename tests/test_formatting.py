@@ -185,6 +185,15 @@ def test_split_body_takes_a_linked_image_whole():
     ]
 
 
+def test_split_body_takes_a_linked_image_whatever_it_links_to():
+    # The wrapper's target is dropped either way, so it must not decide
+    # whether the wrapper parses: held to http(s), a relative one would
+    # leave a stray "[" and "](…)" as text around the rendered picture.
+    for target in ("/docs/build", "../ci.md", "#results", "mailto:a@b.c", ""):
+        body = f"[![badge](https://ex.com/b.svg)]({target})"
+        assert split_body(body) == [(BodyImage(url="https://ex.com/b.svg", alt="badge"),)]
+
+
 def test_split_body_reads_an_html_img_tag():
     body = '<img width="400" alt="the panel" src="https://ex.com/p.png">'
     assert split_body(body) == [
