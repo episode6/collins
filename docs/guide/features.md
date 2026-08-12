@@ -171,8 +171,10 @@ agents' own session files are never modified.
   tabs with it). Chats and replays, which have no row in the list, collect at
   the right-hand end. The tab bar can't be dragged into a different order for
   that reason: reorder the projects in the sidebar instead.
-- A slim **tab footer** shows the agent's live working directory (click to
-  copy) and the current **git branch** (⎇), plus the terminal-panel buttons.
+- A slim **tab footer** shows the **model** the session last answered with
+  (Opus 5, Haiku 4.5 — click to copy the full id; it follows a `/model` switch
+  mid-session), the agent's live working directory (click to copy) and the
+  current **git branch** (⎇), plus the terminal-panel buttons.
 - **Pull request chips** trail the branch: one per PR the session has opened,
   each with its **CI mark** (✓ / ✗ / ●) or GitHub's merge mark, and each
   **opening that PR's page beside the session on click** — the same view the

@@ -14,8 +14,11 @@ the newest model of that setting's preferred tier (Haiku for titles, Sonnet
 for icons), or, should the tier ever be dropped, the newest model of the
 weakest tier still offered.
 
-Kept GTK-free (like projecticons/titles) so the ranking and resolution
-logic is unit-testable headless.
+Reading an id back out is here too: short_name() turns one into the name a
+person would say, for the footer's "which model is this session on?".
+
+Kept GTK-free (like projecticons/titles) so the ranking, resolution and
+naming logic is unit-testable headless.
 """
 
 from __future__ import annotations
@@ -138,6 +141,36 @@ def available_models() -> list[ClaudeModel]:
             _cached = models
             _cached_at = time.monotonic()
         return list(models or _cached or [])
+
+
+_DATE_LEN = 8  # a YYYYMMDD stamp in an id (claude-haiku-4-5-20251001)
+
+
+def short_name(model_id: str) -> str:
+    """A model id written the way a person says it: "Opus 5", "Haiku 4.5".
+
+    For the places that have an id and no room for it — the tab footer names
+    the model a session is answering with, and the id it reads off the
+    transcript is both longer than the row can spare and noisier than the
+    question ("which model?") deserves.
+
+    Ids are pulled apart rather than looked up, so a model released after this
+    build still reads correctly: the tier is the part that names one of
+    `_TIERS`, the version is whatever digits sit around it (a date stamp
+    aside), and everything else — the `claude-` prefix, a cloud provider's
+    `us.anthropic.` and `-v1:0` wrappers — is packaging. An id that names no
+    known tier is handed back whole; better a long name than a wrong one.
+    """
+    ident = (model_id or "").strip()
+    base = ident.split(":", 1)[0]  # -v1:0 (Bedrock/Vertex)
+    base = base.rsplit(".", 1)[-1]  # us.anthropic.
+    base = base.split("[", 1)[0]  # claude-opus-5[1m] (a context-window variant)
+    parts = [part for part in base.replace("_", "-").split("-") if part]
+    tier = next((part for part in parts if part in _TIERS), None)
+    if tier is None:
+        return ident
+    version = [p for p in parts if p.isdigit() and len(p) != _DATE_LEN]
+    return " ".join(filter(None, (tier.capitalize(), ".".join(version))))
 
 
 def _tier(model_id: str) -> int:

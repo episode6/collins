@@ -33,6 +33,7 @@ from . import (  # noqa: E402
     themes,
     vtehtml,
 )
+from .claudemodels import short_name  # noqa: E402
 from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch, has_changes  # noqa: E402
@@ -1091,6 +1092,7 @@ class TerminalTab(Gtk.Box):
 
         self._footer_cwd: str | None = None  # last value shown in the footer
         self._footer_branch: str | None = None
+        self._footer_model: str | None = None  # model id, as the transcript writes it
         # Every PR this session has opened, oldest first: url -> PR with the
         # last status known for it (see _collect_prs). Replaced wholesale,
         # never mutated in place — the update thread reads it while the main
@@ -1348,6 +1350,26 @@ class TerminalTab(Gtk.Box):
         # tab, so the two shouldn't read as one run.
         copy_prompt_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
 
+        # Which model the session is answering with — the first thing the row
+        # says about the session itself, ahead of where it is working. Read
+        # off the transcript, which stamps every reply with its model, so a
+        # `/model` switch mid-session shows up here within a poll; the short
+        # name is what shows and the id itself is the tooltip (and the copy).
+        # Its divider trails it, so a session too new to have replied yet
+        # leaves neither a label nor a gap behind (see _sync_footer_seps).
+        self._model_label = Gtk.Label(xalign=0.0)
+        # A name is a couple of words; an id Collins can't shorten (a model
+        # newer than this build) is the long case, and it gives up its tail
+        # rather than the working directory's.
+        self._model_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self._model_label.set_max_width_chars(20)
+        self._model_label.add_css_class("caption")
+        self._model_label.add_css_class("dim-label")
+        self._model_label.set_visible(False)
+        enable_copy_on_click(self._model_label, lambda: self._footer_model, short_name)
+        self._model_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        self._model_sep.set_visible(False)
+
         self._cwd_label = Gtk.Label(xalign=0.0)
         self._cwd_label.set_ellipsize(Pango.EllipsizeMode.START)
         self._cwd_label.add_css_class("caption")
@@ -1440,12 +1462,14 @@ class TerminalTab(Gtk.Box):
         open_external.connect("pressed", self._on_open_external_terminal)
         toggle_btn.add_controller(open_external)
 
-        # cwd, branch and PRs sit together on the left; the wrapper box (not the
-        # cwd label) takes the slack so the buttons stay pinned right even
-        # while the branch and PR labels are hidden.
+        # model, cwd, branch and PRs sit together on the left; the wrapper box
+        # (not the cwd label) takes the slack so the buttons stay pinned right
+        # even while the model, branch and PR labels are hidden.
         left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
         left.append(copy_prompt_btn)
         left.append(copy_prompt_sep)
+        left.append(self._model_label)
+        left.append(self._model_sep)
         left.append(self._cwd_label)
         left.append(self._branch_seps[0])
         left.append(self._branch_label)
@@ -1567,16 +1591,30 @@ class TerminalTab(Gtk.Box):
         for links in list(self._root_name_links):
             links.set_root(root)
 
+    def _refresh_model_label(self) -> None:
+        """Name the model the session last answered with, or hide the label
+        until it has. Called wherever the transcript has just been read."""
+        model = self._transcript.model()
+        if model == self._footer_model:
+            return
+        self._footer_model = model
+        self._model_label.set_text(short_name(model) if model else "")
+        self._model_label.set_tooltip_text(copy_tooltip(model) if model else None)
+        self._model_label.set_visible(model is not None)
+        self._sync_footer_seps()
+
     def _sync_footer_seps(self) -> None:
         """Show only the dividers that separate two visible chips.
 
         The PR group ends in a button that is always there, so its own dividers
-        never come and go; the branch is the one chip that does, and the
-        divider ahead of it does double duty when it's absent — the row never
-        opens or closes with a stray divider.
+        never come and go; the model and the branch are the chips that do, and
+        each is paired with the divider on the side away from the copy button —
+        so the run never opens or closes with a stray divider. The one ahead of
+        the branch does double duty, standing in for the cwd's own.
         """
         branch = self._footer_branch is not None
         cwd = self._footer_cwd is not None
+        self._model_sep.set_visible(self._footer_model is not None)
         self._branch_seps[0].set_visible(cwd)
         self._branch_seps[1].set_visible(branch)
 
@@ -2208,11 +2246,13 @@ class TerminalTab(Gtk.Box):
         pull requests). Used on resume, and again once a brand-new session's
         file appears on disk."""
         self._transcript.set_path(jsonl_path)
-        # Another session's PRs; re-read from the new transcript below, and
-        # restored again by the window once this tab's session is known.
+        # Another session's PRs (and another session's model); re-read from the
+        # new transcript below, and the PRs restored again by the window once
+        # this tab's session is known.
         self._tracked_prs = {}
         self._restored_prs = []
         self._refresh_pr_chips([])
+        self._refresh_model_label()
         self._watch_transcript(jsonl_path)
 
     @property
@@ -2381,6 +2421,7 @@ class TerminalTab(Gtk.Box):
         self._pr_refresh_btn.set_sensitive(True)
         # Same pane object wherever it lives (in-tab or popped out).
         self._editor.set_agent_files(self._transcript.touched_files())
+        self._refresh_model_label()
         if tracked is not None:
             # The shown ones come back with status, and they keep it: it is
             # what the chips fall back to when a poll brings nothing new (a

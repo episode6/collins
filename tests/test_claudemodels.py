@@ -9,6 +9,7 @@ from collins.claudemodels import (
     default_model,
     parse_models,
     resolve_model,
+    short_name,
 )
 
 
@@ -159,3 +160,38 @@ def test_oauth_token_read_and_absent(tmp_path):
         assert claudemodels._oauth_token() == "tok-123"
     finally:
         claudemodels.CREDENTIALS_PATH = original
+
+
+# -- short_name ---------------------------------------------------------------
+
+
+def test_short_name_reads_current_ids():
+    assert short_name("claude-opus-5") == "Opus 5"
+    assert short_name("claude-sonnet-5") == "Sonnet 5"
+    assert short_name("claude-fable-5") == "Fable 5"
+    assert short_name("claude-opus-4-8") == "Opus 4.8"
+
+
+def test_short_name_drops_a_date_stamp():
+    assert short_name("claude-haiku-4-5-20251001") == "Haiku 4.5"
+
+
+def test_short_name_reads_the_old_id_order():
+    """Pre-2025 ids put the version ahead of the tier."""
+    assert short_name("claude-3-5-sonnet-20241022") == "Sonnet 3.5"
+
+
+def test_short_name_unwraps_cloud_and_variant_ids():
+    assert short_name("us.anthropic.claude-sonnet-4-20250514-v1:0") == "Sonnet 4"
+    assert short_name("claude-opus-5[1m]") == "Opus 5"
+
+
+def test_short_name_of_a_bare_alias_is_the_tier():
+    assert short_name("opus") == "Opus"
+
+
+def test_short_name_hands_back_what_it_cannot_read():
+    """Better a long name than a wrong one — an id naming no known tier is
+    shown as it came."""
+    assert short_name("some-future-model-9") == "some-future-model-9"
+    assert short_name("") == ""
