@@ -1,12 +1,13 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 """Read what a session is doing by tailing its JSONL transcript.
 
-Two things come out of the same pass, which is what makes it cheap: the files
-the agent has written (see ``_TOUCH_TOOLS``), and the ``pr-link`` records Claude
-Code writes when a session opens or touches a pull request (see prstatus).
+Three things come out of the same pass, which is what makes it cheap: the files
+the agent has written (see ``_TOUCH_TOOLS``), the ``pr-link`` records Claude
+Code writes when a session opens or touches a pull request (see prstatus), and
+the model that answered the last turn (see ``model``).
 Every distinct PR is kept, not just the last one — a session that opens three of
 them has three to show — in the order they first appear, which is the order they
 were opened.
@@ -34,12 +35,18 @@ _TOUCH_TOOLS = {
 }
 _MAX_TOUCHED = 30  # most-recent-first; plenty for a list that shows a handful
 
+# The CLI stamps its own interjections — API errors, interrupted turns — as
+# assistant messages from this "model". No model answered them, so they must
+# not retire the one that did.
+_SYNTHETIC_MODEL = "<synthetic>"
+
 
 class TranscriptModel:
     def __init__(self, jsonl_path: str | Path | None) -> None:
         self.path = Path(jsonl_path) if jsonl_path else None
         self._prs: dict[str, PullRequest] = {}  # url -> PR, first-seen order
         self._touched: list[str] = []  # files written by the agent, newest first
+        self._model: str | None = None  # model id of the most recent reply
         self._offset = 0
         self._buf = b""
 
@@ -48,6 +55,7 @@ class TranscriptModel:
         self.path = Path(jsonl_path) if jsonl_path else None
         self._prs = {}
         self._touched = []
+        self._model = None
         self._offset = 0
         self._buf = b""
 
@@ -77,6 +85,7 @@ class TranscriptModel:
         if size < self._offset:  # rewritten/truncated → start over
             self._prs = {}
             self._touched = []
+            self._model = None
             self._offset, self._buf = 0, b""
         if size <= self._offset:
             return False
@@ -110,10 +119,11 @@ class TranscriptModel:
                 return False  # re-emitted on resume/compact; not news, and not a reorder
             self._prs[pr.url] = pr
             return True
-        content = (entry.get("message") or {}).get("content")
+        message = entry.get("message") or {}
+        changed = self._record_model(entry, message)
+        content = message.get("content")
         if not isinstance(content, list):
-            return False
-        changed = False
+            return changed
         for block in content:
             if not isinstance(block, dict):
                 continue
@@ -123,6 +133,25 @@ class TranscriptModel:
                 if isinstance(path, str) and path.strip() and self._record_touch(path.strip()):
                     changed = True
         return changed
+
+    def _record_model(self, entry: dict, message: dict) -> bool:
+        """Remember which model wrote this reply. False when it isn't one, or
+        when it is the model already recorded.
+
+        Only the session's own replies count. A subagent's turns are written
+        into the same transcript (``isSidechain``) and routinely run on another
+        model — a Haiku search agent must not be mistaken for the session
+        switching to Haiku.
+        """
+        if entry.get("type") != "assistant" or entry.get("isSidechain"):
+            return False
+        model = message.get("model")
+        if not isinstance(model, str) or not model or model == _SYNTHETIC_MODEL:
+            return False
+        if model == self._model:
+            return False
+        self._model = model
+        return True
 
     def _record_touch(self, path: str) -> bool:
         """Move *path* to the front of the touched list. False when it was
@@ -142,6 +171,16 @@ class TranscriptModel:
         first, as the transcript recorded them — absolute paths, unchecked
         against disk or project root; the editor pane does that filtering."""
         return list(self._touched)
+
+    def model(self) -> str | None:
+        """The model that answered the session's most recent turn, as the CLI
+        recorded it (``claude-opus-5``), or None until one has.
+
+        The most recent rather than the first: a session can change model
+        mid-run — ``/model``, a fast-mode toggle — and what it is answering
+        with now is the only interesting answer.
+        """
+        return self._model
 
     def pull_requests(self) -> list[PullRequest]:
         """Every pull request this session has linked, oldest first.

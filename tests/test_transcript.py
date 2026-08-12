@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-08. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 import json
 
@@ -295,3 +295,105 @@ def test_set_path_clears_touched_files(tmp_path):
     m.update()
     m.set_path(None)
     assert m.touched_files() == []
+
+
+# -- which model is answering --------------------------------------------------
+
+
+def _reply_line(model, text="ok", sidechain=False):
+    line = {
+        "type": "assistant",
+        "message": {"role": "assistant", "model": model,
+                    "content": [{"type": "text", "text": text}]},
+    }
+    if sidechain:
+        line["isSidechain"] = True
+    return line
+
+
+def test_no_reply_means_no_model(tmp_path):
+    """A session that hasn't answered yet names no model — the footer has
+    nothing to show until it does."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [{"type": "user", "message": {"role": "user", "content": "hi"}}])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.model() is None
+
+
+def test_model_comes_from_the_latest_reply(tmp_path):
+    """A session can switch models mid-run; what it is answering with now is
+    what the footer says."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [_reply_line("claude-opus-5"), _reply_line("claude-sonnet-5")])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.model() == "claude-sonnet-5"
+
+
+def test_a_switch_is_a_change_but_the_same_model_is_not(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_reply_line("claude-opus-5")])
+    m = TranscriptModel(p)
+    assert m.update() is True
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_reply_line("claude-opus-5")) + "\n")
+    assert m.update() is False  # every turn repeats it; that is not news
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_reply_line("claude-sonnet-5")) + "\n")
+    assert m.update() is True
+    assert m.model() == "claude-sonnet-5"
+
+
+def test_synthetic_replies_do_not_count(tmp_path):
+    """The CLI's own interjections (API errors, interrupts) are stamped
+    <synthetic>: no model answered them, so the real one stands."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [_reply_line("claude-opus-5"), _reply_line("<synthetic>", "API Error")])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.model() == "claude-opus-5"
+
+
+def test_subagent_replies_do_not_count(tmp_path):
+    """A Haiku search agent runs inside an Opus session; the session is still
+    on Opus."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [_reply_line("claude-opus-5"),
+               _reply_line("claude-haiku-4-5-20251001", sidechain=True)])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.model() == "claude-opus-5"
+
+
+def test_one_line_can_carry_both_a_model_and_a_touch(tmp_path):
+    """Tool-use turns are stamped with a model like any other reply; the same
+    pass reads both out of them."""
+    p = tmp_path / "s.jsonl"
+    line = _touch_line("Write", "file_path", "/proj/a.py")
+    line["message"]["model"] = "claude-opus-5"
+    _write(p, [line])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.model() == "claude-opus-5"
+    assert m.touched_files() == ["/proj/a.py"]
+
+
+def test_set_path_clears_the_model(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_reply_line("claude-opus-5")])
+    m = TranscriptModel(p)
+    m.update()
+    m.set_path(tmp_path / "other.jsonl")
+    assert m.model() is None
+
+
+def test_relocate_keeps_the_model(tmp_path):
+    """Entering a worktree moves the file, not the session."""
+    old = tmp_path / "proj-repo" / "s.jsonl"
+    old.parent.mkdir()
+    _write(old, [_reply_line("claude-opus-5")])
+    m = TranscriptModel(old)
+    m.update()
+    m.relocate(_move(old, tmp_path / "proj-repo-worktree", "s.jsonl"))
+    assert m.model() == "claude-opus-5"
