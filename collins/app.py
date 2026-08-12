@@ -139,6 +139,15 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   padding: 3px;
 }
 
+/* the composer panel sliding up over the terminal's bottom edge. Shape only,
+   as with .attach-overlay above: its colors come from
+   themes._apply_dynamic_theme_css so it reads as a surface of the terminal's
+   own theme rather than an app-colored card floating on it. */
+.composer-panel {
+  padding: 8px;
+  border-radius: 12px 12px 0 0;
+}
+
 .count-badge {
   background-color: alpha(currentColor, 0.1);
   border-radius: 10px;

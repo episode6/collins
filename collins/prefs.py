@@ -272,15 +272,29 @@ class PreferencesDialog(Adw.Dialog):
         terminal_group.add(self._easy_copy_row)
 
         self._attach_overlay_row = Adw.SwitchRow(
-            title=_("Floating attach-file button"),
+            title=_("Floating composer button"),
             subtitle=_(
-                "Overlay a semi-transparent attach button on the corner of "
-                "each agent terminal"
+                "Overlay a semi-transparent button on the corner of each "
+                "agent terminal that opens the composer, a spell-checked "
+                "prompt box"
             ),
         )
         self._attach_overlay_row.set_active(bool(state.get_setting("attach_overlay_button")))
         self._attach_overlay_row.connect("notify::active", self._on_attach_overlay_changed)
         terminal_group.add(self._attach_overlay_row)
+
+        self._composer_enter_row = Adw.SwitchRow(
+            title=_("Enter sends composer text"),
+            subtitle=_(
+                "Off: Enter inserts a newline and Ctrl+Enter sends. "
+                "Shift+Enter always inserts a newline"
+            ),
+        )
+        self._composer_enter_row.set_active(
+            bool(state.get_setting("composer_enter_sends"))
+        )
+        self._composer_enter_row.connect("notify::active", self._on_composer_enter_changed)
+        terminal_group.add(self._composer_enter_row)
 
         current_theme = state.get_setting("terminal_theme") or DEFAULT_THEME
         if current_theme not in THEME_NAMES:
@@ -1015,6 +1029,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_attach_overlay_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("attach_overlay_button", row.get_active())
+        self._on_change()
+
+    def _on_composer_enter_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("composer_enter_sends", row.get_active())
         self._on_change()
 
     def _on_tab_drag_changed(self, row: Adw.SwitchRow, _pspec) -> None:

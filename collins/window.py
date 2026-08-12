@@ -3544,8 +3544,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _attach_file_to_chat(self) -> None:
         """The header attach button: pick a file, reference it in the focused
         agent's chat. The pick-then-mention flow lives on the tab (see
-        TerminalTab.pick_file_to_attach), shared with the floating button in
-        the terminal's corner."""
+        TerminalTab.pick_file_to_attach; the floating button in the
+        terminal's corner opens the composer instead)."""
         page = self.tab_view.get_selected_page()
         tab = page.get_child() if page is not None else None
         if isinstance(tab, TerminalTab):

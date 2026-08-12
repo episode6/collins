@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-06. Full change history: git log for this file.
+# fork. Last modified: 2026-08-12. Full change history: git log for this file.
 """Built-in terminal color palettes for the VTE terminal."""
 
 from __future__ import annotations
@@ -132,10 +132,11 @@ def apply_terminal_theme(terminal: Vte.Terminal, name: str | None) -> None:
 # mismatched frame around it: the empty space beside a width-clamped
 # terminal (.terminal-gutter, see TerminalTab's Adw.Clamp), the selected
 # tab's row in the tab bar, which sits directly above the terminal it shows,
-# and the floating attach-file button in the terminal's corner
-# (.attach-overlay), which inverts the terminal's colors so it contrasts
-# with any palette. One provider for the whole app: terminal_theme is a
-# single global setting, not per-tab.
+# the floating composer button in the terminal's corner (.attach-overlay),
+# which inverts the terminal's colors so it contrasts with any palette, and
+# the composer panel that button opens (.composer-panel), drawn as a surface
+# of the terminal itself. One provider for the whole app: terminal_theme is
+# a single global setting, not per-tab.
 _dynamic_theme_provider: Gtk.CssProvider | None = None
 
 
@@ -160,5 +161,12 @@ def _apply_dynamic_theme_css(theme: dict | None) -> None:
         # on hover. Shape and placement are static (see app.py's _CSS).
         f".attach-overlay {{ background-color: alpha({fg_css}, 0.45); color: {bg_css}; }}"
         f".attach-overlay:hover {{ background-color: alpha({fg_css}, 0.8); }}"
-        f".attach-overlay:active {{ background-color: {fg_css}; }}".encode()
+        f".attach-overlay:active {{ background-color: {fg_css}; }}"
+        # The composer panel is a surface of the terminal itself: terminal bg
+        # at full strength (it covers the prompt it stands in for), fenced off
+        # by a faint fg-colored top edge. Shape is static (app.py's _CSS).
+        f".composer-panel {{ background-color: {bg_css}; color: {fg_css}; "
+        f"border-top: 1px solid alpha({fg_css}, 0.3); }}"
+        f".composer-panel textview, .composer-panel textview text {{ "
+        f"background-color: {bg_css}; color: {fg_css}; caret-color: {fg_css}; }}".encode()
     )
