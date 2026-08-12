@@ -29,7 +29,7 @@ except (ValueError, ImportError):
         "and relaunch."
     ) from None
 
-from . import dialogs, editorfiles, fileclipboard, paneldnd  # noqa: E402
+from . import animatedimage, dialogs, editorfiles, fileclipboard, paneldnd  # noqa: E402
 from .filetree import FileTree  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 
@@ -697,12 +697,13 @@ class EditorPane(Gtk.Box):
         if guard != editorfiles.LoadGuard.OK:
             self._notify(self._guard_message(path, guard))
             return
-        try:
-            texture = Gdk.Texture.new_from_filename(key)
-        except GLib.Error:
+        # Through animatedimage like every other image surface, so a GIF
+        # opened here plays rather than showing its first frame.
+        paintable = animatedimage.load(key)
+        if paintable is None:
             self._notify(_("{name} couldn't be decoded as an image.").format(name=path.name))
             return
-        picture = Gtk.Picture.new_for_paintable(texture)
+        picture = Gtk.Picture.new_for_paintable(paintable)
         picture.set_can_shrink(True)
         picture.set_content_fit(Gtk.ContentFit.CONTAIN)
         picture.set_hexpand(True)

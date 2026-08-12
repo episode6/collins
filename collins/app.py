@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-10. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -702,6 +702,17 @@ popover.menu button.open-with-row:hover {
 .pr-check-row {
   padding: 2px 6px;
   min-height: 26px;
+}
+/* an image a PR body embeds, rendered in place (bodyimages.py). The
+   hairline frame is on the slot rather than the picture: it hugs the
+   picture either way, and while the download runs (or after it failed) the
+   same frame reads as the place the picture is going. */
+.pr-body-image {
+  border: 1px solid alpha(currentColor, 0.15);
+  border-radius: 6px;
+}
+.pr-body-image-standin {
+  padding: 6px 10px;
 }
 /* the Files view's per-file sections: a quieter card than .pr-card, since a
    built diff buffer brings its own scheme-colored background on top */

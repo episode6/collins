@@ -35,11 +35,20 @@ past a few lines behind "Show more", and the page's reading text renders at
 the ``pr_font_scale`` setting's size — buttons and menus excepted — via one
 display-level provider keyed off the page's css class (`_apply_font_scale`).
 
+Bodies show the images they embed, in place (`formatting.split_body` finds
+them, bodyimages fetches and sizes them, a click opens the lightbox) — a
+screenshot in a PR description is most of what that description says, and
+rendering it as the word "screenshot" underlined threw that away. The
+``pr_inline_images`` setting turns it off, which is also the answer for
+anyone who would rather a repository's bodies didn't make their machine
+fetch anything: off, an image renders as the alt-text link it always did.
+
 Everything shown is repository content and therefore untrusted: bodies go
 through `formatting.md_to_pango`'s escaping (with the plain-text fallback on
-malformed markup), only http(s) URLs ever reach a browser (prdetail already
-enforced that on the way in), and a pathological body renders capped behind
-a "Show more" step so building labels can't wedge the main loop.
+malformed markup), only http(s) URLs ever reach a browser or a fetch
+(prdetail and split_body both enforce that on the way in), and a
+pathological body renders capped behind a "Show more" step — with a cap on
+images too — so building labels can't wedge the main loop.
 """
 
 from __future__ import annotations
@@ -56,10 +65,15 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import avatars, dialogs, practions, prdetail, prmenu  # noqa: E402
+from . import avatars, bodyimages, dialogs, practions, prdetail, prmenu  # noqa: E402
 from .copylabel import open_tooltip, open_uri  # noqa: E402
 from .editor import GtkSource, style_scheme  # noqa: E402 — require_version + friendly exit live there
-from .formatting import format_relative, format_timestamp, md_to_pango  # noqa: E402
+from .formatting import (  # noqa: E402
+    format_relative,
+    format_timestamp,
+    md_to_pango,
+    split_body,
+)
 from .i18n import _, ngettext  # noqa: E402
 from .prstatus import PullRequest, invalidate  # noqa: E402
 
@@ -77,6 +91,9 @@ _RENDER_CAP = 20_000
 # them even without a newline (long paragraphs wrap).
 _FOLD_LINES = 8
 _FOLD_CHARS = 550
+# What a row of body images costs the fold's line budget: a picture caps at
+# bodyimages._MAX_HEIGHT, several lines' worth of the preview's height.
+_IMAGE_FOLD_LINES = 4
 # The title may wrap this far before it ellipsizes — a PR title is a sentence,
 # not a phrase, and one header line cut most of it off.
 _TITLE_LINES = 3
@@ -150,6 +167,9 @@ class PrViewPage(Adw.Bin):
         # "one press, one mutation" has to hold across all of those copies.
         self._thread_busy: set[str] = set()
         self._pending_reveal = False  # reveal_unresolved asked before data came
+        # The pr_inline_images setting, at its shipped default until the
+        # first apply_settings lands (which is before anything is fetched).
+        self._inline_images = True
 
         # -- header ---------------------------------------------------------
         header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -352,13 +372,22 @@ class PrViewPage(Adw.Bin):
         return False  # nothing running: a PR page is cheap to refetch
 
     def apply_settings(self, settings: dict) -> None:
-        """The editor's style scheme (the diff buffers wear it) and the page's
-        own text scale. Everything else renders in the app font and theme."""
+        """The editor's style scheme (the diff buffers wear it), the page's
+        own text scale, and whether bodies render the images they embed.
+        Everything else renders in the app font and theme."""
         scheme = settings.get("editor_style_scheme") or ""
         if scheme != self._scheme_setting:
             self._scheme_setting = scheme
             self._apply_scheme()
         _apply_font_scale(self.get_display(), settings.get("pr_font_scale"))
+        inline_images = bool(settings.get("pr_inline_images", True))
+        if inline_images != self._inline_images:
+            self._inline_images = inline_images
+            # Bodies are built with the setting baked in, so the switch only
+            # means anything once the cards are rebuilt around it.
+            if self._detail is not None:
+                self._rebuild()
+                self._rebuild_files()
 
     def page_state(self) -> dict:
         """This page's slot in a serialized dock layout (see panellayout):
@@ -564,7 +593,7 @@ class PrViewPage(Adw.Bin):
     def _description_card(self, detail: prdetail.PullRequestDetail) -> Gtk.Widget:
         card = _card(detail.author, detail.created_at)
         if detail.body:
-            card.append(_folded_body(detail.body))
+            card.append(_folded_body(detail.body, self._inline_images))
         else:
             none = Gtk.Label(label=_("No description provided."), xalign=0.0)
             none.add_css_class("dim-label")
@@ -600,7 +629,7 @@ class PrViewPage(Adw.Bin):
 
     def _comment_card(self, comment: prdetail.PrComment) -> Gtk.Widget:
         card = _card(comment.author, comment.created_at, url=comment.url)
-        card.append(_body_label(comment.body))
+        card.append(_body_label(comment.body, self._inline_images))
         return card
 
     def _review_card(self, review: prdetail.PrReview) -> Gtk.Widget:
@@ -617,7 +646,7 @@ class PrViewPage(Adw.Bin):
             verdict.add_css_class("dim-label")
         card = _card(review.author, review.created_at, trailing=[icon, verdict])
         if review.body:
-            card.append(_body_label(review.body))
+            card.append(_body_label(review.body, self._inline_images))
         return card
 
     def _thread_card(self, thread: prdetail.PrThread) -> _ThreadCard:
@@ -627,7 +656,12 @@ class PrViewPage(Adw.Bin):
         agreeing on a half-typed reply, and the shared busy set what keeps
         them from mutating the same thread twice."""
         return _ThreadCard(
-            thread, self._pr, self._thread_drafts, self._thread_busy, self._posted
+            thread,
+            self._pr,
+            self._thread_drafts,
+            self._thread_busy,
+            self._posted,
+            self._inline_images,
         )
 
     # -- the files view --------------------------------------------------------
@@ -954,6 +988,7 @@ class _ThreadCard(Gtk.Box):
         drafts: dict[str, str],
         busy: set[str],
         on_posted: Callable[[], None],
+        images: bool = False,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("pr-card")
@@ -982,7 +1017,7 @@ class _ThreadCard(Gtk.Box):
         for comment in thread.comments:
             block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             block.append(_byline(comment.author, comment.created_at, url=comment.url))
-            block.append(_body_label(comment.body))
+            block.append(_body_label(comment.body, images))
             body.append(block)
         body.append(self._write_row())
         body.append(self._reply_editor())
@@ -1294,35 +1329,29 @@ def _card(
     return card
 
 
-def _folded_body(text: str) -> Gtk.Widget:
+def _folded_body(text: str, images: bool = False) -> Gtk.Widget:
     """The description's body, folded to `_FOLD_LINES` lines behind "Show
     more" — a long description shouldn't push the conversation off screen.
 
-    A body that plainly fits the fold comes back as the plain label. The
-    expanded half is `_body_label`, so a pathological body keeps the render
-    cap's own second "Show more" step. The preview is truncated *text*, not
-    just an ellipsized label: `set_lines` is Pango's negative height, a
-    per-paragraph cap, so on a many-paragraph body the label alone would
-    show six lines of every paragraph. The line cap stays on as the bound
-    for the other shape — one huge paragraph.
+    A body that plainly fits the fold comes back without a toggle at all.
+    The expanded half is `_body_label`, so a pathological body keeps the
+    render cap's own second "Show more" step. The preview is truncated
+    *content*, not just an ellipsized label: `set_lines` is Pango's negative
+    height, a per-paragraph cap, so on a many-paragraph body the label alone
+    would show six lines of every paragraph. The line cap stays on as the
+    bound for the other shape — one huge paragraph.
+
+    The one thing the fold never hides is every picture: a preview carries
+    the body's first image row even when the text ran out of budget before
+    reaching it (`keep_first_image`). A description whose screenshots all
+    sat behind "Show more" would have made rendering them pointless for
+    exactly the bodies this is for.
     """
-    if text.count("\n") < _FOLD_LINES and len(text) <= _FOLD_CHARS:
-        return _body_label(text)
-    # Whole lines while the budget lasts (a cut mid-line can sever a link's
-    # markdown and render it literal); only a first line over the budget by
-    # itself is cut mid-way.
-    head = ""
-    for line in text.split("\n")[:_FOLD_LINES]:
-        if head and len(head) + len(line) > _FOLD_CHARS:
-            break
-        head = f"{head}\n{line}" if head else line[:_FOLD_CHARS]
-    preview = Gtk.Label(xalign=0.0, selectable=True, wrap=True, hexpand=True)
-    preview.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-    preview.set_lines(_FOLD_LINES)
-    preview.set_ellipsize(Pango.EllipsizeMode.END)
-    # rstrip: an "…" after a kept blank line would render as its own line.
-    _set_md(preview, head.rstrip() + "…")
-    full = _body_label(text)
+    segments = split_body(text) if images else [text]
+    preview = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True)
+    if _fill_body(preview, segments, _FOLD_CHARS, _FOLD_LINES, preview=True):
+        return preview
+    full = _body_widget(segments)
     full.set_visible(False)
     word = Gtk.Label(label=_("Show more"))
     caret = Gtk.Image.new_from_icon_name("pan-down-symbolic")
@@ -1348,28 +1377,127 @@ def _folded_body(text: str) -> Gtk.Widget:
     return box
 
 
-def _body_label(text: str) -> Gtk.Widget:
-    """A markdown body as a selectable wrapped label; past the render cap
-    it starts folded behind "Show more" (the whole text is already
-    bounded by prdetail, this cap is about Pango layout cost)."""
-    label = Gtk.Label(xalign=0.0, selectable=True, wrap=True, hexpand=True)
-    label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-    if len(text) <= _RENDER_CAP:
-        _set_md(label, text)
-        return label
-    _set_md(label, text[:_RENDER_CAP] + "…")
+def _body_label(text: str, images: bool = False) -> Gtk.Widget:
+    """A markdown body as selectable wrapped text — with the images it
+    embeds rendered in place when *images* is on (the `pr_inline_images`
+    setting; off, an image stays the alt-text link md_to_pango makes of
+    it). Past the render cap the rest waits behind "Show more" (the whole
+    text is already bounded by prdetail; this cap is about Pango layout
+    cost, which the main loop pays)."""
+    return _body_widget(split_body(text) if images else [text])
+
+
+def _body_widget(segments: list) -> Gtk.Widget:
+    """Every segment that fits the render cap, and a "Show more" for the
+    rest. Split out from `_body_label` because the fold's expanded half is
+    this same widget over the same already-split segments."""
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True)
+    if _fill_body(box, segments, _RENDER_CAP, None):
+        return box
     more = Gtk.Button(label=_("Show more"))
     more.add_css_class("flat")
     more.set_halign(Gtk.Align.START)
 
     def show_all(button: Gtk.Button) -> None:
-        _set_md(label, text)
+        child = box.get_first_child()
+        while child is not None:
+            box.remove(child)
+            child = box.get_first_child()
+        _fill_body(box, segments, None, None)
         button.set_visible(False)
 
     more.connect("clicked", show_all)
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-    box.append(label)
-    box.append(more)
+    outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    outer.append(box)
+    outer.append(more)
+    return outer
+
+
+def _fill_body(
+    box: Gtk.Box,
+    segments: list,
+    chars: int | None,
+    lines: int | None,
+    preview: bool = False,
+    keep_first_image: bool = True,
+) -> bool:
+    """Append the segments that fit *chars*/*lines* to *box*; return whether
+    all of them did.
+
+    Budgets are spent as the segments are walked, so what a reader gets is
+    the front of the body rather than a sample of it. An image row spends
+    `_IMAGE_FOLD_LINES` of the line budget — a picture is worth several
+    lines of a preview's height, and a body that opens with five of them
+    shouldn't unfold itself by being mostly pictures.
+    """
+    spent = False  # budgets exhausted; from here only a first image may pass
+    shown_image = False
+    complete = True
+    for segment in segments:
+        if isinstance(segment, tuple):
+            if spent and not (keep_first_image and not shown_image):
+                complete = False
+                continue
+            box.append(_image_row(segment))
+            shown_image = True
+            if lines is not None:
+                lines -= _IMAGE_FOLD_LINES
+                spent = spent or lines <= 0
+            continue
+        if spent:
+            complete = False
+            continue
+        head, whole = _head(segment, chars, lines)
+        label = Gtk.Label(xalign=0.0, selectable=True, wrap=True, hexpand=True)
+        label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        if preview and not whole:
+            # The backstop for the shape a budget can't catch: one paragraph
+            # longer than the fold, whose head is still a single line here.
+            # Only on the cut segment — a label that holds all its text must
+            # not ellipsize, or a body that fits the fold in a narrow panel
+            # would hide its tail with no "Show more" to press.
+            label.set_lines(_FOLD_LINES)
+            label.set_ellipsize(Pango.EllipsizeMode.END)
+        # rstrip: an "…" after a kept blank line would render as its own line.
+        _set_md(label, head if whole else head.rstrip() + "…")
+        box.append(label)
+        if not whole:
+            spent = True
+            complete = False
+            continue
+        if chars is not None:
+            chars -= len(segment)
+            spent = spent or chars <= 0
+        if lines is not None:
+            lines -= segment.count("\n") + 1
+            spent = spent or lines <= 0
+    return complete
+
+
+def _head(text: str, chars: int | None, lines: int | None) -> tuple[str, bool]:
+    """The front of *text* that fits the budgets, and whether that is all of
+    it. Whole lines while the budget lasts — a cut mid-line can sever a
+    link's markdown and render it literal — and only a first line over the
+    budget by itself is cut mid-way."""
+    if (chars is None or len(text) <= chars) and (lines is None or text.count("\n") < lines):
+        return text, True
+    head = ""
+    for line in text.split("\n")[:lines]:
+        if head and chars is not None and len(head) + len(line) > chars:
+            break
+        head = f"{head}\n{line}" if head else line[:chars]
+    return head, False
+
+
+def _image_row(row: tuple) -> Gtk.Widget:
+    """One row of body images. Images the body kept on one line stay on one
+    line here (a badge strip, a before/after pair); each still shrinks on
+    its own, so a narrow panel scales them down rather than clipping."""
+    if len(row) == 1:
+        return bodyimages.image(row[0])
+    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    for entry in row:
+        box.append(bodyimages.image(entry))
     return box
 
 

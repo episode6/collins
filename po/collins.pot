@@ -2355,3 +2355,18 @@ msgid ""
 "Reading-text size in the pull request panel, as a percentage of the app "
 "font; buttons and menus keep the app size"
 msgstr ""
+
+#: collins/prefs.py:340
+msgid "Show embedded images"
+msgstr ""
+
+#: collins/prefs.py:341
+msgid ""
+"Render the images a description or comment embeds, in place; click one to "
+"open it full size. Off, they stay links and opening a pull request "
+"downloads nothing"
+msgstr ""
+
+#: collins/bodyimages.py:172
+msgid "That file isn't an image Collins can display."
+msgstr ""

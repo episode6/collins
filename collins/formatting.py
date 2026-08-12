@@ -1,12 +1,13 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-10. Full change history: git log for this file.
+# fork. Last modified: 2026-08-11. Full change history: git log for this file.
 
 """Small human-readable formatting helpers shared across the UI."""
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -83,6 +84,171 @@ def md_to_pango(text: str, links: bool = False) -> str:
     for i, markup in enumerate(stash):
         text = text.replace(f"{_SENT_A}{i}{_SENT_B}", markup)
     return text
+
+
+@dataclass(frozen=True)
+class BodyImage:
+    """An image a body embeds: the URL to fetch, the alt text to fall back
+    to, and the width its author asked for (an `<img width=>`, 0 when
+    nobody said — markdown has no way to say it). All three are repository
+    content, i.e. untrusted — the URL is only ever http(s) (nothing else is
+    fetchable or linkable), the alt text only ever reaches a widget through
+    markup escaping, and the width is a bounded int or nothing at all."""
+
+    url: str
+    alt: str
+    width: int = 0
+
+
+# A body may embed this many images before the rest stay text (they still
+# render as their alt-text links, `md_to_pango`'s own fallback). A cap on
+# widgets built and fetches started, so a body listing hundreds of URLs
+# can't turn opening a PR into a hundred downloads.
+MAX_BODY_IMAGES = 20
+_MAX_URL = 2_000
+# `[![alt](image)](link)` — a linked image, how badges and click-through
+# screenshots are written. The image is what shows, so it parses as one
+# (the outer link is dropped: the picture opens in the lightbox, and the
+# link is a click away on GitHub).
+_LINKED_IMAGE_RE = re.compile(rf"\[!\[([^\]\n]*)\]\(({_MD_URL})\)\]\({_MD_URL}\)")
+# One `<img>` tag. GitHub bodies mix HTML into markdown freely — an <img>
+# with a width= is the usual way to shrink a screenshot — and the markdown
+# pass never looked at tags at all, so today they render as literal text.
+# The length bound keeps a pathological near-tag cheap to reject.
+_IMG_TAG_RE = re.compile(r"<img\b[^<>]{0,1000}>", re.I)
+_ATTR_RE = re.compile(r"""([A-Za-z-]{1,20})\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s'">]+))""")
+# What an `<img src>` must look like to be fetched: markdown's own http(s)
+# rule, restated for a value that arrives quoted rather than parenthesized.
+_HTML_SRC_RE = re.compile(r"^https?://[^\s'\"<>]+$")
+
+
+def split_body(text: str) -> list[str | tuple[BodyImage, ...]]:
+    """A markdown body split into text runs and rows of images.
+
+    Text runs come back verbatim, for `md_to_pango` to render exactly as it
+    would have; images come out as `BodyImage` tuples, one tuple per row —
+    images separated by nothing but spaces belong to one line in the source
+    (a row of badges, a before/after pair) and should stay on one line on
+    screen. A body with no images comes back as the single string it was,
+    so the common case costs one substring search.
+
+    Images inside code — fenced or inline — are left in their text run:
+    a body showing someone *how to write* an image is not embedding one.
+    The whitespace that only ever separated an image from the text around
+    it goes away with the split, since each row is its own widget with its
+    own spacing.
+    """
+    if "![" not in text and "<img" not in text.lower():
+        return [text]
+    protected = [m.span() for m in _FENCE_RE.finditer(text)]
+    protected += [m.span() for m in _INLINE_CODE_RE.finditer(text)]
+    found = []
+    for regex, parse in (
+        (_LINKED_IMAGE_RE, _md_image),
+        (_IMAGE_RE, _md_image),
+        (_IMG_TAG_RE, _html_image),
+    ):
+        for match in regex.finditer(text):
+            image = parse(match)
+            if image is not None:
+                found.append((match.start(), match.end(), image))
+    # Longest first at a given start, so a linked image beats the plain one
+    # nested inside it; anything overlapping something already taken is that
+    # nested match, and is dropped.
+    found.sort(key=lambda item: (item[0], -item[1]))
+    taken: list[tuple[int, int, BodyImage]] = []
+    consumed = 0
+    for start, stop, image in found:
+        if start < consumed or _protected(protected, start, stop):
+            continue
+        if len(taken) >= MAX_BODY_IMAGES:
+            break
+        taken.append((start, stop, image))
+        consumed = stop
+    if not taken:
+        return [text]
+    parts: list[str | BodyImage] = []
+    at = 0
+    for start, stop, image in taken:
+        parts.append(text[at:start])
+        parts.append(image)
+        at = stop
+    parts.append(text[at:])
+    return _rows(parts)
+
+
+def _rows(parts: list[str | BodyImage]) -> list[str | tuple[BodyImage, ...]]:
+    """Alternating text/image parts as text runs and image rows: images the
+    source kept on one line join one row, and text that was only the
+    whitespace around an image drops out."""
+    out: list[str | tuple[BodyImage, ...]] = []
+    joinable = False  # did the run just passed leave us on the same line?
+    for part in parts:
+        if isinstance(part, BodyImage):
+            if joinable and out and isinstance(out[-1], tuple):
+                out[-1] = out[-1] + (part,)
+            else:
+                out.append((part,))
+            joinable = True
+            continue
+        joinable = part.strip(" \t") == ""
+        # The whitespace at a run's edges only ever separated it from an
+        # image, and each row is its own widget with its own spacing now —
+        # a run that was nothing but that separation drops out entirely.
+        chunk = part.strip()
+        if chunk:
+            out.append(chunk)
+    return out
+
+
+def _protected(spans: list[tuple[int, int]], start: int, stop: int) -> bool:
+    return any(span_start < stop and start < span_stop for span_start, span_stop in spans)
+
+
+def _md_image(match: re.Match) -> BodyImage | None:
+    """`![alt](url)` (or its linked form) as a BodyImage; the pattern has
+    already held the URL to http(s)."""
+    url = match.group(2)
+    if len(url) > _MAX_URL:
+        return None
+    return BodyImage(url=url, alt=match.group(1).strip())
+
+
+def _html_image(match: re.Match) -> BodyImage | None:
+    """An `<img>` tag as a BodyImage, or None when its src isn't a URL we
+    can fetch — a relative path, a `data:` blob, a stray tag with no src."""
+    src = alt = width = ""
+    for attr in _ATTR_RE.finditer(match.group(0)):
+        name = attr.group(1).lower()
+        value = attr.group(2) or attr.group(3) or attr.group(4) or ""
+        if name == "src" and not src:
+            src = value
+        elif name == "alt" and not alt:
+            alt = value
+        elif name == "width" and not width:
+            width = value
+    # An HTML attribute carries its URL escaped; & is the one that matters
+    # (query strings are full of it) and the one GitHub itself writes.
+    url = src.strip().replace("&amp;", "&")
+    if len(url) > _MAX_URL or not _HTML_SRC_RE.match(url):
+        return None
+    return BodyImage(url=url, alt=alt.strip(), width=_width(width))
+
+
+def _width(value: str) -> int:
+    """A `width=` attribute as pixels, or 0 for "as big as it comes".
+
+    Shrinking a screenshot with `<img width=>` is the one bit of layout a
+    GitHub body can ask for, and the ask is worth honoring — but only when
+    it is a plain pixel count in a sane range. A percentage means something
+    relative to a page width Collins doesn't have, and a huge value is an
+    author asking to be scaled *up*, which no screenshot survives.
+    """
+    try:
+        pixels = int(value.strip())
+    except ValueError:
+        return 0
+    return pixels if 1 <= pixels <= 4_000 else 0
 
 
 def _blockquote_markup(m: re.Match) -> str:

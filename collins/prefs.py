@@ -333,6 +333,20 @@ class PreferencesDialog(Adw.Dialog):
         pr_scale_row.set_value(int(state.get_setting("pr_font_scale") or 100))
         pr_scale_row.connect("notify::value", self._on_pr_font_scale_changed)
         pr_view_group.add(pr_scale_row)
+        # Not "Show images": the session-tools group already has a row by
+        # that name (the show_image tool), and one Preferences window can't
+        # carry two of them.
+        self._pr_images_row = Adw.SwitchRow(
+            title=_("Show embedded images"),
+            subtitle=_(
+                "Render the images a description or comment embeds, in "
+                "place; click one to open it full size. Off, they stay "
+                "links and opening a pull request downloads nothing"
+            ),
+        )
+        self._pr_images_row.set_active(bool(state.get_setting("pr_inline_images")))
+        self._pr_images_row.connect("notify::active", self._on_pr_images_changed)
+        pr_view_group.add(self._pr_images_row)
         page.add(pr_view_group)
 
         appearance_group = _SearchableGroup(title=_("Appearance"))
@@ -928,6 +942,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_pr_font_scale_changed(self, row: Adw.SpinRow, _pspec) -> None:
         self._state.set_setting("pr_font_scale", int(row.get_value()))
+        self._on_change()
+
+    def _on_pr_images_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("pr_inline_images", bool(row.get_active()))
         self._on_change()
 
     def _on_theme_radio(self, radio: Gtk.CheckButton, name: str) -> None:
