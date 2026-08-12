@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-11. Full change history: git log for this file.
+fork. Last modified: 2026-08-12. Full change history: git log for this file.
 -->
 
 # Features
@@ -132,6 +132,13 @@ belongs to an issue), the prompt is summarized without it.
 Titles are persisted so each is generated only once; right-click →
 **Regenerate name** re-runs the model for one session, and a Preferences
 toggle turns auto-titling off. A manual rename always wins.
+
+Claude names sessions for itself too — automatically, and on an explicit
+`/rename`. The **Follow Claude's own session names** preference (off by
+default) makes the sidebar adopt those names as they land in the transcript,
+whether the session runs in a Collins tab or in a plain terminal. Claude's
+name takes precedence over the generated title; a session renamed by hand in
+Collins still keeps its manual name.
 
 ### Quick switcher
 

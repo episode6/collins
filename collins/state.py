@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-12. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -75,6 +75,12 @@ DEFAULT_SETTINGS = {
     # detected (see SessionStore.apply_pr_title). Fills the generated-name
     # slot, so a manual rename always wins.
     "pr_title_sessions": False,
+    # Follow the agent CLI's own session names: the titles it generates for
+    # itself and /rename renames, read off each transcript's title records
+    # as they land. Display-only — the names are recorded either way (see
+    # AppState.cli_titles) and this switch decides whether display_name
+    # prefers them; a manual rename in Collins still wins.
+    "cli_title_sessions": False,
     # Run the sidebar's PR sweep once, shortly after launch, so the marks
     # restored from the last run are replaced by current ones without the
     # refresh button being clicked (see MainWindow._schedule_launch_sweep).
@@ -205,6 +211,11 @@ class AppState:
     def __init__(self) -> None:
         self.names: dict[str, str] = {}
         self.generated_names: dict[str, str] = {}  # auto-generated titles (user names win)
+        # The agent CLI's own name per session, as last seen in its
+        # transcript. Kept separately from generated_names so the
+        # cli_title_sessions switch flips display both ways without
+        # touching what either side wrote (see SessionStore.display_name).
+        self.cli_titles: dict[str, str] = {}
         self.emojis: dict[str, str] = {}
         self.favorites: set[str] = set()
         self.archived: set[str] = set()
@@ -259,6 +270,7 @@ class AppState:
                 data = {}
         self.names = dict(data.get("names") or {})
         self.generated_names = dict(data.get("generated_names") or {})
+        self.cli_titles = dict(data.get("cli_titles") or {})
         self.emojis = dict(data.get("emojis") or {})
         self.favorites = set(data.get("favorites") or [])
         # "hidden"/"hidden_projects" are the pre-rename spellings of the
@@ -311,6 +323,7 @@ class AppState:
         payload = {
             "names": self.names,
             "generated_names": self.generated_names,
+            "cli_titles": self.cli_titles,
             "emojis": self.emojis,
             "favorites": sorted(self.favorites),
             "archived": sorted(self.archived),
@@ -363,6 +376,19 @@ class AppState:
             name = name.strip()
             if name:
                 self.generated_names[session_id] = name
+        self.save()
+
+    # -- agent-CLI titles --------------------------------------------------
+
+    def get_cli_title(self, session_id: str) -> str | None:
+        return self.cli_titles.get(session_id)
+
+    def set_cli_titles(self, titles: dict[str, str]) -> None:
+        """Record several sessions' CLI titles with a single write to disk."""
+        for session_id, title in titles.items():
+            title = title.strip()
+            if title:
+                self.cli_titles[session_id] = title
         self.save()
 
     # -- emojis ------------------------------------------------------------
