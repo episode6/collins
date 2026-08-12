@@ -1,6 +1,13 @@
 from datetime import datetime, timezone
 
-from collins.formatting import blast_radius_body, format_relative, md_to_pango
+from collins.formatting import (
+    MAX_BODY_IMAGES,
+    BodyImage,
+    blast_radius_body,
+    format_relative,
+    md_to_pango,
+    split_body,
+)
 
 # -- md_to_pango: the markdown PR bodies and comments lean on -----------------
 
@@ -105,7 +112,10 @@ def test_md_links_survive_balanced_parens_in_the_url():
 
 
 def test_md_images_degrade_to_their_alt_text_link():
-    # No remote fetches, ever: an image renders as its alt text linking out.
+    # md_to_pango never fetches anything: an image renders as its alt text
+    # linking out. That is what a body still shows wherever images aren't
+    # pulled out first (see split_body) — inline images turned off, a fetch
+    # that failed, an image past MAX_BODY_IMAGES.
     assert md_to_pango("![a chart](https://example.com/c.png)", links=True) == (
         '<a href="https://example.com/c.png">a chart</a>'
     )
@@ -125,6 +135,111 @@ def test_md_code_spans_shield_their_contents():
 
 def test_md_escapes_markup_in_plain_text():
     assert md_to_pango("a < b & *c*") == "a &lt; b &amp; <i>c</i>"
+
+
+# -- split_body: the images the PR view renders in place ----------------------
+
+
+def test_split_body_leaves_an_imageless_body_whole():
+    assert split_body("just words\n\nand more") == ["just words\n\nand more"]
+
+
+def test_split_body_pulls_an_image_out_of_its_paragraphs():
+    assert split_body("before\n\n![shot](https://ex.com/a.png)\n\nafter") == [
+        "before",
+        (BodyImage(url="https://ex.com/a.png", alt="shot"),),
+        "after",
+    ]
+
+
+def test_split_body_keeps_same_line_images_in_one_row():
+    # A badge row, or a before/after pair: one source line, one screen row.
+    assert split_body("![a](https://ex.com/a.png) ![b](https://ex.com/b.png)") == [
+        (
+            BodyImage(url="https://ex.com/a.png", alt="a"),
+            BodyImage(url="https://ex.com/b.png", alt="b"),
+        )
+    ]
+
+
+def test_split_body_separates_images_on_their_own_lines():
+    assert split_body("![a](https://ex.com/a.png)\n![b](https://ex.com/b.png)") == [
+        (BodyImage(url="https://ex.com/a.png", alt="a"),),
+        (BodyImage(url="https://ex.com/b.png", alt="b"),),
+    ]
+
+
+def test_split_body_keeps_the_text_around_an_inline_image():
+    assert split_body("see ![it](https://ex.com/a.png) there") == [
+        "see",
+        (BodyImage(url="https://ex.com/a.png", alt="it"),),
+        "there",
+    ]
+
+
+def test_split_body_takes_a_linked_image_whole():
+    # [![alt](image)](link) — the image is what shows; no stray brackets may
+    # survive into the text runs.
+    assert split_body("[![badge](https://ex.com/b.svg)](https://ex.com/build)") == [
+        (BodyImage(url="https://ex.com/b.svg", alt="badge"),)
+    ]
+
+
+def test_split_body_takes_a_linked_image_whatever_it_links_to():
+    # The wrapper's target is dropped either way, so it must not decide
+    # whether the wrapper parses: held to http(s), a relative one would
+    # leave a stray "[" and "](…)" as text around the rendered picture.
+    for target in ("/docs/build", "../ci.md", "#results", "mailto:a@b.c", ""):
+        body = f"[![badge](https://ex.com/b.svg)]({target})"
+        assert split_body(body) == [(BodyImage(url="https://ex.com/b.svg", alt="badge"),)]
+
+
+def test_split_body_reads_an_html_img_tag():
+    body = '<img width="400" alt="the panel" src="https://ex.com/p.png">'
+    assert split_body(body) == [
+        (BodyImage(url="https://ex.com/p.png", alt="the panel", width=400),)
+    ]
+
+
+def test_split_body_keeps_only_a_sane_pixel_width():
+    # A percentage is relative to a page width there isn't one of, and an
+    # absurd count is an ask to upscale; both mean "as big as it comes".
+    for width in ('"50%"', '"0"', '"99999"', '"wide"'):
+        body = f'<img width={width} src="https://ex.com/p.png">'
+        assert split_body(body) == [(BodyImage(url="https://ex.com/p.png", alt=""),)]
+
+
+def test_split_body_unescapes_an_html_src():
+    body = '<img src="https://ex.com/p.png?a=1&amp;b=2">'
+    assert split_body(body) == [(BodyImage(url="https://ex.com/p.png?a=1&b=2", alt=""),)]
+
+
+def test_split_body_refuses_an_img_src_it_cannot_fetch():
+    # Relative paths and data: blobs are left as the literal text they are.
+    for src in ("./local.png", "data:image/png;base64,AAAA", ""):
+        body = f'<img src="{src}">'
+        assert split_body(body) == [body]
+
+
+def test_split_body_leaves_images_inside_code_alone():
+    fenced = "```\n![a](https://ex.com/a.png)\n```"
+    assert split_body(fenced) == [fenced]
+    inline = "write `![a](https://ex.com/a.png)` for an image"
+    assert split_body(inline) == [inline]
+
+
+def test_split_body_caps_how_many_images_one_body_renders():
+    body = "\n".join(f"![{n}](https://ex.com/{n}.png)" for n in range(MAX_BODY_IMAGES + 5))
+    rows = split_body(body)
+    images = [row for row in rows if isinstance(row, tuple)]
+    assert len(images) == MAX_BODY_IMAGES
+    # The rest stay text, so md_to_pango still renders them as links.
+    assert any(isinstance(row, str) and "![20](" in row for row in rows)
+
+
+def test_split_body_keeps_a_non_image_link_in_its_text():
+    body = "read [the docs](https://ex.com/d) first"
+    assert split_body(body) == [body]
 
 
 # -- format_relative ----------------------------------------------------------

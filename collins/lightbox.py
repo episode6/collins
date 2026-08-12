@@ -9,6 +9,10 @@ seconds after it leaves), and on images too small to float over — where the
 bar would cover more than half the picture — it sits below the image
 instead, always visible (editorfiles.lightbox_zoombar_inside).
 
+An animated GIF animates here (animatedimage.load is what every image goes
+through), and keeps animating as it is zoomed and panned — the paintable
+carries its own frame clock, so nothing in the zoom math has to know.
+
 Zooming is a display scale relative to the image's natural size, starting at
 the fitted scale: the -/+ buttons step it, double-clicking the image zooms
 in by 100% (and back to fitted on the next). The image grows with the zoom
@@ -68,7 +72,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import editorfiles  # noqa: E402
+from . import animatedimage, editorfiles  # noqa: E402
 from .editorfiles import (  # noqa: E402
     LIGHTBOX_BUTTON_STRIP,
     LIGHTBOX_MIN_H,
@@ -126,12 +130,15 @@ class ImageLightbox(Gtk.Box):
         self.set_hexpand(True)
         self.set_vexpand(True)
 
-        self._texture = self._load_texture()
-        if self._texture is not None:
-            self._picture = Gtk.Picture.new_for_paintable(self._texture)
+        self._paintable = self._load_paintable()
+        if self._paintable is not None:
+            self._picture = Gtk.Picture.new_for_paintable(self._paintable)
             self._picture.set_can_shrink(True)
             self._picture.set_content_fit(Gtk.ContentFit.CONTAIN)
-            self._image_size = (self._texture.get_width(), self._texture.get_height())
+            self._image_size = (
+                self._paintable.get_intrinsic_width(),
+                self._paintable.get_intrinsic_height(),
+            )
             zoom = Gtk.GestureClick()
             zoom.connect("pressed", self._on_picture_pressed)
             self._picture.add_controller(zoom)
@@ -259,13 +266,13 @@ class ImageLightbox(Gtk.Box):
         )
         return btn
 
-    def _load_texture(self) -> Gdk.Texture | None:
+    def _load_paintable(self) -> Gdk.Paintable | None:
+        """The image, animated when the file is: an agent that hands over a
+        GIF to show a flow, or a demo GIF clicked out of a terminal, means
+        the moving picture — a still first frame is a different file."""
         if editorfiles.image_guard(self._path) != editorfiles.LoadGuard.OK:
             return None
-        try:
-            return Gdk.Texture.new_from_filename(str(self._path))
-        except GLib.Error:
-            return None  # not decodable after all; the status page says so
+        return animatedimage.load(self._path)  # None when it won't decode
 
     # -- presenting ----------------------------------------------------------
 

@@ -136,6 +136,10 @@ DEFAULT_SETTINGS = {
     # The native PR page's reading-text size, % of the app font. Buttons and
     # menus keep the app size (see prview._apply_font_scale).
     "pr_font_scale": 120,
+    # Whether PR bodies render the images they embed (bodyimages.py). On:
+    # opening a PR fetches the pictures its description and comments name.
+    # Off: they stay alt-text links, and nothing is fetched.
+    "pr_inline_images": True,
     "editor_window_width": 1000,  # last popped-out editor window size (floating, unmaximized)
     "editor_window_height": 700,
     "editor_window_maximized": False,
