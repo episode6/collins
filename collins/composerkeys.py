@@ -1,3 +1,5 @@
+# New in the ghackett fork of agent-session-manager (GPL-3.0).
+
 """What a key press means inside the composer's text box.
 
 The composer sends on Enter by default, with a setting that swaps sending to

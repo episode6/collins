@@ -2153,13 +2153,15 @@ class TerminalTab(Gtk.Box):
         """Lower the composer. Its text goes back where it came from —
         typed into the CLI's box, unsubmitted (multi-line arrives as one
         paste chunk, whose newlines are line breaks in the box) — unless
-        *restore* is False (sending already emptied it) or the agent is
-        gone, which quietly discards."""
+        *restore* is False (sending already emptied it) or the agent has
+        left the terminal, which quietly discards: what's there now is a
+        shell prompt, where a pasted draft isn't a draft, it's commands
+        (a shell without bracketed paste runs each line as it lands)."""
         if not self.composer_open():
             return
         text = self._composer.take_text()
         self._composer_revealer.set_reveal_child(False)
-        if restore and self._child_pid is not None:
+        if restore and self._agent_is_running():
             restored = composerkeys.restore_text(text)
             if restored:
                 self.feed_child_text(restored)
@@ -2171,14 +2173,18 @@ class TerminalTab(Gtk.Box):
         not behind a panel. Nothing but whitespace just closes. Not
         re-gated on takes_prompt: the box was emptied at open, and anything
         typed into the terminal since submits along with this, same as if
-        the user had pressed Enter there."""
+        the user had pressed Enter there. It IS re-gated on the agent
+        still being in the terminal — the text-then-Return of a submit
+        aimed at a shell would *execute* the draft — and an undeliverable
+        send keeps the panel up with the draft in it, losing nothing."""
         if not text.strip():
             self.close_composer()
             return
-        self._composer.take_text()
-        self._composer_revealer.set_reveal_child(False)
-        if self._child_pid is None:
+        if not self._agent_is_running():
+            self.feed_message(_("Composer: the agent isn't running in this tab"))
             return
+        self._composer.set_text("")
+        self._composer_revealer.set_reveal_child(False)
         self.inject_prompt(text)
 
     def _cut_entered_prompt(self) -> str | None:
