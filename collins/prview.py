@@ -89,6 +89,14 @@ _LARGE_PATCH_LINES = 2_000
 # The file list's share of the Files view until the user drags the divider —
 # the editor gives its file tree the same kind of sliver (_TREE_INITIAL_WIDTH).
 _FILE_LIST_WIDTH = 170
+# The width a *filled* page asks for, requested from the first frame on.
+# Loaded, the page's own minimum is its composer's button row plus the content
+# margins (~310px); loading, it is only the header's, some 60px narrower. A
+# page opening into a panel already squeezed to its minimum — a narrow window,
+# a wide sidebar — would therefore open at the loading floor and shove the
+# divider the moment the fetch landed. Asking for the filled width all along
+# costs nothing at the sizes a panel usually has, and holds the panel still.
+_MIN_PAGE_WIDTH = 320
 
 def _verdict(state: str) -> tuple[str, str | None, str]:
     """A review's verdict as its card heading: icon, color class, wording.
@@ -133,6 +141,9 @@ class PrViewPage(Adw.Bin):
         # this class, which is how a setting reaches every label in the page
         # without touching each one (see the function's comment).
         self.add_css_class("pr-view-page")
+        # The filled page's width, asked for while the first fetch is still
+        # in flight (see _MIN_PAGE_WIDTH).
+        self.set_size_request(_MIN_PAGE_WIDTH, -1)
         self._pr = pr
         self._host_factory = host_factory
         self._detail: prdetail.PullRequestDetail | None = None
