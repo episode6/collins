@@ -123,6 +123,9 @@ class SessionStore(GObject.Object):
         # Last-seen pr_title_sessions value, so apply_pr_titles sweeps only
         # when the setting flips on rather than on every preferences apply.
         self._pr_titles_on = bool(state.get_setting("pr_title_sessions"))
+        # Same for cli_title_sessions: apply_cli_titles re-projects only when
+        # the switch actually moved.
+        self._cli_titles_on = bool(state.get_setting("cli_title_sessions"))
         self._monitors: list[Gio.FileMonitor] = []
         self._refresh_queued = False
         self._scanning = False
@@ -565,11 +568,16 @@ class SessionStore(GObject.Object):
             self._apply()
 
     def apply_cli_titles(self) -> None:
-        """Re-project display names after a preferences apply: the
-        cli_title_sessions switch changes display_name's answer without any
-        session changing on disk, and _apply only pushes properties that
-        differ, so this is a no-op unless the switch actually moved."""
-        self._apply()
+        """Re-project display names when a preferences apply moved the
+        cli_title_sessions switch — it changes display_name's answer without
+        any session changing on disk. Called on every preferences apply
+        (that's the only signal there is), so the flip is detected here;
+        unlike apply_pr_titles both directions count, since switching off
+        reverts every adopted name too."""
+        on = bool(self.state.get_setting("cli_title_sessions"))
+        was_on, self._cli_titles_on = self._cli_titles_on, on
+        if on != was_on:
+            self._apply()
 
     def toggle_favorite(self, session_id: str) -> None:
         self.state.toggle_favorite(session_id)

@@ -691,6 +691,28 @@ def test_record_cli_titles_survives_the_tail_window(store):
     assert store.state.get_cli_title(sid) == "renamed later"
 
 
+def test_apply_cli_titles_reprojects_only_on_a_flip(store, monkeypatch):
+    """Preferences apply calls this on every save; only a save that moved the
+    cli_title_sessions switch (either direction — off reverts the adopted
+    names) re-projects the session list."""
+    applies = []
+    orig = store._apply
+    monkeypatch.setattr(store, "_apply", lambda: (applies.append(1), orig())[1])
+
+    store.apply_cli_titles()  # nothing moved: no work
+    assert not applies
+
+    store.state.set_setting("cli_title_sessions", True)
+    store.apply_cli_titles()
+    assert len(applies) == 1
+    store.apply_cli_titles()  # steady state: no work
+    assert len(applies) == 1
+
+    store.state.set_setting("cli_title_sessions", False)
+    store.apply_cli_titles()  # switching off is a change too
+    assert len(applies) == 2
+
+
 def test_cli_titled_sessions_skip_auto_titling(store, monkeypatch):
     """No claude -p run for a session whose display name already comes from
     the CLI's own title — the generated name would be shadowed anyway."""
