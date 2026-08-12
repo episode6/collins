@@ -1301,14 +1301,8 @@ class SessionSidebar(Gtk.Box):
         menu.append(_("MCP servers"), "win.mcp-servers")
         menu.append(_("Preferences"), "win.preferences")
         menu.append(_("About Collins"), "win.about")
-        # The additive action leads the left end, GNOME-style; menu and search
-        # follow, so the title carries three buttons on its left and two on
-        # its right.
-        self._add_project_btn = Gtk.Button(icon_name="folder-new-symbolic")
-        self._add_project_btn.set_tooltip_text(_("Add project"))
-        self._add_project_btn.set_action_name("win.add-project")
-        header.pack_start(self._add_project_btn)
-
+        # Menu and search hold the left end; the title carries two buttons on
+        # its left and three on its right.
         self._menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         header.pack_start(self._menu_btn)
 
@@ -1316,6 +1310,13 @@ class SessionSidebar(Gtk.Box):
         self.search_btn.set_tooltip_text(_("Search sessions"))
         self.search_btn.connect("toggled", lambda b: self._set_search_active(b.get_active()))
         header.pack_start(self.search_btn)
+
+        # Packed at the end first, so the additive action sits furthest right,
+        # past the refresh button.
+        self._add_project_btn = Gtk.Button(icon_name="folder-new-symbolic")
+        self._add_project_btn.set_tooltip_text(_("Add project"))
+        self._add_project_btn.set_action_name("win.add-project")
+        header.pack_end(self._add_project_btn)
 
         self._refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")
         self._refresh_btn.set_tooltip_text(_("Refresh session list and pull requests"))
