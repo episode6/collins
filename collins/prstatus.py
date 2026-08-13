@@ -53,6 +53,7 @@ import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 
 from .gitinfo import current_branch
@@ -94,8 +95,15 @@ _DUE = float("-inf")
 # someone else's, and whether that someone is Claude. Each comment carries
 # ``viewerDidAuthor`` — GitHub answering "did the logged-in user write this?" —
 # which spares a separate call to learn who that user is, and an ``author``
-# whose login is what names Claude.
-_GH_FIELDS = "title,state,isDraft,statusCheckRollup,mergeable,comments"
+# whose login is what names Claude. ``commits`` answers the question that
+# outranks both: whether the branch has moved since that comment, because a
+# review of code nobody is looking at any more is worth asking for again.
+_GH_FIELDS = "title,state,isDraft,statusCheckRollup,mergeable,comments,commits"
+# How deep gh reads a PR's list fields. It asks GitHub for one page of each and
+# doesn't page further, so a list exactly this long is a truncated one — and
+# for commits, oldest-first, the entries it dropped are the newest. Such a list
+# can't say when the branch last moved, and is read as if it hadn't said.
+_GH_PAGE = 100
 # The logins the `anthropics/claude-code-action` workflow comments under, with
 # any ``[bot]`` suffix already stripped and compared lowercased. GitHub Apps
 # post as ``<app>[bot]``, and the same workflow installed under a differently
@@ -192,10 +200,11 @@ class PullRequest:
     # Whether the PR's newest comment is someone else's — the conversation is
     # waiting on us.
     unresolved: bool = False
-    # Whether that newest comment is Claude's: it has already had the last
-    # word, so the menu stops offering to ask it for a review (see
-    # practions.actions_for).
+    # Whether that newest comment is Claude's.
     claude_replied: bool = False
+    # Whether a commit landed on the branch after that newest comment — the
+    # code has moved on from whatever was said about it.
+    pushed_since: bool = False
 
     @property
     def slug(self) -> str:
@@ -240,6 +249,18 @@ class PullRequest:
         closed PR isn't waiting on anyone.
         """
         return self.state in ("OPEN", "DRAFT") and self.unresolved
+
+    @property
+    def claude_had_the_last_word(self) -> bool:
+        """Whether Claude's answer is still the last thing that happened here.
+
+        What takes the review offer out of the menu (see practions.actions_for),
+        and it takes both halves: Claude wrote the newest comment *and* the
+        branch has stood still since it did. A commit pushed afterwards makes
+        that review a review of code that is no longer there, which is exactly
+        when asking for another pass is the point.
+        """
+        return self.claude_replied and not self.pushed_since
 
     @property
     def badge(self) -> str | None:
@@ -455,6 +476,8 @@ def to_record(pr: PullRequest) -> dict | None:
         record["unresolved"] = True
     if pr.claude_replied:
         record["claude_replied"] = True
+    if pr.pushed_since:
+        record["pushed_since"] = True
     return record
 
 
@@ -497,6 +520,7 @@ def from_record(record: object) -> PullRequest | None:
         mergeable=mergeable if mergeable in _MERGEABLE_STATES else None,
         unresolved=record.get("unresolved") is True,
         claude_replied=record.get("claude_replied") is True,
+        pushed_since=record.get("pushed_since") is True,
     )
 
 
@@ -768,6 +792,7 @@ def _entry(data: dict) -> dict:
         "mergeable": mergeable if mergeable in _MERGEABLE_STATES else None,
         "unresolved": _unresolved(last),
         "claude_replied": _by_claude(last),
+        "pushed_since": _pushed_since(last, data.get("commits")),
     }
 
 
@@ -803,10 +828,11 @@ def _unresolved(last: dict | None) -> bool:
 def _by_claude(last: dict | None) -> bool:
     """Whether the newest comment on the PR was written by Claude.
 
-    What takes "Ask Claude for a review" out of the menu: Claude having the
-    last word means a review was already asked for and answered, and asking
-    again on top of its own comment is the one action in that menu that would
-    plainly repeat itself. Only a login this recognizes counts (see
+    Half of what takes "Ask Claude for a review" out of the menu — the other
+    half is that nothing has been pushed since (see `_pushed_since`). Claude
+    having the last word means a review was already asked for and answered,
+    and asking again on top of its own comment is the one action in that menu
+    that would plainly repeat itself. Only a login this recognizes counts (see
     `_CLAUDE_LOGINS`) — an unrecognized one reads as a person, which leaves
     the offer exactly where it has always been.
     """
@@ -815,6 +841,59 @@ def _by_claude(last: dict | None) -> bool:
     if not isinstance(login, str):
         return False
     return login.lower().removesuffix("[bot]") in _CLAUDE_LOGINS
+
+
+def _pushed_since(last: dict | None, commits: object) -> bool:
+    """Whether the branch moved after the newest comment was posted.
+
+    The other half of the review offer: an answer is only the last word while
+    the code it was written about is still the code on the branch. Push a
+    commit after it and that review is a review of something else, which is
+    precisely the round-of-changes case the offer exists for — so it comes
+    back, Claude's comment still sitting there or not.
+
+    No comment at all is nothing to be *since*, and reads as no push. A date
+    neither side can be read from does not: an unstamped comment, a commits
+    list gh didn't answer with, and one long enough to have been paged (its
+    newest entries are the ones cut) all leave the offer standing, on the same
+    reasoning as `_unresolved` — one offer too many beats one missing.
+    """
+    if last is None:
+        return False
+    written = _when(last.get("createdAt"))
+    pushed = _newest_commit(commits)
+    return written is None or pushed is None or pushed > written
+
+
+def _newest_commit(commits: object) -> float | None:
+    """When the newest commit gh listed for the PR landed, or None if it can't say.
+
+    ``committedDate`` rather than ``authoredDate``, because a rebase rewrites
+    the former and a rebased branch is one that moved — as is a branch that
+    merged its base back in, whose newest commits are someone else's work
+    arriving. Order is not assumed, only wholeness: a full page is a truncated
+    list (see `_GH_PAGE`) and answers nothing.
+    """
+    if not isinstance(commits, list) or not commits or len(commits) >= _GH_PAGE:
+        return None
+    landed = [
+        when
+        for commit in commits
+        if isinstance(commit, dict)
+        and (when := _when(commit.get("committedDate"))) is not None
+    ]
+    return max(landed) if landed else None
+
+
+def _when(value: object) -> float | None:
+    """Epoch seconds from one of GitHub's ISO-8601 stamps, or None if it isn't one."""
+    if not isinstance(value, str):
+        return None
+    try:
+        # fromisoformat() can't parse a trailing "Z" until Python 3.11.
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 
 def _title(value: object) -> str | None:
@@ -1059,6 +1138,7 @@ def _applied(pr: PullRequest, entry: object) -> PullRequest:
         mergeable=mergeable if mergeable in _MERGEABLE_STATES else None,
         unresolved=entry.get("unresolved") is True,
         claude_replied=entry.get("claude_replied") is True,
+        pushed_since=entry.get("pushed_since") is True,
     )
 
 

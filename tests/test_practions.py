@@ -222,6 +222,18 @@ def test_the_review_offer_comes_back_once_someone_answers_claude():
     assert REVIEW in _keys(_pr())
 
 
+def test_a_commit_after_claudes_review_puts_the_offer_back():
+    """Nobody has to answer in words: the review is of code that is no longer
+    on the branch, which is the round of changes worth another pass."""
+    assert REVIEW in _keys(_pr(claude_replied=True, pushed_since=True))
+    assert REVIEW in _keys(_pr(state="DRAFT", claude_replied=True, pushed_since=True))
+
+
+def test_a_commit_nobody_has_reviewed_yet_changes_nothing():
+    """A push with no review under it was already being offered one."""
+    assert REVIEW in _keys(_pr(pushed_since=True))
+
+
 def test_claude_answering_leaves_the_rest_of_the_menu_alone():
     """Only the review offer reads the newest comment's author — the merge, the
     CI errand and the reply are about the PR's state, which hasn't moved."""

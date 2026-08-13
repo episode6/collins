@@ -679,6 +679,13 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
             {"__typename": "CheckRun", "conclusion": None, "status": "IN_PROGRESS",
              "name": "test"},
         ],
+        "comments": [
+            {"author": {"login": "claude"}, "viewerDidAuthor": False, "isMinimized": False,
+             "createdAt": "2026-08-13T12:00:00Z"},
+        ],
+        "commits": [
+            {"oid": "271949c", "committedDate": "2026-08-13T09:30:00Z"},
+        ],
     })
     monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
     monkeypatch.setattr(prstatus.subprocess, "run", lambda *a, **kw: _completed(reply))
@@ -687,8 +694,9 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
         "checks": {"passed": 1, "failed": 0, "pending": 1},
         "title": "Keep the yellow line on a backgrounded session",
         "mergeable": "MERGEABLE",
-        "unresolved": False,
-        "claude_replied": False,
+        "unresolved": True,
+        "claude_replied": True,
+        "pushed_since": False,
     }
 
 
@@ -1422,11 +1430,13 @@ def test_mergeability_survives_the_run():
 # -- unresolved comments -----------------------------------------------------
 
 
-def _comment(mine, minimized=False, login=None):
+def _comment(mine, minimized=False, login=None, when=None):
     """One entry of gh's comments list, as small as the check needs."""
     comment = {"viewerDidAuthor": mine, "isMinimized": minimized}
     if login is not None:
         comment["author"] = {"login": login}
+    if when is not None:
+        comment["createdAt"] = when
     return comment
 
 
@@ -1589,6 +1599,83 @@ def test_claudes_last_word_survives_the_run():
     already given."""
     pr = PullRequest(55, URL, "episode6/collins", state="OPEN", claude_replied=True)
     assert from_record(to_record(pr)).claude_replied is True
+
+
+# -- and whether the code moved after it (the other half of that offer) ------
+
+NOON = "2026-08-13T12:00:00Z"
+MORNING = "2026-08-13T09:30:00Z"
+EVENING = "2026-08-13T18:45:00Z"
+
+
+def _pushed(comments, commits):
+    return prstatus._entry({"comments": comments, "commits": commits})["pushed_since"]
+
+
+def _commit(when):
+    """One entry of gh's commits list, as small as the check needs."""
+    return {"oid": "271949c", "committedDate": when}
+
+
+def test_a_commit_after_the_newest_comment_is_a_push():
+    """The review was of code the branch has since moved off."""
+    assert _pushed([_comment(False, login="claude", when=NOON)], [_commit(EVENING)]) is True
+
+
+def test_a_commit_before_the_newest_comment_is_not():
+    """The ordinary shape of a review: it read the branch as it stands."""
+    assert _pushed([_comment(False, login="claude", when=NOON)],
+                   [_commit(MORNING), _commit(MORNING)]) is False
+
+
+def test_the_newest_commit_is_the_one_that_counts():
+    """Order isn't assumed — the whole list is read for its latest stamp."""
+    commits = [_commit(EVENING), _commit(MORNING)]
+    assert _pushed([_comment(False, login="claude", when=NOON)], commits) is True
+
+
+def test_no_comment_at_all_is_nothing_to_be_pushed_since():
+    assert _pushed([], [_commit(EVENING)]) is False
+
+
+@pytest.mark.parametrize("commits", [None, [], "pushed", 7, [{"committedDate": "soon"}]])
+def test_commits_gh_cant_answer_for_leave_the_offer_standing(commits):
+    """One offer too many beats one missing, as with an unstamped comment."""
+    assert _pushed([_comment(False, login="claude", when=NOON)], commits) is True
+
+
+def test_an_unstamped_comment_leaves_the_offer_standing():
+    assert _pushed([_comment(False, login="claude")], [_commit(MORNING)]) is True
+
+
+def test_a_paged_commit_list_cant_say_when_the_branch_moved():
+    """gh reads one page of commits, oldest first, so a full one is missing
+    exactly the commits this is asking about."""
+    page = [_commit(MORNING) for _ in range(prstatus._GH_PAGE)]
+    assert _pushed([_comment(False, login="claude", when=NOON)], page) is True
+    assert _pushed([_comment(False, login="claude", when=NOON)], page[:-1]) is False
+
+
+def test_a_push_after_claudes_review_is_worth_asking_about_again():
+    """Both bits together are what the menu reads (see practions)."""
+    reviewed = PullRequest(55, URL, state="OPEN", claude_replied=True)
+    assert reviewed.claude_had_the_last_word is True
+    assert replace(reviewed, pushed_since=True).claude_had_the_last_word is False
+    assert PullRequest(55, URL, state="OPEN", pushed_since=True).claude_had_the_last_word is False
+
+
+def test_enrich_fills_pushed_since(gh):
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0},
+        "claude_replied": True, "pushed_since": True})
+    refresh(URL)
+    assert enrich(parse_pr_link(_link())).claude_had_the_last_word is False
+
+
+def test_a_push_after_a_review_survives_the_run():
+    """Otherwise a restart takes the offer away from a branch that has moved."""
+    pr = PullRequest(55, URL, "episode6/collins", state="OPEN",
+                     claude_replied=True, pushed_since=True)
+    assert from_record(to_record(pr)).pushed_since is True
 
 
 # -- known (what a sidebar row rebuilds its mark from) -----------------------
