@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-13. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -2273,8 +2273,11 @@ class SessionSidebar(Gtk.Box):
 
         # Worktree launches only mean something in a git checkout (`.git` is a
         # file in worktree checkouts, so either form counts) — elsewhere the
-        # checkbox is omitted rather than left to silently do nothing.
-        if is_git and not self.store.state.is_virtual_project(project_name):
+        # checkbox is omitted rather than left to silently do nothing. Whether
+        # the project has sessions is beside the point: the pin is by name and
+        # applies to the next launch, which is exactly what a project added to
+        # the sidebar before its first session wants to set up front.
+        if is_git:
             self._worktree_menu_project = project_name
             self._project_worktree_action.set_state(
                 GLib.Variant.new_boolean(
