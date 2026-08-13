@@ -796,14 +796,20 @@ class _WrapLayout(Gtk.LayoutManager):
     Children keep their natural width and their order; what changes is that a
     line too narrow to hold the rest starts a new one. Space left over on a
     line goes to whatever on it expands (a `Gtk.Box(hexpand=True)` used as a
-    spacer, exactly as in a `Gtk.Box`), and to the line's right edge when
-    nothing does — these are action rows, and buttons hug that edge.
+    spacer, exactly as in a `Gtk.Box`), and to the line's end when nothing
+    does — these are action rows, and buttons hug that edge. Every line is
+    laid out from the start edge and mirrored whole under an RTL direction,
+    which is the mirroring a box would have done for free.
 
     The point is the minimum: a box's is the sum of its children's, which is
     how a row of four buttons ends up dictating how narrow a whole panel page
     can be squeezed (see _MIN_PAGE_WIDTH). Wrapping makes it the *widest
     single child* instead, and pays for it in height, which a scrolling column
     has to spare.
+
+    Hand-rolled rather than `Adw.WrapBox` on purpose: that arrived in
+    libadwaita 1.7, and the oldest distribution Collins targets (noble, which
+    the PPA builds for) ships 1.5. Don't "simplify" this into it.
     """
 
     __gtype_name__ = "CollinsPrWrapLayout"
@@ -863,6 +869,7 @@ class _WrapLayout(Gtk.LayoutManager):
         return (height, height, -1, -1)
 
     def do_allocate(self, widget: Gtk.Widget, width: int, height: int, _baseline: int) -> None:
+        rtl = widget.get_direction() == Gtk.TextDirection.RTL
         y = 0
         for index, line in enumerate(self._lines(widget, width)):
             if index:
@@ -872,9 +879,9 @@ class _WrapLayout(Gtk.LayoutManager):
             spare = max(spare, 0)
             growers = [child for child, _ in line if child.get_hexpand()]
             # Nothing to expand: the line's slack goes in front of it, which
-            # right-aligns the buttons the way the un-wrapped row's own spacer
-            # does. The remainder rides the last grower, so the row still ends
-            # flush against its right edge.
+            # pins the buttons to its end the way the un-wrapped row's own
+            # spacer does. The remainder rides the last grower, so the row
+            # still ends flush against that edge.
             x = 0 if growers else spare
             share = spare // len(growers) if growers else 0
             for child, natural in line:
@@ -884,7 +891,10 @@ class _WrapLayout(Gtk.LayoutManager):
                     if child is growers[-1]:
                         child_width += spare - share * len(growers)
                 child_width = max(child_width, child.measure(Gtk.Orientation.HORIZONTAL, -1)[0])
-                transform = Gsk.Transform().translate(Graphene.Point().init(x, y))
+                # RTL mirrors the line about its middle, first child at the
+                # right edge — what Gtk.Box does with the same children.
+                left = width - x - child_width if rtl else x
+                transform = Gsk.Transform().translate(Graphene.Point().init(left, y))
                 child.allocate(child_width, line_height, -1, transform)
                 x += child_width + self._spacing
             y += line_height
