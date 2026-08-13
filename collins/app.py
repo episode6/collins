@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-12. Full change history: git log for this file.
+# fork. Last modified: 2026-08-13. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -151,6 +151,27 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
 /* docked in a panel page, the composer is a pane, not a floating card */
 .composer-panel.docked {
   border-radius: 0;
+}
+
+/* dropped-image previews above the composer's text box: square crops with
+   a remove button that only shows itself while the pointer is on the thumb
+   (hover state reaches the overlay from any child under the pointer) or
+   while the button itself holds keyboard focus -- it stays in the tab
+   order, so a keyboard user can still reach and see it */
+.composer-thumbs picture {
+  border-radius: 6px;
+}
+.composer-thumb .composer-thumb-remove {
+  opacity: 0;
+  margin: 2px;
+  min-width: 20px;
+  min-height: 20px;
+  padding: 2px;
+  transition: opacity 150ms ease;
+}
+.composer-thumb:hover .composer-thumb-remove,
+.composer-thumb:focus-within .composer-thumb-remove {
+  opacity: 1;
 }
 
 .count-badge {

@@ -6,8 +6,11 @@ A `ComposerView` is a spell-checked multi-line text box with Send, attach
 and close buttons — everything the CLI's own input box isn't when a prompt
 outgrows one line. It owns no terminal plumbing at all: it announces
 ``send-requested`` / ``close-requested`` and its host (terminal.py's overlay
-today, a dock panel page later) decides what those mean — cut text out of
-the CLI's box on the way in, type it back or submit it on the way out.
+or a dock panel page) decides what those mean — cut text out of the CLI's
+box on the way in, type it back or submit it on the way out. It is also a
+drop target in its own right — files and raw images land as mentions, and
+images earn a strip of preview thumbnails over the text — through injected
+provider callbacks, so the view itself stays host-agnostic.
 
 libspelling is a hard dependency, the same bargain as GtkSourceView (which
 the spell-check adapter here is built for): nothing degrades without it, and
@@ -28,7 +31,7 @@ import gi
 
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, GObject, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
 
 try:
     gi.require_version("Spelling", "1")
@@ -42,7 +45,8 @@ except (ValueError, ImportError):
 
 from . import composerkeys, dropimages  # noqa: E402
 from .editor import GtkSource  # noqa: E402
-from .i18n import _  # noqa: E402
+from .i18n import _, ngettext  # noqa: E402
+from .lightbox import present_image_lightbox  # noqa: E402
 
 # The prview composer's "grows with the text, then scrolls" bounds, a little
 # taller: prompts run longer than PR comments.
@@ -51,6 +55,10 @@ _MAX_CONTENT_HEIGHT = 240
 
 _ESCAPE_KEYVAL = 0xFF1B  # GDK_KEY_Escape
 
+# Preview thumbnails: small enough that a handful sit in one row over the
+# text view, big enough to tell two screenshots apart.
+_THUMB_SIZE = 64
+
 
 class ComposerView(Gtk.Box):
     """The composer widget itself, host-agnostic (see module docstring).
@@ -58,6 +66,13 @@ class ComposerView(Gtk.Box):
     *pick_attach* is the attach button's click, injected by the host because
     picking a file needs the session's cwd and provider — the pick lands
     back here through `insert_mention`.
+
+    *file_reference* names a path the way the session's provider would
+    mention it (None for a name it refuses), and *notify* is where drop
+    problems are reported (the terminal's feed_message) — both injected for
+    the same reason as *pick_attach*: the view is a drop target of its own
+    (it doesn't sit over the terminal once docked), but stays GTK-only with
+    no provider knowledge.
     """
 
     __gsignals__ = {
@@ -68,11 +83,18 @@ class ComposerView(Gtk.Box):
         "dock-toggle-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    def __init__(self, pick_attach: Callable[[], None]) -> None:
+    def __init__(
+        self,
+        pick_attach: Callable[[], None],
+        file_reference: Callable[[str], str | None],
+        notify: Callable[[str], None],
+    ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("composer-panel")
         self._enter_sends = True
         self._font_provider: Gtk.CssProvider | None = None
+        self._file_reference = file_reference
+        self._notify = notify
 
         self._buffer = GtkSource.Buffer()
         # No language, no brackets: this is prose bound for a prompt, and
@@ -98,6 +120,17 @@ class ComposerView(Gtk.Box):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key)
         self._view.add_controller(keys)
+
+        # Image previews ride above the text view: a row of square thumbs
+        # for dropped images, hidden until the first one lands. Their own
+        # scroller so a long run of drops slides sideways instead of
+        # stretching the width-clamped overlay.
+        self._thumb_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._thumb_box.add_css_class("composer-thumbs")
+        self._thumb_scroller = Gtk.ScrolledWindow(child=self._thumb_box)
+        self._thumb_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        self._thumb_scroller.set_visible(False)
+        self.append(self._thumb_scroller)
 
         scroller = Gtk.ScrolledWindow(child=self._view)
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -137,13 +170,17 @@ class ComposerView(Gtk.Box):
         self.append(row)
         self._docked = False
         self.set_docked(False)
+        self._setup_drop()
 
     # -- text ------------------------------------------------------------------
 
     def set_text(self, text: str) -> None:
-        """Seed the box (the cut CLI prompt on open), cursor at the end."""
+        """Seed the box (the cut CLI prompt on open), cursor at the end.
+        Whole-buffer writes retire the preview strip too: the mentions the
+        thumbs annotated just went with the old text."""
         self._buffer.set_text(text)
         self._buffer.place_cursor(self._buffer.get_end_iter())
+        self._clear_previews()
 
     def peek_text(self) -> str:
         return self._buffer.get_text(
@@ -151,9 +188,11 @@ class ComposerView(Gtk.Box):
         )
 
     def take_text(self) -> str:
-        """Read and clear the box — closing and sending both empty it."""
+        """Read and clear the box — closing and sending both empty it —
+        and the preview strip with it (see set_text)."""
         text = self.peek_text()
         self._buffer.set_text("")
+        self._clear_previews()
         return text
 
     def insert_mention(self, text: str) -> None:
@@ -166,6 +205,141 @@ class ComposerView(Gtk.Box):
         space = dropimages.leading_space(before, dropimages.cell_width(before))
         self._buffer.insert_at_cursor(space + text)
         self.focus_view()
+
+    # -- drag & drop + previews ------------------------------------------------
+
+    def _setup_drop(self) -> None:
+        """The composer is a drop target of its own: overlaid it happens to
+        sit inside the terminal's, but docked as a panel page nothing else
+        would catch a drop. Same two payloads as the terminal's target
+        (_setup_image_drop is the model): Gdk.Texture listed first so a
+        browser drag offering URL and pixels resolves to the pixels.
+        Capture phase, because the text view underneath has drop handling
+        of its own that would win the innermost-widget contest and paste
+        file:// URIs as text; plain text drags don't match our formats and
+        still fall through to it."""
+        # Constructed bare + set_gtypes, as PyGObject demands (see terminal).
+        drop = Gtk.DropTarget(actions=Gdk.DragAction.COPY)
+        drop.set_gtypes([Gdk.Texture, Gdk.FileList])
+        drop.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        drop.connect("accept", self._accept_drop)
+        drop.connect("drop", self._on_drop)
+        self.add_controller(drop)
+
+    def _accept_drop(self, target: Gtk.DropTarget, drop: Gdk.Drop) -> bool:
+        """Claim the drag when the payload is one of ours and the provider
+        has a mention syntax at all (probed the way the terminal's accept
+        does). No agent-running gate here, unlike the terminal's: a mention
+        lands in this buffer as draft text, not in a shell."""
+        if not drop.get_formats().match(target.get_formats()):
+            return False
+        return self._file_reference("image.png") is not None
+
+    def _on_drop(self, _target: Gtk.DropTarget, value, _x: float, _y: float) -> bool:
+        if isinstance(value, Gdk.Texture):
+            # Raw image data: save the PNG copy, mention the copy.
+            try:
+                data = value.save_to_png_bytes().get_data()
+                directory = dropimages.default_directory()
+                dropimages.prune_stale(directory)
+                path = dropimages.save_png(bytes(data), directory)
+            except (GLib.Error, OSError):
+                self._notify(_("couldn't save a copy of the dropped image"))
+                return False
+            return self._mention_dropped([str(path)])
+        if isinstance(value, Gdk.FileList):
+            files = value.get_files()
+            paths = [p for f in files if (p := f.get_path()) is not None]
+            skipped = len(files) - len(paths)
+            if skipped:
+                # Counted, not echoed — the URIs are untrusted bytes (the
+                # terminal's _drop_files says why).
+                self._notify(
+                    ngettext(
+                        "skipped {n} dropped item that isn't a local file",
+                        "skipped {n} dropped items that aren't local files",
+                        skipped,
+                    ).format(n=skipped)
+                )
+            return self._mention_dropped(paths)
+        return False
+
+    def _mention_dropped(self, paths: list[str]) -> bool:
+        """Mention every path the provider will name, and thumbnail the
+        ones that decode as images. mention_tokens keeps path and
+        reference paired, so the provider is asked once per path — the
+        mention text and its thumbnail come from the same answer."""
+        pairs, failed = dropimages.mention_tokens(paths, self._file_reference)
+        if failed:
+            self._notify(
+                ngettext(
+                    "couldn't reference {n} dropped file name",
+                    "couldn't reference {n} dropped file names",
+                    failed,
+                ).format(n=failed)
+            )
+        if not pairs:
+            return False
+        self.insert_mention("".join(reference + " " for _path, reference in pairs))
+        for path, reference in pairs:
+            self._add_preview(path, reference)
+        return True
+
+    def _add_preview(self, path: str, reference: str) -> None:
+        """A square thumbnail in the strip for *path*, if it's an image
+        (anything else simply doesn't preview — the mention already tells
+        the whole story for a text file). Click opens the lightbox; a
+        hover-revealed corner button discards the thumb and takes the
+        mention with it when that's trivially safe (dropimages.
+        remove_mention refuses to guess otherwise, and the thumb alone
+        goes)."""
+        try:
+            texture = Gdk.Texture.new_from_filename(path)
+        except GLib.Error:
+            return
+        picture = Gtk.Picture.new_for_paintable(texture)
+        picture.set_can_shrink(True)
+        picture.set_content_fit(Gtk.ContentFit.COVER)
+        picture.set_size_request(_THUMB_SIZE, _THUMB_SIZE)
+        picture.set_tooltip_text(GLib.path_get_basename(path))
+        picture.set_cursor(Gdk.Cursor.new_from_name("pointer", None))
+        click = Gtk.GestureClick()
+        click.connect(
+            "pressed",
+            lambda _g, _n, _x, _y: present_image_lightbox(self, path),
+        )
+        picture.add_controller(click)
+        thumb = Gtk.Overlay(child=picture)
+        thumb.add_css_class("composer-thumb")
+        remove = Gtk.Button(
+            icon_name="window-close-symbolic",
+            tooltip_text=_("Remove image"),
+            halign=Gtk.Align.END,
+            valign=Gtk.Align.START,
+        )
+        remove.add_css_class("circular")
+        remove.add_css_class("osd")
+        remove.add_css_class("composer-thumb-remove")
+        remove.connect("clicked", lambda *_a: self._remove_preview(thumb, reference))
+        thumb.add_overlay(remove)
+        self._thumb_box.append(thumb)
+        self._thumb_scroller.set_visible(True)
+
+    def _remove_preview(self, thumb: Gtk.Overlay, reference: str) -> None:
+        self._thumb_box.remove(thumb)
+        if self._thumb_box.get_first_child() is None:
+            self._thumb_scroller.set_visible(False)
+        trimmed = dropimages.remove_mention(self.peek_text(), reference)
+        if trimmed is not None:
+            # Straight to the buffer: set_text would clear the other thumbs.
+            self._buffer.set_text(trimmed)
+            self._buffer.place_cursor(self._buffer.get_end_iter())
+        self.focus_view()
+
+    def _clear_previews(self) -> None:
+        while (child := self._thumb_box.get_first_child()) is not None:
+            self._thumb_box.remove(child)
+        self._thumb_scroller.set_visible(False)
 
     # -- behavior --------------------------------------------------------------
 

@@ -911,6 +911,9 @@ msgstr "Ouvrir le rédacteur"
 msgid "Attach file"
 msgstr "Joindre un fichier"
 
+msgid "Remove image"
+msgstr "Retirer l'image"
+
 msgid "Close composer and keep the text in the terminal"
 msgstr "Fermer le rédacteur et garder le texte dans le terminal"
 

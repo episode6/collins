@@ -8,7 +8,9 @@ from collins.dropimages import (
     default_directory,
     leading_space,
     mention_text,
+    mention_tokens,
     prune_stale,
+    remove_mention,
     save_png,
 )
 
@@ -46,6 +48,57 @@ def test_mention_text_counts_refused_names_and_keeps_the_rest():
 def test_mention_text_all_refused_or_empty():
     assert mention_text(["\x1b.png"], _fake_reference) == ("", 1)
     assert mention_text([], _fake_reference) == ("", 0)
+
+
+def test_mention_tokens_pairs_each_path_with_its_reference():
+    pairs, failed = mention_tokens(["a.png", "bad\x0d.png", "my pic.jpg"], _fake_reference)
+    assert pairs == [("a.png", "@a.png"), ("my pic.jpg", '@"my pic.jpg"')]
+    assert failed == 1
+
+
+def test_mention_tokens_asks_the_reference_callback_once_per_path():
+    calls = []
+
+    def counting_reference(path):
+        calls.append(path)
+        return _fake_reference(path)
+
+    mention_tokens(["a.png", "b.png"], counting_reference)
+    assert calls == ["a.png", "b.png"]
+
+
+# -- remove_mention -----------------------------------------------------------
+
+
+def test_remove_mention_takes_the_token_and_its_trailing_space():
+    assert remove_mention("see @a.png here", "@a.png") == "see here"
+
+
+def test_remove_mention_at_the_end_takes_a_leading_space_instead():
+    assert remove_mention("see @a.png", "@a.png") == "see"
+
+
+def test_remove_mention_sole_content_leaves_nothing():
+    assert remove_mention("@a.png ", "@a.png") == ""
+
+
+def test_remove_mention_quoted_token_with_spaces_inside():
+    assert remove_mention('look at @"my pic.jpg" now', '@"my pic.jpg"') == "look at now"
+
+
+def test_remove_mention_none_when_the_token_was_edited_away():
+    assert remove_mention("no mention left", "@a.png") is None
+
+
+def test_remove_mention_none_when_the_token_appears_twice():
+    assert remove_mention("@a.png and @a.png ", "@a.png") is None
+
+
+def test_remove_mention_ignores_a_substring_of_a_longer_token():
+    # "@a.png" inside "@a.pngx" is not the mention; nothing safe to remove.
+    assert remove_mention("keep @a.pngx here", "@a.png") is None
+    # ...and the real token is still found next to the longer one.
+    assert remove_mention("keep @a.pngx @a.png here", "@a.png") == "keep @a.pngx here"
 
 
 # -- leading_space ------------------------------------------------------------
