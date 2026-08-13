@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-08. Full change history: git log for this file.
+fork. Last modified: 2026-08-13. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -23,6 +23,7 @@ fork. Last modified: 2026-08-08. Full change history: git log for this file.
 | `Shift+Enter` | Insert a newline in the agent's prompt |
 | `Ctrl+J` | Show/hide the terminal panel — pressed twice in quick succession it opens the panel and moves it bottom ↔ right |
 | `Ctrl+K` | Clear the terminal panel (screen and saved history) |
+| `Ctrl+.` | Show/hide the composer — raised, the cursor lands in it; pressed again while composing it closes and puts the draft back in the agent's own input box |
 | `F8` | Show/hide the editor panel (brings a popped-out editor back first) |
 | `Ctrl+Shift+O` | Quick open — fuzzy-find a file in the project, opened in the editor |
 | `Ctrl+S` (in the editor) | Save the current file |

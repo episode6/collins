@@ -375,7 +375,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "attach_pr — put a pull request on the session's own footer and sidebar row":
             "attach_pr — pull request elhelyezése a munkamenet saját láblécén "
             "és oldalsávsorán",
-        "Open composer": "Üzenetszerkesztő megnyitása",
+        "Open composer (Ctrl+.)": "Üzenetszerkesztő megnyitása (Ctrl+.)",
         "Attach file": "Fájl csatolása",
         "Remove image": "Kép eltávolítása",
         "Close composer and keep the text in the terminal":
@@ -763,7 +763,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "attach_pr — put a pull request on the session's own footer and sidebar row":
             "attach_pr — setzt einen Pull-Request auf die Fußzeile und "
             "Seitenleistenzeile der Sitzung",
-        "Open composer": "Composer öffnen",
+        "Open composer (Ctrl+.)": "Composer öffnen (Strg+.)",
         "Attach file": "Datei anhängen",
         "Remove image": "Bild entfernen",
         "Close composer and keep the text in the terminal":
@@ -1149,7 +1149,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "attach_pr — put a pull request on the session's own footer and sidebar row":
             "attach_pr — coloca un pull request en el pie y la fila de la "
             "barra lateral de la sesión",
-        "Open composer": "Abrir el redactor",
+        "Open composer (Ctrl+.)": "Abrir el redactor (Ctrl+.)",
         "Attach file": "Adjuntar archivo",
         "Remove image": "Quitar imagen",
         "Close composer and keep the text in the terminal":
@@ -1537,7 +1537,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "attach_pr — put a pull request on the session's own footer and sidebar row":
             "attach_pr — place une pull request sur le pied de page et la "
             "ligne de barre latérale de la session",
-        "Open composer": "Ouvrir le rédacteur",
+        "Open composer (Ctrl+.)": "Ouvrir le rédacteur (Ctrl+.)",
         "Attach file": "Joindre un fichier",
         "Remove image": "Retirer l'image",
         "Close composer and keep the text in the terminal":

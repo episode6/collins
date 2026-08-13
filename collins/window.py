@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-12. Full change history: git log for this file.
+# fork. Last modified: 2026-08-13. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -1041,6 +1041,7 @@ class MainWindow(Adw.ApplicationWindow):
             "tap-panel": lambda *_: self._toggle_panel(double_tap=True),
             "swap-panel": lambda *_: self._swap_panel(),
             "clear-panel": lambda *_: self._clear_panel(),
+            "toggle-composer": lambda *_: self._toggle_composer(),
             # Deliberately no default accelerator or menu surface: the
             # dock's visible affordances (per-tab drag handles, drop
             # zones) cover moving; this exists for custom keybindings.
@@ -1217,6 +1218,10 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control><Shift>e", "win.toggle-tab-emoji"),
             ("<Control>j", "win.tap-panel"),
             ("<Control>k", "win.clear-panel"),
+            # Punctuation on purpose: every Ctrl+letter this controller
+            # claims is one the agent's own input box never sees again, and
+            # Ctrl+period sends no byte a terminal app would have wanted.
+            ("<Control>period", "win.toggle-composer"),
             ("F9", "win.toggle-sidebar"),
             ("F8", "win.toggle-editor"),
             ("<Control><Shift>o", "win.quick-open"),
@@ -3630,6 +3635,24 @@ class MainWindow(Adw.ApplicationWindow):
         tab = self._current_terminal_tab()
         if tab is not None:
             tab.clear_panel_history()
+
+    def _toggle_composer(self) -> None:
+        """Ctrl+period: raise this tab's composer with the cursor already in
+        it, or — pressed while the cursor is in it — lower it, the draft
+        going back into the agent's own input box exactly as the panel's
+        close button leaves it.
+
+        The toggle turns on focus rather than mere visibility: a docked
+        composer sitting in a collapsed strip, or behind another panel
+        page, is one the press was asking to *see*, so it comes forward
+        instead of closing."""
+        tab = self._current_terminal_tab()
+        if tab is None:
+            return
+        if tab.composer_focused():
+            tab.close_composer()
+        else:
+            tab.open_composer()
 
     def _move_panel_page(self) -> None:
         """Cycle the focused panel page to the next strip; a dock with one

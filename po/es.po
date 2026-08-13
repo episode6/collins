@@ -899,8 +899,8 @@ msgstr "Adjuntar pull requests"
 msgid "attach_pr — put a pull request on the session's own footer and sidebar row"
 msgstr "attach_pr — coloca un pull request en el pie y la fila de la barra lateral de la sesión"
 
-msgid "Open composer"
-msgstr "Abrir el redactor"
+msgid "Open composer (Ctrl+.)"
+msgstr "Abrir el redactor (Ctrl+.)"
 
 msgid "Attach file"
 msgstr "Adjuntar archivo"
