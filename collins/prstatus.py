@@ -101,8 +101,12 @@ _DUE = float("-inf")
 _GH_FIELDS = "title,state,isDraft,statusCheckRollup,mergeable,comments,commits"
 # How deep gh reads a PR's list fields. It asks GitHub for one page of each and
 # doesn't page further, so a list exactly this long is a truncated one — and
-# for commits, oldest-first, the entries it dropped are the newest. Such a list
-# can't say when the branch last moved, and is read as if it hadn't said.
+# commits arrive oldest-first, which is what makes the truncation matter: the
+# entries dropped off the end are the newest, exactly the ones being asked
+# about. Such a list can't say when the branch last moved and is read as if it
+# hadn't said. That order is load-bearing only here, for deciding that a list
+# is short of the answer; the answer itself is a max over whatever did arrive
+# (see `_newest_commit`), which doesn't care what order it came in.
 _GH_PAGE = 100
 # The logins the `anthropics/claude-code-action` workflow comments under, with
 # any ``[bot]`` suffix already stripped and compared lowercased. GitHub Apps
@@ -871,8 +875,12 @@ def _newest_commit(commits: object) -> float | None:
     ``committedDate`` rather than ``authoredDate``, because a rebase rewrites
     the former and a rebased branch is one that moved — as is a branch that
     merged its base back in, whose newest commits are someone else's work
-    arriving. Order is not assumed, only wholeness: a full page is a truncated
-    list (see `_GH_PAGE`) and answers nothing.
+    arriving.
+
+    Only wholeness is required of the list, not order: a full page has been
+    truncated (see `_GH_PAGE`, where gh's oldest-first ordering is what makes
+    that fatal) and answers nothing, while a list that did arrive whole is read
+    for its latest stamp wherever that sits in it.
     """
     if not isinstance(commits, list) or not commits or len(commits) >= _GH_PAGE:
         return None
