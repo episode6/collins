@@ -688,6 +688,7 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
         "title": "Keep the yellow line on a backgrounded session",
         "mergeable": "MERGEABLE",
         "unresolved": False,
+        "claude_replied": False,
     }
 
 
@@ -1421,9 +1422,12 @@ def test_mergeability_survives_the_run():
 # -- unresolved comments -----------------------------------------------------
 
 
-def _comment(mine, minimized=False):
+def _comment(mine, minimized=False, login=None):
     """One entry of gh's comments list, as small as the check needs."""
-    return {"viewerDidAuthor": mine, "isMinimized": minimized}
+    comment = {"viewerDidAuthor": mine, "isMinimized": minimized}
+    if login is not None:
+        comment["author"] = {"login": login}
+    return comment
 
 
 def test_someone_elses_last_word_is_unresolved():
@@ -1523,6 +1527,68 @@ def test_unresolved_comments_survive_the_run():
     was waiting — which is the last thing anyone knew."""
     pr = PullRequest(55, URL, "episode6/collins", state="OPEN", unresolved=True)
     assert from_record(to_record(pr)).awaiting_reply is True
+
+
+# -- who had the last word (see practions: it decides the review offer) ------
+
+
+@pytest.mark.parametrize("login", ["claude", "Claude", "claude[bot]", "claude-code[bot]"])
+def test_claudes_last_word_is_recognized(login):
+    """The workflow comments under a handful of logins, app suffix and all."""
+    comments = [_comment(True, login="ghackett"), _comment(False, login=login)]
+    assert prstatus._entry({"comments": comments})["claude_replied"] is True
+
+
+@pytest.mark.parametrize("login", ["ghackett", "claudia", "dependabot[bot]", None])
+def test_anybody_elses_last_word_is_not_claudes(login):
+    """An unrecognized login reads as a person, which leaves the review offer
+    where it has always been."""
+    comments = [_comment(False, login="claude"), _comment(False, login=login)]
+    assert prstatus._entry({"comments": comments})["claude_replied"] is False
+
+
+def test_our_own_last_word_is_not_claudes():
+    comments = [_comment(False, login="claude"), _comment(True, login="ghackett")]
+    entry = prstatus._entry({"comments": comments})
+    assert (entry["unresolved"], entry["claude_replied"]) == (False, False)
+
+
+def test_a_minimized_comment_from_claude_does_not_count():
+    """Both bits read the same last-comment: the last word is the last one
+    still standing."""
+    comments = [_comment(True, login="ghackett"), _comment(False, minimized=True, login="claude")]
+    assert prstatus._entry({"comments": comments})["claude_replied"] is False
+
+
+@pytest.mark.parametrize("comments", [[], None, "chatty", 7])
+def test_no_comments_is_nobodys_last_word(comments):
+    assert prstatus._entry({"comments": comments})["claude_replied"] is False
+
+
+def test_a_malformed_author_is_not_claude():
+    comments = [_comment(False, login=""), {"author": "claude"}]
+    assert prstatus._entry({"comments": comments})["claude_replied"] is False
+
+
+def test_enrich_fills_claude_replied(gh):
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0},
+        "unresolved": True, "claude_replied": True})
+    refresh(URL)
+    assert enrich(parse_pr_link(_link())).claude_replied is True
+
+
+def test_the_cli_cache_says_nothing_about_who_commented(cache):
+    """Its entries have no comments at all, so a warm start offers the review
+    — the safe half of that guess: an offer too many beats one missing."""
+    cache({URL: {"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}}})
+    assert enrich(parse_pr_link(_link())).claude_replied is False
+
+
+def test_claudes_last_word_survives_the_run():
+    """Otherwise a restart puts the review offer back under a review Claude has
+    already given."""
+    pr = PullRequest(55, URL, "episode6/collins", state="OPEN", claude_replied=True)
+    assert from_record(to_record(pr)).claude_replied is True
 
 
 # -- known (what a sidebar row rebuilds its mark from) -----------------------

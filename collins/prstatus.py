@@ -90,11 +90,19 @@ _MAX_GH_ERROR = 500
 # The stamp of a status that is due no matter which TTL applies to it (see
 # invalidate) — every interval measured against it is already over.
 _DUE = float("-inf")
-# ``comments`` rides along for one bit: whether the newest comment is someone
-# else's. Each comment carries ``viewerDidAuthor`` — GitHub answering "did the
-# logged-in user write this?" — which spares a separate call to learn who that
-# user is.
+# ``comments`` rides along for two bits about the newest one: whether it is
+# someone else's, and whether that someone is Claude. Each comment carries
+# ``viewerDidAuthor`` — GitHub answering "did the logged-in user write this?" —
+# which spares a separate call to learn who that user is, and an ``author``
+# whose login is what names Claude.
 _GH_FIELDS = "title,state,isDraft,statusCheckRollup,mergeable,comments"
+# The logins the `anthropics/claude-code-action` workflow comments under, with
+# any ``[bot]`` suffix already stripped and compared lowercased. GitHub Apps
+# post as ``<app>[bot]``, and the same workflow installed under a differently
+# named app answers under a different login — so this is a short list of the
+# ones seen rather than a rule, and a login it doesn't know simply reads as a
+# person, which only ever leaves the review offer where it was.
+_CLAUDE_LOGINS = frozenset({"claude", "claude-code", "claude-bot"})
 # What gh may say in the mergeable field. GitHub works the answer out lazily —
 # the first fetch after a push routinely says UNKNOWN while a background job
 # recomputes — so only a definite verdict is kept and UNKNOWN is stored as "no
@@ -184,6 +192,10 @@ class PullRequest:
     # Whether the PR's newest comment is someone else's — the conversation is
     # waiting on us.
     unresolved: bool = False
+    # Whether that newest comment is Claude's: it has already had the last
+    # word, so the menu stops offering to ask it for a review (see
+    # practions.actions_for).
+    claude_replied: bool = False
 
     @property
     def slug(self) -> str:
@@ -412,12 +424,13 @@ def to_record(pr: PullRequest) -> dict | None:
     would achieve is putting an unvalidated URL on disk.
 
     Status goes out with the PR — state, check counts, mergeability, whether
-    someone is waiting on a reply — so a mark reads as the last thing gh said
-    rather than as "nothing known" until the run's first fetch. Stale beats
-    blank: grey says a PR nothing is known about, and saying that about a PR
-    the app has watched all week is the more wrong of the two answers. A field
-    gh never answered is left out of the record rather than written as null, so
-    a record only ever says what was actually known.
+    someone is waiting on a reply and whether Claude was the one who spoke last
+    — so a mark reads as the last thing gh said rather than as "nothing known"
+    until the run's first fetch. Stale beats blank: grey says a PR nothing is
+    known about, and saying that about a PR the app has watched all week is the
+    more wrong of the two answers. A field gh never answered is left out of the
+    record rather than written as null, so a record only ever says what was
+    actually known.
     """
     if not _FETCHABLE.match(pr.url):
         return None
@@ -440,6 +453,8 @@ def to_record(pr: PullRequest) -> dict | None:
         record["mergeable"] = pr.mergeable
     if pr.unresolved:
         record["unresolved"] = True
+    if pr.claude_replied:
+        record["claude_replied"] = True
     return record
 
 
@@ -481,6 +496,7 @@ def from_record(record: object) -> PullRequest | None:
         pending=_saved_count(checks, "pending"),
         mergeable=mergeable if mergeable in _MERGEABLE_STATES else None,
         unresolved=record.get("unresolved") is True,
+        claude_replied=record.get("claude_replied") is True,
     )
 
 
@@ -744,33 +760,61 @@ def _entry(data: dict) -> dict:
     title and mergeability — which that cache has no room for and the chips'
     menu needs."""
     mergeable = data.get("mergeable")
+    last = _last_comment(data.get("comments"))
     return {
         "state": _state(data),
         "checks": _counts(data.get("statusCheckRollup")),
         "title": _title(data.get("title")),
         "mergeable": mergeable if mergeable in _MERGEABLE_STATES else None,
-        "unresolved": _unresolved(data.get("comments")),
+        "unresolved": _unresolved(last),
+        "claude_replied": _by_claude(last),
     }
 
 
-def _unresolved(comments: object) -> bool:
-    """Whether the newest comment on the PR is someone else's.
+def _last_comment(comments: object) -> dict | None:
+    """The newest comment on the PR that still counts, or None when none does.
 
-    gh hands the PR's comments back oldest-first, each stamped with
-    ``viewerDidAuthor``; the last word being anyone else's means there is
-    plausibly something to answer. Minimized comments are skipped — GitHub
-    collapses those as spam or off-topic, so they demand nothing — and so is
-    anything that isn't a comment-shaped dict at all, like the whole field
-    when it isn't a list: no comments, nothing to answer. A comment that *is*
-    one but is missing its authorship stamp reads as someone else's, though —
-    erring toward "look at it" beats silently swallowing a reply.
+    gh hands the PR's comments back oldest-first, so this walks them backwards
+    and stops at the first one worth reading. Minimized comments are skipped —
+    GitHub collapses those as spam or off-topic, so they demand nothing — and
+    so is anything that isn't a comment-shaped dict at all, like the whole
+    field when it isn't a list.
     """
     if not isinstance(comments, list):
-        return False
+        return None
     for comment in reversed(comments):
         if isinstance(comment, dict) and comment.get("isMinimized") is not True:
-            return comment.get("viewerDidAuthor") is not True
-    return False
+            return comment
+    return None
+
+
+def _unresolved(last: dict | None) -> bool:
+    """Whether the newest comment on the PR is someone else's.
+
+    Each comment is stamped with ``viewerDidAuthor``; the last word being
+    anyone else's means there is plausibly something to answer. No comment at
+    all is nothing to answer. A comment that is missing its authorship stamp
+    reads as someone else's, though — erring toward "look at it" beats
+    silently swallowing a reply.
+    """
+    return last is not None and last.get("viewerDidAuthor") is not True
+
+
+def _by_claude(last: dict | None) -> bool:
+    """Whether the newest comment on the PR was written by Claude.
+
+    What takes "Ask Claude for a review" out of the menu: Claude having the
+    last word means a review was already asked for and answered, and asking
+    again on top of its own comment is the one action in that menu that would
+    plainly repeat itself. Only a login this recognizes counts (see
+    `_CLAUDE_LOGINS`) — an unrecognized one reads as a person, which leaves
+    the offer exactly where it has always been.
+    """
+    author = (last or {}).get("author")
+    login = author.get("login") if isinstance(author, dict) else None
+    if not isinstance(login, str):
+        return False
+    return login.lower().removesuffix("[bot]") in _CLAUDE_LOGINS
 
 
 def _title(value: object) -> str | None:
@@ -1014,6 +1058,7 @@ def _applied(pr: PullRequest, entry: object) -> PullRequest:
         pending=_count(checks, "pending"),
         mergeable=mergeable if mergeable in _MERGEABLE_STATES else None,
         unresolved=entry.get("unresolved") is True,
+        claude_replied=entry.get("claude_replied") is True,
     )
 
 
