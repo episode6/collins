@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-12. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -25,8 +25,8 @@ from .sessions import (
     _UUID_RE,
     Session,
     SessionDetails,
+    _scan_tail,
     _scan_transcript,
-    _tail_state,
     transcript_is_stub,
 )
 from .sessions import parse_details as _claude_parse_details
@@ -819,6 +819,7 @@ class ClaudeProvider(Provider):
                 # after the munged worktree path.
                 if transcript_is_stub(cwd, preview):
                     continue
+                state, cli_title = _scan_tail(jsonl)
                 found.append(
                     Session(
                         session_id=jsonl.stem,
@@ -828,8 +829,9 @@ class ClaudeProvider(Provider):
                         mtime=stat.st_mtime,
                         created=created if created is not None else stat.st_mtime,
                         size=stat.st_size,
-                        state=_tail_state(jsonl),
+                        state=state,
                         provider=self.id,
+                        cli_title=cli_title,
                     )
                 )
         return found

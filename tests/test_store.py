@@ -649,3 +649,88 @@ def test_apply_pr_titles_sweeps_only_on_the_off_to_on_flip(store):
     store.state.set_setting("pr_title_sessions", True)
     store.apply_pr_titles()
     assert store.state.get_generated_name(first.session_id) == "Add the thing"
+
+
+def test_cli_title_display_precedence(store):
+    """The CLI's own name shows only while cli_title_sessions is on, beats
+    the generated slot, and loses to a manual rename."""
+    session = store._last_sessions[0]
+    sid = session.session_id
+    store.state.set_cli_titles({sid: "cli name"})
+
+    assert store.display_name(session) != "cli name"  # setting off: ignored
+    store.state.set_setting("cli_title_sessions", True)
+    assert store.display_name(session) == "cli name"
+
+    store.state.set_generated_name(sid, "generated name")
+    assert store.display_name(session) == "cli name"
+    store.rename(sid, "manual name")
+    assert store.display_name(session) == "manual name"
+
+    store.state.set_setting("cli_title_sessions", False)
+    store.state.set_name(sid, "")
+    assert store.display_name(session) == "generated name"
+
+
+def test_record_cli_titles_survives_the_tail_window(store):
+    """A title observed once sticks: a scan whose tail window no longer holds
+    the title records (cli_title == "") must not clear the recorded name."""
+    session = store._last_sessions[0]
+    sid = session.session_id
+
+    session.cli_title = "seen once"
+    store._record_cli_titles(store._last_sessions)
+    assert store.state.get_cli_title(sid) == "seen once"
+
+    session.cli_title = ""  # scrolled out of the 64KB tail
+    store._record_cli_titles(store._last_sessions)
+    assert store.state.get_cli_title(sid) == "seen once"
+
+    session.cli_title = "renamed later"
+    store._record_cli_titles(store._last_sessions)
+    assert store.state.get_cli_title(sid) == "renamed later"
+
+
+def test_apply_cli_titles_reprojects_only_on_a_flip(store, monkeypatch):
+    """Preferences apply calls this on every save; only a save that moved the
+    cli_title_sessions switch (either direction — off reverts the adopted
+    names) re-projects the session list."""
+    applies = []
+    orig = store._apply
+    monkeypatch.setattr(store, "_apply", lambda: (applies.append(1), orig())[1])
+
+    store.apply_cli_titles()  # nothing moved: no work
+    assert not applies
+
+    store.state.set_setting("cli_title_sessions", True)
+    store.apply_cli_titles()
+    assert len(applies) == 1
+    store.apply_cli_titles()  # steady state: no work
+    assert len(applies) == 1
+
+    store.state.set_setting("cli_title_sessions", False)
+    store.apply_cli_titles()  # switching off is a change too
+    assert len(applies) == 2
+
+
+def test_cli_titled_sessions_skip_auto_titling(store, monkeypatch):
+    """No claude -p run for a session whose display name already comes from
+    the CLI's own title — the generated name would be shadowed anyway."""
+    submitted = []
+    monkeypatch.setattr(
+        store._titles, "submit", lambda sid, *a, **k: submitted.append(sid)
+    )
+    store.state.set_setting("auto_title_sessions", True)
+    store.state.set_setting("cli_title_sessions", True)
+    titled = store._last_sessions[0].session_id
+    store.state.set_cli_titles({titled: "cli name"})
+
+    store._request_titles(store._last_sessions)
+    assert titled not in submitted
+    assert len(submitted) == len(store._last_sessions) - 1
+
+    # With the switch off the CLI title no longer shows, so titling resumes.
+    store.state.set_setting("cli_title_sessions", False)
+    submitted.clear()
+    store._request_titles(store._last_sessions)
+    assert titled in submitted

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-12. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -76,8 +76,11 @@ class Session:
     mtime: float  # last activity (file mtime)
     created: float = 0.0  # session start (first transcript timestamp; mtime fallback)
     size: int = 0  # transcript size in bytes
-    state: str = ""  # "" or "interrupted" (see _tail_state)
+    state: str = ""  # "" or "interrupted" (see _scan_tail)
     provider: str = "claude"  # provider id (see providers.py)
+    # The agent CLI's own name for the session — the last title record in the
+    # transcript's tail, "" when the tail holds none (see _scan_tail).
+    cli_title: str = ""
 
     @property
     def project_name(self) -> str:
@@ -414,25 +417,47 @@ def recreate_worktree(state: dict) -> bool:
     return ok and Path(path).is_dir()
 
 
-def _tail_state(path: Path) -> str:
-    """Cheaply read the transcript's tail to classify its state.
+# The CLI's session-name records: it appends one whenever it names or renames
+# a session, and keeps re-emitting the current name as the session runs.
+# ai-title is its automatic title; a /rename replaces those with custom-title
+# (paired with agent-name) for good — so within any one transcript the last
+# record of any kind is the current name.
+_TITLE_KEYS = {"ai-title": "aiTitle", "custom-title": "customTitle", "agent-name": "agentName"}
+_MAX_CLI_TITLE_CHARS = 200
 
+
+def _scan_tail(path: Path) -> tuple[str, str]:
+    """Cheaply read the transcript's tail: (state, cli_title).
+
+    state:
     - "interrupted": the last event was the user stopping Claude mid-task.
     - "" otherwise.
 
     Anything after the interruption — the agent picking back up, or the user
     saying something else — means the session moved on, so the marker only
     stands when it is the last thing in the transcript.
+
+    cli_title is the newest _TITLE_KEYS record in the tail window, "" when
+    it holds none — which does not mean the session has no title: a busy
+    session can push its title records past the window between re-emissions,
+    so callers keep the last non-empty answer (see AppState.cli_titles).
     """
     blob = _read_tail(path)
 
     latest: str | None = None  # "other" or "interrupted"
+    title = ""
     for line in blob.splitlines():
         try:
             entry = json.loads(line)
         except (json.JSONDecodeError, ValueError):
             continue  # likely a partial first line from the tail window
         if not isinstance(entry, dict):
+            continue
+        key = _TITLE_KEYS.get(entry.get("type"))
+        if key is not None:
+            value = entry.get(key)
+            if isinstance(value, str) and value.strip():
+                title = " ".join(value.split())[:_MAX_CLI_TITLE_CHARS]
             continue
         text = _extract_text((entry.get("message") or {}).get("content")).strip()
         if not text:
@@ -444,7 +469,7 @@ def _tail_state(path: Path) -> str:
         elif entry.get("type") == "user" and not text.startswith("<"):
             latest = "other"  # a real user reply, not a tool result / command
 
-    return "interrupted" if latest == "interrupted" else ""
+    return ("interrupted" if latest == "interrupted" else "", title)
 
 
 def discover_sessions() -> list[Session]:

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-12. Full change history: git log for this file.
 
 import json
 
@@ -69,6 +69,15 @@ def test_set_generated_names_bulk(app_state):
     assert fresh.get_generated_name("sid-1") == "One"
     assert fresh.get_generated_name("sid-2") == "Two"
     assert fresh.get_generated_name("sid-3") is None
+
+
+def test_set_cli_titles_roundtrip(app_state):
+    state = app_state.AppState()
+    state.set_cli_titles({"sid-1": "composer entry", "sid-2": "  ", "sid-3": "fix login"})
+    fresh = app_state.AppState()
+    assert fresh.get_cli_title("sid-1") == "composer entry"
+    assert fresh.get_cli_title("sid-2") is None
+    assert fresh.get_cli_title("sid-3") == "fix login"
 
 
 def test_clearing_name_removes_entry(app_state):

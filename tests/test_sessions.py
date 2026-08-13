@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-12. Full change history: git log for this file.
 
 import json
 import subprocess
@@ -365,6 +365,48 @@ def test_tail_state_session_carried_on_after_the_interruption(monkeypatch, tmp_p
     )
     state = next(s.state for s in sessions_mod.discover_sessions() if s.session_id == sid)
     assert state == ""  # the session moved on → no longer interrupted
+
+
+def test_scan_tail_reads_the_newest_cli_title(monkeypatch, tmp_path):
+    """The CLI appends ai-title records for its automatic name and replaces
+    them with custom-title/agent-name pairs after a /rename — the last record
+    of any kind is the session's current name."""
+    import collins.sessions as sessions_mod
+
+    root = tmp_path / "projects" / "-home-u-proj"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(sessions_mod, "CLAUDE_PROJECTS_DIR", tmp_path / "projects")
+    sid = "55555555-5555-5555-5555-555555555555"
+    lines = [
+        {"type": "user", "cwd": "/home/u/proj", "message": {"content": "do the thing"}},
+        {"type": "ai-title", "aiTitle": "Do the thing", "sessionId": sid},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "On it."}]}},
+        {"type": "custom-title", "customTitle": "  the   real \n name ", "sessionId": sid},
+        {"type": "agent-name", "agentName": "the real name", "sessionId": sid},
+    ]
+    (root / f"{sid}.jsonl").write_text(
+        "\n".join(json.dumps(line) for line in lines), encoding="utf-8"
+    )
+    session = next(s for s in sessions_mod.discover_sessions() if s.session_id == sid)
+    assert session.cli_title == "the real name"
+
+
+def test_scan_tail_without_title_records(monkeypatch, tmp_path):
+    import collins.sessions as sessions_mod
+
+    root = tmp_path / "projects" / "-home-u-proj"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(sessions_mod, "CLAUDE_PROJECTS_DIR", tmp_path / "projects")
+    sid = "66666666-6666-6666-6666-666666666666"
+    lines = [
+        {"type": "user", "cwd": "/home/u/proj", "message": {"content": "do the thing"}},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Done."}]}},
+    ]
+    (root / f"{sid}.jsonl").write_text(
+        "\n".join(json.dumps(line) for line in lines), encoding="utf-8"
+    )
+    session = next(s for s in sessions_mod.discover_sessions() if s.session_id == sid)
+    assert session.cli_title == ""
 
 
 def _write_transcript(path, cwds):

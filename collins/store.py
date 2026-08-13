@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-12. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -123,6 +123,9 @@ class SessionStore(GObject.Object):
         # Last-seen pr_title_sessions value, so apply_pr_titles sweeps only
         # when the setting flips on rather than on every preferences apply.
         self._pr_titles_on = bool(state.get_setting("pr_title_sessions"))
+        # Same for cli_title_sessions: apply_cli_titles re-projects only when
+        # the switch actually moved.
+        self._cli_titles_on = bool(state.get_setting("cli_title_sessions"))
         self._monitors: list[Gio.FileMonitor] = []
         self._refresh_queued = False
         self._scanning = False
@@ -156,6 +159,7 @@ class SessionStore(GObject.Object):
     def _on_scanned(self, sessions: list[Session]) -> bool:
         self._scanning = False
         self._last_sessions = sessions
+        self._record_cli_titles(sessions)
         if self._first_scan:
             self._first_scan = False
             self._backfill_names(sessions)
@@ -196,6 +200,31 @@ class SessionStore(GObject.Object):
             if leaf not in current and leaf not in self.state.get_virtual_projects():
                 self.state.set_project_archived(leaf, False)
 
+    def _record_cli_titles(self, sessions: list[Session]) -> None:
+        """Remember each transcript's newest CLI title record, every scan.
+
+        Recorded whether or not cli_title_sessions is on: the scan only sees
+        a transcript's last 64KB, so a title observed once must survive
+        scrolling out of that window, and a switch flipped on later should
+        find the names already known. The setting gates display alone
+        (display_name), which is what makes flipping it instant both ways."""
+        titles = {
+            s.session_id: s.cli_title
+            for s in sessions
+            if s.cli_title and s.cli_title != self.state.get_cli_title(s.session_id)
+        }
+        if titles:
+            self.state.set_cli_titles(titles)
+
+    def _cli_titled(self, session_id: str) -> bool:
+        """Whether the CLI's own title is what display_name would show for an
+        unnamed session — in which case generating another title that it
+        would shadow is wasted work."""
+        return bool(
+            self.state.get_setting("cli_title_sessions")
+            and self.state.get_cli_title(session_id)
+        )
+
     def _backfill_names(self, sessions: list[Session]) -> None:
         """On the first scan of a run, give every unnamed pre-existing session
         a cheap local title (the first words of its prompt) — persisted, so
@@ -210,6 +239,7 @@ class SessionStore(GObject.Object):
                 session.preview
                 and not self.state.get_name(session_id)
                 and not self.state.get_generated_name(session_id)
+                and not self._cli_titled(session_id)
             ):
                 names[session_id] = fallback_title(session.preview)
         if names:
@@ -228,6 +258,7 @@ class SessionStore(GObject.Object):
                 session.preview
                 and not self.state.get_name(session_id)
                 and not self.state.get_generated_name(session_id)
+                and not self._cli_titled(session_id)
             ):
                 self._titles.submit(session_id, session.preview, session.cwd)
 
@@ -440,8 +471,14 @@ class SessionStore(GObject.Object):
                 item.set_property(prop, value)
 
     def display_name(self, session: Session) -> str:
+        cli_title = (
+            self.state.get_cli_title(session.session_id)
+            if self.state.get_setting("cli_title_sessions")
+            else None
+        )
         return (
             self.state.get_name(session.session_id)
+            or cli_title
             or self.state.get_generated_name(session.session_id)
             or session.preview
             or session.session_id[:8]
@@ -528,6 +565,18 @@ class SessionStore(GObject.Object):
                 names[session_id] = title
         if names:
             self.state.set_generated_names(names)
+            self._apply()
+
+    def apply_cli_titles(self) -> None:
+        """Re-project display names when a preferences apply moved the
+        cli_title_sessions switch — it changes display_name's answer without
+        any session changing on disk. Called on every preferences apply
+        (that's the only signal there is), so the flip is detected here;
+        unlike apply_pr_titles both directions count, since switching off
+        reverts every adopted name too."""
+        on = bool(self.state.get_setting("cli_title_sessions"))
+        was_on, self._cli_titles_on = self._cli_titles_on, on
+        if on != was_on:
             self._apply()
 
     def toggle_favorite(self, session_id: str) -> None:
