@@ -10,7 +10,9 @@ Which actions a PR offers is a question about its state, and the answer is
 deliberately narrow: a draft is asked to come out of draft, an open PR is
 merged now or told to merge itself when its checks go green, and anything the
 repository's own Claude workflow can be asked for goes through a comment
-(`@claude review`) rather than an API Collins would have to hold a token for.
+(`@claude review`) rather than an API Collins would have to hold a token for —
+and only while Claude isn't the one who commented last, since a review it has
+already given isn't one to ask for again.
 
 Four of them aren't about GitHub at all: FIX_CI, REBASE, COMMENTS and NEW_PR
 send a prompt to the session that opened the PR and let the agent do the work.
@@ -180,13 +182,22 @@ def actions_for(
             )
         )
     if pr.state in LIVE:
-        actions.append(
-            Action(
-                REVIEW,
-                _("Ask Claude for a review"),
-                _("Comment “{comment}” on {slug}").format(comment=REVIEW_COMMENT, slug=pr.slug),
+        if not pr.claude_replied:
+            # Not offered when Claude wrote the newest comment: it has already
+            # been asked and has already answered, so a second `@claude review`
+            # posted directly under its own review is the one item in this menu
+            # that would visibly repeat itself. A reply from anyone else — ours
+            # included — puts the offer back, which is what asking for another
+            # pass after a round of changes looks like.
+            actions.append(
+                Action(
+                    REVIEW,
+                    _("Ask Claude for a review"),
+                    _("Comment “{comment}” on {slug}").format(
+                        comment=REVIEW_COMMENT, slug=pr.slug
+                    ),
+                )
             )
-        )
         if pr.failed:
             ci_prompt = CI_PROMPT.format(number=pr.number)
             actions.append(

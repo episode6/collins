@@ -208,6 +208,28 @@ def test_addressing_ci_is_offered_to_a_failing_pr_and_to_nothing_else():
     assert FIX_CI not in _keys(_pr(), takes_prompt=True)
 
 
+def test_claude_having_the_last_word_takes_the_review_offer_away():
+    """It has been asked and it has answered; a second `@claude review` posted
+    under its own review is the menu repeating itself."""
+    assert REVIEW not in _keys(_pr(unresolved=True, claude_replied=True))
+    assert REVIEW not in _keys(_pr(state="DRAFT", claude_replied=True))
+
+
+def test_the_review_offer_comes_back_once_someone_answers_claude():
+    """Asking for another pass after a round of changes is exactly this: the
+    newest comment is no longer Claude's, so the offer is there again."""
+    assert REVIEW in _keys(_pr(unresolved=True))
+    assert REVIEW in _keys(_pr())
+
+
+def test_claude_answering_leaves_the_rest_of_the_menu_alone():
+    """Only the review offer reads the newest comment's author — the merge, the
+    CI errand and the reply are about the PR's state, which hasn't moved."""
+    keys = _keys(_pr(passed=1, failed=1, unresolved=True, claude_replied=True),
+                 takes_prompt=True)
+    assert keys == [AUTO_MERGE, FIX_CI, COMMENTS]
+
+
 def test_unresolved_comments_offer_the_agent_a_reply():
     commented = _pr(unresolved=True)
     assert COMMENTS in _live_keys(commented, takes_prompt=True)
