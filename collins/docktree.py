@@ -127,6 +127,24 @@ class DockTree:
             for leaf in self._iter_leaves(node)
         )
 
+    def first_beyond(self, value: object, orientation: str) -> object | None:
+        """The first leaf value in the nearest subtree on the far side of
+        *value* along *orientation* — "h": right of it, "v": below it — or
+        None when nothing sits there.
+
+        Walk up from *value*'s leaf: the first *orientation* split holding
+        its branch in the start slot has everything to the right of (below)
+        it in the end branch, and that subtree's first leaf in spatial
+        order is the neighbor. The dock's join-don't-split rule rides on
+        this: it is how "a strip already on that side" is found."""
+        node: Leaf | Split = self.find(value)
+        while node.parent is not None:
+            parent = node.parent
+            if parent.orientation == orientation and parent.slot_of(node) == "a":
+                return next(self._iter_leaves(parent.b)).value
+            node = parent
+        return None
+
     def next_leaf(self, value: object) -> object:
         """The value after *value* in leaf order, wrapping around. With a
         single leaf this returns the value itself."""

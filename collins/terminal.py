@@ -35,7 +35,7 @@ from . import (  # noqa: E402
     vtehtml,
 )
 from .claudemodels import short_name  # noqa: E402
-from .composer import ComposerView  # noqa: E402
+from .composer import ComposerPage, ComposerView  # noqa: E402
 from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch, has_changes  # noqa: E402
@@ -1003,6 +1003,7 @@ class TerminalTab(Gtk.Box):
         # only its future overlay slot exists up front.
         self._composer: ComposerView | None = None
         self._composer_revealer: Gtk.Revealer | None = None
+        self._composer_page: ComposerPage | None = None  # set while docked
         self._composer_enter_sends = True
         self._composer_font = ""
         self._content_overlay = Gtk.Overlay(child=scrolled)
@@ -2087,7 +2088,10 @@ class TerminalTab(Gtk.Box):
         return self.provider.clear_prompt_keys(probe) is not None
 
     def composer_open(self) -> bool:
-        return (
+        """The routing predicate: attach entry points (drops, "Add to
+        chat", the attach button) land mentions in the composer whenever
+        it is up — raised over the terminal, or docked as a panel page."""
+        return self._composer_page is not None or (
             self._composer_revealer is not None
             and self._composer_revealer.get_reveal_child()
         )
@@ -2104,6 +2108,9 @@ class TerminalTab(Gtk.Box):
         self._composer.set_font(self._composer_font)
         self._composer.connect("send-requested", self._on_composer_send)
         self._composer.connect("close-requested", lambda *_a: self.close_composer())
+        self._composer.connect(
+            "dock-toggle-requested", lambda *_a: self._toggle_composer_dock()
+        )
         revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_UP,
             valign=Gtk.Align.END,
@@ -2129,6 +2136,12 @@ class TerminalTab(Gtk.Box):
         it). A box that can't be read right now — empty, or the agent
         mid-turn drawing something else — seeds nothing and opens anyway:
         composing while the agent works is half the point."""
+        if self._composer_page is not None:
+            # One composer per tab: docked, the button fronts the page —
+            # revealing a hidden home strip if that's where it lives —
+            # rather than raising a second box over the terminal.
+            self._dock.reveal_page(self._composer_page)
+            return
         if not self._agent_is_running():
             self.feed_message(_("Composer: the agent isn't running in this tab"))
             return
@@ -2156,7 +2169,15 @@ class TerminalTab(Gtk.Box):
         *restore* is False (sending already emptied it) or the agent has
         left the terminal, which quietly discards: what's there now is a
         shell prompt, where a pasted draft isn't a draft, it's commands
-        (a shell without bracketed paste runs each line as it lands)."""
+        (a shell without bracketed paste runs each line as it lands).
+
+        Docked, the same request funnels through the page's tab close
+        (busy-ask and all): the strip's `page_closed` hook lands in
+        `_on_composer_page_closed`, which rescues the view and applies the
+        identical paste-back rules."""
+        if self._composer_page is not None:
+            self._dock.close_page(self._composer_page)
+            return
         if not self.composer_open():
             return
         text = self._composer.take_text()
@@ -2176,16 +2197,91 @@ class TerminalTab(Gtk.Box):
         the user had pressed Enter there. It IS re-gated on the agent
         still being in the terminal — the text-then-Return of a submit
         aimed at a shell would *execute* the draft — and an undeliverable
-        send keeps the panel up with the draft in it, losing nothing."""
+        send keeps the panel up with the draft in it, losing nothing.
+
+        Docked, send never closes: the page is a fixture, not a stand-in
+        raised over the input box, so the buffer clears and the page stays
+        for the next prompt."""
+        docked = self._composer_page is not None
         if not text.strip():
-            self.close_composer()
+            if not docked:
+                self.close_composer()
             return
         if not self._agent_is_running():
             self.feed_message(_("Composer: the agent isn't running in this tab"))
             return
         self._composer.set_text("")
-        self._composer_revealer.set_reveal_child(False)
+        if not docked:
+            self._composer_revealer.set_reveal_child(False)
         self.inject_prompt(text)
+
+    def _toggle_composer_dock(self) -> None:
+        """The composer chrome's dock/float button."""
+        if self._composer_page is None:
+            self.dock_composer()
+        else:
+            self.undock_composer()
+
+    def dock_composer(self) -> None:
+        """Move the live composer view out of the overlay into its own
+        panel page below the terminal — the editor pop-out's precedent:
+        reparent only, nothing serialized, so text, cursor and undo
+        history ride along. Join-don't-split places it: a bottom home
+        strip takes the page as a tab; only an empty axis splits."""
+        if self._composer_page is not None:
+            self._dock.reveal_page(self._composer_page)
+            return
+        composer = self._ensure_composer()
+        revealer = self._composer_revealer
+        revealer.set_reveal_child(False)
+        revealer.set_visible(False)
+        revealer.set_child(None)
+        composer.set_docked(True)
+        self._composer_page = ComposerPage(composer, on_closed=self._on_composer_page_closed)
+        self._dock.open_page(self._composer_page, side="below")
+
+    def undock_composer(self) -> None:
+        """Bring the docked composer back over the terminal, text intact
+        (the chrome's float button). The page's close then runs with the
+        view already rescued, so `_on_composer_page_closed` recognizes it
+        as an undock and leaves the text alone."""
+        page = self._composer_page
+        if page is None:
+            return
+        self._composer_page = None
+        view = page.take_view()
+        view.set_docked(False)
+        revealer = self._composer_revealer
+        revealer.set_child(view)
+        self._dock.close_page(page)
+        revealer.set_visible(True)
+
+        def reveal() -> bool:
+            revealer.set_reveal_child(True)
+            view.focus_view()
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(reveal)
+
+    def _on_composer_page_closed(self, page: ComposerPage) -> None:
+        """The docked composer's tab is closing for real (its X, a bulk
+        close, or the chrome's close routed through the dock): rescue the
+        live view back to the (lowered) overlay slot and apply the
+        overlay close's paste-back semantics — the draft returns to the
+        agent's input box unsubmitted, or is quietly discarded when the
+        agent has left the terminal (see `close_composer`)."""
+        if page is not self._composer_page:
+            return  # an undock already rescued the view; just a close now
+        self._composer_page = None
+        view = page.take_view()
+        view.set_docked(False)
+        self._composer_revealer.set_child(view)
+        text = view.take_text()
+        if self._agent_is_running():
+            restored = composerkeys.restore_text(text)
+            if restored:
+                self.feed_child_text(restored)
+        self.grab_terminal_focus()
 
     def _cut_entered_prompt(self) -> str | None:
         """Read the typed-but-unsent prompt and erase it from the CLI's
@@ -2763,15 +2859,30 @@ class TerminalTab(Gtk.Box):
 
     def _make_panel_page(self, page: dict):
         """The dock's non-shell factory for layout restore (see
-        paneldock.set_page_factory). Only the pr kind exists today; its URL
-        is persisted state and therefore untrusted, so it re-passes the same
-        gate every PR URL passes before reaching gh."""
+        paneldock.set_page_factory). A pr page's URL is persisted state and
+        therefore untrusted, so it re-passes the same gate every PR URL
+        passes before reaching gh; a composer entry conjures a fresh empty
+        docked composer (placement persists, drafts never)."""
+        if page.get("kind") == "composer":
+            return self._restore_composer_page()
         if page.get("kind") != "pr":
             return None
         pr = parse_pr_url(page.get("url"))
         if pr is None:
             return None
         return self._make_pr_page(known(pr))
+
+    def _restore_composer_page(self) -> ComposerPage | None:
+        """A saved layout's docked composer, rebuilt empty. One composer
+        per tab: a duplicate entry (a hand-edited layout file) is refused,
+        which drops it from the restored strip."""
+        if self._composer_page is not None or self.composer_open():
+            return None
+        composer = self._ensure_composer()
+        self._composer_revealer.set_child(None)
+        composer.set_docked(True)
+        self._composer_page = ComposerPage(composer, on_closed=self._on_composer_page_closed)
+        return self._composer_page
 
     @property
     def panel_visible(self) -> bool:
@@ -2868,7 +2979,7 @@ class TerminalTab(Gtk.Box):
         layout = panellayout.validate(layout)
         if not layout:
             return
-        layout = panellayout.prune(layout, {"shell", "pr"})
+        layout = panellayout.prune(layout, {"shell", "pr", "composer"})
         mode = layout.get("mode")
         if mode in ("bottom", "right"):
             self._dock.set_home_position(mode)

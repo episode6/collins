@@ -221,3 +221,49 @@ def test_split_nodes_are_split_instances():
     tree = DockTree("term")
     node = tree.split("term", "strip", "below")
     assert isinstance(node, Split)
+
+
+def test_first_beyond_finds_leaf_below():
+    tree = DockTree("term")
+    tree.split("term", "strip", "below")
+    assert tree.first_beyond("term", "v") == "strip"
+    assert tree.first_beyond("term", "h") is None
+
+
+def test_first_beyond_finds_leaf_right():
+    tree = DockTree("term")
+    tree.split("term", "strip", "right")
+    assert tree.first_beyond("term", "h") == "strip"
+    assert tree.first_beyond("term", "v") is None
+
+
+def test_first_beyond_ignores_leaf_on_near_side():
+    # A strip above (or left of) the terminal is on the axis but not
+    # beyond it: the terminal sits in the end slot there.
+    tree = DockTree("term")
+    tree.split("term", "above-strip", "above")
+    assert tree.first_beyond("term", "v") is None
+    tree.split("term", "left-strip", "left")
+    assert tree.first_beyond("term", "h") is None
+
+
+def test_first_beyond_picks_first_in_spatial_order():
+    tree = DockTree("term")
+    tree.split("term", "s1", "below")
+    tree.split("s1", "s2", "left")
+    assert tree.first_beyond("term", "v") == "s2"
+
+
+def test_first_beyond_walks_past_intermediate_splits():
+    # The terminal nested inside a horizontal split still finds the strip
+    # below the whole arrangement.
+    tree = DockTree("term")
+    tree.split("term", "bottom", "below")
+    tree.split("term", "right", "right")
+    assert tree.first_beyond("term", "v") == "bottom"
+    assert tree.first_beyond("term", "h") == "right"
+
+
+def test_first_beyond_single_leaf_is_none():
+    tree = DockTree("term")
+    assert tree.first_beyond("term", "v") is None

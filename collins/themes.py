@@ -167,6 +167,9 @@ def _apply_dynamic_theme_css(theme: dict | None) -> None:
         # by a faint fg-colored top edge. Shape is static (app.py's _CSS).
         f".composer-panel {{ background-color: {bg_css}; color: {fg_css}; "
         f"border-top: 1px solid alpha({fg_css}, 0.3); }}"
+        # Docked as a panel page the fence is the strip's own edge; the
+        # overlay's top border would read as a stray line mid-pane.
+        f".composer-panel.docked {{ border-top: none; }}"
         f".composer-panel textview, .composer-panel textview text {{ "
         f"background-color: {bg_css}; color: {fg_css}; caret-color: {fg_css}; }}".encode()
     )

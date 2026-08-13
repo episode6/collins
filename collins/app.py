@@ -148,6 +148,11 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   border-radius: 12px 12px 0 0;
 }
 
+/* docked in a panel page, the composer is a pane, not a floating card */
+.composer-panel.docked {
+  border-radius: 0;
+}
+
 .count-badge {
   background-color: alpha(currentColor, 0.1);
   border-radius: 10px;
