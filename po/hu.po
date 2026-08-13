@@ -911,6 +911,9 @@ msgstr "Üzenetszerkesztő megnyitása"
 msgid "Attach file"
 msgstr "Fájl csatolása"
 
+msgid "Remove image"
+msgstr "Kép eltávolítása"
+
 msgid "Close composer and keep the text in the terminal"
 msgstr "Üzenetszerkesztő bezárása, a szöveg a terminálban marad"
 

@@ -381,6 +381,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "és oldalsávsorán",
         "Open composer": "Üzenetszerkesztő megnyitása",
         "Attach file": "Fájl csatolása",
+        "Remove image": "Kép eltávolítása",
         "Close composer and keep the text in the terminal":
             "Üzenetszerkesztő bezárása, a szöveg a terminálban marad",
         "Composer: the agent isn't running in this tab":
@@ -772,6 +773,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Seitenleistenzeile der Sitzung",
         "Open composer": "Composer öffnen",
         "Attach file": "Datei anhängen",
+        "Remove image": "Bild entfernen",
         "Close composer and keep the text in the terminal":
             "Composer schließen und den Text im Terminal behalten",
         "Composer: the agent isn't running in this tab":
@@ -1161,6 +1163,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "barra lateral de la sesión",
         "Open composer": "Abrir el redactor",
         "Attach file": "Adjuntar archivo",
+        "Remove image": "Quitar imagen",
         "Close composer and keep the text in the terminal":
             "Cerrar el redactor y conservar el texto en la terminal",
         "Composer: the agent isn't running in this tab":
@@ -1552,6 +1555,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "ligne de barre latérale de la session",
         "Open composer": "Ouvrir le rédacteur",
         "Attach file": "Joindre un fichier",
+        "Remove image": "Retirer l'image",
         "Close composer and keep the text in the terminal":
             "Fermer le rédacteur et garder le texte dans le terminal",
         "Composer: the agent isn't running in this tab":

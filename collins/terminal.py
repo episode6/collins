@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-12. Full change history: git log for this file.
+# fork. Last modified: 2026-08-13. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -2103,7 +2103,16 @@ class TerminalTab(Gtk.Box):
         rises exactly over the CLI's own input box."""
         if self._composer is not None:
             return self._composer
-        self._composer = ComposerView(pick_attach=self._pick_file_for_composer)
+        self._composer = ComposerView(
+            pick_attach=self._pick_file_for_composer,
+            # The view is its own drop target (see _setup_drop there); it
+            # borrows this tab's provider and cwd through these, read live
+            # at each call so a cwd change between drops is honored.
+            file_reference=lambda path: self.provider.file_reference(
+                path, self.current_agent_cwd()
+            ),
+            notify=self.feed_message,
+        )
         self._composer.set_enter_sends(self._composer_enter_sends)
         self._composer.set_font(self._composer_font)
         self._composer.connect("send-requested", self._on_composer_send)

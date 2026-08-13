@@ -1745,6 +1745,10 @@ msgid "Attach file"
 msgstr ""
 
 #: collins/composer.py
+msgid "Remove image"
+msgstr ""
+
+#: collins/composer.py
 msgid "Composer"
 msgstr ""
 

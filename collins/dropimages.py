@@ -10,8 +10,10 @@ how that text joins whatever is already typed (leading_space, which the
 attach-file button shares).
 
 Kept GTK-free (like editorfiles.py/gitinfo.py) so this stays unit-testable
-headless; terminal.py owns the drop target and turns Gdk values into the
-paths and bytes handled here.
+headless; terminal.py and composer.py own the drop targets and turn Gdk
+values into the paths and bytes handled here. The composer's preview strip
+also leans on this file: remove_mention is how a discarded thumbnail takes
+its mention with it.
 
 The copies live under the user's cache directory rather than /tmp: the
 mention only gets *read* when the user submits the prompt — maybe minutes
@@ -60,6 +62,36 @@ def mention_text(paths: list[str], file_reference: Callable[[str], str | None]) 
         else:
             tokens.append(reference + " ")
     return "".join(tokens), failed
+
+
+def remove_mention(text: str, reference: str) -> str | None:
+    """*text* with the mention token typed for *reference* removed, or None
+    when removing it isn't trivially safe: the token is gone already (edited
+    away), appears more than once, or every occurrence sits inside a longer
+    token (a substring match bounded by non-whitespace) — this function
+    refuses to guess which characters a preview thumbnail meant.
+
+    The removed token takes one adjacent space with it — the trailing one
+    mention_text typed, or failing that a leading one — so a removed mention
+    doesn't leave a double gap where it sat.
+    """
+    spans = []
+    search = 0
+    while (start := text.find(reference, search)) != -1:
+        end = start + len(reference)
+        opens_token = start == 0 or text[start - 1].isspace()
+        ends_token = end == len(text) or text[end].isspace()
+        if opens_token and ends_token:
+            spans.append((start, end))
+        search = start + 1
+    if len(spans) != 1:
+        return None
+    start, end = spans[0]
+    if end < len(text) and text[end] == " ":
+        end += 1
+    elif start > 0 and text[start - 1] == " ":
+        start -= 1
+    return text[:start] + text[end:]
 
 
 def leading_space(text_before_cursor: str, cursor_column: int) -> str:

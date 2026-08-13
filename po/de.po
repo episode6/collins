@@ -911,6 +911,9 @@ msgstr "Composer öffnen"
 msgid "Attach file"
 msgstr "Datei anhängen"
 
+msgid "Remove image"
+msgstr "Bild entfernen"
+
 msgid "Close composer and keep the text in the terminal"
 msgstr "Composer schließen und den Text im Terminal behalten"
 
