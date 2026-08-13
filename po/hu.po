@@ -899,8 +899,8 @@ msgstr "Pull requestek csatolása"
 msgid "attach_pr — put a pull request on the session's own footer and sidebar row"
 msgstr "attach_pr — pull request elhelyezése a munkamenet saját láblécén és oldalsávsorán"
 
-msgid "Open composer"
-msgstr "Üzenetszerkesztő megnyitása"
+msgid "Open composer (Ctrl+.)"
+msgstr "Üzenetszerkesztő megnyitása (Ctrl+.)"
 
 msgid "Attach file"
 msgstr "Fájl csatolása"

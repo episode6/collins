@@ -994,7 +994,7 @@ class TerminalTab(Gtk.Box):
             valign=Gtk.Align.END,
             margin_start=5,
             margin_bottom=5,
-            tooltip_text=_("Open composer"),
+            tooltip_text=_("Open composer (Ctrl+.)"),
         )
         self._composer_overlay_btn.add_css_class("attach-overlay")
         self._composer_overlay_btn.connect("clicked", lambda *_: self.open_composer())
@@ -2066,6 +2066,19 @@ class TerminalTab(Gtk.Box):
         return self._composer_page is not None or (
             self._composer_revealer is not None
             and self._composer_revealer.get_reveal_child()
+        )
+
+    def composer_focused(self) -> bool:
+        """Whether the keyboard focus is inside an open composer right now
+        — what the toggle shortcut branches on, so the chord that raises
+        the panel lowers it only once the cursor has arrived there (see
+        the window's `_toggle_composer`)."""
+        if self._composer is None or not self.composer_open():
+            return False
+        root = self.get_root()
+        focus = root.get_focus() if root is not None else None
+        return focus is not None and (
+            focus is self._composer or focus.is_ancestor(self._composer)
         )
 
     def _ensure_composer(self) -> ComposerView:

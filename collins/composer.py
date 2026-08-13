@@ -2,15 +2,17 @@
 
 """The composer: a GUI prompt box for the agent's terminal.
 
-A `ComposerView` is a spell-checked multi-line text box with Send, attach
-and close buttons — everything the CLI's own input box isn't when a prompt
-outgrows one line. It owns no terminal plumbing at all: it announces
-``send-requested`` / ``close-requested`` and its host (terminal.py's overlay
-or a dock panel page) decides what those mean — cut text out of the CLI's
-box on the way in, type it back or submit it on the way out. It is also a
-drop target in its own right — files and raw images land as mentions, and
-images earn a strip of preview thumbnails over the text — through injected
-provider callbacks, so the view itself stays host-agnostic.
+A `ComposerView` is a spell-checked multi-line text box under a button row
+that reads left to right as close, dock, then attach and Send — chrome at
+one end, composing at the other — everything the CLI's own input box isn't
+when a prompt outgrows one line. It owns no terminal plumbing at all: it
+announces ``send-requested`` / ``close-requested`` and its host
+(terminal.py's overlay or a dock panel page) decides what those mean — cut
+text out of the CLI's box on the way in, type it back or submit it on the
+way out. It is also a drop target in its own right — files and raw images
+land as mentions, and images earn a strip of preview thumbnails over the
+text — through injected provider callbacks, so the view itself stays
+host-agnostic.
 
 libspelling is a hard dependency, the same bargain as GtkSourceView (which
 the spell-check adapter here is built for): nothing degrades without it, and
@@ -142,20 +144,6 @@ class ComposerView(Gtk.Box):
         self.append(scroller)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        attach = Gtk.Button(
-            icon_name="mail-attachment-symbolic",
-            tooltip_text=_("Attach file"),
-        )
-        attach.add_css_class("flat")
-        attach.connect("clicked", lambda *_a: pick_attach())
-        row.append(attach)
-        row.append(Gtk.Box(hexpand=True))
-        self._dock_btn = Gtk.Button()
-        self._dock_btn.add_css_class("flat")
-        self._dock_btn.connect(
-            "clicked", lambda *_a: self.emit("dock-toggle-requested")
-        )
-        row.append(self._dock_btn)
         close = Gtk.Button(
             icon_name="window-close-symbolic",
             tooltip_text=_("Close composer and keep the text in the terminal"),
@@ -163,6 +151,20 @@ class ComposerView(Gtk.Box):
         close.add_css_class("flat")
         close.connect("clicked", lambda *_a: self.emit("close-requested"))
         row.append(close)
+        self._dock_btn = Gtk.Button()
+        self._dock_btn.add_css_class("flat")
+        self._dock_btn.connect(
+            "clicked", lambda *_a: self.emit("dock-toggle-requested")
+        )
+        row.append(self._dock_btn)
+        row.append(Gtk.Box(hexpand=True))
+        attach = Gtk.Button(
+            icon_name="mail-attachment-symbolic",
+            tooltip_text=_("Attach file"),
+        )
+        attach.add_css_class("flat")
+        attach.connect("clicked", lambda *_a: pick_attach())
+        row.append(attach)
         send = Gtk.Button(label=_("Send"))
         send.add_css_class("suggested-action")
         send.connect("clicked", lambda *_a: self.emit("send-requested", self.peek_text()))

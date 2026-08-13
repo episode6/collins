@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-12. Full change history: git log for this file.
+fork. Last modified: 2026-08-13. Full change history: git log for this file.
 -->
 
 # Collins
@@ -63,6 +63,7 @@ Features:
 | `Ctrl+Shift+E` | Toggle 😊 marker on the current tab |
 | `Ctrl+J` | Show/hide the terminal panel (twice quickly: open it and move it bottom ↔ right) |
 | `Ctrl+K` | Clear the terminal panel (screen and saved history) |
+| `Ctrl+.` | Show/hide the composer (pressed while composing, it closes and puts the draft back in the agent's box) |
 | `F8` | Show/hide the editor panel |
 | `Ctrl+S` (in the editor) | Save the current file |
 | `Ctrl+F` (in the editor) | Find in file |

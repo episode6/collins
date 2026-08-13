@@ -899,8 +899,8 @@ msgstr "Pull-Requests anheften"
 msgid "attach_pr — put a pull request on the session's own footer and sidebar row"
 msgstr "attach_pr — setzt einen Pull-Request auf die Fußzeile und Seitenleistenzeile der Sitzung"
 
-msgid "Open composer"
-msgstr "Composer öffnen"
+msgid "Open composer (Ctrl+.)"
+msgstr "Composer öffnen (Strg+.)"
 
 msgid "Attach file"
 msgstr "Datei anhängen"

@@ -1730,8 +1730,8 @@ msgstr ""
 msgid "Composer: the agent isn't running in this tab"
 msgstr ""
 
-#: collins/terminal.py:987
-msgid "Open composer"
+#: collins/terminal.py:997
+msgid "Open composer (Ctrl+.)"
 msgstr ""
 
 #: collins/composer.py:110 collins/terminal.py:2135
