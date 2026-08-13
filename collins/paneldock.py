@@ -355,19 +355,30 @@ class PanelDock(Adw.Bin):
         """Every page across every strip, in spatial-then-tab order."""
         return [page for strip in self.strips() for page in strip.pages()]
 
-    def open_page(self, widget) -> None:
+    def open_page(self, widget, side: str = "right") -> None:
         """Open a non-shell page as a tab in a strip beside the terminal:
-        the first strip right of it, else a new one split off the
-        terminal's right edge. The join-don't-split default keeps opening
-        five PRs from carving the dock into five slivers."""
-        strip = self._strip_right_of_terminal()
+        the first strip on *side* of it ("right" | "below"), else a new one
+        split off that edge. The join-don't-split default keeps opening
+        five PRs from carving the dock into five slivers — and lands the
+        composer in a bottom home strip as a tab rather than beneath it."""
+        if side not in ("right", "below"):
+            side = "right"
+        strip = self._strip_past_terminal("h" if side == "right" else "v")
         if strip is None:
             strip = self._new_strip()
-            split = self._split_leaf(self._terminal, strip, "right")
+            split = self._split_leaf(self._terminal, strip, side)
             self._panes[split].sizer.apply()
         strip.add_page(widget)
         self._reveal_strip(strip)
         GLib.idle_add(widget.grab_page_focus)
+
+    def close_page(self, widget) -> None:
+        """Close *widget*'s tab wherever it lives, through the strip's own
+        close funnel (busy-ask, page_closed hook, collapse-when-empty) —
+        how the docked composer's chrome close reaches its tab's X."""
+        strip = self._strip_of(widget)
+        if strip is not None:
+            strip.close_widget(widget)
 
     def reveal_page(self, widget) -> None:
         """Front an existing page: select its tab, and show its strip if it
@@ -384,28 +395,12 @@ class PanelDock(Adw.Bin):
             strip.set_visible(True)
             self._home_rec().sizer.apply()
 
-    def _strip_right_of_terminal(self):
-        """The first strip in the subtree right of the terminal, or None.
-
-        Walk up from the terminal leaf: the first horizontal split holding
-        the terminal's branch on the left has everything to its right in the
-        other branch, and that subtree's first strip (spatial order) is the
-        join target.
-        """
-        node = self._tree.find(self._terminal)
-        while node.parent is not None:
-            parent = node.parent
-            if parent.orientation == "h" and parent.slot_of(node) == "a":
-                strip = self._first_strip(parent.b)
-                if strip is not None:
-                    return strip
-            node = parent
-        return None
-
-    def _first_strip(self, node: Leaf | Split):
-        if isinstance(node, Leaf):
-            return node.value if node.value is not self._terminal else None
-        return self._first_strip(node.a) or self._first_strip(node.b)
+    def _strip_past_terminal(self, orientation: str):
+        """The first strip in the subtree right of ("h") or below ("v") the
+        terminal, or None — `DockTree.first_beyond`, which can only yield
+        strips: the terminal itself is in the near branch of any split the
+        walk answers from."""
+        return self._tree.first_beyond(self._terminal, orientation)
 
     # -- shells across strips ----------------------------------------------
 

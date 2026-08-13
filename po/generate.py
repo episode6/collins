@@ -385,6 +385,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Üzenetszerkesztő bezárása, a szöveg a terminálban marad",
         "Composer: the agent isn't running in this tab":
             "Üzenetszerkesztő: ezen a lapon nem fut az ügynök",
+        "Composer": "Üzenetszerkesztő",
+        "Dock the composer below the terminal":
+            "Üzenetszerkesztő dokkolása a terminál alá",
+        "Float the composer over the terminal":
+            "Üzenetszerkesztő lebegtetése a terminál felett",
         "Floating composer button": "Lebegő üzenetszerkesztő gomb",
         "Overlay a semi-transparent button on the corner of each agent "
         "terminal that opens the composer, a spell-checked prompt box":
@@ -771,6 +776,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Composer schließen und den Text im Terminal behalten",
         "Composer: the agent isn't running in this tab":
             "Composer: In diesem Tab läuft kein Agent",
+        "Composer": "Composer",
+        "Dock the composer below the terminal":
+            "Composer unter dem Terminal andocken",
+        "Float the composer over the terminal":
+            "Composer über dem Terminal schweben lassen",
         "Floating composer button": "Schwebende Composer-Schaltfläche",
         "Overlay a semi-transparent button on the corner of each agent "
         "terminal that opens the composer, a spell-checked prompt box":
@@ -1155,6 +1165,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Cerrar el redactor y conservar el texto en la terminal",
         "Composer: the agent isn't running in this tab":
             "Redactor: el agente no se está ejecutando en esta pestaña",
+        "Composer": "Redactor",
+        "Dock the composer below the terminal":
+            "Acoplar el redactor debajo de la terminal",
+        "Float the composer over the terminal":
+            "Hacer flotar el redactor sobre la terminal",
         "Floating composer button": "Botón flotante del redactor",
         "Overlay a semi-transparent button on the corner of each agent "
         "terminal that opens the composer, a spell-checked prompt box":
@@ -1541,6 +1556,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Fermer le rédacteur et garder le texte dans le terminal",
         "Composer: the agent isn't running in this tab":
             "Rédacteur : l'agent ne s'exécute pas dans cet onglet",
+        "Composer": "Rédacteur",
+        "Dock the composer below the terminal":
+            "Ancrer le rédacteur sous le terminal",
+        "Float the composer over the terminal":
+            "Faire flotter le rédacteur au-dessus du terminal",
         "Floating composer button": "Bouton flottant du rédacteur",
         "Overlay a semi-transparent button on the corner of each agent "
         "terminal that opens the composer, a spell-checked prompt box":

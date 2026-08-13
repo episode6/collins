@@ -917,6 +917,15 @@ msgstr "Cerrar el redactor y conservar el texto en la terminal"
 msgid "Composer: the agent isn't running in this tab"
 msgstr "Redactor: el agente no se está ejecutando en esta pestaña"
 
+msgid "Composer"
+msgstr "Redactor"
+
+msgid "Dock the composer below the terminal"
+msgstr "Acoplar el redactor debajo de la terminal"
+
+msgid "Float the composer over the terminal"
+msgstr "Hacer flotar el redactor sobre la terminal"
+
 msgid "Floating composer button"
 msgstr "Botón flotante del redactor"
 

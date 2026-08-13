@@ -13,6 +13,9 @@ widget implementing the duck-typed `PanelPage` protocol:
     has_page_focus() -> bool       # for hide-time focus return
     page_busy() -> bool            # running command -> confirm close
     apply_settings(dict) -> None   # font/theme fan-out (no-op where n/a)
+    page_closed() -> None          # optional: tab is closing for real (not
+                                   # a transfer) — last chance to rescue
+                                   # anything living inside the widget
 
 A page may additionally emit "bell" (re-emitted by the strip for the
 window's visual bell) and "shell-exited" (shells: the process ended, so
@@ -272,6 +275,13 @@ class PanelStrip(Gtk.Box):
         if page is not None:
             self._view.set_selected_page(page)
 
+    def close_widget(self, widget) -> None:
+        """Close *widget*'s tab through the same funnel its own X uses —
+        busy-ask and all (the dock's `close_page`)."""
+        page = self._find_page(widget)
+        if page is not None:
+            self._view.close_page(page)
+
     def reorder_to(self, widget, insert_index: int) -> None:
         """Reorder *widget*'s tab to sit before the tab currently at
         *insert_index* (an index that counts the moved tab itself, as
@@ -350,6 +360,12 @@ class PanelStrip(Gtk.Box):
                 self._ask_close_busy(page)
             return True
         self._close_ok.discard(page)
+        # The close is happening for sure now: a page with something to
+        # rescue (the composer's live view) gets it out before the widget
+        # goes down with its tab. Transfers never come this way.
+        closed = getattr(widget, "page_closed", None)
+        if closed is not None:
+            closed()
         view.close_page_finish(page, True)  # page-detached reports "empty"
         return True  # close_page_finish already ran
 

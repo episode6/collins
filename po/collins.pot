@@ -1744,6 +1744,18 @@ msgstr ""
 msgid "Attach file"
 msgstr ""
 
+#: collins/composer.py
+msgid "Composer"
+msgstr ""
+
+#: collins/composer.py
+msgid "Dock the composer below the terminal"
+msgstr ""
+
+#: collins/composer.py
+msgid "Float the composer over the terminal"
+msgstr ""
+
 #: collins/composer.py:118
 msgid "Close composer and keep the text in the terminal"
 msgstr ""

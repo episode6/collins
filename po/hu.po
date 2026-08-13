@@ -917,6 +917,15 @@ msgstr "Üzenetszerkesztő bezárása, a szöveg a terminálban marad"
 msgid "Composer: the agent isn't running in this tab"
 msgstr "Üzenetszerkesztő: ezen a lapon nem fut az ügynök"
 
+msgid "Composer"
+msgstr "Üzenetszerkesztő"
+
+msgid "Dock the composer below the terminal"
+msgstr "Üzenetszerkesztő dokkolása a terminál alá"
+
+msgid "Float the composer over the terminal"
+msgstr "Üzenetszerkesztő lebegtetése a terminál felett"
+
 msgid "Floating composer button"
 msgstr "Lebegő üzenetszerkesztő gomb"
 

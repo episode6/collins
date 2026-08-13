@@ -26,8 +26,9 @@ from collections.abc import Callable
 
 import gi
 
+gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
-from gi.repository import GObject, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, GObject, Gtk, Pango  # noqa: E402
 
 try:
     gi.require_version("Spelling", "1")
@@ -62,6 +63,9 @@ class ComposerView(Gtk.Box):
     __gsignals__ = {
         "send-requested": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "close-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # The chrome's dock/float toggle; what docking means is the host's
+        # business, like every other signal here.
+        "dock-toggle-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(self, pick_attach: Callable[[], None]) -> None:
@@ -101,6 +105,7 @@ class ComposerView(Gtk.Box):
         scroller.set_min_content_height(_MIN_CONTENT_HEIGHT)
         scroller.set_max_content_height(_MAX_CONTENT_HEIGHT)
         scroller.set_propagate_natural_height(True)
+        self._scroller = scroller
         self.append(scroller)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -112,6 +117,12 @@ class ComposerView(Gtk.Box):
         attach.connect("clicked", lambda *_a: pick_attach())
         row.append(attach)
         row.append(Gtk.Box(hexpand=True))
+        self._dock_btn = Gtk.Button()
+        self._dock_btn.add_css_class("flat")
+        self._dock_btn.connect(
+            "clicked", lambda *_a: self.emit("dock-toggle-requested")
+        )
+        row.append(self._dock_btn)
         close = Gtk.Button(
             icon_name="window-close-symbolic",
             tooltip_text=_("Close composer and keep the text in the terminal"),
@@ -124,6 +135,8 @@ class ComposerView(Gtk.Box):
         send.connect("clicked", lambda *_a: self.emit("send-requested", self.peek_text()))
         row.append(send)
         self.append(row)
+        self._docked = False
+        self.set_docked(False)
 
     # -- text ------------------------------------------------------------------
 
@@ -158,6 +171,26 @@ class ComposerView(Gtk.Box):
 
     def set_enter_sends(self, enter_sends: bool) -> None:
         self._enter_sends = bool(enter_sends)
+
+    def set_docked(self, docked: bool) -> None:
+        """Dress the widget for its host: docked (a panel page below the
+        terminal) drops the floating card's rounded top and grows the text
+        view to fill the page, since a panel tab has real height to give
+        where the overlay only borrowed the terminal's bottom edge. The
+        chrome's toggle button swaps meaning with the mode."""
+        self._docked = bool(docked)
+        if self._docked:
+            self.add_css_class("docked")
+            self._scroller.set_max_content_height(-1)
+            self._scroller.set_vexpand(True)
+            self._dock_btn.set_icon_name("view-restore-symbolic")
+            self._dock_btn.set_tooltip_text(_("Float the composer over the terminal"))
+        else:
+            self.remove_css_class("docked")
+            self._scroller.set_max_content_height(_MAX_CONTENT_HEIGHT)
+            self._scroller.set_vexpand(False)
+            self._dock_btn.set_icon_name("go-bottom-symbolic")
+            self._dock_btn.set_tooltip_text(_("Dock the composer below the terminal"))
 
     def set_font(self, font: str) -> None:
         """Match the terminal's font setting; "" (VTE's default) falls back
@@ -203,3 +236,68 @@ class ComposerView(Gtk.Box):
             self._view.scroll_to_mark(self._buffer.get_insert(), 0.0, False, 0.0, 0.0)
             return True
         return False
+
+
+class ComposerPage(Adw.Bin):
+    """The composer as a dock panel page (panelstrip's PanelPage protocol).
+
+    A thin wrapper around the one *live* `ComposerView` — docking reparents
+    the view between the overlay revealer and this bin, never rebuilds it,
+    so text, cursor and undo history ride along. `page_state` persists the
+    placement only: a restored layout gets a fresh empty composer, drafts
+    are not written to disk.
+
+    *on_closed(page)* fires when the page's tab really closes (the strip's
+    `page_closed` hook — an X, a bulk close, the chrome's close button
+    routed through the dock), while the view is still inside: the host
+    rescues it back to the overlay and applies paste-back semantics there.
+    """
+
+    page_kind = "composer"
+
+    def __init__(self, view: ComposerView, on_closed: Callable[[ComposerPage], None]) -> None:
+        super().__init__()
+        self._on_closed = on_closed
+        self.set_child(view)
+
+    def take_view(self) -> ComposerView:
+        """Detach and return the live view (undock, or close-time rescue)."""
+        view = self.get_child()
+        self.set_child(None)
+        return view
+
+    # -- PanelPage protocol ----------------------------------------------------
+
+    def page_title(self) -> str:
+        return _("Composer")
+
+    def page_icon(self) -> str | None:
+        return "document-edit-symbolic"
+
+    def grab_page_focus(self) -> None:
+        view = self.get_child()
+        if view is not None:
+            view.focus_view()
+
+    def has_page_focus(self) -> bool:
+        view = self.get_child()
+        return view.has_focus_within() if view is not None else False
+
+    def page_busy(self) -> bool:
+        # An unsent draft is deliberately not "busy": closing doesn't lose
+        # it — page_closed pastes it back into the agent's input box, the
+        # same road the overlay's close takes — so no confirm is owed.
+        return False
+
+    def apply_settings(self, settings: dict) -> None:
+        # No-op where n/a, per the protocol: the child is the tab's one live
+        # ComposerView, and TerminalTab.apply_settings pushes font and
+        # enter-sends straight to it whether it floats or docks. Forwarding
+        # here would apply the same values a second time.
+        pass
+
+    def page_state(self) -> dict:
+        return {"kind": "composer"}
+
+    def page_closed(self) -> None:
+        self._on_closed(self)
