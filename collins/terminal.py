@@ -1333,32 +1333,6 @@ class TerminalTab(Gtk.Box):
         """Slim status row under the terminal: the tab's live working
         directory and git branch, plus the buttons controlling the terminal
         panel."""
-        # Leading the row: copy the prompt typed into the agent's input box,
-        # rebuilt into the text the user actually entered (the CLI's own
-        # wrapping undone, typed line breaks kept — see entered_prompt).
-        # A right-click is the cut: the same copy, then the box is cleared.
-        self._copy_prompt_icon = Gtk.Image.new_from_icon_name("edit-copy-symbolic")
-        self._copy_prompt_icon.set_pixel_size(_PR_REFRESH_ICON_PX)
-        self._copy_prompt_icon.add_css_class("dim-label")
-        self._copy_prompt_flash = 0  # source id of a pending icon restore
-        copy_prompt_btn = Gtk.Button(child=self._copy_prompt_icon)
-        copy_prompt_btn.add_css_class("flat")
-        copy_prompt_btn.set_tooltip_text(
-            _("Copy the prompt typed in the input box")
-            + "\n"
-            + _("Right-click to cut: copy it and clear the box")
-        )
-        copy_prompt_btn.connect("clicked", self._on_copy_prompt)
-        # Its own gesture, like the terminal toggle's: a Gtk.Button only
-        # activates on the primary button, so the secondary never doubles up.
-        cut_prompt = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
-        cut_prompt.connect("pressed", self._on_cut_prompt)
-        copy_prompt_btn.add_controller(cut_prompt)
-        # A divider after it, like the ones flanking the branch: the button
-        # acts on the input box, while everything right of it describes the
-        # tab, so the two shouldn't read as one run.
-        copy_prompt_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-
         # Which model the session is answering with — the first thing the row
         # says about the session itself, ahead of where it is working. Read
         # off the transcript, which stamps every reply with its model, so a
@@ -1475,8 +1449,6 @@ class TerminalTab(Gtk.Box):
         # (not the cwd label) takes the slack so the buttons stay pinned right
         # even while the model, branch and PR labels are hidden.
         left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
-        left.append(copy_prompt_btn)
-        left.append(copy_prompt_sep)
         left.append(self._model_label)
         left.append(self._model_sep)
         left.append(self._cwd_label)
@@ -1617,9 +1589,9 @@ class TerminalTab(Gtk.Box):
 
         The PR group ends in a button that is always there, so its own dividers
         never come and go; the model and the branch are the chips that do, and
-        each is paired with the divider on the side away from the copy button —
-        so the run never opens or closes with a stray divider. The one ahead of
-        the branch does double duty, standing in for the cwd's own.
+        each is paired with the divider on the side away from the start of the
+        row — so the run never opens or closes with a stray divider. The one
+        ahead of the branch does double duty, standing in for the cwd's own.
         """
         branch = self._footer_branch is not None
         cwd = self._footer_cwd is not None
@@ -2432,44 +2404,6 @@ class TerminalTab(Gtk.Box):
         # position lives in.
         rows = split_screen_rows(text or "", columns)
         return self.provider.entered_prompt(rows, cursor_row - top_row, columns)
-
-    def _on_copy_prompt(self, _btn) -> None:
-        self._copy_entered_prompt(cut=False)
-
-    def _on_cut_prompt(self, _gesture, _n_press: int, _x: float, _y: float) -> None:
-        self._copy_entered_prompt(cut=True)
-
-    def _copy_entered_prompt(self, cut: bool) -> None:
-        """The footer copy-prompt button: put the typed prompt on the
-        clipboard, and for the right-click cut also clear the input box.
-        Nothing typed (or no box to read) quietly does neither — the empty
-        clipboard write would only destroy what the user had on there."""
-        if cut:
-            # The composer's open-cut shares this erase (_cut_entered_prompt);
-            # a provider that can read its box but not clear it safely cuts
-            # nothing — no half-cut that copies, leaves the text, and
-            # flashes done.
-            text = self._cut_entered_prompt()
-            if text is None:
-                return
-        else:
-            prompt = self.entered_prompt()
-            if prompt is None or not prompt.text.strip():
-                return
-            text = prompt.text
-        self._copy_prompt_icon.get_clipboard().set(text)
-        # The same confirmation rhythm as the copy labels beside it
-        # (copylabel), told with the icon: a checkmark for a beat.
-        self._copy_prompt_icon.set_from_icon_name("object-select-symbolic")
-        if self._copy_prompt_flash:
-            GLib.source_remove(self._copy_prompt_flash)
-
-        def restore() -> bool:
-            self._copy_prompt_flash = 0
-            self._copy_prompt_icon.set_from_icon_name("edit-copy-symbolic")
-            return GLib.SOURCE_REMOVE
-
-        self._copy_prompt_flash = GLib.timeout_add(1200, restore)
 
     def unstarted_thread(self) -> bool:
         """Whether this tab is still a New Thread with nothing in it: a
