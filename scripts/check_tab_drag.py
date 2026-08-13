@@ -10,9 +10,12 @@ tab bounds.
 
     python3 scripts/check_tab_drag.py
 
-What it can't exercise: the gesture-claim contest with AdwTabBox's own
-drag (needs a pointer) — verify by hand that dragging a tab shows the
-title chip and drop zones, never Adwaita's native tab drag.
+What it can't exercise: the pointer itself. It can check that Adwaita's
+tab-drag gesture is out of the propagation chain while per-tab handles are
+on (the contest it used to lose to a fast flick is then not a contest at
+all) — but whether a real drag shows the title chip and the drop zones,
+rather than the whole tab following the pointer, still has to be tried by
+hand.
 """
 
 import os
@@ -130,8 +133,15 @@ def our_source(widget) -> Gtk.DragSource | None:
     return None
 
 
+def native_phases(bar) -> list:
+    """The propagation phase of every AdwTabBox drag gesture in *bar*."""
+    return [g.get_propagation_phase() for g in paneldnd._native_drag_gestures(bar)]
+
+
 def _new_page_while_off_is_unwired(dock) -> bool:
-    """A shell opened while the fallback is active must not get a handle."""
+    """A shell opened while the fallback is active must not get a handle —
+    and the strip built for it must leave Adwaita's tab drag armed, since
+    that fallback is the only drag its tabs have."""
     dock2 = make_dock()
     dock2.apply_settings({"panel_tab_drag_handles": False})
     dock2.show_home()
@@ -144,6 +154,7 @@ def _new_page_while_off_is_unwired(dock) -> bool:
         page.get_indicator_icon() is None
         and (tab is None or our_source(tab) is None)
         and strip._grip.get_visible()
+        and all(p == Gtk.PropagationPhase.BUBBLE for p in native_phases(strip.tab_bar))
     )
 
 
@@ -170,12 +181,39 @@ def main() -> int:
         ),
     )
 
+    print("native tab drag stands down:")
+    phases = native_phases(home.tab_bar)
+    check("the tab box's drag gesture is found", len(phases) > 0, phases)
+    check(
+        "and sits out the propagation chain",
+        phases and all(p == Gtk.PropagationPhase.NONE for p in phases),
+        phases,
+    )
+    fresh = make_dock()
+    fresh.show_home()
+    check(
+        "a strip is disarmed before its first page",
+        all(p == Gtk.PropagationPhase.NONE for p in native_phases(fresh.strips()[0].tab_bar)),
+        native_phases(fresh.strips()[0].tab_bar),
+    )
+    plain = Adw.TabBar(view=Adw.TabView())
+    check(
+        "a tab bar we don't own keeps its gesture",
+        all(p == Gtk.PropagationPhase.BUBBLE for p in native_phases(plain)),
+        native_phases(plain),
+    )
+
     print("transfer re-wires:")
     dock.split_move(home, second, dock._terminal, "right")
     drain()
     other = [s for s in dock.strips() if s is not home][0]
     tab = paneldnd._find_tab(other.tab_bar, second)
     check("moved page's fresh tab is wired", tab is not None and our_source(tab) is not None)
+    check(
+        "the destination strip's native drag is down too",
+        all(p == Gtk.PropagationPhase.NONE for p in native_phases(other.tab_bar)),
+        native_phases(other.tab_bar),
+    )
 
     print("foreign pages stay unwired:")
     foreign = Gtk.Label(label="not a panel page")
@@ -224,8 +262,18 @@ def main() -> int:
     check("fallback grip shown", home._grip.get_visible())
     grip_src = our_source(home._grip)
     check("grip carries a drag source", grip_src is not None)
+    check(
+        "Adwaita gets its tab drag back",
+        all(p == Gtk.PropagationPhase.BUBBLE for p in native_phases(home.tab_bar)),
+        native_phases(home.tab_bar),
+    )
     dock.apply_settings({"panel_tab_drag_handles": True})
     drain()
+    check(
+        "and stands down again when it turns back on",
+        all(p == Gtk.PropagationPhase.NONE for p in native_phases(home.tab_bar)),
+        native_phases(home.tab_bar),
+    )
     on_tabs = [paneldnd._find_tab(home.tab_bar, w) for w in home.pages()]
     check(
         "sources remounted when it turns back on",
