@@ -471,13 +471,23 @@ msgid ""
 msgstr ""
 
 #: collins/prefs.py:145
-msgid "Floating attach-file button"
+msgid "Floating composer button"
 msgstr ""
 
 #: collins/prefs.py:147
 msgid ""
-"Overlay a semi-transparent attach button on the corner of each agent "
-"terminal"
+"Overlay a semi-transparent button on the corner of each agent terminal "
+"that opens the composer, a spell-checked prompt box"
+msgstr ""
+
+#: collins/prefs.py:158
+msgid "Enter sends composer text"
+msgstr ""
+
+#: collins/prefs.py:160
+msgid ""
+"Off: Enter inserts a newline and Ctrl+Enter sends. Shift+Enter always "
+"inserts a newline"
 msgstr ""
 
 #: collins/prefs.py:309
@@ -1720,6 +1730,22 @@ msgstr ""
 
 #: collins/terminal.py:1199
 msgid "Add to chat: the agent isn't running in this tab"
+msgstr ""
+
+#: collins/terminal.py:2050
+msgid "Composer: the agent isn't running in this tab"
+msgstr ""
+
+#: collins/terminal.py:987
+msgid "Open composer"
+msgstr ""
+
+#: collins/composer.py:110 collins/terminal.py:2135
+msgid "Attach file"
+msgstr ""
+
+#: collins/composer.py:118
+msgid "Close composer and keep the text in the terminal"
 msgstr ""
 
 #: collins/terminal.py:1205

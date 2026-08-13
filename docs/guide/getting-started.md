@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-10. Full change history: git log for this file.
+fork. Last modified: 2026-08-12. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -26,15 +26,15 @@ Install the system libraries with your distro's package manager:
 ::: code-group
 
 ```bash [Ubuntu / Debian]
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 gir1.2-spelling-1
 ```
 
 ```bash [Fedora]
-sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5
+sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling
 ```
 
 ```bash [Arch]
-sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5
+sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 libspelling
 ```
 
 :::

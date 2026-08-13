@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-12. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -379,6 +379,23 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "attach_pr — put a pull request on the session's own footer and sidebar row":
             "attach_pr — pull request elhelyezése a munkamenet saját láblécén "
             "és oldalsávsorán",
+        "Open composer": "Üzenetszerkesztő megnyitása",
+        "Attach file": "Fájl csatolása",
+        "Close composer and keep the text in the terminal":
+            "Üzenetszerkesztő bezárása, a szöveg a terminálban marad",
+        "Composer: the agent isn't running in this tab":
+            "Üzenetszerkesztő: ezen a lapon nem fut az ügynök",
+        "Floating composer button": "Lebegő üzenetszerkesztő gomb",
+        "Overlay a semi-transparent button on the corner of each agent "
+        "terminal that opens the composer, a spell-checked prompt box":
+            "Félig átlátszó gomb az ügynökterminálok sarkában, amely "
+            "megnyitja az üzenetszerkesztőt, egy helyesírás-ellenőrzős "
+            "beviteli mezőt",
+        "Enter sends composer text": "Az Enter elküldi az üzenetszerkesztő szövegét",
+        "Off: Enter inserts a newline and Ctrl+Enter sends. "
+        "Shift+Enter always inserts a newline":
+            "Kikapcsolva: az Enter új sort kezd, a Ctrl+Enter küld. "
+            "A Shift+Enter mindig új sort kezd",
     },
     "de": {
         "── restored panel history ──": "── wiederhergestellter Panel-Verlauf ──",
@@ -748,6 +765,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "attach_pr — put a pull request on the session's own footer and sidebar row":
             "attach_pr — setzt einen Pull-Request auf die Fußzeile und "
             "Seitenleistenzeile der Sitzung",
+        "Open composer": "Composer öffnen",
+        "Attach file": "Datei anhängen",
+        "Close composer and keep the text in the terminal":
+            "Composer schließen und den Text im Terminal behalten",
+        "Composer: the agent isn't running in this tab":
+            "Composer: In diesem Tab läuft kein Agent",
+        "Floating composer button": "Schwebende Composer-Schaltfläche",
+        "Overlay a semi-transparent button on the corner of each agent "
+        "terminal that opens the composer, a spell-checked prompt box":
+            "Halbtransparente Schaltfläche in der Ecke jedes Agent-Terminals, "
+            "die den Composer öffnet — ein Eingabefeld mit Rechtschreibprüfung",
+        "Enter sends composer text": "Enter sendet den Composer-Text",
+        "Off: Enter inserts a newline and Ctrl+Enter sends. "
+        "Shift+Enter always inserts a newline":
+            "Aus: Enter fügt eine neue Zeile ein und Strg+Enter sendet. "
+            "Umschalt+Enter fügt immer eine neue Zeile ein",
     },
     "es": {
         "── restored panel history ──": "── historial del panel restaurado ──",
@@ -1116,6 +1149,23 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "attach_pr — put a pull request on the session's own footer and sidebar row":
             "attach_pr — coloca un pull request en el pie y la fila de la "
             "barra lateral de la sesión",
+        "Open composer": "Abrir el redactor",
+        "Attach file": "Adjuntar archivo",
+        "Close composer and keep the text in the terminal":
+            "Cerrar el redactor y conservar el texto en la terminal",
+        "Composer: the agent isn't running in this tab":
+            "Redactor: el agente no se está ejecutando en esta pestaña",
+        "Floating composer button": "Botón flotante del redactor",
+        "Overlay a semi-transparent button on the corner of each agent "
+        "terminal that opens the composer, a spell-checked prompt box":
+            "Superpone un botón semitransparente en la esquina de cada "
+            "terminal de agente que abre el redactor, un cuadro de texto "
+            "con corrector ortográfico",
+        "Enter sends composer text": "Enter envía el texto del redactor",
+        "Off: Enter inserts a newline and Ctrl+Enter sends. "
+        "Shift+Enter always inserts a newline":
+            "Desactivado: Enter inserta una línea nueva y Ctrl+Enter envía. "
+            "Mayús+Enter siempre inserta una línea nueva",
     },
     "fr": {
         "── restored panel history ──": "── historique du panneau restauré ──",
@@ -1485,13 +1535,30 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "attach_pr — put a pull request on the session's own footer and sidebar row":
             "attach_pr — place une pull request sur le pied de page et la "
             "ligne de barre latérale de la session",
+        "Open composer": "Ouvrir le rédacteur",
+        "Attach file": "Joindre un fichier",
+        "Close composer and keep the text in the terminal":
+            "Fermer le rédacteur et garder le texte dans le terminal",
+        "Composer: the agent isn't running in this tab":
+            "Rédacteur : l'agent ne s'exécute pas dans cet onglet",
+        "Floating composer button": "Bouton flottant du rédacteur",
+        "Overlay a semi-transparent button on the corner of each agent "
+        "terminal that opens the composer, a spell-checked prompt box":
+            "Superpose un bouton semi-transparent dans le coin de chaque "
+            "terminal d'agent qui ouvre le rédacteur, une zone de saisie "
+            "avec correction orthographique",
+        "Enter sends composer text": "Entrée envoie le texte du rédacteur",
+        "Off: Enter inserts a newline and Ctrl+Enter sends. "
+        "Shift+Enter always inserts a newline":
+            "Désactivé : Entrée insère un saut de ligne et Ctrl+Entrée "
+            "envoie. Maj+Entrée insère toujours un saut de ligne",
     },
 }
 
 _HEADER = (
     "# Modified from the original agent-session-manager\n"
     "# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett\n"
-    "# fork. Last modified: 2026-08-11. Full change history: git log for this file.\n"
+    "# fork. Last modified: 2026-08-12. Full change history: git log for this file.\n"
     "# Generated by po/generate.py — do not edit by hand.\n"
     'msgid ""\n'
     'msgstr ""\n'

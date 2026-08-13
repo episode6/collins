@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-12. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -22,6 +22,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa:
 
 from . import (  # noqa: E402
     apppicker,
+    composerkeys,
     dropimages,
     editor,
     editorfiles,
@@ -34,6 +35,7 @@ from . import (  # noqa: E402
     vtehtml,
 )
 from .claudemodels import short_name  # noqa: E402
+from .composer import ComposerView  # noqa: E402
 from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch, has_changes  # noqa: E402
@@ -976,30 +978,36 @@ class TerminalTab(Gtk.Box):
         scrolled = Gtk.ScrolledWindow(child=self.terminal, vexpand=True)
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
 
-        # Floating attach-file button over the terminal's bottom-left corner —
-        # the same pick-a-file flow as the header button, kept within reach
-        # when the pointer is already down in the terminal. Overlaid on the
+        # Floating composer button over the terminal's bottom-left corner —
+        # opens the composer panel (a GUI prompt box, see collins/composer.py)
+        # right where the CLI's own input box lives. Overlaid on the
         # scrolled terminal itself, inside the width clamp below, so it hugs
         # the corner of the terminal *content* — not the tab — when the clamp
         # centers a width-limited terminal between gutters. Shown only for
-        # providers with a file mention syntax (base agents return None);
-        # whether the agent is actually running is checked at click time,
-        # like "Add to chat" (see add_file_to_chat).
-        self._attach_overlay_btn = Gtk.Button(
-            icon_name="mail-attachment-symbolic",
+        # providers with an input box Collins can cut a prompt out of (the
+        # clear_prompt_keys probe; base agents return None); whether the
+        # agent is actually running is checked at click time, like "Add to
+        # chat" (see add_file_to_chat).
+        self._composer_overlay_btn = Gtk.Button(
+            icon_name="document-edit-symbolic",
             halign=Gtk.Align.START,
             valign=Gtk.Align.END,
             margin_start=5,
             margin_bottom=5,
-            tooltip_text=_("Attach file to chat"),
+            tooltip_text=_("Open composer"),
         )
-        self._attach_overlay_btn.add_css_class("attach-overlay")
-        self._attach_overlay_btn.connect("clicked", lambda *_: self.pick_file_to_attach())
-        self._attach_overlay_btn.set_visible(
-            self.provider.file_reference("image.png", None) is not None
-        )
-        content_overlay = Gtk.Overlay(child=scrolled)
-        content_overlay.add_overlay(self._attach_overlay_btn)
+        self._composer_overlay_btn.add_css_class("attach-overlay")
+        self._composer_overlay_btn.connect("clicked", lambda *_: self.open_composer())
+        self._composer_overlay_btn.set_visible(self._provider_has_prompt_box())
+        # The composer itself is built lazily on first open (_ensure_composer);
+        # only its future overlay slot exists up front.
+        self._composer: ComposerView | None = None
+        self._composer_revealer: Gtk.Revealer | None = None
+        self._composer_enter_sends = True
+        self._composer_font = ""
+        self._content_overlay = Gtk.Overlay(child=scrolled)
+        content_overlay = self._content_overlay
+        content_overlay.add_overlay(self._composer_overlay_btn)
 
         # Past "terminal_max_width", the clamp stops growing the terminal and
         # centers it instead; see _apply_terminal_max_width. Unset until
@@ -1841,9 +1849,10 @@ class TerminalTab(Gtk.Box):
         self.add_file_to_chat(path, start_line, end_line)
 
     def pick_file_to_attach(self) -> None:
-        """The attach-file buttons — the header's and the floating one in the
-        terminal's corner: pick a file, then reference it in the chat (typed,
-        never submitted — see add_file_to_chat).
+        """The header bar's attach-file button: pick a file, then reference
+        it in the chat (typed, never submitted — see add_file_to_chat; the
+        floating corner button opens the composer now, which has an attach
+        of its own — _pick_file_for_composer).
 
         The dialog starts in the agent's cwd right now, not the directory the
         tab started in, matching where the mention it produces will resolve."""
@@ -1895,6 +1904,11 @@ class TerminalTab(Gtk.Box):
         )
         if reference is None:
             self.feed_message(_("Add to chat isn't available for this file"))
+            return
+        # An open composer *is* the input box right now — the CLI's own was
+        # emptied into it — so every attach entry point lands there instead.
+        if self.composer_open():
+            self._composer.insert_mention(reference + " ")
             return
         self.feed_child_text(self._mention_leading_space() + reference + " ")
         GLib.idle_add(self._focus_terminal_after_add_to_chat)
@@ -2053,9 +2067,170 @@ class TerminalTab(Gtk.Box):
             )
         if not text:
             return False
+        # Drops follow the live input box: with the composer open the CLI's
+        # box is empty by construction, and a mention typed into it would be
+        # stranded there when the composer's text comes back over it.
+        if self.composer_open():
+            self._composer.insert_mention(text)
+            return True
         self.feed_child_text(self._mention_leading_space() + text)
         self.grab_terminal_focus()
         return True
+
+    # -- composer ------------------------------------------------------------
+
+    def _provider_has_prompt_box(self) -> bool:
+        """Whether this provider has an input box Collins can read and
+        clear — what the composer's open-cut needs, probed with a dummy
+        prompt (base agents answer None to any clear)."""
+        probe = EnteredPrompt(text="x", rows_below=0)
+        return self.provider.clear_prompt_keys(probe) is not None
+
+    def composer_open(self) -> bool:
+        return (
+            self._composer_revealer is not None
+            and self._composer_revealer.get_reveal_child()
+        )
+
+    def _ensure_composer(self) -> ComposerView:
+        """Build the composer and its overlay slot on first use. The
+        revealer rides content_overlay — the same width-clamped overlay as
+        the floating button — anchored to the bottom edge, so the panel
+        rises exactly over the CLI's own input box."""
+        if self._composer is not None:
+            return self._composer
+        self._composer = ComposerView(pick_attach=self._pick_file_for_composer)
+        self._composer.set_enter_sends(self._composer_enter_sends)
+        self._composer.set_font(self._composer_font)
+        self._composer.connect("send-requested", self._on_composer_send)
+        self._composer.connect("close-requested", lambda *_a: self.close_composer())
+        revealer = Gtk.Revealer(
+            transition_type=Gtk.RevealerTransitionType.SLIDE_UP,
+            valign=Gtk.Align.END,
+            child=self._composer,
+            visible=False,
+        )
+        # Once the hide transition finishes, stop occupying the overlay:
+        # an invisible-but-revealable widget would still shadow the
+        # terminal's bottom edge from pointer events.
+        revealer.connect("notify::child-revealed", self._on_composer_revealed)
+        self._composer_revealer = revealer
+        self._content_overlay.add_overlay(revealer)
+        return self._composer
+
+    def _on_composer_revealed(self, revealer: Gtk.Revealer, _pspec) -> None:
+        if not revealer.get_child_revealed():
+            revealer.set_visible(False)
+
+    def open_composer(self) -> None:
+        """The floating button: raise the composer over the terminal,
+        seeded with whatever was typed-but-unsent in the CLI's input box
+        (cut, not copied — the box empties so a later send can't double
+        it). A box that can't be read right now — empty, or the agent
+        mid-turn drawing something else — seeds nothing and opens anyway:
+        composing while the agent works is half the point."""
+        if not self._agent_is_running():
+            self.feed_message(_("Composer: the agent isn't running in this tab"))
+            return
+        if self.composer_open():
+            self._composer.focus_view()
+            return
+        composer = self._ensure_composer()
+        composer.set_text(self._cut_entered_prompt() or "")
+        revealer = self._composer_revealer
+        revealer.set_visible(True)
+
+        # Revealed from an idle after the (fresh) child maps, or the first
+        # open skips its slide and just appears (the sidebar's lesson).
+        def reveal() -> bool:
+            revealer.set_reveal_child(True)
+            composer.focus_view()
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(reveal)
+
+    def close_composer(self, restore: bool = True) -> None:
+        """Lower the composer. Its text goes back where it came from —
+        typed into the CLI's box, unsubmitted (multi-line arrives as one
+        paste chunk, whose newlines are line breaks in the box) — unless
+        *restore* is False (sending already emptied it) or the agent has
+        left the terminal, which quietly discards: what's there now is a
+        shell prompt, where a pasted draft isn't a draft, it's commands
+        (a shell without bracketed paste runs each line as it lands)."""
+        if not self.composer_open():
+            return
+        text = self._composer.take_text()
+        self._composer_revealer.set_reveal_child(False)
+        if restore and self._agent_is_running():
+            restored = composerkeys.restore_text(text)
+            if restored:
+                self.feed_child_text(restored)
+        self.grab_terminal_focus()
+
+    def _on_composer_send(self, _view, text: str) -> None:
+        """Send closes first, then submits — the panel is a stand-in for
+        the CLI's input box, and the submitted prompt should land in view,
+        not behind a panel. Nothing but whitespace just closes. Not
+        re-gated on takes_prompt: the box was emptied at open, and anything
+        typed into the terminal since submits along with this, same as if
+        the user had pressed Enter there. It IS re-gated on the agent
+        still being in the terminal — the text-then-Return of a submit
+        aimed at a shell would *execute* the draft — and an undeliverable
+        send keeps the panel up with the draft in it, losing nothing."""
+        if not text.strip():
+            self.close_composer()
+            return
+        if not self._agent_is_running():
+            self.feed_message(_("Composer: the agent isn't running in this tab"))
+            return
+        self._composer.set_text("")
+        self._composer_revealer.set_reveal_child(False)
+        self.inject_prompt(text)
+
+    def _cut_entered_prompt(self) -> str | None:
+        """Read the typed-but-unsent prompt and erase it from the CLI's
+        input box; None when there's nothing to take or the provider can't
+        clear its box safely (no half-cut that leaves the text behind for
+        a send to duplicate)."""
+        prompt = self.entered_prompt()
+        if prompt is None or not prompt.text.strip():
+            return None
+        keys = self.provider.clear_prompt_keys(prompt)
+        if not keys:
+            return None
+        self.feed_child_text(keys)
+        return prompt.text
+
+    def _pick_file_for_composer(self) -> None:
+        """The composer's attach button: the same pick-a-file flow as
+        pick_file_to_attach, landing in the composer's box instead of the
+        terminal's."""
+        dialog = Gtk.FileDialog(title=_("Attach file"))
+        cwd = self.current_agent_cwd()
+        if cwd:
+            dialog.set_initial_folder(Gio.File.new_for_path(cwd))
+        root = self.get_root()
+        parent = root if isinstance(root, Gtk.Window) else None
+        dialog.open(parent, None, self._on_composer_file_chosen)
+
+    def _on_composer_file_chosen(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            gfile = dialog.open_finish(result)
+        except GLib.Error:
+            return  # cancelled
+        # The composer can close (or the tab die) while the dialog is up;
+        # a mention with nowhere to land is dropped, matching
+        # _on_attach_file_chosen.
+        if self.get_root() is None or not self.composer_open():
+            return
+        path = gfile.get_path()
+        if path is None:
+            return  # a remote location — nothing the CLI could read
+        reference = self.provider.file_reference(path, self.current_agent_cwd())
+        if reference is None:
+            self.feed_message(_("Add to chat isn't available for this file"))
+            return
+        self._composer.insert_mention(reference + " ")
 
     def inject_prompt(self, text: str) -> None:
         """Type *text* into the agent, send it, and put the tab in front.
@@ -2164,17 +2339,20 @@ class TerminalTab(Gtk.Box):
         clipboard, and for the right-click cut also clear the input box.
         Nothing typed (or no box to read) quietly does neither — the empty
         clipboard write would only destroy what the user had on there."""
-        prompt = self.entered_prompt()
-        if prompt is None or not prompt.text.strip():
-            return
-        keys = self.provider.clear_prompt_keys(prompt) if cut else ""
-        if cut and not keys:
-            # A provider that can read its box but not clear it safely:
-            # no half-cut that copies, leaves the text, and flashes done.
-            return
-        self._copy_prompt_icon.get_clipboard().set(prompt.text)
-        if keys:
-            self.feed_child_text(keys)
+        if cut:
+            # The composer's open-cut shares this erase (_cut_entered_prompt);
+            # a provider that can read its box but not clear it safely cuts
+            # nothing — no half-cut that copies, leaves the text, and
+            # flashes done.
+            text = self._cut_entered_prompt()
+            if text is None:
+                return
+        else:
+            prompt = self.entered_prompt()
+            if prompt is None or not prompt.text.strip():
+                return
+            text = prompt.text
+        self._copy_prompt_icon.get_clipboard().set(text)
         # The same confirmation rhythm as the copy labels beside it
         # (copylabel), told with the icon: a checkmark for a beat.
         self._copy_prompt_icon.set_from_icon_name("object-select-symbolic")
@@ -2970,12 +3148,19 @@ class TerminalTab(Gtk.Box):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
         self._terminal_fg = themes.terminal_foreground(settings.get("terminal_theme"))
-        # The floating attach button can be turned off in preferences; the
-        # provider gate (no file mention syntax = no button) still applies.
-        self._attach_overlay_btn.set_visible(
+        # The floating composer button can be turned off in preferences; the
+        # provider gate (no readable input box = no button) still applies.
+        # The setting keeps the attach button's old key: same slot, same
+        # pixels, and a rename would only orphan saved preferences.
+        self._composer_overlay_btn.set_visible(
             bool(settings.get("attach_overlay_button", True))
-            and self.provider.file_reference("image.png", None) is not None
+            and self._provider_has_prompt_box()
         )
+        self._composer_enter_sends = bool(settings.get("composer_enter_sends", True))
+        self._composer_font = font
+        if self._composer is not None:
+            self._composer.set_enter_sends(self._composer_enter_sends)
+            self._composer.set_font(self._composer_font)
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
         self._apply_terminal_max_width(settings)
         self._set_footer_apps(settings.get("footer_apps") or [])

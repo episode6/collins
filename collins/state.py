@@ -104,10 +104,14 @@ DEFAULT_SETTINGS = {
     "archive_running_session": "ask",  # archiving a session whose tab is busy
     "quit_with_running_sessions": "ask",  # closing a window while sessions run
     "show_tab_bar": True,  # tab bar visibility (tabs keep working underneath)
-    # The floating attach-file button over each agent terminal's bottom-left
-    # corner (see terminal.py). Off hides it everywhere; the header's attach
-    # button keeps working either way.
+    # The floating composer button over each agent terminal's bottom-left
+    # corner (see terminal.py; it was the attach-file button once, and keeps
+    # that key so saved preferences carry over). Off hides it everywhere;
+    # the header's attach button keeps working either way.
     "attach_overlay_button": True,
+    # Whether Enter sends the composer's text (Shift+Enter for a newline);
+    # off swaps the pair: Enter is a newline and Ctrl+Enter sends.
+    "composer_enter_sends": True,
     "show_folder_path": False,  # show each session's project folder path in the sidebar
     "project_icon_size": 16,  # px size of the sidebar's project/folder (and group) icons
     "show_usage_panel": True,  # Claude subscription usage bars under the session list
