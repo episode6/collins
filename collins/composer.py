@@ -290,11 +290,11 @@ class ComposerPage(Adw.Bin):
         return False
 
     def apply_settings(self, settings: dict) -> None:
-        view = self.get_child()
-        if view is None:
-            return
-        view.set_font(settings.get("font") or "")
-        view.set_enter_sends(bool(settings.get("composer_enter_sends", True)))
+        # No-op where n/a, per the protocol: the child is the tab's one live
+        # ComposerView, and TerminalTab.apply_settings pushes font and
+        # enter-sends straight to it whether it floats or docks. Forwarding
+        # here would apply the same values a second time.
+        pass
 
     def page_state(self) -> dict:
         return {"kind": "composer"}
