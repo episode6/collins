@@ -2309,7 +2309,7 @@ class SessionSidebar(Gtk.Box):
 
         # A project kept after its last session went away has nothing left to
         # archive — dropping it is the only way it ever leaves the sidebar.
-        if self.store.state.is_virtual_project(project_name):
+        if self.store.is_virtual_project(project_name):
             forget_item = Gio.MenuItem.new(_("Remove project from sidebar"), None)
             forget_item.set_action_and_target_value(
                 "win.forget-project", GLib.Variant("s", project_name)

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-12. Full change history: git log for this file.
+# fork. Last modified: 2026-08-13. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -650,16 +650,35 @@ class SessionStore(GObject.Object):
         group offers "new session here" without one having been started.
 
         A project that already has sessions is already in the sidebar, and
-        is left alone: is_virtual_project means "no sessions left" to its
-        callers (the worktree toggle, "Remove project from sidebar"), and
-        the folder chooser defaults to the visible project's directory, so
-        re-adding a live project is an easy accident."""
+        is left alone: the folder chooser defaults to the visible project's
+        directory, so re-adding a live project is an easy accident, and the
+        entry it would leave behind outlives the moment it was true (see
+        is_virtual_project)."""
         name = project_name_for_cwd(cwd)
         if any(s.project_name == name for s in self._last_sessions):
             return
         root = worktree_project_root(cwd) or cwd
         self.state.keep_virtual_projects({name: root})
         self._apply()
+
+    def is_virtual_project(self, project_name: str) -> bool:
+        """Is this group nothing but a kept header — a project the sidebar is
+        holding open with no sessions of its own?
+
+        The recorded entry alone doesn't answer that. It's written the moment
+        a folder is added to the sidebar or kept through a bulk delete, and
+        nothing clears it once sessions turn up (or come back) afterwards, so
+        projects in daily use stay listed for good. Sessions win: a group with
+        rows behind it is a real project whatever the state file remembers.
+
+        Ask this, not the state's own accessor, wherever "no sessions left" is
+        the actual question. Deliberately not a prune: keep_projects is called
+        while the sessions it's keeping the header for are still there (see
+        MainWindow._apply_keep_projects), and clearing the entry then would
+        undo the very thing it was asked to record."""
+        return self.state.is_virtual_project(project_name) and not any(
+            s.project_name == project_name for s in self._last_sessions
+        )
 
     def forget_project(self, project_name: str) -> None:
         """Drop a kept (virtual) project from the sidebar. Its sessions, if any
