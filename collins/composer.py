@@ -2,15 +2,17 @@
 
 """The composer: a GUI prompt box for the agent's terminal.
 
-A `ComposerView` is a spell-checked multi-line text box with Send, attach
-and close buttons — everything the CLI's own input box isn't when a prompt
-outgrows one line. It owns no terminal plumbing at all: it announces
-``send-requested`` / ``close-requested`` and its host (terminal.py's overlay
-or a dock panel page) decides what those mean — cut text out of the CLI's
-box on the way in, type it back or submit it on the way out. It is also a
-drop target in its own right — files and raw images land as mentions, and
-images earn a strip of preview thumbnails over the text — through injected
-provider callbacks, so the view itself stays host-agnostic.
+A `ComposerView` is a spell-checked multi-line text box under a button row
+that reads left to right as close, dock, then attach and Send — chrome at
+one end, composing at the other — everything the CLI's own input box isn't
+when a prompt outgrows one line. It owns no terminal plumbing at all: it
+announces ``send-requested`` / ``close-requested`` and its host
+(terminal.py's overlay or a dock panel page) decides what those mean — cut
+text out of the CLI's box on the way in, type it back or submit it on the
+way out. It is also a drop target in its own right — files and raw images
+land as mentions, and images earn a strip of preview thumbnails over the
+text — through injected provider callbacks, so the view itself stays
+host-agnostic.
 
 libspelling is a hard dependency, the same bargain as GtkSourceView (which
 the spell-check adapter here is built for): nothing degrades without it, and
