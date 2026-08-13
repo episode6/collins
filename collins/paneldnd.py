@@ -217,10 +217,11 @@ def make_grip(strip) -> Gtk.Widget:
 def _page_drag_source(strip, resolve) -> Gtk.DragSource:
     """A drag source carrying the page `resolve()` answers at press time —
     a fixed page for a tab's own source (None once it left the strip), the
-    selected page for the grip. On a tab it rides bubble phase, so it
-    runs — and claims the drag — before the `AdwTabBox` ancestor whose
-    own bubble gesture would otherwise start Adwaita's native tab drag.
-    Inert while the strip has no page mover."""
+    selected page for the grip. On a tab it is the only thing left
+    contesting the press: reaching it before the `AdwTabBox` ancestor's own
+    gesture isn't enough to claim ahead of it (`disarm_native_drag` has the
+    timing), so that gesture is stood down rather than outrun. Inert while
+    the strip has no page mover."""
     source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
     pending: dict = {}  # the payload between prepare and drag-begin
 
