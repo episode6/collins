@@ -60,6 +60,10 @@ class PanelStrip(Gtk.Box):
         "empty": (GObject.SignalFlags.RUN_FIRST, None, ()),
         # Emitted when any page rings BEL, for the window's visual bell.
         "bell": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # Emitted with the page widget whenever one arrives in this strip or
+        # comes to the front of it: the dock's record of which panel tab the
+        # rotate shortcut acts on (see PanelDock._on_page_touched).
+        "page-touched": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
     }
 
     def __init__(self, shell_factory) -> None:
@@ -128,7 +132,7 @@ class PanelStrip(Gtk.Box):
         add_btn.connect("clicked", lambda *_: self.new_shell())
         rotate_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
         rotate_btn.add_css_class("flat")
-        rotate_btn.set_tooltip_text(_("Move this tab to the other side"))
+        rotate_btn.set_tooltip_text(_("Move this tab to the other side (Ctrl+;)"))
         rotate_btn.connect("clicked", lambda *_: self.rotate_selected())
         end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         end_box.append(add_btn)
@@ -317,6 +321,7 @@ class PanelStrip(Gtk.Box):
         if getattr(widget, "page_kind", None) is not None and self.tab_drag_handles:
             page.set_indicator_icon(Gio.ThemedIcon.new(paneldnd.HANDLE_ICON))
             paneldnd.wire_tab_drag(self, widget)
+        self.emit("page-touched", widget)
 
     def _sync_tab(self, page: Adw.TabPage) -> None:
         """Bring a tab's title and icon in line with its page widget."""
@@ -521,7 +526,10 @@ class PanelStrip(Gtk.Box):
     def _on_selected(self, *_args) -> None:
         # getattr: a just-dropped foreign page (see shell_pages) becomes
         # the selection before the guard bounces it — nothing to focus.
-        grab = getattr(self.selected_page_widget(), "grab_page_focus", None)
+        widget = self.selected_page_widget()
+        if widget is not None:
+            self.emit("page-touched", widget)
+        grab = getattr(widget, "grab_page_focus", None)
         if grab is not None and self.get_mapped():
             GLib.idle_add(grab)
 

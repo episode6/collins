@@ -888,7 +888,7 @@ class TerminalTab(Gtk.Box):
         "panel-size-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, int)),
         # Emitted when rotating a tab re-homed the panel: "bottom" | "right",
         # the edge the window persists as the app-wide default (as it does
-        # for the bottom/right swap Ctrl+J still fires).
+        # for the whole-panel swap win.swap-panel fires).
         "panel-position-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         # Emitted when either of the tab's terminals rings BEL, for the
         # window's visual bell.
@@ -2888,6 +2888,11 @@ class TerminalTab(Gtk.Box):
         """Cycle the focused panel page to the next strip (win.move-panel-page)."""
         self._dock.move_focused_page_next()
 
+    def rotate_recent_panel_page(self) -> None:
+        """Send the focused (or last-touched) panel tab to the dock's other
+        axis (win.rotate-panel-page)."""
+        self._dock.rotate_recent_page()
+
     def _load_panel_history(self) -> dict[int, str]:
         """Saved shell scrollbacks by history ordinal for this session —
         forks don't restore (their panel would clash with the original
@@ -2948,8 +2953,8 @@ class TerminalTab(Gtk.Box):
 
     def swap_panel(self) -> str:
         """Move the shells to the other home edge (bottom↔right) and return
-        the new position — Ctrl+J's double-tap, where the tab row's rotate
-        button moves a single tab. The strip relocates by reparenting —
+        the new position — the whole panel at once, where Ctrl+; moves a
+        single tab (win.swap-panel). The strip relocates by reparenting —
         every shell keeps running — and shell pages parked in satellite
         strips gather back into the home strip on the way."""
         return self._dock.swap_home()

@@ -94,6 +94,10 @@ class PanelDock(Adw.Bin):
         self._next_shell = 1
         self._next_hist = 0  # next shell's persistent panel-history ordinal
         self._restoring = False  # restore_layout is rebuilding the tree
+        # The page Ctrl+; rotates when the focus has moved on to the agent
+        # terminal: the last one added to a strip or brought to its front
+        # (see _recent_page).
+        self._recent = None
         # The tree's widgets live in a content bin under a dock-wide
         # overlay; the drop zones ride the overlay so a page drag can
         # target every leaf's edges at once (paneldnd.DropZones).
@@ -231,8 +235,8 @@ class PanelDock(Adw.Bin):
 
     def swap_home(self) -> str:
         """The swap action's new meaning: flip the home position and put
-        the panel there — Ctrl+J's double-tap, where the tab row's rotate
-        button moves a single tab.
+        the panel there — the shells as a group (win.swap-panel), where
+        `rotate_page` moves a single tab of any kind.
 
         A strip already on the destination axis takes the panel's pages as
         tabs and becomes the new home, the same join-don't-split rule
@@ -745,6 +749,35 @@ class PanelDock(Adw.Bin):
         target = strips[(strips.index(source) + 1) % len(strips)]
         self.move_page(source, widget, target)
 
+    def _on_page_touched(self, _strip, widget) -> None:
+        """A page arrived in a strip or came to its front. Remembered rather
+        than looked up on demand because the rotate shortcut is usually
+        pressed with the focus back in the agent terminal, where no strip
+        can answer for it."""
+        self._recent = widget
+
+    def _recent_page(self):
+        """(strip, widget) for the panel tab the rotate shortcut acts on:
+        whichever page holds the focus right now, else the last one added or
+        fronted. Hidden strips don't answer — the home strip Ctrl+J closed
+        has a selected tab still, and rotating a panel nobody can see would
+        be a move with nothing to watch it happen."""
+        for strip in self.strips():
+            if strip.get_visible() and strip.has_page_focus():
+                return strip, strip.selected_page_widget()
+        strip = self._strip_of(self._recent)
+        if strip is not None and strip.get_visible():
+            return strip, self._recent
+        return None, None
+
+    def rotate_recent_page(self) -> None:
+        """Send the focused (or last-touched) panel tab to the dock's other
+        axis — the tab row's rotate button, reached from the keyboard
+        (win.rotate-panel-page)."""
+        strip, widget = self._recent_page()
+        if strip is not None and widget is not None:
+            self.rotate_page(strip, widget)
+
     # -- strip lifecycle -----------------------------------------------------
 
     def _new_strip(self):
@@ -754,6 +787,7 @@ class PanelDock(Adw.Bin):
         strip.set_page_mover(self)
         strip.connect("bell", lambda *_: self.emit("bell"))
         strip.connect("empty", self._on_strip_empty)
+        strip.connect("page-touched", self._on_page_touched)
         # Native Adwaita tab DnD: this view accepts drops from this dock's
         # other strips and bounces everything else (tabguard). The dock
         # object is the group key; the fallback conjures a strip for a

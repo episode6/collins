@@ -65,7 +65,6 @@ from .caffeine import (
     toggle_tooltip,
 )
 from .chatsessionview import ChatSessionTab
-from .doubletap import DoubleTap
 from .editorwindow import EditorWindow
 from .flash import flash
 from .formatting import blast_radius_body
@@ -112,12 +111,6 @@ _LAUNCH_SWEEP_DELAY_MS = 2500
 # sliding away (see _offer_undo). The undo itself lives longer: Ctrl+Shift+Z
 # works until the next archive replaces it.
 _UNDO_TOAST_SECONDS = 4
-
-# How soon after Ctrl+J opened the terminal panel a second Ctrl+J counts as a
-# double-tap and swaps the panel bottom↔right instead of closing it again (see
-# _toggle_panel). Long enough for a deliberate second tap, short enough that a
-# later Ctrl+J still plainly means "hide the panel".
-_PANEL_DOUBLE_TAP_US = 500_000
 
 # Quit-time backgrounding, which runs one session at a time. How long to wait
 # for a tab's session id to land before giving up and exiting it cleanly, how
@@ -325,10 +318,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._bg_queue_done = 0
         self._bg_queue_total = 0
         self._bg_queue_dialog: Adw.AlertDialog | None = None
-        # Remembers the tab whose terminal panel the last Ctrl+J opened, so a
-        # second Ctrl+J on it swaps the panel's position rather than closing
-        # it (see _toggle_panel).
-        self._panel_tap = DoubleTap(_PANEL_DOUBLE_TAP_US)
         self._switcher: QuickSwitcher | None = None
         self._quickopen: QuickOpenDialog | None = None
         # Set while the app pushes shared Caffeine state into this window's
@@ -1037,14 +1026,15 @@ class MainWindow(Adw.ApplicationWindow):
             "copy-tab-session-id": lambda *_: self._copy_tab_session_id(),
             "close-menu-tab": lambda *_: self._close_menu_tab(),
             "toggle-panel": lambda *_: self._toggle_panel(),
-            # Ctrl+J's own action: same toggle, but double-tap aware.
-            "tap-panel": lambda *_: self._toggle_panel(double_tap=True),
-            "swap-panel": lambda *_: self._swap_panel(),
+            # Ctrl+; — the tab row's rotate button, from the keyboard.
+            "rotate-panel-page": lambda *_: self._rotate_panel_page(),
             "clear-panel": lambda *_: self._clear_panel(),
             "toggle-composer": lambda *_: self._toggle_composer(),
             # Deliberately no default accelerator or menu surface: the
             # dock's visible affordances (per-tab drag handles, drop
-            # zones) cover moving; this exists for custom keybindings.
+            # zones) cover moving, and Ctrl+; rotates a single tab; these
+            # exist for custom keybindings.
+            "swap-panel": lambda *_: self._swap_panel(),
             "move-panel-page": lambda *_: self._move_panel_page(),
             "toggle-editor": lambda *_: self._toggle_editor(),
             "editor-save": lambda *_: self._editor_save(),
@@ -1216,12 +1206,15 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control><Shift>z", "win.undo-archive"),
             ("<Control><Shift>k", "win.quick-switch"),
             ("<Control><Shift>e", "win.toggle-tab-emoji"),
-            ("<Control>j", "win.tap-panel"),
+            ("<Control>j", "win.toggle-panel"),
             ("<Control>k", "win.clear-panel"),
             # Punctuation on purpose: every Ctrl+letter this controller
             # claims is one the agent's own input box never sees again, and
-            # Ctrl+period sends no byte a terminal app would have wanted.
+            # neither of these sends a byte a terminal app would have wanted.
+            # Ctrl+L is the input box's clear-screen, so the J-K run of panel
+            # chords carries on at the next free key along instead.
             ("<Control>period", "win.toggle-composer"),
+            ("<Control>semicolon", "win.rotate-panel-page"),
             ("F9", "win.toggle-sidebar"),
             ("F8", "win.toggle-editor"),
             ("<Control><Shift>o", "win.quick-open"),
@@ -2183,7 +2176,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._progress_watches.pop(page, None)
         self._fresh_spawns.discard(page)
         self._baseline_captures.pop(page, None)
-        self._panel_tap.forget(page.get_child())  # no Ctrl+J chain to continue
         self._sync_process_poll()
         self._sync_background_busy_poll()
 
@@ -3607,24 +3599,23 @@ class MainWindow(Adw.ApplicationWindow):
         tab = page.get_child() if page is not None else None
         return tab if isinstance(tab, TerminalTab) else None
 
-    def _toggle_panel(self, double_tap: bool = False) -> None:
-        """Show or hide this tab's shell strip. From Ctrl+J (`double_tap`)
-        a second press right after one that opened the panel moves the
-        shells bottom↔right instead of closing it — the whole panel, where
-        the tab row's rotate button moves one tab. That swap ends the
-        chain, so a third press hides the panel again and undoes an unmeant
-        double-tap. The footer button toggles plainly: a double-click there
-        is a click too many, not a request to move the panel."""
+    def _toggle_panel(self) -> None:
+        """Show or hide this tab's shell strip — Ctrl+J and the footer
+        button, which mean the same plain thing. Moving the panel around
+        is Ctrl+; (_rotate_panel_page), which acts on one tab of any kind
+        rather than on the shells as a group."""
         tab = self._current_terminal_tab()
-        if tab is None:
-            return
-        now = GLib.get_monotonic_time()
-        if double_tap and self._panel_tap.follows(tab, now):
-            self._swap_panel()
-            return
-        tab.toggle_panel(self.state.get_setting("panel_position"))  # freshly opened: last-used mode
-        # Only a Ctrl+J that leaves the panel open has a swap to follow it.
-        self._panel_tap.arm(tab if double_tap and tab.panel_visible else None, now)
+        if tab is not None:
+            # Freshly opened: last-used mode.
+            tab.toggle_panel(self.state.get_setting("panel_position"))
+
+    def _rotate_panel_page(self) -> None:
+        """Ctrl+;: send the focused — or most recently opened — panel tab
+        to the dock's other axis, the keyboard's way to the rotate button
+        every strip's tab row carries."""
+        tab = self._current_terminal_tab()
+        if tab is not None:
+            tab.rotate_recent_panel_page()
 
     def _swap_panel(self) -> None:
         tab = self._current_terminal_tab()
