@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-12. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -825,7 +825,18 @@ class App(Adw.Application):
             display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
         if _BUNDLED_ICONS.is_dir():  # running from source; installed icons live in the system theme
-            Gtk.IconTheme.get_for_display(display).add_search_path(str(_BUNDLED_ICONS))
+            # Ahead of the system theme, not behind it (which is all
+            # add_search_path can do): a machine that ran data/install.sh
+            # months ago has copies of these icons under ~/.local/share and
+            # /usr/share, and those directories are searched first, so the
+            # checkout would render whatever artwork was current back then.
+            # Silently, and often not as a missing icon: an old stroked
+            # symbolic still resolves, and GTK's recolor — fill:!important on
+            # every rect/circle/path, stroke untouched — turns it into a
+            # silhouette or into nothing at all. Running from source means
+            # running this checkout's icons.
+            theme = Gtk.IconTheme.get_for_display(display)
+            theme.set_search_path([str(_BUNDLED_ICONS), *theme.get_search_path()])
 
         # No tooltips from the UI behind an open menu (see tooltipmute).
         tooltipmute.install()
