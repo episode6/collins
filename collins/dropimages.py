@@ -45,23 +45,33 @@ _ZERO_WIDTH_CATEGORIES = frozenset({"Mn", "Me", "Cf"})
 _MAX_NAME_ATTEMPTS = 1000
 
 
-def mention_text(paths: list[str], file_reference: Callable[[str], str | None]) -> tuple[str, int]:
-    """The text to type for dropped *paths*: one mention token per path
-    *file_reference* can name, each with a trailing space (it terminates
-    the CLI's mention token and leaves the cursor ready for the next one —
-    or for the user's sentence). Also returns how many paths got no token
-    (a None from *file_reference*, e.g. a control character in the name),
-    so the caller can say some were dropped instead of silently thinning
-    the mention."""
-    tokens = []
+def mention_tokens(
+    paths: list[str], file_reference: Callable[[str], str | None]
+) -> tuple[list[tuple[str, str]], int]:
+    """The (path, reference) pair for every dropped path *file_reference*
+    can name — one lookup per path, kept paired so a caller annotating
+    paths individually (the composer's preview thumbnails) doesn't ask the
+    provider twice. Also returns how many paths got no reference (a None,
+    e.g. a control character in the name), so the caller can say some were
+    dropped instead of silently thinning the mention."""
+    pairs = []
     failed = 0
     for path in paths:
         reference = file_reference(path)
         if reference is None:
             failed += 1
         else:
-            tokens.append(reference + " ")
-    return "".join(tokens), failed
+            pairs.append((path, reference))
+    return pairs, failed
+
+
+def mention_text(paths: list[str], file_reference: Callable[[str], str | None]) -> tuple[str, int]:
+    """The text to type for dropped *paths*: one mention token per path
+    *file_reference* can name (mention_tokens), each with a trailing space
+    (it terminates the CLI's mention token and leaves the cursor ready for
+    the next one — or for the user's sentence)."""
+    pairs, failed = mention_tokens(paths, file_reference)
+    return "".join(reference + " " for _path, reference in pairs), failed
 
 
 def remove_mention(text: str, reference: str) -> str | None:

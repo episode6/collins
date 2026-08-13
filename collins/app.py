@@ -155,7 +155,9 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
 
 /* dropped-image previews above the composer's text box: square crops with
    a remove button that only shows itself while the pointer is on the thumb
-   (hover state reaches the overlay from any child under the pointer) */
+   (hover state reaches the overlay from any child under the pointer) or
+   while the button itself holds keyboard focus -- it stays in the tab
+   order, so a keyboard user can still reach and see it */
 .composer-thumbs picture {
   border-radius: 6px;
 }
@@ -167,7 +169,8 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   padding: 2px;
   transition: opacity 150ms ease;
 }
-.composer-thumb:hover .composer-thumb-remove {
+.composer-thumb:hover .composer-thumb-remove,
+.composer-thumb:focus-within .composer-thumb-remove {
   opacity: 1;
 }
 

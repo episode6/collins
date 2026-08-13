@@ -8,6 +8,7 @@ from collins.dropimages import (
     default_directory,
     leading_space,
     mention_text,
+    mention_tokens,
     prune_stale,
     remove_mention,
     save_png,
@@ -47,6 +48,23 @@ def test_mention_text_counts_refused_names_and_keeps_the_rest():
 def test_mention_text_all_refused_or_empty():
     assert mention_text(["\x1b.png"], _fake_reference) == ("", 1)
     assert mention_text([], _fake_reference) == ("", 0)
+
+
+def test_mention_tokens_pairs_each_path_with_its_reference():
+    pairs, failed = mention_tokens(["a.png", "bad\x0d.png", "my pic.jpg"], _fake_reference)
+    assert pairs == [("a.png", "@a.png"), ("my pic.jpg", '@"my pic.jpg"')]
+    assert failed == 1
+
+
+def test_mention_tokens_asks_the_reference_callback_once_per_path():
+    calls = []
+
+    def counting_reference(path):
+        calls.append(path)
+        return _fake_reference(path)
+
+    mention_tokens(["a.png", "b.png"], counting_reference)
+    assert calls == ["a.png", "b.png"]
 
 
 # -- remove_mention -----------------------------------------------------------

@@ -266,8 +266,10 @@ class ComposerView(Gtk.Box):
 
     def _mention_dropped(self, paths: list[str]) -> bool:
         """Mention every path the provider will name, and thumbnail the
-        ones that decode as images."""
-        text, failed = dropimages.mention_text(paths, self._file_reference)
+        ones that decode as images. mention_tokens keeps path and
+        reference paired, so the provider is asked once per path — the
+        mention text and its thumbnail come from the same answer."""
+        pairs, failed = dropimages.mention_tokens(paths, self._file_reference)
         if failed:
             self._notify(
                 ngettext(
@@ -276,13 +278,11 @@ class ComposerView(Gtk.Box):
                     failed,
                 ).format(n=failed)
             )
-        if not text:
+        if not pairs:
             return False
-        self.insert_mention(text)
-        for path in paths:
-            reference = self._file_reference(path)
-            if reference is not None:
-                self._add_preview(path, reference)
+        self.insert_mention("".join(reference + " " for _path, reference in pairs))
+        for path, reference in pairs:
+            self._add_preview(path, reference)
         return True
 
     def _add_preview(self, path: str, reference: str) -> None:
