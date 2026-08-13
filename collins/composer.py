@@ -142,20 +142,6 @@ class ComposerView(Gtk.Box):
         self.append(scroller)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        attach = Gtk.Button(
-            icon_name="mail-attachment-symbolic",
-            tooltip_text=_("Attach file"),
-        )
-        attach.add_css_class("flat")
-        attach.connect("clicked", lambda *_a: pick_attach())
-        row.append(attach)
-        row.append(Gtk.Box(hexpand=True))
-        self._dock_btn = Gtk.Button()
-        self._dock_btn.add_css_class("flat")
-        self._dock_btn.connect(
-            "clicked", lambda *_a: self.emit("dock-toggle-requested")
-        )
-        row.append(self._dock_btn)
         close = Gtk.Button(
             icon_name="window-close-symbolic",
             tooltip_text=_("Close composer and keep the text in the terminal"),
@@ -163,6 +149,20 @@ class ComposerView(Gtk.Box):
         close.add_css_class("flat")
         close.connect("clicked", lambda *_a: self.emit("close-requested"))
         row.append(close)
+        self._dock_btn = Gtk.Button()
+        self._dock_btn.add_css_class("flat")
+        self._dock_btn.connect(
+            "clicked", lambda *_a: self.emit("dock-toggle-requested")
+        )
+        row.append(self._dock_btn)
+        row.append(Gtk.Box(hexpand=True))
+        attach = Gtk.Button(
+            icon_name="mail-attachment-symbolic",
+            tooltip_text=_("Attach file"),
+        )
+        attach.add_css_class("flat")
+        attach.connect("clicked", lambda *_a: pick_attach())
+        row.append(attach)
         send = Gtk.Button(label=_("Send"))
         send.add_css_class("suggested-action")
         send.connect("clicked", lambda *_a: self.emit("send-requested", self.peek_text()))
