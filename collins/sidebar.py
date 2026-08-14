@@ -499,9 +499,13 @@ class SessionRow(Gtk.ListBoxRow):
         box.set_margin_top(4)
         box.set_margin_bottom(4)
         # No inset of its own: the leading mark already carries 4px of badge
-        # overhang on its left (see prmenu._mark), which with the row's 4px
-        # padding puts the icon the same 8px off the guide line as it stands
-        # off the title. A margin here would only make that gap lopsided again.
+        # overhang on its left (see prmenu._mark, where the overhang scales with
+        # the badge -- 4px at the sizes the row asks for, ROW_ICON_PX and
+        # ROW_BADGE_PX), which with the row's 4px padding puts the icon the same
+        # 8px off the guide line as it stands off the title. A margin here would
+        # only make that gap lopsided again. Resizing the mark moves the
+        # overhang, and row.session-child's padding-left in app.py has to move
+        # the other way to keep the two gaps equal.
         box.set_margin_start(0)
         box.set_margin_end(0)  # theme row padding + the flat button's inset suffice
 

@@ -198,13 +198,18 @@ row.session-child {
   border: 1px solid alpha(currentColor, 0.15);
   border-left: 2px solid alpha(currentColor, 0.15);
   border-radius: 0 8px 8px 0;
-  /* Ours rather than Adwaita's stock 8px, and half of it: with the row's own
-     4px content margin and the 4px of badge overhang every mark reserves on
-     its left (see prmenu._mark), 8px here put the leading icon twice as far
-     from the guide line as it sits from the title it leads -- a lopsided slot
-     that read as the icon belonging to neither. At 4px the two gaps match.
+  /* Ours rather than Adwaita's stock 8px, and half of it. What follows it is
+     the row's leading mark, which reserves 4px of badge overhang on its left
+     (see prmenu._mark, where that scales with the badge -- 4px at the sizes
+     the row asks for) and is held 8px off the title by its own padding and the
+     content box's spacing. Stock 8px here, plus a 4px margin the content box
+     used to carry, put the icon twice as far from the guide line as from the
+     title it leads -- a lopsided slot in which it read as belonging to
+     neither. With the margin gone (see SessionRow) the overhang alone stands
+     for the gap, and 4px here is what makes the two sides match; resize the
+     mark and this has to move the other way.
      The barber pole below is positioned by counting back over the border and
-     this padding, so the two values move together. */
+     this padding, so those two values move together. */
   padding-left: 4px;
   /* smaller text than a stock sidebar row, and shorter: 34px of content plus
      the 1px borders puts the row at 36px, with the project headers keeping the
