@@ -201,7 +201,7 @@ row.session-child {
   /* Ours rather than Adwaita's stock 8px, and half of it. What follows it is
      the row's leading mark, which reserves 4px of badge overhang on its left
      (see prmenu._mark, where that scales with the badge -- 4px at the sizes
-     the row asks for) and is held 8px off the title by its own padding and the
+     the row asks for) and is held off the title by its own padding and the
      content box's spacing. Stock 8px here, plus a 4px margin the content box
      used to carry, put the icon twice as far from the guide line as from the
      title it leads -- a lopsided slot in which it read as belonging to
@@ -254,11 +254,17 @@ row.session-child checkbutton {
 /* the pull request mark ahead of the title (see SessionRow): a menu button
    standing in a line of text, so it takes only the width of the two icons in
    it rather than the tap target the row's other buttons keep. Its padding is
-   lopsided on purpose: 4px on the left, which with the row's own 4px stands
-   the mark's 20px slot 8px off the guide line, and more than the stock 4px on
-   the right, so the mark doesn't crowd the first letter of the title. Every
-   distance in this comment and the next is measured from the guide line, the
-   row's padding included.
+   even -- 4px a side -- and what that buys is not: with the row's own 4px the
+   mark's 20px slot stands 8px off the guide line, and with the content box's
+   2px of spacing it stops 6px short of the title's text box. Six and eight is
+   what measures even on screen, because the two sides are not read against
+   the same thing. The left is read against the guide line, which is ink; the
+   right against the title's first glyph, which sits a pixel or two inside its
+   own box on its left side bearing. The 6px this padding used to hold on the
+   right squared the two sides on paper and left the mark visibly nearer the
+   line than the title -- 8px of white against 10. Every distance in this
+   comment and the next is measured from the guide line, the row's padding
+   included, and against ink rather than boxes where they disagree.
    The 4px of badge overhang inside that slot is not the gap it looks like: on
    a mark that carries a badge the badge is exactly what hangs into it, so
    counting it as gap left the colored mark reading as crowded against the
@@ -267,6 +273,13 @@ row.session-child checkbutton {
    mark stands off the line: image.agent-mark below and the two mark-less rows
    in sidebar.py (PlaceholderRow, NewThreadRow) all align to this column and
    have to move with it.
+   A base with no badge over it -- a merged PR's mark, and the agent mark
+   below -- is centered inside the slot rather than filling it (see
+   prmenu._mark), so it inherits the slot's own 8-and-6 and reads about 2px
+   nearer the line than the badged marks in the same column. That is the trade
+   this value can't get out of: one padding cannot center both a mark whose
+   badge fills the overhang and a base that leaves it empty, and the badged
+   marks are the ones carrying color, so they are the ones to land square.
    The selector is the menubutton node, not the button one: pr-mark is set on
    the GtkMenuButton, whose CSS node is "menubutton" wrapping the "button" node
    that carries the padding. Written as button.pr-mark it matches nothing, and
@@ -274,7 +287,7 @@ row.session-child checkbutton {
 row.session-child menubutton.pr-mark > button {
   min-height: 20px;
   min-width: 0;
-  padding: 0 6px 0 4px;
+  padding: 0 4px;
 }
 /* what stands in that slot when the session has no pull requests: the agent's
    own mark (see SessionRow). Its margins center it on the same 20px slot the
@@ -283,11 +296,12 @@ row.session-child menubutton.pr-mark > button {
    that slot: a badged mark fills the slot corner to corner and reads as
    centered on it, so an icon aligned to the base alone sits visibly high and
    to the right of the marks above and below it (prmenu._mark centers its own
-   unbadged bases for the same reason). Left and right margins together
-   still come to the mark's 4 + 6, so a session that opens its first PR trades
-   one for the other without the title moving under it. */
+   unbadged bases for the same reason). Left and right margins together still
+   come to the mark's 4 + 4 plus the 4px of overhang this icon has no badge to
+   hang into, so a session that opens its first PR trades one for the other
+   without the title moving under it. */
 row.session-child image.agent-mark {
-  margin: 0 8px 0 6px;
+  margin: 0 6px;
 }
 row.session-child checkbutton > check {
   min-height: 14px;
