@@ -1838,6 +1838,10 @@ class TerminalTab(Gtk.Box):
         take a prompt?" is a question the tab answers about itself — a tab
         whose agent has exited, or whose prompt is half-written, keeps its
         chips and its PRs, but is not somewhere to send anything.
+
+        Archiving is the same kind of answer: this session is the one a PR
+        page docked here would put away once its merge lands, and a tab with
+        no session yet has nothing to offer that for.
         """
         return prmenu.ActionHost(
             prompt_block=self.prompt_block,
@@ -1846,7 +1850,21 @@ class TerminalTab(Gtk.Box):
             refresh=self._request_update,
             view_pr=self.open_pr_page,
             view_unresolved=lambda pr: self.open_pr_page(pr, unresolved=True),
+            archive=self._archive_this_session if self.session_id else None,
         )
+
+    def _archive_this_session(self) -> None:
+        """Put this tab's session away — the second half of a PR page's "Merge
+        and archive", once the merge itself has landed.
+
+        Through the window's action rather than by hand: archiving a session
+        with a tab open closes that tab, and the close flow is where a busy
+        agent gets asked about before anything happens (see the window's
+        `archive_session`). The archiving half, never the toggle's other one:
+        this is answering a merge, not a click on a row.
+        """
+        if self.session_id:
+            self.activate_action("win.archive-session-now", GLib.Variant("s", self.session_id))
 
     def _fill_pr_menu(self, _button: Gtk.MenuButton) -> None:
         """Build the ellipsis button's list, just before it opens.

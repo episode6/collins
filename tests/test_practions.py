@@ -7,11 +7,13 @@ from collins import practions
 from collins.practions import (
     AUTO_MERGE,
     CI_PROMPT,
+    CLOSE,
     COMMENTS,
     FIX_ALL,
     FIX_ALL_PROMPT,
     FIX_CI,
     MERGE,
+    MERGE_ARCHIVE,
     NEW_PR,
     NEW_PR_PROMPT,
     READY,
@@ -380,6 +382,76 @@ def test_merging_past_unfinished_checks_says_so_when_it_asks():
     assert "haven't all passed" in pending
 
 
+# -- what that button keeps behind it ----------------------------------------
+
+
+def _alternates(pr, can_archive=True) -> list[str]:
+    return [action.key for action in practions.alternate_actions(pr, can_archive)]
+
+
+def test_the_button_hides_the_two_courses_it_isnt_recommending():
+    """A right-click on the merge offers the ways of not merging it: landing
+    it and being done with the session, or closing it unmerged."""
+    assert _alternates(_pr()) == [MERGE_ARCHIVE, CLOSE]
+
+
+def test_closing_is_offered_until_there_is_nothing_left_to_close():
+    """Every state but merged and closed — and not on a PR nothing has been
+    fetched for, where a Close was never going to work either."""
+    assert CLOSE in _alternates(_pr())
+    assert CLOSE in _alternates(_pr(state="DRAFT"))
+    assert CLOSE in _alternates(_pr(passed=1, failed=1))
+    assert _alternates(_pr(state="MERGED")) == []
+    assert _alternates(_pr(state="CLOSED")) == []
+    assert _alternates(_pr(state=None, passed=None, failed=None, pending=None)) == []
+
+
+def test_a_pr_with_no_button_at_all_can_still_be_closed():
+    """A conflicting PR is offered no merge anywhere (see `_header`), which is
+    the state closing it is most often the answer to."""
+    conflicting = _pr(mergeable="CONFLICTING")
+    assert _header(conflicting) == []
+    assert _alternates(conflicting) == [CLOSE]
+
+
+def test_merging_and_archiving_only_ever_stands_beside_the_merge_itself():
+    """Never beside auto-merge: GitHub lands that one later and on its own, so
+    a session archived now would be archived on a promise. Never on a draft,
+    a settled PR, or a conflicting one, which offer no merge at all."""
+    assert MERGE_ARCHIVE not in _alternates(_pr(passed=1, pending=2))
+    assert MERGE_ARCHIVE not in _alternates(_pr(passed=1, failed=1))
+    assert MERGE_ARCHIVE not in _alternates(_pr(state="DRAFT"))
+    assert MERGE_ARCHIVE not in _alternates(_pr(mergeable="CONFLICTING"))
+
+
+def test_archiving_is_only_offered_where_a_session_is_there_to_archive():
+    """The caller answers that: the PR page is docked inside the session it
+    would put away, and nothing else showing these actions is."""
+    assert _alternates(_pr(), can_archive=False) == [CLOSE]
+
+
+def test_both_alternates_ask_first_and_only_one_asks_in_red():
+    """Merging is final but isn't a loss; closing unmerged is the one action
+    here that throws the work away."""
+    merge_archive, close = practions.alternate_actions(_pr(), True)
+    assert merge_archive.confirm is not None and not merge_archive.confirm.destructive
+    assert close.confirm is not None and close.confirm.destructive
+
+
+def test_merging_and_archiving_asks_about_the_checks_as_the_merge_does():
+    """It is the same merge, so it inherits the same wording about where the
+    checks got to — with what it does afterwards said as well."""
+    question = practions.merge_archive_action(_pr()).confirm
+    assert practions.merge_action(_pr(), auto=False).confirm.body in question.body
+    assert "archived" in question.body
+
+
+def test_every_alternate_names_the_pr_and_wears_a_word():
+    for action in practions.alternate_actions(_pr(), True):
+        assert action.label and action.short
+        assert "#55" in action.tooltip
+
+
 # -- what the Checks list offers under it ------------------------------------
 
 
@@ -521,6 +593,28 @@ def test_merge_names_a_method_and_auto_merge_adds_the_flag(gh):
     perform(AUTO_MERGE, _pr(pending=1))
     assert calls[0] == ["pr", "merge", URL, "--squash"]
     assert calls[1] == ["pr", "merge", URL, "--squash", "--auto"]
+
+
+def test_merge_and_archive_is_the_plain_merge_as_far_as_gh_is_concerned(gh):
+    """The archive half never reaches a subprocess: it is the app's own, and
+    it happens only once this has come back without an error."""
+    calls, _serve = gh
+    assert perform(MERGE_ARCHIVE, _pr()) is None
+    assert calls == [["pr", "merge", URL, "--squash"]]
+
+
+def test_a_refused_merge_takes_the_archive_down_with_it(gh):
+    """What the page waits on: a merge GitHub wouldn't do leaves the session
+    exactly where it was."""
+    _calls, serve = gh
+    serve((False, "Pull request is not mergeable"))
+    assert perform(MERGE_ARCHIVE, _pr()) == "Pull request is not mergeable"
+
+
+def test_closing_closes_without_touching_the_branch(gh):
+    calls, _serve = gh
+    assert perform(CLOSE, _pr()) is None
+    assert calls == [["pr", "close", URL]]
 
 
 def test_review_asks_for_one_in_a_comment(gh):

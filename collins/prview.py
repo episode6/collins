@@ -20,8 +20,12 @@ state offers — "Ready" for a draft, "Auto-Merge" or "Merge" for an open one,
 whichever fits its checks, naming in full on its tooltip what it is about to
 do — behind the same confirmation and the same `gh` call the chip's actions
 menu runs it with (`_ActionBar`), and no button at all where a PR offers
-none. The page carries no menu of its own: what it doesn't draw as a button
-here, a chip's right-click menu still offers for the same PR.
+none. A right-click on that button opens the alternatives to what it says
+(`practions.alternate_actions`): "Close pull request" while there is still
+one to close, and — beside the immediate merge — "Merge and archive
+session", which lands the PR and then puts the session that opened it away,
+in that order and only if the merge worked. Everything else the PR offers
+is still a chip's right-click menu away.
 
 The Checks list carries the page's other button. A conflicting branch shows
 there as a failed check of its own (prdetail adds the row: it blocks the merge
@@ -363,7 +367,7 @@ class PrViewPage(Adw.Bin):
         # draft ready and merging are what a PR page is *for*, and both were
         # two clicks and a submenu away. This is the page's only copy of them
         # now — the chip's menu still holds the full practions list.
-        self._actions = _ActionBar(self._acted)
+        self._actions = _ActionBar(host_factory, self._acted)
         self._actions.set_valign(Gtk.Align.CENTER)
         # The gap the switcher keeps between Conversation and Files, kept on
         # this side of Files too: on a narrow page the centered switcher slides
@@ -1193,16 +1197,29 @@ class _ActionBar(Gtk.Box):
     with the full sentence on its tooltip: this row shares a line with the
     view switcher, and what it can afford there is a word.
 
+    A right-click on it opens what the button deliberately isn't offering
+    (`practions.alternate_actions`): closing the pull request instead of
+    landing it, and — beside the immediate merge only — merging and archiving
+    the session that opened it. Both are the *end* of this pull request, which
+    is what makes them belong on this button rather than anywhere else on the
+    page, and neither is one to hand a stray click: they ask first, they open
+    behind a right-click, and the tooltip says the menu is there. "Merge and
+    archive" archives only once gh comes back without an error — the merge is
+    GitHub's half and the archive is the app's, in that order (see `_landed`).
+
     The row is a _WrapRow for the same reason the composer's is: its minimum
     is its widest single child rather than the sum, so nothing on it can
     become a width the whole panel page can't go under (_MIN_PAGE_WIDTH).
     """
 
-    def __init__(self, on_done: Callable[[], None]) -> None:
+    def __init__(self, host_factory, on_done: Callable[[], None]) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self._host_factory = host_factory
         self._on_done = on_done
         self._pr: PullRequest | None = None
         self._actions: dict[str, practions.Action] = {}
+        # What a right-click offers instead, as the last sync worked it out.
+        self._alternates: list[practions.Action] = []
         self._running = False
         # Whether the bar is waiting on the page's re-read of an action of its
         # own that landed — what `settled` is allowed to let go of. A fetch
@@ -1223,6 +1240,11 @@ class _ActionBar(Gtk.Box):
             button = _BusyButton()
             button.add_css_class("suggested-action")
             button.connect("clicked", self._on_clicked, key)
+            # GtkButton answers the primary button and only that, so this
+            # never doubles up with the click above it.
+            secondary = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+            secondary.connect("pressed", self._on_secondary)
+            button.add_controller(secondary)
             row.append(button)
             self._buttons[key] = button
         self.append(row)
@@ -1232,13 +1254,22 @@ class _ActionBar(Gtk.Box):
         """Show what *pr*'s state offers now, as freshly fetched."""
         self._pr = pr
         self._actions = {action.key: action for action in practions.header_actions(pr)}
+        self._alternates = practions.alternate_actions(
+            pr, can_archive=self._host_factory().archive is not None
+        )
         for key, button in self._buttons.items():
             action = self._actions.get(key)
             button.set_visible(action is not None)
             if action is None:
                 continue
             button.set_word(action.short or action.label)
-            button.set_tooltip_text(action.tooltip)
+            tooltip = action.tooltip
+            if self._alternates:
+                # A context menu nothing points at is a context menu nobody
+                # finds: the tooltip that already says what the button does
+                # says where the rest of it is.
+                tooltip += "\n" + _("Right-click for more actions")
+            button.set_tooltip_text(tooltip)
         self.set_visible(bool(self._actions))
 
     def settled(self) -> None:
@@ -1265,26 +1296,73 @@ class _ActionBar(Gtk.Box):
         action = self._actions.get(key)
         if pr is None or action is None or self._running:
             return
+        self._pick(button, pr, action)
+
+    def _on_secondary(
+        self, gesture: Gtk.GestureClick, _n_press: int, _x: float, _y: float
+    ) -> None:
+        """Right-click on the button: the courses it isn't recommending.
+
+        Built fresh on each opening and let go of when it closes, like the
+        footer chips' menus: what the alternates are follows the PR's state,
+        and a popover outliving the sync that changed them would be offering
+        yesterday's answer.
+        """
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        button = gesture.get_widget()
+        pr = self._pr
+        if pr is None or self._running or not self._alternates:
+            return
+        popover = prmenu.new_popover(Gtk.PositionType.BOTTOM)
+        popover.set_parent(button)
+        popover.connect("closed", lambda menu: GLib.idle_add(menu.unparent))
+        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        for action in self._alternates:
+            row = prmenu.action_button(action)
+            row.connect("clicked", self._on_alternate, popover, pr, action, button)
+            rows.append(row)
+        popover.set_child(rows)
+        popover.popup()
+
+    def _on_alternate(
+        self,
+        _row: Gtk.Button,
+        popover: Gtk.Popover,
+        pr: PullRequest,
+        action: practions.Action,
+        button: _BusyButton,
+    ) -> None:
+        """An alternate was picked: the menu goes first, then the same
+        confirm-and-run the button itself takes. The menu can't stay either
+        way — a dialog takes the pointer grab a popover is holding."""
+        popover.popdown()
+        self._pick(button, pr, action)
+
+    def _pick(self, button: _BusyButton, pr: PullRequest, action: practions.Action) -> None:
+        """Ask, if *action* asks, and then run it — spinning in *button*,
+        which is the one that was pressed however the action was reached."""
+        if self._running:
+            return
         if action.confirm is None:
-            self._start(pr, action)
+            self._start(pr, action, button)
             return
         dialogs.confirm_dialog(
             button.get_root(),
             action.confirm.heading,
             action.confirm.body,
             action.confirm.label,
-            lambda: self._start(pr, action),
-            destructive=False,
+            lambda: self._start(pr, action, button),
+            destructive=action.confirm.destructive,
         )
 
-    def _start(self, pr: PullRequest, action: practions.Action) -> None:
+    def _start(self, pr: PullRequest, action: practions.Action, button: _BusyButton) -> None:
         """Run *action* off the main loop — gh takes a second or two over a
         merge, and the bar says so meanwhile rather than looking ignored."""
         if self._running:  # the dialog's answer could be the second one
             return
         self._running = True
         self.set_sensitive(False)
-        self._buttons[action.key].set_busy(True)
+        button.set_busy(True)
 
         def work() -> None:
             try:
@@ -1309,6 +1387,14 @@ class _ActionBar(Gtk.Box):
         # bar offers next is that read's answer (see `settled`).
         self._holding = True
         self._on_done()
+        if action.key == practions.MERGE_ARCHIVE:
+            # The merge landed, so the session behind it can go — this and no
+            # sooner (see practions.merge_archive_action). Last, after the
+            # re-read has been asked for: archiving closes the session's tab,
+            # and this page goes down with it.
+            archive = self._host_factory().archive
+            if archive is not None:
+                archive()
         return GLib.SOURCE_REMOVE
 
 
