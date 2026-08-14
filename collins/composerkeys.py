@@ -1,7 +1,7 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
-"""What a key press means inside the composer's text box, and what a new
-session opens it as.
+"""What a key press means inside the composer's text box, what opens one,
+and what a new session opens it as.
 
 The composer sends on Enter by default, with a setting that swaps sending to
 Ctrl+Enter (leaving bare Enter a newline, for people who write prompts like
@@ -26,6 +26,10 @@ _RETURN_KEYVALS = frozenset({0xFF0D, 0xFF8D, 0xFE34})
 # Gdk.ModifierType bit positions.
 _SHIFT_MASK = 1 << 0
 _CONTROL_MASK = 1 << 2
+_ALT_MASK = 1 << 3  # Mod1
+_SUPER_MASK = 1 << 26
+_HYPER_MASK = 1 << 27
+_META_MASK = 1 << 28
 
 SEND = "send"
 NEWLINE = "newline"
@@ -48,6 +52,42 @@ def enter_action(keyval: int, state: int, enter_sends: bool) -> str:
     if enter_sends:
         return NEWLINE if ctrl else SEND
     return SEND if ctrl else NEWLINE
+
+
+# Modifiers that make a key a chord rather than a character. Shift and the
+# lock/level bits are deliberately absent: Shift is how a capital arrives,
+# and AltGr (Mod2..Mod5, by layout) is how half of Europe types one.
+_CHORD_MASK = _CONTROL_MASK | _ALT_MASK | _SUPER_MASK | _HYPER_MASK | _META_MASK
+
+# First characters the CLI's own input box hears as a mode switch, not as
+# text: Claude Code opens its slash-command menu on "/", bash mode on "!"
+# and memory mode on "#", each with completion the composer has no answer
+# for. Typed into an empty box they belong to the box, so the composer
+# leaves them there -- an opener is exactly the keystroke whose menu the
+# user is after. (Only as the first character: once the composer is up they
+# are ordinary text in it, and "@" isn't here at all -- a mention parses out
+# of submitted text just as well as out of the CLI's own picker.)
+_PROMPT_OPENERS = frozenset("/!#")
+
+
+def typing_opens_composer(char: str, state: int) -> bool:
+    """Whether typing *char* should raise the composer and take it along.
+
+    The composer_on_typing setting's half of the decision that can be made
+    from the keyboard alone (the other half is the screen: only an empty
+    agent input box is ever typed away from -- see
+    TerminalTab._typing_opens_composer). *char* is the character the key
+    would produce, "" for a key that produces none.
+
+    A character is anything the user could have meant as text: printable,
+    unmodified but for Shift and the level shifts a layout needs. Chords
+    belong to the terminal, and so do the box's own openers.
+    """
+    if len(char) != 1 or char < " " or char == "\x7f":
+        return False
+    if state & _CHORD_MASK:
+        return False
+    return char not in _PROMPT_OPENERS
 
 
 # What a session Collins starts fresh opens its composer as (the

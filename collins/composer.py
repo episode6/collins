@@ -211,6 +211,16 @@ class ComposerView(Gtk.Box):
         self._clear_previews()
         return text
 
+    def insert_typed(self, text: str) -> None:
+        """Type *text* in at the cursor, exactly as given.
+
+        The keystroke that opened the composer, handed over by the terminal
+        (see TerminalTab.type_into_composer). Not `insert_mention`: a
+        character the user just pressed carries none of a mention's spacing
+        rules — it is only ever what typing it into the CLI's box would
+        have put there."""
+        self._buffer.insert_at_cursor(text)
+
     def insert_mention(self, text: str) -> None:
         """Insert mention token(s) at the cursor, spaced off a half-written
         word the same way the terminal's drop path is (dropimages)."""
