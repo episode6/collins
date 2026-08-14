@@ -8,7 +8,8 @@ module is the other altitude: everything the PR *page* shows — description,
 timeline, checks, per-file diffs — fetched only when a view asks for it, never
 polled, and never persisted (a diff must not end up in state.json).
 
-A load is three `gh` calls, all through prstatus's transport so the URL gate,
+A load is three `gh` calls (four on the first load of a run, which also asks
+who the signed-in user is), all through prstatus's transport so the URL gate,
 timeouts, argv-only policy and missing-gh latch stay in one place: one
 ``gh pr view --json`` with the full field list, one paginated ``gh api
 graphql`` for the review threads (the CLI's --json surface has no thread
@@ -200,6 +201,13 @@ class PullRequestDetail:
     timeline: tuple[PrComment | PrReview | PrThread, ...]
     files: tuple[PrFile, ...]
     threads: tuple[PrThread, ...] = ()
+    # Whether the account gh is signed in as is the one who opened this PR.
+    # What takes the review verdicts off the page (see prview's composer):
+    # GitHub refuses an approval of your own pull request, so a button
+    # offering one could only ever come back as an error. False whenever the
+    # question can't be answered — no gh, offline, an author gh didn't name —
+    # which leaves the page exactly as it was before anyone asked.
+    viewer_is_author: bool = False
 
 
 def fetch(url: str) -> PullRequestDetail | None:
@@ -209,10 +217,11 @@ def fetch(url: str) -> PullRequestDetail | None:
     gh, offline — and the caller keeps showing what it has (stale beats blank
     here too). A failed or over-cap diff is *not* a failure (the files arrive
     stat-only, patches None), and neither is a failed thread fetch (the
-    conversation arrives threadless). The reply is folded into the summary
-    cache on the way through (`prstatus.absorb`), so the chip and mark update
-    with the view. Never call on the main thread — this waits on gh three
-    times.
+    conversation arrives threadless) or an unanswerable "who am I" (the PR
+    reads as somebody else's, which is what the page already assumed). The
+    reply is folded into the summary cache on the way through
+    (`prstatus.absorb`), so the chip and mark update with the view. Never call
+    on the main thread — this waits on gh three times.
     """
     if prstatus.repository_for(url) is None:
         return None
@@ -227,7 +236,11 @@ def fetch(url: str) -> PullRequestDetail | None:
     prstatus.absorb(url, data)
     threads = fetch_threads(url)
     diff = prstatus.gh_text(["pr", "diff", url], max_bytes=MAX_DIFF_BYTES)
-    return parse_detail(url, data, diff, threads)
+    # Who "you" are, so the page knows whether this PR is the user's own. Asked
+    # once for the whole run (prstatus.viewer_login caches it), so only the
+    # first load of a session pays for it, and "" — the unanswerable case —
+    # simply means no PR reads as authored here.
+    return parse_detail(url, data, diff, threads, viewer=prstatus.viewer_login())
 
 
 def fetch_threads(url: str) -> tuple[PrThread, ...]:
@@ -279,23 +292,30 @@ def fetch_threads(url: str) -> tuple[PrThread, ...]:
 
 
 def parse_detail(
-    url: str, data: dict, diff: str | None, threads: tuple[PrThread, ...] = ()
+    url: str,
+    data: dict,
+    diff: str | None,
+    threads: tuple[PrThread, ...] = (),
+    viewer: str = "",
 ) -> PullRequestDetail | None:
     """One gh view reply (with its diff and threads, if any) as the record the
     view renders.
 
     Pure — module state is never touched — so recorded gh output drives it
-    straight in tests. None only when *url*/*data* can't even identify a PR
-    (`prstatus.summarize`'s answer).
+    straight in tests; *viewer* is the signed-in login the caller looked up
+    (`prstatus.viewer_login`), passed in rather than asked for here so this
+    stays a function of its arguments. None only when *url*/*data* can't even
+    identify a PR (`prstatus.summarize`'s answer).
     """
     summary = prstatus.summarize(url, data)
     if summary is None:
         return None
     patches = dict(split_unified_diff(diff)) if diff else {}
+    author = _author(data.get("author"))
     return PullRequestDetail(
         summary=summary,
         body=_text(data.get("body")),
-        author=_author(data.get("author")),
+        author=author,
         created_at=_line(data.get("createdAt")),
         base_ref=_line(data.get("baseRefName")),
         head_ref=_line(data.get("headRefName")),
@@ -307,6 +327,9 @@ def parse_detail(
         timeline=_timeline(data.get("comments"), data.get("reviews"), threads),
         files=_files(data.get("files"), patches),
         threads=threads,
+        # Logins are case-insensitive on GitHub, and gh spells one back the
+        # way the account was registered rather than the way it was asked for.
+        viewer_is_author=bool(author) and author.casefold() == viewer.casefold(),
     )
 
 

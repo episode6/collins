@@ -25,12 +25,15 @@ URL = "https://github.com/episode6/collins/pull/263"
 
 @pytest.fixture(autouse=True)
 def clean_status_cache():
-    """fetch() absorbs into prstatus's module cache; keep tests independent."""
+    """fetch() absorbs into prstatus's module cache and remembers the signed-in
+    login there for the run; keep tests independent of both."""
     prstatus._statuses.clear()
     prstatus._inflight.clear()
+    prstatus._viewer = ""
     yield
     prstatus._statuses.clear()
     prstatus._inflight.clear()
+    prstatus._viewer = ""
 
 
 # Shaped like real `gh pr view --json` output (recorded off episode6/collins
@@ -148,6 +151,25 @@ def test_the_header_fields_arrive_whole():
     assert (detail.base_ref, detail.head_ref) == ("main", "collins/tab-drag-handles")
     assert (detail.additions, detail.deletions, detail.changed_files) == (581, 32, 2)
     assert detail.labels == ("enhancement",)
+
+
+def test_a_pr_is_the_viewers_own_when_the_logins_match():
+    """What takes the review verdicts off the page: GitHub refuses a review of
+    your own pull request, and logins compare case-insensitively — gh spells
+    an author back the way the account was registered."""
+    assert parse_detail(URL, _reply(), DIFF, viewer="ghackett").viewer_is_author
+    assert parse_detail(URL, _reply(), DIFF, viewer="GHackett").viewer_is_author
+    assert not parse_detail(URL, _reply(), DIFF, viewer="someone-else").viewer_is_author
+
+
+def test_an_unanswerable_author_reads_as_somebody_elses():
+    """No gh, offline, signed out, or a reply that never named an author: all
+    of them leave the page as it was before anyone asked."""
+    assert not parse_detail(URL, _reply(), DIFF).viewer_is_author  # no viewer
+    assert not parse_detail(URL, _reply(author=None), DIFF, viewer="").viewer_is_author
+    assert not parse_detail(
+        URL, _reply(author=None), DIFF, viewer="ghackett"
+    ).viewer_is_author
 
 
 def test_checks_cover_both_of_ghs_shapes():
@@ -588,6 +610,36 @@ def test_fetch_hands_threads_to_the_detail(monkeypatch):
     assert any(isinstance(entry, PrThread) for entry in detail.timeline)
 
 
+def test_fetch_asks_who_is_signed_in_and_hands_it_to_the_detail(monkeypatch):
+    """The fourth call, and the only one whose answer outlives the load: the
+    login is remembered for the run, so a second page doesn't ask again."""
+    calls = []
+
+    def gh_json(args, cwd=None, timeout=None):
+        calls.append(args)
+        if args[:2] == ["api", "user"]:
+            return {"login": "ghackett"}
+        return None if args[0] == "api" else _reply()
+
+    monkeypatch.setattr(prstatus, "gh_json", gh_json)
+    monkeypatch.setattr(prstatus, "gh_text", lambda args, max_bytes=None: DIFF)
+    assert fetch(URL).viewer_is_author is True
+    assert ["api", "user"] in calls
+    calls.clear()
+    assert fetch(URL).viewer_is_author is True
+    assert ["api", "user"] not in calls
+
+
+def test_fetch_survives_not_knowing_who_is_signed_in(gh):
+    """The gh fixture answers nothing to every `api` call, this one included:
+    the load lands whole, the PR simply reads as somebody else's."""
+    set_view, _set_diff, _calls = gh
+    set_view(_reply())
+    detail = fetch(URL)
+    assert detail is not None
+    assert detail.viewer_is_author is False
+
+
 def test_fetch_absorbs_into_the_summary_cache(gh):
     """Opening the view updates the chip and mark for free: the reply lands in
     prstatus as a fetch of our own."""
@@ -625,7 +677,8 @@ def test_fetch_survives_a_dead_or_oversized_diff(gh):
 def test_fetch_runs_every_call_on_the_action_budget(monkeypatch):
     """All the way down to subprocess.run: a load someone is waiting on gets
     the action timeout for the heavy view reply, the thread query and the
-    diff alike, not the poll's short one."""
+    diff alike, not the poll's short one. The who-am-I call rides along on the
+    poll budget — it is one line of reply, and a load survives losing it."""
     seen = []
 
     def run(argv, **kwargs):
@@ -636,5 +689,5 @@ def test_fetch_runs_every_call_on_the_action_budget(monkeypatch):
     monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
     monkeypatch.setattr(prstatus.subprocess, "run", run)
     assert fetch(URL) is not None
-    assert [kwargs["timeout"] for _argv, kwargs in seen] \
+    assert [kwargs["timeout"] for _argv, kwargs in seen][:3] \
         == [prstatus._GH_ACTION_TIMEOUT_S] * 3
