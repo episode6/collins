@@ -16,6 +16,15 @@ button moves — and only an axis with no strip at all splits the terminal
 to make one. Five PRs' worth of docking would otherwise shred the dock
 into slivers.
 
+One page at a time can step out of that tree entirely: the tab row's
+overlay button *maximizes* it, floating it over the whole session tab —
+terminal, every other strip, and the editor column beside the dock — until
+the restore button at its top-left drops it back into the tab row it came
+from. It is still one of its strip's pages while it is up there (see
+`_strip_pages`): its scrollback saves, its running command blocks a close,
+and the strip it left stays in the tree however empty, because "restore it
+to where it was" has to have a where.
+
 The *home strip* is the strip Ctrl+J toggles: it lives on the home edge
 of the terminal (`home_position`, "bottom" | "right"), can be hidden
 without closing (pages keep running), and is recreated on demand after it
@@ -30,11 +39,12 @@ import gi
 
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, GLib, GObject, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from . import paneldnd  # noqa: E402
 from .docktree import DockTree, Leaf, Split  # noqa: E402
 from .dockzones import EDGE_ZONES  # noqa: E402
+from .i18n import _  # noqa: E402
 from .panedsizer import PanedSizer  # noqa: E402
 from .tabguard import guard  # noqa: E402
 
@@ -44,6 +54,59 @@ _HOME_SIDES = {"bottom": "below", "right": "right"}
 # the terminal vertically is on the "bottom" axis whether it sits above or
 # below it; horizontally, on the "right" axis whether left or right.
 _OTHER_AXIS = {"bottom": "right", "right": "bottom"}
+
+
+class _MaxPane(Gtk.Box):
+    """Where a maximized page lives: a bare `Adw.TabView` of its own under
+    a thin bar whose left end carries the button that puts the page back.
+
+    A view rather than a hand-reparented widget, because that is what lets
+    `Adw.TabView.transfer_page` move the page here and home again — the
+    same reparenting-without-destroying a move between strips uses, so a
+    shell's process never notices it left its strip. No tab bar: exactly
+    one page is ever in here, and the bar above already names it.
+
+    The pane floats in an overlay the session tab hands the dock
+    (`set_maximize_host`), not in the dock's split tree, so what it covers
+    is the whole tab rather than the dock's share of it."""
+
+    def __init__(self, on_restore) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False)
+        self.add_css_class("panel-maximized")
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        bar.add_css_class("panel-maximized-bar")
+        restore = Gtk.Button(icon_name="view-restore-symbolic")
+        restore.add_css_class("flat")
+        restore.set_tooltip_text(_("Restore this tab to its size and place in the panel"))
+        restore.connect("clicked", lambda *_: on_restore())
+        bar.append(restore)
+        self._title = Gtk.Label(xalign=0.0, ellipsize=Pango.EllipsizeMode.END)
+        self._title.add_css_class("heading")
+        bar.append(self._title)
+        self._view = Adw.TabView(vexpand=True)
+        self.append(bar)
+        self.append(self._view)
+
+    @property
+    def tab_view(self) -> Adw.TabView:
+        """The view a page is transferred into — the `tab_view` any
+        transfer target offers (see PanelStrip.transfer_to)."""
+        return self._view
+
+    def set_page_title(self, title: str) -> None:
+        self._title.set_label(title)
+
+
+class _MaxRec:
+    """The page currently maximized: which strip it came out of, and the
+    tab position it drops back into. `handlers` are the page signals
+    rewired to the dock for as long as no strip is carrying them."""
+
+    def __init__(self, strip, widget, position: int) -> None:
+        self.strip = strip
+        self.widget = widget
+        self.position = position
+        self.handlers: list[int] = []
 
 
 class _PaneRec:
@@ -106,6 +169,15 @@ class PanelDock(Adw.Bin):
         overlay = Gtk.Overlay(child=self._content)
         overlay.add_overlay(self._zones)
         self.set_child(overlay)
+        # The maximized page and the record of where it came from. The pane
+        # starts in the dock's own overlay so a dock nobody hands a wider
+        # one to still works; the session tab swaps in its own right after
+        # construction, which is what makes the overlay cover the editor
+        # column too (see set_maximize_host).
+        self._max: _MaxRec | None = None
+        self._max_pane = _MaxPane(self.restore_maximized)
+        self._max_host = overlay
+        overlay.add_overlay(self._max_pane)
         # The guard group for this dock's strip views dies with the dock.
         self.connect("destroy", lambda *_: guard.clear_fallback(self))
 
@@ -121,6 +193,18 @@ class PanelDock(Adw.Bin):
         strip that held focus hides or collapses."""
         self._focus_terminal = grab
 
+    def set_maximize_host(self, overlay: Gtk.Overlay) -> None:
+        """Adopt *overlay* as the layer a maximized page floats in. The
+        session tab passes its own — the one wrapping the dock *and* the
+        editor column — so the overlay button covers everything in the tab
+        rather than only the dock's share of it. Without a call here the
+        dock's own overlay serves, which covers the split tree alone."""
+        if overlay is self._max_host:
+            return
+        self._max_host.remove_overlay(self._max_pane)
+        self._max_host = overlay
+        overlay.add_overlay(self._max_pane)
+
     def set_page_factory(self, factory) -> None:
         """`factory(page_dict) -> PanelPage | None` conjures a non-shell page
         from its serialized layout entry (see panellayout) during restore.
@@ -132,6 +216,10 @@ class PanelDock(Adw.Bin):
         self._settings = settings
         for strip in self.strips():
             strip.apply_settings(settings)
+        if self._max is not None:
+            # A maximized page is out of every strip's fan-out and would
+            # otherwise be the one page a font change misses.
+            self._max.widget.apply_settings(settings)
 
     # -- queries -----------------------------------------------------------
 
@@ -154,8 +242,30 @@ class PanelDock(Adw.Bin):
 
     def shell_pages(self) -> list:
         """Every shell page across every strip, in spatial-then-tab order —
-        the stable order panel history is captured in."""
-        return [shell for strip in self.strips() for shell in strip.shell_pages()]
+        the stable order panel history is captured in. A maximized shell is
+        one of them: it is still its strip's page (see `_strip_pages`), and
+        dropping it here would lose its scrollback to the history prune and
+        let a close skip its running command."""
+        return [page for page in self.pages() if getattr(page, "page_kind", None) == "shell"]
+
+    def _strip_pages(self, strip) -> list:
+        """*strip*'s pages, including the one lifted out of it into the
+        maximize overlay — back at the position it will return to, so
+        every count, capture and serialization of a strip reads the same
+        whether its tab is floating over the tab or sitting in its row."""
+        pages = strip.pages()
+        rec = self._max
+        if rec is not None and rec.strip is strip:
+            pages.insert(min(rec.position, len(pages)), rec.widget)
+        return pages
+
+    def _strip_selected(self, strip):
+        """The page *strip* is showing — the maximized one when that came
+        from here, since that is the tab it will be showing again."""
+        rec = self._max
+        if rec is not None and rec.strip is strip:
+            return rec.widget
+        return strip.selected_page_widget()
 
     def has_running_command(self) -> bool:
         return any(shell.page_busy() for shell in self.shell_pages())
@@ -195,6 +305,11 @@ class PanelDock(Adw.Bin):
         home and the shell opens *in* it as another tab, rather than a
         second column being carved out beside it. Only an empty home axis
         splits the terminal."""
+        # Ctrl+J is about a strip, and no strip is visible under a
+        # maximized page: the tab comes back to its row first, which also
+        # spares `open` from spawning a second shell for a home strip whose
+        # only one is floating over the tab.
+        self.restore_maximized()
         if self._home_strip is None:
             target = self._axis_strip(self._home_position)
             if target is not None:
@@ -217,6 +332,7 @@ class PanelDock(Adw.Bin):
     def hide_home(self) -> None:
         """Hide (don't close) the home strip: pages keep running, the node
         and its size survive for the next show."""
+        self.restore_maximized()  # the panel can't go down with a tab still up
         strip = self._home_strip
         if strip is None or not strip.get_visible():
             return
@@ -252,6 +368,7 @@ class PanelDock(Adw.Bin):
         column next to it. With that side empty the home strip relocates
         there bodily, as it always did. Either way the shell pages parked
         in other strips gather back in. Returns the new position."""
+        self.restore_maximized()  # a page floating over the tab can't be gathered
         self._home_position = "right" if self._home_position == "bottom" else "bottom"
         home = self._home_strip
         target = self._axis_strip(self._home_position, exclude=home)
@@ -363,8 +480,9 @@ class PanelDock(Adw.Bin):
     # -- non-shell pages -----------------------------------------------------
 
     def pages(self) -> list:
-        """Every page across every strip, in spatial-then-tab order."""
-        return [page for strip in self.strips() for page in strip.pages()]
+        """Every page across every strip, in spatial-then-tab order, a
+        maximized one among its strip's (see `_strip_pages`)."""
+        return [page for strip in self.strips() for page in self._strip_pages(strip)]
 
     def open_page(self, widget, side: str = "right") -> None:
         """Open a non-shell page as a tab in a strip beside the terminal:
@@ -372,6 +490,7 @@ class PanelDock(Adw.Bin):
         split off that edge. The join-don't-split default keeps opening
         five PRs from carving the dock into five slivers — and lands the
         composer in a bottom home strip as a tab rather than beneath it."""
+        self.restore_maximized()  # a page opening behind the overlay is a page lost
         if side not in ("right", "below"):
             side = "right"
         strip = self._strip_past_terminal("h" if side == "right" else "v")
@@ -386,14 +505,28 @@ class PanelDock(Adw.Bin):
     def close_page(self, widget) -> None:
         """Close *widget*'s tab wherever it lives, through the strip's own
         close funnel (busy-ask, page_closed hook, collapse-when-empty) —
-        how the docked composer's chrome close reaches its tab's X."""
+        how the docked composer's chrome close reaches its tab's X.
+
+        A *maximized* widget comes down first: it has no strip to be closed
+        from while it is up, and its own chrome's close button is one of
+        the ways here. Closing anything else leaves the overlay alone —
+        that page is out of sight behind it either way, and dropping the
+        overlay for it would be a side effect no caller asked for."""
+        if self._max is not None and self._max.widget is widget:
+            self.restore_maximized()
         strip = self._strip_of(widget)
         if strip is not None:
             strip.close_widget(widget)
 
     def reveal_page(self, widget) -> None:
         """Front an existing page: select its tab, and show its strip if it
-        is the hidden home strip (the one strip that can hide)."""
+        is the hidden home strip (the one strip that can hide). A page
+        already maximized is as fronted as a page gets; any *other* one
+        comes down first, since nothing behind the overlay can be shown."""
+        if self._max is not None and self._max.widget is widget:
+            GLib.idle_add(widget.grab_page_focus)
+            return
+        self.restore_maximized()
         for strip in self.strips():
             if widget in strip.pages():
                 strip.select_widget(widget)
@@ -419,6 +552,9 @@ class PanelDock(Adw.Bin):
         """Front the first busy shell — revealing a hidden home strip if
         that's where it lives — so a close confirmation's "will be
         terminated" points at something visible."""
+        if self._max is not None and getattr(self._max.widget, "page_busy", bool)():
+            return  # already the only thing on screen
+        self.restore_maximized()  # nothing behind the overlay can be pointed at
         for strip in self.strips():
             if any(shell.page_busy() for shell in strip.shell_pages()):
                 if strip is self._home_strip and not strip.get_visible():
@@ -433,8 +569,8 @@ class PanelDock(Adw.Bin):
         return {shell.hist: shell.capture_contents() for shell in self.shell_pages()}
 
     def clear_shells(self) -> None:
-        for strip in self.strips():
-            strip.clear_all()
+        for shell in self.shell_pages():  # a maximized one included
+            shell.clear()
 
     # -- layout persistence --------------------------------------------------
 
@@ -484,15 +620,20 @@ class PanelDock(Adw.Bin):
     def _serialize_strip(self, strip) -> dict | None:
         """One strip's layout dict, pages serialized by their own
         `page_state`. A page without one (a foreign tab mid-bounce, a kind
-        that opted out) simply doesn't persist."""
+        that opted out) simply doesn't persist.
+
+        A maximized page persists as the tab of this strip it will be
+        again, selected: maximizing is a way of looking at a page, not a
+        place a page lives, and nothing about it is worth restoring a
+        session into."""
         pairs = [
             (widget, state)
-            for widget in strip.pages()
+            for widget in self._strip_pages(strip)
             if (state := getattr(widget, "page_state", lambda: None)())
         ]
         if not pairs:
             return None
-        selected_widget = strip.selected_page_widget()
+        selected_widget = self._strip_selected(strip)
         selected = next(
             (i for i, (widget, _state) in enumerate(pairs) if widget is selected_widget), 0
         )
@@ -676,6 +817,93 @@ class PanelDock(Adw.Bin):
         if was_home and target is not None and (strip.page_count == 0 or took_last_shell):
             self._adopt_home(target, dest)
 
+    # -- maximizing a page ---------------------------------------------------
+
+    @property
+    def maximized_page(self):
+        """The page floating over the session tab, or None."""
+        return self._max.widget if self._max is not None else None
+
+    def maximize_page(self, strip, widget) -> None:
+        """The tab row's overlay button: float *widget* over the whole
+        session tab — terminal, other strips and the editor column alike —
+        with only the maximize pane's own restore button showing.
+
+        The page is *transferred* into that pane's view rather than
+        reparented by hand, so it keeps its `Adw.TabPage` and a shell's
+        process rides along exactly as it does across a move between
+        strips. Its old tab position is remembered and its strip is kept
+        alive even when this emptied it (see `_collapse_strip`): "restore
+        it to its normal size and location" needs a location to return to.
+
+        Only one page can be up at a time — a second call restores the
+        first, though with every strip covered there is no button left to
+        make one."""
+        if strip not in self._tree or widget not in strip.pages():
+            return
+        self.restore_maximized()
+        position = strip.pages().index(widget)
+        self._max = _MaxRec(strip, widget, position)  # before the transfer can empty strip
+        strip.transfer_to(widget, self._max_pane, 0)
+        self._wire_max_page(widget)
+        self._max_pane.set_page_title(widget.page_title())
+        self._max_pane.set_visible(True)
+        GLib.idle_add(widget.grab_page_focus)
+
+    def restore_maximized(self) -> bool:
+        """Drop the maximized page back into its own tab row, at the
+        position it left from, selected and focused. False when nothing was
+        up — every dock action that would otherwise happen unseen behind
+        the overlay calls this first, and most of the time it does nothing.
+
+        A strip that left the tree while its page was up (nothing does that
+        today, but a collapse racing an idle would) sends the page to the
+        tab guard's fallback strip rather than nowhere."""
+        rec = self._max
+        if rec is None:
+            return False
+        self._max = None
+        self._max_pane.set_visible(False)
+        for handler in rec.handlers:
+            rec.widget.disconnect(handler)
+        view = self._max_pane.tab_view
+        page = view.get_nth_page(0) if view.get_n_pages() else None
+        if page is None:
+            return True
+        home = rec.strip.tab_view if rec.strip in self._tree else self._bounce_view()
+        view.transfer_page(page, home, min(rec.position, home.get_n_pages()))
+        strip = self._strip_of(rec.widget)
+        if strip is not None:
+            strip.select_widget(rec.widget)
+            self._reveal_strip(strip)
+            GLib.idle_add(rec.widget.grab_page_focus)
+        return True
+
+    def _wire_max_page(self, widget) -> None:
+        """Carry the page's optional signals while it is out of every
+        strip: the strip unwired them on the way out (they ride
+        attach/detach so they follow a page between strips), and a shell
+        that exits, a bell that rings or a title that moves still has to
+        land somewhere. Mirrors `PanelStrip._on_page_attached`."""
+        rec = self._max
+        if GObject.signal_lookup("shell-exited", widget.__gtype__):
+            rec.handlers.append(widget.connect("shell-exited", self._on_max_shell_exited))
+        if GObject.signal_lookup("bell", widget.__gtype__):
+            rec.handlers.append(widget.connect("bell", lambda *_: self.emit("bell")))
+        if GObject.signal_lookup("title-changed", widget.__gtype__):
+            rec.handlers.append(
+                widget.connect(
+                    "title-changed", lambda page: self._max_pane.set_page_title(page.page_title())
+                )
+            )
+
+    def _on_max_shell_exited(self, shell) -> None:
+        """`exit` typed in a maximized shell: the page goes home and then
+        closes, the same end its tab's X would give it — and the same
+        collapse behind it, which the restore has just re-enabled."""
+        self.restore_maximized()
+        self.close_page(shell)
+
     def _adopt_home(self, strip, position: str) -> None:
         """Hand the home role to *strip* on *position*'s axis, the old home
         strip having run out of shells (a rotation took its last one) or
@@ -824,6 +1052,11 @@ class PanelDock(Adw.Bin):
     def _collapse_strip(self, strip) -> bool:
         if strip not in self._tree or strip.page_count > 0:
             return GLib.SOURCE_REMOVE  # repopulated or already gone
+        if self._max is not None and strip is self._max.strip:
+            # Emptied only because its one page is floating over the tab.
+            # The strip holds its place (invisible under the overlay) so
+            # the restore button has somewhere to put the page back.
+            return GLib.SOURCE_REMOVE
         root = self.get_root()
         focus = root.get_focus() if root is not None else None
         refocus = focus is None or focus is strip or focus.is_ancestor(strip)

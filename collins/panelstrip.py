@@ -27,10 +27,10 @@ every kind: a busy page's X asks first, whatever the kind.
 
 Shell pages are created by the strip itself (the + button); the concrete
 shell class is injected as `shell_factory` so this module stays free of
-terminal.py (which imports it). Moving, splitting and rotating need to see
-the whole dock, so those menu items — and the tab row's rotate button —
-call back into an injected *page mover* (the PanelDock) rather than
-anything strip-local.
+terminal.py (which imports it). Moving, splitting, rotating and maximizing
+need to see the whole dock, so those menu items — and the tab row's rotate
+and overlay buttons — call back into an injected *page mover* (the
+PanelDock) rather than anything strip-local.
 """
 
 from __future__ import annotations
@@ -49,11 +49,12 @@ class PanelStrip(Gtk.Box):
     """A tab strip of panel pages: `Adw.TabView` + inline `Adw.TabBar`.
 
     The tab row carries a + button (new shell page, selected immediately),
-    a rotate button that sends the tab on top to the dock's other axis (any
-    kind of tab, not just shells), and each tab an X; shells survive
-    hide/show and die with their tab. When the last page closes (or
-    transfers away) there is nothing left to show, so the owner collapses
-    the strip — see "empty"."""
+    an overlay button that floats the tab on top over the whole session
+    tab, a rotate button that sends it to the dock's other axis (any kind
+    of tab, not just shells), and each tab an X; shells survive hide/show
+    and die with their tab. When the last page closes (or transfers away)
+    there is nothing left to show, so the owner collapses the strip — see
+    "empty"."""
 
     __gsignals__ = {
         # Emitted when a page's X (or a shell exiting) removed the last page.
@@ -132,12 +133,17 @@ class PanelStrip(Gtk.Box):
         add_btn.add_css_class("flat")
         add_btn.set_tooltip_text(_("New terminal tab"))
         add_btn.connect("clicked", lambda *_: self.new_shell())
+        max_btn = Gtk.Button(icon_name="view-fullscreen-symbolic")
+        max_btn.add_css_class("flat")
+        max_btn.set_tooltip_text(_("Overlay this tab over the whole session"))
+        max_btn.connect("clicked", lambda *_: self.maximize_selected())
         rotate_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
         rotate_btn.add_css_class("flat")
         rotate_btn.set_tooltip_text(_("Move this tab to the other side (Ctrl+;)"))
         rotate_btn.connect("clicked", lambda *_: self.rotate_selected())
         end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         end_box.append(add_btn)
+        end_box.append(max_btn)
         end_box.append(rotate_btn)
         # The fallback grip: hidden while per-tab drag handles are on (the
         # default), shown when the panel_tab_drag_handles setting opts out
@@ -203,8 +209,10 @@ class PanelStrip(Gtk.Box):
         return [page for page in self.pages() if getattr(page, "page_kind", None) is not None]
 
     def shell_pages(self) -> list:
-        """The pages of kind shell, in tab order — the set the shell-wide
-        aggregates (capture/clear/busy) range over."""
+        """The pages of kind shell, in tab order — the set this strip's
+        shell-wide questions (busy, home role) range over. The dock's own
+        aggregates (capture, clear) ask it, since they have to count a
+        maximized page this strip no longer physically holds."""
         return [page for page in self.panel_pages() if page.page_kind == "shell"]
 
     def selected_page_widget(self):
@@ -270,15 +278,20 @@ class PanelStrip(Gtk.Box):
                 return page
         return None
 
-    def transfer_to(self, widget, other: PanelStrip, position: int | None = None) -> None:
+    def transfer_to(self, widget, other, position: int | None = None) -> None:
         """Move *widget*'s tab into *other*, appending unless *position*
         says where. The page widget is reparented, never destroyed — a
-        shell's process rides along."""
+        shell's process rides along.
+
+        *other* is anything with a `tab_view`: another strip, or the
+        dock's maximize pane, which hosts a lifted page in a bare view of
+        its own (see paneldock._MaxPane)."""
         page = self._find_page(widget)
         if page is not None:
+            view = other.tab_view
             if position is None:
-                position = other._view.get_n_pages()
-            self._view.transfer_page(page, other._view, position)
+                position = view.get_n_pages()
+            self._view.transfer_page(page, view, position)
 
     def select_widget(self, widget) -> None:
         page = self._find_page(widget)
@@ -409,10 +422,21 @@ class PanelStrip(Gtk.Box):
     def set_page_mover(self, mover) -> None:
         """Wire the dock's move/split interface: `move_targets(strip) ->
         [(label, strip)]`, `move_page(strip, widget, target)`,
-        `split_page(strip, widget, side)` and `rotate_page(strip, widget)`.
-        Without one (a strip under test, or mid-adoption) the menu simply
-        has no move section and the rotate button no-ops."""
+        `split_page(strip, widget, side)`, `rotate_page(strip, widget)` and
+        `maximize_page(strip, widget)`. Without one (a strip under test, or
+        mid-adoption) the menu simply has no move section and the rotate
+        and overlay buttons no-op."""
         self._page_mover = mover
+
+    def maximize_selected(self) -> None:
+        """The tab row's overlay button: float the tab on top over the
+        whole session tab, hiding the terminal, every other strip and the
+        editor column under it until its restore button puts it back.
+        Where "the whole tab" reaches is a fact about the dock and the
+        session around it, so an undocked strip has nothing to cover."""
+        widget = self.selected_page_widget()
+        if widget is not None and self._page_mover is not None:
+            self._page_mover.maximize_page(self, widget)
 
     def rotate_selected(self) -> None:
         """The tab row's rotate button: send the tab on top to the dock's
@@ -567,14 +591,6 @@ class PanelStrip(Gtk.Box):
                 if page is not None:
                     self._view.set_selected_page(page)
                 return
-
-    def capture_all(self) -> list[str]:
-        """Each shell page's scrollback text, in tab order."""
-        return [shell.capture_contents() for shell in self.shell_pages()]
-
-    def clear_all(self) -> None:
-        for shell in self.shell_pages():
-            shell.clear()
 
     def apply_settings(self, settings: dict) -> None:
         self._settings = settings

@@ -1245,7 +1245,14 @@ class TerminalTab(Gtk.Box):
         self._outer_sizer.connect(
             "size-changed", lambda _s, _key, size: self.emit("editor-size-changed", size)
         )
-        self.append(self._outer)
+        # A panel tab the dock maximizes floats over the *whole* tab, so its
+        # overlay wraps the outer paned (dock plus editor column) rather
+        # than living inside the dock; the dock only decides what goes in
+        # it. The footer below stays out: a status bar the overlay covered
+        # would take this tab's PR chips and cwd off screen with it.
+        self._max_overlay = Gtk.Overlay(child=self._outer, vexpand=True)
+        self._dock.set_maximize_host(self._max_overlay)
+        self.append(self._max_overlay)
 
         self._footer_cwd: str | None = None  # last value shown in the footer
         self._footer_branch: str | None = None

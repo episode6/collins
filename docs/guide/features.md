@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-13. Full change history: git log for this file.
+fork. Last modified: 2026-08-14. Full change history: git log for this file.
 -->
 
 # Features
@@ -288,6 +288,14 @@ that lives below or beside the agent terminal, with **tabs of its own**:
   Any kind of tab rotates, not just shells, and only that one tab moves: its
   neighbours stay where they are. If a strip already sits on the side it's
   headed for, the tab joins it rather than carving out another one.
+- The tab row's **overlay button** (between + and rotate) gives the tab
+  you're looking at the *whole* tab: it floats over the agent terminal,
+  every other strip and the editor pane, with a **restore button in its
+  top-left** that drops it back into the tab row it came from, at the same
+  position and size. Any kind of tab overlays — a shell to read a long
+  build log, a PR page to read a diff — and nothing about it moves: the
+  page keeps running where it is, its neighbours keep their places, and
+  the strip it came out of waits for it even if that was its only tab.
 - **Right-click a panel tab to split** — Split Left / Right / Up / Down carves
   a second strip of tabs on that side and moves the tab into it, so you can
   keep shells below the terminal *and* beside it at once. The same menu's

@@ -148,6 +148,20 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   border-radius: 12px 12px 0 0;
 }
 
+/* a panel tab floated over the whole session tab by the tab row's overlay
+   button (paneldock._MaxPane). Opaque on purpose: it hangs in an overlay
+   over the terminal and the editor column, and anything showing through
+   would read as a rendering fault rather than a maximized tab. Its thin
+   bar -- the restore button and the page's title -- is divided from the
+   page below by the same hairline the rest of the app draws seams with. */
+.panel-maximized {
+  background-color: @window_bg_color;
+}
+.panel-maximized .panel-maximized-bar {
+  padding: 3px 6px;
+  border-bottom: 1px solid alpha(currentColor, 0.15);
+}
+
 /* docked in a panel page, the composer is a pane, not a floating card */
 .composer-panel.docked {
   border-radius: 0;

@@ -1090,6 +1090,14 @@ msgstr ""
 msgid "Move this tab to the other side (Ctrl+;)"
 msgstr ""
 
+#: collins/panelstrip.py:138
+msgid "Overlay this tab over the whole session"
+msgstr ""
+
+#: collins/paneldock.py:80
+msgid "Restore this tab to its size and place in the panel"
+msgstr ""
+
 #: collins/terminal.py:633
 msgid "A command is still running in this terminal tab and will be terminated."
 msgstr ""
