@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-13. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -394,7 +394,9 @@ class PlaceholderRow(Gtk.ListBoxRow):
         box.set_valign(Gtk.Align.CENTER)  # match SessionRow in a taller row
         box.set_margin_top(4)  # match SessionRow: the flat button fills the row
         box.set_margin_bottom(4)
-        box.set_margin_start(4)  # match SessionRow's title inset
+        # Stands in for the badge overhang a SessionRow's mark carries, so this
+        # label starts where the marks above it do.
+        box.set_margin_start(4)
 
         label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
         # Full strength, like the real rows with a tab open: dimming now means
@@ -452,7 +454,9 @@ class NewThreadRow(Gtk.ListBoxRow):
         box.set_valign(Gtk.Align.CENTER)  # match SessionRow in a taller row
         box.set_margin_top(4)
         box.set_margin_bottom(4)
-        box.set_margin_start(4)  # match SessionRow's title inset
+        # As in PlaceholderRow: stand in for the mark's badge overhang so the
+        # offer starts where a real row's mark does.
+        box.set_margin_start(4)
 
         label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
         label.add_css_class("session-title")
@@ -494,7 +498,15 @@ class SessionRow(Gtk.ListBoxRow):
         box.set_valign(Gtk.Align.CENTER)  # the row is taller than its content
         box.set_margin_top(4)
         box.set_margin_bottom(4)
-        box.set_margin_start(4)  # air between the guide line and the title
+        # No inset of its own: the leading mark already carries 4px of badge
+        # overhang on its left (see prmenu._mark, where the overhang scales with
+        # the badge -- 4px at the sizes the row asks for, ROW_ICON_PX and
+        # ROW_BADGE_PX), which with the row's 4px padding puts the icon the same
+        # 8px off the guide line as it stands off the title. A margin here would
+        # only make that gap lopsided again. Resizing the mark moves the
+        # overhang, and row.session-child's padding-left in app.py has to move
+        # the other way to keep the two gaps equal.
+        box.set_margin_start(0)
         box.set_margin_end(0)  # theme row padding + the flat button's inset suffice
 
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)

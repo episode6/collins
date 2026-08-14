@@ -198,10 +198,19 @@ row.session-child {
   border: 1px solid alpha(currentColor, 0.15);
   border-left: 2px solid alpha(currentColor, 0.15);
   border-radius: 0 8px 8px 0;
-  /* Adwaita's own row padding, restated so it is ours: the barber pole below
-     is positioned by counting back over the border and this padding, and a
-     theme with a different value would slide the pole off the guide line. */
-  padding-left: 8px;
+  /* Ours rather than Adwaita's stock 8px, and half of it. What follows it is
+     the row's leading mark, which reserves 4px of badge overhang on its left
+     (see prmenu._mark, where that scales with the badge -- 4px at the sizes
+     the row asks for) and is held 8px off the title by its own padding and the
+     content box's spacing. Stock 8px here, plus a 4px margin the content box
+     used to carry, put the icon twice as far from the guide line as from the
+     title it leads -- a lopsided slot in which it read as belonging to
+     neither. With the margin gone (see SessionRow) the overhang alone stands
+     for the gap, and 4px here is what makes the two sides match; resize the
+     mark and this has to move the other way.
+     The barber pole below is positioned by counting back over the border and
+     this padding, so those two values move together. */
+  padding-left: 4px;
   /* smaller text than a stock sidebar row, and shorter: 34px of content plus
      the 1px borders puts the row at 36px, with the project headers keeping the
      coarser rhythm above it */
@@ -406,11 +415,11 @@ row.session-child:not(.running):not(.detached):not(.interrupted) {
 
    Landing it there takes two properties, because GTK does not place a
    background where the CSS spec says. It ignores background-origin: the layer
-   starts inside the border *and* the padding, 10px in for this row (2px border
-   + 8px padding, pinned above), so background-position counts that whole
+   starts inside the border *and* the padding, 6px in for this row (2px border
+   + 4px padding, pinned above), so background-position counts that whole
    distance back. And its default clip stops at the padding edge, which would
    throw the shifted layer away entirely, so the clip is widened to the border
-   box. Both are load-bearing; drop either and the pole either sits 10px inside
+   box. Both are load-bearing; drop either and the pole either sits 6px inside
    the card or vanishes.
 
    The tile is 2x12px and repeats down the line; the stripe period is 8.485px
@@ -420,8 +429,8 @@ row.session-child:not(.running):not(.detached):not(.interrupted) {
    seamless too. GTK stops all CSS animation when the desktop's animations are
    off, which is the reduced-motion behavior we want for free. */
 @keyframes barber-pole {
-  from { background-position: -10px 12px; }
-  to   { background-position: -10px 0; }
+  from { background-position: -6px 12px; }
+  to   { background-position: -6px 0; }
 }
 row.session-child.running.busy {
   border-left-color: transparent;
