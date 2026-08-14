@@ -107,7 +107,8 @@ DEFAULT_SETTINGS = {
     # The floating composer button over each agent terminal's bottom-left
     # corner (see terminal.py; it was the attach-file button once, and keeps
     # that key so saved preferences carry over). Off hides it everywhere;
-    # the header's attach button keeps working either way.
+    # drag-and-drop onto the terminal and the editor's "Add to chat" keep
+    # working either way.
     "attach_overlay_button": True,
     # Whether Enter sends the composer's text (Shift+Enter for a newline);
     # off swaps the pair: Enter is a newline and Ctrl+Enter sends.

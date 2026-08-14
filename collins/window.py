@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-13. Full change history: git log for this file.
+# fork. Last modified: 2026-08-14. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -477,15 +477,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.background_btn.set_tooltip_text(_("Background session and close tab"))
         self.background_btn.connect("clicked", lambda *_: self._background_current_tab())
         content_header.pack_start(self.background_btn)
-        self.archive_btn = Gtk.Button(icon_name="archive-symbolic", visible=False)
-        self.archive_btn.connect("clicked", lambda *_: self._archive_current_session())
-        content_header.pack_start(self.archive_btn)
-        # The file-dialog twin of the editor's "Add to chat": pick a file,
-        # type its mention into the focused agent's input box.
-        self.attach_btn = Gtk.Button(icon_name="mail-attachment-symbolic", visible=False)
-        self.attach_btn.set_tooltip_text(_("Attach file to chat"))
-        self.attach_btn.connect("clicked", lambda *_: self._attach_file_to_chat())
-        content_header.pack_start(self.attach_btn)
 
         # Caffeine Mode: first pack_end child, so it sits immediately left of
         # the window controls (minimize/maximize/close).
@@ -3507,9 +3498,9 @@ class MainWindow(Adw.ApplicationWindow):
     # -- terminal panel ------------------------------------------------------
 
     def _update_close_buttons(self, page: Adw.TabPage | None) -> None:
-        """The header exit/background/archive buttons act on the focused
-        session, so they show only while a session tab is selected — and
-        backgrounding only for providers that support detaching.
+        """The header exit/background buttons act on the focused session, so
+        they show only while a session tab is selected — and backgrounding
+        only for providers that support detaching.
 
         The background button additionally greys out whenever the handoff
         couldn't be tracked (see _background_blocker). Greyed rather than
@@ -3524,36 +3515,6 @@ class MainWindow(Adw.ApplicationWindow):
         blocker = self._background_blocker(page)
         self.background_btn.set_sensitive(not blocker)
         self.background_btn.set_tooltip_text(_BG_TOOLTIPS.get(blocker, _BG_TOOLTIPS[""]))
-        # Attach only where a mention can be typed: providers with a file
-        # mention syntax (base agents return None). Whether the agent is
-        # actually running is checked at click time, like "Add to chat".
-        self.attach_btn.set_visible(
-            is_session and tab.provider.file_reference("image.png", None) is not None
-        )
-        # A brand-new tab has no session id until the store discovers it; the
-        # refresh that delivers the id re-runs this via
-        # _refresh_background_affordances, which also keeps the icon in step
-        # when the session's archived state flips while its tab stays open.
-        session_id = tab.session_id if is_session else None
-        self.archive_btn.set_visible(bool(session_id))
-        if session_id and self.state.is_archived(session_id):
-            self.archive_btn.set_icon_name("unarchive-symbolic")
-            self.archive_btn.set_tooltip_text(_("Restore session (Ctrl+Shift+A)"))
-        else:
-            self.archive_btn.set_icon_name("archive-symbolic")
-            self.archive_btn.set_tooltip_text(
-                _("Archive session and close tab (Ctrl+Shift+A)")
-            )
-
-    def _attach_file_to_chat(self) -> None:
-        """The header attach button: pick a file, reference it in the focused
-        agent's chat. The pick-then-mention flow lives on the tab (see
-        TerminalTab.pick_file_to_attach; the floating button in the
-        terminal's corner opens the composer instead)."""
-        page = self.tab_view.get_selected_page()
-        tab = page.get_child() if page is not None else None
-        if isinstance(tab, TerminalTab):
-            tab.pick_file_to_attach()
 
     # -- the background gate ---------------------------------------------------
 

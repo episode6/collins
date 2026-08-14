@@ -1984,41 +1984,11 @@ class TerminalTab(Gtk.Box):
     def _on_editor_add_to_chat(self, _pane, path: str, start_line: int, end_line: int) -> None:
         self.add_file_to_chat(path, start_line, end_line)
 
-    def pick_file_to_attach(self) -> None:
-        """The header bar's attach-file button: pick a file, then reference
-        it in the chat (typed, never submitted — see add_file_to_chat; the
-        floating corner button opens the composer now, which has an attach
-        of its own — _pick_file_for_composer).
-
-        The dialog starts in the agent's cwd right now, not the directory the
-        tab started in, matching where the mention it produces will resolve."""
-        dialog = Gtk.FileDialog(title=_("Attach file to chat"))
-        cwd = self.current_agent_cwd()
-        if cwd:
-            dialog.set_initial_folder(Gio.File.new_for_path(cwd))
-        root = self.get_root()
-        parent = root if isinstance(root, Gtk.Window) else None
-        dialog.open(parent, None, self._on_attach_file_chosen)
-
-    def _on_attach_file_chosen(self, dialog: Gtk.FileDialog, result) -> None:
-        try:
-            gfile = dialog.open_finish(result)
-        except GLib.Error:
-            return  # cancelled
-        # The tab can close while the dialog is up; a mention typed into a
-        # dead terminal goes nowhere, so just drop it.
-        if self.get_root() is None:
-            return
-        path = gfile.get_path()
-        if path is None:
-            return  # a remote location — nothing the CLI could read
-        self.add_file_to_chat(path)
-
     def add_file_to_chat(self, path: str, start_line: int = 0, end_line: int = 0) -> None:
-        """The editor's "Add to chat" (a right-clicked selection or file)
-        and the header's attach-file button: type the agent's mention token
-        for *path* into the input box — typed, never submitted, so the user
-        says what they want done with it. The trailing space both
+        """The editor's "Add to chat" (a right-clicked selection or file):
+        type the agent's mention token for *path* into the input box —
+        typed, never submitted, so the user says what they want done with
+        it. The trailing space both
         terminates the CLI's mention token and leaves the cursor ready for
         that sentence; the leading one keeps the token off the end of a
         sentence already being written (see _mention_leading_space).
@@ -2771,9 +2741,11 @@ class TerminalTab(Gtk.Box):
         )
 
     def _pick_file_for_composer(self) -> None:
-        """The composer's attach button: the same pick-a-file flow as
-        pick_file_to_attach, landing in the composer's box instead of the
-        terminal's."""
+        """The composer's attach button: pick a file, landing its mention in
+        the composer's box instead of the terminal's.
+
+        The dialog starts in the agent's cwd right now, not the directory the
+        tab started in, matching where the mention it produces will resolve."""
         dialog = Gtk.FileDialog(title=_("Attach file"))
         cwd = self.current_agent_cwd()
         if cwd:
@@ -2788,8 +2760,7 @@ class TerminalTab(Gtk.Box):
         except GLib.Error:
             return  # cancelled
         # The composer can close (or the tab die) while the dialog is up;
-        # a mention with nowhere to land is dropped, matching
-        # _on_attach_file_chosen.
+        # a mention with nowhere to land is dropped.
         if self.get_root() is None or not self.composer_open():
             return
         path = gfile.get_path()
