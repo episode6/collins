@@ -2474,6 +2474,14 @@ msgstr ""
 msgid "Close the attachments panel"
 msgstr ""
 
+#: collins/attachpanel.py
+msgid "Dock the attachments panel beside the terminal"
+msgstr ""
+
+#: collins/attachpanel.py
+msgid "Float the attachments panel over the terminal"
+msgstr ""
+
 #: collins/terminal.py:1183
 msgid "Images this session has seen"
 msgstr ""

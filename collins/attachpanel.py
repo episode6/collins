@@ -9,11 +9,12 @@ Clicking a row opens the lightbox it came out of, with the caption the agent
 gave it; right-clicking offers the picture to another app, to the file
 manager, or to the clipboard, and can strike a row off the list.
 
-Host-agnostic like `ComposerView`, and for the same reason: the view is
-raised over the terminal today and will be a docked panel page tomorrow, so
-it announces `close-requested` and takes what it can't know — whether the
-session could open a file in its editor, how to say something to the
-terminal, what forgetting a record means — as injected callbacks.
+Host-agnostic like `ComposerView`, and for the same reason: the one live
+view is raised over the terminal or docked as a panel tab (`AttachmentsPage`,
+below), moving between the two by reparenting, so it announces
+`close-requested` / `dock-toggle-requested` and takes what it can't know —
+whether the session could open a file in its editor, how to say something to
+the terminal, what forgetting a record means — as injected callbacks.
 
 A row is a preview, and a preview is not a full-size decode: `pictures`
 scales while decoding so a hundred screenshots cost a column's worth of
@@ -35,16 +36,19 @@ from pathlib import Path
 
 import gi
 
+gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from . import pictures  # noqa: E402
 from .attachrecords import Attachment  # noqa: E402
 from .i18n import _  # noqa: E402
 
 # How wide the panel rides over the terminal. Wide enough that a screenshot
-# is recognizable, narrow enough to leave the terminal readable underneath —
-# a docked page (PR C) takes the strip's own width instead.
+# is recognizable, narrow enough to leave the terminal readable underneath.
+# Docked it is a floor rather than a width — the strip's divider gives the
+# page whatever it is dragged to, and a picture column narrower than this
+# stops being one (the PR page's _MIN_PAGE_WIDTH plays the same part).
 PANEL_WIDTH = 280
 # The tallest a preview grows. A portrait phone screenshot would otherwise
 # be a whole panel's worth of one picture.
@@ -63,6 +67,9 @@ class AttachmentsView(Gtk.Box):
 
     __gsignals__ = {
         "close-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # The chrome's dock/float toggle; what docking means is the host's
+        # business, like every other signal here.
+        "dock-toggle-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(
@@ -88,6 +95,10 @@ class AttachmentsView(Gtk.Box):
         title = Gtk.Label(label=_("Attachments"), xalign=0.0, hexpand=True)
         title.add_css_class("heading")
         header.append(title)
+        self._dock_btn = Gtk.Button()
+        self._dock_btn.add_css_class("flat")
+        self._dock_btn.connect("clicked", lambda *_a: self.emit("dock-toggle-requested"))
+        header.append(self._dock_btn)
         close = Gtk.Button(
             icon_name="window-close-symbolic",
             tooltip_text=_("Close the attachments panel"),
@@ -101,6 +112,7 @@ class AttachmentsView(Gtk.Box):
         self._list.add_css_class("attachments-list")
         scroller = Gtk.ScrolledWindow(child=self._list, vexpand=True)
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._scroller = scroller
         self._stack = Gtk.Stack(vexpand=True)
         self._stack.add_named(scroller, "list")
         self._stack.add_named(_empty_state(), "empty")
@@ -131,11 +143,55 @@ class AttachmentsView(Gtk.Box):
         keys.connect("key-pressed", self._on_key)
         self.add_controller(keys)
 
+        self._docked = False
+        self.set_docked(False)
+
     def _on_key(self, _controller, keyval: int, _keycode: int, _state) -> bool:
         if keyval != Gdk.KEY_Escape:
             return False
         self.emit("close-requested")
         return True
+
+    # -- host ------------------------------------------------------------------
+
+    def set_docked(self, docked: bool) -> None:
+        """Dress the panel for its host: docked as a panel tab it is a pane
+        and not a card raised over the terminal, so the floating shape goes —
+        the rounded left corners and the fence along that edge, both hung off
+        this class (app.py's _CSS and themes._apply_dynamic_theme_css). What
+        it is *made of* doesn't change with the host: the same terminal
+        surface, because these are still that terminal's pictures, and a view
+        that repainted itself on the way into a strip would read as a
+        different panel rather than the same one moved.
+        """
+        self._docked = bool(docked)
+        if self._docked:
+            self.add_css_class("docked")
+            self._dock_btn.set_icon_name("view-restore-symbolic")
+            self._dock_btn.set_tooltip_text(
+                _("Float the attachments panel over the terminal")
+            )
+        else:
+            self.remove_css_class("docked")
+            # go-last, not go-next: an arrow into an edge, which is what the
+            # composer's go-bottom is on the other axis. A bare chevron reads
+            # as "forward" — a page turn, not a wall to park against.
+            self._dock_btn.set_icon_name("go-last-symbolic")
+            self._dock_btn.set_tooltip_text(
+                _("Dock the attachments panel beside the terminal")
+            )
+
+    def focus_list(self) -> None:
+        """Put the keyboard on the newest picture — a row is a button, so
+        that is one Enter from the lightbox and one Tab from the next one.
+        An empty list has only its scroller to offer."""
+        row = self._list.get_first_child()
+        (row if row is not None else self._scroller).grab_focus()
+
+    def has_focus_within(self) -> bool:
+        root = self.get_root()
+        focus = root.get_focus() if root is not None else None
+        return focus is not None and (focus is self or focus.is_ancestor(self))
 
     # -- the list --------------------------------------------------------------
 
@@ -371,6 +427,77 @@ class _Row(Gtk.Button):
     def _on_right_click(self, gesture: Gtk.GestureClick, _n, x: float, y: float) -> None:
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self._view.popup_menu(self, self._one, x, y)
+
+
+class AttachmentsPage(Adw.Bin):
+    """The attachments panel as a dock panel page (panelstrip's PanelPage).
+
+    `ComposerPage` on the other axis, and thinner: a wrapper around the one
+    *live* `AttachmentsView`, which docking reparents rather than rebuilds,
+    so the previews already decoded and the place the list was scrolled to
+    ride along. It lands beside the terminal by default, which is usually a
+    strip a pull request is already open in — a session's pictures and the
+    PR they are going into, side by side.
+
+    `page_state` persists the placement and nothing else: the list itself is
+    the session's (state.json), so a restored page is filled from there
+    rather than from the layout.
+
+    *on_closed(page)* fires when the tab really closes (the strip's
+    `page_closed` hook — an X, a bulk close, the panel's own close button
+    routed through the dock), while the view is still inside: the host takes
+    it back to the overlay it was raised in, which is where the handle
+    expects to find it.
+    """
+
+    page_kind = "attachments"
+
+    def __init__(
+        self, view: AttachmentsView, on_closed: Callable[[AttachmentsPage], None]
+    ) -> None:
+        super().__init__()
+        self._on_closed = on_closed
+        self.set_child(view)
+
+    def take_view(self) -> AttachmentsView:
+        """Detach and return the live view (undock, or close-time rescue)."""
+        view = self.get_child()
+        self.set_child(None)
+        return view
+
+    # -- PanelPage protocol ----------------------------------------------------
+
+    def page_title(self) -> str:
+        return _("Attachments")
+
+    def page_icon(self) -> str | None:
+        return "mail-attachment-symbolic"
+
+    def grab_page_focus(self) -> None:
+        view = self.get_child()
+        if view is not None:
+            view.focus_list()
+
+    def has_page_focus(self) -> bool:
+        view = self.get_child()
+        return view.has_focus_within() if view is not None else False
+
+    def page_busy(self) -> bool:
+        # Closing loses nothing at all: the list belongs to the session, not
+        # to the panel, and the handle raises the same one straight back.
+        return False
+
+    def apply_settings(self, settings: dict) -> None:
+        # No-op where n/a, per the protocol. Nothing here is settings-driven:
+        # the panel draws in the app font and in the terminal's own colors,
+        # which reach it through the display-wide provider that sets them.
+        pass
+
+    def page_state(self) -> dict:
+        return {"kind": "attachments"}
+
+    def page_closed(self) -> None:
+        self._on_closed(self)
 
 
 def _missing(error: str | None, remote: bool) -> Gtk.Widget:

@@ -209,6 +209,12 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   opacity: 0.8;
 }
 
+/* docked in a panel page, the panel is a pane, not a floating card (see
+   .composer-panel.docked above) */
+.attachments-panel.docked {
+  border-radius: 0;
+}
+
 /* dropped-image previews above the composer's text box: square crops with
    a remove button that only shows itself while the pointer is on the thumb
    (hover state reaches the overlay from any child under the pointer) or

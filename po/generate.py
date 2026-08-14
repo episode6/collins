@@ -412,6 +412,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # the attachments panel (collins/attachpanel.py)
         "Attachments": "Mellékletek",
         "Close the attachments panel": "A mellékletek panel bezárása",
+        "Dock the attachments panel beside the terminal":
+            "A mellékletek panel dokkolása a terminál mellé",
+        "Float the attachments panel over the terminal":
+            "A mellékletek panel lebegtetése a terminál felett",
         "Images this session has seen": "A munkamenet által látott képek",
         "Open With…": "Megnyitás ezzel…",
         "Show in Folder": "Megjelenítés a mappában",
@@ -824,6 +828,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # the attachments panel (collins/attachpanel.py)
         "Attachments": "Anhänge",
         "Close the attachments panel": "Anhänge-Panel schließen",
+        "Dock the attachments panel beside the terminal":
+            "Anhänge-Panel neben dem Terminal andocken",
+        "Float the attachments panel over the terminal":
+            "Anhänge-Panel über dem Terminal schweben lassen",
         "Images this session has seen": "Bilder, die diese Sitzung gesehen hat",
         "Open With…": "Öffnen mit…",
         "Show in Folder": "Im Ordner anzeigen",
@@ -1236,6 +1244,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # the attachments panel (collins/attachpanel.py)
         "Attachments": "Adjuntos",
         "Close the attachments panel": "Cerrar el panel de adjuntos",
+        "Dock the attachments panel beside the terminal":
+            "Acoplar el panel de adjuntos junto a la terminal",
+        "Float the attachments panel over the terminal":
+            "Hacer flotar el panel de adjuntos sobre la terminal",
         "Images this session has seen": "Imágenes que ha visto esta sesión",
         "Open With…": "Abrir con…",
         "Show in Folder": "Mostrar en la carpeta",
@@ -1649,6 +1661,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # the attachments panel (collins/attachpanel.py)
         "Attachments": "Pièces jointes",
         "Close the attachments panel": "Fermer le panneau des pièces jointes",
+        "Dock the attachments panel beside the terminal":
+            "Ancrer le panneau des pièces jointes à côté du terminal",
+        "Float the attachments panel over the terminal":
+            "Faire flotter le panneau des pièces jointes au-dessus du terminal",
         "Images this session has seen": "Images vues par cette session",
         "Open With…": "Ouvrir avec…",
         "Show in Folder": "Afficher dans le dossier",

@@ -1195,6 +1195,7 @@ class TerminalTab(Gtk.Box):
         # will ride in exists up front.
         self._attachments_view: attachpanel.AttachmentsView | None = None
         self._attachments_revealer: Gtk.Revealer | None = None
+        self._attachments_page: attachpanel.AttachmentsPage | None = None  # docked
         # An open asked for but not yet on screen: the panel is revealed from
         # an idle, so without this a second click in the same frame reads as
         # "not open yet" and opens it again instead of closing it.
@@ -2080,14 +2081,28 @@ class TerminalTab(Gtk.Box):
     # -- the attachments panel ------------------------------------------------
 
     def attachments_open(self) -> bool:
-        return self._attachments_opening or (
-            self._attachments_revealer is not None
-            and self._attachments_revealer.get_reveal_child()
+        """Whether the panel is up anywhere: raised over the terminal, or
+        docked as a panel tab — which counts as open even while its strip is
+        hidden, the same way a docked composer does. Fronting it is what the
+        handle then means."""
+        return (
+            self._attachments_page is not None
+            or self._attachments_opening
+            or (
+                self._attachments_revealer is not None
+                and self._attachments_revealer.get_reveal_child()
+            )
         )
 
     def toggle_attachments(self) -> None:
-        """The handle: raise the panel, or lower one already up."""
-        if self.attachments_open():
+        """The handle: raise the panel, or lower one already up.
+
+        A *docked* panel is fronted instead of lowered — one panel per tab,
+        and this is how it is found again when another tab in its strip is
+        showing (or when the whole strip is hidden). Closing it stays where
+        closing a panel tab lives, on the tab itself.
+        """
+        if self._attachments_page is None and self.attachments_open():
             self.close_attachments()
         else:
             self.open_attachments()
@@ -2106,6 +2121,9 @@ class TerminalTab(Gtk.Box):
         )
         view.set_size_request(attachpanel.PANEL_WIDTH, -1)
         view.connect("close-requested", lambda *_a: self.close_attachments())
+        view.connect(
+            "dock-toggle-requested", lambda *_a: self._toggle_attachments_dock()
+        )
         self._attachments_view = view
         revealer = Gtk.Revealer(
             # SLIDE_LEFT is where it travels, not where it comes from: the
@@ -2130,6 +2148,12 @@ class TerminalTab(Gtk.Box):
     def open_attachments(self) -> None:
         """Slide the gallery in over the terminal's right edge, filled with
         whatever this session has seen so far."""
+        if self._attachments_page is not None:
+            # One panel per tab: docked, the handle fronts the page —
+            # revealing a hidden strip if that is where it lives — rather
+            # than raising a second copy of it over the terminal.
+            self._dock.reveal_page(self._attachments_page)
+            return
         if self.attachments_open():
             return
         view = self._ensure_attachments_panel()
@@ -2150,6 +2174,13 @@ class TerminalTab(Gtk.Box):
         GLib.idle_add(reveal)
 
     def close_attachments(self) -> None:
+        """Lower the panel. Docked, the same request funnels through the
+        page's tab close, whose `page_closed` hook lands in
+        `_on_attachments_page_closed` and takes the view back to the overlay
+        slot the handle raises."""
+        if self._attachments_page is not None:
+            self._dock.close_page(self._attachments_page)
+            return
         if not self.attachments_open():
             return
         revealer = self._attachments_revealer
@@ -2184,6 +2215,79 @@ class TerminalTab(Gtk.Box):
             caption=one.caption or one.context,
             origin=one.origin if one.remote else None,
         )
+
+    def _toggle_attachments_dock(self) -> None:
+        """The panel chrome's dock/float button."""
+        if self._attachments_page is None:
+            self.dock_attachments()
+        else:
+            self.undock_attachments()
+
+    def dock_attachments(self) -> None:
+        """Move the live panel out of the overlay into a tab of its own
+        beside the terminal — the composer's dock on the other axis:
+        reparented, never rebuilt, so the previews already decoded and the
+        place the list was scrolled to ride along. Join-don't-split places
+        it, which beside a terminal usually means the strip a pull request is
+        already open in; only a bare right edge is split for it."""
+        if self._attachments_page is not None:
+            self._dock.reveal_page(self._attachments_page)
+            return
+        view = self._ensure_attachments_panel()
+        view.set_records(self.attachments())
+        revealer = self._attachments_revealer
+        # A reveal still in flight is called off rather than left to fire at
+        # a revealer this is about to empty (see open_attachments).
+        self._attachments_opening = False
+        revealer.set_reveal_child(False)
+        revealer.set_visible(False)
+        revealer.set_child(None)
+        view.set_docked(True)
+        self._attachments_page = attachpanel.AttachmentsPage(
+            view, on_closed=self._on_attachments_page_closed
+        )
+        self._dock.open_page(self._attachments_page, side="right")
+
+    def undock_attachments(self) -> None:
+        """Raise the docked panel back over the terminal (the chrome's float
+        button). The page's close then runs with the view already rescued, so
+        `_on_attachments_page_closed` recognizes it as an undock and leaves
+        the overlay it was just put back into alone."""
+        page = self._attachments_page
+        if page is None:
+            return
+        self._attachments_page = None
+        view = page.take_view()
+        view.set_docked(False)
+        revealer = self._attachments_revealer
+        revealer.set_child(view)
+        self._dock.close_page(page)
+        revealer.set_visible(True)
+
+        def reveal() -> bool:
+            revealer.set_reveal_child(True)
+            # Unlike an open from the handle, which deliberately leaves the
+            # keyboard in the terminal, this one has it: the button that was
+            # just pressed is inside the panel, and the page under it is
+            # going away.
+            view.focus_list()
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(reveal)
+
+    def _on_attachments_page_closed(self, page: attachpanel.AttachmentsPage) -> None:
+        """The docked panel's tab is closing for real (its X, a bulk close,
+        or the chrome's close routed through the dock): take the live view
+        back to the (lowered) overlay slot, so the handle has something to
+        raise again. Nothing is rescued *out* of it, unlike the composer's
+        draft — the list belongs to the session, not to the panel."""
+        if page is not self._attachments_page:
+            return  # an undock already rescued the view; just a close now
+        self._attachments_page = None
+        view = page.take_view()
+        view.set_docked(False)
+        self._attachments_revealer.set_child(view)
+        self.grab_terminal_focus()
 
     def _sync_pr_refresh_tooltip(self, not_found: bool = False) -> None:
         """What the button offers to do, which depends on what the row shows.
@@ -3531,9 +3635,12 @@ class TerminalTab(Gtk.Box):
         paneldock.set_page_factory). A pr page's URL is persisted state and
         therefore untrusted, so it re-passes the same gate every PR URL
         passes before reaching gh; a composer entry conjures a fresh empty
-        docked composer (placement persists, drafts never)."""
+        docked composer (placement persists, drafts never), and an
+        attachments entry a panel over this session's own saved list."""
         if page.get("kind") == "composer":
             return self._restore_composer_page()
+        if page.get("kind") == "attachments":
+            return self._restore_attachments_page()
         if page.get("kind") != "pr":
             return None
         pr = parse_pr_url(page.get("url"))
@@ -3552,6 +3659,26 @@ class TerminalTab(Gtk.Box):
         composer.set_docked(True)
         self._composer_page = ComposerPage(composer, on_closed=self._on_composer_page_closed)
         return self._composer_page
+
+    def _restore_attachments_page(self) -> attachpanel.AttachmentsPage | None:
+        """A saved layout's docked attachments panel, rebuilt around whatever
+        this session has seen. The list is not part of the layout — it is
+        saved against the session (state.json) and reaches the panel the same
+        way it does in any other tab, so a restored page is filled here with
+        what is known now and topped up by `_remember_attachments` once the
+        tab knows which session it is. One panel per tab: a duplicate entry
+        (a hand-edited layout file) is refused, which drops it from the
+        restored strip."""
+        if self._attachments_page is not None or self.attachments_open():
+            return None
+        view = self._ensure_attachments_panel()
+        view.set_records(self.attachments())
+        self._attachments_revealer.set_child(None)
+        view.set_docked(True)
+        self._attachments_page = attachpanel.AttachmentsPage(
+            view, on_closed=self._on_attachments_page_closed
+        )
+        return self._attachments_page
 
     @property
     def panel_visible(self) -> bool:
@@ -3653,7 +3780,7 @@ class TerminalTab(Gtk.Box):
         layout = panellayout.validate(layout)
         if not layout:
             return
-        layout = panellayout.prune(layout, {"shell", "pr", "composer"})
+        layout = panellayout.prune(layout, {"shell", "pr", "composer", "attachments"})
         mode = layout.get("mode")
         if mode in ("bottom", "right"):
             self._dock.set_home_position(mode)
