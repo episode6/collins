@@ -121,6 +121,12 @@ _HEADER_ICON_OFFSET = 18
 # is no taller than the plain menu items above and below it.
 _OPEN_WITH_ICON_PX = 16
 
+# Gap between that icon and its label. Not a round number because it is what
+# lands the label on the text column Adwaita's own menu items use: the GitHub
+# row sits among plain items (see show_group_menu), and a label two pixels off
+# the ones above and below it is the sort of thing you see without seeing why.
+_OPEN_WITH_ICON_GAP = 8
+
 
 def _session_child_indent(icon_size: int) -> int:
     """Left margin for a session row, so its card starts right where the icon
@@ -143,7 +149,7 @@ def _open_with_row(icon: Gio.Icon | None, label: str, action: str, target: GLib.
     """
     image = Gtk.Image.new_from_gicon(icon or Gio.ThemedIcon.new("application-x-executable"))
     image.set_pixel_size(_OPEN_WITH_ICON_PX)
-    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=_OPEN_WITH_ICON_GAP)
     box.append(image)
     box.append(Gtk.Label(label=label, xalign=0.0, hexpand=True))
 
@@ -152,6 +158,27 @@ def _open_with_row(icon: Gio.Icon | None, label: str, action: str, target: GLib.
     button.add_css_class("open-with-row")  # menu-sized, and lit under the pointer
     button.connect("clicked", _on_open_with_clicked, action, target)
     return button
+
+
+def _add_icon_row(
+    section: Gio.Menu,
+    rows: list[Gtk.Widget],
+    icon: Gio.Icon | None,
+    label: str,
+    action: str,
+    target: GLib.Variant,
+) -> None:
+    """Append an item to *section* that is drawn as an icon beside its label.
+
+    The item is an empty placeholder naming a slot, and the widget filling
+    that slot goes on *rows* for _popup_menu to add to the popover under the
+    same name — so the two are built together here, and every caller sharing
+    one popover shares one *rows* list to keep the numbering straight.
+    """
+    item = Gio.MenuItem.new(None, None)
+    item.set_attribute_value("custom", GLib.Variant("s", f"open-with-{len(rows)}"))
+    section.append_item(item)
+    rows.append(_open_with_row(icon, label, action, target))
 
 
 def _on_open_with_clicked(button: Gtk.Button, action: str, target: GLib.Variant) -> None:
@@ -2331,13 +2358,17 @@ class SessionSidebar(Gtk.Box):
             # Only where there is a github.com remote to open (see
             # gitinfo.github_url, which reads `.git/config` and spawns
             # nothing): a checkout hosted elsewhere gets no item at all
-            # rather than one that would go nowhere.
+            # rather than one that would go nowhere. GitHub's own mark on it,
+            # the way the PR menu's row of the same name carries it.
             if github_url(row.cwd):
-                github_item = Gio.MenuItem.new(_("Open on GitHub"), None)
-                github_item.set_action_and_target_value(
-                    "win.open-github", GLib.Variant("s", row.cwd)
+                _add_icon_row(
+                    open_section,
+                    rows,
+                    Gio.ThemedIcon.new("github-symbolic"),
+                    _("Open on GitHub"),
+                    "win.open-github",
+                    GLib.Variant("s", row.cwd),
                 )
-                open_section.append_item(github_item)
             open_section.append_submenu(_("Open In…"), self._open_with_menu(row.cwd, rows))
 
         menu = Gio.Menu()
@@ -2380,10 +2411,7 @@ class SessionSidebar(Gtk.Box):
         section = Gio.Menu()
 
         def add(icon: Gio.Icon | None, label: str, action: str, target: GLib.Variant) -> None:
-            item = Gio.MenuItem.new(None, None)
-            item.set_attribute_value("custom", GLib.Variant("s", f"open-with-{len(rows)}"))
-            section.append_item(item)
-            rows.append(_open_with_row(icon, label, action, target))
+            _add_icon_row(section, rows, icon, label, action, target)
 
         configured = set()
         for app_id, info in footerapps.resolve_apps(
