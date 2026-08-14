@@ -206,6 +206,13 @@ class PanelDock(Adw.Bin):
         if not strip.get_visible():
             strip.set_visible(True)
             self._home_rec().sizer.apply()
+        # The tab Ctrl+J just put on screen is the freshest one there is, so
+        # Ctrl+; rotates it. A strip that already had a shell selects
+        # nothing on the way up, and without this the remembered page would
+        # still be whatever was fronted last — a PR tab in another strip,
+        # say, which the keyboard would then rotate instead of the terminal
+        # the user was looking at (see _recent_page).
+        self._recent = strip.selected_page_widget() or self._recent
 
     def hide_home(self) -> None:
         """Hide (don't close) the home strip: pages keep running, the node
@@ -634,6 +641,14 @@ class PanelDock(Adw.Bin):
         one at a time reassembles them in one strip on the far side, not
         three slivers. Only an axis with no strip at all splits the
         terminal to make one.
+
+        Rotating the home strip's last *shell* away hands the home role
+        after it (see `_adopt_home`) — Ctrl+J follows the terminal it
+        speaks for. Without that, a home strip sharing its tab row with a
+        PR page or the docked composer would go on toggling that page at
+        the old edge, and the next Ctrl+J that showed it would spawn a
+        second shell beside it while the rotated one sat on the far axis,
+        unreachable from the keyboard.
         """
         if strip not in self._tree or widget not in strip.pages():
             return
@@ -653,17 +668,22 @@ class PanelDock(Adw.Bin):
         else:
             self.split_move(strip, widget, self._terminal, _HOME_SIDES[dest])
             target = self._strip_of(widget)
-        if was_home and strip.page_count == 0 and target is not None:
+        # The home role follows an emptied strip, as it always did, and now
+        # also follows the last shell out of one that keeps other tabs.
+        took_last_shell = (
+            getattr(widget, "page_kind", None) == "shell" and not strip.shell_pages()
+        )
+        if was_home and target is not None and (strip.page_count == 0 or took_last_shell):
             self._adopt_home(target, dest)
 
     def _adopt_home(self, strip, position: str) -> None:
         """Hand the home role to *strip* on *position*'s axis, the old home
-        strip having emptied out (a rotation took its last tab) or given
-        way (a swap merged it in). Without this Ctrl+J would go on toggling
-        a strip that no longer exists — conjuring a fresh one on the old
-        edge while the pages it moved sit on the new one. The home strip's
-        remembered size comes along, so a panel sent bottom→right opens at
-        the width it always had."""
+        strip having run out of shells (a rotation took its last one) or
+        given way (a swap merged it in). Without this Ctrl+J would go on
+        toggling a strip whose terminal has left — conjuring a fresh shell
+        on the old edge while the one it moved sits on the new one, out of
+        the toggle's reach. The home strip's remembered size comes along,
+        so a panel sent bottom→right opens at the width it always had."""
         self._home_strip = strip
         self._home_position = position
         rec = self._home_rec()
