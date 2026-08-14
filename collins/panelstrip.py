@@ -60,6 +60,12 @@ class PanelStrip(Gtk.Box):
         "empty": (GObject.SignalFlags.RUN_FIRST, None, ()),
         # Emitted when any page rings BEL, for the window's visual bell.
         "bell": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # Emitted with the page widget whenever a *protocol* page arrives in
+        # this strip or comes to the front of it: the dock's record of which
+        # panel tab the rotate shortcut acts on (see PanelDock._on_page_touched).
+        # Gated like every other protocol touch here, so the foreign tab native
+        # DnD can land for one main-loop turn is never what gets remembered.
+        "page-touched": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
     }
 
     def __init__(self, shell_factory) -> None:
@@ -128,7 +134,7 @@ class PanelStrip(Gtk.Box):
         add_btn.connect("clicked", lambda *_: self.new_shell())
         rotate_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
         rotate_btn.add_css_class("flat")
-        rotate_btn.set_tooltip_text(_("Move this tab to the other side"))
+        rotate_btn.set_tooltip_text(_("Move this tab to the other side (Ctrl+;)"))
         rotate_btn.connect("clicked", lambda *_: self.rotate_selected())
         end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         end_box.append(add_btn)
@@ -303,10 +309,11 @@ class PanelStrip(Gtk.Box):
 
     def _on_page_attached(self, _view, page: Adw.TabPage, _position) -> None:
         """Wire the page's optional signals to *this* strip — on creation
-        and again whenever a transfer lands it here — and give its tab the
-        drag handle. Both are gated to protocol pages: a foreign tab that
-        native DnD drops here for the one turn before the guard bounces it
-        must leave unmarked and unwired (see shell_pages)."""
+        and again whenever a transfer lands it here — give its tab the drag
+        handle, and report the arrival ("page-touched"). All three are gated
+        to protocol pages: a foreign tab that native DnD drops here for the
+        one turn before the guard bounces it must leave unmarked, unwired,
+        and unremembered (see shell_pages)."""
         widget = page.get_child()
         ids = []
         if GObject.signal_lookup("shell-exited", widget.__gtype__):
@@ -318,9 +325,11 @@ class PanelStrip(Gtk.Box):
             # icon) re-syncs its tab whenever that state moves.
             ids.append(widget.connect("title-changed", self._on_title_changed))
         self._page_signals[widget] = ids
-        if getattr(widget, "page_kind", None) is not None and self.tab_drag_handles:
-            page.set_indicator_icon(Gio.ThemedIcon.new(paneldnd.HANDLE_ICON))
-            paneldnd.wire_tab_drag(self, widget)
+        if getattr(widget, "page_kind", None) is not None:
+            if self.tab_drag_handles:
+                page.set_indicator_icon(Gio.ThemedIcon.new(paneldnd.HANDLE_ICON))
+                paneldnd.wire_tab_drag(self, widget)
+            self.emit("page-touched", widget)
 
     def _sync_tab(self, page: Adw.TabPage) -> None:
         """Bring a tab's title and icon in line with its page widget."""
@@ -523,9 +532,13 @@ class PanelStrip(Gtk.Box):
     # -- focus and aggregates ------------------------------------------------
 
     def _on_selected(self, *_args) -> None:
-        # getattr: a just-dropped foreign page (see shell_pages) becomes
-        # the selection before the guard bounces it — nothing to focus.
-        grab = getattr(self.selected_page_widget(), "grab_page_focus", None)
+        # getattr twice: a just-dropped foreign page (see shell_pages) becomes
+        # the selection before the guard bounces it — nothing to focus, and
+        # nothing the dock should remember as the tab to rotate either.
+        widget = self.selected_page_widget()
+        if getattr(widget, "page_kind", None) is not None:
+            self.emit("page-touched", widget)
+        grab = getattr(widget, "grab_page_focus", None)
         if grab is not None and self.get_mapped():
             GLib.idle_add(grab)
 

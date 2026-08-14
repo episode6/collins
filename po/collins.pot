@@ -1037,8 +1037,8 @@ msgstr ""
 msgid "Show/hide terminal panel (Ctrl+J)"
 msgstr ""
 
-#: collins/panelstrip.py:128
-msgid "Move this tab to the other side"
+#: collins/panelstrip.py:137
+msgid "Move this tab to the other side (Ctrl+;)"
 msgstr ""
 
 #: collins/terminal.py:633

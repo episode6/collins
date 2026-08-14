@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-12. Full change history: git log for this file.
+fork. Last modified: 2026-08-13. Full change history: git log for this file.
 -->
 
 # Features
@@ -262,9 +262,10 @@ Every tab has a second, plain-shell terminal area — no agent auto-launched —
 that lives below or beside the agent terminal, with **tabs of its own**:
 
 - Toggle it with `Ctrl+J` or the buttons in the tab footer; `Ctrl+K` clears it
-  (screen and saved history). **Tap `Ctrl+J` twice** in quick succession and
-  the panel opens *and* swaps sides — bottom ↔ right, the whole panel — so you
-  can put it where you want it in one gesture. A third tap hides it again.
+  (screen and saved history). **`Ctrl+;`** sends the tab you're working in to
+  the panel's other side — bottom ↔ right — and pressing it again brings the
+  tab back; it's the keyboard's way to the rotate button in the tab row, and
+  works on a panel tab of any kind, not just shells.
 - Opening and swapping both **join what's already there**: if a strip of tabs
   already sits on the side the panel is headed for — a PR docked to the right,
   with the panel set to open right — the shell opens as another tab in it, and
@@ -276,11 +277,11 @@ that lives below or beside the agent terminal, with **tabs of its own**:
   fresh tab.
 - Shells open in the agent's **current working directory** (worktree-aware),
   and none of the moves below restart them.
-- The tab row's **rotate button** sends the tab you're looking at to the
-  panel's other side — below the terminal to beside it, and back. Any kind of
-  tab rotates, not just shells, and only that one tab moves: its neighbours
-  stay where they are. If a strip already sits on the side it's headed for,
-  the tab joins it rather than carving out another one.
+- The tab row's **rotate button** (or `Ctrl+;`) sends the tab you're looking
+  at to the panel's other side — below the terminal to beside it, and back.
+  Any kind of tab rotates, not just shells, and only that one tab moves: its
+  neighbours stay where they are. If a strip already sits on the side it's
+  headed for, the tab joins it rather than carving out another one.
 - **Right-click a panel tab to split** — Split Left / Right / Up / Down carves
   a second strip of tabs on that side and moves the tab into it, so you can
   keep shells below the terminal *and* beside it at once. The same menu's
