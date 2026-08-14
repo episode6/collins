@@ -801,8 +801,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "over the agent terminal, or docked as a panel below it, where "
         "it stays for the session's later visits":
             "Den Composer öffnen, sobald eine neue Sitzung startet — "
-            "schwebend über dem Agenten-Terminal oder als Panel darunter "
-            "angedockt, wo er auch bei späteren Besuchen der Sitzung bleibt",
+            "schwebend über dem Terminal oder als Panel darunter "
+            "angedockt, wo er auch bei späteren Besuchen bleibt",
         "Never": "Nie",
         "Floating": "Schwebend",
         "Docked": "Angedockt",

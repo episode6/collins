@@ -81,8 +81,10 @@ _SCHEMES = [
 
 # What a new session opens its composer as (composerkeys.AUTOSHOW_MODES, in
 # the order the drop-down offers them). The labels stay short on purpose: a
-# ComboRow gives its selected value about 130px before ellipsizing, so what
-# each one means is spelled out in the row's subtitle instead.
+# ComboRow's selected value gets only what its subtitle leaves — under 100px
+# here — and ellipsizes past that, so what each one means is spelled out in
+# the subtitle instead. Translations have to keep both ends short: German's
+# "Angedockt" came back cut until its subtitle lost a clause.
 _COMPOSER_AUTOSHOW = [
     (composerkeys.OFF, N_("Never")),
     (composerkeys.FLOAT, N_("Floating")),

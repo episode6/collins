@@ -939,7 +939,7 @@ msgid "Composer in new sessions"
 msgstr "Composer in neuen Sitzungen"
 
 msgid "Open the composer as soon as a new session starts — floating over the agent terminal, or docked as a panel below it, where it stays for the session's later visits"
-msgstr "Den Composer öffnen, sobald eine neue Sitzung startet — schwebend über dem Agenten-Terminal oder als Panel darunter angedockt, wo er auch bei späteren Besuchen der Sitzung bleibt"
+msgstr "Den Composer öffnen, sobald eine neue Sitzung startet — schwebend über dem Terminal oder als Panel darunter angedockt, wo er auch bei späteren Besuchen bleibt"
 
 msgid "Never"
 msgstr "Nie"

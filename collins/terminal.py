@@ -2223,10 +2223,12 @@ class TerminalTab(Gtk.Box):
         wait ran out, or a composer is up already — the user got there first
         (the corner button, Ctrl+., a file dropped on the terminal), and
         nothing of theirs should be re-raised over."""
+        # Counted before the checks, so the last tick of the window is the one
+        # that gives up: _COMPOSER_AUTOSHOW_TRIES ticks is the whole wait.
         self._composer_autoshow_tries += 1
         done = (
             self.get_root() is None
-            or self._composer_autoshow_tries > _COMPOSER_AUTOSHOW_TRIES
+            or self._composer_autoshow_tries >= _COMPOSER_AUTOSHOW_TRIES
             or self.composer_open()
         )
         if not done and not self._agent_is_running():
