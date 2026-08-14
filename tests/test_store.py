@@ -167,6 +167,20 @@ def test_kept_project_persists_and_respects_archiving(store, app_state, monkeypa
     assert _empty_group_names(store) == ["beta"]
 
 
+def test_sessions_outrank_a_recorded_virtual_entry(store, monkeypatch):
+    monkeypatch.setattr(store_mod, "_trash_file", lambda path: None)
+    # The bulk delete records the entry while the project it's keeping the
+    # header for still has its sessions, and nothing clears it afterwards —
+    # so the recorded flag says "virtual" at a moment when beta is a perfectly
+    # live project, and would go on saying it if the delete never happened.
+    store.keep_projects(["beta"])
+    assert store.state.is_virtual_project("beta")
+    assert not store.is_virtual_project("beta")
+
+    store.trash_many(_by_project(store, "beta"))
+    assert store.is_virtual_project("beta")
+
+
 def test_add_project_before_any_session(store, app_state):
     # The sidebar's "Add project" button: a directory no session has ever
     # run in lands as a persisted empty header with its folder attached.
@@ -176,15 +190,19 @@ def test_add_project_before_any_session(store, app_state):
     assert store.empty_groups[0][2] == "/home/user/gamma"
     assert "gamma" in store.resolved_project_order
     assert app_state.AppState().get_virtual_projects() == {"gamma": "/home/user/gamma"}
+    # Nothing behind the header, so it reads as the kept header it is — the
+    # one case where "Remove project from sidebar" has something to remove.
+    assert store.is_virtual_project("gamma")
 
 
 def test_add_project_with_live_sessions_is_a_noop(store):
     # The folder chooser defaults to the visible project's own directory, so
-    # "Add project" on a live project must not mark it virtual — the sidebar
-    # reads is_virtual_project as "no sessions left" (worktree toggle,
-    # "Remove project from sidebar").
+    # "Add project" on a live project must not record it as virtual: the entry
+    # is what the sidebar's "Remove project from sidebar" acts on, and it
+    # outlives the moment it was true.
     store.add_project("/home/user/alpha")
     assert not store.state.is_virtual_project("alpha")
+    assert not store.is_virtual_project("alpha")
     assert _empty_group_names(store) == []
 
 

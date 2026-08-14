@@ -2313,8 +2313,11 @@ class SessionSidebar(Gtk.Box):
 
         # Worktree launches only mean something in a git checkout (`.git` is a
         # file in worktree checkouts, so either form counts) — elsewhere the
-        # checkbox is omitted rather than left to silently do nothing.
-        if is_git and not self.store.state.is_virtual_project(project_name):
+        # checkbox is omitted rather than left to silently do nothing. Whether
+        # the project has sessions is beside the point: the pin is by name and
+        # applies to the next launch, which is exactly what a project added to
+        # the sidebar before its first session wants to set up front.
+        if is_git:
             self._worktree_menu_project = project_name
             self._project_worktree_action.set_state(
                 GLib.Variant.new_boolean(
@@ -2346,7 +2349,7 @@ class SessionSidebar(Gtk.Box):
 
         # A project kept after its last session went away has nothing left to
         # archive — dropping it is the only way it ever leaves the sidebar.
-        if self.store.state.is_virtual_project(project_name):
+        if self.store.is_virtual_project(project_name):
             forget_item = Gio.MenuItem.new(_("Remove project from sidebar"), None)
             forget_item.set_action_and_target_value(
                 "win.forget-project", GLib.Variant("s", project_name)
