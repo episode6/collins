@@ -184,6 +184,20 @@ class ComposerView(Gtk.Box):
         self._buffer.place_cursor(self._buffer.get_end_iter())
         self._clear_previews()
 
+    def seed_text(self, text: str) -> None:
+        """Put the cut CLI prompt in at the top, cursor after it.
+
+        Not `set_text`: the cut lands a beat after the composer opens (the
+        screen it is read off has to settle first — terminal._begin_cut),
+        so it can find a box someone has already started typing into. What
+        was in the CLI's box was typed first and goes first, and the cursor
+        is left where they left off there. An empty box — the ordinary case
+        — makes this a plain seeding.
+        """
+        self._buffer.insert(self._buffer.get_start_iter(), text)
+        self._buffer.place_cursor(self._buffer.get_iter_at_offset(len(text)))
+        self._view.scroll_to_mark(self._buffer.get_insert(), 0.0, False, 0.0, 0.0)
+
     def peek_text(self) -> str:
         return self._buffer.get_text(
             self._buffer.get_start_iter(), self._buffer.get_end_iter(), True

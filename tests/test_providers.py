@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-14. Full change history: git log for this file.
 
 import os
 import shutil
@@ -508,6 +508,33 @@ def test_a_word_ending_flush_at_the_margin_is_still_a_wrap():
         100,
     )
     assert prompt.text == "x" * 90 + " abcde next words"
+
+
+def test_a_wrap_before_a_long_word_keeps_the_space_it_ate():
+    """A row ending one cell short of the margin is a wrap like any other:
+    two long words that couldn't share a row, with the typed space eaten by
+    the break. Reading it as a split token would drop that space — and a
+    dropped character is one the open-cut's erase falls short by, leaving
+    the box holding the prompt's first character (see clear_prompt_keys)."""
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen("❯\xa0" + "a" * 36 + " " + "b" * 38, "  " + "c" * 40),
+        _box_row(1),
+        80,
+    )
+    assert prompt.text == "a" * 36 + " " + "b" * 38 + " " + "c" * 40
+
+
+def test_a_cell_a_wide_character_couldnt_straddle_still_reads_as_full():
+    """The one row that *is* brim-full a cell short: the next row opens with
+    a wide character, which is why it starts there at all."""
+    claude = ClaudeProvider()
+    prompt = claude.entered_prompt(
+        _screen("❯\xa0" + "x" * 75, "  " + "字" * 38),
+        _box_row(1),
+        80,
+    )
+    assert prompt.text == "x" * 75 + "字" * 38
 
 
 def test_a_break_before_a_row_filling_token_is_kept():
