@@ -2351,8 +2351,18 @@ class TerminalTab(Gtk.Box):
         the turn).
 
         Asked of every key press the terminal doesn't otherwise claim, so
-        the screen read comes last — behind the setting and a look at the
-        key, neither of which touches VTE.
+        The agent-liveness check the composer's own open makes is repeated
+        here rather than left to it: an open that bails has already
+        swallowed the key by then. Failing here — or a `type_into_composer`
+        that can't land the character after all — answers False, and a
+        False lets the key carry on to VTE exactly as if none of this
+        existed.
+
+        Asked of every key press the terminal doesn't otherwise claim, so
+        the two reads come last, behind the setting and a look at the key,
+        neither of which touches VTE or /proc. Both are paid once per
+        composer: the keys after the first go to a focused composer, not
+        here.
         """
         if not self._composer_on_typing:
             return False
@@ -2360,13 +2370,13 @@ class TerminalTab(Gtk.Box):
         char = chr(code) if code else ""
         if not composerkeys.typing_opens_composer(char, int(state)):
             return False
-        if not self.takes_prompt():
+        if not self.takes_prompt() or not self._agent_is_running():
             return False
-        self.type_into_composer(char)
-        return True
+        return self.type_into_composer(char)
 
-    def type_into_composer(self, text: str) -> None:
-        """Put *text* in the composer as typed, raising it if it isn't up.
+    def type_into_composer(self, text: str) -> bool:
+        """Put *text* in the composer as typed, raising it if it isn't up,
+        and answer whether it landed.
 
         Opening is left to `open_composer` — the docked case, the agent
         gate and the open-cut all keep their say — and the text goes in
@@ -2379,16 +2389,26 @@ class TerminalTab(Gtk.Box):
         Focus follows the text, docked composer included: what the keyboard
         writes into is where the rest of the keyboard — backspace, the
         arrows — has to work too.
+
+        Whether the open took is read off the panel, never off
+        `self._composer`: the view is built once and kept for the tab's
+        life, so a tab that has ever opened one has a non-None view even
+        while nothing is on screen. Docked or already up, it is open now;
+        freshly raised, it is open an idle from now (`_composer_opening`);
+        anything else means `open_composer` turned the request down — the
+        agent has left the terminal — and the character belongs back in
+        VTE's hands.
         """
         self.open_composer()
-        if self._composer is None:
-            return  # no composer to open — the provider has no input box
+        if self._composer is None or not (self.composer_open() or self._composer_opening):
+            return False
         self._composer.insert_typed(text)
         # A floating composer is focused by its own reveal, an idle away;
         # this is for the docked one, which the open only fronted. Asking
         # twice costs nothing, and asking too early (before the panel maps)
         # simply doesn't take — the reveal's own call is the one that does.
         self._composer.focus_view()
+        return True
 
     def autoshow_composer(self, setting) -> None:
         """Open this tab's composer without being asked, the way the
