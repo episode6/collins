@@ -596,11 +596,27 @@ def test_a_word_too_long_for_the_row_below_is_still_not_a_wrap() -> None:
     assert resolve_wrapped_url(url, row, [], below, _WRAP) is None
 
 
-def test_a_neighbour_bearing_its_own_scheme_is_a_separate_link() -> None:
+def test_a_row_below_bearing_its_own_scheme_is_a_separate_link() -> None:
     head, _tail = _split("⏺ Opened " + _URL, _WRAP)
     candidate = head[len("⏺ Opened ") :]
     below = ["  https://example.com/other/page"]
     assert resolve_wrapped_url(candidate, head, [], below, _WRAP) is None
+
+
+def test_a_word_takes_nothing_from_the_link_above_it() -> None:
+    # Upward the scheme comes from the neighbour, not from what was clicked,
+    # so a full row ending in a finished link sits one row above every prose
+    # word — and `y` must not become `https://another.com/xy`.
+    above = "⏺ Opened https://another.com/x"
+    for word in ("y", "page", "Ready", "review."):
+        row = word + " and more text"
+        assert resolve_wrapped_url(word, row, [above], [], len(above)) is None
+    # The row above bearing a scheme is not itself the objection: that is
+    # exactly what a genuine head fragment does, and a tail that carries
+    # anything a word doesn't still stitches.
+    assert resolve_wrapped_url("2/files", "2/files and more", [above], [], len(above)) == (
+        "https://another.com/x2/files"
+    )
 
 
 def test_no_url_stitch_when_the_fragment_is_mid_row() -> None:

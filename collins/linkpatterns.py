@@ -249,9 +249,22 @@ def resolve_wrapped_reference(
 _URL_SHED = ".,:;!?)]}"
 
 # A continuation fragment is the tail of one broken token, never the opening
-# of a new link: a neighbour row that starts (or ends) a URL of its own is a
-# separate reference, not this one's other half.
+# of a new link: a neighbour row *below* that starts a URL of its own is a
+# separate reference, not this one's other half. Deliberately not applied
+# upward, where the neighbour is the URL's *head* and carrying the scheme is
+# the whole point of joining it. Matching anywhere in the token rather than
+# only at its start is over-eager on purpose: it can cost a stitch, never
+# buy a wrong one.
 _URL_START = re.compile("(?:[a-zA-Z][a-zA-Z0-9+.\\-]*://|www\\.)")
+
+# Upward, the scheme comes from the neighbour instead of from what was
+# clicked, so — unlike downward, where a fragment with no scheme can't
+# produce a URL at all — a click on ordinary prose could be handed a link
+# off the row above. A word is never the tail of a broken URL: `03/files`,
+# `ex.html`, `d?id=42` all carry something letters alone do not. The cost is
+# a wholly alphabetic tail (`…/docu` ⏎ `mentation`), which stitches from its
+# head fragment — the half VTE underlines — but not from the tail.
+_WORDLIKE = re.compile(f"[^\\W\\d_]+[{re.escape(_URL_SHED)}]*")
 
 # How many rows a hard-wrapped URL may be stitched across, per direction. A
 # URL long enough to fill whole rows of its own is exactly what this is for,
@@ -309,10 +322,12 @@ def resolve_wrapped_url(
     What differs is the gate. There is no cheap truth to check a URL against,
     and a wrong guess opens a browser somewhere the user never asked to go —
     so every row that gives up a fragment must have been poured full to
-    *wrap_col* (the emitter's wrap column, and see _row_was_poured_full), and
-    a neighbour bearing a scheme of its own is read as a separate link rather
-    than this one's other half. Returns None unless the join genuinely grew
-    the URL; the caller opens the clicked match as it stands.
+    *wrap_col* (the emitter's wrap column, and see _row_was_poured_full), a
+    row below bearing a scheme of its own is read as a separate link rather
+    than this one's other half (_URL_START), and a clicked fragment that is
+    just a word takes nothing from the row above (_WORDLIKE). Returns None
+    unless the join genuinely grew the URL; the caller opens the clicked
+    match as it stands.
     """
     row = row_text.rstrip("\n")
     row_r = row.rstrip()
@@ -338,7 +353,7 @@ def resolve_wrapped_url(
             if token != frag or not _row_was_poured_full(below, wrap_col):
                 break
     ups = [""]
-    if row.lstrip().startswith(candidate):
+    if row.lstrip().startswith(candidate) and not _WORDLIKE.fullmatch(candidate):
         chain = ""
         for above in rows_above[:STITCH_URL_ROWS]:
             frag = above.strip()
