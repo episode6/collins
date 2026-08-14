@@ -797,6 +797,12 @@ def viewer_login() -> str:
     prdetail.PullRequestDetail.viewer_is_author). A failure isn't remembered:
     no gh, offline or signed out is a state that gets better, so the next
     caller asks again. Never call on the main thread.
+
+    The lock is held around the answer, never around the call: two pages
+    loading cold at the same moment may both ask gh, which costs one spare
+    subprocess and writes the same login twice. Holding it across a
+    subprocess to save that would park every other thread that wants a
+    status behind a network round trip — the worse of the two.
     """
     global _viewer
     with _lock:
