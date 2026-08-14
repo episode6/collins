@@ -183,6 +183,41 @@ def test_checks_cover_both_of_ghs_shapes():
     assert checks[2].url == "https://ci.example.com/build/9"
 
 
+def test_a_conflicting_branch_joins_the_checks_as_its_own_row():
+    """It blocks the merge exactly as a failed check does, and the Checks list
+    is where the page enumerates the blockers — it leads them, carries the
+    conflict badge, and has no run to open."""
+    checks = parse_detail(URL, _reply(mergeable="CONFLICTING"), DIFF).checks
+    assert (checks[0].state, checks[0].url) == (prstatus.BADGE_CONFLICT, "")
+    assert checks[0].name
+    assert [c.name for c in checks[1:]] == ["lint", "test", "ci/external"]
+
+
+def test_a_conflicting_pr_with_no_ci_at_all_still_has_a_checks_list():
+    reply = _reply(mergeable="CONFLICTING", statusCheckRollup=[])
+    assert [c.state for c in parse_detail(URL, reply, DIFF).checks] == [
+        prstatus.BADGE_CONFLICT
+    ]
+
+
+def test_a_mergeable_branch_adds_no_row():
+    assert not [
+        c
+        for c in parse_detail(URL, _reply(), DIFF).checks
+        if c.state == prstatus.BADGE_CONFLICT
+    ]
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
+def test_a_settled_pr_never_grows_the_conflict_row(state):
+    """Whatever gh still reports for it, a PR that is over isn't going
+    anywhere — the summary's own rule (PullRequest.conflicting)."""
+    reply = _reply(state=state, mergeable="CONFLICTING")
+    assert [c.name for c in parse_detail(URL, reply, DIFF).checks] == [
+        "lint", "test", "ci/external"
+    ]
+
+
 def test_a_check_url_must_be_http():
     """targetUrl is repository-controlled; nothing else may reach a browser."""
     rollup = [{"__typename": "StatusContext", "context": "ci/evil",

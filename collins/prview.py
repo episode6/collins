@@ -23,6 +23,12 @@ menu runs it with (`_ActionBar`), and no button at all where a PR offers
 none. The page carries no menu of its own: what it doesn't draw as a button
 here, a chip's right-click menu still offers for the same PR.
 
+The Checks list carries the page's other button. A conflicting branch shows
+there as a failed check of its own (prdetail adds the row: it blocks the merge
+exactly as a failure does), and under a list with anything red in it sits the
+one prompt that would clear it — "Fix errors", "Resolve conflicts", or both at
+once — typed into the owning session (`practions.repair_action`).
+
 The Conversation column ends in the page's write half: a composer that posts
 its text as a comment or a review verdict through practions' write calls
 (bodies over stdin, never argv), with a Claude button beside them that either
@@ -673,7 +679,52 @@ class PrViewPage(Adw.Bin):
         section.append(heading)
         for check in checks:
             section.append(self._check_row(check))
+        repair = self._repair_button()
+        if repair is not None:
+            section.append(repair)
         return section
+
+    def _repair_button(self) -> Gtk.Widget | None:
+        """The offer to make the agent clear whatever is blocking the merge —
+        or None where nothing is.
+
+        Under the list rather than beside the row it is about: a PR can fail
+        several checks and conflict as well, and one button asking for all of
+        it in the right order (practions.repair_action) is the offer, not one
+        per red row. It says the action's `short` wording, with the prompt it
+        would send in full on its tooltip, and wears Claude's mark like the
+        composer's own agent button — this is the session's work, not gh's.
+
+        Greyed with the reason when the session can't be typed into just now,
+        the blocked action rows' treatment: the tooltip goes on a sensitive
+        wrapper, since GTK skips insensitive widgets when it picks what the
+        pointer is over.
+        """
+        pr = self._pr
+        action = practions.repair_action(pr, self._host_factory().prompt_block())
+        if action is None:
+            return None
+        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        content.append(Gtk.Image.new_from_icon_name("agent-claude-symbolic"))
+        content.append(Gtk.Label(label=action.short or action.label))
+        button = Gtk.Button(child=content)
+        button.add_css_class("flat")
+        button.set_sensitive(not action.blocked)
+        button.connect("clicked", self._on_repair, action.prompt)
+        wrap = Gtk.Box()
+        wrap.append(button)
+        wrap.set_halign(Gtk.Align.START)
+        wrap.set_margin_top(4)
+        wrap.set_tooltip_text(
+            "\n".join(part for part in (action.tooltip, action.blocked) if part)
+        )
+        return wrap
+
+    def _on_repair(self, _button: Gtk.Button, prompt: str) -> None:
+        host = self._host_factory()
+        if host.prompt_block():  # sampled again: the section was built a fetch ago
+            return
+        host.send_prompt(prompt)
 
     def _check_row(self, check: prdetail.PrCheck) -> Gtk.Widget:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)

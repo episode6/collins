@@ -8,6 +8,8 @@ from collins.practions import (
     AUTO_MERGE,
     CI_PROMPT,
     COMMENTS,
+    FIX_ALL,
+    FIX_ALL_PROMPT,
     FIX_CI,
     MERGE,
     NEW_PR,
@@ -378,6 +380,100 @@ def test_merging_past_unfinished_checks_says_so_when_it_asks():
     assert "haven't all passed" in pending
 
 
+# -- what the Checks list offers under it ------------------------------------
+
+
+def _repair(pr, takes_prompt=True):
+    return practions.repair_action(pr, "" if takes_prompt else BLOCKED)
+
+
+def test_failing_checks_ask_to_be_fixed():
+    action = _repair(_pr(passed=1, failed=2))
+    assert action.key == FIX_CI
+    assert action.prompt == "Address the ci error(s) on PR #55"
+
+
+def test_a_conflicting_branch_asks_to_be_rebased():
+    """Green checks and all: the page lists the conflict as a failed check of
+    its own, and a red row with nothing offered under it is the page pointing
+    at a problem and shrugging."""
+    action = _repair(_pr(mergeable="CONFLICTING"))
+    assert action.key == REBASE
+    assert action.prompt == "rebase PR #55 and resolve the conflicts"
+
+
+def test_both_blockers_at_once_are_one_prompt_in_the_right_order():
+    """Two buttons would leave the order to the user, and fixing CI after the
+    rebase asks for the same work twice."""
+    action = _repair(_pr(passed=1, failed=1, mergeable="CONFLICTING"))
+    assert action.key == FIX_ALL
+    assert action.prompt == FIX_ALL_PROMPT.format(number=55)
+    assert action.prompt.index("ci error") < action.prompt.index("rebase")
+
+
+def test_nothing_is_offered_where_nothing_blocks_the_merge():
+    assert _repair(_pr()) is None
+    assert _repair(_pr(passed=1, pending=2)) is None
+    assert _repair(_pr(passed=None, failed=None, pending=None)) is None
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
+def test_a_settled_pr_has_nothing_left_to_repair(state):
+    """What CI said on the way into a merged PR is history, and there is no
+    branch left to rebase."""
+    assert _repair(_pr(state=state, failed=2, mergeable="CONFLICTING")) is None
+
+
+def test_a_conflicted_draft_is_still_asked_to_resolve():
+    assert _repair(_pr(state="DRAFT", mergeable="CONFLICTING")).key == REBASE
+
+
+def test_repairing_needs_a_session_at_its_prompt():
+    """The offer stays put and comes back blocked, the menu rows' treatment:
+    an offer that vanishes with what a terminal is showing is one nobody can
+    find twice."""
+    for pr in (_pr(failed=1), _pr(mergeable="CONFLICTING"),
+               _pr(failed=1, mergeable="CONFLICTING")):
+        assert _repair(pr, takes_prompt=False).blocked == BLOCKED
+        assert _repair(pr, takes_prompt=True).blocked == ""
+
+
+def test_every_repair_has_a_button_s_worth_of_label_and_a_full_tooltip():
+    for pr in (_pr(failed=1), _pr(mergeable="CONFLICTING"),
+               _pr(failed=1, mergeable="CONFLICTING")):
+        action = _repair(pr)
+        assert (action.short or action.label)
+        assert action.prompt in action.tooltip
+
+
+def test_the_repair_wording_is_the_three_the_page_promises():
+    assert _repair(_pr(failed=1)).short == "Fix errors"
+    assert _repair(_pr(mergeable="CONFLICTING")).short == "Resolve conflicts"
+    both = _repair(_pr(failed=1, mergeable="CONFLICTING"))
+    assert (both.short or both.label) == "Fix errors & resolve conflicts"
+
+
+def test_the_repair_offer_agrees_with_the_menu_on_what_to_send():
+    """Same PR, same work: the button under the checks and the menu row for
+    one blocker send the very same prompt."""
+    failing, conflicted = _pr(failed=1), _pr(mergeable="CONFLICTING")
+    assert _repair(failing).prompt == next(
+        a.prompt for a in actions_for(failing) if a.key == FIX_CI
+    )
+    assert _repair(conflicted).prompt == next(
+        a.prompt for a in actions_for(conflicted) if a.key == REBASE
+    )
+
+
+def test_the_combined_prompt_is_never_in_the_menu():
+    """The menu has room for both rows; only the page's single button folds
+    them together."""
+    both = _pr(failed=1, mergeable="CONFLICTING")
+    keys = _keys(both, takes_prompt=True)
+    assert FIX_ALL not in keys
+    assert {REBASE, FIX_CI} <= set(keys)
+
+
 def test_checks_green_is_unknown_status_pessimistic():
     assert checks_green(_pr()) is True
     assert checks_green(_pr(pending=1)) is False
@@ -549,6 +645,10 @@ def test_the_prompts_sent_to_a_session_are_left_in_english():
     """They are read by the agent CLI, not by a person."""
     assert CI_PROMPT == "Address the ci error(s) on PR #{number}"
     assert REBASE_PROMPT == "rebase PR #{number} and resolve the conflicts"
+    assert FIX_ALL_PROMPT == (
+        "Address the ci error(s) on PR #{number}, then rebase it and resolve "
+        "the conflicts"
+    )
     assert NEW_PR_PROMPT == "Open a pull request for your changes"
 
 
