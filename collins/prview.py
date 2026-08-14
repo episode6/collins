@@ -63,7 +63,7 @@ import gi
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 from . import avatars, bodyimages, dialogs, practions, prdetail, prmenu  # noqa: E402
 from .copylabel import open_tooltip, open_uri  # noqa: E402
@@ -106,13 +106,13 @@ _LARGE_PATCH_LINES = 2_000
 # The file list's share of the Files view until the user drags the divider —
 # the editor gives its file tree the same kind of sliver (_TREE_INITIAL_WIDTH).
 _FILE_LIST_WIDTH = 170
-# The width a *filled* page asks for, requested from the first frame on.
-# Loaded, the page's own minimum is its composer's button row plus the content
-# margins (~310px); loading, it is only the header's, some 60px narrower. A
-# page opening into a panel already squeezed to its minimum — a narrow window,
-# a wide sidebar — would therefore open at the loading floor and shove the
-# divider the moment the fetch landed. Asking for the filled width all along
-# costs nothing at the sizes a panel usually has, and holds the panel still.
+# The one width the page asks for, in every state it is ever in. A page whose
+# minimum grew when its fetch landed would shove the panel divider out from
+# under a panel already squeezed narrow — so nothing built below may ask for
+# more than this: everything long wraps or ellipsizes, and the composer's
+# button row wraps onto further lines (see _WrapRow) rather than setting a
+# floor of its own. Comfortably above what the header alone needs, which is
+# what the page shows while the first fetch is still in flight.
 _MIN_PAGE_WIDTH = 320
 
 def _verdict(state: str) -> tuple[str, str | None, str]:
@@ -790,6 +790,139 @@ class PrViewPage(Adw.Bin):
             self._dark_id = None
 
 
+class _WrapLayout(Gtk.LayoutManager):
+    """A horizontal box's layout, but one that wraps onto further lines.
+
+    Children keep their natural width and their order; what changes is that a
+    line too narrow to hold the rest starts a new one. Space left over on a
+    line goes to whatever on it expands (a `Gtk.Box(hexpand=True)` used as a
+    spacer, exactly as in a `Gtk.Box`), and to the line's end when nothing
+    does — these are action rows, and buttons hug that edge. Every line is
+    laid out from the start edge and mirrored whole under an RTL direction,
+    which is the mirroring a box would have done for free.
+
+    The point is the minimum: a box's is the sum of its children's, which is
+    how a row of four buttons ends up dictating how narrow a whole panel page
+    can be squeezed (see _MIN_PAGE_WIDTH). Wrapping makes it the *widest
+    single child* instead, and pays for it in height, which a scrolling column
+    has to spare.
+
+    Hand-rolled rather than `Adw.WrapBox` on purpose: that arrived in
+    libadwaita 1.7, and the oldest distribution Collins targets (noble, which
+    the PPA builds for) ships 1.5. Don't "simplify" this into it.
+    """
+
+    __gtype_name__ = "CollinsPrWrapLayout"
+
+    def __init__(self, spacing: int = 6, row_spacing: int = 6) -> None:
+        super().__init__()
+        self._spacing = spacing
+        self._row_spacing = row_spacing
+
+    def _lines(self, widget: Gtk.Widget, width: int) -> list[list[tuple[Gtk.Widget, int]]]:
+        """The visible children packed greedily into lines of *width*, each
+        paired with the width it asked for. A child wider than the line gets
+        one to itself rather than being dropped."""
+        lines: list[list[tuple[Gtk.Widget, int]]] = []
+        line: list[tuple[Gtk.Widget, int]] = []
+        used = 0
+        for child in widget:
+            if not child.get_visible():
+                continue
+            natural = child.measure(Gtk.Orientation.HORIZONTAL, -1)[1]
+            if line and used + self._spacing + natural > width:
+                lines.append(line)
+                line, used = [], 0
+            used += natural + (self._spacing if line else 0)
+            line.append((child, natural))
+        if line:
+            lines.append(line)
+        return lines
+
+    def _line_height(self, line: list[tuple[Gtk.Widget, int]]) -> int:
+        return max((c.measure(Gtk.Orientation.VERTICAL, w)[1] for c, w in line), default=0)
+
+    def do_get_request_mode(self, _widget: Gtk.Widget) -> Gtk.SizeRequestMode:
+        return Gtk.SizeRequestMode.HEIGHT_FOR_WIDTH
+
+    def do_measure(
+        self, widget: Gtk.Widget, orientation: Gtk.Orientation, for_size: int
+    ) -> tuple[int, int, int, int]:
+        children = [child for child in widget if child.get_visible()]
+        if orientation == Gtk.Orientation.HORIZONTAL:
+            # Every line holds at least one child, so the narrowest the row can
+            # be drawn is the widest child's own minimum; the natural width is
+            # still the whole row on one line.
+            minimum = max(
+                (c.measure(orientation, -1)[0] for c in children),
+                default=0,
+            )
+            natural = sum(c.measure(orientation, -1)[1] for c in children)
+            natural += self._spacing * max(len(children) - 1, 0)
+            return (minimum, max(natural, minimum), -1, -1)
+        width = for_size
+        if width < 0:  # asked height-for-any-width: answer for one line
+            width = self.do_measure(widget, Gtk.Orientation.HORIZONTAL, -1)[1]
+        lines = self._lines(widget, width)
+        height = sum(self._line_height(line) for line in lines)
+        height += self._row_spacing * max(len(lines) - 1, 0)
+        return (height, height, -1, -1)
+
+    def do_allocate(self, widget: Gtk.Widget, width: int, height: int, _baseline: int) -> None:
+        rtl = widget.get_direction() == Gtk.TextDirection.RTL
+        y = 0
+        for index, line in enumerate(self._lines(widget, width)):
+            if index:
+                y += self._row_spacing
+            line_height = self._line_height(line)
+            spare = width - sum(w for _, w in line) - self._spacing * (len(line) - 1)
+            spare = max(spare, 0)
+            growers = [child for child, _ in line if child.get_hexpand()]
+            # Nothing to expand: the line's slack goes in front of it, which
+            # pins the buttons to its end the way the un-wrapped row's own
+            # spacer does. The remainder rides the last grower, so the row
+            # still ends flush against that edge.
+            x = 0 if growers else spare
+            share = spare // len(growers) if growers else 0
+            for child, natural in line:
+                child_width = natural
+                if child in growers:
+                    child_width += share
+                    if child is growers[-1]:
+                        child_width += spare - share * len(growers)
+                child_width = max(child_width, child.measure(Gtk.Orientation.HORIZONTAL, -1)[0])
+                # RTL mirrors the line about its middle, first child at the
+                # right edge — what Gtk.Box does with the same children.
+                left = width - x - child_width if rtl else x
+                transform = Gsk.Transform().translate(Graphene.Point().init(left, y))
+                child.allocate(child_width, line_height, -1, transform)
+                x += child_width + self._spacing
+            y += line_height
+
+
+class _WrapRow(Gtk.Widget):
+    """A button row under _WrapLayout — `append` in order, as with a box."""
+
+    __gtype_name__ = "CollinsPrWrapRow"
+
+    def __init__(self, spacing: int = 6) -> None:
+        super().__init__()
+        self.set_layout_manager(_WrapLayout(spacing))
+
+    def append(self, child: Gtk.Widget) -> None:
+        child.set_parent(self)
+
+    def do_dispose(self) -> None:
+        # A plain Gtk.Widget doesn't unparent its children for us, and GTK
+        # warns loudly about the ones still parented when it finalizes.
+        child = self.get_first_child()
+        while child is not None:
+            following = child.get_next_sibling()
+            child.unparent()
+            child = following
+        Gtk.Widget.do_dispose(self)
+
+
 class _Composer(Gtk.Box):
     """The Conversation view's write half: a comment box and its verdicts.
 
@@ -807,6 +940,10 @@ class _Composer(Gtk.Box):
     COMMENTS prompt into the owning session instead, greyed with the reason
     whenever the session can't take a prompt right now — the blocked action
     rows' treatment, tooltip on a sensitive wrapper and all.
+
+    Its buttons sit in a row that wraps (_WrapRow): they read the same at any
+    width the panel is dragged to, and none of them may quietly become the
+    minimum width of the whole page.
     """
 
     def __init__(
@@ -843,7 +980,10 @@ class _Composer(Gtk.Box):
         entry.set_propagate_natural_height(True)
         self.append(entry)
 
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        # Wrapping rather than a box: four buttons side by side would otherwise
+        # be the page's minimum width, and a panel could never be squeezed
+        # narrower than they are wide (see _WrapLayout, _MIN_PAGE_WIDTH).
+        row = _WrapRow()
         reply = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         reply.append(Gtk.Image.new_from_icon_name("agent-claude-symbolic"))
         reply.append(Gtk.Label(label=_("Reply via Claude")))
