@@ -118,7 +118,8 @@ _LARGE_PATCH_LINES = 2_000
 # the editor gives its file tree the same kind of sliver (_TREE_INITIAL_WIDTH).
 _FILE_LIST_WIDTH = 170
 # What Adwaita leaves between the switcher's own two buttons, borrowed for the
-# seam between Files and the action button beside it (see _ActionBar).
+# seam between Files and the action button beside it — applied where the two
+# meet, on the switcher row's end widget (see `switcher_row` below).
 _SWITCHER_GAP = 3
 # The one width the page asks for, in every state it is ever in. A page whose
 # minimum grew when its fetch landed would shove the panel divider out from
