@@ -487,7 +487,7 @@ msgstr ""
 #: collins/prefs.py:311
 msgid ""
 "Start typing at an agent's empty prompt and the composer opens with what "
-"you typed. A dialog, a menu and the CLI's own /, ! and # keep their keys"
+"you typed. A dialog, a menu and the CLI's own /, !, # and @ keep their keys"
 msgstr ""
 
 #: collins/prefs.py:158

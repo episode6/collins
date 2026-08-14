@@ -66,7 +66,7 @@ def test_non_return_keys_pass():
         assert enter_action(keyval, CTRL, False) == PASS
 
 
-@pytest.mark.parametrize("char", ["a", "Z", "7", " ", ".", "@", "é", "ß", "€", "字"])
+@pytest.mark.parametrize("char", ["a", "Z", "7", " ", ".", "'", "é", "ß", "€", "字"])
 def test_typing_opens_composer_on_characters(char):
     assert typing_opens_composer(char, 0)
     assert typing_opens_composer(char, SHIFT)  # a capital is still a character
@@ -86,10 +86,11 @@ def test_typing_ignores_keys_that_are_not_characters(char):
     assert not typing_opens_composer(char, 0)
 
 
-@pytest.mark.parametrize("char", ["/", "!", "#"])
+@pytest.mark.parametrize("char", ["/", "!", "#", "@"])
 def test_typing_leaves_the_input_boxes_own_openers(char):
-    # The CLI's slash-command, bash and memory modes start here, with
-    # completion the composer can't offer — the keystroke belongs to the box.
+    # The CLI's slash-command, bash, memory and file-picker modes start
+    # here, with completion the composer can't offer — the keystroke
+    # belongs to the box.
     assert not typing_opens_composer(char, 0)
     assert not typing_opens_composer(char, SHIFT)
 

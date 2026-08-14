@@ -60,14 +60,14 @@ def enter_action(keyval: int, state: int, enter_sends: bool) -> str:
 _CHORD_MASK = _CONTROL_MASK | _ALT_MASK | _SUPER_MASK | _HYPER_MASK | _META_MASK
 
 # First characters the CLI's own input box hears as a mode switch, not as
-# text: Claude Code opens its slash-command menu on "/", bash mode on "!"
-# and memory mode on "#", each with completion the composer has no answer
-# for. Typed into an empty box they belong to the box, so the composer
-# leaves them there -- an opener is exactly the keystroke whose menu the
-# user is after. (Only as the first character: once the composer is up they
-# are ordinary text in it, and "@" isn't here at all -- a mention parses out
-# of submitted text just as well as out of the CLI's own picker.)
-_PROMPT_OPENERS = frozenset("/!#")
+# text: Claude Code opens its slash-command menu on "/", bash mode on "!",
+# memory mode on "#" and its file picker on "@", each with completion the
+# composer has no answer for. Typed into an empty box they belong to the
+# box, so the composer leaves them there -- an opener is exactly the
+# keystroke whose menu the user is after. Only as the first character:
+# once the composer is up they are ordinary text in it, and a mention
+# written there parses out of the submitted text just as well.
+_PROMPT_OPENERS = frozenset("/!#@")
 
 
 def typing_opens_composer(char: str, state: int) -> bool:

@@ -310,7 +310,7 @@ class PreferencesDialog(Adw.Dialog):
             subtitle=_(
                 "Start typing at an agent's empty prompt and the composer "
                 "opens with what you typed. A dialog, a menu and the CLI's "
-                "own /, ! and # keep their keys"
+                "own /, !, # and @ keep their keys"
             ),
         )
         self._composer_typing_row.set_active(bool(state.get_setting("composer_on_typing")))
