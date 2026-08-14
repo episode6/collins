@@ -22,6 +22,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa:
 
 from . import (  # noqa: E402
     apppicker,
+    attachpanel,
     attachrecords,
     composerkeys,
     dropimages,
@@ -1173,9 +1174,36 @@ class TerminalTab(Gtk.Box):
         # Counts up only while a new session set to open floating waits for
         # its agent (see autoshow_composer).
         self._composer_autoshow_tries = 0
+
+        # The attachments handle: a slim pill on the terminal's right edge,
+        # the composer button's counterpart on the other axis, opening the
+        # gallery of images this session has seen (collins/attachpanel.py).
+        # Always there, empty list or not — a panel nobody can find until it
+        # is already full is a panel nobody finds — and it toggles: a second
+        # click on the handle that raised the panel lowers it again.
+        self._attachments_btn = Gtk.Button(
+            icon_name="mail-attachment-symbolic",
+            halign=Gtk.Align.END,
+            valign=Gtk.Align.CENTER,
+            margin_end=5,
+            tooltip_text=_("Images this session has seen"),
+        )
+        self._attachments_btn.add_css_class("attach-overlay")
+        self._attachments_btn.add_css_class("attachments-handle")
+        self._attachments_btn.connect("clicked", lambda *_: self.toggle_attachments())
+        # Built lazily on first open, like the composer; only the slot it
+        # will ride in exists up front.
+        self._attachments_view: attachpanel.AttachmentsView | None = None
+        self._attachments_revealer: Gtk.Revealer | None = None
+        # An open asked for but not yet on screen: the panel is revealed from
+        # an idle, so without this a second click in the same frame reads as
+        # "not open yet" and opens it again instead of closing it.
+        self._attachments_opening = False
+
         self._content_overlay = Gtk.Overlay(child=scrolled)
         content_overlay = self._content_overlay
         content_overlay.add_overlay(self._composer_overlay_btn)
+        content_overlay.add_overlay(self._attachments_btn)
 
         # Past "terminal_max_width", the clamp stops growing the terminal and
         # centers it instead; see _apply_terminal_max_width. Unset until
@@ -2023,15 +2051,139 @@ class TerminalTab(Gtk.Box):
         self._saved_attachment_records = []
         self._remember_attachments()
 
+    def forget_attachment(self, key: str) -> None:
+        """Strike one image off this session's list (the panel's own "Remove
+        From List"). Both halves of the list have to let go of it — what this
+        run saw and what the last one saved — or the union behind
+        `attachments` would hand it straight back."""
+        self._attachments = {k: v for k, v in self._attachments.items() if k != key}
+        self._restored_attachments = [
+            one for one in self._restored_attachments if one.key != key
+        ]
+        self._remember_attachments()
+
     def _remember_attachments(self) -> None:
         """Hand the list to the window, which saves it against the session —
         but only when it actually reads differently, so a picture shown twice
-        with nothing new to say about it writes nothing to disk."""
-        records = attachrecords.to_records(self.attachments())
+        with nothing new to say about it writes nothing to disk. An open panel
+        is refreshed on the same terms: an unchanged list has nothing to
+        redraw, and the diff in `set_records` keeps the rest of it in place."""
+        attachments = self.attachments()
+        records = attachrecords.to_records(attachments)
         if records == self._saved_attachment_records:
             return
         self._saved_attachment_records = records
+        if self._attachments_view is not None:
+            self._attachments_view.set_records(attachments)
         self.emit("attachments-changed", records)
+
+    # -- the attachments panel ------------------------------------------------
+
+    def attachments_open(self) -> bool:
+        return self._attachments_opening or (
+            self._attachments_revealer is not None
+            and self._attachments_revealer.get_reveal_child()
+        )
+
+    def toggle_attachments(self) -> None:
+        """The handle: raise the panel, or lower one already up."""
+        if self.attachments_open():
+            self.close_attachments()
+        else:
+            self.open_attachments()
+
+    def _ensure_attachments_panel(self) -> attachpanel.AttachmentsView:
+        """Build the panel and its overlay slot on first use. The revealer
+        rides content_overlay — the same width-clamped overlay the composer
+        and the two floating buttons use — anchored to the right edge, so the
+        panel slides in over the terminal's own right margin."""
+        if self._attachments_view is not None:
+            return self._attachments_view
+        view = attachpanel.AttachmentsView(
+            open_image=self._show_attachment,
+            forget=self.forget_attachment,
+            notify=self.feed_message,
+        )
+        view.set_size_request(attachpanel.PANEL_WIDTH, -1)
+        view.connect("close-requested", lambda *_a: self.close_attachments())
+        self._attachments_view = view
+        revealer = Gtk.Revealer(
+            # SLIDE_LEFT is where it travels, not where it comes from: the
+            # panel enters moving leftward, i.e. in from the right edge.
+            transition_type=Gtk.RevealerTransitionType.SLIDE_LEFT,
+            halign=Gtk.Align.END,
+            child=view,
+            visible=False,
+        )
+        # Once the hide transition finishes, stop occupying the overlay: an
+        # invisible-but-revealable widget would still shadow the terminal's
+        # right edge from pointer events (the composer's lesson, bottom edge).
+        revealer.connect("notify::child-revealed", self._on_attachments_revealed)
+        self._attachments_revealer = revealer
+        self._content_overlay.add_overlay(revealer)
+        return view
+
+    def _on_attachments_revealed(self, revealer: Gtk.Revealer, _pspec) -> None:
+        if not revealer.get_child_revealed():
+            revealer.set_visible(False)
+
+    def open_attachments(self) -> None:
+        """Slide the gallery in over the terminal's right edge, filled with
+        whatever this session has seen so far."""
+        if self.attachments_open():
+            return
+        view = self._ensure_attachments_panel()
+        view.set_records(self.attachments())
+        revealer = self._attachments_revealer
+        revealer.set_visible(True)
+        self._attachments_opening = True
+
+        # Revealed from an idle after the (fresh) child maps, or the first
+        # open skips its slide and just appears (the sidebar's lesson).
+        def reveal() -> bool:
+            if not self._attachments_opening:
+                return GLib.SOURCE_REMOVE  # closed again before it ever showed
+            self._attachments_opening = False
+            revealer.set_reveal_child(True)
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(reveal)
+
+    def close_attachments(self) -> None:
+        if not self.attachments_open():
+            return
+        revealer = self._attachments_revealer
+        if self._attachments_opening:
+            # Never made it to the screen, so nothing will slide out and no
+            # child-revealed notify is coming: un-occupy the overlay by hand,
+            # or the slot shadows the terminal's right edge from then on.
+            self._attachments_opening = False
+            revealer.set_visible(False)
+        revealer.set_reveal_child(False)
+        self.grab_terminal_focus()
+
+    def _show_attachment(self, one: attachrecords.Attachment, path: str) -> None:
+        """Open a row's picture in the lightbox, with the caption it was
+        shown under. Same editor gating as every other image this tab opens:
+        the button appears only for a file this session could edit — which a
+        downloaded copy of a remote image never is."""
+        can_edit = self.can_open_in_editor(path)
+        on_open = None
+        if can_edit:
+
+            def on_open() -> None:
+                self.activate_action(
+                    "win.open-in-editor", GLib.Variant("(sii)", (path, 0, 0))
+                )
+
+        present_image_lightbox(
+            self,
+            path,
+            can_open_in_editor=can_edit,
+            on_open_in_editor=on_open,
+            caption=one.caption or one.context,
+            origin=one.origin if one.remote else None,
+        )
 
     def _sync_pr_refresh_tooltip(self, not_found: bool = False) -> None:
         """What the button offers to do, which depends on what the row shows.

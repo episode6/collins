@@ -2462,6 +2462,60 @@ msgid ""
 "downloads nothing"
 msgstr ""
 
-#: collins/bodyimages.py:172
+#: collins/bodyimages.py:122
 msgid "That file isn't an image Collins can display."
+msgstr ""
+
+#: collins/attachpanel.py:88
+msgid "Attachments"
+msgstr ""
+
+#: collins/attachpanel.py:93
+msgid "Close the attachments panel"
+msgstr ""
+
+#: collins/terminal.py:1183
+msgid "Images this session has seen"
+msgstr ""
+
+#: collins/attachpanel.py:241
+msgid "Show in Folder"
+msgstr ""
+
+#: collins/attachpanel.py:245
+msgid "Copy Path"
+msgstr ""
+
+#: collins/attachpanel.py:244
+msgid "Copy Address"
+msgstr ""
+
+#: collins/attachpanel.py:252
+msgid "Remove From List"
+msgstr ""
+
+#: collins/attachpanel.py:383
+msgid "No longer on disk"
+msgstr ""
+
+#: collins/attachpanel.py:383
+msgid "Couldn't be downloaded"
+msgstr ""
+
+#: collins/attachpanel.py:409
+msgid "No images yet"
+msgstr ""
+
+#: collins/attachpanel.py:412
+msgid "Pictures this session shows you collect here."
+msgstr ""
+
+#: collins/attachpanel.py:213
+#, python-brace-format
+msgid "that image isn't on disk any more: {path}"
+msgstr ""
+
+#: collins/attachpanel.py:223
+#, python-brace-format
+msgid "couldn't download that image: {reason}"
 msgstr ""

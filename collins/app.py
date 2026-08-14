@@ -168,6 +168,47 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   border-radius: 0;
 }
 
+/* the attachments handle on the terminal's right edge: the same pill as
+   .attach-overlay above (whose colors it also borrows), stood on end -- tall
+   and narrow, so it reads as an edge to pull rather than a second button. */
+.attachments-handle {
+  min-width: 18px;
+  min-height: 46px;
+  padding: 3px 1px;
+}
+
+/* the attachments panel sliding in over the terminal's right edge. Shape
+   only, as with the composer above: its colors come from
+   themes._apply_dynamic_theme_css, so it reads as a surface of the
+   terminal's own theme. Rows are flat buttons -- a preview with its caption
+   under it -- outlined only enough to tell one picture from the next. */
+.attachments-panel {
+  border-radius: 12px 0 0 12px;
+}
+.attachments-panel .attachments-header {
+  padding: 6px 6px 6px 12px;
+}
+.attachments-panel .attachments-list {
+  padding: 6px 10px 10px 10px;
+}
+.attachments-panel .attachments-empty {
+  padding: 24px;
+}
+.attachments-panel .attachment-row {
+  padding: 6px;
+  border-radius: 8px;
+}
+.attachments-panel .attachment-thumb {
+  border-radius: 6px;
+}
+.attachments-panel .attachment-standin {
+  padding: 12px 4px;
+}
+.attachments-panel .attachment-caption {
+  font-size: 0.9em;
+  opacity: 0.8;
+}
+
 /* dropped-image previews above the composer's text box: square crops with
    a remove button that only shows itself while the pointer is on the thumb
    (hover state reaches the overlay from any child under the pointer) or
