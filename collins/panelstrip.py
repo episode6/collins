@@ -209,8 +209,10 @@ class PanelStrip(Gtk.Box):
         return [page for page in self.pages() if getattr(page, "page_kind", None) is not None]
 
     def shell_pages(self) -> list:
-        """The pages of kind shell, in tab order — the set the shell-wide
-        aggregates (capture/clear/busy) range over."""
+        """The pages of kind shell, in tab order — the set this strip's
+        shell-wide questions (busy, home role) range over. The dock's own
+        aggregates (capture, clear) ask it, since they have to count a
+        maximized page this strip no longer physically holds."""
         return [page for page in self.panel_pages() if page.page_kind == "shell"]
 
     def selected_page_widget(self):
@@ -589,14 +591,6 @@ class PanelStrip(Gtk.Box):
                 if page is not None:
                     self._view.set_selected_page(page)
                 return
-
-    def capture_all(self) -> list[str]:
-        """Each shell page's scrollback text, in tab order."""
-        return [shell.capture_contents() for shell in self.shell_pages()]
-
-    def clear_all(self) -> None:
-        for shell in self.shell_pages():
-            shell.clear()
 
     def apply_settings(self, settings: dict) -> None:
         self._settings = settings

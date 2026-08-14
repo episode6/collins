@@ -507,10 +507,13 @@ class PanelDock(Adw.Bin):
         close funnel (busy-ask, page_closed hook, collapse-when-empty) —
         how the docked composer's chrome close reaches its tab's X.
 
-        A maximized page comes down first: it has no strip to be closed
+        A *maximized* widget comes down first: it has no strip to be closed
         from while it is up, and its own chrome's close button is one of
-        the ways here."""
-        self.restore_maximized()
+        the ways here. Closing anything else leaves the overlay alone —
+        that page is out of sight behind it either way, and dropping the
+        overlay for it would be a side effect no caller asked for."""
+        if self._max is not None and self._max.widget is widget:
+            self.restore_maximized()
         strip = self._strip_of(widget)
         if strip is not None:
             strip.close_widget(widget)
