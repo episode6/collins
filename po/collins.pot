@@ -996,7 +996,7 @@ msgstr ""
 
 #: collins/terminal.py:340
 #, python-brace-format
-msgid "warning: project dir {cwd} no longer exists, starting in HOME"
+msgid "warning: project dir {cwd} no longer exists, starting in {fallback}"
 msgstr ""
 
 #: collins/terminal.py:1139
