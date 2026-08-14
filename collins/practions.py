@@ -251,37 +251,25 @@ def actions_for(
 def header_actions(pr: PullRequest) -> list[Action]:
     """The state-changing actions the PR page puts beside its view switcher.
 
-    `actions_for`'s first item or two, and only those: the actions that move
-    the pull request itself along — out of draft, or into the base branch.
-    Everything else the menu offers is either a prompt for the session or a
-    comment, which is what the page's composer is for.
+    `actions_for`'s first item, and only that: the action that moves the pull
+    request itself along — out of draft, or into the base branch. Everything
+    else the menu offers is either a prompt for the session or a comment,
+    which is what the page's composer is for.
 
-    Where the menu picks *one* merge — the one that fits the checks — this
-    offers both while they are both real offers, since a button row can say
-    what a single menu item has to choose between: waiting for the checks is
-    the recommended half (`recommended_key`), merging now is the half that
-    doesn't wait. Once the checks are green there is nothing left to wait
-    for, so only the merge remains.
+    One at a time, always: a draft is asked to come out of draft, and an open
+    PR is offered the single merge that fits the state its checks are in —
+    auto-merge while they are still running, the merge itself once they are
+    green. The same answer the menu gives, drawn as a button, so the page and
+    the menu can't recommend different things about the same PR; and since it
+    is the one Collins recommends, it is the one that wears the accent.
     """
     if pr.state == "DRAFT":
         return [ready_action(pr)]
     if pr.state == "OPEN" and not pr.conflicting:
-        # Same gate as the menu's: GitHub refuses both halves on a branch it
-        # can't merge, and a draft can't be auto-merged either.
-        if checks_green(pr):
-            return [merge_action(pr, auto=False)]
-        return [merge_action(pr, auto=True), merge_action(pr, auto=False)]
+        # Same gate as the menu's: GitHub refuses a merge on a branch it can't
+        # merge, and a draft can't be auto-merged either.
+        return [merge_action(pr, auto=not checks_green(pr))]
     return []
-
-
-def recommended_key(pr: PullRequest) -> str:
-    """Which of `header_actions` is the one to press — the action the menu
-    would have offered on its own, for the page to draw as its suggested one.
-    Merging before the checks have spoken stays available beside it, but it
-    isn't what Collins is recommending."""
-    if pr.state == "DRAFT":
-        return READY
-    return MERGE if checks_green(pr) else AUTO_MERGE
 
 
 def ready_action(pr: PullRequest) -> Action:

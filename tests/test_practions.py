@@ -325,10 +325,11 @@ def test_a_draft_is_offered_its_way_out_and_nothing_else():
     assert _header(_pr(state="DRAFT")) == [READY]
 
 
-def test_a_pending_pr_offers_both_halves_of_the_merge():
-    """Where the menu has to pick one, a button row can say both: wait for the
-    checks, or don't."""
-    assert _header(_pr(passed=1, pending=2)) == [AUTO_MERGE, MERGE]
+def test_a_pending_pr_is_offered_auto_merge_and_not_the_merge_itself():
+    """One merge at a time: while the checks are still running, the offer is
+    the one that waits for them — never both, to be chosen between."""
+    assert _header(_pr(passed=1, pending=2)) == [AUTO_MERGE]
+    assert _header(_pr(passed=1, failed=1)) == [AUTO_MERGE]
 
 
 def test_a_green_pr_has_nothing_left_to_wait_for():
@@ -344,16 +345,16 @@ def test_nothing_is_offered_where_the_menu_offers_no_merge_either():
     assert _header(_pr(state=None, passed=None, failed=None, pending=None)) == []
 
 
-def test_the_recommended_button_is_the_one_the_menu_would_have_shown():
-    """The accent goes on the single action `actions_for` picks, so the page
-    and the menu can't recommend different things about the same PR."""
+def test_the_page_shows_one_button_and_it_is_the_menu_s_own_answer():
+    """The page never offers a choice the menu doesn't: whatever it shows is
+    `actions_for`'s first item, so the two can't recommend different things
+    about the same PR."""
     for pr in (_pr(state="DRAFT"), _pr(), _pr(passed=1, pending=2), _pr(passed=1, failed=1)):
-        offered = _keys(pr)
-        assert practions.recommended_key(pr) == offered[0]
+        assert _header(pr) == _keys(pr)[:1]
 
 
-def test_the_page_buttons_have_a_word_to_wear():
-    """They share a line with the view switcher, so each carries a short label
+def test_the_page_button_has_a_word_to_wear():
+    """It shares a line with the view switcher, so it carries a short label
     for the button and keeps the full sentence for its tooltip."""
     for pr in (_pr(state="DRAFT"), _pr(), _pr(passed=1, pending=2)):
         for action in practions.header_actions(pr):
@@ -361,9 +362,10 @@ def test_the_page_buttons_have_a_word_to_wear():
             assert action.tooltip
 
 
-def test_both_merges_still_ask_first():
-    asks = {a.key: a.confirm is not None for a in practions.header_actions(_pr(pending=1))}
-    assert asks == {AUTO_MERGE: True, MERGE: True}
+def test_the_merge_still_asks_first_whichever_one_it_is():
+    for pr in (_pr(pending=1), _pr()):
+        (action,) = practions.header_actions(pr)
+        assert action.confirm is not None
 
 
 def test_merging_past_unfinished_checks_says_so_when_it_asks():
