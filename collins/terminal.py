@@ -1155,10 +1155,10 @@ class TerminalTab(Gtk.Box):
                 # loop: `git worktree add` checks out a whole working tree.
                 # Until it finishes, readers see the worktree cwd and no
                 # initial command, same as a tab whose shell hasn't spawned.
-                path = str(state["worktreePath"])
-                self._cwd = path
+                worktree = str(state["worktreePath"])
+                self._cwd = worktree
                 self._initial_command = None
-                self.feed_message(_("recreating removed worktree {path}").format(path=path))
+                self.feed_message(_("recreating removed worktree {path}").format(path=worktree))
 
                 def recreate() -> None:
                     recreate_worktree(state)
@@ -1169,8 +1169,8 @@ class TerminalTab(Gtk.Box):
                     # root a session started in before entering the worktree).
                     # _finish_spawn re-checks the directory; on failure it
                     # falls back with its usual warning.
-                    within = cwd is not None and _within(path, cwd) and Path(cwd).is_dir()
-                    GLib.idle_add(self._finish_spawn, cwd if within else path, session_id)
+                    inside = cwd is not None and _within(worktree, cwd) and Path(cwd).is_dir()
+                    GLib.idle_add(self._finish_spawn, cwd if inside else worktree, session_id)
 
                 threading.Thread(target=recreate, daemon=True).start()
                 return
