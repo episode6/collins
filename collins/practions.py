@@ -18,7 +18,9 @@ moved since, as a review it has already given isn't one to ask for again.
 
 The same answers dress a second surface: `header_actions` is the handful of
 them that change the pull request itself, which the native PR page draws as
-buttons over its view switcher rather than burying a merge two clicks deep.
+buttons on its view switcher's row rather than burying a merge two clicks
+deep — in their `short` wording, which is all a button beside a switcher has
+room to say.
 
 Four of them aren't about GitHub at all: FIX_CI, REBASE, COMMENTS and NEW_PR
 send a prompt to the session that opened the PR and let the agent do the work.
@@ -111,6 +113,12 @@ class Action:
     it would. The menu shows a blocked action as an unpressable row carrying
     that sentence, rather than leaving it out: an offer that comes and goes
     with what a terminal happens to be showing is one nobody can find twice.
+
+    *short* is the same action in a word or two, for the `header_actions`
+    buttons that sit on the PR page's switcher row: a menu row has a line to
+    explain itself in, a button beside a view switcher has none to spare, and
+    what the full label was saying is on the tooltip either way. Empty where
+    the label is already short enough to be a button.
     """
 
     key: str
@@ -119,6 +127,7 @@ class Action:
     confirm: Confirm | None = None
     prompt: str = ""
     blocked: str = ""
+    short: str = ""
 
 
 def checks_green(pr: PullRequest) -> bool:
@@ -240,7 +249,7 @@ def actions_for(
 
 
 def header_actions(pr: PullRequest) -> list[Action]:
-    """The state-changing actions the PR page puts above its view switcher.
+    """The state-changing actions the PR page puts beside its view switcher.
 
     `actions_for`'s first item or two, and only those: the actions that move
     the pull request itself along — out of draft, or into the base branch.
@@ -282,6 +291,7 @@ def ready_action(pr: PullRequest) -> Action:
         READY,
         _("Mark ready for review"),
         _("Take {slug} out of draft").format(slug=pr.slug),
+        short=_("Ready"),
     )
 
 
@@ -320,6 +330,7 @@ def merge_action(pr: PullRequest, auto: bool) -> Action:
                 ),
                 _("Enable auto-merge"),
             ),
+            short=_("Auto-Merge"),
         )
     if checks_green(pr):
         body = _("Its checks have passed. This merges the pull request on GitHub now.")
@@ -333,6 +344,7 @@ def merge_action(pr: PullRequest, auto: bool) -> Action:
         _("Merge pull request"),
         _("Merge {slug} now").format(slug=pr.slug),
         Confirm(_("Merge {slug}?").format(slug=pr.slug), body, _("Merge")),
+        short=_("Merge"),
     )
 
 

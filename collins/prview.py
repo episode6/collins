@@ -14,11 +14,12 @@ the page comes back into view; the widgets here only ever render what that
 GTK-free layer parsed and bounded. Failures keep the last-loaded content
 under an inline banner — stale beats blank, as everywhere in the PR stack.
 
-Over the switcher sit the actions that move the PR itself along, as buttons:
-whatever `practions.header_actions` says its state offers — "Mark ready for
-review" for a draft, "Merge when checks pass" and "Merge" for an open one —
-each behind the same confirmation and the same `gh` call the actions menu
-runs them with (`_ActionBar`), and no bar at all where a PR offers none.
+On the switcher's own row, at its end, sit the actions that move the PR itself
+along, as buttons: whatever `practions.header_actions` says its state offers —
+"Ready" for a draft, "Auto-Merge" and "Merge" for an open one, each naming in
+full on its tooltip what it is about to do — behind the same confirmation and
+the same `gh` call the actions menu runs them with (`_ActionBar`), and no
+buttons at all where a PR offers none.
 
 The Conversation column ends in the page's write half: a composer that posts
 its text as a comment or a review verdict through practions' write calls
@@ -328,11 +329,12 @@ class PrViewPage(Adw.Bin):
         files_paned.set_position(_FILE_LIST_WIDTH)
 
         # -- what the PR's state offers ---------------------------------------
-        # Above the switcher rather than inside the actions menu: marking a
+        # On the switcher's row rather than inside the actions menu: marking a
         # draft ready and merging are what a PR page is *for*, and both were
         # two clicks and a submenu away. The menu keeps them too — it is the
         # same practions answer, drawn twice.
         self._actions = _ActionBar(self._acted)
+        self._actions.set_valign(Gtk.Align.CENTER)
 
         # -- the two views under one switcher ---------------------------------
         self._stack = Adw.ViewStack(vexpand=True)
@@ -342,7 +344,16 @@ class PrViewPage(Adw.Bin):
         self._stack.add_titled_with_icon(files_paned, "files", _("Files"), "ft-file-symbolic")
         switcher = Adw.ViewSwitcher(stack=self._stack)
         switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
-        switcher.set_halign(Gtk.Align.CENTER)
+        # A CenterBox rather than a row with the buttons packed on the end: it
+        # keeps the switcher centered on the *page* whatever the buttons beside
+        # it happen to be, which is where it sat when it had the row to itself,
+        # and its minimum is the switcher's plus one button's — the action row
+        # wraps below (_WrapRow), so a two-button state can't widen the floor
+        # the whole panel page is squeezed to (see _MIN_PAGE_WIDTH).
+        switcher_row = Gtk.CenterBox()
+        switcher_row.add_css_class("pr-view-switcher")
+        switcher_row.set_center_widget(switcher)
+        switcher_row.set_end_widget(self._actions)
 
         column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         column.append(self._banner)  # above the stack: it speaks for both views
@@ -350,8 +361,7 @@ class PrViewPage(Adw.Bin):
 
         view = Adw.ToolbarView()
         view.add_top_bar(header)
-        view.add_top_bar(self._actions)
-        view.add_top_bar(switcher)
+        view.add_top_bar(switcher_row)
         view.set_content(column)
         self.set_child(view)
 
@@ -945,7 +955,7 @@ class _WrapRow(Gtk.Widget):
 
 
 class _ActionBar(Gtk.Box):
-    """The buttons that move the pull request along, over the view switcher.
+    """The buttons that move the pull request along, beside the view switcher.
 
     Whatever `practions.header_actions` says the PR's state offers, and
     nothing when it offers none — a merged PR, a closed one, a conflicting
@@ -961,20 +971,25 @@ class _ActionBar(Gtk.Box):
     success is quiet, and *on_done* re-reads the PR — which is what takes the
     buttons away, since the state they were offered for has just changed.
 
+    Each button says the action's `short` wording — "Merge", not "Merge pull
+    request" — with the full sentence on its tooltip: this row shares a line
+    with the view switcher, and what it can afford there is a word.
+
     The row wraps (_WrapRow) for the same reason the composer's does: no
     button here may become the width the whole panel page can't go under.
     """
 
     def __init__(self, on_done: Callable[[], None]) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
-        self.add_css_class("pr-view-actions")
         self._on_done = on_done
         self._pr: PullRequest | None = None
         self._actions: dict[str, practions.Action] = {}
         self._running = False
 
+        # No spacer at the head of the row: the switcher's CenterBox already
+        # pins the whole bar to the page's end, and a wrapped line with nothing
+        # expanding on it is laid out flush to that same edge (_WrapLayout).
         row = _WrapRow()
-        row.append(Gtk.Box(hexpand=True))  # the buttons hug the row's end
         self._spinner = Gtk.Spinner()
         self._spinner.set_visible(False)
         self._spinner.set_valign(Gtk.Align.CENTER)
@@ -1001,7 +1016,7 @@ class _ActionBar(Gtk.Box):
             button.set_visible(action is not None)
             if action is None:
                 continue
-            button.set_label(action.label)
+            button.set_label(action.short or action.label)
             button.set_tooltip_text(action.tooltip)
             if key == recommended:
                 button.add_css_class("suggested-action")

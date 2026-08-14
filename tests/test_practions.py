@@ -352,6 +352,15 @@ def test_the_recommended_button_is_the_one_the_menu_would_have_shown():
         assert practions.recommended_key(pr) == offered[0]
 
 
+def test_the_page_buttons_have_a_word_to_wear():
+    """They share a line with the view switcher, so each carries a short label
+    for the button and keeps the full sentence for its tooltip."""
+    for pr in (_pr(state="DRAFT"), _pr(), _pr(passed=1, pending=2)):
+        for action in practions.header_actions(pr):
+            assert action.short and len(action.short) <= len(action.label)
+            assert action.tooltip
+
+
 def test_both_merges_still_ask_first():
     asks = {a.key: a.confirm is not None for a in practions.header_actions(_pr(pending=1))}
     assert asks == {AUTO_MERGE: True, MERGE: True}
