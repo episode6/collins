@@ -1797,7 +1797,23 @@ class MainWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _on_bell(self, tab: TerminalTab) -> None:
-        """Visual bell (the audible bell is VTE's own)."""
+        """Ring for a terminal's BEL, and flash where it came from.
+
+        The sound is the app's to make rather than VTE's (whose own audible
+        bell is switched off in TerminalTab), because VTE refuses to ring for
+        a widget that was never realized — and a tab that has never been
+        selected is exactly the one whose bell there is no other way to hear.
+        Every tab in a window today has been selected at least once, so this
+        rings the same as before; what it stops doing is going quiet for tabs
+        the user never opened.
+
+        Still the display's beep, not a sound of ours: it reaches the user
+        through the compositor, so the desktop's own alert-sound setting has
+        the last word on whether anything is heard.
+        """
+        display = self.get_display()
+        if display is not None:
+            display.beep()
         self._flash_session(self.tab_view.get_page(tab))
 
     def _flash_session(self, page: Adw.TabPage | None) -> None:
