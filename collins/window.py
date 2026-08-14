@@ -4195,11 +4195,10 @@ class MainWindow(Adw.ApplicationWindow):
         here, from the owner and repo gitinfo read out of the repository's
         config, so nothing a checkout has written in there can reach a browser
         as anything but `https://github.com/owner/repo`. A folder whose remote
-        went away between the menu opening and the click does nothing.
+        went away between the menu opening and the click resolves to nothing,
+        which open_uri does nothing with.
         """
-        url = github_url(param.get_string())
-        if url is not None:
-            open_uri(self, url)
+        open_uri(self, github_url(param.get_string()))
 
     def _on_open_folder_app(self, _action, param: GLib.Variant) -> None:
         app_id, folder = param.unpack()
