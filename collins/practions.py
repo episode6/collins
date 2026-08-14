@@ -1,3 +1,5 @@
+# New in the ghackett fork of agent-session-manager (GPL-3.0).
+
 """What Collins can *do* to a pull request, and the `gh` calls that do it.
 
 prstatus reads a PR; this decides what is worth offering to change about one
