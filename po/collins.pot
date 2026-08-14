@@ -1215,14 +1215,6 @@ msgstr ""
 msgid "Background session and close tab"
 msgstr ""
 
-#: collins/window.py:2718
-msgid "Restore session (Ctrl+Shift+A)"
-msgstr ""
-
-#: collins/window.py:2722
-msgid "Archive session and close tab (Ctrl+Shift+A)"
-msgstr ""
-
 #: collins/window.py:3705
 msgid "Archived “{name}”"
 msgstr ""
@@ -1783,10 +1775,6 @@ msgstr ""
 
 #: collins/terminal.py:1205
 msgid "Add to chat isn't available for this file"
-msgstr ""
-
-#: collins/window.py:377 collins/window.py:2761
-msgid "Attach file to chat"
 msgstr ""
 
 #: collins/terminal.py:1472
