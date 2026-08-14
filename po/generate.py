@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-13. Full change history: git log for this file.
+# fork. Last modified: 2026-08-14. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -409,6 +409,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Never": "Soha",
         "Floating": "Lebegő",
         "Docked": "Dokkolt",
+        # the attachments panel (collins/attachpanel.py)
+        "Attachments": "Mellékletek",
+        "Close the attachments panel": "A mellékletek panel bezárása",
+        "Images this session has seen": "A munkamenet által látott képek",
+        "Open With…": "Megnyitás ezzel…",
+        "Show in Folder": "Megjelenítés a mappában",
+        "Copy Path": "Elérési út másolása",
+        "Copy Address": "Cím másolása",
+        "Remove From List": "Eltávolítás a listáról",
+        "No longer on disk": "Már nincs a lemezen",
+        "Couldn't be downloaded": "Nem sikerült letölteni",
+        "No images yet": "Még nincsenek képek",
+        "Pictures this session shows you collect here.": "A munkamenet által mutatott képek itt gyűlnek össze.",
+        "that image isn't on disk any more: {path}": "ez a kép már nincs a lemezen: {path}",
+        "couldn't download that image: {reason}": "nem sikerült letölteni a képet: {reason}",
     },
     "de": {
         "── restored panel history ──": "── wiederhergestellter Panel-Verlauf ──",
@@ -806,6 +821,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Never": "Nie",
         "Floating": "Schwebend",
         "Docked": "Angedockt",
+        # the attachments panel (collins/attachpanel.py)
+        "Attachments": "Anhänge",
+        "Close the attachments panel": "Anhänge-Panel schließen",
+        "Images this session has seen": "Bilder, die diese Sitzung gesehen hat",
+        "Open With…": "Öffnen mit…",
+        "Show in Folder": "Im Ordner anzeigen",
+        "Copy Path": "Pfad kopieren",
+        "Copy Address": "Adresse kopieren",
+        "Remove From List": "Aus der Liste entfernen",
+        "No longer on disk": "Nicht mehr auf der Festplatte",
+        "Couldn't be downloaded": "Konnte nicht heruntergeladen werden",
+        "No images yet": "Noch keine Bilder",
+        "Pictures this session shows you collect here.": "Bilder, die diese Sitzung dir zeigt, sammeln sich hier.",
+        "that image isn't on disk any more: {path}": "dieses Bild ist nicht mehr auf der Festplatte: {path}",
+        "couldn't download that image: {reason}": "das Bild konnte nicht heruntergeladen werden: {reason}",
     },
     "es": {
         "── restored panel history ──": "── historial del panel restaurado ──",
@@ -1203,6 +1233,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Never": "Nunca",
         "Floating": "Flotante",
         "Docked": "Acoplado",
+        # the attachments panel (collins/attachpanel.py)
+        "Attachments": "Adjuntos",
+        "Close the attachments panel": "Cerrar el panel de adjuntos",
+        "Images this session has seen": "Imágenes que ha visto esta sesión",
+        "Open With…": "Abrir con…",
+        "Show in Folder": "Mostrar en la carpeta",
+        "Copy Path": "Copiar la ruta",
+        "Copy Address": "Copiar la dirección",
+        "Remove From List": "Quitar de la lista",
+        "No longer on disk": "Ya no está en el disco",
+        "Couldn't be downloaded": "No se pudo descargar",
+        "No images yet": "Todavía no hay imágenes",
+        "Pictures this session shows you collect here.": "Las imágenes que esta sesión te muestra se recogen aquí.",
+        "that image isn't on disk any more: {path}": "esa imagen ya no está en el disco: {path}",
+        "couldn't download that image: {reason}": "no se pudo descargar esa imagen: {reason}",
     },
     "fr": {
         "── restored panel history ──": "── historique du panneau restauré ──",
@@ -1601,13 +1646,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Never": "Jamais",
         "Floating": "Flottant",
         "Docked": "Ancré",
+        # the attachments panel (collins/attachpanel.py)
+        "Attachments": "Pièces jointes",
+        "Close the attachments panel": "Fermer le panneau des pièces jointes",
+        "Images this session has seen": "Images vues par cette session",
+        "Open With…": "Ouvrir avec…",
+        "Show in Folder": "Afficher dans le dossier",
+        "Copy Path": "Copier le chemin",
+        "Copy Address": "Copier l'adresse",
+        "Remove From List": "Retirer de la liste",
+        "No longer on disk": "N'est plus sur le disque",
+        "Couldn't be downloaded": "N'a pas pu être téléchargée",
+        "No images yet": "Pas encore d'images",
+        "Pictures this session shows you collect here.": "Les images que cette session vous montre s'accumulent ici.",
+        "that image isn't on disk any more: {path}": "cette image n'est plus sur le disque : {path}",
+        "couldn't download that image: {reason}": "impossible de télécharger cette image : {reason}",
     },
 }
 
 _HEADER = (
     "# Modified from the original agent-session-manager\n"
     "# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett\n"
-    "# fork. Last modified: 2026-08-13. Full change history: git log for this file.\n"
+    "# fork. Last modified: 2026-08-14. Full change history: git log for this file.\n"
     "# Generated by po/generate.py — do not edit by hand.\n"
     'msgid ""\n'
     'msgstr ""\n'

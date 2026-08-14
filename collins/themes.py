@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-12. Full change history: git log for this file.
+# fork. Last modified: 2026-08-14. Full change history: git log for this file.
 """Built-in terminal color palettes for the VTE terminal."""
 
 from __future__ import annotations
@@ -134,9 +134,10 @@ def apply_terminal_theme(terminal: Vte.Terminal, name: str | None) -> None:
 # tab's row in the tab bar, which sits directly above the terminal it shows,
 # the floating composer button in the terminal's corner (.attach-overlay),
 # which inverts the terminal's colors so it contrasts with any palette, and
-# the composer panel that button opens (.composer-panel), drawn as a surface
-# of the terminal itself. One provider for the whole app: terminal_theme is
-# a single global setting, not per-tab.
+# the two panels those buttons open (.composer-panel over the bottom edge,
+# .attachments-panel over the right one), drawn as surfaces of the terminal
+# itself. One provider for the whole app: terminal_theme is a single global
+# setting, not per-tab.
 _dynamic_theme_provider: Gtk.CssProvider | None = None
 
 
@@ -171,5 +172,13 @@ def _apply_dynamic_theme_css(theme: dict | None) -> None:
         # overlay's top border would read as a stray line mid-pane.
         f".composer-panel.docked {{ border-top: none; }}"
         f".composer-panel textview, .composer-panel textview text {{ "
-        f"background-color: {bg_css}; color: {fg_css}; caret-color: {fg_css}; }}".encode()
+        f"background-color: {bg_css}; color: {fg_css}; caret-color: {fg_css}; }}"
+        # The attachments panel is the composer's counterpart on the other
+        # edge, and a surface of the terminal for the same reason: it covers
+        # the terminal's right margin, fenced off by a faint fg-colored edge.
+        # Its rows only lift out of that surface under the pointer.
+        f".attachments-panel {{ background-color: {bg_css}; color: {fg_css}; "
+        f"border-left: 1px solid alpha({fg_css}, 0.3); }}"
+        f".attachments-panel .attachment-row:hover {{ "
+        f"background-color: alpha({fg_css}, 0.12); }}".encode()
     )
