@@ -254,17 +254,19 @@ row.session-child checkbutton {
 /* the pull request mark ahead of the title (see SessionRow): a menu button
    standing in a line of text, so it takes only the width of the two icons in
    it rather than the tap target the row's other buttons keep. Its padding is
-   lopsided on purpose: 4px on the left, which with the row's own 4px and the
-   4px of badge overhang inside the mark stands the base icon 12px off the
-   guide line, and more than the stock 4px on the right, so the base icon
-   doesn't crowd the first letter of the title.
-   The overhang is not empty space on a mark that carries a badge -- the badge
-   hangs into it -- so counting it as gap left the colored mark reading as
-   crowded against the guide line however even the two sides measured. This
-   padding is the gap the overhang cannot be, and it is the one value to move
-   to change how far the mark stands off the line: image.agent-mark below and
-   the two mark-less rows in sidebar.py (PlaceholderRow, NewThreadOffer) all
-   align to this column and have to move with it.
+   lopsided on purpose: 4px on the left, which with the row's own 4px stands
+   the mark's 20px slot 8px off the guide line, and more than the stock 4px on
+   the right, so the mark doesn't crowd the first letter of the title. Every
+   distance in this comment and the next is measured from the guide line, the
+   row's padding included.
+   The 4px of badge overhang inside that slot is not the gap it looks like: on
+   a mark that carries a badge the badge is exactly what hangs into it, so
+   counting it as gap left the colored mark reading as crowded against the
+   line however even the two sides measured. This padding is the gap the
+   overhang cannot be, and it is the one value to move to change how far the
+   mark stands off the line: image.agent-mark below and the two mark-less rows
+   in sidebar.py (PlaceholderRow, NewThreadRow) all align to this column and
+   have to move with it.
    The selector is the menubutton node, not the button one: pr-mark is set on
    the GtkMenuButton, whose CSS node is "menubutton" wrapping the "button" node
    that carries the padding. Written as button.pr-mark it matches nothing, and
@@ -276,12 +278,12 @@ row.session-child menubutton.pr-mark > button {
 }
 /* what stands in that slot when the session has no pull requests: the agent's
    own mark (see SessionRow). Its margins center it on the same 20px slot the
-   mark occupies (16px of icon plus 4px of badge overhang, held off the guide
-   line by the button's 4px above), rather than standing it where the mark's
-   base icon starts: a badged mark fills that slot corner to corner and reads
-   as centered on it, so an icon aligned to the base alone sits visibly high
-   and to the right of the marks above and below it (prmenu._mark centers its
-   own unbadged bases for the same reason). Left and right margins together
+   mark occupies -- 16px of icon plus 4px of badge overhang, 8px off the guide
+   line -- rather than standing it where the mark's base icon starts within
+   that slot: a badged mark fills the slot corner to corner and reads as
+   centered on it, so an icon aligned to the base alone sits visibly high and
+   to the right of the marks above and below it (prmenu._mark centers its own
+   unbadged bases for the same reason). Left and right margins together
    still come to the mark's 4 + 6, so a session that opens its first PR trades
    one for the other without the title moving under it. */
 row.session-child image.agent-mark {
