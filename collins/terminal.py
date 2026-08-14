@@ -857,6 +857,9 @@ class PanelTerminal(Gtk.Box):
         self.terminal.set_scroll_on_output(False)
         self.terminal.set_scroll_on_keystroke(True)
         self.terminal.set_mouse_autohide(True)
+        # The sound belongs to the window, not to VTE (see Window._on_bell);
+        # all this terminal does with a BEL is say that one arrived.
+        self.terminal.set_audible_bell(False)
         self.terminal.connect("child-exited", self._on_child_exited)
         self.terminal.connect("bell", lambda *_: self.emit("bell"))
         _setup_links(self.terminal)
@@ -1100,6 +1103,9 @@ class TerminalTab(Gtk.Box):
         self.terminal.set_scroll_on_output(False)
         self.terminal.set_scroll_on_keystroke(True)
         self.terminal.set_mouse_autohide(True)
+        # The sound belongs to the window, not to VTE (see Window._on_bell);
+        # all this terminal does with a BEL is say that one arrived.
+        self.terminal.set_audible_bell(False)
         self.terminal.connect("child-exited", self._on_child_exited)
         _setup_links(self.terminal)
         _setup_smooth_scroll(self.terminal)
