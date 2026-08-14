@@ -16,14 +16,17 @@ repository's own Claude workflow can be asked for goes through a comment
 and only while Claude isn't the one who commented last on code that hasn't
 moved since, as a review it has already given isn't one to ask for again.
 
-The same answers dress a second surface: `header_actions` is the handful of
-them that change the pull request itself, which the native PR page draws as
-buttons on its view switcher's row rather than burying a merge two clicks
-deep — in their `short` wording, which is all a button beside a switcher has
-room to say.
+The same answers dress two more surfaces, both on the native PR page.
+`header_actions` is the handful of them that change the pull request itself,
+which the page draws as buttons on its view switcher's row rather than burying
+a merge two clicks deep. `repair_action` is the other one: whatever single
+prompt would clear what is blocking the merge, drawn under the page's Checks
+list where those blockers are enumerated. Both speak in the actions' `short`
+wording, which is all a button has room to say.
 
-Four of them aren't about GitHub at all: FIX_CI, REBASE, COMMENTS and NEW_PR
-send a prompt to the session that opened the PR and let the agent do the work.
+Five of them aren't about GitHub at all: FIX_CI, REBASE, FIX_ALL, COMMENTS and
+NEW_PR send a prompt to the session that opened the PR and let the agent do the
+work.
 All need a session sitting at an empty prompt, and NEW_PR needs uncommitted
 work to open a pull request *for* — neither is a property of the PR, so the
 caller answers both.
@@ -60,13 +63,22 @@ REVIEW = "review"
 FIX_CI = "fix-ci"
 COMMENTS = "comments"
 NEW_PR = "new-pr"
+# Both merge blockers at once, as one prompt. Never in the menu — which keeps
+# offering the two separately, since a menu has room for both rows — only on
+# the page's Checks list, where one button is the whole offer (`repair_action`).
+FIX_ALL = "fix-all"
 
 # What the prompt-sending actions type into the session. Read by the agent
 # CLI, not by a person, so they stay in English (and untranslated) whatever the
-# app's language is. Two of them name their PR: a session can have opened
+# app's language is. Three of them name their PR: a session can have opened
 # several, and a bare "the ci error(s)" would leave the agent to guess whose.
 CI_PROMPT = "Address the ci error(s) on PR #{number}"
 REBASE_PROMPT = "rebase PR #{number} and resolve the conflicts"
+# Failures first, the rebase after: fixing CI is a commit on the branch, and
+# asking for it on the far side of a rebase is asking for the same work twice.
+FIX_ALL_PROMPT = (
+    "Address the ci error(s) on PR #{number}, then rebase it and resolve the conflicts"
+)
 COMMENTS_PROMPT = "Address unresolved comments on PR #{number}"
 NEW_PR_PROMPT = "Open a pull request for your changes"
 # What asking for a review looks like on the PR: the mention the
@@ -180,16 +192,7 @@ def actions_for(
         # the merge would have — resolving is what makes merging offerable.
         actions.append(merge_action(pr, auto=not checks_green(pr)))
     if pr.state in LIVE and pr.conflicting:
-        rebase_prompt = REBASE_PROMPT.format(number=pr.number)
-        actions.append(
-            Action(
-                REBASE,
-                _("Rebase / resolve conflicts"),
-                _("Send “{prompt}” to this session").format(prompt=rebase_prompt),
-                prompt=rebase_prompt,
-                blocked=prompt_block,
-            )
-        )
+        actions.append(rebase_action(pr, prompt_block))
     if pr.state in LIVE:
         if not pr.claude_had_the_last_word:
             # Not offered when Claude wrote the newest comment and nothing has
@@ -201,16 +204,7 @@ def actions_for(
             # changed is exactly the one worth asking for again.
             actions.append(review_action(pr))
         if pr.failed:
-            ci_prompt = CI_PROMPT.format(number=pr.number)
-            actions.append(
-                Action(
-                    FIX_CI,
-                    _("Address the CI errors"),
-                    _("Send “{prompt}” to this session").format(prompt=ci_prompt),
-                    prompt=ci_prompt,
-                    blocked=prompt_block,
-                )
-            )
+            actions.append(fix_ci_action(pr, prompt_block))
         if pr.awaiting_reply:
             # Offered whenever someone else has the last word, not only when
             # the chip badges it — answering a reviewer doesn't wait on CI.
@@ -270,6 +264,73 @@ def header_actions(pr: PullRequest) -> list[Action]:
         # merge, and a draft can't be auto-merged either.
         return [merge_action(pr, auto=not checks_green(pr))]
     return []
+
+
+def repair_action(pr: PullRequest, prompt_block: str = "") -> Action | None:
+    """The one prompt that would clear what is blocking *pr*'s merge, or None.
+
+    What the PR page hangs under its Checks list — the one place on the page
+    where the merge blockers are enumerated, and so the place to offer doing
+    something about them. Which of the two blockers a PR has decides the
+    wording: failed checks ask to be fixed, a conflicting branch asks to be
+    rebased, and a PR carrying both gets a single button asking for both in
+    one prompt rather than two the user would have to press in the right
+    order (see FIX_ALL_PROMPT).
+
+    A conflict alone counts, even with every check green: the page lists it
+    as a failed check of its own (see prdetail's synthetic row), and a red row
+    in that list with nothing offered under it is the page pointing at a
+    problem and shrugging.
+
+    None where there is nothing to repair, and on any settled PR: what CI said
+    on the way into a merged pull request is history, and there is no branch
+    left to rebase. *prompt_block* rides back as `blocked` exactly as it does
+    on the menu's rows — the offer stays put and the button greys out with the
+    reason on it, rather than coming and going with what a terminal happens to
+    be showing.
+    """
+    if pr.state not in LIVE:
+        return None
+    if pr.failed and pr.conflicting:
+        prompt = FIX_ALL_PROMPT.format(number=pr.number)
+        return Action(
+            FIX_ALL,
+            _("Fix errors & resolve conflicts"),
+            _("Send “{prompt}” to this session").format(prompt=prompt),
+            prompt=prompt,
+            blocked=prompt_block,
+        )
+    if pr.conflicting:
+        return rebase_action(pr, prompt_block)
+    if pr.failed:
+        return fix_ci_action(pr, prompt_block)
+    return None
+
+
+def fix_ci_action(pr: PullRequest, prompt_block: str = "") -> Action:
+    """Ask the session to fix whatever *pr*'s checks are failing on."""
+    prompt = CI_PROMPT.format(number=pr.number)
+    return Action(
+        FIX_CI,
+        _("Address the CI errors"),
+        _("Send “{prompt}” to this session").format(prompt=prompt),
+        prompt=prompt,
+        blocked=prompt_block,
+        short=_("Fix errors"),
+    )
+
+
+def rebase_action(pr: PullRequest, prompt_block: str = "") -> Action:
+    """Ask the session to rebase *pr* onto its base and resolve the conflicts."""
+    prompt = REBASE_PROMPT.format(number=pr.number)
+    return Action(
+        REBASE,
+        _("Rebase / resolve conflicts"),
+        _("Send “{prompt}” to this session").format(prompt=prompt),
+        prompt=prompt,
+        blocked=prompt_block,
+        short=_("Resolve conflicts"),
+    )
 
 
 def ready_action(pr: PullRequest) -> Action:

@@ -183,6 +183,91 @@ def test_checks_cover_both_of_ghs_shapes():
     assert checks[2].url == "https://ci.example.com/build/9"
 
 
+def test_a_conflicting_branch_joins_the_checks_as_its_own_row():
+    """It blocks the merge exactly as a failed check does, and the Checks list
+    is where the page enumerates the blockers — it leads them, carries the
+    conflict badge, and has no run to open."""
+    checks = parse_detail(URL, _reply(mergeable="CONFLICTING"), DIFF).checks
+    assert (checks[0].state, checks[0].url) == (prstatus.BADGE_CONFLICT, "")
+    assert checks[0].name
+    assert [c.name for c in checks[1:]] == ["lint", "test", "ci/external"]
+
+
+def test_a_conflicting_pr_with_no_ci_at_all_still_has_a_checks_list():
+    reply = _reply(mergeable="CONFLICTING", statusCheckRollup=[])
+    assert [c.state for c in parse_detail(URL, reply, DIFF).checks] == [
+        prstatus.BADGE_CONFLICT
+    ]
+
+
+def test_a_mergeable_branch_adds_no_row():
+    assert not [
+        c
+        for c in parse_detail(URL, _reply(), DIFF).checks
+        if c.state == prstatus.BADGE_CONFLICT
+    ]
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
+def test_a_settled_pr_never_grows_the_conflict_row(state):
+    """Whatever gh still reports for it, a PR that is over isn't going
+    anywhere — the summary's own rule (PullRequest.conflicting)."""
+    reply = _reply(state=state, mergeable="CONFLICTING")
+    assert [c.name for c in parse_detail(URL, reply, DIFF).checks] == [
+        "lint", "test", "ci/external"
+    ]
+
+
+def _check(name, state):
+    return prdetail.PrCheck(name=name, state=state, url="")
+
+
+def test_urgency_puts_the_blockers_first_then_what_is_still_running():
+    """What the view orders a capped list by: a row that blocks the merge,
+    then one still to report, then one with nothing left to say."""
+    checks = [
+        _check("lint", prstatus.BADGE_PASSED),
+        _check("test", prstatus.BADGE_PENDING),
+        _check("build", prstatus.BADGE_FAILED),
+        _check("docs", prstatus.BADGE_PASSED),
+    ]
+    assert [c.name for c in prdetail.by_urgency(checks)] == [
+        "build", "test", "lint", "docs"
+    ]
+
+
+def test_urgency_keeps_the_repositorys_order_within_a_rung():
+    """Stable, so two failures stay in the order gh reported them — and the
+    conflict row, which `_checks` puts first, stays first among them."""
+    checks = parse_detail(
+        URL,
+        _reply(mergeable="CONFLICTING", statusCheckRollup=[
+            {"name": "a", "conclusion": "SUCCESS"},
+            {"name": "b", "conclusion": "FAILURE"},
+            {"name": "c", "conclusion": "FAILURE"},
+        ]),
+        None,
+    ).checks
+    ordered = prdetail.by_urgency(checks)
+    assert [c.state for c in ordered[:3]] == [
+        prstatus.BADGE_CONFLICT, prstatus.BADGE_FAILED, prstatus.BADGE_FAILED
+    ]
+    assert [c.name for c in ordered[1:]] == ["b", "c", "a"]
+
+
+def test_urgency_never_drops_or_invents_a_row():
+    checks = parse_detail(URL, _reply(mergeable="CONFLICTING"), DIFF).checks
+    assert sorted(prdetail.by_urgency(checks), key=lambda c: c.name) == sorted(
+        checks, key=lambda c: c.name
+    )
+
+
+def test_an_unknown_verdict_sorts_with_the_quiet_ones():
+    """A state gh grows later must not jump the queue ahead of a failure."""
+    checks = [_check("new", "something-else"), _check("test", prstatus.BADGE_FAILED)]
+    assert [c.name for c in prdetail.by_urgency(checks)] == ["test", "new"]
+
+
 def test_a_check_url_must_be_http():
     """targetUrl is repository-controlled; nothing else may reach a browser."""
     rollup = [{"__typename": "StatusContext", "context": "ci/evil",

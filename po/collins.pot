@@ -151,6 +151,22 @@ msgstr ""
 msgid "Rebase / resolve conflicts"
 msgstr ""
 
+#: collins/practions.py:298
+msgid "Fix errors & resolve conflicts"
+msgstr ""
+
+#: collins/practions.py:319
+msgid "Fix errors"
+msgstr ""
+
+#: collins/practions.py:332
+msgid "Resolve conflicts"
+msgstr ""
+
+#: collins/prdetail.py:502
+msgid "Merge conflicts"
+msgstr ""
+
 #: collins/terminal.py:2017
 msgid "This session isn't at an empty prompt."
 msgstr ""
@@ -2279,6 +2295,10 @@ msgstr ""
 
 #: collins/prview.py:389
 msgid "Checks"
+msgstr ""
+
+#: collins/prview.py:704
+msgid "Checks ({n})"
 msgstr ""
 
 #: collins/prview.py:475

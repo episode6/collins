@@ -39,6 +39,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from . import prstatus
+from .i18n import _
 from .prstatus import PullRequest
 
 log = logging.getLogger(__name__)
@@ -156,10 +157,16 @@ class PrThread:
 
 @dataclass(frozen=True)
 class PrCheck:
-    """One CI check row. *state* is a prstatus badge name (check_verdict)."""
+    """One CI check row. *state* is a prstatus badge name (check_verdict).
+
+    Nearly all of them come out of the rollup, but not quite all: a
+    conflicting branch joins the list as a row of its own (see `_checks`),
+    which is the one whose state is BADGE_CONFLICT and whose url is always
+    empty.
+    """
 
     name: str
-    state: str  # prstatus.BADGE_PASSED / BADGE_FAILED / BADGE_PENDING
+    state: str  # a prstatus BADGE_* name: PASSED / FAILED / PENDING / CONFLICT
     url: str  # the check's details page, http(s) or ""
 
 
@@ -184,7 +191,9 @@ class PullRequestDetail:
     *summary* is the same record the chips read, freshly enriched — the header
     reuses its state icon and title. *changed_files* is gh's own count rather
     than ``len(files)``: the files field is a list a big PR can outgrow, and
-    the header should keep counting what the list can't hold.
+    the header should keep counting what the list can't hold. *checks* is the
+    rollup plus, on a conflicting branch, the synthetic row that says so — so
+    a PR with no CI at all still has a Checks list when its merge is blocked.
     """
 
     summary: PullRequest
@@ -323,7 +332,7 @@ def parse_detail(
         deletions=_int(data.get("deletions")),
         changed_files=_int(data.get("changedFiles")),
         labels=_labels(data.get("labels")),
-        checks=_checks(data.get("statusCheckRollup")),
+        checks=_checks(data.get("statusCheckRollup"), summary.conflicting),
         timeline=_timeline(data.get("comments"), data.get("reviews"), threads),
         files=_files(data.get("files"), patches),
         threads=threads,
@@ -343,6 +352,35 @@ def file_threads(threads: Iterable[PrThread], path: str) -> tuple[PrThread, ...]
     mine = [thread for thread in threads if thread.path == path]
     mine.sort(key=lambda t: (t.line is None, t.line or 0, t.created_at))
     return tuple(mine)
+
+
+# What a check row is worth showing first, lowest first. The badge's own
+# ranking (see prstatus.PullRequest.badge), one rung shorter: a row that
+# blocks the merge, then one still to report, then one with nothing to say.
+_CHECK_URGENCY = {
+    prstatus.BADGE_FAILED: 0,
+    prstatus.BADGE_CONFLICT: 0,
+    prstatus.BADGE_PENDING: 1,
+}
+
+
+def by_urgency(checks: Iterable[PrCheck]) -> tuple[PrCheck, ...]:
+    """*checks* with the ones worth seeing first, first.
+
+    gh's own order is the one the list keeps whenever every row fits on the
+    page — it is the repository's order, and reshuffling a list somebody can
+    read whole buys nothing. This is for the other case: the view shows the
+    first handful of a long list and scrolls the rest (see prview's
+    `_CHECK_ROWS_SHOWN`), and a twenty-context rollup whose two failures sat
+    at positions eleven and nineteen would clip to five green rows over a
+    button offering to fix errors none of them showed.
+
+    Stable, so within a rung the repository's order survives — and the
+    conflict row, which `_checks` puts first, stays first among the blockers.
+    """
+    return tuple(
+        sorted(checks, key=lambda check: _CHECK_URGENCY.get(check.state, 2))
+    )
 
 
 # -- shaping the view reply ---------------------------------------------------
@@ -473,14 +511,25 @@ def _thread(node: object) -> PrThread | None:
     )
 
 
-def _checks(rollup: object) -> tuple[PrCheck, ...]:
+def _checks(rollup: object, conflicting: bool = False) -> tuple[PrCheck, ...]:
     """The rollup as rows, one per context, in gh's order.
 
     Both of gh's shapes: a CheckRun has name/detailsUrl, a StatusContext has
     context/targetUrl. A context with no name at all has nothing to put in a
     row and is dropped — the summary's counts still include it.
+
+    A *conflicting* branch leads them as a row nothing in the rollup put there:
+    GitHub reports it on its own `mergeable` field, but it is a merge blocker
+    exactly as a failed check is, and the Checks list is where the page
+    enumerates those. It goes first because it outranks them (the badge's own
+    order, see PullRequest.badge), it wears the conflict badge — the same red
+    x a failure does — and it carries no URL, there being no run to open.
     """
     checks = []
+    if conflicting:
+        checks.append(
+            PrCheck(name=_("Merge conflicts"), state=prstatus.BADGE_CONFLICT, url="")
+        )
     for check in rollup if isinstance(rollup, list) else []:
         if not isinstance(check, dict):
             continue
