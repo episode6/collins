@@ -43,10 +43,12 @@ from .i18n import _, ngettext  # noqa: E402
 from .lightbox import present_image_lightbox  # noqa: E402
 from .linkpatterns import (  # noqa: E402
     FILE_PATTERN,
+    STITCH_URL_ROWS,
     URL_PATTERN,
     bare_names_pattern,
     resolve_file_reference,
     resolve_wrapped_reference,
+    resolve_wrapped_url,
     token_at_column,
 )
 from .panedsizer import PanedSizer  # noqa: E402
@@ -184,6 +186,11 @@ def _setup_links(terminal: Vte.Terminal) -> None:
     and costs the user nothing. Root-level files carry no slash, so the path
     grammar can't take them; _RootNameLinks keeps one more regex built from
     the names actually at the project root, so `README.md` underlines too.
+
+    No regex can see past a newline the CLI itself wrote, so a reference too
+    long for one row matches only in halves — each half underlining on its
+    own. The click stitches them back together (_resolve_wrapped_at for
+    paths, _resolve_wrapped_url_at for URLs) before deciding what it opens.
     """
     terminal.set_allow_hyperlink(True)
     tag_kinds: dict[int, str] = {}
@@ -204,12 +211,14 @@ def _setup_links(terminal: Vte.Terminal) -> None:
             return
         kind = "url"
         uri = terminal.check_hyperlink_at(x, y)
+        # An OSC 8 hyperlink carries its target in the escape sequence, whole
+        # however the visible text wrapped; only regex matches read off the
+        # screen can be a fragment of something longer.
+        from_screen = uri is None
         if uri is None and tag_kinds:
             match, tag = terminal.check_match_at(x, y)
             if match is not None:
                 kind = tag_kinds.get(tag, "url")
-                if kind == "url" and match.startswith("www."):
-                    match = "http://" + match
             uri = match
         roots = _reference_roots(terminal)
         if not uri:
@@ -217,13 +226,20 @@ def _setup_links(terminal: Vte.Terminal) -> None:
             # slash (`o.py:7)`) and so matches nothing — the half holding
             # the file *name* offers no click candidate at all. Hand the
             # stitcher the raw token under the pointer instead; its geometry
-            # gates and existence check keep prose clicks inert.
+            # gates and existence check keep prose clicks inert. A URL's
+            # continuation half (`03/files`) is just as matchless, so the URL
+            # stitcher gets the same token when no file comes of it.
             resolved = _resolve_wrapped_at(terminal, None, x, y, roots)
-            if resolved is None:
+            if resolved is not None:
+                gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+                path, line, col = resolved
+                _open_file_reference(terminal, path, line, col)
+                return
+            stitched = _resolve_wrapped_url_at(terminal, None, x, y)
+            if stitched is None:
                 return
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-            path, line, col = resolved
-            _open_file_reference(terminal, path, line, col)
+            _launch_uri(terminal, stitched)
             return
         if kind == "file":
             # Stitching runs before direct resolution: a fragment of a
@@ -237,26 +253,28 @@ def _setup_links(terminal: Vte.Terminal) -> None:
             resolved = _resolve_wrapped_at(terminal, uri, x, y, roots)
             if resolved is None:
                 resolved = resolve_file_reference(uri, roots)
-            if resolved is None:
+            if resolved is not None:
+                gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+                path, line, col = resolved
+                _open_file_reference(terminal, path, line, col)
+                return
+            # The path grammar takes the tail of a wrapped URL for a relative
+            # path (`303/files`), and it resolves nowhere; before the click
+            # falls through, ask whether the row above hands it a scheme.
+            stitched = _resolve_wrapped_url_at(terminal, None, x, y)
+            if stitched is None:
                 return  # over-matched prose: leave the click to the terminal
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-            path, line, col = resolved
-            _open_file_reference(terminal, path, line, col)
+            _launch_uri(terminal, stitched)
             return
+        if from_screen:
+            # The visible match may be only as much of the URL as fit on its
+            # row; the rest is on the next one, past a newline no regex over
+            # screen text can see. A stitch that isn't clearly a wrap comes
+            # back None and the match opens as it stands.
+            uri = _resolve_wrapped_url_at(terminal, uri, x, y) or uri
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-        if uri.startswith("file:"):
-            # A file: URI (or OSC 8 file: hyperlink) behaves exactly like a
-            # matched path reference — lightbox for images, editor inside
-            # the project, default app otherwise — however the CLI happened
-            # to emit it. path_from_file_uri sheds any #L10-style fragment.
-            path = editorfiles.path_from_file_uri(uri)
-            if path is not None:
-                _open_file_reference(terminal, path, None, None)
-                return
-            launcher = Gtk.FileLauncher.new(Gio.File.new_for_uri(uri))
-        else:
-            launcher = Gtk.UriLauncher.new(uri)
-        launcher.launch(terminal.get_root(), None, _on_link_launched)
+        _launch_uri(terminal, uri)
 
     # Capture phase, so Ctrl+click opens the link even when the running app
     # has turned on mouse reporting (same trick as the context menu).
@@ -264,6 +282,25 @@ def _setup_links(terminal: Vte.Terminal) -> None:
     click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
     click.connect("pressed", on_pressed)
     terminal.add_controller(click)
+
+
+def _launch_uri(terminal: Vte.Terminal, uri: str) -> None:
+    """Open a clicked link the way its scheme deserves."""
+    if uri.startswith("www."):
+        uri = "http://" + uri  # the bare-host grammar's half of a URL
+    if uri.startswith("file:"):
+        # A file: URI (or OSC 8 file: hyperlink) behaves exactly like a
+        # matched path reference — lightbox for images, editor inside the
+        # project, default app otherwise — however the CLI happened to emit
+        # it. path_from_file_uri sheds any #L10-style fragment.
+        path = editorfiles.path_from_file_uri(uri)
+        if path is not None:
+            _open_file_reference(terminal, path, None, None)
+            return
+        launcher = Gtk.FileLauncher.new(Gio.File.new_for_uri(uri))
+    else:
+        launcher = Gtk.UriLauncher.new(uri)
+    launcher.launch(terminal.get_root(), None, _on_link_launched)
 
 
 def _on_link_launched(launcher: Gtk.UriLauncher | Gtk.FileLauncher, result) -> None:
@@ -283,27 +320,19 @@ def _reference_roots(terminal: Vte.Terminal) -> list[str | None]:
     return [tab.current_agent_cwd(), tab.editor_root]
 
 
-def _resolve_wrapped_at(
-    terminal: Vte.Terminal,
-    candidate: str | None,
-    x: float,
-    y: float,
-    roots: list[str | None],
-) -> tuple[str, int | None, int | None] | None:
-    """Stitch a failed candidate with its neighbour rows (see linkpatterns.
-    resolve_wrapped_reference) — this half only turns the click's x/y into a
-    screen cell and fetches row texts. With *candidate* None (nothing under
-    the pointer matched at all), the whitespace-delimited token at the cell
-    stands in as the candidate.
+def _screen_at(
+    terminal: Vte.Terminal, x: float, y: float
+) -> tuple[list[str], int, int, int] | None:
+    """The visible screen as a list of screen-row texts, plus the row and
+    column the click landed on and the row width — the shared half of both
+    stitchers, which need neighbour rows rather than a single match.
 
     Row texts come from the *visible screen* snapshot, indexed by screen
     row, never from grid-row reads: the grid APIs address VTE's internal
     ring, and under a repaint-style renderer (claude's own UI) the ring
     drifts a full page away from what the adjustment describes, so every
     adjustment-derived get_text_range read comes back empty — discovered
-    live. The clicked row is probed with a ±1 slop: the y→row division
-    ignores VTE's inner border, and the stitcher's geometry gates reject
-    the wrong rows anyway."""
+    live."""
     ch = terminal.get_char_height()
     cw = terminal.get_char_width()
     if ch <= 0 or cw <= 0:
@@ -325,13 +354,40 @@ def _resolve_wrapped_at(
     frac = 0.0
     if vadj is not None and terminal.get_scroll_unit_is_pixels():
         frac = vadj.get_value() % ch
-    row = int((y + frac) // ch)
-    col = int(x // cw)
+    return rows, int((y + frac) // ch), int(x // cw), cols
 
+
+def _row_reader(rows: list[str]) -> Callable[[int], str]:
     def row_text(r: int) -> str:
         return rows[r] if 0 <= r < len(rows) else ""
 
-    for r in (row, row - 1, row + 1):
+    return row_text
+
+
+# The clicked row is probed with a ±1 slop in both stitchers: the y→row
+# division ignores VTE's inner border, so a click near a row's edge can land
+# a row out. The geometry gates reject the wrong rows on their own for
+# paths; the URL side narrows the slop further (see _resolve_wrapped_url_at).
+_ROW_SLOP = (0, -1, 1)
+
+
+def _resolve_wrapped_at(
+    terminal: Vte.Terminal,
+    candidate: str | None,
+    x: float,
+    y: float,
+    roots: list[str | None],
+) -> tuple[str, int | None, int | None] | None:
+    """Stitch a failed path candidate with its neighbour rows (see
+    linkpatterns.resolve_wrapped_reference). With *candidate* None (nothing
+    under the pointer matched at all), the whitespace-delimited token at the
+    clicked cell stands in as the candidate."""
+    screen = _screen_at(terminal, x, y)
+    if screen is None:
+        return None
+    rows, row, col, _cols = screen
+    row_text = _row_reader(rows)
+    for r in (row + slop for slop in _ROW_SLOP):
         row_txt = row_text(r)
         cand = candidate if candidate is not None else token_at_column(row_txt, col)
         if not cand:
@@ -345,6 +401,47 @@ def _resolve_wrapped_at(
         )
         if resolved is not None:
             return resolved
+    return None
+
+
+def _resolve_wrapped_url_at(
+    terminal: Vte.Terminal, candidate: str | None, x: float, y: float
+) -> str | None:
+    """Stitch a clicked URL fragment with its neighbour rows (see
+    linkpatterns.resolve_wrapped_url), or None to open what was clicked.
+
+    The terminal's column count stands in for the emitter's wrap column, and
+    is an upper bound on it: a CLI wrapping to a narrower measure only makes
+    the row-full gate stricter, which costs a stitch and never buys a wrong
+    one. Claude Code's own renderer stops a column or two short, which is
+    what linkpatterns' slack is for."""
+    screen = _screen_at(terminal, x, y)
+    if screen is None:
+        return None
+    rows, row, col, cols = screen
+    row_text = _row_reader(rows)
+    for r in (row + slop for slop in _ROW_SLOP):
+        row_txt = row_text(r)
+        cand = candidate if candidate is not None else token_at_column(row_txt, col)
+        if not cand:
+            continue
+        stitched = resolve_wrapped_url(
+            cand,
+            row_txt,
+            [row_text(r - n) for n in range(1, STITCH_URL_ROWS + 1)],
+            [row_text(r + n) for n in range(1, STITCH_URL_ROWS + 1)],
+            cols,
+        )
+        if stitched is not None:
+            return stitched
+        if candidate is None:
+            # The slop is for a click the row division put on the wrong side
+            # of a row boundary, which shows up as an empty cell where the
+            # click was. A cell that *did* hold a token settles which row was
+            # clicked, and a neighbour row's token is then not the user's
+            # click at all — prose one row under a wrapped link would
+            # otherwise open the link.
+            break
     return None
 
 
