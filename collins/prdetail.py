@@ -354,6 +354,35 @@ def file_threads(threads: Iterable[PrThread], path: str) -> tuple[PrThread, ...]
     return tuple(mine)
 
 
+# What a check row is worth showing first, lowest first. The badge's own
+# ranking (see prstatus.PullRequest.badge), one rung shorter: a row that
+# blocks the merge, then one still to report, then one with nothing to say.
+_CHECK_URGENCY = {
+    prstatus.BADGE_FAILED: 0,
+    prstatus.BADGE_CONFLICT: 0,
+    prstatus.BADGE_PENDING: 1,
+}
+
+
+def by_urgency(checks: Iterable[PrCheck]) -> tuple[PrCheck, ...]:
+    """*checks* with the ones worth seeing first, first.
+
+    gh's own order is the one the list keeps whenever every row fits on the
+    page — it is the repository's order, and reshuffling a list somebody can
+    read whole buys nothing. This is for the other case: the view shows the
+    first handful of a long list and scrolls the rest (see prview's
+    `_CHECK_ROWS_SHOWN`), and a twenty-context rollup whose two failures sat
+    at positions eleven and nineteen would clip to five green rows over a
+    button offering to fix errors none of them showed.
+
+    Stable, so within a rung the repository's order survives — and the
+    conflict row, which `_checks` puts first, stays first among the blockers.
+    """
+    return tuple(
+        sorted(checks, key=lambda check: _CHECK_URGENCY.get(check.state, 2))
+    )
+
+
 # -- shaping the view reply ---------------------------------------------------
 
 

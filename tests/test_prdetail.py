@@ -218,6 +218,56 @@ def test_a_settled_pr_never_grows_the_conflict_row(state):
     ]
 
 
+def _check(name, state):
+    return prdetail.PrCheck(name=name, state=state, url="")
+
+
+def test_urgency_puts_the_blockers_first_then_what_is_still_running():
+    """What the view orders a capped list by: a row that blocks the merge,
+    then one still to report, then one with nothing left to say."""
+    checks = [
+        _check("lint", prstatus.BADGE_PASSED),
+        _check("test", prstatus.BADGE_PENDING),
+        _check("build", prstatus.BADGE_FAILED),
+        _check("docs", prstatus.BADGE_PASSED),
+    ]
+    assert [c.name for c in prdetail.by_urgency(checks)] == [
+        "build", "test", "lint", "docs"
+    ]
+
+
+def test_urgency_keeps_the_repositorys_order_within_a_rung():
+    """Stable, so two failures stay in the order gh reported them — and the
+    conflict row, which `_checks` puts first, stays first among them."""
+    checks = parse_detail(
+        URL,
+        _reply(mergeable="CONFLICTING", statusCheckRollup=[
+            {"name": "a", "conclusion": "SUCCESS"},
+            {"name": "b", "conclusion": "FAILURE"},
+            {"name": "c", "conclusion": "FAILURE"},
+        ]),
+        None,
+    ).checks
+    ordered = prdetail.by_urgency(checks)
+    assert [c.state for c in ordered[:3]] == [
+        prstatus.BADGE_CONFLICT, prstatus.BADGE_FAILED, prstatus.BADGE_FAILED
+    ]
+    assert [c.name for c in ordered[1:]] == ["b", "c", "a"]
+
+
+def test_urgency_never_drops_or_invents_a_row():
+    checks = parse_detail(URL, _reply(mergeable="CONFLICTING"), DIFF).checks
+    assert sorted(prdetail.by_urgency(checks), key=lambda c: c.name) == sorted(
+        checks, key=lambda c: c.name
+    )
+
+
+def test_an_unknown_verdict_sorts_with_the_quiet_ones():
+    """A state gh grows later must not jump the queue ahead of a failure."""
+    checks = [_check("new", "something-else"), _check("test", prstatus.BADGE_FAILED)]
+    assert [c.name for c in prdetail.by_urgency(checks)] == ["test", "new"]
+
+
 def test_a_check_url_must_be_http():
     """targetUrl is repository-controlled; nothing else may reach a browser."""
     rollup = [{"__typename": "StatusContext", "context": "ci/evil",

@@ -27,7 +27,11 @@ The Checks list carries the page's other button. A conflicting branch shows
 there as a failed check of its own (prdetail adds the row: it blocks the merge
 exactly as a failure does), and under a list with anything red in it sits the
 one prompt that would clear it — "Fix errors", "Resolve conflicts", or both at
-once — typed into the owning session (`practions.repair_action`).
+once — typed into the owning session (`practions.repair_action`). The list is
+never taller than `_CHECK_ROWS_SHOWN` rows: past that it scrolls in place
+(`_CappedList`), counts itself on its heading, and leads with the rows that
+block the merge, so a fifty-context rollup can't push the conversation off the
+page or clip away the very failures the button is offering to fix.
 
 The Conversation column ends in the page's write half: a composer that posts
 its text as a comment or a review verdict through practions' write calls
@@ -135,6 +139,14 @@ _SWITCHER_GAP = 3
 # floor of its own. Comfortably above what the header alone needs, which is
 # what the page shows while the first fetch is still in flight.
 _MIN_PAGE_WIDTH = 320
+# How many check rows the Checks list is ever tall, and the gap between two of
+# them. A repository is free to put fifty contexts on a pull request, and a
+# section that grew a row per context would push the description off the top of
+# the panel and the conversation off the bottom; past this the list scrolls in
+# place (see _CappedList).
+_CHECK_ROWS_SHOWN = 5
+_CHECK_ROW_GAP = 2
+
 
 def _verdict(state: str) -> tuple[str, str | None, str]:
     """A review's verdict as its card heading: icon, color class, wording.
@@ -672,13 +684,39 @@ class PrViewPage(Adw.Bin):
         return card
 
     def _checks_section(self, checks) -> Gtk.Widget:
+        """The rollup as a list, capped at _CHECK_ROWS_SHOWN rows.
+
+        A repository can put fifty contexts on one pull request, and fifty
+        rows here would push the description off the top of the panel and the
+        conversation off the bottom — this section says how the checks stand,
+        it isn't where they are all read. Past the cap the list scrolls
+        (`_CappedList`) and the heading starts carrying the count, since a
+        list clipped with nothing saying so reads as a list that short.
+
+        A capped list also reorders, blockers first (`prdetail.by_urgency`):
+        the rows that get clipped should be the ones with nothing to say, not
+        the two failures that happened to be numbered eleven and nineteen. An
+        uncapped one keeps gh's own order — every row is on screen, so there
+        is nothing for a reshuffle to rescue.
+
+        The heading and the repair button stay outside the scroller: what is
+        offered about the checks must not scroll away from them.
+        """
         section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        heading = Gtk.Label(label=_("Checks"), xalign=0.0)
+        capped = len(checks) > _CHECK_ROWS_SHOWN
+        heading = Gtk.Label(
+            label=_("Checks ({n})").format(n=len(checks)) if capped else _("Checks"),
+            xalign=0.0,
+        )
         heading.add_css_class("caption-heading")
         heading.set_margin_bottom(2)
         section.append(heading)
-        for check in checks:
-            section.append(self._check_row(check))
+        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=_CHECK_ROW_GAP)
+        for check in prdetail.by_urgency(checks) if capped else checks:
+            rows.append(self._check_row(check))
+        section.append(
+            _CappedList(rows, _CHECK_ROWS_SHOWN, _CHECK_ROW_GAP) if capped else rows
+        )
         repair = self._repair_button()
         if repair is not None:
             section.append(repair)
@@ -1031,6 +1069,68 @@ class _WrapRow(Gtk.Widget):
             child.unparent()
             child = following
         Gtk.Widget.do_dispose(self)
+
+
+class _CappedList(Gtk.ScrolledWindow):
+    """A scroller exactly as tall as the first *shown* rows of its child.
+
+    What keeps a fifty-context rollup from becoming a fifty-row section (see
+    `_checks_section`). A plain `max_content_height` would have done it in one
+    line, but only in pixels — and the page's reading text is scaled by a
+    display-level provider keyed on an *ancestor* class (`_apply_font_scale`),
+    so a row's height isn't knowable when the section is built and doesn't
+    stay put afterwards either: `pr_font_scale` changes it under a page that
+    is already showing, with no rebuild to recompute anything on.
+
+    Measuring instead of remembering is what makes that a non-problem. The cap
+    is derived inside `do_measure`, from the rows themselves, every time GTK
+    asks — so it is always the current height of the current five rows, at
+    whatever scale the page is wearing. The first five are summed one by one
+    rather than multiplied out from the first: a linked check is a button and
+    an unlinked one a bare box, and the two are not the same height.
+
+    Nothing is capped horizontally: the rows already ellipsize, and this must
+    not become a width the panel can't go under (see _MIN_PAGE_WIDTH).
+    """
+
+    __gtype_name__ = "CollinsPrCappedList"
+
+    def __init__(self, rows: Gtk.Box, shown: int, spacing: int) -> None:
+        super().__init__()
+        self._rows = rows
+        self._shown = shown
+        self._spacing = spacing
+        self.set_child(rows)
+        self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        # Without this a ScrolledWindow's natural height is its min-content
+        # height, and there would be nothing for the cap to be a cap *on*.
+        self.set_propagate_natural_height(True)
+
+    def do_measure(self, orientation, for_size):
+        minimum, natural, _min_base, _nat_base = Gtk.ScrolledWindow.do_measure(
+            self, orientation, for_size
+        )
+        cap = self._cap(for_size) if orientation == Gtk.Orientation.VERTICAL else None
+        if cap is not None:
+            minimum, natural = min(minimum, cap), min(natural, cap)
+        # Baselines are -1 either way: a scroller aligns to no line of text,
+        # and GTK warns about a horizontal measure that reports one at all —
+        # which the chained-up call's out-parameters otherwise carry back.
+        return minimum, natural, -1, -1
+
+    def _cap(self, for_size: int) -> int | None:
+        """The height of the first `_shown` rows, gaps included — or None
+        where there are no rows to measure, which is nothing to cap."""
+        total = 0
+        seen = 0
+        row = self._rows.get_first_child()
+        while row is not None and seen < self._shown:
+            total += row.measure(Gtk.Orientation.VERTICAL, for_size)[1]
+            if seen:
+                total += self._spacing
+            seen += 1
+            row = row.get_next_sibling()
+        return total if seen else None
 
 
 class _BusyButton(Gtk.Button):

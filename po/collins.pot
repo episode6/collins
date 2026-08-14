@@ -2297,6 +2297,10 @@ msgstr ""
 msgid "Checks"
 msgstr ""
 
+#: collins/prview.py:704
+msgid "Checks ({n})"
+msgstr ""
+
 #: collins/prview.py:475
 msgid "Show more"
 msgstr ""
