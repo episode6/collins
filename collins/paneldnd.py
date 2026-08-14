@@ -10,19 +10,17 @@ because they share one story — how a panel page travels by pointer:
   use internal content and cannot be seen by our `Gtk.DropTarget`s, so
   the drop zones get their own drag with their own gtype (`PageDrag`).
   The source rides the tab's private `AdwTab` widget (found by the same
-  fail-soft walk `MainWindow._tab_widget` uses for the tab flash), where
-  bubble-phase propagation reaches it *before* the `AdwTabBox` ancestor
-  that implements Adwaita's own tab drag: claiming the sequence there
-  kills the native drag outright — deliberately, since a native drag can
-  only reorder within a bar or land on another bar's guard, while this
-  one can join, reorder positionally, and split. The tab shows a
-  drag-handle indicator icon beside its title as the affordance.
-  Because all of it rides private widget internals, the
+  fail-soft walk `MainWindow._tab_widget` uses for the tab flash). The
+  native drag it replaces — which can only reorder within a bar or land
+  on another bar's guard, while this one can join, reorder positionally,
+  and split — is stood down rather than raced (`disarm_native_drag`).
+  The tab shows a drag-handle indicator icon beside its title as the
+  affordance. Because all of it rides private widget internals, the
   `panel_tab_drag_handles` setting can turn it off: `unwire_tab_drag`
-  reverses the mount, native tab dragging returns (nothing claims ahead
-  of it anymore), and each strip shows its end-of-bar grip
-  (`make_grip`) — the drag-the-selected-page fallback that speaks the
-  same drop-zone language.
+  reverses the mount, `restore_native_drag` gives Adwaita its gesture
+  back, and each strip shows its end-of-bar grip (`make_grip`) — the
+  drag-the-selected-page fallback that speaks the same drop-zone
+  language.
 - **The drop zones** (`DropZones`): an overlay across the whole dock,
   active only while a page drag is in flight, that highlights and
   resolves edge/center zones over every visible leaf (geometry in
@@ -83,6 +81,9 @@ def wire_tab_drag(strip, widget) -> None:
     def wire() -> bool:
         if not getattr(strip, "tab_drag_handles", True):
             return GLib.SOURCE_REMOVE  # turned off while this idle was queued
+        # This bar now has a tab that drags itself, so Adwaita's own tab
+        # drag has no business in it (idempotent — every attach lands here).
+        disarm_native_drag(strip.tab_bar)
         tab = _find_tab(strip.tab_bar, widget)
         if tab is not None and getattr(tab, "_collins_page_drag", None) is None:
             source = _page_drag_source(
@@ -97,13 +98,82 @@ def wire_tab_drag(strip, widget) -> None:
 
 def unwire_tab_drag(strip, widget) -> None:
     """Undo `wire_tab_drag` for *widget*'s tab (the fallback setting turned
-    per-tab drags off): with no source claiming ahead of `AdwTabBox`'s own
-    gesture, native tab dragging simply resumes."""
+    per-tab drags off). Native tab dragging comes back with the strip's
+    `restore_native_drag`, which the same funnel calls once for the bar."""
     tab = _find_tab(strip.tab_bar, widget)
     source = getattr(tab, "_collins_page_drag", None) if tab is not None else None
     if source is not None:
         tab.remove_controller(source)
         tab._collins_page_drag = None
+
+
+def disarm_native_drag(bar: Adw.TabBar) -> None:
+    """Take Adwaita's own tab drag out of *bar*'s event propagation.
+
+    Per-tab sources were meant to beat it on claim priority alone: a
+    `Gtk.DragSource` on the deep `AdwTab` sees a press before the
+    `AdwTabBox` ancestor whose `GtkGestureDrag` implements Adwaita's tab
+    reordering, so ours should claim the sequence first at the drag
+    threshold. It doesn't, reliably — the two gestures don't start on the
+    same terms. `GtkDragSource` refuses to begin a drag for
+    `MIN_TIME_TO_DND` (100ms) after the press however far the pointer has
+    travelled (gtkdragsource.c: the timeout armed in its `begin` gates
+    the threshold check in its `update`), while Adwaita's gesture claims
+    the moment the pointer passes that threshold. Cross the eight pixels
+    inside 100ms — an ordinary quick flick, as opposed to a press that
+    settles first — and the native drag claims the sequence and cancels
+    ours: the whole tab follows the pointer, in a drag the drop zones
+    can't see, rather than the page's title chip.
+
+    So stand it down instead of racing it. Propagation phase NONE leaves
+    the gesture in place but out of every chain, and touches nothing else
+    the bar does — selection, middle-click close and the context menu
+    ride other gestures, and the drop target that receives a foreign tab
+    for the guard to bounce is a different controller again. Fails soft
+    like every walk over these private widgets: a bar whose box the walk
+    can't find simply keeps racing, exactly as it did before."""
+    for gesture in _native_drag_gestures(bar):
+        if getattr(gesture, "_collins_phase", None) is None:
+            gesture._collins_phase = gesture.get_propagation_phase()
+        gesture.set_propagation_phase(Gtk.PropagationPhase.NONE)
+
+
+def restore_native_drag(bar: Adw.TabBar) -> None:
+    """Undo `disarm_native_drag` — the `panel_tab_drag_handles` fallback
+    needs Adwaita's gesture back on the phase it was built with, since
+    with no per-tab source mounted it is the only way a tab drags at
+    all."""
+    for gesture in _native_drag_gestures(bar):
+        phase = getattr(gesture, "_collins_phase", None)
+        if phase is not None:
+            gesture.set_propagation_phase(phase)
+            gesture._collins_phase = None
+
+
+def _native_drag_gestures(bar: Adw.TabBar) -> list:
+    """The drag gesture of every `AdwTabBox` in *bar* — the controller
+    behind Adwaita's tab reordering and its cross-bar DnD. Both boxes are
+    walked (a strip pins nothing, but the pinned one costs nothing to
+    visit), and the gesture is matched by exact gtype rather than
+    `isinstance`, so a kinetic `GtkGesturePan` or `GtkGestureSwipe` — both
+    `GtkGestureDrag` subclasses — could never be mistaken for it."""
+    gestures: list = []
+
+    def walk(node: Gtk.Widget) -> None:
+        child = node.get_first_child()
+        while child is not None:
+            if child.__gtype__.name == "AdwTabBox":
+                controllers = child.observe_controllers()
+                for i in range(controllers.get_n_items()):
+                    controller = controllers.get_item(i)
+                    if controller.__gtype__.name == "GtkGestureDrag":
+                        gestures.append(controller)
+            else:
+                walk(child)
+            child = child.get_next_sibling()
+
+    walk(bar)
+    return gestures
 
 
 def _find_tab(bar: Adw.TabBar, widget) -> Gtk.Widget | None:
@@ -147,10 +217,11 @@ def make_grip(strip) -> Gtk.Widget:
 def _page_drag_source(strip, resolve) -> Gtk.DragSource:
     """A drag source carrying the page `resolve()` answers at press time —
     a fixed page for a tab's own source (None once it left the strip), the
-    selected page for the grip. On a tab it rides bubble phase, so it
-    runs — and claims the drag — before the `AdwTabBox` ancestor whose
-    own bubble gesture would otherwise start Adwaita's native tab drag.
-    Inert while the strip has no page mover."""
+    selected page for the grip. On a tab it is the only thing left
+    contesting the press: reaching it before the `AdwTabBox` ancestor's own
+    gesture isn't enough to claim ahead of it (`disarm_native_drag` has the
+    timing), so that gesture is stood down rather than outrun. Inert while
+    the strip has no page mover."""
     source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
     pending: dict = {}  # the payload between prepare and drag-begin
 

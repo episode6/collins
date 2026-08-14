@@ -144,6 +144,10 @@ class PanelStrip(Gtk.Box):
         self._bar = bar
         self.append(bar)
         self.append(self._view)
+        # Before any page arrives and before the first apply_settings: the
+        # native drag has to be down from the strip's first press, not from
+        # its first settings pass.
+        self._apply_tab_drag()
 
     # -- pages -------------------------------------------------------------
 
@@ -568,10 +572,16 @@ class PanelStrip(Gtk.Box):
 
     def _apply_tab_drag(self) -> None:
         """Bring the drag affordances in line with the setting, live: per-tab
-        handles come and go on every page, and the fallback grip shows
-        exactly when they're off."""
+        handles come and go on every page, Adwaita's own tab drag stands
+        down exactly while they're up (it wins a fast flick otherwise — see
+        paneldnd.disarm_native_drag), and the fallback grip shows exactly
+        when they're off."""
         enabled = self.tab_drag_handles
         self._grip.set_visible(not enabled)
+        if enabled:
+            paneldnd.disarm_native_drag(self._bar)
+        else:
+            paneldnd.restore_native_drag(self._bar)
         for widget in self.pages():
             if getattr(widget, "page_kind", None) is None:
                 continue  # see shell_pages
