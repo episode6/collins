@@ -174,6 +174,10 @@ class PrViewPage(Adw.Bin):
         self._host_factory = host_factory
         self._detail: prdetail.PullRequestDetail | None = None
         self._fetching = False
+        # A forced read that arrived while one was already in flight, waiting
+        # to be re-issued: the fetch in flight was dispatched before whatever
+        # asked, so it cannot be the answer (see `_fetch`).
+        self._refetch = False
         self._fetch_gen = 0
         self._fetched_at = 0  # monotonic µs of the last fetch *attempt*
         # The Conversation view's thread cards in timeline order — what the
@@ -470,6 +474,13 @@ class PrViewPage(Adw.Bin):
         hammer gh; a failure doesn't dodge the throttle either — the stamp is
         the attempt's, or a dead gh would be retried on every map."""
         if self._fetching:
+            # A forced read is somebody asking what the PR looks like *after*
+            # something they just did. The read in flight was dispatched
+            # before it and can't answer that, so the ask is remembered and
+            # re-issued when that one lands (see `_landed`) rather than
+            # dropped — which would leave the page showing the state the
+            # action changed, and let a held button go on that answer.
+            self._refetch = self._refetch or force
             return
         now = GLib.get_monotonic_time()
         if not force and self._fetched_at and now - self._fetched_at < _FOCUS_REFRESH_MIN_US:
@@ -496,6 +507,15 @@ class PrViewPage(Adw.Bin):
         if gen != self._fetch_gen:
             return GLib.SOURCE_REMOVE  # a newer fetch owns the page now
         self._fetching = False
+        if self._refetch:
+            # This answer is to a question asked before the action that has
+            # since landed: it isn't dropped so much as unbelievable. Nothing
+            # here renders it and nothing lets go of its spinner — the read
+            # that was actually asked for goes out now, still spinning, and
+            # that one settles the page.
+            self._refetch = False
+            self._fetch(force=True)
+            return GLib.SOURCE_REMOVE
         self._spinner.stop()
         self._refresh_slot.set_visible_child_name("button")
         # Whatever this read says, the buttons that asked for it let go of
