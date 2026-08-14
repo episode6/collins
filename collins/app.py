@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-13. Full change history: git log for this file.
+# fork. Last modified: 2026-08-14. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -205,11 +205,11 @@ row.session-child {
      content box's spacing. Stock 8px here, plus a 4px margin the content box
      used to carry, put the icon twice as far from the guide line as from the
      title it leads -- a lopsided slot in which it read as belonging to
-     neither. With the margin gone (see SessionRow) the overhang alone stands
-     for the gap, and 4px here is what makes the two sides match; resize the
-     mark and this has to move the other way.
-     The barber pole below is positioned by counting back over the border and
-     this padding, so those two values move together. */
+     neither. With the margin gone (see SessionRow) this is only half of the
+     gap on that side; the mark button's own 4px of left padding is the rest,
+     and it is the half to move (see menubutton.pr-mark below), because the
+     barber pole below is positioned by counting back over the border and this
+     padding, so those two values move together. */
   padding-left: 4px;
   /* smaller text than a stock sidebar row, and shorter: 34px of content plus
      the 1px borders puts the row at 36px, with the project headers keeping the
@@ -254,10 +254,17 @@ row.session-child checkbutton {
 /* the pull request mark ahead of the title (see SessionRow): a menu button
    standing in a line of text, so it takes only the width of the two icons in
    it rather than the tap target the row's other buttons keep. Its padding is
-   lopsided on purpose: none on the left, so the mark tucks in against the
-   guide line where it reads as the row's own rather than the title's, and more
-   than the stock 4px on the right, so the base icon doesn't crowd the first
-   letter of the title.
+   lopsided on purpose: 4px on the left, which with the row's own 4px and the
+   4px of badge overhang inside the mark stands the base icon 12px off the
+   guide line, and more than the stock 4px on the right, so the base icon
+   doesn't crowd the first letter of the title.
+   The overhang is not empty space on a mark that carries a badge -- the badge
+   hangs into it -- so counting it as gap left the colored mark reading as
+   crowded against the guide line however even the two sides measured. This
+   padding is the gap the overhang cannot be, and it is the one value to move
+   to change how far the mark stands off the line: image.agent-mark below and
+   the two mark-less rows in sidebar.py (PlaceholderRow, NewThreadOffer) all
+   align to this column and have to move with it.
    The selector is the menubutton node, not the button one: pr-mark is set on
    the GtkMenuButton, whose CSS node is "menubutton" wrapping the "button" node
    that carries the padding. Written as button.pr-mark it matches nothing, and
@@ -265,16 +272,16 @@ row.session-child checkbutton {
 row.session-child menubutton.pr-mark > button {
   min-height: 20px;
   min-width: 0;
-  padding: 0 6px 0 0;
+  padding: 0 6px 0 4px;
 }
 /* what stands in that slot when the session has no pull requests: the agent's
    own mark (see SessionRow). Its margins put it exactly where the mark's base
-   icon sits -- 4px in from the guide line, which is the overhang combined_icon
-   reserves for a badge, and the same 6px off the title as above -- so a
-   session that opens its first PR trades one for the other without the title
-   moving under it. */
+   icon sits -- 8px in from the guide line, being the mark button's 4px of left
+   padding plus the 4px of overhang combined_icon reserves for a badge, and the
+   same 6px off the title as above -- so a session that opens its first PR
+   trades one for the other without the title moving under it. */
 row.session-child image.agent-mark {
-  margin: 0 6px 0 4px;
+  margin: 0 6px 0 8px;
 }
 row.session-child checkbutton > check {
   min-height: 14px;
