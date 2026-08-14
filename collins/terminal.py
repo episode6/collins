@@ -1146,6 +1146,11 @@ class TerminalTab(Gtk.Box):
         self._send_after_settle = False
         self._composer_enter_sends = True
         self._composer_font = ""
+        self._composer_on_typing = False
+        # An open that has been asked for but hasn't reached the screen yet:
+        # the panel is revealed from an idle, so two keys pressed in the same
+        # frame both find a composer that isn't open (see open_composer).
+        self._composer_opening = False
         # Counts up only while a new session set to open floating waits for
         # its agent (see autoshow_composer).
         self._composer_autoshow_tries = 0
@@ -2301,17 +2306,23 @@ class TerminalTab(Gtk.Box):
         if not self._agent_is_running():
             self.feed_message(_("Composer: the agent isn't running in this tab"))
             return
-        if self.composer_open():
+        # An open already in flight is not opened again: emptying the box a
+        # second time would take with it the character that asked for the
+        # first one (type_into_composer, whose keys can outrun the idle
+        # below by a whole frame).
+        if self.composer_open() or self._composer_opening:
             self._composer.focus_view()
             return
         composer = self._ensure_composer()
         composer.set_text("")
         revealer = self._composer_revealer
         revealer.set_visible(True)
+        self._composer_opening = True
 
         # Revealed from an idle after the (fresh) child maps, or the first
         # open skips its slide and just appears (the sidebar's lesson).
         def reveal() -> bool:
+            self._composer_opening = False
             revealer.set_reveal_child(True)
             composer.focus_view()
             # The cut starts from here rather than above it: every round of
@@ -2321,6 +2332,83 @@ class TerminalTab(Gtk.Box):
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(reveal)
+
+    def _typing_opens_composer(self, keyval: int, state: Gdk.ModifierType) -> bool:
+        """Whether this key press is the one that raises the composer, the
+        composer_on_typing setting says so, and it has now been typed there
+        instead of into the terminal.
+
+        The keyboard's half of the answer is `composerkeys` (a character,
+        not a chord, and not one of the input box's own openers); the
+        screen's half is `takes_prompt`, the same "an empty agent input box
+        is what a keystroke would land in" this app types prompts on. That
+        is the whole safety gate, and it is the right one: a permission
+        dialog, a menu, a line already half written and a terminal with no
+        agent in it read as no, so their keys go where they were aimed —
+        while an agent mid-turn with an empty box reads as yes, which is
+        where a composer earns its keep (verified against the CLI: the box
+        redraws empty a beat after a prompt is sent, and stays that way for
+        the turn).
+
+        Asked of every key press the terminal doesn't otherwise claim, so
+        The agent-liveness check the composer's own open makes is repeated
+        here rather than left to it: an open that bails has already
+        swallowed the key by then. Failing here — or a `type_into_composer`
+        that can't land the character after all — answers False, and a
+        False lets the key carry on to VTE exactly as if none of this
+        existed.
+
+        Asked of every key press the terminal doesn't otherwise claim, so
+        the two reads come last, behind the setting and a look at the key,
+        neither of which touches VTE or /proc. Both are paid once per
+        composer: the keys after the first go to a focused composer, not
+        here.
+        """
+        if not self._composer_on_typing:
+            return False
+        code = Gdk.keyval_to_unicode(keyval)
+        char = chr(code) if code else ""
+        if not composerkeys.typing_opens_composer(char, int(state)):
+            return False
+        if not self.takes_prompt() or not self._agent_is_running():
+            return False
+        return self.type_into_composer(char)
+
+    def type_into_composer(self, text: str) -> bool:
+        """Put *text* in the composer as typed, raising it if it isn't up,
+        and answer whether it landed.
+
+        Opening is left to `open_composer` — the docked case, the agent
+        gate and the open-cut all keep their say — and the text goes in
+        after it, into the box that open just emptied. The cut underneath
+        is no hazard: this is only ever reached at an empty input box, so
+        it finds nothing to seed. (Were the box to fill in the beat it
+        takes anyway — a mention landing, the agent redrawing — `seed_text`
+        puts what was in the terminal first, where it was typed.)
+
+        Focus follows the text, docked composer included: what the keyboard
+        writes into is where the rest of the keyboard — backspace, the
+        arrows — has to work too.
+
+        Whether the open took is read off the panel, never off
+        `self._composer`: the view is built once and kept for the tab's
+        life, so a tab that has ever opened one has a non-None view even
+        while nothing is on screen. Docked or already up, it is open now;
+        freshly raised, it is open an idle from now (`_composer_opening`);
+        anything else means `open_composer` turned the request down — the
+        agent has left the terminal — and the character belongs back in
+        VTE's hands.
+        """
+        self.open_composer()
+        if self._composer is None or not (self.composer_open() or self._composer_opening):
+            return False
+        self._composer.insert_typed(text)
+        # A floating composer is focused by its own reveal, an idle away;
+        # this is for the docked one, which the open only fronted. Asking
+        # twice costs nothing, and asking too early (before the panel maps)
+        # simply doesn't take — the reveal's own call is the one that does.
+        self._composer.focus_view()
+        return True
 
     def autoshow_composer(self, setting) -> None:
         """Open this tab's composer without being asked, the way the
@@ -3620,6 +3708,7 @@ class TerminalTab(Gtk.Box):
             and self._provider_has_prompt_box()
         )
         self._composer_enter_sends = bool(settings.get("composer_enter_sends", True))
+        self._composer_on_typing = bool(settings.get("composer_on_typing"))
         self._composer_font = font
         if self._composer is not None:
             self._composer.set_enter_sends(self._composer_enter_sends)
@@ -3720,4 +3809,10 @@ class TerminalTab(Gtk.Box):
             if keyval == Gdk.KEY_G:
                 self.toggle_search()
                 return True
+
+        # Last, once every chord above has passed: a plain character typed
+        # at an empty agent prompt can open the composer instead of landing
+        # in the CLI's box (opt-in — see _typing_opens_composer).
+        if self._typing_opens_composer(keyval, state):
+            return True
         return False

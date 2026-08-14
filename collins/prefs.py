@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-13. Full change history: git log for this file.
+# fork. Last modified: 2026-08-14. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -304,6 +304,18 @@ class PreferencesDialog(Adw.Dialog):
         self._attach_overlay_row.set_active(bool(state.get_setting("attach_overlay_button")))
         self._attach_overlay_row.connect("notify::active", self._on_attach_overlay_changed)
         terminal_group.add(self._attach_overlay_row)
+
+        self._composer_typing_row = Adw.SwitchRow(
+            title=_("Typing opens the composer"),
+            subtitle=_(
+                "Start typing at an agent's empty prompt and the composer "
+                "opens with what you typed. A dialog, a menu and the CLI's "
+                "own /, !, # and @ keep their keys"
+            ),
+        )
+        self._composer_typing_row.set_active(bool(state.get_setting("composer_on_typing")))
+        self._composer_typing_row.connect("notify::active", self._on_composer_typing_changed)
+        terminal_group.add(self._composer_typing_row)
 
         self._composer_enter_row = Adw.SwitchRow(
             title=_("Enter sends composer text"),
@@ -1072,6 +1084,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_attach_overlay_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("attach_overlay_button", row.get_active())
+        self._on_change()
+
+    def _on_composer_typing_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("composer_on_typing", row.get_active())
         self._on_change()
 
     def _on_composer_enter_changed(self, row: Adw.SwitchRow, _pspec) -> None:
