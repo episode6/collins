@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-13. Full change history: git log for this file.
+# fork. Last modified: 2026-08-14. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -107,7 +107,7 @@ DEFAULT_SETTINGS = {
     # The floating composer button over each agent terminal's bottom-left
     # corner (see terminal.py; it was the attach-file button once, and keeps
     # that key so saved preferences carry over). Off hides it everywhere;
-    # the header's attach button keeps working either way.
+    # drops and the editor's "Add to chat" keep working either way.
     "attach_overlay_button": True,
     # Whether Enter sends the composer's text (Shift+Enter for a newline);
     # off swaps the pair: Enter is a newline and Ctrl+Enter sends.
