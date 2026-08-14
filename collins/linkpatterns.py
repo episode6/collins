@@ -95,6 +95,7 @@ def bare_names_pattern(names: Iterable[str]) -> str | None:
 
 _SUFFIX = re.compile(r"(.+?):(\d+)(?::(\d+))?")
 _FILE_RX = re.compile(FILE_PATTERN)
+_URL_RX = re.compile(URL_PATTERN)
 
 # The characters FILE_PATTERN refuses to *end* a match on (_PATH_FINAL's
 # exclusions). When a wrap falls right after one of them — a row ending
@@ -238,4 +239,141 @@ def resolve_wrapped_reference(
                 resolved = resolve_file_reference(m.group(0), roots)
                 if resolved is not None:
                     return resolved
+    return None
+
+
+# The characters URL_PATTERN refuses to *end* a match on (_FINAL's
+# exclusions) which can nonetheless sit inside a URL — the URL counterpart of
+# _SHED_CHARS. A wrap falling right after one (a row ending `…/pull/303.`)
+# hands the click a candidate short of the row end.
+_URL_SHED = ".,:;!?)]}"
+
+# A continuation fragment is the tail of one broken token, never the opening
+# of a new link: a neighbour row *below* that starts a URL of its own is a
+# separate reference, not this one's other half. Deliberately not applied
+# upward, where the neighbour is the URL's *head* and carrying the scheme is
+# the whole point of joining it. Matching anywhere in the token rather than
+# only at its start is over-eager on purpose: it can cost a stitch, never
+# buy a wrong one.
+_URL_START = re.compile("(?:[a-zA-Z][a-zA-Z0-9+.\\-]*://|www\\.)")
+
+# Upward, the scheme comes from the neighbour instead of from what was
+# clicked, so — unlike downward, where a fragment with no scheme can't
+# produce a URL at all — a click on ordinary prose could be handed a link
+# off the row above. A word is never the tail of a broken URL: `03/files`,
+# `ex.html`, `d?id=42` all carry something letters alone do not. The cost is
+# a wholly alphabetic tail (`…/docu` ⏎ `mentation`), which stitches from its
+# head fragment — the half VTE underlines — but not from the tail.
+_WORDLIKE = re.compile(f"[^\\W\\d_]+[{re.escape(_URL_SHED)}]*")
+
+# How many rows a hard-wrapped URL may be stitched across, per direction. A
+# URL long enough to fill whole rows of its own is exactly what this is for,
+# and the whole-row-is-one-token rule below keeps the chain honest, so this
+# reaches further than the path stitcher's caps. Public: the caller decides
+# how many neighbour rows to read off the screen.
+STITCH_URL_ROWS = 4
+
+
+# How far short of *wrap_col* a row may stop and still count as poured full.
+# Ink — Claude Code's renderer — hard-wraps at the column before the last and
+# leaves a trailing space there, so the callers' terminal-width estimate of
+# the wrap column always overshoots a little.
+_WRAP_SLACK = 2
+
+
+def _row_was_poured_full(row: str, wrap_col: int) -> bool:
+    """Whether *row* was filled to the emitter's wrap column — the signature
+    of a row that broke a token because it ran out of width, as against one
+    the emitter chose to end.
+
+    This is the URL stitcher's answer to the path stitcher's existence check.
+    A path fragment costs nothing to guess wrong — a join that resolves
+    nowhere opens nothing — but every syntactically valid URL "resolves", so
+    the geometry has to carry the whole gate. Without it the commonest URL
+    shape of all (a link alone on its line, prose on the next) would stitch
+    into a link nobody wrote.
+
+    Note it is fullness that tells the two breaks apart, not whether what
+    came down would have fitted: a word wrap moves a word down precisely
+    because it did *not* fit, so "wouldn't have fitted" is true of both and
+    separates nothing. What only a mid-token break does is fill the row.
+    """
+    return len(row.rstrip()) + _WRAP_SLACK >= wrap_col
+
+
+def resolve_wrapped_url(
+    candidate: str,
+    row_text: str,
+    rows_above: list[str],
+    rows_below: list[str],
+    wrap_col: int,
+) -> str | None:
+    """The whole URL a fragment belongs to, when the *emitter* hard-wrapped it
+    across rows, or None to leave the click alone.
+
+    The path stitcher's shape (see resolve_wrapped_reference): fragments join
+    downward only when the candidate ends its row and upward only when it
+    starts one, neighbours contribute their adjacent whitespace-delimited
+    token, and the chain reaches further rows only while a whole row was one
+    token — a middle fragment of something too long to fit anywhere. Every
+    join is re-matched against URL_PATTERN with the same span guards, so a
+    stitch only ever returns text the click itself touched.
+
+    What differs is the gate. There is no cheap truth to check a URL against,
+    and a wrong guess opens a browser somewhere the user never asked to go —
+    so every row that gives up a fragment must have been poured full to
+    *wrap_col* (the emitter's wrap column, and see _row_was_poured_full), a
+    row below bearing a scheme of its own is read as a separate link rather
+    than this one's other half (_URL_START), and a clicked fragment that is
+    just a word takes nothing from the row above (_WORDLIKE). Returns None
+    unless the join genuinely grew the URL; the caller opens the clicked
+    match as it stands.
+    """
+    row = row_text.rstrip("\n")
+    row_r = row.rstrip()
+    downs = [""]
+    trail = None
+    if row_r.endswith(candidate):
+        trail = ""
+    else:
+        core = row_r.rstrip(_URL_SHED)
+        if core != row_r and core.endswith(candidate):
+            trail = row_r[len(core) :]
+    if trail is not None and _row_was_poured_full(row_r, wrap_col):
+        chain = trail
+        for below in rows_below[:STITCH_URL_ROWS]:
+            frag = below.strip()
+            if not frag or _URL_START.search(frag.split()[0]):
+                break
+            token = frag.split()[0]
+            chain += token
+            downs.append(chain)
+            # Only a row that is one token *and* full is a middle fragment
+            # with more of the URL after it; anything else ends the chain.
+            if token != frag or not _row_was_poured_full(below, wrap_col):
+                break
+    ups = [""]
+    if row.lstrip().startswith(candidate) and not _WORDLIKE.fullmatch(candidate):
+        chain = ""
+        for above in rows_above[:STITCH_URL_ROWS]:
+            frag = above.strip()
+            if not frag or not _row_was_poured_full(above, wrap_col):
+                break
+            token = frag.split()[-1]
+            chain = token + chain
+            ups.append(chain)
+            if token != frag:
+                break
+    for up in reversed(ups):  # longest joins first
+        for down in reversed(downs):
+            if not up and not down:
+                continue  # nothing to add; the clicked match already stands
+            joined = up + candidate + down
+            for m in _URL_RX.finditer(joined):
+                if m.end() <= len(up):
+                    continue
+                if m.start() >= len(up) + len(candidate):
+                    break
+                if m.start() < len(up) or m.end() > len(up) + len(candidate):
+                    return m.group(0)
     return None

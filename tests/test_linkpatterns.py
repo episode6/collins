@@ -15,6 +15,7 @@ from collins.linkpatterns import (
     bare_names_pattern,
     resolve_file_reference,
     resolve_wrapped_reference,
+    resolve_wrapped_url,
     token_at_column,
 )
 
@@ -504,6 +505,139 @@ def test_prose_hanging_punctuation_does_not_false_join(project) -> None:
         "collins/foo.py", "  see collins/foo.py,", [], ["  and more"], [str(project)]
     )
     assert resolved is None
+
+
+# -- resolve_wrapped_url ---------------------------------------------------
+#
+# The same wrap, one row's worth of URL at a time. A path fragment that
+# stitches wrong opens nothing; a URL fragment that stitches wrong opens a
+# browser, so here the geometry alone has to tell a wrap from a line break —
+# see _break_was_forced.
+
+_WRAP = 60
+_URL = "https://github.com/episode6/collins/pull/303/files#diff-abc123"
+# Long enough to fill a screen row of its own with room to spare.
+_LONG_URL = "https://example.com/" + "segment/" * 12 + "end?id=42"
+
+
+def test_url_stitches_downward_from_the_head_fragment() -> None:
+    head, tail = _split("⏺ Opened " + _URL, _WRAP)
+    candidate = head[len("⏺ Opened ") :]
+    assert resolve_wrapped_url(candidate, head, [], ["  " + tail + " —"], _WRAP) == _URL
+
+
+def test_ink_style_wrap_a_column_short_is_still_a_full_row() -> None:
+    # Claude Code's renderer breaks at the column before the last and leaves
+    # a trailing space there, so the caller's terminal-width guess at the
+    # wrap column always overshoots by a little.
+    head, tail = _split("⏺ Opened " + _URL, _WRAP - 1)
+    candidate = head[len("⏺ Opened ") :]
+    assert resolve_wrapped_url(candidate, head + " ", [], ["  " + tail], _WRAP) == _URL
+
+
+def test_url_stitches_upward_from_the_continuation_fragment() -> None:
+    head, tail = _split("⏺ Opened " + _URL, _WRAP)
+    row = "  " + tail + " for review"
+    assert resolve_wrapped_url(tail, row, [head], [], _WRAP) == _URL
+
+
+def test_url_stitches_across_a_row_it_fills_by_itself() -> None:
+    first, rest = _split("⏺ " + _LONG_URL, _WRAP)
+    middle, tail = _split(rest, _WRAP)
+    assert len(middle) == _WRAP and " " not in middle  # a middle fragment
+    below = [middle, "  " + tail + " — done."]
+    assert resolve_wrapped_url(first[2:], first, [], below, _WRAP) == _LONG_URL
+    # ...and from the far end, reaching back over the same middle row.
+    above = [middle, first]
+    assert resolve_wrapped_url(tail, "  " + tail + " — done.", above, [], _WRAP) == _LONG_URL
+
+
+def test_url_stitch_crosses_a_shed_character() -> None:
+    url = "https://example.com/docs/guide.html"
+    row = "⏺ See " + url[:31]  # the wrap fell right after `guide.`
+    candidate = url[:30]  # ...which the pattern refuses to end a match on
+    assert resolve_wrapped_url(candidate, row, [], ["  html, then"], len(row)) == url
+
+
+def test_bare_host_url_stitches_in_its_own_form() -> None:
+    url = "www.example.com/docs/getting-started/index.html"
+    head, tail = _split(url, 40)
+    row = "⏺ See " + head
+    # No scheme is invented here; the click handler prefixes http:// as it
+    # does for any www. match.
+    assert resolve_wrapped_url(head, row, [], ["  " + tail], len(row)) == url
+
+
+def test_url_stitch_sheds_a_glued_tool_call_prefix() -> None:
+    url = "https://example.com/a/very/long/reference/page?id=42"
+    head, tail = _split(url, 40)
+    above = "⏺ Fetch(" + head
+    row = "  " + tail + ")"
+    assert resolve_wrapped_url(tail + ")", row, [above], [], len(above)) == url
+
+
+def test_url_alone_on_its_row_keeps_the_prose_below_out() -> None:
+    # The commonest shape of all: a link on its own line, the next sentence
+    # under it. The row stopped well short of the wrap column, so nothing
+    # broke a token there and there is nothing to stitch.
+    url = "https://example.com/pr/303"
+    row = "  " + url
+    assert resolve_wrapped_url(url, row, [], ["  Ready for review."], _WRAP) is None
+    assert resolve_wrapped_url("Ready", "  Ready for review.", [row], [], _WRAP) is None
+
+
+def test_a_word_too_long_for_the_row_below_is_still_not_a_wrap() -> None:
+    # The row below opens with a word that could not have fitted above — but
+    # that is what an ordinary word wrap does too, so it says nothing. Only
+    # the unfilled row above does, and it says the link ended there.
+    url = "https://example.com/pr/303"
+    row = "⏺ Opened " + url  # 25 columns short of the wrap
+    below = ["  Documentation-and-review follows."]
+    assert resolve_wrapped_url(url, row, [], below, _WRAP) is None
+
+
+def test_a_row_below_bearing_its_own_scheme_is_a_separate_link() -> None:
+    head, _tail = _split("⏺ Opened " + _URL, _WRAP)
+    candidate = head[len("⏺ Opened ") :]
+    below = ["  https://example.com/other/page"]
+    assert resolve_wrapped_url(candidate, head, [], below, _WRAP) is None
+
+
+def test_a_word_takes_nothing_from_the_link_above_it() -> None:
+    # Upward the scheme comes from the neighbour, not from what was clicked,
+    # so a full row ending in a finished link sits one row above every prose
+    # word — and `y` must not become `https://another.com/xy`.
+    above = "⏺ Opened https://another.com/x"
+    for word in ("y", "page", "Ready", "review."):
+        row = word + " and more text"
+        assert resolve_wrapped_url(word, row, [above], [], len(above)) is None
+    # The row above bearing a scheme is not itself the objection: that is
+    # exactly what a genuine head fragment does, and a tail that carries
+    # anything a word doesn't still stitches.
+    assert resolve_wrapped_url("2/files", "2/files and more", [above], [], len(above)) == (
+        "https://another.com/x2/files"
+    )
+
+
+def test_no_url_stitch_when_the_fragment_is_mid_row() -> None:
+    head, tail = _split("⏺ Opened " + _URL, _WRAP)
+    candidate = head[len("⏺ Opened ") :]
+    row = head + " and more"
+    assert resolve_wrapped_url(candidate, row, [], ["  " + tail], _WRAP) is None
+
+
+def test_url_stitch_stops_at_a_blank_row() -> None:
+    head, tail = _split("⏺ Opened " + _URL, _WRAP)
+    candidate = head[len("⏺ Opened ") :]
+    assert resolve_wrapped_url(candidate, head, [], ["", "  " + tail], _WRAP) is None
+
+
+def test_url_stitch_that_adds_nothing_returns_none() -> None:
+    # A neighbour joins on, but no URL match reaches across the seam — the
+    # click opens what it matched rather than a re-derived same-again.
+    url = "https://example.com/pr/303"
+    row = "⏺ Opened " + url
+    assert resolve_wrapped_url(url, row, [], ["  ' and prose"], len(row)) is None
 
 
 def test_token_at_column() -> None:
