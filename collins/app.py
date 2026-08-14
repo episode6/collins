@@ -275,13 +275,17 @@ row.session-child menubutton.pr-mark > button {
   padding: 0 6px 0 4px;
 }
 /* what stands in that slot when the session has no pull requests: the agent's
-   own mark (see SessionRow). Its margins put it exactly where the mark's base
-   icon sits -- 8px in from the guide line, being the mark button's 4px of left
-   padding plus the 4px of overhang combined_icon reserves for a badge, and the
-   same 6px off the title as above -- so a session that opens its first PR
-   trades one for the other without the title moving under it. */
+   own mark (see SessionRow). Its margins center it on the same 20px slot the
+   mark occupies (16px of icon plus 4px of badge overhang, held off the guide
+   line by the button's 4px above), rather than standing it where the mark's
+   base icon starts: a badged mark fills that slot corner to corner and reads
+   as centered on it, so an icon aligned to the base alone sits visibly high
+   and to the right of the marks above and below it (prmenu._mark centers its
+   own unbadged bases for the same reason). Left and right margins together
+   still come to the mark's 4 + 6, so a session that opens its first PR trades
+   one for the other without the title moving under it. */
 row.session-child image.agent-mark {
-  margin: 0 6px 0 8px;
+  margin: 0 8px 0 6px;
 }
 row.session-child checkbutton > check {
   min-height: 14px;

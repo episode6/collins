@@ -394,10 +394,11 @@ class PlaceholderRow(Gtk.ListBoxRow):
         box.set_valign(Gtk.Align.CENTER)  # match SessionRow in a taller row
         box.set_margin_top(4)  # match SessionRow: the flat button fills the row
         box.set_margin_bottom(4)
-        # Stands in for the mark column a SessionRow leads with -- its button's
-        # 4px of left padding plus the 4px of badge overhang the mark itself
-        # carries -- so this label starts where the marks above it do.
-        box.set_margin_start(8)
+        # Stands in for the mark column a SessionRow leads with -- the button's
+        # 4px of left padding plus half the badge overhang the mark centers
+        # itself in (see prmenu._mark) -- so this label starts where the icons
+        # above it do.
+        box.set_margin_start(6)
 
         label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
         # Full strength, like the real rows with a tab open: dimming now means
@@ -456,8 +457,9 @@ class NewThreadRow(Gtk.ListBoxRow):
         box.set_margin_top(4)
         box.set_margin_bottom(4)
         # As in PlaceholderRow: stand in for the mark column (button padding
-        # plus badge overhang) so the offer starts where a real row's mark does.
-        box.set_margin_start(8)
+        # plus half the overhang) so the offer starts where a real row's mark
+        # does.
+        box.set_margin_start(6)
 
         label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
         label.add_css_class("session-title")
