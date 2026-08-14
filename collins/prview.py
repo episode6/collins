@@ -201,8 +201,7 @@ class PrViewPage(Adw.Bin):
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._mark_slot = Adw.Bin(child=prmenu.status_icon(pr))
         self._mark_slot.set_valign(Gtk.Align.START)
-        # Optically centers the mark (and the spinner below) on the title's
-        # first line of text.
+        # Optically centers the mark on the title's first line of text.
         self._mark_slot.set_margin_top(4)
         top.append(self._mark_slot)
         self._number = Gtk.Label(label=f"#{pr.number}")
@@ -219,17 +218,23 @@ class PrViewPage(Adw.Bin):
         self._title.set_ellipsize(Pango.EllipsizeMode.END)
         top.append(self._title)
 
-        self._spinner = Gtk.Spinner()
-        self._spinner.set_visible(False)
-        self._spinner.set_valign(Gtk.Align.START)
-        self._spinner.set_margin_top(4)
-        top.append(self._spinner)
+        # The Refresh button and the spinner that stands in for it while a
+        # fetch is in flight, as two pages of one Stack: the spinner says the
+        # reload is running where the button that asked for it was, rather
+        # than beside a greyed-out copy of it, and the stack measures as the
+        # button either way so the header's buttons never shift.
         self._refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")
         self._refresh_btn.add_css_class("flat")
-        self._refresh_btn.set_valign(Gtk.Align.START)
         self._refresh_btn.set_tooltip_text(_("Reload this pull request"))
         self._refresh_btn.connect("clicked", lambda *_a: self.refresh())
-        top.append(self._refresh_btn)
+        self._spinner = Gtk.Spinner()
+        self._spinner.set_halign(Gtk.Align.CENTER)
+        self._spinner.set_valign(Gtk.Align.CENTER)
+        self._refresh_slot = Gtk.Stack()
+        self._refresh_slot.set_valign(Gtk.Align.START)
+        self._refresh_slot.add_named(self._refresh_btn, "button")
+        self._refresh_slot.add_named(self._spinner, "busy")
+        top.append(self._refresh_slot)
         github_btn = Gtk.Button(icon_name="github-symbolic")
         github_btn.add_css_class("flat")
         github_btn.set_valign(Gtk.Align.START)
@@ -467,9 +472,8 @@ class PrViewPage(Adw.Bin):
             return
         self._fetched_at = now
         self._fetching = True
-        self._spinner.set_visible(True)
         self._spinner.start()
-        self._refresh_btn.set_sensitive(False)
+        self._refresh_slot.set_visible_child_name("busy")
         self._fetch_gen += 1
         gen = self._fetch_gen
         url = self.pr_url
@@ -489,8 +493,12 @@ class PrViewPage(Adw.Bin):
             return GLib.SOURCE_REMOVE  # a newer fetch owns the page now
         self._fetching = False
         self._spinner.stop()
-        self._spinner.set_visible(False)
-        self._refresh_btn.set_sensitive(True)
+        self._refresh_slot.set_visible_child_name("button")
+        # Whatever this read says, the buttons that asked for it let go of
+        # their spinners here: an action holds its own until the page it
+        # changed has been re-read, and a failed read is still an answer.
+        self._actions.settled()
+        self._composer.settled()
         if detail is None:
             self._banner_label.set_text(
                 _("Couldn't load this pull request — is the GitHub CLI signed in?")
@@ -952,6 +960,43 @@ class _WrapRow(Gtk.Widget):
         Gtk.Widget.do_dispose(self)
 
 
+class _BusyButton(Gtk.Button):
+    """A button that spins in place of its own word while its action runs.
+
+    The word and the spinner are two pages of one Stack, which measures as the
+    larger of the two whichever is showing: the button keeps the width it had
+    when it was pressed, so the row it sits on doesn't reshuffle under the
+    pointer for the second or two gh takes. And the press reads as *this*
+    button working — which a lone spinner parked at the end of the row never
+    quite said.
+
+    *child* is for the buttons whose word comes with something else (the
+    Claude button's icon): the whole of it swaps for the spinner, and
+    `set_word` is then the caller's own business.
+    """
+
+    __gtype_name__ = "CollinsPrBusyButton"
+
+    def __init__(self, label: str = "", child: Gtk.Widget | None = None) -> None:
+        super().__init__()
+        self._word = Gtk.Label(label=label) if child is None else child
+        self._spinner = Gtk.Spinner()
+        self._spinner.set_halign(Gtk.Align.CENTER)
+        self._spinner.set_valign(Gtk.Align.CENTER)
+        self._stack = Gtk.Stack()
+        self._stack.add_named(self._word, "word")
+        self._stack.add_named(self._spinner, "busy")
+        self.set_child(self._stack)
+
+    def set_word(self, label: str) -> None:
+        """Say *label* — `set_label` would throw the stack away."""
+        self._word.set_label(label)
+
+    def set_busy(self, busy: bool) -> None:
+        self._stack.set_visible_child_name("busy" if busy else "word")
+        self._spinner.set_spinning(busy)
+
+
 class _ActionBar(Gtk.Box):
     """The button that moves the pull request along, beside the view switcher.
 
@@ -963,10 +1008,13 @@ class _ActionBar(Gtk.Box):
     choose between), so it wears the accent.
 
     The button is `practions.perform` on a worker thread behind the merge's
-    own confirmation dialog, the bar held insensitive until the answer lands
-    (one press, one merge). A failure is gh's own sentence in a dialog;
-    success is quiet, and *on_done* re-reads the PR — which is what takes the
-    button away, since the state it was offered for has just changed.
+    own confirmation dialog, spinning where its word was and the bar held
+    insensitive until the answer lands (one press, one merge). A failure is
+    gh's own sentence in a dialog; success is quiet, and *on_done* re-reads
+    the PR — which is what takes the button away, since the state it was
+    offered for has just changed. The spinner outlives the merge itself and
+    stops on that re-read (`settled`): the button is the same width all the
+    way through, and never comes back live for the moment between the two.
 
     It says the action's `short` wording — "Merge", not "Merge pull request" —
     with the full sentence on its tooltip: this row shares a line with the
@@ -983,22 +1031,23 @@ class _ActionBar(Gtk.Box):
         self._pr: PullRequest | None = None
         self._actions: dict[str, practions.Action] = {}
         self._running = False
+        # Whether the bar is waiting on the page's re-read of an action of its
+        # own that landed — what `settled` is allowed to let go of. A fetch
+        # that lands for any other reason (the page came back into view while
+        # a merge is still running) must not.
+        self._holding = False
 
         # No spacer at the head of the row: the switcher's CenterBox already
         # pins the whole bar to the page's end, and a wrapped line with nothing
         # expanding on it is laid out flush to that same edge (_WrapLayout).
         row = _WrapRow()
-        self._spinner = Gtk.Spinner()
-        self._spinner.set_visible(False)
-        self._spinner.set_valign(Gtk.Align.CENTER)
-        row.append(self._spinner)
         # Built once and shown by key, rather than rebuilt per sync: the set is
         # closed (three actions, at most one of them showing at a time), and a
         # button that only ever changes its visibility can't lose a click to a
         # rebuild landing under the pointer.
-        self._buttons: dict[str, Gtk.Button] = {}
+        self._buttons: dict[str, _BusyButton] = {}
         for key in (practions.READY, practions.AUTO_MERGE, practions.MERGE):
-            button = Gtk.Button()
+            button = _BusyButton()
             button.add_css_class("suggested-action")
             button.connect("clicked", self._on_clicked, key)
             row.append(button)
@@ -1015,9 +1064,28 @@ class _ActionBar(Gtk.Box):
             button.set_visible(action is not None)
             if action is None:
                 continue
-            button.set_label(action.short or action.label)
+            button.set_word(action.short or action.label)
             button.set_tooltip_text(action.tooltip)
         self.set_visible(bool(self._actions))
+
+    def settled(self) -> None:
+        """The page's re-read has landed: the pressed button lets its word
+        back and the bar goes live again.
+
+        Called by the page rather than by the action's own landing, and that
+        is the point — a merge that worked is followed by the fetch that takes
+        the button away, and a bar that came back to life in between offered a
+        second press of an action that had already happened. Only a read this
+        bar is waiting on releases it: any other fetch may land mid-merge."""
+        if self._holding:
+            self._release()
+
+    def _release(self) -> None:
+        self._holding = False
+        self._running = False
+        self.set_sensitive(True)
+        for button in self._buttons.values():
+            button.set_busy(False)
 
     def _on_clicked(self, button: Gtk.Button, key: str) -> None:
         pr = self._pr
@@ -1043,8 +1111,7 @@ class _ActionBar(Gtk.Box):
             return
         self._running = True
         self.set_sensitive(False)
-        self._spinner.set_visible(True)
-        self._spinner.start()
+        self._buttons[action.key].set_busy(True)
 
         def work() -> None:
             try:
@@ -1057,17 +1124,17 @@ class _ActionBar(Gtk.Box):
         threading.Thread(target=work, name="pr-view-action", daemon=True).start()
 
     def _landed(self, action: practions.Action, error: str | None) -> bool:
-        self._running = False
-        self.set_sensitive(True)
-        self._spinner.stop()
-        self._spinner.set_visible(False)
         if error:
+            self._release()  # nothing is re-reading the page: let go here
             root = self.get_root()
             if root is not None:
                 dialogs.error_dialog(
                     root, _("{action} failed").format(action=action.label), error
                 )
             return GLib.SOURCE_REMOVE
+        # Still spinning, still held: _on_done re-reads the PR, and what this
+        # bar offers next is that read's answer (see `settled`).
+        self._holding = True
         self._on_done()
         return GLib.SOURCE_REMOVE
 
@@ -1077,13 +1144,16 @@ class _Composer(Gtk.Box):
 
     One per page, created once and re-appended across rebuilds — the rebuild
     that lands a background refresh must not eat a half-typed comment. The
-    buttons run practions' write calls on a worker thread, the whole composer
-    held insensitive until the answer lands (one press, one post): Comment
-    posts the text as an issue comment, Approve / Request changes submit a
-    review with the text along. Comment and Request changes need words to go
-    — GitHub refuses both bare — so they grey out over an empty box; Approve
-    stands alone. A failure comes back as gh's own sentence in a dialog, the
-    text kept where it was typed; success clears the box and re-reads the PR.
+    buttons run practions' write calls on a worker thread, the pressed one
+    spinning where its word was and the whole composer held insensitive until
+    the answer lands (one press, one post): Comment posts the text as an issue
+    comment, Approve / Request changes submit a review with the text along.
+    Comment and Request changes need words to go — GitHub refuses both bare —
+    so they grey out over an empty box; Approve stands alone. A failure comes
+    back as gh's own sentence in a dialog, the text kept where it was typed;
+    success clears the box and re-reads the PR, the spinner running on until
+    that read lands (`settled`) so the row holds still while the timeline
+    above it is still catching up with what was just posted.
 
     The Claude button beside them is the complement, not a competitor, and
     which complement depends on who is waiting: "Address comments" while
@@ -1107,6 +1177,13 @@ class _Composer(Gtk.Box):
         self._on_posted = on_posted
         self._pr: PullRequest | None = None
         self._posting = False
+        # The button whose press is in flight — the one wearing the spinner,
+        # until `settled` gives it its word back.
+        self._busy_btn: _BusyButton | None = None
+        # Whether the composer is waiting on the page's re-read of a post of
+        # its own — what `settled` may release. A fetch landing for any other
+        # reason while a post is still in flight must not.
+        self._holding = False
         # Which of its two jobs the Claude button is doing, as one of
         # practions' keys — set by every sync, and "" until the first one.
         self._claude_key = ""
@@ -1143,7 +1220,7 @@ class _Composer(Gtk.Box):
         claude.append(Gtk.Image.new_from_icon_name("agent-claude-symbolic"))
         self._claude_label = Gtk.Label()
         claude.append(self._claude_label)
-        self._reply_btn = Gtk.Button(child=claude)
+        self._reply_btn = _BusyButton(child=claude)
         self._reply_btn.add_css_class("flat")
         self._reply_btn.connect("clicked", self._on_claude)
         # Insensitive widgets are skipped when GTK picks what the pointer is
@@ -1154,31 +1231,31 @@ class _Composer(Gtk.Box):
         self._reply_wrap.set_visible(False)  # until a sync says which job it has
         row.append(self._reply_wrap)
         row.append(Gtk.Box(hexpand=True))
-        self._spinner = Gtk.Spinner()
-        self._spinner.set_visible(False)
-        row.append(self._spinner)
-        self._request_btn = Gtk.Button(label=_("Request changes"))
+        self._request_btn = _BusyButton(label=_("Request changes"))
         self._request_btn.connect(
             "clicked",
             lambda *_a: self._post(
+                self._request_btn,
                 _("Request changes"),
                 lambda pr, body: practions.review(pr, practions.REQUEST_CHANGES, body),
             ),
         )
         row.append(self._request_btn)
-        self._approve_btn = Gtk.Button(label=_("Approve"))
+        self._approve_btn = _BusyButton(label=_("Approve"))
         self._approve_btn.connect(
             "clicked",
             lambda *_a: self._post(
+                self._approve_btn,
                 _("Approve"),
                 lambda pr, body: practions.review(pr, practions.APPROVE, body),
             ),
         )
         row.append(self._approve_btn)
-        self._comment_btn = Gtk.Button(label=_("Comment"))
+        self._comment_btn = _BusyButton(label=_("Comment"))
         self._comment_btn.add_css_class("suggested-action")
         self._comment_btn.connect(
-            "clicked", lambda *_a: self._post(_("Comment"), practions.comment)
+            "clicked",
+            lambda *_a: self._post(self._comment_btn, _("Comment"), practions.comment),
         )
         row.append(self._comment_btn)
         self.append(row)
@@ -1256,7 +1333,7 @@ class _Composer(Gtk.Box):
         # Ctrl+Enter comments, as on GitHub itself; a bare Enter stays a newline.
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and state & Gdk.ModifierType.CONTROL_MASK:
             if self._comment_btn.get_sensitive():
-                self._post(_("Comment"), practions.comment)
+                self._post(self._comment_btn, _("Comment"), practions.comment)
             return Gdk.EVENT_STOP
         return Gdk.EVENT_PROPAGATE
 
@@ -1268,6 +1345,7 @@ class _Composer(Gtk.Box):
             # Posted on the PR, not typed at the session — and the box keeps
             # whatever is in it: asking for a review isn't sending a comment.
             self._post(
+                self._reply_btn,
                 _("Request review"),
                 lambda pr, _body: practions.perform(practions.REVIEW, pr),
                 clear=False,
@@ -1280,23 +1358,24 @@ class _Composer(Gtk.Box):
 
     def _post(
         self,
+        button: _BusyButton,
         label: str,
         run: Callable[[PullRequest, str], str | None],
         clear: bool = True,
     ) -> None:
         """Run one write call off the main loop, the composer held insensitive
-        until it lands. *label* is the button's own word, for the failure
-        dialog's heading; *clear* is whether landing it empties the box — true
-        for everything that posts what was typed there, false for the calls
-        that only happen to be run from the same row."""
+        and *button* spinning until it lands. *label* is the button's own word,
+        for the failure dialog's heading; *clear* is whether landing it empties
+        the box — true for everything that posts what was typed there, false
+        for the calls that only happen to be run from the same row."""
         pr = self._pr
         if pr is None or self._posting:
             return
         body = self._body().strip()
         self._posting = True
         self.set_sensitive(False)
-        self._spinner.set_visible(True)
-        self._spinner.start()
+        self._busy_btn = button
+        button.set_busy(True)
 
         def work() -> None:
             try:
@@ -1309,19 +1388,35 @@ class _Composer(Gtk.Box):
         threading.Thread(target=work, name="pr-post", daemon=True).start()
 
     def _landed(self, label: str, error: str | None, clear: bool) -> bool:
-        self._posting = False
-        self.set_sensitive(True)
-        self._spinner.stop()
-        self._spinner.set_visible(False)
         if error:
+            self._release()  # nothing is re-reading the page: let go here
             root = self.get_root()
             if root is not None:
                 dialogs.error_dialog(root, _("{action} failed").format(action=label), error)
             return GLib.SOURCE_REMOVE
         if clear:
             self._text.get_buffer().set_text("")  # posted: the box has done its job
+        # Still spinning, still held: _on_posted re-reads the PR, and the
+        # word this posted only shows up in the timeline when that lands.
+        self._holding = True
         self._on_posted()
         return GLib.SOURCE_REMOVE
+
+    def settled(self) -> None:
+        """The page's re-read has landed (or gave up): the pressed button
+        takes its word back and the composer goes live again. Only a read this
+        composer is waiting on releases it — any other fetch may land while a
+        post of its own is still in flight."""
+        if self._holding:
+            self._release()
+
+    def _release(self) -> None:
+        self._holding = False
+        self._posting = False
+        self.set_sensitive(True)
+        if self._busy_btn is not None:
+            self._busy_btn.set_busy(False)
+            self._busy_btn = None
 
 
 class _ThreadCard(Gtk.Box):
@@ -1334,9 +1429,9 @@ class _ThreadCard(Gtk.Box):
     the way GitHub folds them. Under the comments sit Reply — a composer
     behind a revealer, posting through `practions.reply_in_thread` — and
     Resolve/Unresolve. One press, one mutation: the card holds insensitive
-    under a spinner until the answer lands, a failure comes back as gh's own
-    sentence with the text kept, and success hands off to the page's posted
-    path, which re-reads everything. Every fetch rebuilds the cards
+    with the pressed button spinning in place of its own word until the answer
+    lands, a failure comes back as gh's own sentence with the text kept, and
+    success hands off to the page's posted path, which re-reads everything. Every fetch rebuilds the cards
     wholesale (and each thread gets one per view), so the per-thread state
     lives in the page's containers rather than in this widget — the reply
     draft in *drafts* and the in-flight guard in *busy*, both keyed by
@@ -1362,6 +1457,8 @@ class _ThreadCard(Gtk.Box):
         self._busy = busy
         self._on_posted = on_posted
         self._posting = False
+        # The button whose press is in flight — the one wearing the spinner.
+        self._busy_btn: _BusyButton | None = None
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
         anchor = thread.path if thread.line is None else f"{thread.path}:{thread.line}"
@@ -1424,17 +1521,14 @@ class _ThreadCard(Gtk.Box):
         reply.connect("clicked", self._on_reply_toggled)
         row.append(reply)
         row.append(Gtk.Box(hexpand=True))
-        self._spinner = Gtk.Spinner()
-        self._spinner.set_visible(False)
-        row.append(self._spinner)
         resolved = self._thread.is_resolved
-        resolve = Gtk.Button(label=_("Unresolve") if resolved else _("Resolve"))
-        resolve.add_css_class("flat")
-        resolve.set_tooltip_text(
+        self._resolve_btn = _BusyButton(label=_("Unresolve") if resolved else _("Resolve"))
+        self._resolve_btn.add_css_class("flat")
+        self._resolve_btn.set_tooltip_text(
             _("Reopen this thread") if resolved else _("Mark this thread resolved")
         )
-        resolve.connect("clicked", lambda *_a: self._set_resolved(not resolved))
-        row.append(resolve)
+        self._resolve_btn.connect("clicked", lambda *_a: self._set_resolved(not resolved))
+        row.append(self._resolve_btn)
         return row
 
     def _reply_editor(self) -> Gtk.Widget:
@@ -1454,7 +1548,7 @@ class _ThreadCard(Gtk.Box):
         entry.set_min_content_height(48)
         entry.set_max_content_height(160)
         entry.set_propagate_natural_height(True)
-        self._post_btn = Gtk.Button(label=_("Post reply"))
+        self._post_btn = _BusyButton(label=_("Post reply"))
         self._post_btn.add_css_class("suggested-action")
         self._post_btn.connect("clicked", lambda *_a: self._post_reply())
         buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -1497,6 +1591,7 @@ class _ThreadCard(Gtk.Box):
         if not body:
             return
         self._post(
+            self._post_btn,
             _("Reply"),
             lambda: practions.reply_in_thread(self._pr, self._thread.id, body),
             sent_draft=True,
@@ -1504,21 +1599,29 @@ class _ThreadCard(Gtk.Box):
 
     def _set_resolved(self, resolved: bool) -> None:
         self._post(
+            self._resolve_btn,
             _("Resolve") if resolved else _("Unresolve"),
             lambda: practions.set_thread_resolved(self._pr, self._thread.id, resolved),
         )
 
-    def _post(self, label: str, run: Callable[[], str | None], sent_draft: bool = False) -> None:
+    def _post(
+        self,
+        button: _BusyButton,
+        label: str,
+        run: Callable[[], str | None],
+        sent_draft: bool = False,
+    ) -> None:
         """One thread mutation off the main loop, this card held insensitive
-        until it lands. *label* is the button's own word, for the failure
-        dialog's heading; *sent_draft* says success should clear the reply."""
+        and *button* spinning until it lands. *label* is the button's own word,
+        for the failure dialog's heading; *sent_draft* says success should
+        clear the reply."""
         if self._posting or self._thread.id in self._busy:
             return  # this card, its twin in the other view, or a rebuilt copy
         self._posting = True
         self._busy.add(self._thread.id)
         self.set_sensitive(False)
-        self._spinner.set_visible(True)
-        self._spinner.start()
+        self._busy_btn = button
+        button.set_busy(True)
 
         def work() -> None:
             try:
@@ -1534,8 +1637,9 @@ class _ThreadCard(Gtk.Box):
         self._posting = False
         self._busy.discard(self._thread.id)
         self.set_sensitive(True)
-        self._spinner.stop()
-        self._spinner.set_visible(False)
+        if self._busy_btn is not None:
+            self._busy_btn.set_busy(False)
+            self._busy_btn = None
         if error:
             root = self.get_root()
             if root is not None:
