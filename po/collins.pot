@@ -2228,10 +2228,6 @@ msgstr ""
 msgid "Reload this pull request"
 msgstr ""
 
-#: collins/prview.py:128
-msgid "Pull request actions"
-msgstr ""
-
 #: collins/prview.py:262
 msgid "Couldn't load this pull request — is the GitHub CLI signed in?"
 msgstr ""

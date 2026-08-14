@@ -18,8 +18,10 @@ On the switcher's own row, at its end, sits the action that moves the PR
 itself along, as one button: whatever `practions.header_actions` says its
 state offers — "Ready" for a draft, "Auto-Merge" or "Merge" for an open one,
 whichever fits its checks, naming in full on its tooltip what it is about to
-do — behind the same confirmation and the same `gh` call the actions menu
-runs it with (`_ActionBar`), and no button at all where a PR offers none.
+do — behind the same confirmation and the same `gh` call the chip's actions
+menu runs it with (`_ActionBar`), and no button at all where a PR offers
+none. The page carries no menu of its own: what it doesn't draw as a button
+here, a chip's right-click menu still offers for the same PR.
 
 The Conversation column ends in the page's write half: a composer that posts
 its text as a comment or a review verdict through practions' write calls
@@ -65,7 +67,6 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
-from dataclasses import replace
 
 import gi
 
@@ -149,8 +150,9 @@ class PrViewPage(Adw.Bin):
     Constructed from the summary record a chip already holds — enough for the
     tab title and header before anything is fetched — and filled in by the
     first `prdetail.fetch`. *host_factory* is the owning tab's ActionHost
-    builder (`TerminalTab._pr_action_host`): the header's actions menu is the
-    same menu the chip opens, minus the row that would open this very page.
+    builder (`TerminalTab._pr_action_host`): how the page reaches the session
+    the pull request belongs to — the composer's Claude button asks it whether
+    a prompt can be typed there, and every landed action asks it to re-poll.
     """
 
     page_kind = "pr"
@@ -236,14 +238,6 @@ class PrViewPage(Adw.Bin):
         github_btn.set_tooltip_text(open_tooltip(pr.url))
         github_btn.connect("clicked", lambda b: open_uri(b, self.pr_url))
         top.append(github_btn)
-        self._menu = prmenu.new_popover(Gtk.PositionType.BOTTOM)
-        menu_btn = Gtk.MenuButton(icon_name="view-more-horizontal-symbolic")
-        menu_btn.add_css_class("flat")
-        menu_btn.set_valign(Gtk.Align.START)
-        menu_btn.set_tooltip_text(_("Pull request actions"))
-        menu_btn.set_popover(self._menu)
-        menu_btn.set_create_popup_func(self._fill_menu)
-        top.append(menu_btn)
         header.append(top)
 
         sub = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -329,10 +323,10 @@ class PrViewPage(Adw.Bin):
         files_paned.set_position(_FILE_LIST_WIDTH)
 
         # -- what the PR's state offers ---------------------------------------
-        # On the switcher's row rather than inside the actions menu: marking a
+        # On the switcher's row rather than inside an actions menu: marking a
         # draft ready and merging are what a PR page is *for*, and both were
-        # two clicks and a submenu away. The menu keeps them too — it is the
-        # same practions answer, drawn twice.
+        # two clicks and a submenu away. This is the page's only copy of them
+        # now — the chip's menu still holds the full practions list.
         self._actions = _ActionBar(self._acted)
         self._actions.set_valign(Gtk.Align.CENTER)
 
@@ -514,21 +508,6 @@ class PrViewPage(Adw.Bin):
         return GLib.SOURCE_REMOVE
 
     # -- header ---------------------------------------------------------------
-
-    def _fill_menu(self, _button: Gtk.MenuButton) -> None:
-        """The chip's actions menu, rebuilt fresh on every open — minus
-        "View in Collins" (this page *is* the view), and with a refresh that
-        also re-reads the page an action just changed."""
-        host = self._host_factory()
-        host = replace(
-            host,
-            view_pr=None,
-            # The deep link stays, as an in-page jump: from here "view the
-            # unresolved comments" means scroll to them, not open a twin.
-            view_unresolved=lambda _pr: self.reveal_unresolved(),
-            refresh=lambda base=host.refresh: (base(), self.refresh()),
-        )
-        prmenu.show_actions(self._menu, self._pr, host)
 
     def _sync_header(self) -> None:
         pr = self._pr
