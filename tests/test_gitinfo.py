@@ -1,5 +1,6 @@
-"""Tests for gitinfo: current_branch, which is pure filesystem parsing and
-needs no git, and has_changes/ignored_names, the calls that shell out to it."""
+"""Tests for gitinfo: current_branch and github_url, which are pure filesystem
+parsing and need no git, and has_changes/ignored_names, the calls that shell
+out to it."""
 
 import shutil
 import subprocess
@@ -7,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from collins.gitinfo import current_branch, has_changes, ignored_names
+from collins.gitinfo import current_branch, github_url, has_changes, ignored_names
 
 
 def make_repo(root: Path, head: str = "ref: refs/heads/main\n") -> Path:
@@ -84,6 +85,125 @@ def test_broken_pointer_file(tmp_path):
     worktree.mkdir()
     (worktree / ".git").write_text("not a gitdir line\n")
     assert current_branch(worktree) is None
+
+
+# -- github_url ---------------------------------------------------------------
+
+
+def with_remotes(root: Path, config: str) -> Path:
+    """A repository whose config holds *config* — the remote stanzas under
+    test, indented the way git writes them."""
+    repo = make_repo(root)
+    (repo / ".git" / "config").write_text(config)
+    return repo
+
+
+ORIGIN = '[remote "origin"]\n\turl = {url}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n'
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/episode6/collins.git",
+        "https://github.com/episode6/collins",
+        "https://ghackett@github.com/episode6/collins.git",
+        "http://github.com/episode6/collins",
+        "https://www.github.com/episode6/collins",
+        "git@github.com:episode6/collins.git",
+        "git@github.com:episode6/collins",
+        "ssh://git@github.com/episode6/collins.git",
+        "ssh://git@github.com:22/episode6/collins.git",
+        "git://github.com/episode6/collins.git",
+    ],
+)
+def test_every_way_a_github_remote_is_written(tmp_path, url):
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url=url))
+    assert github_url(repo) == "https://github.com/episode6/collins"
+
+
+def test_from_a_subdirectory(tmp_path):
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url="git@github.com:e6/c.git"))
+    sub = repo / "a" / "b"
+    sub.mkdir(parents=True)
+    assert github_url(sub) == "https://github.com/e6/c"
+
+
+def test_origin_wins_over_other_remotes(tmp_path):
+    config = (
+        '[remote "fork"]\n\turl = git@github.com:someone/collins.git\n'
+        + ORIGIN.format(url="git@github.com:episode6/collins.git")
+    )
+    repo = with_remotes(tmp_path / "repo", config)
+    assert github_url(repo) == "https://github.com/episode6/collins"
+
+
+def test_upstream_when_origin_is_elsewhere(tmp_path):
+    """The remotes are walked in order until one has a GitHub page: origin on
+    another host doesn't end the search."""
+    config = (
+        ORIGIN.format(url="git@gitlab.com:episode6/collins.git")
+        + '[remote "upstream"]\n\turl = git@github.com:episode6/collins.git\n'
+    )
+    repo = with_remotes(tmp_path / "repo", config)
+    assert github_url(repo) == "https://github.com/episode6/collins"
+
+
+def test_an_unconventional_remote_name_still_counts(tmp_path):
+    repo = with_remotes(tmp_path / "repo", '[remote "gh"]\n\turl = git@github.com:e6/c.git\n')
+    assert github_url(repo) == "https://github.com/e6/c"
+
+
+def test_other_sections_are_not_remotes(tmp_path):
+    """A url outside a remote stanza — `[lfs]`, say — isn't one."""
+    config = "[core]\n\tbare = false\n[lfs]\n\turl = https://github.com/e6/c.git\n"
+    assert github_url(with_remotes(tmp_path / "repo", config)) is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "git@gitlab.com:episode6/collins.git",
+        "https://github.example.com/episode6/collins.git",
+        "https://notgithub.com/episode6/collins",
+        "/srv/git/collins.git",
+        "../sibling-checkout",
+        "https://github.com/episode6",  # no repo half
+        "https://github.com/episode6/collins/extra",
+        "https://github.com/../..",
+        "javascript:alert(1)//github.com/e6/c",
+        "",
+    ],
+)
+def test_remotes_with_no_github_page(tmp_path, url):
+    assert github_url(with_remotes(tmp_path / "repo", ORIGIN.format(url=url))) is None
+
+
+def test_no_remotes_at_all(tmp_path):
+    assert github_url(with_remotes(tmp_path / "repo", "[core]\n\tbare = false\n")) is None
+
+
+def test_no_config_file(tmp_path):
+    assert github_url(make_repo(tmp_path / "repo")) is None
+
+
+def test_not_a_repository(tmp_path):
+    assert github_url(tmp_path) is None
+    assert github_url(None) is None
+    assert github_url(tmp_path / "gone") is None
+
+
+def test_a_worktree_reads_the_main_checkouts_config(tmp_path):
+    """The linked worktree has a HEAD of its own but no config; `commondir`
+    is what leads back to the one with the remotes in it."""
+    main = with_remotes(tmp_path / "main", ORIGIN.format(url="git@github.com:e6/c.git"))
+    wt_git_dir = main / ".git" / "worktrees" / "wt"
+    wt_git_dir.mkdir(parents=True)
+    (wt_git_dir / "HEAD").write_text("ref: refs/heads/wt-branch\n")
+    (wt_git_dir / "commondir").write_text("../..\n")
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / ".git").write_text(f"gitdir: {wt_git_dir}\n")
+    assert github_url(worktree) == "https://github.com/e6/c"
 
 
 # -- has_changes ------------------------------------------------------------
@@ -229,3 +349,24 @@ def test_no_names_asks_nothing(repo):
 def test_ignored_names_without_git(repo, monkeypatch):
     monkeypatch.setattr("collins.gitinfo.shutil.which", lambda _name: None)
     assert ignored_names(repo, ["a.txt"]) == set()
+
+
+# -- github_url, against a real repository -------------------------------------
+# (down here for the `repo` fixture, which the parsing tests above don't need)
+
+
+@needs_git
+def test_a_remote_git_itself_wrote(repo):
+    """The config git writes for `remote add` is a form this parses."""
+    _git(repo, "remote", "add", "origin", "git@github.com:episode6/collins.git")
+    assert github_url(repo) == "https://github.com/episode6/collins"
+
+
+@needs_git
+def test_a_real_worktrees_config(repo, tmp_path):
+    """The commondir hop, as git lays it out rather than as the unit test
+    above fakes it."""
+    _git(repo, "remote", "add", "origin", "https://github.com/episode6/collins.git")
+    worktree = tmp_path / "wt"
+    _git(repo, "worktree", "add", "-q", "-b", "wt-branch", str(worktree))
+    assert github_url(worktree) == "https://github.com/episode6/collins"
