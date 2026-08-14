@@ -27,7 +27,8 @@ its text as a comment or a review verdict through practions' write calls
 types the COMMENTS prompt into the owning session ("Address comments", while
 someone is waiting on a reply) or asks the repository's workflow for a review
 ("Request review") — the composer is for answering a reviewer yourself, the
-button for making the agent do it.
+button for making the agent do it. The verdicts sit out a pull request the
+signed-in account opened, which GitHub won't let anyone review their own of.
 
 Review threads render as their own cards (`_ThreadCard`): anchored in the
 Conversation timeline by when they started, and again under their file's
@@ -618,7 +619,7 @@ class PrViewPage(Adw.Bin):
             empty = Gtk.Label(label=_("No comments yet."), xalign=0.0)
             empty.add_css_class("dim-label")
             self._content.append(empty)
-        self._composer.sync(self._pr)
+        self._composer.sync(self._pr, detail.viewer_is_author)
         self._content.append(self._composer)
 
     def _acted(self) -> None:
@@ -1085,6 +1086,12 @@ class _Composer(Gtk.Box):
     stands alone. A failure comes back as gh's own sentence in a dialog, the
     text kept where it was typed; success clears the box and re-reads the PR.
 
+    The two verdicts are only there to be pressed on somebody else's pull
+    request: GitHub won't take a review of your own, so on a PR the signed-in
+    account opened (see prdetail's `viewer_is_author`) they aren't drawn at
+    all — a button whose only possible answer is a refusal is worse than no
+    button. Commenting is the half that is always yours to do.
+
     The Claude button beside them is the complement, not a competitor, and
     which complement depends on who is waiting: "Address comments" while
     somebody's word is unanswered, typing the COMMENTS prompt into the owning
@@ -1184,14 +1191,16 @@ class _Composer(Gtk.Box):
         self.append(row)
         self._sync_buttons()
 
-    def sync(self, pr: PullRequest) -> None:
+    def sync(self, pr: PullRequest, viewer_is_author: bool = False) -> None:
         """Point the composer at *pr* as freshly fetched, and re-read the
-        session behind it. Verdicts only show for a live PR — GitHub refuses
-        a review on a merged or closed one, commenting stays open forever."""
+        session behind it. Verdicts only show for a live PR that somebody else
+        opened — GitHub refuses a review on a merged or closed one, and
+        refuses your own pull request's approval whatever state it is in.
+        Commenting stays open in every case."""
         self._pr = pr
-        live = pr.state in practions.LIVE
-        self._approve_btn.set_visible(live)
-        self._request_btn.set_visible(live)
+        verdicts = pr.state in practions.LIVE and not viewer_is_author
+        self._approve_btn.set_visible(verdicts)
+        self._request_btn.set_visible(verdicts)
         self._comment_btn.set_tooltip_text(_("Comment on {slug}").format(slug=pr.slug))
         self._approve_btn.set_tooltip_text(_("Approve {slug}").format(slug=pr.slug))
         self._request_btn.set_tooltip_text(

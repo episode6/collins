@@ -146,6 +146,9 @@ _RESYNC_WORKERS = 4
 _SWEEP_WORKERS = 8
 # How many PRs a row's tooltip spells out before it starts counting them.
 _MAX_TOOLTIP_PRS = 8
+# The longest a GitHub login can plausibly be: 39 characters for an account,
+# plus room for the ``[bot]`` an app posts under. What `viewer_login` keeps.
+_MAX_LOGIN = 50
 
 # Only fetch for URLs shaped like a PR page. The URL comes out of a transcript
 # — repo content, i.e. untrusted — and lands in an argv, so this also keeps a
@@ -168,6 +171,7 @@ _lock = threading.Lock()
 _statuses: dict[str, tuple[float, dict | None]] = {}
 _inflight: set[str] = set()
 _gh_missing = False  # gh isn't on PATH; nothing to retry against this run
+_viewer = ""  # the signed-in login, once asked for; "" until then (viewer_login)
 
 # What a PR's badge — the small status mark riding its base icon — can say.
 # Pure names rather than icon names: which icon and color each one gets is the
@@ -781,6 +785,34 @@ def gh_text(args: list[str], max_bytes: int | None = None) -> str | None:
         log.info("prstatus: gh %s reply over %s bytes; dropped", " ".join(args), max_bytes)
         return None
     return result.stdout
+
+
+def viewer_login() -> str:
+    """The GitHub login gh is signed in as — "" when it can't be had.
+
+    One ``gh api user`` the first time somebody asks, then that answer for the
+    rest of the run: the signed-in account doesn't change under a running app,
+    and the question is asked on every PR page load (whether the PR is the
+    user's own decides what the page offers to do about it — see
+    prdetail.PullRequestDetail.viewer_is_author). A failure isn't remembered:
+    no gh, offline or signed out is a state that gets better, so the next
+    caller asks again. Never call on the main thread.
+    """
+    global _viewer
+    with _lock:
+        if _viewer:
+            return _viewer
+    if _gh_missing:
+        return ""
+    data = gh_json(["api", "user"])
+    login = data.get("login") if isinstance(data, dict) else None
+    # GitHub's own logins are short; anything else isn't one, and this is the
+    # value every PR's author is compared against.
+    if not isinstance(login, str) or not login or len(login) > _MAX_LOGIN:
+        return ""
+    with _lock:
+        _viewer = login
+    return login
 
 
 def _entry(data: dict) -> dict:

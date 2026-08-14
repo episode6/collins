@@ -95,6 +95,7 @@ def scheduled(monkeypatch):
     urls: list[str] = []
     monkeypatch.setattr(prstatus, "_schedule", urls.append)
     monkeypatch.setattr(prstatus, "_gh_missing", False)
+    monkeypatch.setattr(prstatus, "_viewer", "")  # the run's remembered login
     prstatus._statuses.clear()
     prstatus._inflight.clear()
     yield urls
@@ -794,6 +795,41 @@ def test_gh_run_feeds_stdin_rather_than_argv(monkeypatch):
     argv, kwargs = seen[0]
     assert kwargs["input"] == "A comment body.\n"
     assert "A comment body.\n" not in argv
+
+
+# -- who is signed in (what tells a PR page it is looking at your own PR) -----
+
+
+def test_viewer_login_is_asked_once_and_kept(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        prstatus, "gh_json",
+        lambda args, cwd=None, timeout=None: calls.append(args) or {"login": "ghackett"},
+    )
+    assert prstatus.viewer_login() == "ghackett"
+    assert prstatus.viewer_login() == "ghackett"
+    assert calls == [["api", "user"]]  # the second answer came out of the run's memory
+
+
+def test_viewer_login_doesnt_remember_a_failure(monkeypatch):
+    """Offline, signed out, or a reply that isn't a user: all of them are
+    states that get better, so the next caller asks again."""
+    replies = [None, {"login": ""}, {"login": 7}, {"login": "x" * 200}, {"login": "gh"}]
+    monkeypatch.setattr(
+        prstatus, "gh_json", lambda args, cwd=None, timeout=None: replies.pop(0)
+    )
+    assert [prstatus.viewer_login() for _ in range(4)] == ["", "", "", ""]
+    assert prstatus.viewer_login() == "gh"
+
+
+def test_viewer_login_stays_off_a_machine_without_gh(monkeypatch):
+    calls = []
+    monkeypatch.setattr(prstatus, "_gh_missing", True)
+    monkeypatch.setattr(
+        prstatus, "gh_json", lambda args, cwd=None, timeout=None: calls.append(args)
+    )
+    assert prstatus.viewer_login() == ""
+    assert calls == []
 
 
 # -- absorbing a detail fetch -------------------------------------------------
