@@ -398,6 +398,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Shift+Enter always inserts a newline":
             "Kikapcsolva: az Enter új sort kezd, a Ctrl+Enter küld. "
             "A Shift+Enter mindig új sort kezd",
+        "Composer in new sessions": "Üzenetszerkesztő új munkamenetekben",
+        "Open the composer as soon as a new session starts — floating "
+        "over the agent terminal, or docked as a panel below it, where "
+        "it stays for the session's later visits":
+            "Az üzenetszerkesztő megnyitása, amint egy új munkamenet "
+            "elindul — az ügynökterminál felett lebegve, vagy alatta "
+            "panelként dokkolva, ahol a munkamenet későbbi megnyitásaikor "
+            "is ott marad",
+        "Never": "Soha",
+        "Floating": "Lebegő",
+        "Docked": "Dokkolt",
     },
     "de": {
         "── restored panel history ──": "── wiederhergestellter Panel-Verlauf ──",
@@ -785,6 +796,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Shift+Enter always inserts a newline":
             "Aus: Enter fügt eine neue Zeile ein und Strg+Enter sendet. "
             "Umschalt+Enter fügt immer eine neue Zeile ein",
+        "Composer in new sessions": "Composer in neuen Sitzungen",
+        "Open the composer as soon as a new session starts — floating "
+        "over the agent terminal, or docked as a panel below it, where "
+        "it stays for the session's later visits":
+            "Den Composer öffnen, sobald eine neue Sitzung startet — "
+            "schwebend über dem Agenten-Terminal oder als Panel darunter "
+            "angedockt, wo er auch bei späteren Besuchen der Sitzung bleibt",
+        "Never": "Nie",
+        "Floating": "Schwebend",
+        "Docked": "Angedockt",
     },
     "es": {
         "── restored panel history ──": "── historial del panel restaurado ──",
@@ -1172,6 +1193,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Shift+Enter always inserts a newline":
             "Desactivado: Enter inserta una línea nueva y Ctrl+Enter envía. "
             "Mayús+Enter siempre inserta una línea nueva",
+        "Composer in new sessions": "Redactor en sesiones nuevas",
+        "Open the composer as soon as a new session starts — floating "
+        "over the agent terminal, or docked as a panel below it, where "
+        "it stays for the session's later visits":
+            "Abrir el redactor en cuanto empiece una sesión nueva: "
+            "flotando sobre la terminal del agente, o acoplado como panel "
+            "debajo, donde permanece en las visitas posteriores a la sesión",
+        "Never": "Nunca",
+        "Floating": "Flotante",
+        "Docked": "Acoplado",
     },
     "fr": {
         "── restored panel history ──": "── historique du panneau restauré ──",
@@ -1560,6 +1591,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Shift+Enter always inserts a newline":
             "Désactivé : Entrée insère un saut de ligne et Ctrl+Entrée "
             "envoie. Maj+Entrée insère toujours un saut de ligne",
+        "Composer in new sessions": "Rédacteur dans les nouvelles sessions",
+        "Open the composer as soon as a new session starts — floating "
+        "over the agent terminal, or docked as a panel below it, where "
+        "it stays for the session's later visits":
+            "Ouvrir le rédacteur dès qu'une nouvelle session démarre — "
+            "flottant au-dessus du terminal de l'agent, ou ancré en panneau "
+            "en dessous, où il reste lors des visites suivantes de la session",
+        "Never": "Jamais",
+        "Floating": "Flottant",
+        "Docked": "Ancré",
     },
 }
 

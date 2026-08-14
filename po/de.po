@@ -935,3 +935,18 @@ msgstr "Enter sendet den Composer-Text"
 msgid "Off: Enter inserts a newline and Ctrl+Enter sends. Shift+Enter always inserts a newline"
 msgstr "Aus: Enter fügt eine neue Zeile ein und Strg+Enter sendet. Umschalt+Enter fügt immer eine neue Zeile ein"
 
+msgid "Composer in new sessions"
+msgstr "Composer in neuen Sitzungen"
+
+msgid "Open the composer as soon as a new session starts — floating over the agent terminal, or docked as a panel below it, where it stays for the session's later visits"
+msgstr "Den Composer öffnen, sobald eine neue Sitzung startet — schwebend über dem Agenten-Terminal oder als Panel darunter angedockt, wo er auch bei späteren Besuchen der Sitzung bleibt"
+
+msgid "Never"
+msgstr "Nie"
+
+msgid "Floating"
+msgstr "Schwebend"
+
+msgid "Docked"
+msgstr "Angedockt"
+

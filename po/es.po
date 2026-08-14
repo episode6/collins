@@ -935,3 +935,18 @@ msgstr "Enter envía el texto del redactor"
 msgid "Off: Enter inserts a newline and Ctrl+Enter sends. Shift+Enter always inserts a newline"
 msgstr "Desactivado: Enter inserta una línea nueva y Ctrl+Enter envía. Mayús+Enter siempre inserta una línea nueva"
 
+msgid "Composer in new sessions"
+msgstr "Redactor en sesiones nuevas"
+
+msgid "Open the composer as soon as a new session starts — floating over the agent terminal, or docked as a panel below it, where it stays for the session's later visits"
+msgstr "Abrir el redactor en cuanto empiece una sesión nueva: flotando sobre la terminal del agente, o acoplado como panel debajo, donde permanece en las visitas posteriores a la sesión"
+
+msgid "Never"
+msgstr "Nunca"
+
+msgid "Floating"
+msgstr "Flotante"
+
+msgid "Docked"
+msgstr "Acoplado"
+
