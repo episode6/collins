@@ -432,6 +432,66 @@ def test_session_prs_ignore_corrupt_entries(app_state):
     assert fresh.get_session_prs("bad") == []
 
 
+def _shot(name, last=1.0):
+    return {"key": f"/tmp/{name}.png", "kind": "image", "source": "lightbox",
+            "at": last, "last": last}
+
+
+def test_session_attachments_roundtrip(app_state):
+    state = app_state.AppState()
+    state.set_session_attachments("sid", [_shot("b", 9), _shot("a", 1)])
+    fresh = app_state.AppState()
+    assert fresh.get_session_attachments("sid") == [_shot("b", 9), _shot("a", 1)]
+    assert fresh.get_session_attachments("other") == []
+
+
+def test_session_attachments_empty_removes_entry(app_state):
+    state = app_state.AppState()
+    state.set_session_attachments("sid", [_shot("a")])
+    state.set_session_attachments("sid", [])
+    assert app_state.AppState().get_session_attachments("sid") == []
+
+
+def test_session_attachments_unchanged_are_not_rewritten(app_state):
+    """A tab hands its whole list back on every sighting; only what reads
+    differently is worth a write."""
+    state = app_state.AppState()
+    state.set_session_attachments("sid", [_shot("a")])
+    app_state._STATE_FILE.unlink()  # a redundant save would recreate the file
+    state.set_session_attachments("sid", [_shot("a")])  # identical list
+    state.set_session_attachments("absent", [])  # clearing a session that has none
+    state.set_session_attachments("", [_shot("b")])  # a tab with no session id yet
+    assert not app_state._STATE_FILE.exists()
+
+
+def test_session_attachments_ignore_corrupt_entries(app_state):
+    state = app_state.AppState()
+    state.set_session_attachments("good", [_shot("a")])
+    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
+    data["session_attachments"]["bad"] = "not-a-list"
+    app_state._STATE_FILE.write_text(json.dumps(data), encoding="utf-8")
+    fresh = app_state.AppState()
+    assert fresh.get_session_attachments("good") == [_shot("a")]
+    assert fresh.get_session_attachments("bad") == []
+
+
+def test_forwarding_a_session_carries_its_attachments(app_state):
+    """A fork is the same conversation: the images it was already shown are
+    its own, and its transcript starts after them."""
+    state = app_state.AppState()
+    state.set_session_attachments("old", [_shot("a")])
+    state.forward_session("old", "new")
+    assert app_state.AppState().get_session_attachments("new") == [_shot("a")]
+
+
+def test_forwarding_does_not_clobber_the_forks_own_attachments(app_state):
+    state = app_state.AppState()
+    state.set_session_attachments("old", [_shot("a")])
+    state.set_session_attachments("new", [_shot("b")])
+    state.forward_session("old", "new")
+    assert app_state.AppState().get_session_attachments("new") == [_shot("b")]
+
+
 def test_forwarding_a_session_carries_its_prs(app_state):
     """A /bg fork continues the same conversation: the PRs it opened are its
     own, and the fork's transcript never repeats their pr-links."""

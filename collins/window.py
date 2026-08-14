@@ -1379,6 +1379,9 @@ class MainWindow(Adw.ApplicationWindow):
             # The PRs this session opened, back on the footer row before the
             # first transcript poll (and including any that only a lookup knew).
             tab.restore_prs(self.state.get_session_prs(bound_id))
+            # And the images it was shown, which nothing else would recover:
+            # the terminal's scrollback starts empty on a resume.
+            tab.restore_attachments(self.state.get_session_attachments(bound_id))
 
     def _tab_title(self, session: Session) -> str:
         """Tab title with the session's saved emoji prefix (tabs only)."""
@@ -1679,6 +1682,7 @@ class MainWindow(Adw.ApplicationWindow):
         tab.connect("editor-pop-out-requested", self._pop_out_editor)
         tab.connect("bell", self._on_bell)
         tab.connect("prs-changed", self._on_tab_prs_changed)
+        tab.connect("attachments-changed", self._on_tab_attachments_changed)
         tab.connect("pr-status-changed", self._on_tab_pr_status_changed)
         tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
         tab.set_editor_width_lookup(lambda: int(self.state.get_setting("editor_width") or 0))
@@ -1861,6 +1865,10 @@ class MainWindow(Adw.ApplicationWindow):
         # A `--continue` tab lands on a session that may already have PRs
         # saved; a brand-new one has none, and this is a no-op for it.
         tab.restore_prs(self.state.get_session_prs(session_id))
+        # The same for its images — and this call does double duty, writing
+        # down anything the tab was shown while it still had no id to file it
+        # under (see TerminalTab.restore_attachments).
+        tab.restore_attachments(self.state.get_session_attachments(session_id))
         self._pending_resolved[page] = (session_id, page.get_title())
         self._sync_status(session_id)
         self._update_active_row()  # the resolved tab may be the selected one
@@ -1886,6 +1894,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.state.set_session_prs(tab.session_id, list(records or []))
         self.sidebar.sync_session_prs(tab.session_id)
         self.store.apply_pr_title(tab.session_id)
+
+    def _on_tab_attachments_changed(self, tab: TerminalTab, records: object) -> None:
+        """A tab saw an image: save the list against that tab's session.
+
+        Skipped for the same two tabs prs-changed skips. A fork shares the
+        original's session id and would overwrite its list; a tab whose
+        session isn't resolved yet has nowhere to write, and hands the list
+        over again the moment it is (see _on_session_resolved).
+        """
+        if tab.fork or not tab.session_id:
+            return
+        self.state.set_session_attachments(tab.session_id, list(records or []))
 
     def _on_tab_pr_status_changed(self, tab: TerminalTab) -> None:
         """A tab's chips read differently now: rebuild its row's mark to match.
@@ -4455,7 +4475,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _forget_transcript(self, session_id: str) -> None:
         """Drop everything the app kept for a session whose transcript just
         went away: its tab, its panel scrollback, its panel and editor
-        layout, its PRs."""
+        layout, its PRs, the images it was shown."""
         page = self._pages.get(session_id)
         if page is not None:
             self.tab_view.close_page(page)
@@ -4463,6 +4483,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.state.set_panel_layout(session_id, None)
         self.state.set_editor_state(session_id, None)
         self.state.set_session_prs(session_id, [])
+        self.state.set_session_attachments(session_id, [])
 
     def _on_trash_session(self, _action, param: GLib.Variant) -> None:
         session = self._session_for(param)
