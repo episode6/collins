@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-13. Full change history: git log for this file.
+# fork. Last modified: 2026-08-14. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -99,6 +99,19 @@ _PROMPT_SUBMIT_MS = 250
 # past that the shell is presumed to be sitting at a prompt with no agent.
 _COMPOSER_AUTOSHOW_POLL_MS = 400
 _COMPOSER_AUTOSHOW_TRIES = 50
+# The composer's open-cut, which is a run of screen reads either side of an
+# erase (see TerminalTab._begin_cut). The read is taken once _CUT_SETTLE_READS
+# of them _CUT_SETTLE_MS apart agree — 150ms of a still input box, measured
+# against the CLI (2.1.226), which finishes echoing a burst of typing 30-100ms
+# after the last key. A box still moving after _CUT_SETTLE_TRIES of them is
+# not cut at all: erasing a read that is still catching up would take the
+# characters it hasn't shown yet with it. The erase is then checked again at
+# each of _CUT_VERIFY_MS, spread out because a busy CLI can take a while to
+# work through a line of backspaces.
+_CUT_SETTLE_MS = 50
+_CUT_SETTLE_READS = 4
+_CUT_SETTLE_TRIES = 12
+_CUT_VERIFY_MS = (150, 400, 900)
 _PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
 # A session links every PR that passes through its tool output, including ones
 # it only read, so the row is bounded: it tracks (and saves, and refreshes) the
@@ -688,6 +701,12 @@ def _has_running_command(terminal: Vte.Terminal, child_pid: int | None) -> bool:
         return False
 
 
+def _prompt_read(prompt: EnteredPrompt | None) -> tuple[str, int] | None:
+    """What two settle reads of the CLI's input box compare, so that "the
+    box is still empty" counts as agreement too (see _settle_cut)."""
+    return None if prompt is None else (prompt.text, prompt.rows_below)
+
+
 class PrChipRow(Gtk.Widget):
     """The footer's PR chips: as many as fit, and the newest ones are the ones.
 
@@ -1113,6 +1132,13 @@ class TerminalTab(Gtk.Box):
         self._composer: ComposerView | None = None
         self._composer_revealer: Gtk.Revealer | None = None
         self._composer_page: ComposerPage | None = None  # set while docked
+        # The text an open-cut took out of the CLI's box and hasn't proved
+        # gone yet — what a leftover has to match before anything erases it
+        # (see _verify_cut) — and the number of the cut that took it, which
+        # anything writing to that box on its own account bumps to call the
+        # rounds still in flight off.
+        self._cut_pending: str | None = None
+        self._cut_seq = 0
         self._composer_enter_sends = True
         self._composer_font = ""
         # Counts up only while a new session set to open floating waits for
@@ -2256,7 +2282,11 @@ class TerminalTab(Gtk.Box):
         (cut, not copied — the box empties so a later send can't double
         it). A box that can't be read right now — empty, or the agent
         mid-turn drawing something else — seeds nothing and opens anyway:
-        composing while the agent works is half the point."""
+        composing while the agent works is half the point.
+
+        The seeding lands a beat after the panel does, because a cut can't
+        be taken off a screen that is still moving (see _begin_cut); the
+        composer opens on the spot either way."""
         if self._composer_page is not None:
             # One composer per tab: docked, the button fronts the page —
             # revealing a hidden home strip if that's where it lives —
@@ -2270,7 +2300,7 @@ class TerminalTab(Gtk.Box):
             self._composer.focus_view()
             return
         composer = self._ensure_composer()
-        composer.set_text(self._cut_entered_prompt() or "")
+        composer.set_text("")
         revealer = self._composer_revealer
         revealer.set_visible(True)
 
@@ -2279,6 +2309,10 @@ class TerminalTab(Gtk.Box):
         def reveal() -> bool:
             revealer.set_reveal_child(True)
             composer.focus_view()
+            # The cut starts from here rather than above it: every round of
+            # it asks whether the composer is still open before touching
+            # the CLI's box, and until this line it isn't.
+            self._begin_cut(composer)
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(reveal)
@@ -2353,6 +2387,8 @@ class TerminalTab(Gtk.Box):
         if not self.composer_open():
             return
         text = self._composer.take_text()
+        self._cut_pending = None  # the box is about to hold this text again
+        self._cut_seq += 1
         self._composer_revealer.set_reveal_child(False)
         if restore and self._agent_is_running():
             restored = composerkeys.restore_text(text)
@@ -2373,7 +2409,13 @@ class TerminalTab(Gtk.Box):
 
         Docked, send never closes: the page is a fixture, not a stand-in
         raised over the input box, so the buffer clears and the page stays
-        for the next prompt."""
+        for the next prompt.
+
+        A send this quick can outrun the open-cut's own check that the box
+        emptied, so it carries the last one: whatever the cut still can't
+        account for is erased first, a beat ahead of the prompt rather
+        than in front of it in the same write — a chunk opening with
+        backspaces is a chunk the CLI could read as pasted text."""
         docked = self._composer_page is not None
         if not text.strip():
             if not docked:
@@ -2382,10 +2424,25 @@ class TerminalTab(Gtk.Box):
         if not self._agent_is_running():
             self.feed_message(_("Composer: the agent isn't running in this tab"))
             return
+        leftover = (
+            self._leftover_cut_keys(self._cut_pending)
+            if self._cut_pending is not None
+            else None
+        )
+        self._cut_pending = None
+        self._cut_seq += 1  # the prompt about to be typed is not a cut's to erase
         self._composer.set_text("")
         if not docked:
             self._composer_revealer.set_reveal_child(False)
+        if leftover:
+            self.feed_child_text(leftover)
+            GLib.timeout_add(_CUT_VERIFY_MS[0], self._inject_after_cut, text)
+            return
         self.inject_prompt(text)
+
+    def _inject_after_cut(self, text: str) -> bool:
+        self.inject_prompt(text)
+        return GLib.SOURCE_REMOVE
 
     def _toggle_composer_dock(self) -> None:
         """The composer chrome's dock/float button."""
@@ -2449,25 +2506,140 @@ class TerminalTab(Gtk.Box):
         view.set_docked(False)
         self._composer_revealer.set_child(view)
         text = view.take_text()
+        self._cut_pending = None  # as in close_composer: the text goes back
+        self._cut_seq += 1
         if self._agent_is_running():
             restored = composerkeys.restore_text(text)
             if restored:
                 self.feed_child_text(restored)
         self.grab_terminal_focus()
 
-    def _cut_entered_prompt(self) -> str | None:
-        """Read the typed-but-unsent prompt and erase it from the CLI's
-        input box; None when there's nothing to take or the provider can't
-        clear its box safely (no half-cut that leaves the text behind for
-        a send to duplicate)."""
+    def _begin_cut(self, composer: ComposerView) -> None:
+        """Take the typed-but-unsent prompt out of the CLI's input box and
+        into *composer* — the open-cut, run as a chain of screen reads.
+
+        Both halves of it need a beat, which is why this isn't the inline
+        read `open_composer` used to do:
+
+        * The **read** is only worth trusting once the screen has stopped
+          moving. The CLI echoes what was typed a repaint later, so a
+          composer opened from the keyboard the instant a prompt was typed
+          reads a line still catching up — and erasing that read would eat
+          the characters it hadn't shown yet, which no later round can get
+          back. A run of identical reads is the settle test, and a box
+          that never settles is left alone.
+
+        * The **erase** is checked afterwards, because a read can fall
+          short of the buffer it renders even settled: an invisible
+          trailing space is dropped, and so is the space a wrap ate
+          between two long words. The erase is one backspace per character
+          read, running backwards from the end, so a read one character
+          short leaves the box holding the *first* character of the prompt
+          — which the composer's copy starts with too, so the send that
+          follows types it twice.
+
+        Nothing is cut when there is nothing to take or the provider can't
+        clear its box safely: no half-cut that leaves the text behind for
+        a send to duplicate.
+        """
+        self._cut_pending = None
+        self._cut_seq += 1
+        self._settle_cut(composer, self._cut_seq, None, 0, 0)
+
+    def _settle_cut(
+        self,
+        composer: ComposerView,
+        seq: int,
+        previous: EnteredPrompt | None,
+        agreed: int,
+        attempt: int,
+    ) -> bool:
+        """One settle read, cutting once *agreed* of them in a row match.
+
+        An empty box answers None to every read, which agrees with itself
+        like any other answer: the ordinary open settles on the fourth read
+        and cuts nothing.
+        """
+        if not self._cut_alive(composer, seq):
+            return GLib.SOURCE_REMOVE
         prompt = self.entered_prompt()
+        agreed = agreed + 1 if _prompt_read(prompt) == _prompt_read(previous) else 1
+        if agreed >= _CUT_SETTLE_READS:
+            self._apply_cut(composer, seq, prompt)
+            return GLib.SOURCE_REMOVE
+        if attempt >= _CUT_SETTLE_TRIES:
+            return GLib.SOURCE_REMOVE  # never still: the box keeps its text
+        GLib.timeout_add(
+            _CUT_SETTLE_MS, self._settle_cut, composer, seq, prompt, agreed, attempt + 1
+        )
+        return GLib.SOURCE_REMOVE
+
+    def _apply_cut(
+        self, composer: ComposerView, seq: int, prompt: EnteredPrompt | None
+    ) -> None:
+        """Erase the settled read from the box, seed it into the composer,
+        and start checking that the box really emptied."""
         if prompt is None or not prompt.text.strip():
-            return None
+            return
         keys = self.provider.clear_prompt_keys(prompt)
         if not keys:
-            return None
+            return
         self.feed_child_text(keys)
-        return prompt.text
+        self._cut_pending = prompt.text
+        composer.seed_text(prompt.text)
+        GLib.timeout_add(_CUT_VERIFY_MS[0], self._verify_cut, composer, seq, 0)
+
+    def _verify_cut(self, composer: ComposerView, seq: int, index: int) -> bool:
+        """Re-read the box after an erase and finish the job if it fell
+        short (see _begin_cut for how it can).
+
+        Only a leftover the cut can account for is touched: the erase runs
+        backwards from the end, so whatever it failed to reach is a prefix
+        of what was read. Anything else on that line got there some other
+        way — the user typing into the terminal, the agent redrawing — and
+        is left alone, which also ends the checking.
+        """
+        if not self._cut_alive(composer, seq) or self._cut_pending is None:
+            return GLib.SOURCE_REMOVE
+        keys = self._leftover_cut_keys(self._cut_pending)
+        if keys is None:
+            self._cut_pending = None  # emptied, or not ours to erase
+            return GLib.SOURCE_REMOVE
+        self.feed_child_text(keys)
+        if index + 1 < len(_CUT_VERIFY_MS):
+            GLib.timeout_add(
+                _CUT_VERIFY_MS[index + 1], self._verify_cut, composer, seq, index + 1
+            )
+        return GLib.SOURCE_REMOVE
+
+    def _leftover_cut_keys(self, cut: str) -> str | None:
+        """Keystrokes erasing what a cut of *cut* left in the input box, or
+        None when the box is empty or holds something that cut can't
+        account for (see _verify_cut).
+
+        An erase still queued reads as the whole prompt, which is a prefix
+        of itself: the answer is another full line of backspaces, and the
+        two lines of them meet an emptied box between them — where the
+        spare ones are no-ops."""
+        left = self.entered_prompt()
+        if left is None or not left.text or not cut.startswith(left.text):
+            return None
+        return self.provider.clear_prompt_keys(left)
+
+    def _cut_alive(self, composer: ComposerView, seq: int) -> bool:
+        """Whether cut *seq* still has a composer to cut into and an agent
+        to cut from.
+
+        A composer closed mid-chain has already typed its text back into
+        the box (close_composer), and a send has just typed a prompt into
+        it — no later round of a chain may erase *those*, and bumping
+        `_cut_seq` is how each of them says so."""
+        return (
+            seq == self._cut_seq
+            and self._composer is composer
+            and self.composer_open()
+            and self._agent_is_running()
+        )
 
     def _pick_file_for_composer(self) -> None:
         """The composer's attach button: the same pick-a-file flow as

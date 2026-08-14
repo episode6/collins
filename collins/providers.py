@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-12. Full change history: git log for this file.
+# fork. Last modified: 2026-08-14. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -128,12 +128,22 @@ def _wrap_join(c1: str, c2: str, width: int) -> str:
     repainted away from — with the row nearly full, or a word ending flush
     at the margin, it reads as a wrap and the copied text gains a space
     where the newline was.
+
+    Miscounting the *characters* costs more than miscounting the shape:
+    the composer's open-cut erases one backspace per character read, so a
+    join that drops a space the user typed leaves a character behind in
+    the box (terminal._begin_cut).
     """
     run2 = c2.split(" ", 1)[0]
     if not run2:
         return "\n"  # blank or indented next row: only a typed break does that
-    if cell_width(c1) >= width - 1:  # full: some wrap (-1: a wide char can
-        # leave one cell it couldn't straddle)
+    # Full: some wrap. One cell short counts as full only when the next row
+    # opens wide — that cell is the one the wide character couldn't straddle
+    # — and not when an ordinary word simply ended there, which is a wrap
+    # that ate a space.
+    if cell_width(c1) >= width or (
+        cell_width(c1) == width - 1 and cell_width(run2[0]) == 2
+    ):
         run1 = c1.rsplit(" ", 1)[-1]
         if run1 and cell_width(run1) + cell_width(run2) > width:
             return ""  # the runs can't be two words that ever shared a row
