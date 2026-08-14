@@ -180,6 +180,10 @@ class PrViewPage(Adw.Bin):
         # unresolved deep link scans — and the reply drafts, keyed by thread
         # id so they survive the rebuilds that replace the cards.
         self._thread_cards: list[tuple[prdetail.PrThread, Gtk.Widget]] = []
+        # Every live thread card, both views' copies of each — the ones a
+        # landed fetch releases (the timeline list above is the Conversation
+        # view's alone, and the deep link's business).
+        self._cards: list[_ThreadCard] = []
         self._thread_drafts: dict[str, str] = {}
         # Thread ids with a mutation in flight. On the page rather than the
         # card for the same reason the drafts are: a thread renders as twin
@@ -499,6 +503,8 @@ class PrViewPage(Adw.Bin):
         # changed has been re-read, and a failed read is still an answer.
         self._actions.settled()
         self._composer.settled()
+        for card in self._cards:
+            card.settled()
         if detail is None:
             self._banner_label.set_text(
                 _("Couldn't load this pull request — is the GitHub CLI signed in?")
@@ -602,6 +608,9 @@ class PrViewPage(Adw.Bin):
         detail = self._detail
         self._clear_content()
         self._thread_cards = []
+        # Cleared here rather than in _rebuild_files: the two always run as a
+        # pair, this one first, and the files view's twins join the same list.
+        self._cards = []
         # Drafts for threads that no longer exist have nowhere to go back to.
         alive = {thread.id for thread in detail.threads}
         for gone in [key for key in self._thread_drafts if key not in alive]:
@@ -703,7 +712,7 @@ class PrViewPage(Adw.Bin):
         shows in both — so the shared draft dict is what keeps the copies
         agreeing on a half-typed reply, and the shared busy set what keeps
         them from mutating the same thread twice."""
-        return _ThreadCard(
+        card = _ThreadCard(
             thread,
             self._pr,
             self._thread_drafts,
@@ -711,6 +720,11 @@ class PrViewPage(Adw.Bin):
             self._acted,
             self._inline_images,
         )
+        # Every card built for this page, both views' copies: a mutation holds
+        # its card until the re-read it asked for lands, and the page is what
+        # tells them it did (see `_landed`).
+        self._cards.append(card)
+        return card
 
     # -- the files view --------------------------------------------------------
 
@@ -1430,8 +1444,11 @@ class _ThreadCard(Gtk.Box):
     behind a revealer, posting through `practions.reply_in_thread` — and
     Resolve/Unresolve. One press, one mutation: the card holds insensitive
     with the pressed button spinning in place of its own word until the answer
-    lands, a failure comes back as gh's own sentence with the text kept, and
-    success hands off to the page's posted path, which re-reads everything. Every fetch rebuilds the cards
+    lands *and* the page's re-read behind it has (`settled`) — usually the
+    read that replaces this card with one saying the new thing. A failure
+    comes back as gh's own sentence with the text kept, released on the spot
+    since no read is coming; success hands off to the page's posted path,
+    which re-reads everything. Every fetch rebuilds the cards
     wholesale (and each thread gets one per view), so the per-thread state
     lives in the page's containers rather than in this widget — the reply
     draft in *drafts* and the in-flight guard in *busy*, both keyed by
@@ -1459,6 +1476,9 @@ class _ThreadCard(Gtk.Box):
         self._posting = False
         # The button whose press is in flight — the one wearing the spinner.
         self._busy_btn: _BusyButton | None = None
+        # Whether this card is waiting on the page's re-read of a mutation of
+        # its own — what `settled` may release (see the composer's twin flag).
+        self._holding = False
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
         anchor = thread.path if thread.line is None else f"{thread.path}:{thread.line}"
@@ -1635,21 +1655,40 @@ class _ThreadCard(Gtk.Box):
 
     def _landed(self, label: str, error: str | None, sent_draft: bool) -> bool:
         self._posting = False
+        # Out of the shared set as soon as gh answers, whether or not this
+        # card is still holding: the set is the guard on the call, and a copy
+        # of this card that a mid-flight fetch orphaned would never come back
+        # to clear it — the thread would be locked for the rest of the page.
         self._busy.discard(self._thread.id)
-        self.set_sensitive(True)
-        if self._busy_btn is not None:
-            self._busy_btn.set_busy(False)
-            self._busy_btn = None
         if error:
+            self._release()  # nothing is re-reading the page: let go here
             root = self.get_root()
             if root is not None:
                 dialogs.error_dialog(root, _("{action} failed").format(action=label), error)
             return GLib.SOURCE_REMOVE
+        # Still spinning, still held: _on_posted re-reads the PR, and this
+        # card only says what it did once that read lands (see `settled`).
+        self._holding = True
         if sent_draft:
             self._text.get_buffer().set_text("")
             self._drafts.pop(self._thread.id, None)  # after set_text re-added it
         self._on_posted()
         return GLib.SOURCE_REMOVE
+
+    def settled(self) -> None:
+        """The page's re-read has landed (or gave up): the pressed button
+        takes its word back and the card goes live again. A successful
+        mutation usually replaces this card outright — this is what happens
+        when the read that would have replaced it failed."""
+        if self._holding:
+            self._release()
+
+    def _release(self) -> None:
+        self._holding = False
+        self.set_sensitive(True)
+        if self._busy_btn is not None:
+            self._busy_btn.set_busy(False)
+            self._busy_btn = None
 
 
 class _FileSection(Gtk.Box):
