@@ -91,6 +91,12 @@ _EDITOR_FOLLOW_TICKS = 2
 # that sends it (see inject_prompt). Long enough that the CLI has stopped
 # reading the text as a paste, short enough that nobody watching sees a pause.
 _PROMPT_SUBMIT_MS = 250
+# How often, and for how long, a new session set to open floating waits for
+# its agent to actually come up before raising the composer over it (see
+# autoshow_composer). Twenty seconds covers a cold CLI start on a slow disk;
+# past that the shell is presumed to be sitting at a prompt with no agent.
+_COMPOSER_AUTOSHOW_POLL_MS = 400
+_COMPOSER_AUTOSHOW_TRIES = 50
 _PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
 # A session links every PR that passes through its tool output, including ones
 # it only read, so the row is bounded: it tracks (and saves, and refreshes) the
@@ -1012,6 +1018,9 @@ class TerminalTab(Gtk.Box):
         self._composer_page: ComposerPage | None = None  # set while docked
         self._composer_enter_sends = True
         self._composer_font = ""
+        # Counts up only while a new session set to open floating waits for
+        # its agent (see autoshow_composer).
+        self._composer_autoshow_tries = 0
         self._content_overlay = Gtk.Overlay(child=scrolled)
         content_overlay = self._content_overlay
         content_overlay.add_overlay(self._composer_overlay_btn)
@@ -2176,6 +2185,57 @@ class TerminalTab(Gtk.Box):
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(reveal)
+
+    def autoshow_composer(self, setting) -> None:
+        """Open this tab's composer without being asked, the way the
+        composer_new_sessions setting says. Called by the window on the
+        sessions it starts fresh, and on nothing else: a resumed session
+        brings back the panel layout it was closed with, which already has
+        the answer for that session.
+
+        "dock" lands the composer as a panel page below the terminal right
+        away — docking reads nothing off the screen and needs no agent — and
+        that page joins this session's saved layout, so a session that
+        started with a docked composer keeps one when it is resumed.
+
+        "float" raises it over the terminal instead, which *does* need the
+        agent: the open cuts whatever is in the CLI's input box, and a
+        composer over a plain shell could only paste a draft back into
+        something that would run it. So it waits for the CLI to come up in
+        the shell just spawned, and gives up quietly if it never does.
+
+        Either way the floating button's provider gate applies — an agent
+        whose input box Collins can't read has no composer to offer — and a
+        composer the user opened first is left alone.
+        """
+        mode = composerkeys.autoshow_mode(setting)
+        if mode == composerkeys.OFF or not self._provider_has_prompt_box():
+            return
+        if mode == composerkeys.DOCK:
+            self.dock_composer()
+            return
+        self._composer_autoshow_tries = 0
+        GLib.timeout_add(_COMPOSER_AUTOSHOW_POLL_MS, self._autoshow_composer_tick)
+
+    def _autoshow_composer_tick(self) -> bool:
+        """Wait out the agent's start, then raise the floating composer.
+        Stops at the first sign the moment has passed: the tab is gone, the
+        wait ran out, or a composer is up already — the user got there first
+        (the corner button, Ctrl+., a file dropped on the terminal), and
+        nothing of theirs should be re-raised over."""
+        # Counted before the checks, so the last tick of the window is the one
+        # that gives up: _COMPOSER_AUTOSHOW_TRIES ticks is the whole wait.
+        self._composer_autoshow_tries += 1
+        done = (
+            self.get_root() is None
+            or self._composer_autoshow_tries >= _COMPOSER_AUTOSHOW_TRIES
+            or self.composer_open()
+        )
+        if not done and not self._agent_is_running():
+            return GLib.SOURCE_CONTINUE
+        if not done:
+            self.open_composer()
+        return GLib.SOURCE_REMOVE
 
     def close_composer(self, restore: bool = True) -> None:
         """Lower the composer. Its text goes back where it came from —

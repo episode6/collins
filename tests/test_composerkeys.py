@@ -1,6 +1,17 @@
 import pytest
 
-from collins.composerkeys import NEWLINE, PASS, SEND, enter_action, restore_text
+from collins.composerkeys import (
+    AUTOSHOW_MODES,
+    DOCK,
+    FLOAT,
+    NEWLINE,
+    OFF,
+    PASS,
+    SEND,
+    autoshow_mode,
+    enter_action,
+    restore_text,
+)
 
 RETURN = 0xFF0D
 KP_ENTER = 0xFF8D
@@ -66,3 +77,22 @@ def test_restore_text_plain_and_empty():
     assert restore_text("\n\n") == ""
     # Trailing spaces are the user's; only newlines are a submit hazard.
     assert restore_text("hello \n") == "hello "
+
+
+@pytest.mark.parametrize("mode", AUTOSHOW_MODES)
+def test_autoshow_mode_keeps_known_values(mode):
+    assert autoshow_mode(mode) == mode
+
+
+def test_autoshow_modes_are_the_three_the_setting_offers():
+    assert AUTOSHOW_MODES == (OFF, FLOAT, DOCK)
+
+
+@pytest.mark.parametrize(
+    "setting", [None, "", "on", True, False, 1, "Docked", "float ", ["dock"]]
+)
+def test_autoshow_mode_falls_back_to_off(setting):
+    # Showing a composer is the opt-in half, so anything unreadable — a
+    # missing setting, a hand-edited word, an older Collins's boolean —
+    # must land on off rather than conjure one.
+    assert autoshow_mode(setting) == OFF

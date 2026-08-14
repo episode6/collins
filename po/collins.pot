@@ -490,6 +490,29 @@ msgid ""
 "inserts a newline"
 msgstr ""
 
+#: collins/prefs.py:320
+msgid "Composer in new sessions"
+msgstr ""
+
+#: collins/prefs.py:322
+msgid ""
+"Open the composer as soon as a new session starts — floating over the agent "
+"terminal, or docked as a panel below it, where it stays for the session's "
+"later visits"
+msgstr ""
+
+#: collins/prefs.py:87
+msgid "Never"
+msgstr ""
+
+#: collins/prefs.py:88
+msgid "Floating"
+msgstr ""
+
+#: collins/prefs.py:89
+msgid "Docked"
+msgstr ""
+
 #: collins/prefs.py:309
 msgid "Panels"
 msgstr ""

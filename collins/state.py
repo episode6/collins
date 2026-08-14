@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-12. Full change history: git log for this file.
+# fork. Last modified: 2026-08-13. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -112,6 +112,13 @@ DEFAULT_SETTINGS = {
     # Whether Enter sends the composer's text (Shift+Enter for a newline);
     # off swaps the pair: Enter is a newline and Ctrl+Enter sends.
     "composer_enter_sends": True,
+    # What a session Collins starts fresh opens its composer as, off by
+    # default: "off" | "float" (raised over the terminal, as Ctrl+. does) |
+    # "dock" (a panel page below it, which joins the session's saved layout
+    # and so comes back on later resumes). Only new sessions — a resumed one
+    # is left to the layout it was closed with (see composerkeys.autoshow_mode
+    # and TerminalTab.autoshow_composer).
+    "composer_new_sessions": "off",
     "show_folder_path": False,  # show each session's project folder path in the sidebar
     "project_icon_size": 16,  # px size of the sidebar's project/folder (and group) icons
     "show_usage_panel": True,  # Claude subscription usage bars under the session list

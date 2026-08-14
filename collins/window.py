@@ -1589,6 +1589,11 @@ class MainWindow(Adw.ApplicationWindow):
             f"new {provider.name} session — {cwd}",
         )
         self._add_placeholder(page, cwd)
+        # A session Collins starts fresh can come up with its composer already
+        # open (opt-in; see TerminalTab.autoshow_composer). Only here: the
+        # sessions reopened in open_session restore the panel layout they
+        # were closed with, which is that session's own answer.
+        tab.autoshow_composer(self.state.get_setting("composer_new_sessions"))
 
     # -- sidebar placeholders for unresolved new-session tabs ----------------
 

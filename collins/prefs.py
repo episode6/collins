@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-12. Full change history: git log for this file.
+# fork. Last modified: 2026-08-13. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -18,7 +18,17 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
-from . import apppicker, claudemodels, clisetup, cliwelcome, editor, footerapps, mcptools, prefssearch
+from . import (  # noqa: E402
+    apppicker,
+    claudemodels,
+    clisetup,
+    cliwelcome,
+    composerkeys,
+    editor,
+    footerapps,
+    mcptools,
+    prefssearch,
+)
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label, grace_seconds
 from .i18n import LANGUAGES, N_, _, ngettext
 from .state import AppState
@@ -67,6 +77,18 @@ _SCHEMES = [
     ("system", N_("Follow system"), Adw.ColorScheme.DEFAULT),
     ("light", N_("Light"), Adw.ColorScheme.FORCE_LIGHT),
     ("dark", N_("Dark"), Adw.ColorScheme.FORCE_DARK),
+]
+
+# What a new session opens its composer as (composerkeys.AUTOSHOW_MODES, in
+# the order the drop-down offers them). The labels stay short on purpose: a
+# ComboRow's selected value gets only what its subtitle leaves — under 100px
+# here — and ellipsizes past that, so what each one means is spelled out in
+# the subtitle instead. Translations have to keep both ends short: German's
+# "Angedockt" came back cut until its subtitle lost a clause.
+_COMPOSER_AUTOSHOW = [
+    (composerkeys.OFF, N_("Never")),
+    (composerkeys.FLOAT, N_("Floating")),
+    (composerkeys.DOCK, N_("Docked")),
 ]
 
 # What closing a running session's tab does when a setting stands in for the
@@ -295,6 +317,27 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._composer_enter_row.connect("notify::active", self._on_composer_enter_changed)
         terminal_group.add(self._composer_enter_row)
+
+        self._composer_autoshow_row = Adw.ComboRow(
+            title=_("Composer in new sessions"),
+            subtitle=_(
+                "Open the composer as soon as a new session starts — floating "
+                "over the agent terminal, or docked as a panel below it, where "
+                "it stays for the session's later visits"
+            ),
+        )
+        autoshow_labels = [_(label) for _v, label in _COMPOSER_AUTOSHOW]
+        self._composer_autoshow_row.set_model(Gtk.StringList.new(autoshow_labels))
+        autoshow_values = [value for value, _l in _COMPOSER_AUTOSHOW]
+        self._composer_autoshow_row.set_selected(
+            autoshow_values.index(
+                composerkeys.autoshow_mode(state.get_setting("composer_new_sessions"))
+            )
+        )
+        self._composer_autoshow_row.connect(
+            "notify::selected", self._on_composer_autoshow_changed
+        )
+        terminal_group.add(_searchable(self._composer_autoshow_row, *autoshow_labels))
 
         current_theme = state.get_setting("terminal_theme") or DEFAULT_THEME
         if current_theme not in THEME_NAMES:
@@ -1033,6 +1076,12 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_composer_enter_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("composer_enter_sends", row.get_active())
+        self._on_change()
+
+    def _on_composer_autoshow_changed(self, row: Adw.ComboRow, _pspec) -> None:
+        self._state.set_setting(
+            "composer_new_sessions", _COMPOSER_AUTOSHOW[row.get_selected()][0]
+        )
         self._on_change()
 
     def _on_tab_drag_changed(self, row: Adw.SwitchRow, _pspec) -> None:
