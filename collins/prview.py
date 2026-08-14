@@ -117,6 +117,10 @@ _LARGE_PATCH_LINES = 2_000
 # The file list's share of the Files view until the user drags the divider —
 # the editor gives its file tree the same kind of sliver (_TREE_INITIAL_WIDTH).
 _FILE_LIST_WIDTH = 170
+# What Adwaita leaves between the switcher's own two buttons, borrowed for the
+# seam between Files and the action button beside it — applied where the two
+# meet, on the switcher row's end widget (see `switcher_row` below).
+_SWITCHER_GAP = 3
 # The one width the page asks for, in every state it is ever in. A page whose
 # minimum grew when its fetch landed would shove the panel divider out from
 # under a panel already squeezed narrow — so nothing built below may ask for
@@ -343,6 +347,10 @@ class PrViewPage(Adw.Bin):
         # now — the chip's menu still holds the full practions list.
         self._actions = _ActionBar(self._acted)
         self._actions.set_valign(Gtk.Align.CENTER)
+        # The gap the switcher keeps between Conversation and Files, kept on
+        # this side of Files too: on a narrow page the centered switcher slides
+        # right up to this button, and without it the two read as one control.
+        self._actions.set_margin_start(_SWITCHER_GAP)
 
         # -- the two views under one switcher ---------------------------------
         self._stack = Adw.ViewStack(vexpand=True)
