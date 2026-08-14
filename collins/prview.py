@@ -1207,6 +1207,13 @@ class _ActionBar(Gtk.Box):
     archive" archives only once gh comes back without an error — the merge is
     GitHub's half and the archive is the app's, in that order (see `_landed`).
 
+    A state can offer alternates and no button to hang them off: an open pull
+    request whose branch conflicts is offered no merge at all, and it is the
+    likeliest one of all to be closed. There the bar draws a flat ellipsis in
+    the button's place, opening the same menu on a plain click — the only way
+    "close this pull request" is reachable for as long as `alternate_actions`
+    says it is offered.
+
     The row is a _WrapRow for the same reason the composer's is: its minimum
     is its widest single child rather than the sum, so nothing on it can
     become a width the whole panel page can't go under (_MIN_PAGE_WIDTH).
@@ -1242,13 +1249,30 @@ class _ActionBar(Gtk.Box):
             button.connect("clicked", self._on_clicked, key)
             # GtkButton answers the primary button and only that, so this
             # never doubles up with the click above it.
-            secondary = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
-            secondary.connect("pressed", self._on_secondary)
-            button.add_controller(secondary)
+            self._add_menu_gesture(button)
             row.append(button)
             self._buttons[key] = button
+        # Where the alternates go when the state offers no button to hang them
+        # off: an open PR whose branch conflicts is offered no merge anywhere
+        # (GitHub would refuse it), and that is the state closing the pull
+        # request is most often the answer to. Flat and quiet — it is not a
+        # course Collins is recommending, it is the way to the ones it keeps
+        # behind the button that isn't there.
+        self._more = _BusyButton(child=Gtk.Image.new_from_icon_name("view-more-symbolic"))
+        self._more.add_css_class("flat")
+        self._more.set_tooltip_text(_("More actions"))
+        self._more.connect("clicked", lambda button: self._open_menu(button))
+        self._add_menu_gesture(self._more)
+        row.append(self._more)
         self.append(row)
         self.set_visible(False)
+
+    def _add_menu_gesture(self, button: _BusyButton) -> None:
+        """Open the alternates on a right-click. GtkButton answers the primary
+        button and only that, so this never doubles up with a plain click."""
+        secondary = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        secondary.connect("pressed", self._on_secondary)
+        button.add_controller(secondary)
 
     def sync(self, pr: PullRequest) -> None:
         """Show what *pr*'s state offers now, as freshly fetched."""
@@ -1270,7 +1294,11 @@ class _ActionBar(Gtk.Box):
                 # says where the rest of it is.
                 tooltip += "\n" + _("Right-click for more actions")
             button.set_tooltip_text(tooltip)
-        self.set_visible(bool(self._actions))
+        # The ellipsis only stands in for a button that isn't there: with one
+        # showing, the alternates are a right-click away from it and a second
+        # control saying the same thing is one control too many.
+        self._more.set_visible(not self._actions and bool(self._alternates))
+        self.set_visible(bool(self._actions) or self._more.get_visible())
 
     def settled(self) -> None:
         """The page's re-read has landed: the pressed button lets its word
@@ -1288,7 +1316,7 @@ class _ActionBar(Gtk.Box):
         self._holding = False
         self._running = False
         self.set_sensitive(True)
-        for button in self._buttons.values():
+        for button in (*self._buttons.values(), self._more):
             button.set_busy(False)
 
     def _on_clicked(self, button: Gtk.Button, key: str) -> None:
@@ -1301,15 +1329,17 @@ class _ActionBar(Gtk.Box):
     def _on_secondary(
         self, gesture: Gtk.GestureClick, _n_press: int, _x: float, _y: float
     ) -> None:
-        """Right-click on the button: the courses it isn't recommending.
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self._open_menu(gesture.get_widget())
+
+    def _open_menu(self, button: Gtk.Widget) -> None:
+        """Show the alternates under *button* — the courses it isn't taking.
 
         Built fresh on each opening and let go of when it closes, like the
         footer chips' menus: what the alternates are follows the PR's state,
         and a popover outliving the sync that changed them would be offering
         yesterday's answer.
         """
-        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-        button = gesture.get_widget()
         pr = self._pr
         if pr is None or self._running or not self._alternates:
             return
