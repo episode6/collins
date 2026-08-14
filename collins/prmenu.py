@@ -199,9 +199,21 @@ def _mark(
     The base icon carries the state (see `_BASE_ICONS`); the one status worth
     acting on rides its bottom-left corner as a smaller badge (see
     `PullRequest.badge` for which wins the slot — the tooltip still carries
-    everything, via describe). The base always keeps room for the overhang,
-    badge or no badge, so bases line up down a column of marks and a chip
-    doesn't shift when a badge comes or goes.
+    everything, via describe). The mark is always the same size, badge or no
+    badge — base plus overhang in both directions — so a chip doesn't resize
+    and its neighbours don't move when a badge comes or goes.
+
+    Where the base sits inside that box is what the badge decides. A badged
+    mark fills the box: base against the top-right corner, badge hanging into
+    the bottom-left, and the two together read as centered on it. Alone, the
+    base held in that same corner does not — it reads as a small icon pushed
+    up and to the right of its slot, next to neighbours that look centered in
+    theirs. So an unbadged base is centered in the box instead: the overhang
+    is split around it rather than spent on one side. Bases no longer share an
+    exact left edge down a column of mixed marks, which is the trade — an
+    icon's own center is what the eye lines up, not the corner of the box it
+    was drawn in, and the sidebar's agent mark (see .agent-mark in app.py) is
+    centered on this same slot for the same reason.
 
     The overhang scales with the badge: it is how much of the badge hangs off
     the base, and at a bigger badge a fixed one would leave the mark sitting
@@ -212,10 +224,20 @@ def _mark(
     base = Gtk.Image.new_from_icon_name(name)
     base.set_pixel_size(base_px)
     base.add_css_class(css_class)
-    base.set_margin_start(overhang)
-    base.set_margin_bottom(overhang)
-    mark = Gtk.Overlay(child=base)
     badge = _BADGE_ICONS.get(badge_name or "")
+    if badge is not None:
+        base.set_margin_start(overhang)
+        base.set_margin_bottom(overhang)
+    else:
+        # Split, not halved: an odd overhang can't be, and the leftover pixel
+        # goes to the side the badge would have come from, leaving the base a
+        # half-pixel nearer the box's center than the corner it starts at.
+        near = (overhang + 1) // 2
+        base.set_margin_start(near)
+        base.set_margin_end(overhang - near)
+        base.set_margin_bottom(near)
+        base.set_margin_top(overhang - near)
+    mark = Gtk.Overlay(child=base)
     if badge is not None:
         name, css_class = badge
         image = Gtk.Image.new_from_icon_name(name)
