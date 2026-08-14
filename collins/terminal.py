@@ -1961,6 +1961,7 @@ class TerminalTab(Gtk.Box):
     def record_attachment(
         self,
         key: str,
+        *,
         source: str = attachrecords.LIGHTBOX,
         caption: str | None = None,
         context: str | None = None,
@@ -1974,6 +1975,12 @@ class TerminalTab(Gtk.Box):
         worth remembering. A key that is neither is dropped here rather than
         by the caller, so every capture point can pass on what it has
         without first deciding whether it counts.
+
+        Everything after the key is keyword-only, as it is on
+        attachrecords.sighting: the caption is what a caller reaches for
+        first, but *source* is the parameter next to the key, and a caption
+        landing there is a source nothing recognizes — which is dropped
+        silently, taking the whole sighting with it.
         """
         one = attachrecords.sighting(
             key, source=source, caption=caption, context=context, origin=origin
