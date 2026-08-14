@@ -261,6 +261,11 @@ class AppState:
         # mergeable?, unresolved? — see to_record). The status in one is the
         # last that was fetched, not the current one.
         self.session_prs: dict[str, list] = {}
+        # session id -> the images it has seen, newest first, as attachrecords
+        # records ({key, kind, source, at, last, remote?, caption?, context?,
+        # origin? — see to_record). A log of what the session showed, not a
+        # claim the files are still there.
+        self.session_attachments: dict[str, list] = {}
         # session id -> cmdlines of the processes the CLI had spawned under
         # itself before anything was ever submitted to it — its MCP servers,
         # plumbing that must not read as "the agent left something running".
@@ -332,6 +337,9 @@ class AppState:
         self.session_prs = {
             k: v for k, v in (data.get("session_prs") or {}).items() if isinstance(v, list)
         }
+        self.session_attachments = {
+            k: v for k, v in (data.get("session_attachments") or {}).items() if isinstance(v, list)
+        }
         self.process_baselines = {
             k: v for k, v in (data.get("process_baselines") or {}).items() if isinstance(v, list)
         }
@@ -360,6 +368,7 @@ class AppState:
             "panel_layout": self.panel_layouts,
             "editor_states": self.editor_states,
             "session_prs": self.session_prs,  # order is the payload — never sort
+            "session_attachments": self.session_attachments,  # newest first; never sort
             "process_baselines": self.process_baselines,
             "session_forwards": self.session_forwards,
             "pending_detaches": self.pending_detaches,
@@ -575,6 +584,12 @@ class AppState:
             # The same conversation under a new id: the PRs it opened are the
             # fork's too, and the fork's transcript doesn't repeat them.
             self.session_prs[new_id] = list(self.session_prs[old_id])
+        if old_id in self.session_attachments and new_id not in self.session_attachments:
+            # Same reasoning as the PRs: the fork is the same conversation
+            # under a new id, so the images it has already been shown are its
+            # own — and its transcript, which starts at the fork, won't
+            # mention them again.
+            self.session_attachments[new_id] = list(self.session_attachments[old_id])
         if old_id in self.process_baselines and new_id not in self.process_baselines:
             # A fork is a fresh CLI process with no pristine capture window of
             # its own (it resumes a conversation already underway), so the
@@ -711,6 +726,31 @@ class AppState:
             if session_id not in self.session_prs:
                 return
             del self.session_prs[session_id]
+        self.save()
+
+    # -- per-session attachments ---------------------------------------------
+
+    def get_session_attachments(self, session_id: str) -> list:
+        """The image records saved for a session, newest first."""
+        return list(self.session_attachments.get(session_id) or [])
+
+    def set_session_attachments(self, session_id: str, attachments: list) -> None:
+        """Persist a session's images (attachrecords records); empty drops it.
+
+        A tab re-folds this list on every sighting and hands the whole thing
+        back, so the unchanged case — which is nearly all of them — is
+        deliberately not rewritten to disk.
+        """
+        if not session_id:
+            return
+        if attachments:
+            if self.session_attachments.get(session_id) == attachments:
+                return
+            self.session_attachments[session_id] = list(attachments)
+        else:
+            if session_id not in self.session_attachments:
+                return
+            del self.session_attachments[session_id]
         self.save()
 
     # -- settings ------------------------------------------------------------

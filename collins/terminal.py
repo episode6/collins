@@ -22,6 +22,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa:
 
 from . import (  # noqa: E402
     apppicker,
+    attachrecords,
     composerkeys,
     dropimages,
     editor,
@@ -628,6 +629,12 @@ def _present_image(terminal: Vte.Terminal, path: str) -> None:
                 "win.open-in-editor", GLib.Variant("(sii)", (path, 0, 0))
             )
 
+    if tab is not None:
+        # No caption to record: a clicked reference is a path, not something
+        # anyone described. The line it was printed on almost always says
+        # what it is, and the transcript's own snippet fills the label in
+        # later (attachrecords lets context land in an empty slot).
+        tab.record_attachment(path)
     present_image_lightbox(
         terminal, path, can_open_in_editor=can_edit, on_open_in_editor=on_open
     )
@@ -1034,6 +1041,12 @@ class TerminalTab(Gtk.Box):
         # else showing this session need redrawing?" — and a rebuild that
         # changed no record (a fetch that came back the same) still redraws.
         "pr-status-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # Emitted when the images this session has seen change (object = their
+        # attachrecords records, newest first), so the window can save them
+        # against the session. Guarded like prs-changed: a sighting of an
+        # image already on the list that changes nothing about it says
+        # nothing.
+        "attachments-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         # Emitted (debounced) when the editor panel's divider is moved: the
         # new panel px size, so the window can persist it as the app-wide
         # default. Mirrors panel-size-changed, minus the mode — the editor
@@ -1270,6 +1283,16 @@ class TerminalTab(Gtk.Box):
         self._attached_prs: dict[str, PullRequest] = {}
         self._footer_prs: list[PullRequest] = []  # what the chips currently show
         self._saved_pr_records: list[dict] = []  # last records handed to the window
+        # Every image this session has been shown, key -> the sighting (see
+        # attachrecords). Kept apart from anything a poll produces and folded
+        # in on collection, for the reason attach_pr gives: a sighting lands
+        # from a tool call or a click at a moment of its choosing, and a
+        # transcript update already in flight replaces what it collected
+        # wholesale when it finishes. Replaced wholesale here too, never
+        # mutated, so the update thread never reads a half-written dict.
+        self._attachments: dict[str, attachrecords.Attachment] = {}
+        self._restored_attachments: list[attachrecords.Attachment] = []  # from a previous run
+        self._saved_attachment_records: list[dict] = []  # last records handed to the window
         self._pr_discover = False  # a click's search, waiting for a free tick
         self._pr_focus_refresh_at = 0  # last time coming into view forced a refetch
         self._cwd_refresh_source: int | None = None
@@ -1932,6 +1955,77 @@ class TerminalTab(Gtk.Box):
         merged = {pr.url: pr for pr in merge_ordered(self._restored_prs, live)}
         merged.update({pr.url: pr for pr in live})  # positions keep, values don't
         self._tracked_prs = merged
+
+    # -- attachments --------------------------------------------------------
+
+    def record_attachment(
+        self,
+        key: str,
+        *,
+        source: str = attachrecords.LIGHTBOX,
+        caption: str | None = None,
+        context: str | None = None,
+        origin: str | None = None,
+    ) -> None:
+        """Write down an image this session put on screen.
+
+        *key* is the absolute path it was read from, or — for one that came
+        off the web — the URL itself, never the cache file it was downloaded
+        into: those are pruned after a day, so the copy is not the thing
+        worth remembering. A key that is neither is dropped here rather than
+        by the caller, so every capture point can pass on what it has
+        without first deciding whether it counts.
+
+        Everything after the key is keyword-only, as it is on
+        attachrecords.sighting: the caption is what a caller reaches for
+        first, but *source* is the parameter next to the key, and a caption
+        landing there is a source nothing recognizes — which is dropped
+        silently, taking the whole sighting with it.
+        """
+        one = attachrecords.sighting(
+            key, source=source, caption=caption, context=context, origin=origin
+        )
+        if one is None:
+            return
+        self._attachments = attachrecords.fold(self._attachments, one)
+        self._remember_attachments()
+
+    def attachments(self) -> list[attachrecords.Attachment]:
+        """Every image this session has seen, newest first — the sightings
+        this run collected merged with the ones a previous run saved."""
+        return list(
+            attachrecords.union(self._restored_attachments, self._attachments).values()
+        )
+
+    def restore_attachments(self, records: object) -> None:
+        """Re-adopt the images saved for this session by a previous run.
+
+        A union rather than an assignment, and for the same reason the PRs
+        need one: the window calls this once the tab's session is known,
+        which can be after the session has already shown something (a
+        `--continue` tab resolves its id a moment into its first turn).
+        """
+        restored = attachrecords.from_records(records)
+        if restored:
+            self._restored_attachments = restored
+        # Then offer the list up again from scratch, even when nothing was
+        # saved and even when it reads exactly as it did a moment ago: this
+        # is also the call that flushes what a tab collected *before* it knew
+        # which session it was. Those sightings were emitted into a window
+        # that had nowhere to write them, and the guard below would never
+        # offer them a second time on their own.
+        self._saved_attachment_records = []
+        self._remember_attachments()
+
+    def _remember_attachments(self) -> None:
+        """Hand the list to the window, which saves it against the session —
+        but only when it actually reads differently, so a picture shown twice
+        with nothing new to say about it writes nothing to disk."""
+        records = attachrecords.to_records(self.attachments())
+        if records == self._saved_attachment_records:
+            return
+        self._saved_attachment_records = records
+        self.emit("attachments-changed", records)
 
     def _sync_pr_refresh_tooltip(self, not_found: bool = False) -> None:
         """What the button offers to do, which depends on what the row shows.
@@ -2938,6 +3032,10 @@ class TerminalTab(Gtk.Box):
         # this tab's session is known.
         self._tracked_prs = {}
         self._restored_prs = []
+        # Another session's images too, restored again the same way. The
+        # sightings this tab collected itself stay: they were shown in this
+        # tab's window, whichever transcript it was pointed at at the time.
+        self._restored_attachments = []
         self._refresh_pr_chips([])
         self._refresh_model_label()
         self._watch_transcript(jsonl_path)

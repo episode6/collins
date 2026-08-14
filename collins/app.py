@@ -22,6 +22,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 from . import (
     APP_ID,
     DEBUG_APP_ID,
+    attachrecords,
     buildinfo,
     clisetup,
     cliwelcome,
@@ -1135,6 +1136,15 @@ class App(Adw.Application):
         the status page rather than the cache file nobody chose."""
         can_edit = tab.can_open_in_editor(path)
         on_open = (lambda: window.open_in_tab_editor(tab, path)) if can_edit else None
+        # The one place every `show_image` passes through, local and remote
+        # alike, and the only one that has the agent's own caption in hand.
+        # A remote image is written down under its URL, never under *path* —
+        # that is the cache copy, and the cache is pruned after a day.
+        tab.record_attachment(
+            origin if attachrecords.is_remote(origin) else path,
+            caption=caption,
+            origin=origin,
+        )
         present_image_lightbox(
             tab,
             path,
