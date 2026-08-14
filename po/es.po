@@ -476,8 +476,8 @@ msgstr "Añadir seleccionadas a favoritos"
 msgid "Open selected in tabs"
 msgstr "Abrir seleccionadas en pestañas"
 
-msgid "warning: project dir {cwd} no longer exists, starting in HOME"
-msgstr "advertencia: el directorio del proyecto {cwd} ya no existe, iniciando en HOME"
+msgid "warning: project dir {cwd} no longer exists, starting in {fallback}"
+msgstr "advertencia: el directorio del proyecto {cwd} ya no existe, iniciando en {fallback}"
 
 msgid "recreating removed worktree {path}"
 msgstr "recreando el worktree eliminado {path}"

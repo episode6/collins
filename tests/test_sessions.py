@@ -1,12 +1,15 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-12. Full change history: git log for this file.
+# fork. Last modified: 2026-08-13. Full change history: git log for this file.
 
 import json
+import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
+from collins import sessions
 from collins.sessions import (
     Session,
     configured_mcp_servers,
@@ -605,22 +608,62 @@ def test_last_worktree_state_takes_last(tmp_path):
 
 def test_recreatable_worktree(tmp_path):
     root, _head, state = _worktree_repo(tmp_path)
-    jsonl = tmp_path / "s.jsonl"
+    # Filed the way the CLI files a session that has entered a worktree.
+    project = tmp_path / "-repo--claude-worktrees-oasis"
+    project.mkdir()
+    jsonl = project / "s.jsonl"
     jsonl.write_text(_worktree_state_line(state), encoding="utf-8")
     cwd = state["worktreePath"]
 
     assert recreatable_worktree(jsonl, cwd) == state
-    # A different missing directory under the same worktrees root doesn't match.
-    assert recreatable_worktree(jsonl, str(root / ".claude" / "worktrees" / "other")) is None
-    # Not a Claude worktree path at all / repo gone / no transcript.
-    assert recreatable_worktree(jsonl, str(root / "sub")) is None
+    # The tab's own directory doesn't have to be the worktree: a session that
+    # entered one mid-run is handed the repository root it started in, and
+    # still needs the worktree back before the CLI re-enters it.
+    assert recreatable_worktree(jsonl, str(root)) == state
+    assert recreatable_worktree(jsonl, str(root / ".claude" / "worktrees" / "other")) == state
+    # Nothing to repair: the worktree is still there.
+    Path(cwd).mkdir(parents=True)
+    assert recreatable_worktree(jsonl, cwd) is None
+    Path(cwd).rmdir()
+    # No transcript to read / the repository itself is gone.
     assert recreatable_worktree(None, cwd) is None
-    assert (
-        recreatable_worktree(jsonl, str(tmp_path / "gone" / ".claude" / "worktrees" / "x")) is None
+    gone = dict(state, worktreePath=str(tmp_path / "gone" / ".claude" / "worktrees" / "x"))
+    jsonl.write_text(_worktree_state_line(gone), encoding="utf-8")
+    assert recreatable_worktree(jsonl, cwd) is None
+    # A worktree with no branch recorded (a session that entered somebody
+    # else's) can't be put back.
+    jsonl.write_text(
+        _worktree_state_line({k: v for k, v in state.items() if k != "worktreeBranch"}),
+        encoding="utf-8",
     )
+    assert recreatable_worktree(jsonl, cwd) is None
     # A relocated session (trailing null record) offers nothing to recreate.
     jsonl.write_text(_worktree_state_line(state) + _worktree_state_line(None), encoding="utf-8")
     assert recreatable_worktree(jsonl, cwd) is None
+
+
+def test_recreatable_worktree_skips_plain_sessions(tmp_path, monkeypatch):
+    """An ordinary session's transcript is never read looking for worktrees —
+    it is the common case, and the read is the whole file."""
+    root, _head, state = _worktree_repo(tmp_path)
+    plain = tmp_path / "-home-u-proj"
+    plain.mkdir()
+    jsonl = plain / "s.jsonl"
+    jsonl.write_text(_worktree_state_line(state), encoding="utf-8")
+
+    read: list[Path] = []
+    real = sessions.last_worktree_state
+    monkeypatch.setattr(sessions, "last_worktree_state", lambda p: (read.append(p), real(p))[1])
+    assert sessions.recreatable_worktree(jsonl, str(root)) is None
+    assert read == []
+    # Filed under a worktree (the CLI moves the transcript when a session
+    # enters one), so it is worth reading even though the cwd is the root.
+    filed = tmp_path / "-home-u-proj--claude-worktrees-oasis"
+    filed.mkdir()
+    moved = filed / "s.jsonl"
+    moved.write_text(jsonl.read_text(encoding="utf-8"), encoding="utf-8")
+    assert sessions.recreatable_worktree(moved, str(root)) == state
+    assert read == [moved]
 
 
 def test_recreate_worktree_fresh(tmp_path):
@@ -663,6 +706,29 @@ def test_recreate_worktree_existing_branch(tmp_path):
         text=True,
     ).stdout.strip()
     assert sha == tip
+
+
+def test_recreate_worktree_missing_but_locked(tmp_path):
+    """The CLI locks every worktree it makes, and the lock outlives the
+    session: a directory that went missing behind git's back leaves a
+    registration a single `add -f` refuses outright."""
+    root, _head, state = _worktree_repo(tmp_path)
+    wt = state["worktreePath"]
+    assert recreate_worktree(state)
+    _git(root, "worktree", "lock", wt)
+    shutil.rmtree(wt)
+
+    assert recreate_worktree(state)
+    assert Path(wt, ".git").exists()
+
+
+def test_recreate_worktree_without_a_base(tmp_path):
+    """Nothing to branch from and no branch left: say so rather than leaving a
+    half-made worktree behind."""
+    _root, _head, state = _worktree_repo(tmp_path)
+    del state["originalHeadCommit"]
+    assert not recreate_worktree(state)
+    assert not Path(state["worktreePath"]).exists()
 
 
 def _prompt_transcript(tmp_path, *entries):

@@ -192,8 +192,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Remove selected from favorites": "Kijelöltek eltávolítása a kedvencekből",
         "Add selected to favorites": "Kijelöltek hozzáadása a kedvencekhez",
         "Open selected in tabs": "Kijelöltek megnyitása lapokon",
-        "warning: project dir {cwd} no longer exists, starting in HOME":
-            "figyelmeztetés: a(z) {cwd} projektkönyvtár már nem létezik, indítás a HOME-ban",
+        "warning: project dir {cwd} no longer exists, starting in {fallback}":
+            "figyelmeztetés: a(z) {cwd} projektkönyvtár már nem létezik, indítás itt: {fallback}",
         "recreating removed worktree {path}":
             "az eltávolított {path} munkafa újralétrehozása",
         "warning: `{cli}` not found in PATH — starting a plain shell":
@@ -574,8 +574,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Remove selected from favorites": "Ausgewählte aus Favoriten entfernen",
         "Add selected to favorites": "Ausgewählte zu Favoriten hinzufügen",
         "Open selected in tabs": "Ausgewählte in Tabs öffnen",
-        "warning: project dir {cwd} no longer exists, starting in HOME":
-            "Warnung: Projektverzeichnis {cwd} existiert nicht mehr, starte im HOME",
+        "warning: project dir {cwd} no longer exists, starting in {fallback}":
+            "Warnung: Projektverzeichnis {cwd} existiert nicht mehr, starte in {fallback}",
         "recreating removed worktree {path}":
             "entfernter Worktree {path} wird neu erstellt",
         "warning: `{cli}` not found in PATH — starting a plain shell":
@@ -962,8 +962,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Remove selected from favorites": "Quitar seleccionadas de favoritos",
         "Add selected to favorites": "Añadir seleccionadas a favoritos",
         "Open selected in tabs": "Abrir seleccionadas en pestañas",
-        "warning: project dir {cwd} no longer exists, starting in HOME":
-            "advertencia: el directorio del proyecto {cwd} ya no existe, iniciando en HOME",
+        "warning: project dir {cwd} no longer exists, starting in {fallback}":
+            "advertencia: el directorio del proyecto {cwd} ya no existe, iniciando en {fallback}",
         "recreating removed worktree {path}":
             "recreando el worktree eliminado {path}",
         "warning: `{cli}` not found in PATH — starting a plain shell":
@@ -1349,8 +1349,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Remove selected from favorites": "Retirer la sélection des favoris",
         "Add selected to favorites": "Ajouter la sélection aux favoris",
         "Open selected in tabs": "Ouvrir la sélection dans des onglets",
-        "warning: project dir {cwd} no longer exists, starting in HOME":
-            "avertissement : le répertoire de projet {cwd} n’existe plus, démarrage dans HOME",
+        "warning: project dir {cwd} no longer exists, starting in {fallback}":
+            "avertissement : le répertoire de projet {cwd} n’existe plus, démarrage dans {fallback}",
         "recreating removed worktree {path}":
             "recréation du worktree supprimé {path}",
         "warning: `{cli}` not found in PATH — starting a plain shell":

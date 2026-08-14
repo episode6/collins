@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-12. Full change history: git log for this file.
+# fork. Last modified: 2026-08-13. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -356,29 +356,59 @@ def last_worktree_state(path: Path) -> dict | None:
     return state
 
 
+def _worktree_related(jsonl_path: Path, cwd: str) -> bool:
+    """Whether a transcript is worth reading for worktree records at all.
+
+    last_worktree_state() reads a whole transcript, which is wasted on the
+    ordinary session that never saw a worktree — so only sessions that could
+    plausibly have one pay for it: a directory that is gone, a directory that
+    is itself a Claude worktree, or a transcript the CLI has filed under one
+    (it names a transcript's project directory after the session's working
+    directory, and moves the file when a session enters a worktree — so a
+    session that left the repository root for one is filed under the worktree
+    while its own records still say root).
+    """
+    if not cwd or not Path(cwd).is_dir():
+        return True
+    if worktree_project_root(cwd):
+        return True
+    return "--claude-worktrees-" in jsonl_path.parent.name
+
+
 def recreatable_worktree(jsonl_path: str | Path | None, cwd: str) -> dict | None:
-    """The worktree state a missing session cwd can be recreated from, or None.
+    """The worktree a session needs put back before it resumes, or None.
 
     Exiting the CLI reaps a session worktree it considers untouched — no
     changes, no commits — deleting both the directory and its `worktree-*`
     branch, so resuming later silently relocates the session to the repository
-    root. When the missing cwd is exactly the worktree the transcript still
-    records as current and the repository is still there, the worktree can be
-    put back before relaunching: a recreated worktree at the same path, branch
-    and base commit resumes seamlessly (verified against CLI 2.1.226).
+    root. The worktree the transcript still records as current is where the
+    session belongs whatever directory the tab is about to start in: the CLI
+    re-enters it on resume as long as the directory is there (and drops the
+    session out of it for good when it isn't), so a session that entered its
+    worktree mid-run — and is handed the repository root it started in —
+    needs the same repair as one that was launched into it. A recreated
+    worktree at the same path, branch and base commit resumes seamlessly
+    (verified against CLI 2.1.232).
+
+    *cwd* is only the tab's starting directory, used to skip the read for
+    sessions that plainly never had a worktree (see _worktree_related).
     """
     if not jsonl_path:
         return None
-    root = worktree_project_root(cwd)
-    if root is None or not Path(root, ".git").exists():
+    jsonl_path = Path(jsonl_path)
+    if not _worktree_related(jsonl_path, cwd):
         return None
-    state = last_worktree_state(Path(jsonl_path))
+    state = last_worktree_state(jsonl_path)
     if not state:
         return None
     path = state.get("worktreePath")
-    if not isinstance(path, str) or os.path.normpath(path) != os.path.normpath(cwd):
+    # A worktree that is still there needs nothing; one that never had a
+    # branch recorded (a session that entered somebody else's worktree)
+    # can't be put back.
+    if not isinstance(path, str) or Path(path).is_dir() or not state.get("worktreeBranch"):
         return None
-    if not (state.get("worktreeBranch") and state.get("originalHeadCommit")):
+    root = worktree_project_root(path)
+    if root is None or not Path(root, ".git").exists():
         return None
     return state
 
@@ -406,14 +436,19 @@ def recreate_worktree(state: dict) -> bool:
             return False
 
     branch = str(state["worktreeBranch"])
-    # -f in both forms, because git refuses a path it still has registered —
-    # a worktree deleted behind git's back rather than reaped by the CLI.
+    # -f twice, in both forms: one -f covers a path git still has registered,
+    # but the CLI locks every worktree it creates and a lock outlives the
+    # session, so a directory that went missing behind git's back leaves a
+    # "missing but locked" registration that only `add -f -f` will overwrite.
     if git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"):
         # The branch survived (a reap deletes it), so it may hold commits the
         # base doesn't: check it back out instead of clobbering it.
-        ok = git("worktree", "add", "-f", path, branch)
+        ok = git("worktree", "add", "-f", "-f", path, branch)
+    elif state.get("originalHeadCommit"):
+        base = str(state["originalHeadCommit"])
+        ok = git("worktree", "add", "-f", "-f", "-b", branch, path, base)
     else:
-        ok = git("worktree", "add", "-f", "-b", branch, path, str(state["originalHeadCommit"]))
+        ok = False  # no branch left and no base to branch from
     return ok and Path(path).is_dir()
 
 

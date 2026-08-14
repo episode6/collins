@@ -476,8 +476,8 @@ msgstr "Kijelöltek hozzáadása a kedvencekhez"
 msgid "Open selected in tabs"
 msgstr "Kijelöltek megnyitása lapokon"
 
-msgid "warning: project dir {cwd} no longer exists, starting in HOME"
-msgstr "figyelmeztetés: a(z) {cwd} projektkönyvtár már nem létezik, indítás a HOME-ban"
+msgid "warning: project dir {cwd} no longer exists, starting in {fallback}"
+msgstr "figyelmeztetés: a(z) {cwd} projektkönyvtár már nem létezik, indítás itt: {fallback}"
 
 msgid "recreating removed worktree {path}"
 msgstr "az eltávolított {path} munkafa újralétrehozása"

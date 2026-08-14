@@ -133,6 +133,12 @@ _UNLIMITED_CLAMP_WIDTH = 1_000_000
 PROGRESS_HINT_TERMPROP: str | None = getattr(Vte, "TERMPROP_PROGRESS_HINT", None)
 
 
+def _within(root: str, path: str) -> bool:
+    """Whether *path* is *root* itself or something under it. Purely lexical."""
+    root, path = os.path.normpath(root), os.path.normpath(path)
+    return path == root or path.startswith(root + os.sep)
+
+
 def _agent_tab_environment() -> list[str]:
     """The environment an agent tab's shell spawns with: the app's own, plus
     what makes Claude Code announce its progress to a VTE terminal.
@@ -1137,28 +1143,34 @@ class TerminalTab(Gtk.Box):
     # -- spawning ----------------------------------------------------------
 
     def _spawn(self, cwd: str | None, session_id: str | None) -> None:
-        if cwd is not None and session_id is not None and not Path(cwd).is_dir():
-            state = recreatable_worktree(self._transcript.path, cwd)
+        if session_id is not None:
+            state = recreatable_worktree(self._transcript.path, cwd or "")
             if state is not None:
                 # The CLI reaped this session's worktree when it last exited
                 # (it deletes untouched ones); resuming without it would
-                # relocate the session to the repository root for good.
+                # relocate the session out of the worktree for good — it
+                # re-enters one it can still find, wherever the shell starts.
                 # Recreate it first — same path, branch, base commit — so the
                 # resume lands back where the session left off. Off the main
                 # loop: `git worktree add` checks out a whole working tree.
                 # Until it finishes, readers see the worktree cwd and no
                 # initial command, same as a tab whose shell hasn't spawned.
-                self._cwd = cwd
+                path = str(state["worktreePath"])
+                self._cwd = path
                 self._initial_command = None
-                self.feed_message(
-                    _("recreating removed worktree {path}").format(path=cwd)
-                )
+                self.feed_message(_("recreating removed worktree {path}").format(path=path))
 
                 def recreate() -> None:
                     recreate_worktree(state)
+                    # Back to the directory the tab was handed once it exists
+                    # again — an agent that had moved into a subdirectory of
+                    # the worktree resumes there — and to the worktree itself
+                    # for a tab handed somewhere outside it (the repository
+                    # root a session started in before entering the worktree).
                     # _finish_spawn re-checks the directory; on failure it
-                    # falls back to HOME with its usual warning.
-                    GLib.idle_add(self._finish_spawn, cwd, session_id)
+                    # falls back with its usual warning.
+                    within = cwd is not None and _within(path, cwd) and Path(cwd).is_dir()
+                    GLib.idle_add(self._finish_spawn, cwd if within else path, session_id)
 
                 threading.Thread(target=recreate, daemon=True).start()
                 return
@@ -1167,10 +1179,19 @@ class TerminalTab(Gtk.Box):
     def _finish_spawn(self, cwd: str | None, session_id: str | None) -> None:
         if cwd is None or not Path(cwd).is_dir():
             if cwd is not None:
+                # A worktree that couldn't be put back still belongs to a
+                # repository: start there rather than in HOME, which is where
+                # the CLI relocates the session anyway.
+                root = worktree_project_root(cwd)
+                fallback = root if root and Path(root).is_dir() else str(Path.home())
                 self.feed_message(
-                    _("warning: project dir {cwd} no longer exists, starting in HOME").format(cwd=cwd)
+                    _("warning: project dir {cwd} no longer exists, starting in {fallback}").format(
+                        cwd=cwd, fallback=fallback
+                    )
                 )
-            cwd = str(Path.home())
+                cwd = fallback
+            else:
+                cwd = str(Path.home())
         self._cwd = cwd
 
         # Run the user's interactive shell and type the agent command into it,
