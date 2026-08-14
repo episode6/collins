@@ -34,6 +34,7 @@ from . import footerapps, openwith, prmenu
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
 from .formatting import format_size
+from .gitinfo import github_url
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .projecticons import project_icon_data
@@ -2327,6 +2328,16 @@ class SessionSidebar(Gtk.Box):
 
         rows: list[Gtk.Widget] = []
         if row.cwd:
+            # Only where there is a github.com remote to open (see
+            # gitinfo.github_url, which reads `.git/config` and spawns
+            # nothing): a checkout hosted elsewhere gets no item at all
+            # rather than one that would go nowhere.
+            if github_url(row.cwd):
+                github_item = Gio.MenuItem.new(_("Open on GitHub"), None)
+                github_item.set_action_and_target_value(
+                    "win.open-github", GLib.Variant("s", row.cwd)
+                )
+                open_section.append_item(github_item)
             open_section.append_submenu(_("Open In…"), self._open_with_menu(row.cwd, rows))
 
         menu = Gio.Menu()

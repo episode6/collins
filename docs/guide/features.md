@@ -64,6 +64,12 @@ fork. Last modified: 2026-08-13. Full change history: git log for this file.
   `xdg-terminals.list`, and the system's own `x-terminal-emulator` are
   honoured, in that order). The Chats group has no folder of its own, so its
   menu stays as it was.
+- **Open on GitHub**, in that same menu, opens the project's repository page in
+  your browser. It appears only where there is somewhere to go: Collins reads
+  the remotes out of the checkout's own `.git/config` (a worktree's config is
+  the main checkout's), prefers `origin`, and offers nothing at all for a
+  folder that isn't a repository or whose remotes live somewhere other than
+  github.com.
 - **Generate Icon**, in that menu too, asks Claude to design the project a
   sidebar icon from what's in the folder — its name, top-level files and
   README. The result is previewed at full size and at the 16px the sidebar

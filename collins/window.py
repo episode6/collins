@@ -65,10 +65,11 @@ from .caffeine import (
     toggle_tooltip,
 )
 from .chatsessionview import ChatSessionTab
+from .copylabel import open_uri
 from .editorwindow import EditorWindow
 from .flash import flash
 from .formatting import blast_radius_body
-from .gitinfo import has_changes
+from .gitinfo import github_url, has_changes
 from .i18n import _
 from .licenses import legal_sections
 from .models import SessionItem
@@ -1101,6 +1102,7 @@ class MainWindow(Adw.ApplicationWindow):
             "trash-session": self._on_trash_session,
             "open-folder": self._on_open_folder,
             "open-folder-terminal": self._on_open_folder_terminal,
+            "open-github": self._on_open_github,
         }
         for name, callback in per_session.items():
             action = Gio.SimpleAction(name=name, parameter_type=GLib.VariantType("s"))
@@ -4185,6 +4187,19 @@ class MainWindow(Adw.ApplicationWindow):
             )
             return
         openwith.launch_terminal(info, param.get_string())
+
+    def _on_open_github(self, _action, param: GLib.Variant) -> None:
+        """Open the project folder's repository page on GitHub.
+
+        What the action carries is the folder, not the page: the URL is built
+        here, from the owner and repo gitinfo read out of the repository's
+        config, so nothing a checkout has written in there can reach a browser
+        as anything but `https://github.com/owner/repo`. A folder whose remote
+        went away between the menu opening and the click does nothing.
+        """
+        url = github_url(param.get_string())
+        if url is not None:
+            open_uri(self, url)
 
     def _on_open_folder_app(self, _action, param: GLib.Variant) -> None:
         app_id, folder = param.unpack()
