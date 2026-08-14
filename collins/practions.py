@@ -18,7 +18,9 @@ moved since, as a review it has already given isn't one to ask for again.
 
 The same answers dress a second surface: `header_actions` is the handful of
 them that change the pull request itself, which the native PR page draws as
-buttons over its view switcher rather than burying a merge two clicks deep.
+buttons on its view switcher's row rather than burying a merge two clicks
+deep — in their `short` wording, which is all a button beside a switcher has
+room to say.
 
 Four of them aren't about GitHub at all: FIX_CI, REBASE, COMMENTS and NEW_PR
 send a prompt to the session that opened the PR and let the agent do the work.
@@ -111,6 +113,12 @@ class Action:
     it would. The menu shows a blocked action as an unpressable row carrying
     that sentence, rather than leaving it out: an offer that comes and goes
     with what a terminal happens to be showing is one nobody can find twice.
+
+    *short* is the same action in a word or two, for the `header_actions`
+    buttons that sit on the PR page's switcher row: a menu row has a line to
+    explain itself in, a button beside a view switcher has none to spare, and
+    what the full label was saying is on the tooltip either way. Empty where
+    the label is already short enough to be a button.
     """
 
     key: str
@@ -119,6 +127,7 @@ class Action:
     confirm: Confirm | None = None
     prompt: str = ""
     blocked: str = ""
+    short: str = ""
 
 
 def checks_green(pr: PullRequest) -> bool:
@@ -240,39 +249,27 @@ def actions_for(
 
 
 def header_actions(pr: PullRequest) -> list[Action]:
-    """The state-changing actions the PR page puts above its view switcher.
+    """The state-changing actions the PR page puts beside its view switcher.
 
-    `actions_for`'s first item or two, and only those: the actions that move
-    the pull request itself along — out of draft, or into the base branch.
-    Everything else the menu offers is either a prompt for the session or a
-    comment, which is what the page's composer is for.
+    `actions_for`'s first item, and only that: the action that moves the pull
+    request itself along — out of draft, or into the base branch. Everything
+    else the menu offers is either a prompt for the session or a comment,
+    which is what the page's composer is for.
 
-    Where the menu picks *one* merge — the one that fits the checks — this
-    offers both while they are both real offers, since a button row can say
-    what a single menu item has to choose between: waiting for the checks is
-    the recommended half (`recommended_key`), merging now is the half that
-    doesn't wait. Once the checks are green there is nothing left to wait
-    for, so only the merge remains.
+    One at a time, always: a draft is asked to come out of draft, and an open
+    PR is offered the single merge that fits the state its checks are in —
+    auto-merge while they are still running, the merge itself once they are
+    green. The same answer the menu gives, drawn as a button, so the page and
+    the menu can't recommend different things about the same PR; and since it
+    is the one Collins recommends, it is the one that wears the accent.
     """
     if pr.state == "DRAFT":
         return [ready_action(pr)]
     if pr.state == "OPEN" and not pr.conflicting:
-        # Same gate as the menu's: GitHub refuses both halves on a branch it
-        # can't merge, and a draft can't be auto-merged either.
-        if checks_green(pr):
-            return [merge_action(pr, auto=False)]
-        return [merge_action(pr, auto=True), merge_action(pr, auto=False)]
+        # Same gate as the menu's: GitHub refuses a merge on a branch it can't
+        # merge, and a draft can't be auto-merged either.
+        return [merge_action(pr, auto=not checks_green(pr))]
     return []
-
-
-def recommended_key(pr: PullRequest) -> str:
-    """Which of `header_actions` is the one to press — the action the menu
-    would have offered on its own, for the page to draw as its suggested one.
-    Merging before the checks have spoken stays available beside it, but it
-    isn't what Collins is recommending."""
-    if pr.state == "DRAFT":
-        return READY
-    return MERGE if checks_green(pr) else AUTO_MERGE
 
 
 def ready_action(pr: PullRequest) -> Action:
@@ -282,6 +279,7 @@ def ready_action(pr: PullRequest) -> Action:
         READY,
         _("Mark ready for review"),
         _("Take {slug} out of draft").format(slug=pr.slug),
+        short=_("Ready"),
     )
 
 
@@ -320,6 +318,7 @@ def merge_action(pr: PullRequest, auto: bool) -> Action:
                 ),
                 _("Enable auto-merge"),
             ),
+            short=_("Auto-Merge"),
         )
     if checks_green(pr):
         body = _("Its checks have passed. This merges the pull request on GitHub now.")
@@ -333,6 +332,7 @@ def merge_action(pr: PullRequest, auto: bool) -> Action:
         _("Merge pull request"),
         _("Merge {slug} now").format(slug=pr.slug),
         Confirm(_("Merge {slug}?").format(slug=pr.slug), body, _("Merge")),
+        short=_("Merge"),
     )
 
 
