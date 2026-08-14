@@ -57,7 +57,11 @@ _FLOOR_WIDTH = 120
 # reasoning as avatars._GATE, one size up because these are bigger.
 _GATE = threading.Semaphore(3)
 
-# url -> the file it was fetched to, or None when the fetch failed.
+# url -> the file it was fetched to, or None when the fetch failed. Kept for
+# the run, uncapped, unlike the decoded-picture cache in bodyimages: what is
+# held here is a path and a message, and evicting one wouldn't free anything
+# worth freeing — it would only make a URL already on disk download again.
+# The files themselves are bounded by remoteimages' own 24h prune.
 _files: dict[str, Path | None] = {}
 _errors: dict[str, str] = {}  # url -> why it failed, for a fallback's tooltip
 _waiting: dict[str, list[Callable[[Path | None, str | None], None]]] = {}
@@ -114,18 +118,23 @@ def _landed(url: str, path: Path | None, error: str | None) -> bool:
     return GLib.SOURCE_REMOVE
 
 
-def thumbnail(path: str | Path, width: int) -> Gdk.Paintable | None:
-    """The image at *path*, decoded no bigger than a *width*-wide column.
+def thumbnail(
+    path: str | Path, width: int, max_height: int = MAX_HEIGHT
+) -> Gdk.Paintable | None:
+    """The image at *path*, decoded no bigger than the box it is drawn in.
 
     `animatedimage.load` decodes at full size, which is the right answer for
     the one picture a lightbox shows and the wrong one for a gallery: a
     hundred screenshots held as full-resolution textures is hundreds of
     megabytes for a column that paints them a few hundred pixels wide. So
-    anything wider than the column is scaled while it is decoded — the
-    full-size copy is never held at all — and anything already narrower is
-    loaded as it is, since upscaling only makes it blurrier.
+    anything that doesn't already fit in *width* x *max_height* is scaled
+    while it is decoded — the full-size copy is never held at all — and
+    anything that does fit is loaded as it is, since upscaling only makes it
+    blurrier. Both bounds are needed: a tall narrow picture is inside the
+    column's width and still decodes to megabytes nobody sees, because a
+    preview that tall is drawn as a sliver (see BoundedPicture) either way.
 
-    GIFs go through `animatedimage` whatever their width: an animation shown
+    GIFs go through `animatedimage` whatever their size: an animation shown
     as a still is exactly the picture that misleads, and its clock stops
     itself whenever nobody is drawing it, so one scrolled out of view costs
     nothing. None when the file can't be decoded at all — every caller has a
@@ -135,13 +144,17 @@ def thumbnail(path: str | Path, width: int) -> Gdk.Paintable | None:
     if path.suffix.lower() == ".gif":
         return animatedimage.load(path)
     info = GdkPixbuf.Pixbuf.get_file_info(str(path))
-    natural = info[1] if info is not None and info[0] is not None else 0
-    if natural <= width:
-        # Unrecognized (natural 0) lands here too: gdk-pixbuf doesn't know
-        # the format, and GdkTexture's own decoders get their turn.
+    known = info is not None and info[0] is not None
+    if not known or (info[1] <= width and info[2] <= max_height):
+        # An unrecognized file lands here too: gdk-pixbuf doesn't know the
+        # format, and GdkTexture's own decoders get their turn.
         return animatedimage.load(path)
     try:
-        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(path), width, -1, True)
+        # Both bounds with preserve_aspect: gdk-pixbuf fits the picture
+        # inside the box, so whichever dimension is the binding one decides.
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+            str(path), width, max_height, True
+        )
     except GLib.Error:
         return animatedimage.load(path)
     return Gdk.Texture.new_for_pixbuf(pixbuf)

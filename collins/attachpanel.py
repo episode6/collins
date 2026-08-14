@@ -343,13 +343,15 @@ class _Row(Gtk.Button):
         if self._one.remote:
             pictures.fetch(self._one.key, self._remote_landed)
             return
-        self._show(pictures.thumbnail(self._one.key, PANEL_WIDTH))
+        self._show(pictures.thumbnail(self._one.key, PANEL_WIDTH, _THUMB_HEIGHT))
 
     def _remote_landed(self, path: Path | None, error: str | None) -> None:
         if self.get_parent() is None:
             return  # struck off the list while the download ran
         self._show(
-            pictures.thumbnail(path, PANEL_WIDTH) if path is not None else None,
+            pictures.thumbnail(path, PANEL_WIDTH, _THUMB_HEIGHT)
+            if path is not None
+            else None,
             error=error,
         )
 
