@@ -2296,8 +2296,12 @@ msgstr[1] ""
 msgid "Add a comment"
 msgstr ""
 
-#: collins/prview.py:750
-msgid "Reply via Claude"
+#: collins/prview.py:1218
+msgid "Address comments"
+msgstr ""
+
+#: collins/prview.py:1231
+msgid "Request review"
 msgstr ""
 
 #: collins/prview.py:764

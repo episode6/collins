@@ -313,6 +313,60 @@ def test_every_action_names_the_pr_in_its_tooltip():
         assert action.label and action.tooltip
 
 
+# -- what the page's own buttons offer ---------------------------------------
+
+
+def _header(pr) -> list[str]:
+    return [action.key for action in practions.header_actions(pr)]
+
+
+def test_a_draft_is_offered_its_way_out_and_nothing_else():
+    """Merging a draft is a thing GitHub refuses, auto-merge included."""
+    assert _header(_pr(state="DRAFT")) == [READY]
+
+
+def test_a_pending_pr_offers_both_halves_of_the_merge():
+    """Where the menu has to pick one, a button row can say both: wait for the
+    checks, or don't."""
+    assert _header(_pr(passed=1, pending=2)) == [AUTO_MERGE, MERGE]
+
+
+def test_a_green_pr_has_nothing_left_to_wait_for():
+    assert _header(_pr()) == [MERGE]
+
+
+def test_nothing_is_offered_where_the_menu_offers_no_merge_either():
+    """A conflicting PR, a settled one, and one nothing has been fetched for:
+    the bar goes away rather than showing buttons GitHub would refuse."""
+    assert _header(_pr(mergeable="CONFLICTING")) == []
+    assert _header(_pr(state="MERGED")) == []
+    assert _header(_pr(state="CLOSED")) == []
+    assert _header(_pr(state=None, passed=None, failed=None, pending=None)) == []
+
+
+def test_the_recommended_button_is_the_one_the_menu_would_have_shown():
+    """The accent goes on the single action `actions_for` picks, so the page
+    and the menu can't recommend different things about the same PR."""
+    for pr in (_pr(state="DRAFT"), _pr(), _pr(passed=1, pending=2), _pr(passed=1, failed=1)):
+        offered = _keys(pr)
+        assert practions.recommended_key(pr) == offered[0]
+
+
+def test_both_merges_still_ask_first():
+    asks = {a.key: a.confirm is not None for a in practions.header_actions(_pr(pending=1))}
+    assert asks == {AUTO_MERGE: True, MERGE: True}
+
+
+def test_merging_past_unfinished_checks_says_so_when_it_asks():
+    """The green wording would be a lie on a PR whose checks haven't spoken —
+    and this is the press that most needs the question to be accurate."""
+    green = practions.merge_action(_pr(), auto=False).confirm.body
+    pending = practions.merge_action(_pr(pending=2), auto=False).confirm.body
+    assert "have passed" in green
+    assert green != pending
+    assert "haven't all passed" in pending
+
+
 def test_checks_green_is_unknown_status_pessimistic():
     assert checks_green(_pr()) is True
     assert checks_green(_pr(pending=1)) is False

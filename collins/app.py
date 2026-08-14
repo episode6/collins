@@ -716,6 +716,11 @@ popover.menu button.open-with-row:hover {
 .pr-view-title {
   font-weight: bold;
 }
+/* the state's own actions, over the view switcher: the header's own side
+   padding, and enough under them to keep the switcher off the buttons */
+.pr-view-actions {
+  padding: 0px 10px 6px 10px;
+}
 .pr-card {
   padding: 8px 10px;
   border-radius: 10px;

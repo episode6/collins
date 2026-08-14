@@ -14,11 +14,19 @@ the page comes back into view; the widgets here only ever render what that
 GTK-free layer parsed and bounded. Failures keep the last-loaded content
 under an inline banner — stale beats blank, as everywhere in the PR stack.
 
+Over the switcher sit the actions that move the PR itself along, as buttons:
+whatever `practions.header_actions` says its state offers — "Mark ready for
+review" for a draft, "Merge when checks pass" and "Merge" for an open one —
+each behind the same confirmation and the same `gh` call the actions menu
+runs them with (`_ActionBar`), and no bar at all where a PR offers none.
+
 The Conversation column ends in the page's write half: a composer that posts
 its text as a comment or a review verdict through practions' write calls
-(bodies over stdin, never argv), with "Reply via Claude" beside them typing
-the COMMENTS prompt into the owning session instead — the composer is for
-answering a reviewer yourself, the prompt for making the agent do it.
+(bodies over stdin, never argv), with a Claude button beside them that either
+types the COMMENTS prompt into the owning session ("Address comments", while
+someone is waiting on a reply) or asks the repository's workflow for a review
+("Request review") — the composer is for answering a reviewer yourself, the
+button for making the agent do it.
 
 Review threads render as their own cards (`_ThreadCard`): anchored in the
 Conversation timeline by when they started, and again under their file's
@@ -285,7 +293,7 @@ class PrViewPage(Adw.Bin):
         # The write half, built once and re-appended across rebuilds: the
         # rebuild that lands a background refresh must not eat a half-typed
         # comment (see _Composer).
-        self._composer = _Composer(host_factory, self._posted)
+        self._composer = _Composer(host_factory, self._acted)
 
         # -- files ------------------------------------------------------------
         # The diff buffers follow the editor's style-scheme setting (or the
@@ -319,6 +327,13 @@ class PrViewPage(Adw.Bin):
         files_paned.set_end_child(self._files_scroller)
         files_paned.set_position(_FILE_LIST_WIDTH)
 
+        # -- what the PR's state offers ---------------------------------------
+        # Above the switcher rather than inside the actions menu: marking a
+        # draft ready and merging are what a PR page is *for*, and both were
+        # two clicks and a submenu away. The menu keeps them too — it is the
+        # same practions answer, drawn twice.
+        self._actions = _ActionBar(self._acted)
+
         # -- the two views under one switcher ---------------------------------
         self._stack = Adw.ViewStack(vexpand=True)
         self._stack.add_titled_with_icon(
@@ -335,6 +350,7 @@ class PrViewPage(Adw.Bin):
 
         view = Adw.ToolbarView()
         view.add_top_bar(header)
+        view.add_top_bar(self._actions)
         view.add_top_bar(switcher)
         view.set_content(column)
         self.set_child(view)
@@ -508,6 +524,10 @@ class PrViewPage(Adw.Bin):
 
     def _sync_header(self) -> None:
         pr = self._pr
+        # Before the first fetch this is the summary the chip already held —
+        # enough of a state for the buttons, so a draft opened from the footer
+        # offers "Mark ready for review" while the fetch is still in flight.
+        self._actions.sync(pr)
         self._mark_slot.set_child(prmenu.status_icon(pr))
         self._number.set_label(f"#{pr.number}")
         title = pr.title or pr.repository or _("Pull request")
@@ -593,10 +613,11 @@ class PrViewPage(Adw.Bin):
         self._composer.sync(self._pr)
         self._content.append(self._composer)
 
-    def _posted(self) -> None:
-        """A comment or review just landed on GitHub: re-read everything that
-        shows this PR — the page itself (whose fetch re-absorbs into the
-        summary cache), and the summary the tab's own poll holds."""
+    def _acted(self) -> None:
+        """Something the page did just landed on GitHub — a comment, a review,
+        or one of the header buttons' actions: re-read everything that shows
+        this PR, the page itself (whose fetch re-absorbs into the summary
+        cache) and the summary the tab's own poll holds."""
         invalidate(self.pr_url)
         self._host_factory().refresh()
         self.refresh()
@@ -671,7 +692,7 @@ class PrViewPage(Adw.Bin):
             self._pr,
             self._thread_drafts,
             self._thread_busy,
-            self._posted,
+            self._acted,
             self._inline_images,
         )
 
@@ -923,6 +944,124 @@ class _WrapRow(Gtk.Widget):
         Gtk.Widget.do_dispose(self)
 
 
+class _ActionBar(Gtk.Box):
+    """The buttons that move the pull request along, over the view switcher.
+
+    Whatever `practions.header_actions` says the PR's state offers, and
+    nothing when it offers none — a merged PR, a closed one, a conflicting
+    one, or one nothing has been fetched for yet all show no bar at all
+    rather than a row of dead buttons. The one Collins would have offered on
+    its own (see practions.recommended_key) wears the accent; the other, when
+    there is one, stands beside it plain: merging before the checks have
+    spoken is a thing you can mean, just not the thing to press by default.
+
+    Every button is `practions.perform` on a worker thread behind the merge's
+    own confirmation dialog, the bar held insensitive until the answer lands
+    (one press, one merge). A failure is gh's own sentence in a dialog;
+    success is quiet, and *on_done* re-reads the PR — which is what takes the
+    buttons away, since the state they were offered for has just changed.
+
+    The row wraps (_WrapRow) for the same reason the composer's does: no
+    button here may become the width the whole panel page can't go under.
+    """
+
+    def __init__(self, on_done: Callable[[], None]) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.add_css_class("pr-view-actions")
+        self._on_done = on_done
+        self._pr: PullRequest | None = None
+        self._actions: dict[str, practions.Action] = {}
+        self._running = False
+
+        row = _WrapRow()
+        row.append(Gtk.Box(hexpand=True))  # the buttons hug the row's end
+        self._spinner = Gtk.Spinner()
+        self._spinner.set_visible(False)
+        self._spinner.set_valign(Gtk.Align.CENTER)
+        row.append(self._spinner)
+        # Built once and shown by key, rather than rebuilt per sync: the set is
+        # closed (three actions), and a button that only ever changes its
+        # visibility can't lose a click to a rebuild landing under the pointer.
+        self._buttons: dict[str, Gtk.Button] = {}
+        for key in (practions.READY, practions.AUTO_MERGE, practions.MERGE):
+            button = Gtk.Button()
+            button.connect("clicked", self._on_clicked, key)
+            row.append(button)
+            self._buttons[key] = button
+        self.append(row)
+        self.set_visible(False)
+
+    def sync(self, pr: PullRequest) -> None:
+        """Show what *pr*'s state offers now, as freshly fetched."""
+        self._pr = pr
+        self._actions = {action.key: action for action in practions.header_actions(pr)}
+        recommended = practions.recommended_key(pr)
+        for key, button in self._buttons.items():
+            action = self._actions.get(key)
+            button.set_visible(action is not None)
+            if action is None:
+                continue
+            button.set_label(action.label)
+            button.set_tooltip_text(action.tooltip)
+            if key == recommended:
+                button.add_css_class("suggested-action")
+            else:
+                button.remove_css_class("suggested-action")
+        self.set_visible(bool(self._actions))
+
+    def _on_clicked(self, button: Gtk.Button, key: str) -> None:
+        pr = self._pr
+        action = self._actions.get(key)
+        if pr is None or action is None or self._running:
+            return
+        if action.confirm is None:
+            self._start(pr, action)
+            return
+        dialogs.confirm_dialog(
+            button.get_root(),
+            action.confirm.heading,
+            action.confirm.body,
+            action.confirm.label,
+            lambda: self._start(pr, action),
+            destructive=False,
+        )
+
+    def _start(self, pr: PullRequest, action: practions.Action) -> None:
+        """Run *action* off the main loop — gh takes a second or two over a
+        merge, and the bar says so meanwhile rather than looking ignored."""
+        if self._running:  # the dialog's answer could be the second one
+            return
+        self._running = True
+        self.set_sensitive(False)
+        self._spinner.set_visible(True)
+        self._spinner.start()
+
+        def work() -> None:
+            try:
+                error = practions.perform(action.key, pr)
+            except Exception:  # a button must never take the app down with it
+                log.debug("prview: %s on %s failed", action.key, pr.url, exc_info=True)
+                error = _("Collins couldn't run that action.")
+            GLib.idle_add(self._landed, action, error)
+
+        threading.Thread(target=work, name="pr-view-action", daemon=True).start()
+
+    def _landed(self, action: practions.Action, error: str | None) -> bool:
+        self._running = False
+        self.set_sensitive(True)
+        self._spinner.stop()
+        self._spinner.set_visible(False)
+        if error:
+            root = self.get_root()
+            if root is not None:
+                dialogs.error_dialog(
+                    root, _("{action} failed").format(action=action.label), error
+                )
+            return GLib.SOURCE_REMOVE
+        self._on_done()
+        return GLib.SOURCE_REMOVE
+
+
 class _Composer(Gtk.Box):
     """The Conversation view's write half: a comment box and its verdicts.
 
@@ -936,10 +1075,13 @@ class _Composer(Gtk.Box):
     stands alone. A failure comes back as gh's own sentence in a dialog, the
     text kept where it was typed; success clears the box and re-reads the PR.
 
-    "Reply via Claude" is the complement, not a competitor: it types the
-    COMMENTS prompt into the owning session instead, greyed with the reason
-    whenever the session can't take a prompt right now — the blocked action
-    rows' treatment, tooltip on a sensitive wrapper and all.
+    The Claude button beside them is the complement, not a competitor, and
+    which complement depends on who is waiting: "Address comments" while
+    somebody's word is unanswered, typing the COMMENTS prompt into the owning
+    session (greyed with the reason whenever it can't take a prompt right now
+    — the blocked action rows' treatment, tooltip on a sensitive wrapper and
+    all), and "Request review" when nobody is, which posts `@claude review`
+    on the PR and so needs no session at all. See `_sync_claude`.
 
     Its buttons sit in a row that wraps (_WrapRow): they read the same at any
     width the panel is dragged to, and none of them may quietly become the
@@ -955,6 +1097,9 @@ class _Composer(Gtk.Box):
         self._on_posted = on_posted
         self._pr: PullRequest | None = None
         self._posting = False
+        # Which of its two jobs the Claude button is doing, as one of
+        # practions' keys — set by every sync, and "" until the first one.
+        self._claude_key = ""
 
         heading = Gtk.Label(label=_("Add a comment"), xalign=0.0)
         heading.add_css_class("caption-heading")
@@ -984,17 +1129,19 @@ class _Composer(Gtk.Box):
         # be the page's minimum width, and a panel could never be squeezed
         # narrower than they are wide (see _WrapLayout, _MIN_PAGE_WIDTH).
         row = _WrapRow()
-        reply = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        reply.append(Gtk.Image.new_from_icon_name("agent-claude-symbolic"))
-        reply.append(Gtk.Label(label=_("Reply via Claude")))
-        self._reply_btn = Gtk.Button(child=reply)
+        claude = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        claude.append(Gtk.Image.new_from_icon_name("agent-claude-symbolic"))
+        self._claude_label = Gtk.Label()
+        claude.append(self._claude_label)
+        self._reply_btn = Gtk.Button(child=claude)
         self._reply_btn.add_css_class("flat")
-        self._reply_btn.connect("clicked", self._on_reply)
+        self._reply_btn.connect("clicked", self._on_claude)
         # Insensitive widgets are skipped when GTK picks what the pointer is
         # over (the blocked action rows' lesson): the reason a greyed button
         # is grey lives on this wrapper, which stays sensitive.
         self._reply_wrap = Gtk.Box()
         self._reply_wrap.append(self._reply_btn)
+        self._reply_wrap.set_visible(False)  # until a sync says which job it has
         row.append(self._reply_wrap)
         row.append(Gtk.Box(hexpand=True))
         self._spinner = Gtk.Spinner()
@@ -1040,12 +1187,51 @@ class _Composer(Gtk.Box):
         self._request_btn.set_tooltip_text(
             _("Request changes on {slug}").format(slug=pr.slug)
         )
-        prompt = practions.COMMENTS_PROMPT.format(number=pr.number)
-        block = self._host_factory().prompt_block()
-        self._reply_btn.set_sensitive(not block)
-        tooltip = _("Send “{prompt}” to this session").format(prompt=prompt)
-        self._reply_wrap.set_tooltip_text("\n".join(part for part in (tooltip, block) if part))
+        self._sync_claude(pr)
         self._sync_buttons()
+
+    def _sync_claude(self, pr: PullRequest) -> None:
+        """Point the Claude button at whichever of its two jobs this PR is in
+        want of — and hide it when neither is.
+
+        Someone waiting on a reply is what the button is most often for, and
+        that one is the session's work: it types the COMMENTS prompt into the
+        terminal, greyed with the reason whenever the session can't take a
+        prompt right now. With nobody waiting, the useful ask is the other
+        direction — a review, which lives on the PR as `@claude review` and so
+        goes through gh rather than the session (practions.review_action), and
+        needs no terminal at all.
+
+        Neither applies to a settled PR, and the review doesn't apply while
+        Claude's own review is still the newest thing here — the menu's rule
+        (see practions.actions_for), for the same reason: asking twice under
+        an unanswered answer is the app repeating itself.
+        """
+        self._claude_key = ""
+        if pr.state not in practions.LIVE:
+            self._reply_wrap.set_visible(False)
+            return
+        if pr.awaiting_reply:
+            prompt = practions.COMMENTS_PROMPT.format(number=pr.number)
+            block = self._host_factory().prompt_block()
+            self._claude_key = practions.COMMENTS
+            self._claude_label.set_label(_("Address comments"))
+            self._reply_btn.set_sensitive(not block)
+            tooltip = _("Send “{prompt}” to this session").format(prompt=prompt)
+            self._reply_wrap.set_tooltip_text(
+                "\n".join(part for part in (tooltip, block) if part)
+            )
+            self._reply_wrap.set_visible(True)
+            return
+        if pr.claude_had_the_last_word:
+            self._reply_wrap.set_visible(False)
+            return
+        action = practions.review_action(pr)
+        self._claude_key = practions.REVIEW
+        self._claude_label.set_label(_("Request review"))
+        self._reply_btn.set_sensitive(True)  # gh's business; no session needed
+        self._reply_wrap.set_tooltip_text(action.tooltip)
+        self._reply_wrap.set_visible(True)
 
     def _body(self) -> str:
         buffer = self._text.get_buffer()
@@ -1064,19 +1250,35 @@ class _Composer(Gtk.Box):
             return Gdk.EVENT_STOP
         return Gdk.EVENT_PROPAGATE
 
-    def _on_reply(self, *_args) -> None:
+    def _on_claude(self, *_args) -> None:
         pr = self._pr
         if pr is None:
+            return
+        if self._claude_key == practions.REVIEW:
+            # Posted on the PR, not typed at the session — and the box keeps
+            # whatever is in it: asking for a review isn't sending a comment.
+            self._post(
+                _("Request review"),
+                lambda pr, _body: practions.perform(practions.REVIEW, pr),
+                clear=False,
+            )
             return
         host = self._host_factory()
         if host.prompt_block():  # sampled again: sync was a fetch ago
             return
         host.send_prompt(practions.COMMENTS_PROMPT.format(number=pr.number))
 
-    def _post(self, label: str, run: Callable[[PullRequest, str], str | None]) -> None:
+    def _post(
+        self,
+        label: str,
+        run: Callable[[PullRequest, str], str | None],
+        clear: bool = True,
+    ) -> None:
         """Run one write call off the main loop, the composer held insensitive
         until it lands. *label* is the button's own word, for the failure
-        dialog's heading."""
+        dialog's heading; *clear* is whether landing it empties the box — true
+        for everything that posts what was typed there, false for the calls
+        that only happen to be run from the same row."""
         pr = self._pr
         if pr is None or self._posting:
             return
@@ -1092,11 +1294,11 @@ class _Composer(Gtk.Box):
             except Exception:  # a text box must never take the app down
                 log.debug("prview: posting to %s failed", pr.url, exc_info=True)
                 error = _("Collins couldn't run that action.")
-            GLib.idle_add(self._landed, label, error)
+            GLib.idle_add(self._landed, label, error, clear)
 
         threading.Thread(target=work, name="pr-post", daemon=True).start()
 
-    def _landed(self, label: str, error: str | None) -> bool:
+    def _landed(self, label: str, error: str | None, clear: bool) -> bool:
         self._posting = False
         self.set_sensitive(True)
         self._spinner.stop()
@@ -1106,7 +1308,8 @@ class _Composer(Gtk.Box):
             if root is not None:
                 dialogs.error_dialog(root, _("{action} failed").format(action=label), error)
             return GLib.SOURCE_REMOVE
-        self._text.get_buffer().set_text("")  # posted: the box has done its job
+        if clear:
+            self._text.get_buffer().set_text("")  # posted: the box has done its job
         self._on_posted()
         return GLib.SOURCE_REMOVE
 
