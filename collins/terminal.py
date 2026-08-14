@@ -105,9 +105,10 @@ _COMPOSER_AUTOSHOW_TRIES = 50
 # against the CLI (2.1.226), which finishes echoing a burst of typing 30-100ms
 # after the last key. A box still moving after _CUT_SETTLE_TRIES of them is
 # not cut at all: erasing a read that is still catching up would take the
-# characters it hasn't shown yet with it. The erase is then checked again at
-# each of _CUT_VERIFY_MS, spread out because a busy CLI can take a while to
-# work through a line of backspaces.
+# characters it hasn't shown yet with it. The erase is then checked again
+# _CUT_VERIFY_MS apart — each gap measured from the check before it, so the
+# last one lands about a second and a half after the cut — widening because a
+# busy CLI can take a while to work through a line of backspaces.
 _CUT_SETTLE_MS = 50
 _CUT_SETTLE_READS = 4
 _CUT_SETTLE_TRIES = 12
@@ -1139,6 +1140,10 @@ class TerminalTab(Gtk.Box):
         # rounds still in flight off.
         self._cut_pending: str | None = None
         self._cut_seq = 0
+        # Whether a cut is still deciding what the box holds, and a send that
+        # arrived while it was (see _on_composer_send).
+        self._cut_settling = False
+        self._send_after_settle = False
         self._composer_enter_sends = True
         self._composer_font = ""
         # Counts up only while a new session set to open floating waits for
@@ -2411,15 +2416,29 @@ class TerminalTab(Gtk.Box):
         raised over the input box, so the buffer clears and the page stays
         for the next prompt.
 
-        A send this quick can outrun the open-cut's own check that the box
-        emptied, so it carries the last one: whatever the cut still can't
-        account for is erased first, a beat ahead of the prompt rather
-        than in front of it in the same write — a chunk opening with
-        backspaces is a chunk the CLI could read as pasted text."""
+        A send can outrun the open-cut, which is a chain of screen reads
+        and takes a beat (see _begin_cut). Two beats to outrun, and one
+        each:
+
+        * A cut still deciding what the box holds is *waited* for, never
+          worked around — the box would otherwise keep the prompt that was
+          about to be taken out of it, and typing this one after it sends
+          the two jammed together. `_end_settling` sends for us the moment
+          it knows.
+
+        * A cut that has erased but not yet proved the box empty carries
+          its last check here: whatever it still can't account for is
+          erased first, a beat ahead of the prompt rather than in front of
+          it in the same write — a chunk opening with backspaces is a
+          chunk the CLI could read as pasted text.
+        """
         docked = self._composer_page is not None
         if not text.strip():
             if not docked:
                 self.close_composer()
+            return
+        if self._cut_settling:
+            self._send_after_settle = True
             return
         if not self._agent_is_running():
             self.feed_message(_("Composer: the agent isn't running in this tab"))
@@ -2544,6 +2563,7 @@ class TerminalTab(Gtk.Box):
         """
         self._cut_pending = None
         self._cut_seq += 1
+        self._cut_settling = True
         self._settle_cut(composer, self._cut_seq, None, 0, 0)
 
     def _settle_cut(
@@ -2559,20 +2579,41 @@ class TerminalTab(Gtk.Box):
         An empty box answers None to every read, which agrees with itself
         like any other answer: the ordinary open settles on the fourth read
         and cuts nothing.
+
+        Every way out of here ends the settling, because a send held back
+        for it (`_send_after_settle`) has to be let go of on all of them.
         """
         if not self._cut_alive(composer, seq):
+            self._end_settling()
             return GLib.SOURCE_REMOVE
         prompt = self.entered_prompt()
         agreed = agreed + 1 if _prompt_read(prompt) == _prompt_read(previous) else 1
         if agreed >= _CUT_SETTLE_READS:
             self._apply_cut(composer, seq, prompt)
+            self._end_settling()
             return GLib.SOURCE_REMOVE
         if attempt >= _CUT_SETTLE_TRIES:
-            return GLib.SOURCE_REMOVE  # never still: the box keeps its text
+            self._end_settling()  # never still: the box keeps its text
+            return GLib.SOURCE_REMOVE
         GLib.timeout_add(
             _CUT_SETTLE_MS, self._settle_cut, composer, seq, prompt, agreed, attempt + 1
         )
         return GLib.SOURCE_REMOVE
+
+    def _end_settling(self) -> None:
+        """The cut has decided; send whatever was waiting on it.
+
+        The waiting send is re-taken from the composer rather than replayed
+        from the text it carried, because a cut that landed has just seeded
+        that box: what goes out is the CLI's text and the draft written
+        under it, in the order they were written, which is what the send
+        would have carried had it come a moment later."""
+        self._cut_settling = False
+        if not self._send_after_settle:
+            return
+        self._send_after_settle = False
+        if self._composer is not None and self.composer_open():
+            self._on_composer_send(None, self._composer.peek_text())
 
     def _apply_cut(
         self, composer: ComposerView, seq: int, prompt: EnteredPrompt | None
