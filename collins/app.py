@@ -1470,7 +1470,9 @@ class App(Adw.Application):
         session id, not a promise, so the whole spawn → submit → resolve dance
         runs before this returns — bounded by a deadline, and driven by
         _BackgroundSpawn. Everything up to the spawn is validated synchronously
-        here so an obviously-bad call fails fast and cheap.
+        here so an obviously-bad call fails fast and cheap. The launch dir is
+        collapsed to the project root (never a nested worktree) before the
+        spawn — see the cwd normalization below.
         """
         window, tab = found
         provider = tab.provider
@@ -1526,7 +1528,9 @@ class App(Adw.Application):
             return False, f"The {provider.name} CLI isn't available to start a session."
 
         deferred = mcptools.DeferredResult()
-        root = os.path.realpath(worktree_project_root(cwd) or cwd)
+        # cwd is already collapsed to the project root above, so this is just
+        # the per-project serialization key for the spawn queue.
+        root = os.path.realpath(cwd)
         spawn = _BackgroundSpawn(
             window, cwd, provider, options, worktree, args["prompt"], deferred,
             on_done=lambda: self._start_session_advance(root),
