@@ -1053,10 +1053,9 @@ class _BackgroundSpawn:
             return GLib.SOURCE_CONTINUE
         self._poll_source = None
         tab.inject_prompt_unfocused(self._prompt)
-        # The id can't be in yet (the transcript appears only after this
-        # submit), but cover the impossible so the wait can't hang on it.
-        if tab.session_id:
-            self._on_resolved(tab, tab.session_id)
+        # From here the id arrives on session-resolved (connected in begin) —
+        # never synchronously: it comes from a transcript this submit only now
+        # creates, which the resolver finds on a later poll.
         return GLib.SOURCE_REMOVE
 
     def _on_resolved(self, tab, session_id: str) -> None:
