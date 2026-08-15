@@ -1,26 +1,32 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-14. Full change history: git log for this file.
 
 """Read what a session is doing by tailing its JSONL transcript.
 
-Three things come out of the same pass, which is what makes it cheap: the files
+Four things come out of the same pass, which is what makes it cheap: the files
 the agent has written (see ``_TOUCH_TOOLS``), the ``pr-link`` records Claude
-Code writes when a session opens or touches a pull request (see prstatus), and
-the model that answered the last turn (see ``model``).
+Code writes when a session opens or touches a pull request (see prstatus), the
+model that answered the last turn (see ``model``), and the images the
+conversation named (see ``attachments``).
 Every distinct PR is kept, not just the last one — a session that opens three of
 them has three to show — in the order they first appear, which is the order they
 were opened.
 
 Tailing is incremental (byte offset) so it stays cheap on large, actively-written
-transcripts.
+transcripts. It is also retroactive for free: a transcript is always read from
+byte 0, so a session opened today gives up every image it has ever mentioned on
+the first poll and only the new ones after that.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
+from . import attachrecords
+from .attachrecords import Attachment
 from .prstatus import PullRequest, parse_pr_link
 
 # Write-tools whose input names the file they touch, and the input key that
@@ -47,6 +53,7 @@ class TranscriptModel:
         self._prs: dict[str, PullRequest] = {}  # url -> PR, first-seen order
         self._touched: list[str] = []  # files written by the agent, newest first
         self._model: str | None = None  # model id of the most recent reply
+        self._images: dict[str, Attachment] = {}  # images named in the messages
         self._offset = 0
         self._buf = b""
 
@@ -56,6 +63,7 @@ class TranscriptModel:
         self._prs = {}
         self._touched = []
         self._model = None
+        self._images = {}
         self._offset = 0
         self._buf = b""
 
@@ -86,6 +94,7 @@ class TranscriptModel:
             self._prs = {}
             self._touched = []
             self._model = None
+            self._images = {}
             self._offset, self._buf = 0, b""
         if size <= self._offset:
             return False
@@ -121,6 +130,8 @@ class TranscriptModel:
             return True
         message = entry.get("message") or {}
         changed = self._record_model(entry, message)
+        if self._record_images(entry, message):
+            changed = True
         content = message.get("content")
         if not isinstance(content, list):
             return changed
@@ -153,6 +164,40 @@ class TranscriptModel:
         self._model = model
         return True
 
+    def _record_images(self, entry: dict, message: dict) -> bool:
+        """Fold the images this message names into the session's list. False
+        when it named none, or none the list didn't already have.
+
+        Only what was actually *said* is read — the text blocks of the two
+        sides' messages. Tool results are where a session's bulk lives, and
+        they are mostly file listings and diffs: scanning them would turn a
+        gallery of the pictures a conversation was about into every png
+        under the project root. Sidechain records are skipped for the reason
+        `_record_model` gives — a subagent's turns are somebody else's
+        conversation that happens to share the file.
+
+        The message's own cwd resolves its relative paths, and its own
+        timestamp dates the sighting: read from byte 0, a morning's
+        transcript arrives all at once, and stamping it `now` would file
+        every image in it under this minute.
+        """
+        if entry.get("type") not in ("user", "assistant") or entry.get("isSidechain"):
+            return False
+        texts = _texts(message.get("content"))
+        if not texts:
+            return False
+        cwd = entry.get("cwd")
+        roots = [cwd] if isinstance(cwd, str) and cwd else []
+        at = _stamp(entry.get("timestamp"))
+        seen: list[Attachment] = []
+        for text in texts:
+            seen.extend(attachrecords.scan(text, roots=roots, now=at))
+        if not seen:
+            return False
+        before = self._images
+        self._images = attachrecords.fold(before, *seen)
+        return self._images != before
+
     def _record_touch(self, path: str) -> bool:
         """Move *path* to the front of the touched list. False when it was
         already the most recent one — no reorder, nothing to redraw."""
@@ -182,6 +227,16 @@ class TranscriptModel:
         """
         return self._model
 
+    def attachments(self) -> list[Attachment]:
+        """Every image the conversation has named, newest sighting first.
+
+        Transcript-sourced, so each carries the line it was mentioned on as
+        its context and none of them carries a caption: the tab merges these
+        with what the lightbox recorded, where the captions come from (see
+        attachrecords).
+        """
+        return list(self._images.values())
+
     def pull_requests(self) -> list[PullRequest]:
         """Every pull request this session has linked, oldest first.
 
@@ -189,3 +244,36 @@ class TranscriptModel:
         off the main loop to add CI status.
         """
         return list(self._prs.values())
+
+
+def _texts(content: object) -> list[str]:
+    """What a message actually said, as plain strings.
+
+    A user turn is either the text itself or a list of blocks; an assistant
+    turn is always blocks. Only ``text`` ones are taken: a ``tool_use``
+    input is arguments, a ``tool_result`` is output, and ``thinking`` is a
+    draft of what was later said properly.
+    """
+    if isinstance(content, str):
+        return [content]
+    if not isinstance(content, list):
+        return []
+    return [
+        block["text"]
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+    ]
+
+
+def _stamp(value: object) -> float | None:
+    """A transcript timestamp as unix seconds, or None when it can't be read
+    — in which case the sighting is dated when it was noticed instead."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        # fromisoformat() can't parse a trailing "Z" until Python 3.11.
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None

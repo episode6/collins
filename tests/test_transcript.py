@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-14. Full change history: git log for this file.
 
 import json
 
@@ -397,3 +397,135 @@ def test_relocate_keeps_the_model(tmp_path):
     m.update()
     m.relocate(_move(old, tmp_path / "proj-repo-worktree", "s.jsonl"))
     assert m.model() == "claude-opus-5"
+
+
+# -- images the conversation named ------------------------------------------
+
+
+def _said(text, *, role="assistant", cwd=None, at=None, sidechain=False):
+    line = {
+        "type": role,
+        "message": {"role": role, "content": [{"type": "text", "text": text}]},
+    }
+    if cwd:
+        line["cwd"] = cwd
+    if at:
+        line["timestamp"] = at
+    if sidechain:
+        line["isSidechain"] = True
+    return line
+
+
+def _png(tmp_path, name):
+    path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x89PNG")
+    return path
+
+
+def test_images_named_in_either_side_of_the_conversation_are_listed(tmp_path):
+    mine = _png(tmp_path, "mine.png")
+    theirs = _png(tmp_path, "theirs.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [
+        _said(f"look at {mine}", role="user"),
+        _said(f"and here's {theirs}"),
+    ])
+    m = TranscriptModel(p)
+    assert m.update() is True
+    assert {one.key for one in m.attachments()} == {str(mine), str(theirs)}
+
+
+def test_a_mentioned_image_carries_its_line_as_context(tmp_path):
+    shot = _png(tmp_path, "shot.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [_said(f"the toolbar is off by a pixel: {shot}")])
+    m = TranscriptModel(p)
+    m.update()
+    (one,) = m.attachments()
+    assert one.context == "the toolbar is off by a pixel:"
+    assert one.caption is None
+
+
+def test_a_relative_mention_resolves_against_the_message_cwd(tmp_path):
+    shot = _png(tmp_path, "docs/shot.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [_said("see docs/shot.png", cwd=str(tmp_path))])
+    m = TranscriptModel(p)
+    m.update()
+    assert [one.key for one in m.attachments()] == [str(shot)]
+
+
+def test_a_mention_is_dated_by_the_message_that_made_it(tmp_path):
+    """A transcript is read from byte 0, so a morning's worth of messages
+    lands in one poll: stamping them `now` would file them all together."""
+    from datetime import datetime
+
+    shot = _png(tmp_path, "shot.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [_said(f"{shot} here", at="2026-06-01T10:00:00.000Z")])
+    m = TranscriptModel(p)
+    m.update()
+    (one,) = m.attachments()
+    assert one.at == one.last == datetime.fromisoformat("2026-06-01T10:00:00+00:00").timestamp()
+
+
+def test_tool_input_and_output_are_not_scanned(tmp_path):
+    """The bulk of a transcript is listings and diffs; a gallery of the
+    images a conversation was about can't be drawn from those."""
+    _png(tmp_path, "a.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [
+        _touch_line("Write", "file_path", str(tmp_path / "a.png")),
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": f"{tmp_path}/a.png"},
+        ]}},
+    ])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.attachments() == []
+
+
+def test_a_subagents_images_are_its_own(tmp_path):
+    shot = _png(tmp_path, "shot.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [_said(f"found {shot}", sidechain=True)])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.attachments() == []
+
+
+def test_a_re_mentioned_image_is_not_a_change(tmp_path):
+    """Repeating a path must not report a change on every poll — it would
+    have the tab rewriting state.json for the rest of the session."""
+    shot = _png(tmp_path, "shot.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [_said(f"{shot} again", at="2026-06-01T10:00:00.000Z")])
+    m = TranscriptModel(p)
+    assert m.update() is True
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_said(f"{shot} again", at="2026-06-01T10:00:00.000Z")) + "\n")
+    assert m.update() is False
+
+
+def test_a_later_mention_moves_an_image_up_the_list(tmp_path):
+    a, b = _png(tmp_path, "a.png"), _png(tmp_path, "b.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [
+        _said(f"{a}", at="2026-06-01T10:00:00.000Z"),
+        _said(f"{b}", at="2026-06-01T10:05:00.000Z"),
+        _said(f"{a} once more", at="2026-06-01T10:09:00.000Z"),
+    ])
+    m = TranscriptModel(p)
+    m.update()
+    assert [one.key for one in m.attachments()] == [str(a), str(b)]
+
+
+def test_set_path_clears_the_images(tmp_path):
+    shot = _png(tmp_path, "shot.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [_said(f"{shot}")])
+    m = TranscriptModel(p)
+    m.update()
+    m.set_path(tmp_path / "other.jsonl")
+    assert m.attachments() == []

@@ -199,6 +199,66 @@ def test_union_keeps_both_sides_and_merges_the_overlap():
     assert joined["/tmp/a.png"].last == 50.0
 
 
+# -- striking a record off ------------------------------------------------
+
+
+def test_strike_marks_and_visible_hides():
+    listed = attachrecords.fold({}, shot("/tmp/a.png"), shot("/tmp/b.png"))
+    struck = attachrecords.strike(listed, {"/tmp/a.png"})
+    assert struck["/tmp/a.png"].hidden is True
+    assert struck["/tmp/b.png"].hidden is False
+    assert [one.key for one in attachrecords.visible(struck.values())] == ["/tmp/b.png"]
+
+
+def test_striking_survives_a_later_sighting():
+    """The whole point of a tombstone: the transcript still mentions the
+    image, so a record that merely vanished would be back on the next scan."""
+    struck = attachrecords.strike(attachrecords.fold({}, shot("/tmp/a.png")), {"/tmp/a.png"})
+    again = attachrecords.fold(struck, shot("/tmp/a.png", now=9000.0))
+    assert again["/tmp/a.png"].hidden is True
+    assert again["/tmp/a.png"].last == 9000.0
+
+
+def test_striking_a_row_never_pushes_a_listed_one_out():
+    """Removing an image must not cost the panel an image."""
+    listed = attachrecords.fold(
+        {}, *[shot(f"/tmp/{index}.png", now=float(index)) for index in range(120)]
+    )
+    struck = attachrecords.strike(listed, set(listed))
+    assert len(attachrecords.visible(struck.values())) == 0
+    both = attachrecords.fold(struck, *[shot(f"/tmp/new{n}.png", now=500.0 + n) for n in range(100)])
+    assert len(attachrecords.visible(both.values())) == attachrecords.MAX_RECORDS
+
+
+def test_tombstones_have_a_budget_of_their_own():
+    listed = attachrecords.fold(
+        {}, *[shot(f"/tmp/{index}.png", now=float(index)) for index in range(80)]
+    )
+    struck = attachrecords.strike(listed, set(listed))
+    assert len(struck) == attachrecords.MAX_STRUCK
+    assert list(struck)[0] == "/tmp/79.png"  # the oldest tombstones go first
+
+
+def test_striking_drops_the_label_nobody_will_read_again():
+    listed = attachrecords.fold({}, shot("/tmp/a.png", caption="Cap", context="Ctx", origin="o"))
+    (one,) = attachrecords.strike(listed, {"/tmp/a.png"}).values()
+    assert (one.caption, one.context, one.origin) == (None, None, None)
+    assert one.key == "/tmp/a.png" and one.at and one.last
+
+
+def test_a_tombstone_round_trips_through_a_record():
+    struck = attachrecords.strike(attachrecords.fold({}, shot("/tmp/a.png")), {"/tmp/a.png"})
+    (record,) = attachrecords.to_records(struck.values())
+    assert record["hidden"] is True
+    assert attachrecords.from_record(record).hidden is True
+
+
+def test_a_listed_record_says_nothing_about_hiding():
+    (record,) = attachrecords.to_records([shot("/tmp/a.png")])
+    assert "hidden" not in record
+    assert attachrecords.from_record(record).hidden is False
+
+
 # -- records on disk ------------------------------------------------------
 
 
@@ -298,3 +358,181 @@ def test_the_label_prefers_caption_then_context_then_basename():
 
 def test_a_remote_label_falls_back_to_the_last_path_segment():
     assert shot("https://example.com/charts/cpu.png").label == "cpu.png"
+
+
+# -- scanning a message ---------------------------------------------------
+
+
+def make(tmp_path, name):
+    """An image that really is on disk, since that is what scanning asks."""
+    path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x89PNG")
+    return path
+
+
+def keys(text, tmp_path=None, **kw):
+    roots = [str(tmp_path)] if tmp_path is not None else []
+    return [one.key for one in attachrecords.scan(text, roots=roots, **kw)]
+
+
+def test_scan_takes_an_absolute_path_to_an_image_that_exists(tmp_path):
+    shot_png = make(tmp_path, "shot.png")
+    assert keys(f"the failing row: {shot_png}") == [str(shot_png)]
+
+
+def test_scan_resolves_a_relative_path_against_the_message_cwd(tmp_path):
+    make(tmp_path, "docs/mock.jpg")
+    assert keys("see docs/mock.jpg for the layout", tmp_path) == [
+        str(tmp_path / "docs/mock.jpg")
+    ]
+
+
+def test_scan_reads_through_a_line_and_column_suffix(tmp_path):
+    shot_png = make(tmp_path, "shot.png")
+    assert keys(f"{shot_png}:12:3 is the frame", tmp_path) == [str(shot_png)]
+
+
+def test_scan_expands_a_home_relative_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    make(tmp_path, "Pictures/wide.webp")
+    assert keys("saved to ~/Pictures/wide.webp") == [str(tmp_path / "Pictures/wide.webp")]
+
+
+def test_scan_ignores_a_path_nothing_is_at(tmp_path):
+    """A transcript is full of images that were proposed, renamed or never
+    written; only what is on disk right now becomes a row."""
+    assert keys(f"I'll write it to {tmp_path}/planned.png", tmp_path) == []
+
+
+def test_scan_ignores_paths_that_are_not_images(tmp_path):
+    make(tmp_path, "notes.md")
+    make(tmp_path, "collins/terminal.py")
+    assert keys("notes.md and collins/terminal.py:44 both changed", tmp_path) == []
+
+
+def test_scan_takes_a_remote_url_by_its_own_suffix():
+    text = "the badge is https://example.com/img/ci.svg?v=2 and the docs are at "
+    text += "https://example.com/guide"
+    assert keys(text) == ["https://example.com/img/ci.svg?v=2"]
+
+
+def test_scan_refuses_a_url_it_could_never_fetch():
+    """Only http(s) reaches the downloader, so nothing else becomes a row —
+    and a URL with no suffix stays out too: `show_image` catches those, and
+    a looser grammar would put every link in the session in the panel."""
+    assert keys("ftp://example.com/a.png and https://example.com/render?id=7") == []
+
+
+def test_scan_does_not_read_a_url_as_a_path_as_well():
+    assert keys("https://example.com/img/ci.png") == ["https://example.com/img/ci.png"]
+
+
+def test_scan_records_transcript_sightings_with_no_caption(tmp_path):
+    shot_png = make(tmp_path, "shot.png")
+    (one,) = attachrecords.scan(f"look at {shot_png}", now=1234.0)
+    assert one.source == TRANSCRIPT
+    assert one.caption is None
+    assert one.at == one.last == 1234.0
+    assert one.origin is None  # a local record is already its own path
+
+
+def test_scan_keeps_the_url_a_remote_record_came_from():
+    (one,) = attachrecords.scan("https://example.com/ci.png")
+    assert one.remote and one.origin == "https://example.com/ci.png"
+
+
+def test_scan_collapses_a_path_mentioned_twice(tmp_path):
+    shot_png = make(tmp_path, "shot.png")
+    (one,) = attachrecords.scan(f"{shot_png} — and again, {shot_png}", now=5.0)
+    assert one.key == str(shot_png)
+
+
+def test_scan_stops_checking_the_disk_after_a_listing(tmp_path, monkeypatch):
+    """A message naming hundreds of image paths is `ls`, not a conversation:
+    the stat calls stop even though the parse doesn't."""
+    monkeypatch.setattr(attachrecords, "MAX_SCAN_CANDIDATES", 3)
+    real = make(tmp_path, "real.png")
+    text = "\n".join([f"{tmp_path}/missing{n}.png" for n in range(10)] + [str(real)])
+    assert keys(text, tmp_path) == []
+
+
+def test_the_listing_cap_does_not_hold_back_urls(tmp_path, monkeypatch):
+    """It is a budget for stat calls, and a URL spends none of it."""
+    monkeypatch.setattr(attachrecords, "MAX_SCAN_CANDIDATES", 3)
+    text = "\n".join(
+        [f"{tmp_path}/missing{n}.png" for n in range(10)] + ["https://example.com/ci.png"]
+    )
+    assert keys(text, tmp_path) == ["https://example.com/ci.png"]
+
+
+# -- the context snippet --------------------------------------------------
+
+
+def context(text, tmp_path):
+    (one,) = attachrecords.scan(text, roots=[str(tmp_path)])
+    return one.context
+
+
+def test_the_snippet_is_the_line_around_the_reference(tmp_path):
+    make(tmp_path, "out/shot.png")
+    text = "First line, unrelated.\nHere's the failing row: out/shot.png — see the badge.\nAfter."
+    assert context(text, tmp_path) == "Here's the failing row: — see the badge."
+
+
+def test_a_line_naming_two_images_keeps_neither_path_in_the_snippets(tmp_path):
+    """Each row's label would otherwise carry the other row's path — a
+    caption pointing at the wrong picture."""
+    make(tmp_path, "out/before.png")
+    make(tmp_path, "out/after.png")
+    text = "out/before.png became out/after.png after the fix"
+    contexts = [one.context for one in attachrecords.scan(text, roots=[str(tmp_path)])]
+    assert contexts == ["became after the fix", "became after the fix"]
+
+
+def test_an_unresolved_image_is_still_elided_from_the_snippet(tmp_path):
+    make(tmp_path, "out/after.png")
+    text = "out/never-written.png became out/after.png"
+    (one,) = attachrecords.scan(text, roots=[str(tmp_path)])
+    assert one.context == "became"
+
+
+def test_punctuation_hanging_off_the_reference_goes_with_it(tmp_path):
+    """Left behind, a mark that belonged to the path strands as " ." between
+    the words either side and reads as a typo."""
+    make(tmp_path, "out/shot.png")
+    assert context("docked at last: out/shot.png. Next up, the strip.", tmp_path) == (
+        "docked at last: Next up, the strip."
+    )
+    assert context("the edge, out/shot.png, never fights it", tmp_path) == (
+        "the edge, never fights it"
+    )
+    assert context("see (out/shot.png) for the layout", tmp_path) == "see for the layout"
+
+
+def test_an_ordinary_link_stays_in_the_snippet(tmp_path):
+    make(tmp_path, "out/shot.png")
+    text = "as https://example.com/guide describes, out/shot.png is the result"
+    (one,) = attachrecords.scan(text, roots=[str(tmp_path)])
+    assert one.context == "as https://example.com/guide describes, is the result"
+
+
+def test_a_reference_alone_on_its_line_has_no_snippet(tmp_path):
+    make(tmp_path, "out/shot.png")
+    assert context("nothing to say\n\nout/shot.png\n\n", tmp_path) is None
+
+
+def test_a_long_line_is_trimmed_towards_the_reference(tmp_path):
+    make(tmp_path, "out/shot.png")
+    text = f"{'front ' * 40}the thing itself out/shot.png right here{' tail' * 40}"
+    snippet = context(text, tmp_path)
+    assert len(snippet) <= attachrecords.MAX_TEXT
+    assert "the thing itself right here" in snippet
+    assert snippet.startswith("…") and snippet.endswith("…")
+
+
+def test_a_long_head_alone_is_trimmed_from_the_front(tmp_path):
+    make(tmp_path, "out/shot.png")
+    snippet = context(f"{'front ' * 60}and finally out/shot.png", tmp_path)
+    assert len(snippet) <= attachrecords.MAX_TEXT
+    assert snippet.startswith("…") and snippet.endswith("and finally")
