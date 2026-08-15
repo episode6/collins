@@ -1194,6 +1194,10 @@ class TerminalTab(Gtk.Box):
         )
         self._composer_overlay_btn.add_css_class("attach-overlay")
         self._composer_overlay_btn.connect("clicked", lambda *_: self.open_composer())
+        # The user setting behind the button (default on); the docked state
+        # and provider gate join it in _sync_composer_overlay_btn. Held
+        # separately so a dock/undock can recompute without settings in hand.
+        self._composer_overlay_setting = True
         self._composer_overlay_btn.set_visible(self._provider_has_prompt_box())
         # The composer itself is built lazily on first open (_ensure_composer);
         # only its future overlay slot exists up front.
@@ -2337,7 +2341,9 @@ class TerminalTab(Gtk.Box):
     def _sync_attachments_handle(self) -> None:
         """Dress the handle for what it is holding: lit says there is
         something new, and the tooltip — the only room on an 18px pill for a
-        number — says how much."""
+        number — says how much. It hides entirely while the panel is docked —
+        a panel already on screen needs no handle to raise it."""
+        self._attachments_btn.set_visible(self._attachments_page is None)
         count = len(self._attachments_unseen)
         if count:
             self._attachments_btn.add_css_class("unseen")
@@ -2530,6 +2536,7 @@ class TerminalTab(Gtk.Box):
         self._attachments_page = attachpanel.AttachmentsPage(
             view, on_closed=self._on_attachments_page_closed
         )
+        self._sync_attachments_handle()
         self._dock.open_page(self._attachments_page, side="right")
 
     def undock_attachments(self) -> None:
@@ -2541,6 +2548,7 @@ class TerminalTab(Gtk.Box):
         if page is None:
             return
         self._attachments_page = None
+        self._sync_attachments_handle()
         view = page.take_view()
         view.set_docked(False)
         revealer = self._attachments_revealer
@@ -2568,6 +2576,7 @@ class TerminalTab(Gtk.Box):
         if page is not self._attachments_page:
             return  # an undock already rescued the view; just a close now
         self._attachments_page = None
+        self._sync_attachments_handle()
         view = page.take_view()
         view.set_docked(False)
         self._attachments_revealer.set_child(view)
@@ -3193,6 +3202,17 @@ class TerminalTab(Gtk.Box):
         self.inject_prompt(text)
         return GLib.SOURCE_REMOVE
 
+    def _sync_composer_overlay_btn(self) -> None:
+        """Show the floating composer button only when it has something to do:
+        the user setting is on, the provider has a readable input box, and the
+        composer isn't already docked — a panel on screen needs no button to
+        raise it."""
+        self._composer_overlay_btn.set_visible(
+            self._composer_overlay_setting
+            and self._provider_has_prompt_box()
+            and self._composer_page is None
+        )
+
     def _toggle_composer_dock(self) -> None:
         """The composer chrome's dock/float button."""
         if self._composer_page is None:
@@ -3216,6 +3236,7 @@ class TerminalTab(Gtk.Box):
         revealer.set_child(None)
         composer.set_docked(True)
         self._composer_page = ComposerPage(composer, on_closed=self._on_composer_page_closed)
+        self._sync_composer_overlay_btn()
         self._dock.open_page(self._composer_page, side="below")
 
     def undock_composer(self) -> None:
@@ -3227,6 +3248,7 @@ class TerminalTab(Gtk.Box):
         if page is None:
             return
         self._composer_page = None
+        self._sync_composer_overlay_btn()
         view = page.take_view()
         view.set_docked(False)
         revealer = self._composer_revealer
@@ -3251,6 +3273,7 @@ class TerminalTab(Gtk.Box):
         if page is not self._composer_page:
             return  # an undock already rescued the view; just a close now
         self._composer_page = None
+        self._sync_composer_overlay_btn()
         view = page.take_view()
         view.set_docked(False)
         self._composer_revealer.set_child(view)
@@ -4106,6 +4129,7 @@ class TerminalTab(Gtk.Box):
         self._composer_revealer.set_child(None)
         composer.set_docked(True)
         self._composer_page = ComposerPage(composer, on_closed=self._on_composer_page_closed)
+        self._sync_composer_overlay_btn()
         return self._composer_page
 
     def _restore_attachments_page(self) -> attachpanel.AttachmentsPage | None:
@@ -4126,6 +4150,7 @@ class TerminalTab(Gtk.Box):
         self._attachments_page = attachpanel.AttachmentsPage(
             view, on_closed=self._on_attachments_page_closed
         )
+        self._sync_attachments_handle()
         return self._attachments_page
 
     @property
@@ -4512,10 +4537,8 @@ class TerminalTab(Gtk.Box):
         # provider gate (no readable input box = no button) still applies.
         # The setting keeps the attach button's old key: same slot, same
         # pixels, and a rename would only orphan saved preferences.
-        self._composer_overlay_btn.set_visible(
-            bool(settings.get("attach_overlay_button", True))
-            and self._provider_has_prompt_box()
-        )
+        self._composer_overlay_setting = bool(settings.get("attach_overlay_button", True))
+        self._sync_composer_overlay_btn()
         self._composer_enter_sends = bool(settings.get("composer_enter_sends", True))
         self._composer_on_typing = bool(settings.get("composer_on_typing"))
         self._composer_font = font
