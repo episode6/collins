@@ -1608,6 +1608,8 @@ class MainWindow(Adw.ApplicationWindow):
         one, else the fixed fallback."""
         page = self.tab_view.get_selected_page()
         tab = page.get_child() if page is not None else None
+        # Not every tab is a terminal — a chat or a replay has no geometry to
+        # copy, and takes the fallback along with "nothing is selected".
         if isinstance(tab, TerminalTab):
             cols, rows = tab.terminal.get_column_count(), tab.terminal.get_row_count()
             if cols > 0 and rows > 0:
