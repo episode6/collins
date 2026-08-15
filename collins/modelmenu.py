@@ -2,11 +2,11 @@
 
 """The menu that switches a running session's model.
 
-Two places open one — the footer's model label (a left-click) and the
-composer chrome's model button — and both list the same catalog the
-Preferences pickers draw from: the Models API, asked with the CLI's own
-OAuth token (claudemodels), with the CLI's version-agnostic aliases
-standing in when the API can't be asked. The model the session last
+Two places open one — the footer's model chip and the composer chrome's
+model button, each a MenuButton hosting this popover — and both list the
+same catalog the Preferences pickers draw from: the Models API, asked with
+the CLI's own OAuth token (claudemodels), with the CLI's version-agnostic
+aliases standing in when the API can't be asked. The model the session last
 answered with wears the mark, read live off the same transcript-fed
 value the footer label shows. Picking one hands the id back to the host
 (terminal.switch_model), which posts the provider's switch command to
@@ -40,9 +40,10 @@ def new_model_popover(
 ) -> Gtk.PopoverMenu:
     """A popover listing the models *on_pick* can switch to, refilled on
     every show so the mark tracks *current_model* and a stale catalog
-    refreshes itself. Long-lived: hand it to a MenuButton, which owns its
-    popover for the widget's life — a per-click open wants
-    `open_model_menu` instead."""
+    refreshes itself. Hand it to a MenuButton, which owns its popover for
+    the widget's life and — this matters — re-measures it as the catalog
+    fills in under the open menu; a hand-parented popover keeps the size it
+    had over the still-empty menu it popped up on."""
     menu = Gio.Menu()
     popover = Gtk.PopoverMenu.new_from_model(menu)
 
@@ -73,22 +74,6 @@ def new_model_popover(
     popover.insert_action_group(_GROUP, group)
     popover.connect("show", lambda *_a: _refresh(menu, pick, copy, current_model))
     return popover
-
-
-def open_model_menu(
-    parent: Gtk.Widget,
-    current_model: Callable[[], str | None],
-    on_pick: Callable[[str], None],
-) -> None:
-    """Pop a one-shot model menu over *parent* — the parent-per-open shape
-    of the app's other click-summoned menus (the window's caffeine menu):
-    parented for the popup, unparented an idle after it closes."""
-    popover = new_model_popover(current_model, on_pick)
-    popover.set_parent(parent)
-    # The one caller is the footer, at the bottom of the tab: open upwards.
-    popover.set_position(Gtk.PositionType.TOP)
-    popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
-    popover.popup()
 
 
 def _refresh(
