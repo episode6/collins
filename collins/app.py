@@ -10,6 +10,7 @@ import logging
 import os
 import sys
 import threading
+from collections import deque
 from pathlib import Path
 
 import gi
@@ -39,7 +40,9 @@ from .caffeine import duration_seconds, follow_poll, follows_activity, grace_sec
 from .i18n import _
 from .lightbox import present_image_lightbox
 from .prefs import apply_color_scheme
+from .providers import SessionOptions
 from .prstatus import parse_pr_url
+from .sessions import worktree_project_root
 from .state import AppState
 from .store import SessionStore
 from .terminal import TerminalTab
@@ -47,6 +50,18 @@ from .window import MainWindow, session_window
 
 # Bundled icons (e.g. tab-close-symbolic); found by name when installed.
 _BUNDLED_ICONS = Path(__file__).resolve().parent.parent / "data" / "icons"
+
+# The start_session tool holds its reply until the spawned session has taken
+# the prompt and reported its id (see _BackgroundSpawn). This is the deadline
+# on that whole wait: past it the call fails rather than hanging, and must come
+# in under the CLI's own MCP tool-call timeout (a reply sent after the CLI has
+# given up helps no one). The tab it opened stays — visible, closable, and
+# still resolving in the background — so a late id isn't lost, only unreported.
+_START_SESSION_DEADLINE_MS = 20_000
+# How often the spawn polls the fresh terminal for its input box to be ready
+# before injecting the prompt (takes_prompt). Nothing can be mid-turn behind a
+# brand-new spawn, so a yes is safe the moment the box is drawn.
+_START_SESSION_POLL_MS = 300
 
 _CSS = b"""
 .group-header { padding: 10px 10px 4px 10px; }
@@ -969,6 +984,141 @@ _FILETYPE_COLORS = {
 }
 
 
+class _BackgroundSpawn:
+    """One start_session tool call in flight: spawn a background session,
+    submit its prompt once the box is ready, and resolve the deferred reply
+    with the id (or a reason it couldn't).
+
+    Ordered exactly as the spec's "Resolving the id" requires — poll
+    takes_prompt, inject, *then* wait for session-resolved — because a
+    brand-new session's transcript, and so its id, only appears after the
+    first prompt is submitted. A single deadline covers the whole wait; a
+    process that exits on launch fails the call in a second rather than
+    twenty. Whatever the outcome, the tab and its sidebar row stay: a failed
+    call is unreported, not undone.
+
+    These run one at a time per project root (App._start_session_advance): two
+    fresh spawns polling the same cwd both baseline the transcripts present at
+    arm time and each treats any new arrival as its own, so a back-to-back
+    pair — the tool's normal case — could bind to each other's session for
+    life. Serializing means the second's baseline already contains the first's
+    resolved transcript.
+    """
+
+    def __init__(
+        self, window, cwd, provider, options, worktree, prompt, deferred, on_done
+    ) -> None:
+        self._window = window
+        self._cwd = cwd
+        self._provider = provider
+        self._options = options
+        self._worktree = worktree
+        self._prompt = prompt
+        self._deferred = deferred
+        self._on_done = on_done
+        self._tab: TerminalTab | None = None
+        self._deadline_source: int | None = None
+        self._poll_source: int | None = None
+        self._exit_handler: int | None = None
+        self._resolved_handler: int | None = None
+        self._finished = False
+
+    def begin(self) -> None:
+        tab = self._window.start_background_session(
+            self._cwd, self._provider, self._options, self._worktree
+        )
+        if tab is None:  # trust is a refusal here, never a dialog over the user
+            self._finish(
+                False,
+                f"Collins hasn't been trusted to run agents in {self._cwd}; open "
+                "a session there once by hand and it will be.",
+            )
+            return
+        self._tab = tab
+        self._exit_handler = tab.connect("process-exited", self._on_exited)
+        self._resolved_handler = tab.connect("session-resolved", self._on_resolved)
+        self._deadline_source = GLib.timeout_add(
+            _START_SESSION_DEADLINE_MS, self._on_deadline
+        )
+        self._poll_source = GLib.timeout_add(_START_SESSION_POLL_MS, self._poll_prompt)
+
+    def _poll_prompt(self) -> bool:
+        if self._finished:
+            return GLib.SOURCE_REMOVE
+        tab = self._tab
+        if tab.get_root() is None:  # the user closed the tab before we injected
+            self._finish(False, "The session's tab was closed before it could start.")
+            return GLib.SOURCE_REMOVE
+        if not tab.takes_prompt():
+            return GLib.SOURCE_CONTINUE
+        self._poll_source = None
+        tab.inject_prompt_unfocused(self._prompt)
+        # From here the id arrives on session-resolved (connected in begin) —
+        # never synchronously: it comes from a transcript this submit only now
+        # creates, which the resolver finds on a later poll.
+        return GLib.SOURCE_REMOVE
+
+    def _on_resolved(self, tab, session_id: str) -> None:
+        if self._finished:
+            return
+        # By now the resolver has followed the agent into any worktree it moved
+        # to (that is how it found the transcript), so the live cwd is the
+        # session's real directory — and whether it differs from the launch dir
+        # is whether a worktree was actually used, however `worktree` resolved.
+        actual = tab.current_agent_cwd() or self._cwd
+        if os.path.realpath(actual) != os.path.realpath(self._cwd):
+            text = f"Started session {session_id} in a fresh worktree at {actual}."
+        elif self._worktree:  # asked for, but silently dropped outside a checkout
+            text = (
+                f"Started session {session_id} in {actual} — a worktree was "
+                "requested but this isn't a git checkout, so it shares the tree."
+            )
+        else:
+            text = f"Started session {session_id} in {actual}."
+        self._finish(True, text)
+
+    def _on_exited(self, _tab, status: int) -> None:
+        if self._finished:
+            return
+        self._finish(
+            False,
+            f"The session exited on launch (status {status}) before it could "
+            "start; its tab is still open in Collins.",
+        )
+
+    def _on_deadline(self) -> bool:
+        self._deadline_source = None
+        if not self._finished:
+            self._finish(
+                False,
+                "The session didn't report its id within the time limit. Its tab "
+                "is open in Collins and will keep trying to resolve.",
+            )
+        return GLib.SOURCE_REMOVE
+
+    def _finish(self, ok: bool, text: str) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        tab = self._tab
+        if tab is not None:
+            if self._exit_handler is not None:
+                tab.disconnect(self._exit_handler)
+            if self._resolved_handler is not None:
+                tab.disconnect(self._resolved_handler)
+        for source in (self._deadline_source, self._poll_source):
+            if source is not None:
+                GLib.source_remove(source)
+        self._deadline_source = self._poll_source = None
+        self._deferred.resolve(ok, text)
+        # Let the next spawn for this root go. On a deadline the tab's resolver
+        # is still live, so a genuinely concurrent spawn could still race it —
+        # but a deadline means something already went wrong (20s with no id),
+        # and the back-to-back success case this serialization is for resolves
+        # in seconds, well ahead of it.
+        self._on_done()
+
+
 class App(Adw.Application):
     def __init__(self) -> None:
         # COLLINS_APP_ID lets a demo instance run alongside the real one (for screenshots).
@@ -1071,6 +1221,10 @@ class App(Adw.Application):
         the tools are conveniences, never load-bearing.
         """
         self._mcp_service: mcpserver.SessionToolService | None = None
+        # start_session spawns, serialized per project root so a back-to-back
+        # pair can't race each other's transcript (_BackgroundSpawn): root ->
+        # queue of pending spawns, its head the one running.
+        self._start_session_chains: dict[str, deque] = {}
         app_id = self.get_application_id()
         service = mcpserver.SessionToolService(
             mcptools.socket_path(app_id),
@@ -1142,6 +1296,7 @@ class App(Adw.Application):
                 "show_image": self._mcp_show_image,
                 "notify_user": self._mcp_notify_user,
                 "attach_pr": self._mcp_attach_pr,
+                "start_session": self._mcp_start_session,
             },
             is_enabled=self._mcp_tool_enabled,
         )
@@ -1298,6 +1453,82 @@ class App(Adw.Application):
         if not tab.attach_pr(pr):
             return True, f"{pr.slug} is already attached to this session."
         return True, f"Attached {pr.slug} to this session."
+
+    def _mcp_start_session(self, found, args: dict) -> mcptools.ToolResult:
+        """Spawn a sibling session in a background tab and hand it a prompt.
+
+        The reply is deferred (mcptools.DeferredResult): the model gets a real
+        session id, not a promise, so the whole spawn → submit → resolve dance
+        runs before this returns — bounded by a deadline, and driven by
+        _BackgroundSpawn. Everything up to the spawn is validated synchronously
+        here so an obviously-bad call fails fast and cheap.
+        """
+        window, tab = found
+        provider = tab.provider
+        # Every provider that serves the tools can spawn (--mcp-config is
+        # unconditional), so this is belt-and-braces — but a provider that
+        # can't hand the sibling the tools shouldn't pretend to.
+        if not getattr(provider, "supports_mcp_config", False):
+            return False, "This session's agent can't start Collins sessions."
+
+        raw_cwd = args.get("cwd")
+        if raw_cwd:
+            cwd = os.path.abspath(os.path.expanduser(raw_cwd))
+            if not os.path.isdir(cwd):
+                return False, f"No such directory: {raw_cwd}"
+        else:
+            # The agent's live cwd — a worktree, once the CLI has moved — the
+            # same root open_in_editor resolves relative paths against.
+            cwd = tab.current_agent_cwd()
+            if not cwd:
+                return False, "Couldn't work out a directory to start the session in."
+
+        mode = args.get("permission_mode")
+        if mode:
+            # The provider's own modes, minus bypass: handing a sibling
+            # bypassPermissions is privilege the user never saw, and the only
+            # human gate on this call is the caller's own MCP permission prompt.
+            allowed = {value for value, _label in provider.permission_modes()}
+            allowed.discard("bypassPermissions")
+            if mode not in allowed:
+                if mode == "bypassPermissions":
+                    return False, (
+                        "start_session won't grant bypassPermissions to a spawned "
+                        "session."
+                    )
+                return False, (
+                    f"permission_mode must be one of: {', '.join(sorted(allowed))}."
+                )
+
+        worktree = args.get("worktree")  # bool, or None to use the project default
+        options = SessionOptions(permission_mode=mode or "")
+        # A missing CLI drops the new tab to a plain shell the takes_prompt poll
+        # could never say yes to — a leaked shell, not a session. Refuse before
+        # anything is spawned.
+        if provider.new_command(options) is None:
+            return False, f"The {provider.name} CLI isn't available to start a session."
+
+        deferred = mcptools.DeferredResult()
+        root = os.path.realpath(worktree_project_root(cwd) or cwd)
+        spawn = _BackgroundSpawn(
+            window, cwd, provider, options, worktree, args["prompt"], deferred,
+            on_done=lambda: self._start_session_advance(root),
+        )
+        self._start_session_chains.setdefault(root, deque()).append(spawn)
+        if len(self._start_session_chains[root]) == 1:
+            spawn.begin()  # nothing ahead of it; the queue is otherwise idle
+        return deferred
+
+    def _start_session_advance(self, root: str) -> None:
+        """A spawn for *root* finished: drop it and start the next one waiting."""
+        queue = self._start_session_chains.get(root)
+        if not queue:
+            return
+        queue.popleft()  # the spawn that just finished, always the head
+        if queue:
+            queue[0].begin()
+        else:
+            del self._start_session_chains[root]
 
     def _apply_scheme_css(self) -> None:
         """Load the scheme's colors. Runs at startup and on every light/dark

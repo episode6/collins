@@ -98,6 +98,25 @@ _EDITOR_FOLLOW_TICKS = 2
 # that sends it (see inject_prompt). Long enough that the CLI has stopped
 # reading the text as a paste, short enough that nobody watching sees a pause.
 _PROMPT_SUBMIT_MS = 250
+# The bracketed-paste control sequences (ESC[200~ … ESC[201~) that tell a
+# terminal app the text between them was pasted, not typed — so its newlines
+# stay literal instead of each submitting. See inject_prompt_unfocused.
+_PASTE_START = "\x1b[200~"
+_PASTE_END = "\x1b[201~"
+
+
+def _bracketed_paste(text: str) -> str:
+    """*text* wrapped as one bracketed paste, safe to feed to a CLI's input.
+
+    Carriage returns are normalized to newlines (a bare CR reads as Enter —
+    a submit mid-prompt), and any paste-end marker already in the text is
+    dropped so the agent's own prompt can't close the wrapper early and leave
+    its tail arriving as live keystrokes.
+    """
+    body = text.replace("\r\n", "\n").replace("\r", "\n").replace(_PASTE_END, "")
+    return f"{_PASTE_START}{body}{_PASTE_END}"
+
+
 # How often, and for how long, a new session set to open floating waits for
 # its agent to actually come up before raising the composer over it (see
 # autoshow_composer). Twenty seconds covers a cold CLI start on a slow disk;
@@ -3441,6 +3460,23 @@ class TerminalTab(Gtk.Box):
         """
         self._post_prompt(text)
         self.grab_terminal_focus()
+
+    def inject_prompt_unfocused(self, text: str) -> None:
+        """Submit *text* to the agent without taking focus or the view — what
+        a background spawn does with the prompt the start_session tool handed
+        it (see App._mcp_start_session). inject_prompt's sibling, minus the
+        grab: a session no one is looking at must not pull the keyboard over.
+
+        Where inject_prompt only ever carried the PR menu's one-liners, a tool
+        prompt is arbitrary user text and often multi-line. It is wrapped in an
+        explicit bracketed paste so its newlines stay literal in the box
+        however VTE chunks the write — the CLI keeps bracketed paste on — and
+        any carriage returns (a stray submit mid-prompt) or paste-end markers
+        (an early close of the wrapper) are stripped first. The submitting
+        Return still travels on its own a beat later (_post_prompt), after the
+        paste has closed, so the whole thing lands as one turn.
+        """
+        self._post_prompt(_bracketed_paste(text))
 
     def _post_prompt(self, text: str) -> None:
         """Type *text* into the agent and submit it a beat later (see

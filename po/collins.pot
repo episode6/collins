@@ -2140,6 +2140,15 @@ msgid ""
 "attach_pr — put a pull request on the session's own footer and sidebar row"
 msgstr ""
 
+#: collins/prefs.py:108
+msgid "Start sessions in the background"
+msgstr ""
+
+#: collins/prefs.py:109
+msgid ""
+"start_session — spawn a sibling agent in a new background tab, with a prompt"
+msgstr ""
+
 #: collins/cliwelcome.py:70
 msgid "Collins needs the Claude Code CLI"
 msgstr ""

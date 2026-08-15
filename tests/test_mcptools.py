@@ -20,6 +20,7 @@ def test_serves_exactly_the_landed_tools():
         "show_image",
         "notify_user",
         "attach_pr",
+        "start_session",
     ]
 
 
@@ -62,6 +63,7 @@ def test_enabled_tools_serves_only_what_is_switched_on():
         "open_in_editor",
         "notify_user",
         "attach_pr",
+        "start_session",
     ]
 
 
@@ -196,6 +198,67 @@ def test_overlong_notification_is_rejected():
     telling the agent about, not silently truncating."""
     assert mcptools.validate_args("notify_user", {"message": "x" * 500}) is None
     assert "500" in mcptools.validate_args("notify_user", {"message": "x" * 501})
+
+
+def test_start_session_minimal_args():
+    """Only the prompt is required; the cwd, worktree, and mode all default."""
+    assert mcptools.validate_args("start_session", {"prompt": "Fix the build"}) is None
+    assert "prompt" in mcptools.validate_args("start_session", {})
+    assert "empty" in mcptools.validate_args("start_session", {"prompt": ""})
+    assert "50000" in mcptools.validate_args("start_session", {"prompt": "x" * 50_001})
+
+
+def test_start_session_cwd_is_an_optional_string():
+    assert (
+        mcptools.validate_args(
+            "start_session", {"prompt": "go", "cwd": "/home/me/project"}
+        )
+        is None
+    )
+    assert "string" in mcptools.validate_args(
+        "start_session", {"prompt": "go", "cwd": 7}
+    )
+
+
+def test_start_session_worktree_must_be_a_boolean():
+    """The validator grew a boolean kind for this — an int isn't a bool, and
+    a bare string never was one."""
+    assert (
+        mcptools.validate_args("start_session", {"prompt": "go", "worktree": True})
+        is None
+    )
+    assert (
+        mcptools.validate_args("start_session", {"prompt": "go", "worktree": False})
+        is None
+    )
+    assert "true or false" in mcptools.validate_args(
+        "start_session", {"prompt": "go", "worktree": "yes"}
+    )
+    assert "true or false" in mcptools.validate_args(
+        "start_session", {"prompt": "go", "worktree": 1}
+    )
+
+
+def test_start_session_permission_mode_is_enum_constrained():
+    """The schema bounds it to a fixed set; the handler narrows that further
+    (bypass is refused there, not here)."""
+    for mode in ("plan", "acceptEdits", "bypassPermissions"):
+        assert (
+            mcptools.validate_args(
+                "start_session", {"prompt": "go", "permission_mode": mode}
+            )
+            is None
+        )
+    error = mcptools.validate_args(
+        "start_session", {"prompt": "go", "permission_mode": "whatever"}
+    )
+    assert "one of" in error and "plan" in error
+
+
+def test_start_session_rejects_unexpected_arguments():
+    assert "surprise" in mcptools.validate_args(
+        "start_session", {"prompt": "go", "surprise": 1}
+    )
 
 
 # ---- the dispatch skeleton ---------------------------------------------------
