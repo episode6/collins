@@ -120,6 +120,7 @@ def fetch_models(timeout: float = _TIMEOUT_S) -> list[ClaudeModel]:
 
 
 _lock = threading.Lock()
+_fetch_lock = threading.Lock()  # single-flight: one live query at a time
 _cached: list[ClaudeModel] | None = None
 _cached_at = 0.0
 
@@ -130,17 +131,26 @@ def available_models() -> list[ClaudeModel]:
     Blocking (up to the network timeout) — call from a worker thread. A
     failed refresh falls back to whatever was cached before, and [] means
     the API has never answered this run.
+
+    Concurrent callers on a stale cache queue on one fetch rather than
+    fanning out into duplicate queries (a menu reopened before its first
+    fetch lands, say): whoever holds the fetch lock asks the API, and the
+    queued callers re-read the cache it just filled.
     """
     global _cached, _cached_at
     with _lock:
         if _cached is not None and time.monotonic() - _cached_at < _CACHE_TTL_S:
             return list(_cached)
-    models = fetch_models()
-    with _lock:
-        if models:
-            _cached = models
-            _cached_at = time.monotonic()
-        return list(models or _cached or [])
+    with _fetch_lock:
+        with _lock:
+            if _cached is not None and time.monotonic() - _cached_at < _CACHE_TTL_S:
+                return list(_cached)  # filled while queued here
+        models = fetch_models()
+        with _lock:
+            if models:
+                _cached = models
+                _cached_at = time.monotonic()
+            return list(models or _cached or [])
 
 
 def cached_models() -> list[ClaudeModel] | None:

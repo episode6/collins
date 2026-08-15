@@ -1632,7 +1632,9 @@ class TerminalTab(Gtk.Box):
             # it: a click opens the switch menu, and the copy its neighbours
             # answer clicks with lives on as that menu's own copy row.
             self._model_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
-            click = Gtk.GestureClick()
+            # Primary button only — opening a menu is a heavier act than the
+            # neighbours' copy, and a right-click should keep meaning nothing.
+            click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
             click.connect("released", self._on_model_label_click)
             self._model_label.add_controller(click)
         else:

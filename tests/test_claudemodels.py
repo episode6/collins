@@ -1,6 +1,8 @@
 """Tests for model discovery and resolution (collins.claudemodels)."""
 
 import json
+import threading
+import time
 
 from collins import claudemodels
 from collins.claudemodels import (
@@ -140,6 +142,35 @@ def test_blank_setting_resolves_to_default():
 def test_pick_model_with_explicit_setting_needs_no_query():
     # Would hit the network for a blank setting; an explicit one never does.
     assert claudemodels.pick_model("claude-opus-5") == "claude-opus-5"
+
+
+def test_available_models_single_flight(monkeypatch):
+    # Concurrent callers on a cold cache share one fetch; the queued ones
+    # re-read the cache the winner filled instead of querying again.
+    calls = []
+
+    def slow_fetch(timeout=None):
+        calls.append(1)
+        time.sleep(0.2)
+        return [ClaudeModel("claude-opus-5", "Claude Opus 5")]
+
+    original = (claudemodels._cached, claudemodels._cached_at)
+    monkeypatch.setattr(claudemodels, "fetch_models", slow_fetch)
+    claudemodels._cached = None
+    try:
+        results = []
+        threads = [
+            threading.Thread(target=lambda: results.append(claudemodels.available_models()))
+            for _ in range(4)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(calls) == 1
+        assert all(r and r[0].id == "claude-opus-5" for r in results)
+    finally:
+        claudemodels._cached, claudemodels._cached_at = original
 
 
 def test_cached_models_never_queries():
