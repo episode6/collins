@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-14. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -1226,6 +1226,10 @@ class TerminalTab(Gtk.Box):
         # to be seen and is not news (see attachrecords.unseen).
         self._attachments_unseen: set[str] = set()
         self._attachments_since = time.time()
+        # And the pictures that have been up in the lightbox this run, which
+        # the handle never lights for: whoever it would be alerting watched
+        # them arrive full-screen (see _behold_attachment).
+        self._attachments_beheld: set[str] = set()
 
         self._content_overlay = Gtk.Overlay(child=scrolled)
         content_overlay = self._content_overlay
@@ -2071,6 +2075,10 @@ class TerminalTab(Gtk.Box):
         if one is None:
             return
         self._attachments = attachrecords.fold(self._attachments, one)
+        if one.source == attachrecords.LIGHTBOX:
+            # Before the list is offered on, so the news pass below never
+            # sees this sighting as anything to light the handle for.
+            self._behold_attachment(one.key)
         self._remember_attachments()
 
     def attachments(self) -> list[attachrecords.Attachment]:
@@ -2187,7 +2195,10 @@ class TerminalTab(Gtk.Box):
             self._clear_attachment_news()
             return
         unseen, fresh = attachrecords.unseen(
-            shown, noted=self._attachments_unseen, since=self._attachments_since
+            shown,
+            noted=self._attachments_unseen,
+            since=self._attachments_since,
+            beheld=self._attachments_beheld,
         )
         if unseen == self._attachments_unseen:
             return
@@ -2201,6 +2212,28 @@ class TerminalTab(Gtk.Box):
             # .bell-flash class as the visual bell, a different animation
             # under it (see themes._apply_dynamic_theme_css).
             flash(self._attachments_btn)
+
+    def _behold_attachment(self, key: str) -> None:
+        """*key* has been up in the lightbox, so it can never be news here:
+        a pill lighting up to say "there is a picture you haven't seen"
+        about the picture filling the screen is the handle crying wolf.
+
+        A set of keys rather than a nudge to the baseline, because the
+        showing does not arrive alone: the agent's reply usually goes on to
+        mention the same picture, and the transcript scan dates that
+        sighting whenever the message lands — seconds, sometimes minutes,
+        after the lightbox went up. A moment would be outrun by its own
+        echo; the key holds for the rest of the run (a fresh run starts
+        with its baseline at the tab's opening, which covers history).
+
+        Direct, not routed through the news pass: a picture re-shown with
+        nothing new to say writes no record (`_remember_attachments`'s
+        guard), so a key already counted unseen has to be let go of here.
+        """
+        self._attachments_beheld.add(key)
+        if key in self._attachments_unseen:
+            self._attachments_unseen = self._attachments_unseen - {key}
+            self._sync_attachments_handle()
 
     def _clear_attachment_news(self) -> None:
         """The panel is on screen, so nothing in it is unseen any more.
