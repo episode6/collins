@@ -169,18 +169,20 @@ class AttachmentsView(Gtk.Box):
         different panel rather than the same one moved.
         """
         self._docked = bool(docked)
+        # Both icons are pictures of where the press puts the panel: the
+        # dock glyph fills the frame's right pane, the undock glyph raises
+        # that pane as a detached card. The composer draws the same pair on
+        # its own edge (dock/undock-bottom), so the two overlays stay a
+        # matched set.
         if self._docked:
             self.add_css_class("docked")
-            self._dock_btn.set_icon_name("view-restore-symbolic")
+            self._dock_btn.set_icon_name("undock-right-symbolic")
             self._dock_btn.set_tooltip_text(
                 _("Float the attachments panel over the terminal")
             )
         else:
             self.remove_css_class("docked")
-            # go-last, not go-next: an arrow into an edge, which is what the
-            # composer's go-bottom is on the other axis. A bare chevron reads
-            # as "forward" — a page turn, not a wall to park against.
-            self._dock_btn.set_icon_name("go-last-symbolic")
+            self._dock_btn.set_icon_name("dock-right-symbolic")
             self._dock_btn.set_tooltip_text(
                 _("Dock the attachments panel beside the terminal")
             )

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="16px" viewBox="0 0 16 16" width="16px" xmlns="http://www.w3.org/2000/svg">
+    <!-- Dock the floating attachments panel: a window frame with its right
+         pane filled solid — the icon is a picture of where the panel lands.
+         Counterpart of undock-right-symbolic, which raises the same pane as
+         a detached card. Filled paths only: GTK recolors symbolic icons by
+         overriding fill on every shape, and (since GTK 4.14 parses these
+         itself) group transforms are dropped, so geometry is baked in. -->
+    <g fill="#2e3436">
+        <path fill-rule="evenodd" d="M 4 1 H 12 C 13.644531 1 15 2.355469 15 4 V 12 C 15 13.644531 13.644531 15 12 15 H 4 C 2.355469 15 1 13.644531 1 12 V 4 C 1 2.355469 2.355469 1 4 1 Z M 4 3 C 3.429688 3 3 3.429688 3 4 V 12 C 3 12.570312 3.429688 13 4 13 H 12 C 12.570312 13 13 12.570312 13 12 V 4 C 13 3.429688 12.570312 3 12 3 Z"/>
+        <path d="M 8 3 H 12 C 12.570312 3 13 3.429688 13 4 V 12 C 13 12.570312 12.570312 13 12 13 H 8 Z"/>
+    </g>
+</svg>

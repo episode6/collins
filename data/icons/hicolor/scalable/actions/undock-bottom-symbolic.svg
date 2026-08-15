@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="16px" viewBox="0 0 16 16" width="16px" xmlns="http://www.w3.org/2000/svg">
+    <!-- Float the docked composer: the same bottom pane as
+         dock-bottom-symbolic, but raised off the floor as a detached card —
+         a gap on every side is what says "floating". See
+         dock-right-symbolic for the filled-paths-only constraint. -->
+    <g fill="#2e3436">
+        <path fill-rule="evenodd" d="M 4 1 H 12 C 13.644531 1 15 2.355469 15 4 V 12 C 15 13.644531 13.644531 15 12 15 H 4 C 2.355469 15 1 13.644531 1 12 V 4 C 1 2.355469 2.355469 1 4 1 Z M 4 3 C 3.429688 3 3 3.429688 3 4 V 12 C 3 12.570312 3.429688 13 4 13 H 12 C 12.570312 13 13 12.570312 13 12 V 4 C 13 3.429688 12.570312 3 12 3 Z"/>
+        <path d="M 5.5 7.5 H 10.5 C 11.052 7.5 11.5 7.948 11.5 8.5 V 11 C 11.5 11.552 11.052 12 10.5 12 H 5.5 C 4.948 12 4.5 11.552 4.5 11 V 8.5 C 4.5 7.948 4.948 7.5 5.5 7.5 Z"/>
+    </g>
+</svg>
