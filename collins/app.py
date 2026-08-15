@@ -55,9 +55,18 @@ _BUNDLED_ICONS = Path(__file__).resolve().parent.parent / "data" / "icons"
 # the prompt and reported its id (see _BackgroundSpawn). This is the deadline
 # on that whole wait: past it the call fails rather than hanging, and must come
 # in under the CLI's own MCP tool-call timeout (a reply sent after the CLI has
-# given up helps no one). The tab it opened stays — visible, closable, and
-# still resolving in the background — so a late id isn't lost, only unreported.
-_START_SESSION_DEADLINE_MS = 20_000
+# given up helps no one — the caller sees an opaque "did not respond in time"
+# instead of our own honest failure, and loses the id). The tab it opened stays
+# — visible, closable, and still resolving in the background — so a late id
+# isn't lost, only unreported.
+#
+# Probed 2026-08-15: that CLI timeout is ~17s (a start_session call returned
+# "did not respond in time" 16.9s after it was made). So the earlier 20s
+# guess sat *above* it — the CLI always gave up first. Keep a wide margin below
+# it, both for the reply to travel back before the cutoff and against a caller
+# whose timeout is configured lower. A healthy spawn resolves in a few seconds
+# (~5s even through a fresh-worktree launch), well inside this.
+_START_SESSION_DEADLINE_MS = 12_000
 # How often the spawn polls the fresh terminal for its input box to be ready
 # before injecting the prompt (takes_prompt). Nothing can be mid-turn behind a
 # brand-new spawn, so a yes is safe the moment the box is drawn.

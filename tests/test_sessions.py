@@ -29,6 +29,7 @@ from collins.sessions import (
     session_from_file,
     transcript_is_stub,
     worktree_project_root,
+    worktree_shares_project,
 )
 
 
@@ -537,6 +538,35 @@ def test_worktree_project_root_is_none_outside_worktrees():
     assert worktree_project_root("/.claude/worktrees/orphan") is None  # no repo above
     assert worktree_project_root("") is None
     assert worktree_project_root(None) is None
+
+
+def test_worktree_shares_project_matches_worktrees_of_one_repo():
+    repo = "/home/u/dev/repo"
+    wt_a = f"{repo}/.claude/worktrees/a"
+    wt_b = f"{repo}/.claude/worktrees/b"
+    # A worktree belongs to its own repo root...
+    assert worktree_shares_project(wt_a, repo)
+    # ...and to a sibling worktree of the same repo: the case a background
+    # start_session hits, where the spawning tab is itself in a worktree.
+    assert worktree_shares_project(wt_a, wt_b)
+    # The agent may have moved deeper inside the followed worktree.
+    assert worktree_shares_project(f"{wt_a}/sub/dir", wt_b)
+
+
+def test_worktree_shares_project_is_false_for_non_worktree_or_other_repo():
+    repo = "/home/u/dev/repo"
+    wt = f"{repo}/.claude/worktrees/a"
+    # `cwd` isn't a worktree at all → no project to share.
+    assert not worktree_shares_project(repo, repo)
+    assert not worktree_shares_project("/home/u/dev/repo/src", repo)
+    # A worktree of a *different* repo doesn't match.
+    assert not worktree_shares_project(wt, "/home/u/dev/other")
+    assert not worktree_shares_project(
+        wt, "/home/u/dev/other/.claude/worktrees/x"
+    )
+    # Missing arguments.
+    assert not worktree_shares_project(None, repo)
+    assert not worktree_shares_project(wt, None)
 
 
 def test_project_name_for_cwd_prefers_the_repository():

@@ -82,6 +82,7 @@ from .sessions import (  # noqa: E402
     recreatable_worktree,
     recreate_worktree,
     worktree_project_root,
+    worktree_shares_project,
 )
 from .shellinput import shell_command  # noqa: E402
 from .transcript import TranscriptModel  # noqa: E402
@@ -3939,23 +3940,27 @@ class TerminalTab(Gtk.Box):
         # session's own transcript exists). We see the cwd move within one
         # poll of the CLI starting, long before a first prompt can land, so
         # the baseline can't swallow our own transcript.
+        #
+        # worktree_shares_project matches on the *project root*, not the launch
+        # dir: when this tab was itself launched from inside a worktree (a
+        # background session spawned by an agent already in one), git roots the
+        # new worktree at the main repo, so live's root is that repo while the
+        # launch dir is the caller's worktree — both collapse to the same root.
         live = self.current_agent_cwd()
-        if live and live != self._resolver_cwd:
-            root = worktree_project_root(live)
-            if root is not None and os.path.realpath(root) == os.path.realpath(
-                self._resolver_cwd
-            ):
-                if live not in self._baselined_dirs:
-                    self._baselined_dirs.add(live)
-                    if self._command_override is None:
-                        self._known_transcripts |= set(
-                            self.provider.transcripts_for_cwd(live)
-                        )
-                cands += [
-                    p
-                    for p in self.provider.transcripts_for_cwd(live)
-                    if p not in self._known_transcripts
-                ]
+        if live and live != self._resolver_cwd and worktree_shares_project(
+            live, self._resolver_cwd
+        ):
+            if live not in self._baselined_dirs:
+                self._baselined_dirs.add(live)
+                if self._command_override is None:
+                    self._known_transcripts |= set(
+                        self.provider.transcripts_for_cwd(live)
+                    )
+            cands += [
+                p
+                for p in self.provider.transcripts_for_cwd(live)
+                if p not in self._known_transcripts
+            ]
         try:
             path = max(cands, key=lambda p: p.stat().st_mtime, default=None)
         except OSError:
