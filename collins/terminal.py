@@ -1645,19 +1645,32 @@ class TerminalTab(Gtk.Box):
         self._model_label.set_max_width_chars(20)
         self._model_label.add_css_class("caption")
         self._model_label.add_css_class("dim-label")
-        self._model_label.set_visible(False)
+        # The chip that carries the name into the row and takes its visibility:
+        # the name label itself when there is nothing to switch, or a menu
+        # button wrapping it when there is.
+        self._model_chip: Gtk.Widget
         if self._can_switch_model():
-            # The label acts rather than copies, like the PR chips beside
-            # it: a click opens the switch menu, and the copy its neighbours
-            # answer clicks with lives on as that menu's own copy row.
-            self._model_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
-            # Primary button only — opening a menu is a heavier act than the
-            # neighbours' copy, and a right-click should keep meaning nothing.
-            click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
-            click.connect("released", self._on_model_label_click)
-            self._model_label.add_controller(click)
+            # A menu button, like the PR chips beside it: a click opens the
+            # switch menu, and the copy its neighbours answer clicks with
+            # lives on as that menu's own copy row. A MenuButton (not a
+            # hand-parented popover) because the catalog fills in on show and
+            # arrives fully only from a worker thread: a MenuButton
+            # re-measures its popover as the list grows, where a popover
+            # popped up by hand keeps the size it had over the empty menu and
+            # strands the rows in a one-line scroller.
+            popover = modelmenu.new_model_popover(
+                lambda: self._footer_model, self.switch_model
+            )
+            # It sits at the bottom of the tab: open upwards.
+            popover.set_position(Gtk.PositionType.TOP)
+            model_btn = Gtk.MenuButton(popover=popover)
+            model_btn.set_child(self._model_label)
+            model_btn.add_css_class("flat")
+            self._model_chip = model_btn
         else:
             enable_copy_on_click(self._model_label, lambda: self._footer_model, short_name)
+            self._model_chip = self._model_label
+        self._model_chip.set_visible(False)
         self._model_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
         self._model_sep.set_visible(False)
 
@@ -1757,7 +1770,7 @@ class TerminalTab(Gtk.Box):
         # (not the cwd label) takes the slack so the buttons stay pinned right
         # even while the model, branch and PR labels are hidden.
         left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
-        left.append(self._model_label)
+        left.append(self._model_chip)
         left.append(self._model_sep)
         left.append(self._cwd_label)
         left.append(self._branch_seps[0])
@@ -1896,8 +1909,8 @@ class TerminalTab(Gtk.Box):
             tooltip = model + "\n" + _("Click to switch the model")
         else:
             tooltip = copy_tooltip(model)
-        self._model_label.set_tooltip_text(tooltip)
-        self._model_label.set_visible(model is not None)
+        self._model_chip.set_tooltip_text(tooltip)
+        self._model_chip.set_visible(model is not None)
         if self._composer is not None:
             self._composer.set_model_name(short_name(model) if model else None)
         self._sync_footer_seps()
@@ -1907,11 +1920,6 @@ class TerminalTab(Gtk.Box):
         gate on the footer label's menu and the composer's picker alike,
         probed with an alias the way _provider_has_prompt_box probes."""
         return self.provider.model_switch_command("sonnet") is not None
-
-    def _on_model_label_click(self, _gesture, _n_press, _x, _y) -> None:
-        modelmenu.open_model_menu(
-            self._model_label, lambda: self._footer_model, self.switch_model
-        )
 
     def _sync_footer_seps(self) -> None:
         """Show only the dividers that separate two visible chips.
