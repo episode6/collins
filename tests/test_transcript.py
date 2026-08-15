@@ -592,6 +592,21 @@ def test_a_subagents_sent_images_are_its_own(tmp_path):
     assert m.attachments() == []
 
 
+def test_a_sent_list_is_cut_to_the_stat_budget(tmp_path):
+    """A real call sends a handful of files; a doctored transcript could
+    send thousands, each costing a disk check on the update thread."""
+    from collins import attachrecords
+
+    first = _png(tmp_path, "first.png")
+    last = _png(tmp_path, "last.png")
+    padding = [str(tmp_path / f"gone-{i}.png") for i in range(attachrecords.MAX_SCAN_CANDIDATES)]
+    p = tmp_path / "s.jsonl"
+    _write(p, [_sent_line([str(first), *padding, str(last)])])
+    m = TranscriptModel(p)
+    m.update()
+    assert [one.key for one in m.attachments()] == [str(first)]
+
+
 def test_a_garbled_senduserfile_call_is_ignored(tmp_path):
     p = tmp_path / "s.jsonl"
     _write(p, [

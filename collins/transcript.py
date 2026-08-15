@@ -287,7 +287,9 @@ def _deliveries(content: object) -> list[tuple[list, str | None]]:
     for why). Shapes are taken on trust no further than typing: the files
     list is whatever the call carried — each entry is vetted individually by
     ``attachrecords.delivered`` — and a caption that isn't a string is no
-    caption.
+    caption. The list is also cut to `scan`'s stat budget: a real call sends
+    a handful of files, so anything longer is a doctored transcript, and
+    every entry kept may cost a disk check on the update thread.
     """
     if not isinstance(content, list):
         return []
@@ -303,7 +305,7 @@ def _deliveries(content: object) -> list[tuple[list, str | None]]:
         files = arguments.get("files")
         caption = arguments.get("caption")
         calls.append((
-            files if isinstance(files, list) else [],
+            files[: attachrecords.MAX_SCAN_CANDIDATES] if isinstance(files, list) else [],
             caption if isinstance(caption, str) else None,
         ))
     return calls

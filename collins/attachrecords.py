@@ -548,25 +548,21 @@ def delivered(
     one kind — and only ones something is at right now, same as `scan`: the
     delivery that actually succeeded had a file there, so what this skips is
     a call that failed, and a scratchpad since cleaned up — whose earlier
-    sightings the saved records still hold.
+    sightings the saved records still hold. Only *local* ones, too: the real
+    tool never carries a URL, so a remote-looking entry is a doctored
+    transcript (this module trusts nothing read from disk), refused before
+    it costs anything.
     """
     if not isinstance(path, str) or not path.strip():
         return None
     written = path.strip()
     if is_remote(written) or not editorfiles.is_image_path(written):
         return None
-    expanded = os.path.expanduser(written)
-    if os.path.isabs(expanded):
-        trials = [expanded]
-    else:
-        trials = [os.path.join(root, expanded) for root in roots if root]
-    for trial in trials:
-        if os.path.exists(trial):
-            return sighting(
-                os.path.normpath(trial), source=LIGHTBOX, caption=caption, now=now
-            )
-    log.debug("delivered image resolved nowhere: %r", written)
-    return None
+    key = linkpatterns.resolve_path(written, roots)
+    if key is None:
+        log.debug("delivered image resolved nowhere: %r", written)
+        return None
+    return sighting(key, source=LIGHTBOX, caption=caption, now=now)
 
 
 def _names_an_image(match: re.Match) -> bool:

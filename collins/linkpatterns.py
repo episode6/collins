@@ -110,6 +110,27 @@ _STITCH_ROWS_UP = 2
 _STITCH_ROWS_DOWN = 3
 
 
+def resolve_path(text: str, roots: Iterable[str | None]) -> str | None:
+    """The existing file *text* points at, normalized — or None.
+
+    The one resolution rule every "does this reference mean a real file?"
+    gate shares (the click's `resolve_file_reference`, the attachment log's
+    `attachrecords.delivered`): ``~`` is expanded, a relative path is tried
+    against each of *roots* in order (skipping None entries), and only a
+    path something is actually at comes back. One home for it, so the gates
+    can't drift apart on what "resolves" means.
+    """
+    expanded = os.path.expanduser(text)
+    if os.path.isabs(expanded):
+        trials = [expanded]
+    else:
+        trials = [os.path.join(root, expanded) for root in roots if root]
+    for trial in trials:
+        if os.path.exists(trial):
+            return os.path.normpath(trial)
+    return None
+
+
 def resolve_file_reference(
     text: str, roots: list[str | None]
 ) -> tuple[str, int | None, int | None] | None:
@@ -117,10 +138,9 @@ def resolve_file_reference(
 
     The regex is only a shape detector; this is the false-positive gate the
     click runs. Strips the ``:line[:col]`` suffix (preferring that reading
-    over a literal filename containing colons), expands ``~``, and tries
-    relative paths against each of *roots* in order, skipping None entries.
-    Returns ``(path, line, col)`` with line/col as the reference wrote them
-    (1-based) or None where it carried no suffix.
+    over a literal filename containing colons), then resolves what is left
+    (see `resolve_path`). Returns ``(path, line, col)`` with line/col as the
+    reference wrote them (1-based) or None where it carried no suffix.
     """
     candidates: list[tuple[str, int | None, int | None]] = []
     m = _SUFFIX.fullmatch(text)
@@ -130,14 +150,9 @@ def resolve_file_reference(
         )
     candidates.append((text, None, None))
     for raw, line, col in candidates:
-        expanded = os.path.expanduser(raw)
-        if os.path.isabs(expanded):
-            trials = [expanded]
-        else:
-            trials = [os.path.join(root, expanded) for root in roots if root]
-        for trial in trials:
-            if os.path.exists(trial):
-                return os.path.normpath(trial), line, col
+        path = resolve_path(raw, roots)
+        if path is not None:
+            return path, line, col
     return None
 
 
