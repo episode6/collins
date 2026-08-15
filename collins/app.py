@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-14. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -203,6 +203,11 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
 }
 .attachments-panel .attachment-standin {
   padding: 12px 4px;
+}
+/* a non-picture file's row face: file-type icon beside the bare name,
+   padded like the stand-in so the two one-line shapes rhyme */
+.attachments-panel .attachment-file {
+  padding: 6px 4px;
 }
 .attachments-panel .attachment-caption {
   font-size: 0.9em;

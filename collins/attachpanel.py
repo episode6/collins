@@ -1,17 +1,22 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
-"""The attachments panel: every image a session has seen, in one column.
+"""The attachments panel: every image a session has seen — and every file
+it delivered — in one column.
 
-`attachrecords` writes down each image a session puts on screen; this is
-where that list is finally shown — a narrow column of previews sliding in
-from the terminal's right edge, one row per picture, in the order the
-conversation beside it runs: oldest at the top, newest at the bottom, the
-list parked at that bottom edge. It sits alongside a terminal transcript
-that grows downward, and a column that grew the other way would have the
-picture just shown at the far end from the message that showed it.
-Clicking a row opens the lightbox it came out of, with the caption the agent
-gave it; right-clicking offers the picture to another app, to the file
-manager, or to the clipboard, and can strike a row off the list.
+`attachrecords` writes down each image a session puts on screen and each
+file it hands over; this is where that list is finally shown — a narrow
+column sliding in from the terminal's right edge, one row per attachment,
+in the order the conversation beside it runs: oldest at the top, newest at
+the bottom, the list parked at that bottom edge. It sits alongside a
+terminal transcript that grows downward, and a column that grew the other
+way would have the picture just shown at the far end from the message that
+showed it. A picture's row is a preview; any other file's row is a
+file-type icon beside the bare file name, its path held for the tooltip —
+there is nothing to thumbnail in a zip. Clicking a picture opens the
+lightbox it came out of, with the caption the agent gave it; clicking a
+file opens it in the desktop's default app. Right-clicking offers either to
+another app, to the file manager, or to the clipboard, and can strike a row
+off the list.
 
 Host-agnostic like `ComposerView`, and for the same reason: the one live
 view is raised over the terminal or docked as a panel tab (`AttachmentsPage`,
@@ -66,11 +71,13 @@ _THUMB_HEIGHT = 200
 class AttachmentsView(Gtk.Box):
     """The panel widget itself (see module docstring).
 
-    *open_image(attachment, path)* shows one: the host has the lightbox's
-    editor gating in hand, and *path* is a local file — a remote image is
-    downloaded before it is ever passed on. *forget(key)* drops a record
-    from the session's list, and *notify(message)* is where the things that
-    can only be said in words go (the terminal's feed_message).
+    *open_image(attachment, path)* shows one picture: the host has the
+    lightbox's editor gating in hand, and *path* is a local file — a remote
+    image is downloaded before it is ever passed on. Only image rows go
+    through it; a file row's activation stays in the panel, which launches
+    the desktop's default handler (see `open`). *forget(key)* drops a
+    record from the session's list, and *notify(message)* is where the
+    things that can only be said in words go (the terminal's feed_message).
     """
 
     __gsignals__ = {
@@ -244,7 +251,10 @@ class AttachmentsView(Gtk.Box):
                 row = _Row(one, self)
                 self._rows[one.key] = row
                 self._list.append(row)
-                fresh.append(row)
+                if row.needs_decode:
+                    # A file row is born complete; only pictures wait their
+                    # turn in the fill loop.
+                    fresh.append(row)
             else:
                 row.update(one)
             if row.get_prev_sibling() is not previous:
@@ -316,8 +326,14 @@ class AttachmentsView(Gtk.Box):
     # -- opening ---------------------------------------------------------------
 
     def open(self, one: Attachment) -> None:
-        """A row was activated: show it in the lightbox."""
-        self._with_local_file(one, lambda path: self._open_image(one, path))
+        """A row was activated: a picture goes to the lightbox; any other
+        file goes to whatever the desktop opens it with — the panel has no
+        way to show a spreadsheet, and the default handler is what a
+        double-click on the file anywhere else would do."""
+        if one.kind == "image":
+            self._with_local_file(one, lambda path: self._open_image(one, path))
+        else:
+            self._with_local_file(one, self._launch_default)
 
     def _with_local_file(self, one: Attachment, then: Callable[[str], None]) -> None:
         """Hand *then* a real file for *one*, downloading it if it is remote.
@@ -331,7 +347,7 @@ class AttachmentsView(Gtk.Box):
         """
         if not one.remote:
             if not os.path.isfile(one.key):
-                self._notify(_("that image isn't on disk any more: {path}").format(path=one.key))
+                self._notify(_gone(one))
                 return
             then(one.key)
             return
@@ -392,12 +408,18 @@ class AttachmentsView(Gtk.Box):
         launcher.set_always_ask(True)  # "another app": always show the chooser
         launcher.launch(self.get_root(), None, _launched)
 
+    def _launch_default(self, path: str) -> None:
+        """Open *path* in the desktop's default handler (a file row's
+        activation) — no chooser, unless nothing claims the type."""
+        launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(path))
+        launcher.launch(self.get_root(), None, _launched)
+
     def _on_show_folder(self, _action, target: GLib.Variant) -> None:
         one = self._records.get(target.get_string())
         if one is None or one.remote:
             return
         if not os.path.exists(one.key):
-            self._notify(_("that image isn't on disk any more: {path}").format(path=one.key))
+            self._notify(_gone(one))
             return
         launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(one.key))
         launcher.open_containing_folder(self.get_root(), None, None)
@@ -410,7 +432,9 @@ class AttachmentsView(Gtk.Box):
 
 
 class _Row(Gtk.Button):
-    """One image in the list: a preview with its one-line label under it.
+    """One attachment in the list: a preview with its one-line label under
+    it, or — for a file that isn't a picture — a file-type icon beside the
+    bare file name, with the path kept for the tooltip.
 
     A button, not a box with a click controller: this is the panel's whole
     interaction, and a button is what gets the focus ring, the keyboard
@@ -435,24 +459,68 @@ class _Row(Gtk.Button):
         self._label.add_css_class("attachment-caption")
         box.append(self._label)
         self.set_child(box)
+        if not self.needs_decode:
+            # A file row's face is an icon and a name — built here rather
+            # than in the fill loop, since there is nothing to decode and no
+            # reason for the row to stand empty even one idle turn.
+            self._slot.append(self._file_face(one))
         self.connect("clicked", lambda *_a: self._view.open(self._one))
         right_click = Gtk.GestureClick(button=3)
         right_click.connect("pressed", self._on_right_click)
         self.add_controller(right_click)
         self.update(one)
 
+    @property
+    def needs_decode(self) -> bool:
+        """Whether this row is waiting on the fill loop for its preview —
+        only picture rows decode anything."""
+        return self._one.kind == "image"
+
     def update(self, one: Attachment) -> None:
-        """Re-label the row for a fresh sighting of the same image — the
-        picture is the same file, so the preview is left alone."""
+        """Re-label the row for a fresh sighting of the same attachment —
+        the picture (or the file the icon names) is the same file, so the
+        slot is left alone."""
         self._one = one
-        self._label.set_label(one.label)
-        # The label is one ellipsized line, so the tooltip carries it whole,
-        # over the path or URL it came from — which is half of what anyone
-        # opens this panel to find. Plain text, never markup: a caption is
-        # agent output and a path is whatever the file system holds.
-        self.set_tooltip_text(
-            one.key if one.key == one.label else f"{one.label}\n{one.key}"
+        if one.kind == "image":
+            self._label.set_label(one.label)
+            # The label is one ellipsized line, so the tooltip carries it
+            # whole, over the path or URL it came from — which is half of
+            # what anyone opens this panel to find. Plain text, never
+            # markup: a caption is agent output and a path is whatever the
+            # file system holds.
+            self.set_tooltip_text(
+                one.key if one.key == one.label else f"{one.label}\n{one.key}"
+            )
+            return
+        # A file row already prints its name in the slot, so the label under
+        # it is reserved for words somebody actually wrote — the delivery's
+        # caption, or the line it was mentioned on — and stays out of the
+        # layout when there are none. The tooltip's job here is the path
+        # (the name alone doesn't say *which* report.pdf), plus the caption
+        # whole when the one-line label may have cut it short.
+        caption = one.caption or one.context
+        self._label.set_label(caption or "")
+        self._label.set_visible(bool(caption))
+        self.set_tooltip_text(f"{caption}\n{one.key}" if caption else one.key)
+
+    def _file_face(self, one: Attachment) -> Gtk.Widget:
+        """The icon-and-name line a non-picture file shows in place of a
+        preview. The icon comes from the name's content type — guessed, not
+        sniffed: the row must draw the same whether the file still exists,
+        and the shape is all it is here to say."""
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box.add_css_class("attachment-file")
+        content_type, _sure = Gio.content_type_guess(one.filename, None)
+        icon = Gtk.Image.new_from_gicon(
+            Gio.content_type_get_symbolic_icon(content_type)
         )
+        box.append(icon)
+        name = Gtk.Label(label=one.filename, xalign=0.0)
+        # Middle, not end: a name's tail is its extension, which is the half
+        # that says what kind of thing this is.
+        name.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        box.append(name)
+        return box
 
     def load(self) -> None:
         """Decode the preview (see AttachmentsView._fill_next for the when).
@@ -565,6 +633,15 @@ class AttachmentsPage(Adw.Bin):
         self._on_closed(self)
 
 
+def _gone(one: Attachment) -> str:
+    """What to say for a local record whose file has since been deleted —
+    worded for what the row is, since "image" aimed at a report reads as
+    the wrong row having been clicked."""
+    if one.kind == "image":
+        return _("that image isn't on disk any more: {path}").format(path=one.key)
+    return _("that file isn't on disk any more: {path}").format(path=one.key)
+
+
 def _missing(error: str | None, remote: bool) -> Gtk.Widget:
     """What stands in for a picture that isn't there: the record is a log of
     what the session saw, so the row stays and says why it can't show it."""
@@ -600,10 +677,10 @@ def _empty_state() -> Gtk.Widget:
     icon.set_pixel_size(32)
     icon.add_css_class("dim-label")
     box.append(icon)
-    title = Gtk.Label(label=_("No images yet"))
+    title = Gtk.Label(label=_("No attachments yet"))
     title.add_css_class("heading")
     box.append(title)
-    subtitle = Gtk.Label(label=_("Pictures this session shows you collect here."))
+    subtitle = Gtk.Label(label=_("Pictures and files this session shares collect here."))
     subtitle.set_wrap(True)
     subtitle.set_justify(Gtk.Justification.CENTER)
     subtitle.add_css_class("dim-label")

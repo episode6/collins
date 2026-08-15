@@ -52,8 +52,12 @@ def test_sighting_refuses_empty_and_non_string_keys():
 
 
 def test_sighting_refuses_unknown_kinds_and_sources():
-    assert shot("/tmp/a.png", kind="file") is None
+    assert shot("/tmp/a.mp4", kind="video") is None
     assert shot("/tmp/a.png", source="guesswork") is None
+
+
+def test_sighting_takes_the_file_kind():
+    assert shot("/tmp/report.pdf", kind="file").kind == "file"
 
 
 def test_sighting_flattens_and_trims_long_text():
@@ -389,7 +393,7 @@ def test_from_records_drops_what_it_cannot_vouch_for():
             {"key": "", "kind": "image"},
             {"key": "relative.png", "kind": "image"},
             {"key": "/tmp/a.png"},  # no kind
-            {"key": "/tmp/a.png", "kind": "file"},  # the deferred kind
+            {"key": "/tmp/a.mp4", "kind": "video"},  # unknown kind
             {"key": "/tmp/good.png", "kind": "image", "at": 5, "last": 5},
         ]
     ) == [Attachment(key="/tmp/good.png", at=5.0, last=5.0)]
@@ -662,11 +666,30 @@ def test_delivered_expands_a_home_path(tmp_path, monkeypatch):
     assert attachrecords.delivered("~/shot.png").key == str(shot)
 
 
-def test_delivered_refuses_what_is_not_an_image_on_disk(tmp_path):
+def test_delivered_records_a_non_image_as_a_file_row(tmp_path):
+    """The delivery tool sends any kind of file, and every one of them was
+    handed over on purpose — a report lands in the panel as a `file` row,
+    caption and all, where the prose scan would have passed it by."""
     report = tmp_path / "report.txt"
     report.write_text("words")
-    assert attachrecords.delivered(str(report)) is None  # not an image
+    one = attachrecords.delivered(str(report), caption="the summary", now=5.0)
+    assert one.kind == "file"
+    assert one.key == str(report)
+    assert one.source == LIGHTBOX
+    assert one.caption == "the summary"
+    assert one.filename == "report.txt"
+
+
+def test_a_delivered_file_record_round_trips(tmp_path):
+    report = tmp_path / "report.txt"
+    report.write_text("words")
+    one = attachrecords.delivered(str(report), now=5.0)
+    assert attachrecords.from_record(attachrecords.to_record(one)) == one
+
+
+def test_delivered_refuses_what_is_not_on_disk(tmp_path):
     assert attachrecords.delivered(str(tmp_path / "gone.png")) is None  # nothing there
+    assert attachrecords.delivered(str(tmp_path / "gone.txt")) is None  # any kind
     assert attachrecords.delivered("https://example.com/ci.png") is None  # not local
     assert attachrecords.delivered("bare.png") is None  # no root to try against
     assert attachrecords.delivered(None) is None

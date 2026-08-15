@@ -181,10 +181,13 @@ class TranscriptModel:
         conversation that happens to share the file.
 
         One tool call *is* read: SendUserFile (see ``_deliveries``), because
-        handing the user a picture is saying it as deliberately as prose
-        can, and the call's arguments are the only place its paths and
-        caption ever appear — an agent that sends an image without also
-        naming it in text would otherwise leave no trace here at all.
+        handing the user a file is saying it as deliberately as prose can,
+        and the call's arguments are the only place its paths and caption
+        ever appear — an agent that sends a file without also naming it in
+        text would otherwise leave no trace here at all. It is also the one
+        feed that records more than pictures: a delivered report or archive
+        lands as a ``file`` row (attachrecords.delivered sorts the kinds),
+        where the text scan stays images-only.
 
         The message's own cwd resolves its relative paths, and its own
         timestamp dates the sighting: read from byte 0, a morning's
@@ -241,7 +244,8 @@ class TranscriptModel:
         return self._model
 
     def attachments(self) -> list[Attachment]:
-        """Every image the conversation has named, newest sighting first.
+        """Every image the conversation has named — plus every file it
+        delivered outright — newest sighting first.
 
         Transcript-sourced, so each carries the line it was mentioned on as
         its context and none of them carries a caption: the tab merges these
