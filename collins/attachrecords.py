@@ -282,6 +282,40 @@ def visible(attachments: Iterable[Attachment]) -> list[Attachment]:
     return [one for one in attachments if not one.hidden]
 
 
+def unseen(
+    attachments: Iterable[Attachment], *, noted: Iterable[str], since: float
+) -> tuple[set[str], set[str]]:
+    """What the panel's handle owes a badge, and what has only just landed.
+
+    Returns two sets: everything unseen (what the badge counts) and the part
+    of it that arrived on this call (what a flash fires for, so that a list
+    merely re-offered unchanged doesn't flash anything).
+
+    Unseen is measured against *since* — a moment, not a list. It has to be:
+    a whole history routinely arrives at once, since a session restored from
+    disk hands over everything it ever saw and the first read of a
+    morning-long transcript hands over every image in it. Both date their
+    sightings when they happened (see `scan`'s *now*), so a baseline is what
+    separates the pictures somebody has already had their chance to see from
+    the ones that landed while they were reading the terminal. The caller
+    moves it forward every time the panel is looked at, since this reads the
+    whole list every call and would otherwise re-announce a picture it had
+    already shown.
+
+    *noted* is what was unseen before, and it stays unseen — a picture does
+    not become old news by being sighted a second time — except where the
+    list no longer has it: a row struck off by hand takes its share of the
+    badge with it, since a badge counting rows nobody can open is a badge
+    that can't be cleared.
+    """
+    listed = {one.key for one in attachments if not one.hidden}
+    already = set(noted)
+    fresh = {
+        one.key for one in attachments if not one.hidden and one.last > since
+    } - already
+    return (already & listed) | fresh, fresh
+
+
 def _ordered(attachments: Mapping[str, Attachment]) -> dict[str, Attachment]:
     """Newest sighting first, capped. Ties break on first sighting and then
     on key, so the same set always serializes to the same bytes — an order

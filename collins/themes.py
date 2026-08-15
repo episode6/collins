@@ -163,6 +163,27 @@ def _apply_dynamic_theme_css(theme: dict | None) -> None:
         f".attach-overlay {{ background-color: alpha({fg_css}, 0.45); color: {bg_css}; }}"
         f".attach-overlay:hover {{ background-color: alpha({fg_css}, 0.8); }}"
         f".attach-overlay:active {{ background-color: {fg_css}; }}"
+        # An image landing in a panel nobody has open flashes the handle, in
+        # the same orange and on the same .bell-flash class as the visual
+        # bell (flash.py) — but as a background it fills with and drains out
+        # of, rather than the bell's inset shadow, which bands across a
+        # capsule (app.py's _CSS says why). Draining back to the resting
+        # pill color is why this rule is here and not there: that color is
+        # the terminal's, and only this provider knows it.
+        f"@keyframes attachments-handle-flash {{ "
+        f"from {{ background-color: #D97757; }} "
+        f"to {{ background-color: alpha({fg_css}, 0.45); }} }}"
+        f"button.attachments-handle.bell-flash {{ "
+        f"animation: attachments-handle-flash 400ms ease-out; }}"
+        # The unseen dot on the attachments handle. Its fill is the app's
+        # attention orange rather than anything the terminal chose -- it is
+        # the same color the bell flashes the handle in, and a dot painted
+        # out of the palette it sits on is a dot that vanishes into some
+        # palettes. The ring is what keeps it a badge on the pill: terminal
+        # background, so the dot reads as punched through it. Shape is
+        # static (app.py's _CSS).
+        f".attachments-badge {{ background-color: #D97757; "
+        f"border: 2px solid {bg_css}; }}"
         # The composer panel is a surface of the terminal itself: terminal bg
         # at full strength (it covers the prompt it stands in for), fenced off
         # by a faint fg-colored top edge. Shape is static (app.py's _CSS).

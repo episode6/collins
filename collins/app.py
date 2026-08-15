@@ -177,6 +177,18 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   padding: 3px 1px;
 }
 
+/* the handle's unseen badge: a dot near the top of the pill, clear of the
+   icon centered in it (the icon's 16px sits from y=18 in a 52px-tall handle;
+   this ends at 16). Colors -- the app's attention orange, ringed in the
+   terminal's own background so it reads as a badge on the pill rather than a
+   stain in it -- come from themes._apply_dynamic_theme_css, like everything
+   else the handle is painted in. */
+.attachments-badge {
+  min-width: 9px;
+  min-height: 9px;
+  border-radius: 9999px;
+}
+
 /* the attachments panel sliding in over the terminal's right edge. Shape
    only, as with the composer above: its colors come from
    themes._apply_dynamic_theme_css, so it reads as a surface of the
@@ -674,6 +686,15 @@ tabbar tab.bell-flash,
 row.session-child.bell-flash {
   animation: bell-flash 400ms ease-out;
 }
+/* The attachments handle takes the same .bell-flash class (flash.py is the
+   app's one "look here", see TerminalTab._note_attachment_news) but not this
+   animation: an inset shadow spread across a 9999px-radius capsule bands, a
+   hard-edged bright rectangle between two dimmer caps, which is invisible on
+   the near-square widgets above and plain to see on a 20px pill. It flashes
+   its background instead, which needs the color it flashes back *to* -- so
+   that rule lives with the rest of the handle's colors, in
+   themes._apply_dynamic_theme_css. */
+
 /* a busy row's barber pole also claims the animation property, with one more
    class on its selector, which would silently drop the flash exactly when a
    bell is most likely (the agent is mid-turn): the row that is busy while its

@@ -2486,6 +2486,10 @@ msgstr ""
 msgid "Images this session has seen"
 msgstr ""
 
+#: collins/terminal.py
+msgid "Images this session has seen ({n} new)"
+msgstr ""
+
 #: collins/attachpanel.py:241
 msgid "Show in Folder"
 msgstr ""
