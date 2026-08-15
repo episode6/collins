@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-14. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -1125,6 +1125,18 @@ class TerminalTab(Gtk.Box):
         _setup_smooth_scroll(self.terminal)
         _setup_scroll_zoom(self.terminal)
         self.terminal.connect("bell", lambda *_: self.emit("bell"))
+
+        # Clicking into the terminal lowers whatever is raised over it —
+        # the composer and the attachments gallery both ride the overlay as
+        # stand-ins, and a click aimed past them at the terminal means
+        # "back to the CLI". Capture phase, like the link and context-menu
+        # gestures above, so it fires even when the running app has turned
+        # on mouse reporting; the sequence is never claimed, so the click
+        # still lands in VTE (focus, selection, links) as usual.
+        dismiss = Gtk.GestureClick(button=0)
+        dismiss.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        dismiss.connect("pressed", lambda *_a: self.dismiss_raised_panels())
+        self.terminal.add_controller(dismiss)
 
         self._easy_copy_paste = False
         # The colour plain text is drawn in, once a theme has been applied;
@@ -2714,6 +2726,17 @@ class TerminalTab(Gtk.Box):
         return True
 
     # -- composer ------------------------------------------------------------
+
+    def dismiss_raised_panels(self) -> None:
+        """Lower any panel raised *over* the terminal — the composer and/or
+        the attachments gallery — the way clicking past a popover dismisses
+        it. Docked pages are fixtures beside the terminal, not stand-ins in
+        front of it, so they stay put; the composer's draft goes back into
+        the CLI's box exactly as its own close would put it."""
+        if self._composer_page is None and self.composer_open():
+            self.close_composer()
+        if self._attachments_page is None and self.attachments_open():
+            self.close_attachments()
 
     def _provider_has_prompt_box(self) -> bool:
         """Whether this provider has an input box Collins can read and
