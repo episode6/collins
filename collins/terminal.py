@@ -30,6 +30,7 @@ from . import (  # noqa: E402
     editor,
     editorfiles,
     footerapps,
+    modelmenu,
     panelhistory,
     panellayout,
     prmenu,
@@ -1189,6 +1190,9 @@ class TerminalTab(Gtk.Box):
         # arrived while it was (see _on_composer_send).
         self._cut_settling = False
         self._send_after_settle = False
+        # A model switch that arrived during the settle, same bargain as the
+        # held send (see switch_model).
+        self._model_after_settle: str | None = None
         self._composer_enter_sends = True
         self._composer_font = ""
         self._composer_on_typing = False
@@ -1611,7 +1615,7 @@ class TerminalTab(Gtk.Box):
         # says about the session itself, ahead of where it is working. Read
         # off the transcript, which stamps every reply with its model, so a
         # `/model` switch mid-session shows up here within a poll; the short
-        # name is what shows and the id itself is the tooltip (and the copy).
+        # name is what shows and the id itself is the tooltip.
         # Its divider trails it, so a session too new to have replied yet
         # leaves neither a label nor a gap behind (see _sync_footer_seps).
         self._model_label = Gtk.Label(xalign=0.0)
@@ -1623,7 +1627,18 @@ class TerminalTab(Gtk.Box):
         self._model_label.add_css_class("caption")
         self._model_label.add_css_class("dim-label")
         self._model_label.set_visible(False)
-        enable_copy_on_click(self._model_label, lambda: self._footer_model, short_name)
+        if self._can_switch_model():
+            # The label acts rather than copies, like the PR chips beside
+            # it: a click opens the switch menu, and the copy its neighbours
+            # answer clicks with lives on as that menu's own copy row.
+            self._model_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+            # Primary button only — opening a menu is a heavier act than the
+            # neighbours' copy, and a right-click should keep meaning nothing.
+            click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
+            click.connect("released", self._on_model_label_click)
+            self._model_label.add_controller(click)
+        else:
+            enable_copy_on_click(self._model_label, lambda: self._footer_model, short_name)
         self._model_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
         self._model_sep.set_visible(False)
 
@@ -1848,15 +1863,36 @@ class TerminalTab(Gtk.Box):
 
     def _refresh_model_label(self) -> None:
         """Name the model the session last answered with, or hide the label
-        until it has. Called wherever the transcript has just been read."""
+        until it has. Called wherever the transcript has just been read.
+        The composer's picker button names the same read, so the two never
+        disagree about what the session is answering with."""
         model = self._transcript.model()
         if model == self._footer_model:
             return
         self._footer_model = model
         self._model_label.set_text(short_name(model) if model else "")
-        self._model_label.set_tooltip_text(copy_tooltip(model) if model else None)
+        if model is None:
+            tooltip = None
+        elif self._can_switch_model():
+            tooltip = model + "\n" + _("Click to switch the model")
+        else:
+            tooltip = copy_tooltip(model)
+        self._model_label.set_tooltip_text(tooltip)
         self._model_label.set_visible(model is not None)
+        if self._composer is not None:
+            self._composer.set_model_name(short_name(model) if model else None)
         self._sync_footer_seps()
+
+    def _can_switch_model(self) -> bool:
+        """Whether this provider can switch a running session's model — the
+        gate on the footer label's menu and the composer's picker alike,
+        probed with an alias the way _provider_has_prompt_box probes."""
+        return self.provider.model_switch_command("sonnet") is not None
+
+    def _on_model_label_click(self, _gesture, _n_press, _x, _y) -> None:
+        modelmenu.open_model_menu(
+            self._model_label, lambda: self._footer_model, self.switch_model
+        )
 
     def _sync_footer_seps(self) -> None:
         """Show only the dividers that separate two visible chips.
@@ -2816,9 +2852,23 @@ class TerminalTab(Gtk.Box):
                 path, self.current_agent_cwd()
             ),
             notify=self.feed_message,
+            # The chrome's model picker, persistent for the button that owns
+            # it (its content refills itself each show); what a pick means —
+            # posting the switch command to the chat — is this tab's business,
+            # like the view's every other signal.
+            model_popover=(
+                modelmenu.new_model_popover(
+                    lambda: self._footer_model, self.switch_model
+                )
+                if self._can_switch_model()
+                else None
+            ),
         )
         self._composer.set_enter_sends(self._composer_enter_sends)
         self._composer.set_font(self._composer_font)
+        self._composer.set_model_name(
+            short_name(self._footer_model) if self._footer_model else None
+        )
         self._composer.connect("send-requested", self._on_composer_send)
         self._composer.connect("close-requested", lambda *_a: self.close_composer())
         self._composer.connect(
@@ -3251,13 +3301,31 @@ class TerminalTab(Gtk.Box):
         from the text it carried, because a cut that landed has just seeded
         that box: what goes out is the CLI's text and the draft written
         under it, in the order they were written, which is what the send
-        would have carried had it come a moment later."""
+        would have carried had it come a moment later.
+
+        A model switch held the same way goes first — it was asked of the
+        session the prompt is about to be sent to — unless a send is waiting
+        too, in which case the switch yields the box and re-posts itself once
+        the send has typed and submitted (a beat past the send's slowest
+        path), through the ordinary "no composer over the box" road."""
         self._cut_settling = False
+        model = self._model_after_settle
+        self._model_after_settle = None
+        if model is not None and not self._send_after_settle:
+            self.switch_model(model)
+        elif model is not None:
+            GLib.timeout_add(
+                _CUT_VERIFY_MS[0] + 2 * _PROMPT_SUBMIT_MS, self._switch_after_send, model
+            )
         if not self._send_after_settle:
             return
         self._send_after_settle = False
         if self._composer is not None and self.composer_open():
             self._on_composer_send(None, self._composer.peek_text())
+
+    def _switch_after_send(self, model_id: str) -> bool:
+        self.switch_model(model_id)
+        return GLib.SOURCE_REMOVE
 
     def _apply_cut(
         self, composer: ComposerView, seq: int, prompt: EnteredPrompt | None
@@ -3371,12 +3439,82 @@ class TerminalTab(Gtk.Box):
         the prompt typed out and waiting for someone to press enter. Arriving
         on its own, after the input has settled, it submits.
         """
+        self._post_prompt(text)
+        self.grab_terminal_focus()
+
+    def _post_prompt(self, text: str) -> None:
+        """Type *text* into the agent and submit it a beat later (see
+        inject_prompt for why the Return travels alone) — without touching
+        focus, for the callers that shouldn't move it (switch_model, while
+        the composer holds the keyboard)."""
         self.feed_child_text(text)
         GLib.timeout_add(_PROMPT_SUBMIT_MS, self._submit_prompt)
-        self.grab_terminal_focus()
 
     def _submit_prompt(self) -> bool:
         self.feed_child_text("\r")
+        return GLib.SOURCE_REMOVE
+
+    def switch_model(self, model_id: str) -> None:
+        """Post the provider's model-switch command to the chat — what a
+        pick in either model menu (the footer label's, the composer's)
+        means. The command is a prompt like any other to the terminal; the
+        CLI answers it in the transcript, and the footer label follows
+        within a poll.
+
+        With the composer up, the CLI's box is the composer's to manage —
+        emptied by the open-cut — so the command types straight in and the
+        composer stays exactly as it was, draft and all: switching models
+        mid-draft is the point of putting a picker there. The two cut races
+        the composer's own send can hit apply unchanged (_on_composer_send
+        tells them in full): a cut still settling holds the command back
+        and _end_settling lets it go, and one still proving the box empty
+        gets finished first, a beat ahead of the command.
+
+        Without a composer the box is the user's, so the command is only
+        posted at an empty prompt — inject_prompt's own bargain — and the
+        chat says why when it isn't.
+        """
+        command = self.provider.model_switch_command(model_id)
+        if command is None:
+            return
+        if not self._agent_is_running():
+            self.feed_message(_("Model switch: the agent isn't running in this tab"))
+            return
+        if self.composer_open():
+            if self._cut_settling:
+                self._model_after_settle = model_id
+                return
+            leftover = (
+                self._leftover_cut_keys(self._cut_pending)
+                if self._cut_pending is not None
+                else None
+            )
+            self._cut_pending = None
+            self._cut_seq += 1  # the command about to be typed is not a cut's to erase
+            if leftover:
+                self.feed_child_text(leftover)
+                GLib.timeout_add(_CUT_VERIFY_MS[0], self._post_after_cut, command)
+            else:
+                self._post_prompt(command)
+            # The keyboard goes back to the draft: the popover's close is
+            # about to hand focus to the button that opened it, so the
+            # re-grab waits out that close in an idle (popovers undo a
+            # grab made during their own action).
+            GLib.idle_add(self._refocus_composer)
+            return
+        block = self.prompt_block()
+        if block:
+            self.feed_message(block)
+            return
+        self.inject_prompt(command)
+
+    def _post_after_cut(self, text: str) -> bool:
+        self._post_prompt(text)
+        return GLib.SOURCE_REMOVE
+
+    def _refocus_composer(self) -> bool:
+        if self._composer is not None and self.composer_open():
+            self._composer.focus_view()
         return GLib.SOURCE_REMOVE
 
     def takes_prompt(self) -> bool:

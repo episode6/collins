@@ -383,6 +383,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Üzenetszerkesztő bezárása, a szöveg a terminálban marad",
         "Composer: the agent isn't running in this tab":
             "Üzenetszerkesztő: ezen a lapon nem fut az ügynök",
+        "Model switch: the agent isn't running in this tab":
+            "Modellváltás: ezen a lapon nem fut az ügynök",
+        "Click to switch the model": "Kattintson a modell váltásához",
+        "Switch the model for this session":
+            "Modell váltása ehhez a munkamenethez",
+        "Loading models…": "Modellek betöltése…",
+        "Copy model id": "Modellazonosító másolása",
         "Composer": "Üzenetszerkesztő",
         "Dock the composer below the terminal":
             "Üzenetszerkesztő dokkolása a terminál alá",
@@ -805,6 +812,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Composer schließen und den Text im Terminal behalten",
         "Composer: the agent isn't running in this tab":
             "Composer: In diesem Tab läuft kein Agent",
+        "Model switch: the agent isn't running in this tab":
+            "Modellwechsel: In diesem Tab läuft kein Agent",
+        "Click to switch the model": "Zum Wechseln des Modells klicken",
+        "Switch the model for this session":
+            "Das Modell für diese Sitzung wechseln",
+        "Loading models…": "Modelle werden geladen…",
+        "Copy model id": "Modell-ID kopieren",
         "Composer": "Composer",
         "Dock the composer below the terminal":
             "Composer unter dem Terminal andocken",
@@ -1224,6 +1238,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Cerrar el redactor y conservar el texto en la terminal",
         "Composer: the agent isn't running in this tab":
             "Redactor: el agente no se está ejecutando en esta pestaña",
+        "Model switch: the agent isn't running in this tab":
+            "Cambio de modelo: el agente no se está ejecutando en esta pestaña",
+        "Click to switch the model": "Haz clic para cambiar el modelo",
+        "Switch the model for this session": "Cambiar el modelo de esta sesión",
+        "Loading models…": "Cargando modelos…",
+        "Copy model id": "Copiar el id del modelo",
         "Composer": "Redactor",
         "Dock the composer below the terminal":
             "Acoplar el redactor debajo de la terminal",
@@ -1645,6 +1665,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Fermer le rédacteur et garder le texte dans le terminal",
         "Composer: the agent isn't running in this tab":
             "Rédacteur : l'agent ne s'exécute pas dans cet onglet",
+        "Model switch: the agent isn't running in this tab":
+            "Changement de modèle : l'agent ne s'exécute pas dans cet onglet",
+        "Click to switch the model": "Cliquer pour changer de modèle",
+        "Switch the model for this session": "Changer le modèle de cette session",
+        "Loading models…": "Chargement des modèles…",
+        "Copy model id": "Copier l'id du modèle",
         "Composer": "Rédacteur",
         "Dock the composer below the terminal":
             "Ancrer le rédacteur sous le terminal",

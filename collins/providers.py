@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-14. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -338,6 +338,12 @@ class Provider:
         """(flag value, label) model choices for the advanced dialog; the first
         entry's empty value means 'don't pass --model'. Empty list = no picker."""
         return []
+
+    def model_switch_command(self, model_id: str) -> str | None:
+        """The line typed into a *running* session to switch it to *model_id*
+        — posted like any prompt — or None when the CLI has no mid-session
+        switch (which hides the model menus entirely)."""
+        return None
 
     def permission_modes(self) -> list[tuple[str, str]]:
         """(flag value, label) permission-mode choices; first empty = default."""
@@ -740,6 +746,11 @@ class ClaudeProvider(Provider):
     def session_models(self) -> list[tuple[str, str]]:
         # CLI aliases (version-agnostic; resolve to the current model of each tier).
         return [("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku")]
+
+    def model_switch_command(self, model_id: str) -> str | None:
+        # The CLI's own slash command, which takes anything --model does:
+        # an alias or a full model id.
+        return f"/model {model_id}"
 
     def permission_modes(self) -> list[tuple[str, str]]:
         return [

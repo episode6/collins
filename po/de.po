@@ -917,6 +917,21 @@ msgstr "Composer schließen und den Text im Terminal behalten"
 msgid "Composer: the agent isn't running in this tab"
 msgstr "Composer: In diesem Tab läuft kein Agent"
 
+msgid "Model switch: the agent isn't running in this tab"
+msgstr "Modellwechsel: In diesem Tab läuft kein Agent"
+
+msgid "Click to switch the model"
+msgstr "Zum Wechseln des Modells klicken"
+
+msgid "Switch the model for this session"
+msgstr "Das Modell für diese Sitzung wechseln"
+
+msgid "Loading models…"
+msgstr "Modelle werden geladen…"
+
+msgid "Copy model id"
+msgstr "Modell-ID kopieren"
+
 msgid "Composer"
 msgstr "Composer"
 
