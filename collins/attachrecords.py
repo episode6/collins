@@ -529,6 +529,46 @@ def scan(
     return list(seen.values())
 
 
+def delivered(
+    path: object, *, roots: Iterable[str | None] = (), caption: str | None = None,
+    now: float | None = None,
+) -> Attachment | None:
+    """A file the agent handed straight to the user, as a sighting — or None
+    when it isn't an image the panel could reopen.
+
+    This is `scan`'s sibling for the harness's file-delivery tool
+    (SendUserFile): the paths live in the tool call's arguments, not in any
+    message text, so the grammar pass never sees them — yet an image sent
+    this way is the most deliberately shown picture in the whole transcript.
+    That intent is why the sighting ranks as `LIGHTBOX`: the call's caption
+    is a real caption, written for exactly this picture (or batch), and it
+    would be thrown away as mere context otherwise.
+
+    Only images are taken — the tool sends any kind of file, the panel shows
+    one kind — and only ones something is at right now, same as `scan`: the
+    delivery that actually succeeded had a file there, so what this skips is
+    a call that failed, and a scratchpad since cleaned up — whose earlier
+    sightings the saved records still hold.
+    """
+    if not isinstance(path, str) or not path.strip():
+        return None
+    written = path.strip()
+    if is_remote(written) or not editorfiles.is_image_path(written):
+        return None
+    expanded = os.path.expanduser(written)
+    if os.path.isabs(expanded):
+        trials = [expanded]
+    else:
+        trials = [os.path.join(root, expanded) for root in roots if root]
+    for trial in trials:
+        if os.path.exists(trial):
+            return sighting(
+                os.path.normpath(trial), source=LIGHTBOX, caption=caption, now=now
+            )
+    log.debug("delivered image resolved nowhere: %r", written)
+    return None
+
+
 def _names_an_image(match: re.Match) -> bool:
     """Whether a reference is image-shaped at all — the cheap check that
     keeps the rest of the pass off the ordinary paths and links a transcript

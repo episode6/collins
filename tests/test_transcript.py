@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-14. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 import json
 
@@ -519,6 +519,91 @@ def test_a_later_mention_moves_an_image_up_the_list(tmp_path):
     m = TranscriptModel(p)
     m.update()
     assert [one.key for one in m.attachments()] == [str(a), str(b)]
+
+
+def _sent_line(files, caption=None, *, cwd=None, sidechain=False):
+    inp = {"files": files, "status": "normal"}
+    if caption is not None:
+        inp["caption"] = caption
+    line = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "t1", "name": "SendUserFile",
+                         "input": inp}],
+        },
+    }
+    if cwd:
+        line["cwd"] = cwd
+    if sidechain:
+        line["isSidechain"] = True
+    return line
+
+
+def test_images_sent_with_senduserfile_are_listed_with_their_caption(tmp_path):
+    """An agent that hands the user pictures without naming them in prose
+    still fills the panel: the tool call is the only place the paths and
+    the caption ever appear."""
+    dark = _png(tmp_path, "sheet-dark.png")
+    light = _png(tmp_path, "sheet-light.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [_sent_line([str(dark), str(light)], "icon candidates")])
+    m = TranscriptModel(p)
+    assert m.update() is True
+    by_key = {one.key: one for one in m.attachments()}
+    assert set(by_key) == {str(dark), str(light)}
+    assert all(one.caption == "icon candidates" for one in by_key.values())
+    assert all(one.source == "lightbox" for one in by_key.values())
+
+
+def test_a_sent_non_image_is_not_listed(tmp_path):
+    report = tmp_path / "report.txt"
+    report.write_text("words")
+    p = tmp_path / "s.jsonl"
+    _write(p, [_sent_line([str(report)])])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.attachments() == []
+
+
+def test_a_sent_relative_path_resolves_against_the_message_cwd(tmp_path):
+    shot = _png(tmp_path, "out/shot.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [_sent_line(["out/shot.png"], cwd=str(tmp_path))])
+    m = TranscriptModel(p)
+    m.update()
+    assert [one.key for one in m.attachments()] == [str(shot)]
+
+
+def test_a_sent_file_that_is_gone_is_not_listed(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_sent_line([str(tmp_path / "never-was.png")])])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.attachments() == []
+
+
+def test_a_subagents_sent_images_are_its_own(tmp_path):
+    shot = _png(tmp_path, "shot.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [_sent_line([str(shot)], sidechain=True)])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.attachments() == []
+
+
+def test_a_garbled_senduserfile_call_is_ignored(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [
+        _sent_line("not-a-list"),
+        _sent_line([None, 7, {}]),
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "SendUserFile", "input": None},
+        ]}},
+    ])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.attachments() == []
 
 
 def test_set_path_clears_the_images(tmp_path):

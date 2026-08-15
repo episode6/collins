@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-14. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 """Read what a session is doing by tailing its JSONL transcript.
 
@@ -40,6 +40,10 @@ _TOUCH_TOOLS = {
     "NotebookEdit": "notebook_path",
 }
 _MAX_TOUCHED = 30  # most-recent-first; plenty for a list that shows a handful
+
+# The harness tool that hands the user files directly. Its input is the only
+# tool input the image pass reads — see `_deliveries`.
+_SEND_FILE_TOOL = "SendUserFile"
 
 # The CLI stamps its own interjections — API errors, interrupted turns — as
 # assistant messages from this "model". No model answered them, so they must
@@ -176,6 +180,12 @@ class TranscriptModel:
         `_record_model` gives — a subagent's turns are somebody else's
         conversation that happens to share the file.
 
+        One tool call *is* read: SendUserFile (see ``_deliveries``), because
+        handing the user a picture is saying it as deliberately as prose
+        can, and the call's arguments are the only place its paths and
+        caption ever appear — an agent that sends an image without also
+        naming it in text would otherwise leave no trace here at all.
+
         The message's own cwd resolves its relative paths, and its own
         timestamp dates the sighting: read from byte 0, a morning's
         transcript arrives all at once, and stamping it `now` would file
@@ -183,15 +193,18 @@ class TranscriptModel:
         """
         if entry.get("type") not in ("user", "assistant") or entry.get("isSidechain"):
             return False
-        texts = _texts(message.get("content"))
-        if not texts:
-            return False
+        content = message.get("content")
         cwd = entry.get("cwd")
         roots = [cwd] if isinstance(cwd, str) and cwd else []
         at = _stamp(entry.get("timestamp"))
         seen: list[Attachment] = []
-        for text in texts:
+        for text in _texts(content):
             seen.extend(attachrecords.scan(text, roots=roots, now=at))
+        for files, caption in _deliveries(content):
+            for path in files:
+                one = attachrecords.delivered(path, roots=roots, caption=caption, now=at)
+                if one is not None:
+                    seen.append(one)
         if not seen:
             return False
         before = self._images
@@ -265,6 +278,35 @@ def _texts(content: object) -> list[str]:
         and block.get("type") == "text"
         and isinstance(block.get("text"), str)
     ]
+
+
+def _deliveries(content: object) -> list[tuple[list, str | None]]:
+    """Each SendUserFile call in a message, as ``(files, caption)``.
+
+    The one tool whose *input* the image pass reads (see ``_record_images``
+    for why). Shapes are taken on trust no further than typing: the files
+    list is whatever the call carried — each entry is vetted individually by
+    ``attachrecords.delivered`` — and a caption that isn't a string is no
+    caption.
+    """
+    if not isinstance(content, list):
+        return []
+    calls = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        if block.get("name") != _SEND_FILE_TOOL:
+            continue
+        arguments = block.get("input") or {}
+        if not isinstance(arguments, dict):
+            continue
+        files = arguments.get("files")
+        caption = arguments.get("caption")
+        calls.append((
+            files if isinstance(files, list) else [],
+            caption if isinstance(caption, str) else None,
+        ))
+    return calls
 
 
 def _stamp(value: object) -> float | None:
