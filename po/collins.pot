@@ -127,6 +127,10 @@ msgstr ""
 msgid "Copied to clipboard"
 msgstr ""
 
+#: collins/copylabel.py
+msgid "Right-click to copy the link"
+msgstr ""
+
 #: collins/prmenu.py:206 collins/terminal.py:1045
 msgid "Click for actions"
 msgstr ""

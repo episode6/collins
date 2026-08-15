@@ -91,7 +91,12 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 from . import avatars, bodyimages, dialogs, practions, prdetail, prmenu  # noqa: E402
-from .copylabel import open_tooltip, open_uri  # noqa: E402
+from .copylabel import (  # noqa: E402
+    copy_hint,
+    enable_copy_on_secondary_click,
+    open_tooltip,
+    open_uri,
+)
 from .editor import GtkSource, style_scheme  # noqa: E402 — require_version + friendly exit live there
 from .formatting import (  # noqa: E402
     format_relative,
@@ -275,8 +280,11 @@ class PrViewPage(Adw.Bin):
         github_btn = Gtk.Button(icon_name="github-symbolic")
         github_btn.add_css_class("flat")
         github_btn.set_valign(Gtk.Align.START)
-        github_btn.set_tooltip_text(open_tooltip(pr.url))
+        github_btn.set_tooltip_text(open_tooltip(pr.url) + "\n" + copy_hint())
         github_btn.connect("clicked", lambda b: open_uri(b, self.pr_url))
+        # And the link itself on a right-click, confirmed on the button's own
+        # face — the page has the URL and nowhere else offers it.
+        enable_copy_on_secondary_click(github_btn, lambda: self.pr_url)
         top.append(github_btn)
         header.append(top)
 
