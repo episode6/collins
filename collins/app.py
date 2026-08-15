@@ -1470,7 +1470,9 @@ class App(Adw.Application):
         session id, not a promise, so the whole spawn → submit → resolve dance
         runs before this returns — bounded by a deadline, and driven by
         _BackgroundSpawn. Everything up to the spawn is validated synchronously
-        here so an obviously-bad call fails fast and cheap.
+        here so an obviously-bad call fails fast and cheap. The launch dir is
+        collapsed to the project root (never a nested worktree) before the
+        spawn — see the cwd normalization below.
         """
         window, tab = found
         provider = tab.provider
@@ -1491,6 +1493,14 @@ class App(Adw.Application):
             cwd = tab.current_agent_cwd()
             if not cwd:
                 return False, "Couldn't work out a directory to start the session in."
+        # New sessions belong in the project proper, never inside an existing
+        # worktree: launching from `<repo>/.claude/worktrees/<name>` roots the
+        # fresh spawn there, and the transcript resolver — which baselines and
+        # follows relative to the launch dir — mismaps the tab, so the id never
+        # comes back. The foreground new-session path collapses the same way
+        # (see window._visible_project_dir); mirror it here. No-op (returns
+        # None) for any cwd that isn't a Claude-managed worktree.
+        cwd = worktree_project_root(cwd) or cwd
 
         mode = args.get("permission_mode")
         if mode:
@@ -1518,7 +1528,9 @@ class App(Adw.Application):
             return False, f"The {provider.name} CLI isn't available to start a session."
 
         deferred = mcptools.DeferredResult()
-        root = os.path.realpath(worktree_project_root(cwd) or cwd)
+        # cwd is already collapsed to the project root above, so this is just
+        # the per-project serialization key for the spawn queue.
+        root = os.path.realpath(cwd)
         spawn = _BackgroundSpawn(
             window, cwd, provider, options, worktree, args["prompt"], deferred,
             on_done=lambda: self._start_session_advance(root),
