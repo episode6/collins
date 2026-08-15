@@ -3919,11 +3919,18 @@ class TerminalTab(Gtk.Box):
             else set()
         )
         self._baselined_dirs = {self._resolver_cwd}
-        # The instant polling starts, before any prompt has created a
-        # transcript. A worktree we later follow into may hold transcripts
-        # from an older, recycled session, but those predate this moment; a
-        # transcript stamped after it is our own (see _resolve_transcript).
-        self._resolver_armed_at = time.time()
+        # Stamp the instant polling *first* starts, before any prompt has
+        # created a transcript. A worktree we later follow into may hold
+        # transcripts from an older, recycled session, but those predate this
+        # moment; a transcript stamped after it is our own (see
+        # _resolve_transcript). Anchor it to the first arm only: a backgrounded
+        # tab that pauses unresolved (~3 min) and resumes on re-map re-runs
+        # this and re-baselines its worktree — pushing arm time forward here
+        # would let that re-baseline exclude our own transcript if the agent
+        # had since gone quiet (mtime now behind a later arm time), the very
+        # failure this gate exists to prevent.
+        if not self._resolver_armed_at:
+            self._resolver_armed_at = time.time()
         self._resolver_source = GLib.timeout_add(1500, self._resolve_transcript)
 
     def _predates_resolver(self, path: Path) -> bool:
