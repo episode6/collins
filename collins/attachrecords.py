@@ -283,7 +283,11 @@ def visible(attachments: Iterable[Attachment]) -> list[Attachment]:
 
 
 def unseen(
-    attachments: Iterable[Attachment], *, noted: Iterable[str], since: float
+    attachments: Iterable[Attachment],
+    *,
+    noted: Iterable[str],
+    since: float,
+    beheld: Container[str] = frozenset(),
 ) -> tuple[set[str], set[str]]:
     """What the panel's handle owes a badge, and what has only just landed.
 
@@ -307,11 +311,25 @@ def unseen(
     list no longer has it: a row struck off by hand takes its share of the
     badge with it, since a badge counting rows nobody can open is a badge
     that can't be cleared.
+
+    *beheld* is the pictures somebody has already had full-screen — a
+    lightbox is the biggest look a picture ever gets, so one that was shown
+    in it is not news, however fresh its sighting is. The record of the
+    showing itself lands moments *after* the baseline moved, and the mention
+    the agent makes of the same picture in its reply lands moments after
+    that, which is why this is a set of keys and not another moment: the
+    sightings that trail a showing are dated all around it, and none of
+    them tell the reader anything the lightbox didn't. A beheld key also
+    comes out of *noted* — a picture that was waiting unseen in the panel
+    and then got clicked open from the terminal has been seen, and the badge
+    lets go of it.
     """
     listed = {one.key for one in attachments if not one.hidden}
-    already = set(noted)
+    already = {key for key in noted if key not in beheld}
     fresh = {
-        one.key for one in attachments if not one.hidden and one.last > since
+        one.key
+        for one in attachments
+        if not one.hidden and one.last > since and one.key not in beheld
     } - already
     return (already & listed) | fresh, fresh
 

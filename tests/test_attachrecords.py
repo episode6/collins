@@ -202,9 +202,9 @@ def test_union_keeps_both_sides_and_merges_the_overlap():
 # -- what the handle's badge counts ---------------------------------------
 
 
-def unseen(listed, noted=(), since=1000.0):
+def unseen(listed, noted=(), since=1000.0, beheld=frozenset()):
     """The badge set and the just-arrived part of it, for a fold's values."""
-    return attachrecords.unseen(listed.values(), noted=noted, since=since)
+    return attachrecords.unseen(listed.values(), noted=noted, since=since, beheld=beheld)
 
 
 def test_a_restored_history_is_not_news():
@@ -259,6 +259,36 @@ def test_a_looked_at_picture_stays_looked_at_once_the_baseline_moves():
     assert unseen(listed, since=2500.0) == (set(), set())
     later = attachrecords.fold(listed, shot("/tmp/b.png", now=3000.0))
     assert unseen(later, since=2500.0) == ({"/tmp/b.png"}, {"/tmp/b.png"})
+
+
+def test_a_beheld_picture_is_never_news():
+    """The sighting a lightbox showing writes is dated after the baseline by
+    construction — it happened just now — but the person the handle would
+    alert watched it happen full-screen."""
+    listed = attachrecords.fold({}, shot("/tmp/shown.png", now=2000.0))
+    assert unseen(listed, beheld={"/tmp/shown.png"}) == (set(), set())
+
+
+def test_a_beheld_pictures_echo_is_not_news_either():
+    """The agent's reply mentions the picture it just showed, and the scan
+    dates that sighting after the showing — the reason beheld is a set of
+    keys and not another baseline."""
+    listed = attachrecords.fold({}, shot("/tmp/shown.png", now=2000.0))
+    later = attachrecords.fold(listed, shot("/tmp/shown.png", source=TRANSCRIPT, now=3000.0))
+    assert unseen(later, beheld={"/tmp/shown.png"}) == (set(), set())
+
+
+def test_beholding_lets_a_counted_picture_out_of_the_badge():
+    """A picture waiting unseen in the panel that then gets opened in the
+    lightbox has been seen: the badge lets go of it."""
+    listed = attachrecords.fold(
+        {}, shot("/tmp/waiting.png", now=2000.0), shot("/tmp/other.png", now=2000.0)
+    )
+    noted = {"/tmp/waiting.png", "/tmp/other.png"}
+    assert unseen(listed, noted=noted, beheld={"/tmp/waiting.png"}) == (
+        {"/tmp/other.png"},
+        set(),
+    )
 
 
 def test_an_undated_sighting_is_not_news():
