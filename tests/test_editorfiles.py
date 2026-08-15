@@ -17,6 +17,7 @@ from collins.editorfiles import (
     RerootAction,
     follow_scope,
     format_copied_files,
+    gallery_step,
     guess_language_id,
     image_guard,
     is_image_path,
@@ -355,6 +356,51 @@ def test_lightbox_zoombar_moves_below_past_half_the_image():
 
 def test_lightbox_zoombar_moves_below_tiny_images():
     assert not lightbox_zoombar_inside(58, 48)  # a 48px icon at 1:1
+
+
+# -- gallery_step -------------------------------------------------------------
+
+# Rows as (kind, key) in display order: oldest at the top, newest at the
+# bottom, with a non-picture file sitting among the pictures.
+_GALLERY = [
+    ("image", "/i1"),
+    ("image", "/i2"),
+    ("file", "/f1"),
+    ("image", "/i3"),
+]
+
+
+def test_gallery_step_next_and_previous():
+    assert gallery_step(_GALLERY, "/i2", 1) == "/i3"
+    assert gallery_step(_GALLERY, "/i2", -1) == "/i1"
+
+
+def test_gallery_step_skips_file_rows():
+    # /i2 -> /i3 steps straight over the file between them.
+    assert gallery_step(_GALLERY, "/i2", 1) == "/i3"
+    assert gallery_step(_GALLERY, "/i3", -1) == "/i2"
+
+
+def test_gallery_step_does_not_wrap_at_the_ends():
+    assert gallery_step(_GALLERY, "/i1", -1) is None
+    assert gallery_step(_GALLERY, "/i3", 1) is None
+
+
+def test_gallery_step_from_a_non_picture_key_is_none():
+    # A file row's key names no picture, so there is nothing to step from.
+    assert gallery_step(_GALLERY, "/f1", 1) is None
+    assert gallery_step(_GALLERY, "/f1", -1) is None
+
+
+def test_gallery_step_from_a_missing_key_is_none():
+    # Struck off the list while its lightbox was still up.
+    assert gallery_step(_GALLERY, "/gone", 1) is None
+
+
+def test_gallery_step_single_image_has_no_neighbours():
+    lone = [("image", "/only")]
+    assert gallery_step(lone, "/only", 1) is None
+    assert gallery_step(lone, "/only", -1) is None
 
 
 def test_lightbox_layout_unrealized_window_uses_fallback():

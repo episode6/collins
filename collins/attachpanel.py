@@ -49,7 +49,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import pictures, scrolling  # noqa: E402
+from . import editorfiles, pictures, scrolling  # noqa: E402
 from .attachrecords import Attachment  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -344,32 +344,29 @@ class AttachmentsView(Gtk.Box):
 
     def _navigate_from(self, one: Attachment, step: int) -> None:
         """Open the image *step* rows away from *one* (the lightbox's arrow
-        keys, -1 for the previous picture, +1 for the next). Only pictures
-        count — file rows are skipped — and the ends don't wrap: an arrow at
-        the last image is a no-op. `open` builds a fresh lightbox, which
-        (being one-at-a-time) replaces the one the arrow was pressed in."""
-        images = self._ordered_images()
-        keys = [img.key for img in images]
-        try:
-            here = keys.index(one.key)
-        except ValueError:
-            return  # struck off the list while its lightbox was up
-        target = here + step
-        if 0 <= target < len(images):
-            self.open(images[target])
+        keys, -1 for the previous picture, +1 for the next). The stepping
+        rules — pictures only, ends don't wrap — live in the GTK-free
+        `editorfiles.gallery_step`, so all this does is read the rows for
+        their order and open whatever it names. `open` builds a fresh
+        lightbox, which (being one-at-a-time) replaces the one the arrow was
+        pressed in."""
+        key = editorfiles.gallery_step(self._ordered_entries(), one.key, step)
+        target = self._records.get(key) if key is not None else None
+        if target is not None:
+            self.open(target)
 
-    def _ordered_images(self) -> list[Attachment]:
-        """The image attachments in the order their rows hang — oldest at the
-        top, newest at the bottom — so an arrow walks the gallery the way the
-        eye reads it. Read off the live rows, the authority on both order and
-        which records are still listed."""
-        images: list[Attachment] = []
+    def _ordered_entries(self) -> list[tuple[str, str]]:
+        """Every row as a `(kind, key)` pair in the order they hang — oldest
+        at the top, newest at the bottom — the raw material
+        `editorfiles.gallery_step` walks. Read off the live rows, the
+        authority on both order and which records are still listed."""
+        entries: list[tuple[str, str]] = []
         row = self._list.get_first_child()
         while row is not None:
-            if isinstance(row, _Row) and row.attachment.kind == "image":
-                images.append(row.attachment)
+            if isinstance(row, _Row):
+                entries.append((row.attachment.kind, row.attachment.key))
             row = row.get_next_sibling()
-        return images
+        return entries
 
     def _with_local_file(self, one: Attachment, then: Callable[[str], None]) -> None:
         """Hand *then* a real file for *one*, downloading it if it is remote.
