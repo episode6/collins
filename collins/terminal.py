@@ -2196,7 +2196,7 @@ class TerminalTab(Gtk.Box):
         flash it for the ones that landed just now.
 
         A picture arriving while the panel is on screen is not news — it is a
-        row appearing at the top of a list somebody is already reading — so
+        row landing at the foot of a list somebody is already reading — so
         that case puts the handle out instead of lighting it. Which sightings
         count as new at all is `attachrecords.unseen`'s rule, and the whole
         point of it: a restored session and the first read of a long

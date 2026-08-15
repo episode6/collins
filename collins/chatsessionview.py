@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-03. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 """A chat tab backed by a live headless `claude -p` stream-json session.
 
@@ -32,6 +32,7 @@ from .formatting import display_path  # noqa: E402
 from .gitinfo import current_branch  # noqa: E402
 from .i18n import _  # noqa: E402
 from .providers import ChatVariant, Provider  # noqa: E402
+from .scrolling import at_bottom, bottom  # noqa: E402
 
 
 class ChatSessionTab(Gtk.Box):
@@ -382,11 +383,11 @@ class ChatSessionTab(Gtk.Box):
     # -- scrolling -------------------------------------------------------------
 
     def _on_scroll(self, adj: Gtk.Adjustment) -> None:
-        self._stick = adj.get_value() >= adj.get_upper() - adj.get_page_size() - 48
+        self._stick = at_bottom(adj.get_value(), adj.get_upper(), adj.get_page_size())
 
     def _on_upper_changed(self, adj: Gtk.Adjustment, _pspec) -> None:
         if self._stick:
-            adj.set_value(adj.get_upper() - adj.get_page_size())
+            adj.set_value(bottom(adj.get_upper(), adj.get_page_size()))
 
     def _queue_scroll(self) -> None:
         if self._stick and self._scroll_source is None:
@@ -395,5 +396,5 @@ class ChatSessionTab(Gtk.Box):
     def _scroll_to_bottom(self) -> bool:
         self._scroll_source = None
         adj = self._scroller.get_vadjustment()
-        adj.set_value(adj.get_upper() - adj.get_page_size())
+        adj.set_value(bottom(adj.get_upper(), adj.get_page_size()))
         return GLib.SOURCE_REMOVE
