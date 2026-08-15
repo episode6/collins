@@ -48,7 +48,11 @@ from .i18n import _  # noqa: E402
 # is recognizable, narrow enough to leave the terminal readable underneath.
 # Docked it is a floor rather than a width — the strip's divider gives the
 # page whatever it is dragged to, and a picture column narrower than this
-# stops being one (the PR page's _MIN_PAGE_WIDTH plays the same part).
+# stops being one (the PR page's _MIN_PAGE_WIDTH plays the same part). The
+# floor is the *view's* own size request, set by whoever builds it
+# (TerminalTab._ensure_attachments_panel), and it rides the reparent into a
+# page — AttachmentsPage asks for nothing on its own account, as ComposerPage
+# doesn't either.
 PANEL_WIDTH = 280
 # The tallest a preview grows. A portrait phone screenshot would otherwise
 # be a whole panel's worth of one picture.
