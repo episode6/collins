@@ -34,8 +34,16 @@ shade clicks produce no event propagation at all and no controller anywhere
 sees them. This widget IS the shade, added to the main window's
 `lightbox_overlay` (a Gtk.Overlay wrapping the window content), so every
 pixel is targetable by us: any press that isn't the image, the zoom bar or
-a button closes, as does Esc (a capture-phase key controller on the window,
-so focus doesn't matter).
+a button closes, as does Esc. The key controller is capture-phase on the
+window, so focus doesn't matter, and it swallows *every* key press while the
+lightbox is up — nothing typed at a picture reaches the terminal behind it —
+acting on Esc (close) and the arrows (step to the previous/next image in the
+gallery the caller wired up via `navigate`).
+
+Only one lightbox floats at a time: presenting a second image (a fresh
+click, or an arrow walking the gallery) closes whatever shade is already up
+and takes its place, rather than stacking shades (and leaking their root key
+controllers). The overlay remembers its live one in `_active_lightbox`.
 
 Presented when a clicked file reference turns out to be an image (see
 terminal._setup_links), and by the `show_image` session tool — which may
@@ -105,9 +113,16 @@ class ImageLightbox(Gtk.Box):
         on_open_in_editor: Callable[[], None] | None = None,
         caption: str | None = None,
         origin: str | None = None,
+        navigate: Callable[[int], None] | None = None,
     ) -> None:
         super().__init__()
         self._path = Path(path)
+        # Called with -1/+1 when the left/right (or up/down) arrow is pressed,
+        # to step to the previous/next image; None when this lightbox was
+        # opened somewhere with no gallery to walk (a clicked path, the
+        # composer, show_image). See the attachments panel for the one caller
+        # that supplies it.
+        self._navigate = navigate
         # What the image is called when it can't be shown: the file's own
         # name, unless the caller knows the path is a stand-in for something
         # the user would recognize better (show_image's downloaded copy of a
@@ -290,6 +305,15 @@ class ImageLightbox(Gtk.Box):
             launcher.launch(root, None, lambda lch, res: _launch_done(lch, res))
             return
         self._overlay = overlay
+        # One lightbox at a time: a second image (a fresh click, or an arrow
+        # stepping through the gallery) replaces whatever is already floating
+        # rather than stacking a shade — and each shade owns its own root Esc
+        # controller, which stacking would leak. The overlay is held by
+        # MainWindow, so this attribute rides the same live wrapper.
+        previous = getattr(overlay, "_active_lightbox", None)
+        if previous is not None and previous is not self:
+            previous.close()
+        overlay._active_lightbox = self
 
         win_w, win_h = root.get_width(), root.get_height()
         side, width, height = lightbox_layout(*self._image_size, win_w, win_h)
@@ -348,8 +372,12 @@ class ImageLightbox(Gtk.Box):
         click.connect("pressed", self._on_shade_pressed)
         self.add_controller(click)
 
-        # Esc closes no matter what holds keyboard focus: capture phase on
-        # the window itself, removed again on close.
+        # The lightbox swallows the keyboard while it is up: capture phase on
+        # the window itself, so it wins no matter what holds focus, and it
+        # consumes every key press rather than only the ones it acts on —
+        # nothing typed at a picture leaks through to the terminal behind it.
+        # Esc closes, the arrows step through the gallery (_on_root_key),
+        # removed again on close.
         esc = Gtk.EventControllerKey()
         esc.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         esc.connect("key-pressed", self._on_root_key)
@@ -380,6 +408,8 @@ class ImageLightbox(Gtk.Box):
                 self._surface.disconnect(handler)
             self._surface, self._surface_handlers = None, []
         if self._overlay is not None:
+            if getattr(self._overlay, "_active_lightbox", None) is self:
+                self._overlay._active_lightbox = None
             self._overlay.remove_overlay(self)
             self._overlay = None
 
@@ -648,9 +678,17 @@ class ImageLightbox(Gtk.Box):
         self.close()
 
     def _on_root_key(self, _ctrl, keyval, _keycode, _state) -> bool:
-        if keyval != Gdk.KEY_Escape:
-            return False
-        self.close()
+        """Every key press while the lightbox is up is ours: Esc closes, the
+        arrows walk the gallery, and everything else is swallowed so it never
+        reaches the terminal behind the shade."""
+        if keyval == Gdk.KEY_Escape:
+            self.close()
+        elif keyval in (Gdk.KEY_Left, Gdk.KEY_Up):
+            if self._navigate is not None:
+                self._navigate(-1)
+        elif keyval in (Gdk.KEY_Right, Gdk.KEY_Down):
+            if self._navigate is not None:
+                self._navigate(1)
         return True
 
     # -- actions -------------------------------------------------------------
@@ -681,7 +719,8 @@ def present_image_lightbox(
     on_open_in_editor: Callable[[], None] | None = None,
     caption: str | None = None,
     origin: str | None = None,
+    navigate: Callable[[int], None] | None = None,
 ) -> None:
     ImageLightbox(
-        path, can_open_in_editor, on_open_in_editor, caption, origin
+        path, can_open_in_editor, on_open_in_editor, caption, origin, navigate
     ).present_over(parent)
