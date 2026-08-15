@@ -44,7 +44,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import pictures  # noqa: E402
+from . import pictures, scrolling  # noqa: E402
 from .attachrecords import Attachment  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -61,11 +61,6 @@ PANEL_WIDTH = 280
 # The tallest a preview grows. A portrait phone screenshot would otherwise
 # be a whole panel's worth of one picture.
 _THUMB_HEIGHT = 200
-# How far off the bottom edge still counts as being parked at it, so the
-# list keeps following new pictures. A preview is tall, so this is generous
-# on purpose: a nudge of the wheel shouldn't unstick the list, and reading
-# a row properly means scrolling well clear of this.
-_STUCK_SLACK = 48
 
 
 class AttachmentsView(Gtk.Box):
@@ -266,7 +261,9 @@ class AttachmentsView(Gtk.Box):
     # -- following the bottom edge ---------------------------------------------
 
     def _on_scrolled(self, adj: Gtk.Adjustment) -> None:
-        self._stuck = adj.get_value() >= adj.get_upper() - adj.get_page_size() - _STUCK_SLACK
+        self._stuck = scrolling.at_bottom(
+            adj.get_value(), adj.get_upper(), adj.get_page_size()
+        )
 
     def _on_grown(self, _adj: Gtk.Adjustment, _pspec) -> None:
         """The list got taller — follow it down, but not from in here.
@@ -288,7 +285,7 @@ class AttachmentsView(Gtk.Box):
         self._pin_source = 0
         if self._stuck:
             adj = self._scroller.get_vadjustment()
-            adj.set_value(adj.get_upper() - adj.get_page_size())
+            adj.set_value(scrolling.bottom(adj.get_upper(), adj.get_page_size()))
         return GLib.SOURCE_REMOVE
 
     def _schedule_fill(self) -> None:
