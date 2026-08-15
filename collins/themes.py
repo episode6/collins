@@ -179,6 +179,10 @@ def _apply_dynamic_theme_css(theme: dict | None) -> None:
         # Its rows only lift out of that surface under the pointer.
         f".attachments-panel {{ background-color: {bg_css}; color: {fg_css}; "
         f"border-left: 1px solid alpha({fg_css}, 0.3); }}"
+        # Docked as a panel tab the fence is the strip's own edge, as it is
+        # for the composer; the overlay's left border would read as a stray
+        # line down the middle of a pane.
+        f".attachments-panel.docked {{ border-left: none; }}"
         f".attachments-panel .attachment-row:hover {{ "
         f"background-color: alpha({fg_css}, 0.12); }}".encode()
     )

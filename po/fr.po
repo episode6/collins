@@ -956,6 +956,12 @@ msgstr "Pièces jointes"
 msgid "Close the attachments panel"
 msgstr "Fermer le panneau des pièces jointes"
 
+msgid "Dock the attachments panel beside the terminal"
+msgstr "Ancrer le panneau des pièces jointes à côté du terminal"
+
+msgid "Float the attachments panel over the terminal"
+msgstr "Faire flotter le panneau des pièces jointes au-dessus du terminal"
+
 msgid "Images this session has seen"
 msgstr "Images vues par cette session"
 

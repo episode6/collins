@@ -956,6 +956,12 @@ msgstr "Anhänge"
 msgid "Close the attachments panel"
 msgstr "Anhänge-Panel schließen"
 
+msgid "Dock the attachments panel beside the terminal"
+msgstr "Anhänge-Panel neben dem Terminal andocken"
+
+msgid "Float the attachments panel over the terminal"
+msgstr "Anhänge-Panel über dem Terminal schweben lassen"
+
 msgid "Images this session has seen"
 msgstr "Bilder, die diese Sitzung gesehen hat"
 

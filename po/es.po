@@ -956,6 +956,12 @@ msgstr "Adjuntos"
 msgid "Close the attachments panel"
 msgstr "Cerrar el panel de adjuntos"
 
+msgid "Dock the attachments panel beside the terminal"
+msgstr "Acoplar el panel de adjuntos junto a la terminal"
+
+msgid "Float the attachments panel over the terminal"
+msgstr "Hacer flotar el panel de adjuntos sobre la terminal"
+
 msgid "Images this session has seen"
 msgstr "Imágenes que ha visto esta sesión"
 

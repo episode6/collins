@@ -956,6 +956,12 @@ msgstr "Mellékletek"
 msgid "Close the attachments panel"
 msgstr "A mellékletek panel bezárása"
 
+msgid "Dock the attachments panel beside the terminal"
+msgstr "A mellékletek panel dokkolása a terminál mellé"
+
+msgid "Float the attachments panel over the terminal"
+msgstr "A mellékletek panel lebegtetése a terminál felett"
+
 msgid "Images this session has seen"
 msgstr "A munkamenet által látott képek"
 
