@@ -1115,6 +1115,7 @@ class TerminalTab(Gtk.Box):
         self._resolver_cwd: str | None = None  # set iff this tab resolves its own transcript
         self._baselined_dirs: set[str] = set()  # dirs whose pre-existing transcripts are excluded
         self._known_transcripts: set[Path] = set()  # transcripts predating this tab
+        self._resolver_armed_at = 0.0  # wall-clock time polling (re)started
         self._updating = False  # an off-thread transcript parse is in flight
         # Every _RootNameLinks watching a terminal inside this tab — the agent's
         # and one per panel shell — so a re-root can re-point them all. They
@@ -3918,7 +3919,29 @@ class TerminalTab(Gtk.Box):
             else set()
         )
         self._baselined_dirs = {self._resolver_cwd}
+        # Stamp the instant polling *first* starts, before any prompt has
+        # created a transcript. A worktree we later follow into may hold
+        # transcripts from an older, recycled session, but those predate this
+        # moment; a transcript stamped after it is our own (see
+        # _resolve_transcript). Anchor it to the first arm only: a backgrounded
+        # tab that pauses unresolved (~3 min) and resumes on re-map re-runs
+        # this and re-baselines its worktree — pushing arm time forward here
+        # would let that re-baseline exclude our own transcript if the agent
+        # had since gone quiet (mtime now behind a later arm time), the very
+        # failure this gate exists to prevent.
+        if not self._resolver_armed_at:
+            self._resolver_armed_at = time.time()
         self._resolver_source = GLib.timeout_add(1500, self._resolve_transcript)
+
+    def _predates_resolver(self, path: Path) -> bool:
+        """Whether `path` was last written before this resolver armed — i.e.
+        belongs to an older session, not one this tab is waiting on. A file we
+        can't stat is treated as *not* predating, so a transient error never
+        baselines out (and thus loses) a transcript that might be ours."""
+        try:
+            return path.stat().st_mtime < self._resolver_armed_at
+        except OSError:
+            return False
 
     def _resolve_transcript(self) -> bool:
         if self.get_root() is None:
@@ -3934,12 +3957,17 @@ class TerminalTab(Gtk.Box):
         # by the *worktree's* cwd — the launch dir's key never sees it. Follow
         # the agent into any worktree of this tab's own project, with the same
         # baseline discipline as the launch dir: the CLI recycles unchanged
-        # worktrees, so a transcript already present when we first see the
-        # worktree belongs to an older session (observed live — a leftover
-        # would otherwise attach the instant the cwd moved, before this
-        # session's own transcript exists). We see the cwd move within one
-        # poll of the CLI starting, long before a first prompt can land, so
-        # the baseline can't swallow our own transcript.
+        # worktrees, so a transcript from an older, recycled session may sit
+        # in a worktree we follow into, and we must not attach to that.
+        #
+        # But baseline out only transcripts that predate this resolver: a fast
+        # `claude -w` writes its first transcript line within ~1s of creating
+        # the worktree, tighter than our 1.5s poll, so the tick that first
+        # sees the moved cwd can *also* see our own just-born transcript
+        # already present. Excluding everything present at that moment (the
+        # old behavior) would swallow it and the tab would never bind. An
+        # older session's transcript predates _resolver_armed_at; our own is
+        # stamped after it.
         #
         # worktree_shares_project matches on the *project root*, not the launch
         # dir: when this tab was itself launched from inside a worktree (a
@@ -3953,9 +3981,11 @@ class TerminalTab(Gtk.Box):
             if live not in self._baselined_dirs:
                 self._baselined_dirs.add(live)
                 if self._command_override is None:
-                    self._known_transcripts |= set(
-                        self.provider.transcripts_for_cwd(live)
-                    )
+                    self._known_transcripts |= {
+                        p
+                        for p in self.provider.transcripts_for_cwd(live)
+                        if self._predates_resolver(p)
+                    }
             cands += [
                 p
                 for p in self.provider.transcripts_for_cwd(live)
