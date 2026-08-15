@@ -108,6 +108,13 @@ _APP_TITLE = "Collins"
 # time anyone has read the panel.
 _LAUNCH_SWEEP_DELAY_MS = 2500
 
+# The geometry a background session's terminal is spawned at when there is no
+# visible agent terminal to copy (see start_background_session). Never shown is
+# never allocated, so this is the width the CLI lays its output out to for as
+# long as nobody selects the tab — wide enough that its boxes and diffs aren't
+# wrapped into nonsense by VTE's 80x24 default.
+_BACKGROUND_TERMINAL_SIZE = (120, 40)
+
 # How long the "session archived" snackbar offers its Undo button before
 # sliding away (see _offer_undo). The undo itself lives longer: Ctrl+Shift+Z
 # works until the next archive replaces it.
@@ -1567,9 +1574,57 @@ class MainWindow(Adw.ApplicationWindow):
             cwd, provider, lambda: self._launch_new_session(cwd, provider, options, worktree)
         )
 
+    def start_background_session(
+        self,
+        cwd: str,
+        provider=None,
+        options=None,
+        worktree: bool | None = None,
+    ) -> TerminalTab | None:
+        """Start a session in a tab that never takes the selection, the focus,
+        or the view — the launch path behind a session asking for a sibling
+        (see the `start_session` MCP tool). Returns the new tab, or None if the
+        folder isn't trusted.
+
+        Trust is a *refusal* here, not a question: the whole point is that the
+        user isn't interrupted, and a modal dialog over their work asking on
+        behalf of an agent they can't see is the loudest interruption of all.
+        Everything else the launch does — the sidebar's placeholder row, the
+        bell, the header flash — stays on. Those are how a background session
+        announces itself; only the ones that move the app under the user's
+        hands are skipped.
+        """
+        provider = provider or self._default_provider()
+        if not (chats.is_chat_cwd(cwd) or trust.is_trusted(trust.trust_root(cwd))):
+            return None
+        return self._launch_new_session(
+            cwd, provider, options, worktree, background=True,
+            initial_size=self._background_terminal_size(),
+        )
+
+    def _background_terminal_size(self) -> tuple[int, int]:
+        """The geometry to spawn a never-shown terminal at: whatever the tab on
+        screen is running at, so the hidden session lays out like the visible
+        one, else the fixed fallback."""
+        page = self.tab_view.get_selected_page()
+        tab = page.get_child() if page is not None else None
+        # Not every tab is a terminal — a chat or a replay has no geometry to
+        # copy, and takes the fallback along with "nothing is selected".
+        if isinstance(tab, TerminalTab):
+            cols, rows = tab.terminal.get_column_count(), tab.terminal.get_row_count()
+            if cols > 0 and rows > 0:
+                return (cols, rows)
+        return _BACKGROUND_TERMINAL_SIZE
+
     def _launch_new_session(
-        self, cwd: str, provider, options=None, worktree: bool | None = None
-    ) -> None:
+        self,
+        cwd: str,
+        provider,
+        options=None,
+        worktree: bool | None = None,
+        background: bool = False,
+        initial_size: tuple[int, int] | None = None,
+    ) -> TerminalTab:
         if worktree is None:
             worktree = self._worktree_for_new_session(cwd)
         else:
@@ -1578,19 +1633,24 @@ class MainWindow(Adw.ApplicationWindow):
             options = replace(options or SessionOptions(), worktree=True)
         tab = TerminalTab(
             cwd=cwd, session_id=None, settings=self.state.settings, provider=provider,
-            options=options,
+            options=options, initial_size=initial_size,
         )
         page = self._add_tab(
             tab,
             _("New chat") if chats.is_chat_cwd(cwd) else GLib.path_get_basename(cwd),
             f"new {provider.name} session — {cwd}",
+            background=background,
         )
         self._add_placeholder(page, cwd)
-        # A session Collins starts fresh can come up with its composer already
-        # open (opt-in; see TerminalTab.autoshow_composer). Only here: the
-        # sessions reopened in open_session restore the panel layout they
-        # were closed with, which is that session's own answer.
-        tab.autoshow_composer(self.state.get_setting("composer_new_sessions"))
+        if not background:
+            # A session Collins starts fresh can come up with its composer
+            # already open (opt-in; see TerminalTab.autoshow_composer). Only
+            # here: the sessions reopened in open_session restore the panel
+            # layout they were closed with, which is that session's own answer.
+            # A background session has no one at it to type in the box, and
+            # opening one would only be found later as clutter.
+            tab.autoshow_composer(self.state.get_setting("composer_new_sessions"))
+        return tab
 
     # -- sidebar placeholders for unresolved new-session tabs ----------------
 
@@ -1673,7 +1733,21 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self._add_tab(tab, GLib.path_get_basename(cwd), f"continue {provider.name} — {cwd}")
 
-    def _add_tab(self, tab: TerminalTab, title: str, tooltip: str) -> Adw.TabPage:
+    def _add_tab(
+        self, tab: TerminalTab, title: str, tooltip: str, background: bool = False
+    ) -> Adw.TabPage:
+        """`background` leaves the user where they were: the new page is
+        appended and wired up as usual, but doesn't take the selection, raise
+        the tab area, or pull the keyboard focus over (see
+        start_background_session).
+
+        With nothing selected, though, Adw.TabView selects the appended page
+        itself, and a selected page whose content stack still shows the empty
+        state is a tab nobody — not even the placeholder row's own open — can
+        get back to. So an empty tab view falls through to the foreground tail:
+        there was nothing on screen to interrupt anyway.
+        """
+        background = background and self.tab_view.get_selected_page() is not None
         page = self.tab_view.append(tab)
         page.set_title(title)
         page.set_tooltip(tooltip)
@@ -1727,10 +1801,14 @@ class MainWindow(Adw.ApplicationWindow):
         clicks.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         clicks.connect("pressed", self._on_terminal_click, page)
         tab.terminal.add_controller(clicks)
-        self.tab_view.set_selected_page(page)
-        self.content_stack.set_visible_child_name("tabs")
+        if not background:
+            self.tab_view.set_selected_page(page)
+            self.content_stack.set_visible_child_name("tabs")
+        # Runs either way: the bar's order is the sidebar's, and the new row
+        # this tab brings with it reshuffles that order regardless.
         self._sort_tabs()  # appended at the end; slot it in beside its row
-        GLib.idle_add(tab.grab_terminal_focus)
+        if not background:
+            GLib.idle_add(tab.grab_terminal_focus)
         return page
 
     # -- tab order mirrors the sidebar ---------------------------------------

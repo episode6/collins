@@ -1074,6 +1074,7 @@ class TerminalTab(Gtk.Box):
         jsonl_path: str | Path | None = None,
         options=None,
         command_override: str | None = None,
+        initial_size: tuple[int, int] | None = None,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.session_id = session_id
@@ -1102,6 +1103,16 @@ class TerminalTab(Gtk.Box):
         self._root_name_links: list[_RootNameLinks] = []
 
         self.terminal = Vte.Terminal()
+        if initial_size is not None:
+            # A tab whose page is never selected is never allocated, so its
+            # child would otherwise come up at VTE's default 80x24 and stay
+            # there — see Window.start_background_session. set_size reaches
+            # the child's winsize with no allocation at all, but only if it
+            # runs *before* the spawn at the end of this constructor: a
+            # post-hoc call would let the CLI paint its first frame at 80
+            # columns. Selecting the tab later hands allocation the wheel
+            # back, which is an ordinary SIGWINCH the CLI redraws through.
+            self.terminal.set_size(*initial_size)
         self.terminal.set_scrollback_lines(10_000)
         self.terminal.set_scroll_on_output(False)
         self.terminal.set_scroll_on_keystroke(True)
