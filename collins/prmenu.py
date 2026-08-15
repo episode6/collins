@@ -121,6 +121,11 @@ _ACTION_ICONS = {
     practions.READY: ("git-pull-request-symbolic", "pr-open"),
     practions.MERGE: ("git-merge-symbolic", "pr-merged"),
     practions.AUTO_MERGE: ("git-merge-symbolic", "pr-merged"),
+    # The two the PR page keeps behind its button (see practions.alternate_actions).
+    # Each wears the half of itself the merge glyph doesn't already say: the
+    # sidebar's own archive mark, and the closed-PR base icon in its red.
+    practions.MERGE_ARCHIVE: ("archive-symbolic", None),
+    practions.CLOSE: ("git-pull-request-closed-symbolic", "pr-closed"),
     practions.REBASE: ("agent-claude-symbolic", None),
     practions.REVIEW: ("agent-claude-symbolic", None),
     practions.FIX_CI: ("agent-claude-symbolic", None),
@@ -164,6 +169,12 @@ class ActionHost:
     # the PR awaits a reply; None hides it wherever no page can be shown —
     # except on the page's own menu, where it stays as an in-page jump.
     view_unresolved: Callable[[PullRequest], None] | None = None
+    # Archive the session this PR belongs to — what "Merge and archive" does
+    # once its merge has landed (practions.MERGE_ARCHIVE). None where there is
+    # no session to put away: a host built for a record rather than for a live
+    # tab, which is why that action is only ever offered on the PR page docked
+    # inside the session it would archive.
+    archive: Callable[[], None] | None = None
 
 
 def new_popover(position: Gtk.PositionType) -> Gtk.Popover:
@@ -671,6 +682,40 @@ def action_icon(key: str) -> Gtk.Widget:
     return _mark_icon(*_ACTION_ICONS.get(key, ("", None)))
 
 
+def action_button(action: practions.Action, spinner: Gtk.Spinner | None = None) -> Gtk.Button:
+    """*action* as a menu row's button: its mark, what it does, its tooltip.
+
+    Public because the PR page builds a menu of its own — the alternates
+    behind its action button (see prview) — and a menu that looks like the
+    chips' menus is one menu the reader has learned once. *spinner*, where the
+    caller has somewhere to run one, sits at the row's end; the page spins its
+    button instead and passes none.
+
+    Nothing is connected here: what a row does when it is picked belongs to
+    whoever is showing it.
+    """
+    label = Gtk.Label(label=action.label, xalign=0.0, hexpand=True)
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    # The mark keeps the label under the header's title, where the plain
+    # indent used to; an action the map doesn't know keeps the indent, so a
+    # future action without a mark still lines up rather than jutting out.
+    mark = _ACTION_ICONS.get(action.key)
+    if mark is not None:
+        row.append(_mark_icon(*mark))
+    else:
+        label.set_margin_start(MARK_COLUMN_PX + 8)
+    row.append(label)
+    if spinner is not None:
+        row.append(spinner)
+    button = Gtk.Button(child=row)
+    button.add_css_class("flat")
+    button.add_css_class("pr-menu-row")
+    tooltip = "\n".join(part for part in (action.tooltip, action.blocked) if part)
+    if tooltip:
+        button.set_tooltip_text(tooltip)
+    return button
+
+
 def _action_row(
     popover: Gtk.Popover, pr: PullRequest, action: practions.Action, host: ActionHost
 ) -> Gtk.Widget:
@@ -682,26 +727,9 @@ def _action_row(
     here is still on the PR, so the menu owes them the answer rather than the
     gap where it was.
     """
-    label = Gtk.Label(label=action.label, xalign=0.0, hexpand=True)
     spinner = Gtk.Spinner()
     spinner.set_visible(False)
-    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-    # The mark keeps the label under the header's title, where the plain
-    # indent used to; an action the map doesn't know keeps the indent, so a
-    # future action without a mark still lines up rather than jutting out.
-    mark = _ACTION_ICONS.get(action.key)
-    if mark is not None:
-        row.append(_mark_icon(*mark))
-    else:
-        label.set_margin_start(MARK_COLUMN_PX + 8)
-    row.append(label)
-    row.append(spinner)
-    button = Gtk.Button(child=row)
-    button.add_css_class("flat")
-    button.add_css_class("pr-menu-row")
-    tooltip = "\n".join(part for part in (action.tooltip, action.blocked) if part)
-    if tooltip:
-        button.set_tooltip_text(tooltip)
+    button = action_button(action, spinner)
     if not action.blocked:
         button.connect("clicked", _on_action_clicked, popover, pr, action, host, spinner)
         return button
@@ -712,7 +740,7 @@ def _action_row(
     button.set_sensitive(False)
     button.set_hexpand(True)  # the wrapper is the row now; the button still fills it
     wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-    wrapper.set_tooltip_text(tooltip)
+    wrapper.set_tooltip_text(button.get_tooltip_text())
     wrapper.append(button)
     return wrapper
 
@@ -746,7 +774,7 @@ def _on_action_clicked(
             action.confirm.body,
             action.confirm.label,
             lambda: _start_action(pr, action, host, root, None, None),
-            destructive=False,
+            destructive=action.confirm.destructive,
         )
         return
     _start_action(pr, action, host, root, popover, spinner)

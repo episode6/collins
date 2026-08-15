@@ -16,13 +16,23 @@ repository's own Claude workflow can be asked for goes through a comment
 and only while Claude isn't the one who commented last on code that hasn't
 moved since, as a review it has already given isn't one to ask for again.
 
-The same answers dress two more surfaces, both on the native PR page.
+The same answers dress three more surfaces, all on the native PR page.
 `header_actions` is the handful of them that change the pull request itself,
 which the page draws as buttons on its view switcher's row rather than burying
 a merge two clicks deep. `repair_action` is the other one: whatever single
 prompt would clear what is blocking the merge, drawn under the page's Checks
 list where those blockers are enumerated. Both speak in the actions' `short`
 wording, which is all a button has room to say.
+
+`alternate_actions` is the third: what a right-click on that button offers
+*instead* of what it says. The button is the one course Collins recommends,
+and the two things it deliberately doesn't recommend live behind it — closing
+a pull request rather than landing it, and landing one whose session is then
+done with (MERGE_ARCHIVE, the merge plus the archive of the session that
+opened it, which is the app's own business and happens only once the merge
+really lands). Both are one press away from the button that already means
+"finish with this PR", and neither belongs on the row itself: a Close beside a
+Merge is an accident waiting for a stray click.
 
 Five of them aren't about GitHub at all: FIX_CI, REBASE, FIX_ALL, COMMENTS and
 NEW_PR send a prompt to the session that opened the PR and let the agent do the
@@ -58,6 +68,15 @@ from .prstatus import PullRequest, gh_json, gh_run, repository_for
 READY = "ready"
 MERGE = "merge"
 AUTO_MERGE = "auto-merge"
+# The merge again, with the session that opened the PR archived behind it.
+# Never in the PR list's menu and never a button: only the page's alternates
+# (`alternate_actions`), since archiving is about a session and that menu is
+# opened from the session the page is docked in. `perform` merges and stops
+# there — the archive is the app's, and waits on this having worked.
+MERGE_ARCHIVE = "merge-archive"
+# Close without merging. Alternates only, for the same reason: it is the one
+# thing a PR offers that undoes the work rather than landing it.
+CLOSE = "close"
 REBASE = "rebase"
 REVIEW = "review"
 FIX_CI = "fix-ci"
@@ -105,11 +124,18 @@ LIVE = ("OPEN", "DRAFT")
 
 @dataclass(frozen=True)
 class Confirm:
-    """The dialog an action puts up before it goes ahead."""
+    """The dialog an action puts up before it goes ahead.
+
+    *destructive* dresses the confirming button as a warning rather than as
+    the suggested course (see dialogs.confirm_dialog). Merging isn't a loss,
+    however final it is; closing a pull request unmerged is the one action
+    here that throws work away, so it is the one that asks in red.
+    """
 
     heading: str
     body: str
     label: str
+    destructive: bool = False
 
 
 @dataclass(frozen=True)
@@ -266,6 +292,37 @@ def header_actions(pr: PullRequest) -> list[Action]:
     return []
 
 
+def alternate_actions(pr: PullRequest, can_archive: bool = False) -> list[Action]:
+    """The other courses `header_actions`' button deliberately doesn't take.
+
+    What the PR page hangs off a right-click on that button: the actions worth
+    having a click away but not worth a button of their own, because the button
+    says the one thing Collins recommends and these two are the ways of *not*
+    doing it — merging and being done with the session behind it, or closing
+    the pull request unmerged.
+
+    "Merge and archive" is only ever offered beside the immediate merge. On
+    auto-merge there is nothing to wait for in the app — GitHub lands the PR
+    minutes or hours later, on its own — and a session archived now would be
+    archived on a promise rather than on a merge. *can_archive* is the caller's
+    answer to "is there a session here to archive at all?" (see
+    prmenu.ActionHost.archive): the PR page docked beside a session has one, a
+    chip's menu is answering for a PR whose page isn't open, and the record
+    behind a sidebar row may have no tab at all.
+
+    Closing is offered for as long as there is something to close — every state
+    but merged and closed, which is exactly `LIVE`. An unfetched PR offers
+    nothing, as everywhere else here: a Close that was never going to work is
+    worse than a menu with one row in it.
+    """
+    actions: list[Action] = []
+    if can_archive and any(action.key == MERGE for action in header_actions(pr)):
+        actions.append(merge_archive_action(pr))
+    if pr.state in LIVE:
+        actions.append(close_action(pr))
+    return actions
+
+
 def repair_action(pr: PullRequest, prompt_block: str = "") -> Action | None:
     """The one prompt that would clear what is blocking *pr*'s merge, or None.
 
@@ -381,19 +438,78 @@ def merge_action(pr: PullRequest, auto: bool) -> Action:
             ),
             short=_("Auto-Merge"),
         )
-    if checks_green(pr):
-        body = _("Its checks have passed. This merges the pull request on GitHub now.")
-    else:
-        body = _(
-            "Its checks haven't all passed. This merges the pull request on GitHub "
-            "now, if the repository lets it."
-        )
     return Action(
         MERGE,
         _("Merge pull request"),
         _("Merge {slug} now").format(slug=pr.slug),
-        Confirm(_("Merge {slug}?").format(slug=pr.slug), body, _("Merge")),
+        Confirm(_("Merge {slug}?").format(slug=pr.slug), _merge_body(pr), _("Merge")),
         short=_("Merge"),
+    )
+
+
+def _merge_body(pr: PullRequest) -> str:
+    """What an immediate merge's question says about where *pr*'s checks got
+    to. A branch with no required checks merges fine, so merging past
+    unfinished ones is a real thing to offer — just not one to ask about in
+    the all-clear's words."""
+    if checks_green(pr):
+        return _("Its checks have passed. This merges the pull request on GitHub now.")
+    return _(
+        "Its checks haven't all passed. This merges the pull request on GitHub "
+        "now, if the repository lets it."
+    )
+
+
+def merge_archive_action(pr: PullRequest) -> Action:
+    """Merge *pr* now, then archive the session that opened it.
+
+    The end of a piece of work as one action: the pull request lands and the
+    session that produced it leaves the sidebar. The two halves are strictly
+    ordered and the caller keeps that order — `perform` only merges, and the
+    archive is the app's own, run once this has come back without an error.
+    A merge GitHub refused leaves the session exactly where it was, which is
+    the whole point of not archiving first.
+    """
+    return Action(
+        MERGE_ARCHIVE,
+        _("Merge and archive session"),
+        _("Merge {slug} now, then archive this session").format(slug=pr.slug),
+        Confirm(
+            _("Merge {slug} and archive this session?").format(slug=pr.slug),
+            _merge_body(pr)
+            + " "
+            + _(
+                "The session is archived once the merge lands — you can bring it "
+                "back with Undo, or from “Show archived”."
+            ),
+            _("Merge & archive"),
+        ),
+        short=_("Merge & archive"),
+    )
+
+
+def close_action(pr: PullRequest) -> Action:
+    """Close *pr* without merging it.
+
+    The one action here that ends a pull request by throwing its work away
+    rather than landing it, so it asks in red (see Confirm.destructive) — and
+    says in the asking that GitHub keeps the branch and the conversation, since
+    "close" reads as "delete" to anyone who hasn't reopened one before.
+    """
+    return Action(
+        CLOSE,
+        _("Close pull request"),
+        _("Close {slug} without merging").format(slug=pr.slug),
+        Confirm(
+            _("Close {slug}?").format(slug=pr.slug),
+            _(
+                "The pull request is closed without merging. Its branch and its "
+                "comments stay, and it can be reopened on GitHub."
+            ),
+            _("Close"),
+            destructive=True,
+        ),
+        short=_("Close"),
     )
 
 
@@ -410,11 +526,16 @@ def perform(key: str, pr: PullRequest) -> str | None:
         return _("{url} doesn't look like a pull request.").format(url=pr.url)
     if key == READY:
         return _run(["pr", "ready", pr.url])
-    if key in (MERGE, AUTO_MERGE):
+    if key in (MERGE, AUTO_MERGE, MERGE_ARCHIVE):
+        # MERGE_ARCHIVE is the plain merge as far as GitHub is concerned; the
+        # archive that follows it is the app's, and only happens if this
+        # returns None (see merge_archive_action).
         args = ["pr", "merge", pr.url, merge_method(repository)]
         if key == AUTO_MERGE:
             args.append("--auto")
         return _run(args)
+    if key == CLOSE:
+        return _run(["pr", "close", pr.url])
     if key == REVIEW:
         return _run(["pr", "comment", pr.url, "--body", REVIEW_COMMENT])
     return _("Collins doesn't know how to do that.")  # unreachable; never a crash

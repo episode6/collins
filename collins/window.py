@@ -1087,6 +1087,9 @@ class MainWindow(Adw.ApplicationWindow):
                 p.get_string(), background=True
             ),
             "archive-session": self._on_archive_session,
+            # Archive, never restore: what a landed "Merge and archive" asks
+            # for (see archive_session), which the sidebar's toggle can't be.
+            "archive-session-now": lambda _a, p: self.archive_session(p.get_string()),
             "archive-project": self._on_archive_project,
             "generate-icon": self._on_generate_icon,
             "forget-project": lambda _a, p: self.store.forget_project(p.get_string()),
@@ -4274,8 +4277,23 @@ class MainWindow(Adw.ApplicationWindow):
         if session_id is not None:
             self.sidebar.clear_archiving(session_id)
 
+    def archive_session(self, session_id: str) -> None:
+        """Archive *session_id*, whatever it is now.
+
+        The half of `_archive_session` that only ever puts a session away, for
+        the callers that mean archiving rather than the sidebar button's
+        toggle — the PR page's "Merge and archive" (see practions), which has
+        just merged a pull request and must not answer that by *un*archiving
+        a session somebody is looking at with "Show archived" on.
+        """
+        self._set_archived(session_id, True)
+
     def _archive_session(self, session_id: str) -> None:
-        archived = not self.state.is_archived(session_id)
+        """The sidebar's toggle: archive a visible session, restore an
+        archived one."""
+        self._set_archived(session_id, not self.state.is_archived(session_id))
+
+    def _set_archived(self, session_id: str, archived: bool) -> None:
         page = self._page_for(session_id) if archived else None
         if page is not None:
             # Close the tab through the normal close-page flow, so a busy tab
