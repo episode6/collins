@@ -917,6 +917,21 @@ msgstr "Üzenetszerkesztő bezárása, a szöveg a terminálban marad"
 msgid "Composer: the agent isn't running in this tab"
 msgstr "Üzenetszerkesztő: ezen a lapon nem fut az ügynök"
 
+msgid "Model switch: the agent isn't running in this tab"
+msgstr "Modellváltás: ezen a lapon nem fut az ügynök"
+
+msgid "Click to switch the model"
+msgstr "Kattintson a modell váltásához"
+
+msgid "Switch the model for this session"
+msgstr "Modell váltása ehhez a munkamenethez"
+
+msgid "Loading models…"
+msgstr "Modellek betöltése…"
+
+msgid "Copy model id"
+msgstr "Modellazonosító másolása"
+
 msgid "Composer"
 msgstr "Üzenetszerkesztő"
 

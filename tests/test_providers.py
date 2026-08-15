@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-14. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 import os
 import shutil
@@ -277,6 +277,16 @@ def test_provider_option_lists():
     assert ClaudeProvider().supports_add_dir is True
     assert ("opus", "Opus") in ClaudeProvider().session_models()
     assert any(v == "plan" for v, _l in ClaudeProvider().permission_modes())
+
+
+def test_model_switch_command():
+    # The CLI's slash command takes anything --model does; the base provider
+    # answers None, which hides the model menus entirely.
+    assert ClaudeProvider().model_switch_command("sonnet") == "/model sonnet"
+    assert (
+        ClaudeProvider().model_switch_command("claude-opus-5") == "/model claude-opus-5"
+    )
+    assert providers.Provider().model_switch_command("sonnet") is None
 
 
 def test_claude_chat_command_resume(monkeypatch):

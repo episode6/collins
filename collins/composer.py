@@ -75,6 +75,12 @@ class ComposerView(Gtk.Box):
     the same reason as *pick_attach*: the view is a drop target of its own
     (it doesn't sit over the terminal once docked), but stays GTK-only with
     no provider knowledge.
+
+    *model_popover* is the model-switch menu (modelmenu, wired by the host
+    to post the switch to the chat), shown on a button in the send row; None
+    — a provider with no mid-session switch — leaves the row without one.
+    The button names the session's current model when the host pushes it
+    (`set_model_name`, off the same transcript read as the footer's label).
     """
 
     __gsignals__ = {
@@ -90,6 +96,7 @@ class ComposerView(Gtk.Box):
         pick_attach: Callable[[], None],
         file_reference: Callable[[str], str | None],
         notify: Callable[[str], None],
+        model_popover: Gtk.Popover | None = None,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("composer-panel")
@@ -158,6 +165,17 @@ class ComposerView(Gtk.Box):
         )
         row.append(self._dock_btn)
         row.append(Gtk.Box(hexpand=True))
+        # The model picker sits with the composing half of the row: choosing
+        # what answers the prompt is part of writing it. The button wears the
+        # session's current model as its label (set_model_name).
+        self._model_btn: Gtk.MenuButton | None = None
+        if model_popover is not None:
+            self._model_btn = Gtk.MenuButton(popover=model_popover)
+            self._model_btn.set_always_show_arrow(True)
+            self._model_btn.add_css_class("flat")
+            self._model_btn.set_tooltip_text(_("Switch the model for this session"))
+            row.append(self._model_btn)
+            self.set_model_name(None)
         attach = Gtk.Button(
             icon_name="mail-attachment-symbolic",
             tooltip_text=_("Attach file"),
@@ -368,6 +386,13 @@ class ComposerView(Gtk.Box):
         self._thumb_scroller.set_visible(False)
 
     # -- behavior --------------------------------------------------------------
+
+    def set_model_name(self, name: str | None) -> None:
+        """Name the model on the picker button — the one the session last
+        answered with, pushed by the host — or the generic word before the
+        first reply says which that is."""
+        if self._model_btn is not None:
+            self._model_btn.set_label(name or _("Model"))
 
     def set_enter_sends(self, enter_sends: bool) -> None:
         self._enter_sends = bool(enter_sends)

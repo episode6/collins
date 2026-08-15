@@ -143,6 +143,14 @@ def available_models() -> list[ClaudeModel]:
         return list(models or _cached or [])
 
 
+def cached_models() -> list[ClaudeModel] | None:
+    """Whatever the cache holds, however stale — never the network, so safe
+    on the main loop. None means the API hasn't answered this run; the
+    caller shows its own stand-in and asks available_models() off-thread."""
+    with _lock:
+        return list(_cached) if _cached is not None else None
+
+
 _DATE_LEN = 8  # a YYYYMMDD stamp in an id (claude-haiku-4-5-20251001)
 
 

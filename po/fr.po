@@ -917,6 +917,21 @@ msgstr "Fermer le rédacteur et garder le texte dans le terminal"
 msgid "Composer: the agent isn't running in this tab"
 msgstr "Rédacteur : l'agent ne s'exécute pas dans cet onglet"
 
+msgid "Model switch: the agent isn't running in this tab"
+msgstr "Changement de modèle : l'agent ne s'exécute pas dans cet onglet"
+
+msgid "Click to switch the model"
+msgstr "Cliquer pour changer de modèle"
+
+msgid "Switch the model for this session"
+msgstr "Changer le modèle de cette session"
+
+msgid "Loading models…"
+msgstr "Chargement des modèles…"
+
+msgid "Copy model id"
+msgstr "Copier l'id du modèle"
+
 msgid "Composer"
 msgstr "Rédacteur"
 

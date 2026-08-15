@@ -142,6 +142,20 @@ def test_pick_model_with_explicit_setting_needs_no_query():
     assert claudemodels.pick_model("claude-opus-5") == "claude-opus-5"
 
 
+def test_cached_models_never_queries():
+    original = claudemodels._cached
+    try:
+        claudemodels._cached = None
+        assert claudemodels.cached_models() is None  # never answered this run
+        models = [claudemodels.ClaudeModel("claude-opus-5", "Claude Opus 5")]
+        claudemodels._cached = models
+        cached = claudemodels.cached_models()
+        assert cached == models
+        assert cached is not models  # a copy: the cache can't be mutated through it
+    finally:
+        claudemodels._cached = original
+
+
 # -- credentials --------------------------------------------------------------
 
 
