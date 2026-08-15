@@ -1327,6 +1327,10 @@ class TerminalTab(Gtk.Box):
         # mutated, so the update thread never reads a half-written dict.
         self._attachments: dict[str, attachrecords.Attachment] = {}
         self._restored_attachments: list[attachrecords.Attachment] = []  # from a previous run
+        # And the polled source those are kept apart from: the images the
+        # transcript scan noticed, replaced wholesale by every update.
+        self._scanned_attachments: list[attachrecords.Attachment] = []
+        self._struck_attachments: set[str] = set()  # removed from the panel by hand
         self._saved_attachment_records: list[dict] = []  # last records handed to the window
         self._pr_discover = False  # a click's search, waiting for a free tick
         self._pr_focus_refresh_at = 0  # last time coming into view forced a refetch
@@ -2044,11 +2048,33 @@ class TerminalTab(Gtk.Box):
         self._remember_attachments()
 
     def attachments(self) -> list[attachrecords.Attachment]:
-        """Every image this session has seen, newest first — the sightings
-        this run collected merged with the ones a previous run saved."""
-        return list(
-            attachrecords.union(self._restored_attachments, self._attachments).values()
-        )
+        """Every image this session has seen and still lists, newest first."""
+        return attachrecords.visible(self._all_attachments().values())
+
+    def _all_attachments(self) -> dict[str, attachrecords.Attachment]:
+        """The whole list including what has been struck off, which is what
+        gets saved: a tombstone is the only thing that keeps a removed image
+        removed once the transcript is read again (see attachrecords.strike).
+
+        Three sources, folded in the order they can know things: what a
+        previous run saved, what this run has been shown, and what the
+        transcript scan has noticed. Order only decides tie-breaks — a
+        caption may only come from a lightbox sighting and a context snippet
+        only fills an empty slot, whichever arrived first.
+        """
+        live = attachrecords.union(self._restored_attachments, self._attachments)
+        everything = attachrecords.fold(live, *self._scanned_attachments)
+        return attachrecords.strike(everything, self._struck_attachments)
+
+    def _harvest_attachments(self) -> None:
+        """Take the images the last transcript update noticed. On the main
+        loop, from `_apply_update`, with the scan itself already done on the
+        update thread."""
+        scanned = self._transcript.attachments()
+        if scanned == self._scanned_attachments:
+            return
+        self._scanned_attachments = scanned
+        self._remember_attachments()
 
     def restore_attachments(self, records: object) -> None:
         """Re-adopt the images saved for this session by a previous run.
@@ -2072,13 +2098,16 @@ class TerminalTab(Gtk.Box):
 
     def forget_attachment(self, key: str) -> None:
         """Strike one image off this session's list (the panel's own "Remove
-        From List"). Both halves of the list have to let go of it — what this
-        run saw and what the last one saved — or the union behind
-        `attachments` would hand it straight back."""
-        self._attachments = {k: v for k, v in self._attachments.items() if k != key}
-        self._restored_attachments = [
-            one for one in self._restored_attachments if one.key != key
-        ]
+        From List").
+
+        Marked rather than deleted, because deleting it doesn't last: the
+        message that mentioned the image is still in the transcript, so the
+        next scan of it — this poll, or the one on the first poll of
+        tomorrow's run — would hand the row straight back. The record stays
+        in the file wearing a tombstone, and everything that shows the list
+        passes over it.
+        """
+        self._struck_attachments = self._struck_attachments | {key}
         self._remember_attachments()
 
     def _remember_attachments(self) -> None:
@@ -2086,14 +2115,17 @@ class TerminalTab(Gtk.Box):
         but only when it actually reads differently, so a picture shown twice
         with nothing new to say about it writes nothing to disk. An open panel
         is refreshed on the same terms: an unchanged list has nothing to
-        redraw, and the diff in `set_records` keeps the rest of it in place."""
-        attachments = self.attachments()
-        records = attachrecords.to_records(attachments)
+        redraw, and the diff in `set_records` keeps the rest of it in place.
+
+        What is saved is the whole list, struck-off records included; what
+        the panel is given is only what it shows."""
+        everything = self._all_attachments().values()
+        records = attachrecords.to_records(everything)
         if records == self._saved_attachment_records:
             return
         self._saved_attachment_records = records
         if self._attachments_view is not None:
-            self._attachments_view.set_records(attachments)
+            self._attachments_view.set_records(attachrecords.visible(everything))
         self.emit("attachments-changed", records)
 
     # -- the attachments panel ------------------------------------------------
@@ -3486,6 +3518,7 @@ class TerminalTab(Gtk.Box):
         self._pr_refresh_btn.set_sensitive(True)
         # Same pane object wherever it lives (in-tab or popped out).
         self._editor.set_agent_files(self._transcript.touched_files())
+        self._harvest_attachments()
         self._refresh_model_label()
         if tracked is not None:
             # The shown ones come back with status, and they keep it: it is
