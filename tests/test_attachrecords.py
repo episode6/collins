@@ -635,3 +635,39 @@ def test_a_long_head_alone_is_trimmed_from_the_front(tmp_path):
     snippet = context(f"{'front ' * 60}and finally out/shot.png", tmp_path)
     assert len(snippet) <= attachrecords.MAX_TEXT
     assert snippet.startswith("…") and snippet.endswith("and finally")
+
+
+# -- a file delivered straight to the user --------------------------------
+
+
+def test_delivered_records_an_existing_image_as_a_captioned_lightbox_sighting(tmp_path):
+    shot = make(tmp_path, "sheet.png")
+    one = attachrecords.delivered(str(shot), caption="icon candidates", now=5.0)
+    assert one.key == str(shot)
+    assert one.source == LIGHTBOX
+    assert one.caption == "icon candidates"
+    assert one.context is None
+    assert one.at == one.last == 5.0
+
+
+def test_delivered_resolves_a_relative_path_against_the_roots(tmp_path):
+    shot = make(tmp_path, "out/shot.png")
+    one = attachrecords.delivered("out/shot.png", roots=[None, str(tmp_path)])
+    assert one.key == str(shot)
+
+
+def test_delivered_expands_a_home_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    shot = make(tmp_path, "shot.png")
+    assert attachrecords.delivered("~/shot.png").key == str(shot)
+
+
+def test_delivered_refuses_what_is_not_an_image_on_disk(tmp_path):
+    report = tmp_path / "report.txt"
+    report.write_text("words")
+    assert attachrecords.delivered(str(report)) is None  # not an image
+    assert attachrecords.delivered(str(tmp_path / "gone.png")) is None  # nothing there
+    assert attachrecords.delivered("https://example.com/ci.png") is None  # not local
+    assert attachrecords.delivered("bare.png") is None  # no root to try against
+    assert attachrecords.delivered(None) is None
+    assert attachrecords.delivered("   ") is None
