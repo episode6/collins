@@ -219,6 +219,33 @@ def test_striking_survives_a_later_sighting():
     assert again["/tmp/a.png"].last == 9000.0
 
 
+def test_striking_a_row_never_pushes_a_listed_one_out():
+    """Removing an image must not cost the panel an image."""
+    listed = attachrecords.fold(
+        {}, *[shot(f"/tmp/{index}.png", now=float(index)) for index in range(120)]
+    )
+    struck = attachrecords.strike(listed, set(listed))
+    assert len(attachrecords.visible(struck.values())) == 0
+    both = attachrecords.fold(struck, *[shot(f"/tmp/new{n}.png", now=500.0 + n) for n in range(100)])
+    assert len(attachrecords.visible(both.values())) == attachrecords.MAX_RECORDS
+
+
+def test_tombstones_have_a_budget_of_their_own():
+    listed = attachrecords.fold(
+        {}, *[shot(f"/tmp/{index}.png", now=float(index)) for index in range(80)]
+    )
+    struck = attachrecords.strike(listed, set(listed))
+    assert len(struck) == attachrecords.MAX_STRUCK
+    assert list(struck)[0] == "/tmp/79.png"  # the oldest tombstones go first
+
+
+def test_striking_drops_the_label_nobody_will_read_again():
+    listed = attachrecords.fold({}, shot("/tmp/a.png", caption="Cap", context="Ctx", origin="o"))
+    (one,) = attachrecords.strike(listed, {"/tmp/a.png"}).values()
+    assert (one.caption, one.context, one.origin) == (None, None, None)
+    assert one.key == "/tmp/a.png" and one.at and one.last
+
+
 def test_a_tombstone_round_trips_through_a_record():
     struck = attachrecords.strike(attachrecords.fold({}, shot("/tmp/a.png")), {"/tmp/a.png"})
     (record,) = attachrecords.to_records(struck.values())
@@ -428,6 +455,15 @@ def test_scan_stops_checking_the_disk_after_a_listing(tmp_path, monkeypatch):
     real = make(tmp_path, "real.png")
     text = "\n".join([f"{tmp_path}/missing{n}.png" for n in range(10)] + [str(real)])
     assert keys(text, tmp_path) == []
+
+
+def test_the_listing_cap_does_not_hold_back_urls(tmp_path, monkeypatch):
+    """It is a budget for stat calls, and a URL spends none of it."""
+    monkeypatch.setattr(attachrecords, "MAX_SCAN_CANDIDATES", 3)
+    text = "\n".join(
+        [f"{tmp_path}/missing{n}.png" for n in range(10)] + ["https://example.com/ci.png"]
+    )
+    assert keys(text, tmp_path) == ["https://example.com/ci.png"]
 
 
 # -- the context snippet --------------------------------------------------

@@ -63,6 +63,13 @@ log = logging.getLogger(__name__)
 # is already more scrolling than anyone does, and the cap is what bounds
 # what a long-running session adds to state.json (~30KB at worst).
 MAX_RECORDS = 100
+# Struck-off records (see `strike`) are counted separately, so that removing
+# a row never costs a row: sharing one budget would have a session that
+# struck fifty images showing fifty fewer. They are cheap to keep — a
+# tombstone is a key and two dates — and a deliberate act to make, so this
+# is generous. Past it the oldest tombstone goes, and the image it was
+# hiding comes back if the transcript still mentions it.
+MAX_STRUCK = 50
 # Captions and context snippets are one ellipsized line in the panel, so
 # what is stored is what could plausibly be read. It also keeps a novel of
 # a caption from being written to disk 100 times over.
@@ -250,15 +257,24 @@ def strike(
     removed would come back on the next scan of it. The record stays in the
     file, marked, and the panel passes over it.
 
-    Struck records do count against MAX_RECORDS, which is the small price:
-    a session that strikes a hundred images has spent its list on saying
-    so, and the oldest of them ages out of the cap in the end — at which
-    point the transcript may reintroduce it. Ordinary use strikes one row.
+    What it keeps is what it needs to go on refusing that image — the key
+    and its dates. The caption and the snippet go: nothing will show them
+    again, and a tombstone nobody reads should be the cheapest record in
+    the file, since it is kept on its own budget (MAX_STRUCK) so that
+    striking a row never pushes a listed one out.
+
+    Re-capped on the way out, like every other collection here: a record
+    that has just become a tombstone gives its place in the listed budget
+    back on the spot, rather than at the next restore.
     """
-    return {
-        key: replace(one, hidden=True) if key in keys and not one.hidden else one
-        for key, one in attachments.items()
-    }
+    return _ordered(
+        {
+            key: replace(one, hidden=True, caption=None, context=None, origin=None)
+            if key in keys and not one.hidden
+            else one
+            for key, one in attachments.items()
+        }
+    )
 
 
 def visible(attachments: Iterable[Attachment]) -> list[Attachment]:
@@ -269,9 +285,16 @@ def visible(attachments: Iterable[Attachment]) -> list[Attachment]:
 def _ordered(attachments: Mapping[str, Attachment]) -> dict[str, Attachment]:
     """Newest sighting first, capped. Ties break on first sighting and then
     on key, so the same set always serializes to the same bytes — an order
-    that wobbled would rewrite state.json on every poll."""
+    that wobbled would rewrite state.json on every poll.
+
+    The two kinds of record are capped against their own budgets and then
+    put back in one recency order: what the panel shows is never crowded
+    out by what it is hiding.
+    """
     ranked = sorted(attachments.values(), key=lambda one: (-one.last, -one.at, one.key))
-    return {one.key: one for one in ranked[:MAX_RECORDS]}
+    kept = {one.key for one in [one for one in ranked if not one.hidden][:MAX_RECORDS]}
+    kept |= {one.key for one in [one for one in ranked if one.hidden][:MAX_STRUCK]}
+    return {one.key: one for one in ranked if one.key in kept}
 
 
 def _text(value: object, limit: int | None = MAX_TEXT) -> str | None:
@@ -391,7 +414,9 @@ _LINE_SUFFIX_RX = re.compile(r":\d+(?::\d+)?$")
 # How many image-shaped paths one message may have checked against the disk.
 # A message naming more than this is a directory listing rather than a
 # conversation, and each candidate past the cap costs a stat call on the
-# update thread to win a row that MAX_RECORDS would drop anyway.
+# update thread to win a row that MAX_RECORDS would drop anyway. It is a
+# budget for filesystem calls and nothing else: a URL spends none of it and
+# so is never held back by it.
 MAX_SCAN_CANDIDATES = 200
 
 
@@ -437,11 +462,12 @@ def scan(
         written = url or path  # the reference as the message spelled it
         if url is not None:
             key = url if is_remote(url) else None
+        elif checked >= MAX_SCAN_CANDIDATES:
+            continue  # the budget below is spent, but a URL costs none of it
         else:
             checked += 1
-            if checked > MAX_SCAN_CANDIDATES:
-                log.debug("stopped after %d image paths in one message", checked - 1)
-                break
+            if checked == MAX_SCAN_CANDIDATES:
+                log.debug("stat budget spent after %d image paths in one message", checked)
             resolved = linkpatterns.resolve_file_reference(path, trials)
             key = resolved[0] if resolved is not None else None
         if key is None:
