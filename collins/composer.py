@@ -383,13 +383,16 @@ class ComposerView(Gtk.Box):
             self.add_css_class("docked")
             self._scroller.set_max_content_height(-1)
             self._scroller.set_vexpand(True)
-            self._dock_btn.set_icon_name("view-restore-symbolic")
+            # The bottom-edge halves of the attachments panel's dock pair
+            # (see AttachmentsView.set_docked): dock fills the frame's
+            # bottom pane, undock raises it as a detached card.
+            self._dock_btn.set_icon_name("undock-bottom-symbolic")
             self._dock_btn.set_tooltip_text(_("Float the composer over the terminal"))
         else:
             self.remove_css_class("docked")
             self._scroller.set_max_content_height(_MAX_CONTENT_HEIGHT)
             self._scroller.set_vexpand(False)
-            self._dock_btn.set_icon_name("go-bottom-symbolic")
+            self._dock_btn.set_icon_name("dock-bottom-symbolic")
             self._dock_btn.set_tooltip_text(_("Dock the composer below the terminal"))
 
     def set_font(self, font: str) -> None:
