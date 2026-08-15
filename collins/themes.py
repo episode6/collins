@@ -163,27 +163,37 @@ def _apply_dynamic_theme_css(theme: dict | None) -> None:
         f".attach-overlay {{ background-color: alpha({fg_css}, 0.45); color: {bg_css}; }}"
         f".attach-overlay:hover {{ background-color: alpha({fg_css}, 0.8); }}"
         f".attach-overlay:active {{ background-color: {fg_css}; }}"
-        # An image landing in a panel nobody has open flashes the handle, in
-        # the same orange and on the same .bell-flash class as the visual
-        # bell (flash.py) — but as a background it fills with and drains out
-        # of, rather than the bell's inset shadow, which bands across a
-        # capsule (app.py's _CSS says why). Draining back to the resting
-        # pill color is why this rule is here and not there: that color is
-        # the terminal's, and only this provider knows it.
+        # While images have landed that the panel wasn't on screen to show,
+        # the handle is lit: the whole pill in the app's attention orange
+        # instead of the terminal's own fg, which on an 18px pill is the only
+        # badge there is room for. The orange is fixed rather than drawn from
+        # the palette it sits on, exactly so it can't be a color the terminal
+        # is already using; the icon on it stays terminal-bg (.attach-overlay
+        # above), which is what that color is for. Hover and press keep
+        # saying so — they outrank .attach-overlay's by a class, whatever the
+        # order here.
+        f".attachments-handle.unseen {{ background-color: #D97757; }}"
+        f".attachments-handle.unseen:hover {{ "
+        f"background-color: shade(#D97757, 1.2); }}"
+        f".attachments-handle.unseen:active {{ "
+        f"background-color: shade(#D97757, 0.85); }}"
+        # An image landing in a panel nobody has open flashes the handle on
+        # its way to that lit state, on the same .bell-flash class as the
+        # visual bell (flash.py) but not the bell's animation — app.py's _CSS
+        # says why. It blooms from a pale tint of the orange and settles into
+        # it: the pop is the arrival, the orange is what stays, and because
+        # the animation ends exactly on the declared color there is nothing
+        # to snap back from. Both ends are the accent rather than anything
+        # the terminal chose, so the flash is as bright against a resting
+        # pill of 45% fg in one palette as in any other — starting from the
+        # terminal's own fg looked strong on a dark theme and nearly
+        # disappeared on a light one, where the resting pill is already most
+        # of the way there.
         f"@keyframes attachments-handle-flash {{ "
-        f"from {{ background-color: #D97757; }} "
-        f"to {{ background-color: alpha({fg_css}, 0.45); }} }}"
+        f"from {{ background-color: shade(#D97757, 1.5); }} "
+        f"to {{ background-color: #D97757; }} }}"
         f"button.attachments-handle.bell-flash {{ "
         f"animation: attachments-handle-flash 400ms ease-out; }}"
-        # The unseen dot on the attachments handle. Its fill is the app's
-        # attention orange rather than anything the terminal chose -- it is
-        # the same color the bell flashes the handle in, and a dot painted
-        # out of the palette it sits on is a dot that vanishes into some
-        # palettes. The ring is what keeps it a badge on the pill: terminal
-        # background, so the dot reads as punched through it. Shape is
-        # static (app.py's _CSS).
-        f".attachments-badge {{ background-color: #D97757; "
-        f"border: 2px solid {bg_css}; }}"
         # The composer panel is a surface of the terminal itself: terminal bg
         # at full strength (it covers the prompt it stands in for), fenced off
         # by a faint fg-colored top edge. Shape is static (app.py's _CSS).

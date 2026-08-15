@@ -1183,33 +1183,23 @@ class TerminalTab(Gtk.Box):
         # Always there, empty list or not — a panel nobody can find until it
         # is already full is a panel nobody finds — and it toggles: a second
         # click on the handle that raised the panel lowers it again.
+        # It also lights up: while pictures have landed that the panel wasn't
+        # on screen to show, the pill itself goes the app's attention orange
+        # (the ".unseen" class, painted in themes.py) rather than growing a
+        # badge of its own. On something this size that is the legible move —
+        # a dot in the corner of an 18px pill is a smudge, and a numeral on
+        # it is a numeral nobody reads, so the count goes in the tooltip and
+        # the handle carries the signal with its whole surface.
         self._attachments_btn = Gtk.Button(
             icon_name="mail-attachment-symbolic",
+            halign=Gtk.Align.END,
+            valign=Gtk.Align.CENTER,
+            margin_end=5,
             tooltip_text=_("Images this session has seen"),
         )
         self._attachments_btn.add_css_class("attach-overlay")
         self._attachments_btn.add_css_class("attachments-handle")
         self._attachments_btn.connect("clicked", lambda *_: self.toggle_attachments())
-        # The badge: a dot near the top of the pill, up while pictures have
-        # landed that the panel wasn't on screen to show (see
-        # _note_attachment_news). It rides an overlay of its own rather than
-        # the terminal's, so it is placed against the handle and travels with
-        # it; can_target(False) keeps it from swallowing the click it is
-        # sitting on top of. The count it stands for is in the handle's
-        # tooltip: this pill is 18px wide, and a numeral small enough to fit
-        # on it is a numeral nobody reads.
-        self._attachments_badge = Gtk.Box(
-            halign=Gtk.Align.CENTER, valign=Gtk.Align.START, margin_top=3, visible=False
-        )
-        self._attachments_badge.add_css_class("attachments-badge")
-        self._attachments_badge.set_can_target(False)
-        self._attachments_handle = Gtk.Overlay(
-            child=self._attachments_btn,
-            halign=Gtk.Align.END,
-            valign=Gtk.Align.CENTER,
-            margin_end=5,
-        )
-        self._attachments_handle.add_overlay(self._attachments_badge)
         # Built lazily on first open, like the composer; only the slot it
         # will ride in exists up front.
         self._attachments_view: attachpanel.AttachmentsView | None = None
@@ -1229,7 +1219,7 @@ class TerminalTab(Gtk.Box):
         self._content_overlay = Gtk.Overlay(child=scrolled)
         content_overlay = self._content_overlay
         content_overlay.add_overlay(self._composer_overlay_btn)
-        content_overlay.add_overlay(self._attachments_handle)
+        content_overlay.add_overlay(self._attachments_btn)
 
         # Past "terminal_max_width", the clamp stops growing the terminal and
         # centers it instead; see _apply_terminal_max_width. Unset until
@@ -2171,12 +2161,12 @@ class TerminalTab(Gtk.Box):
         return view is not None and view.get_mapped()
 
     def _note_attachment_news(self, shown: list[attachrecords.Attachment]) -> None:
-        """Badge the handle for pictures that landed with nobody looking, and
+        """Light the handle for pictures that landed with nobody looking, and
         flash it for the ones that landed just now.
 
         A picture arriving while the panel is on screen is not news — it is a
         row appearing at the top of a list somebody is already reading — so
-        that case clears the badge instead of adding to it. Which sightings
+        that case puts the handle out instead of lighting it. Which sightings
         count as new at all is `attachrecords.unseen`'s rule, and the whole
         point of it: a restored session and the first read of a long
         transcript both deliver a history all at once, and none of it
@@ -2191,11 +2181,14 @@ class TerminalTab(Gtk.Box):
         if unseen == self._attachments_unseen:
             return
         self._attachments_unseen = unseen
-        self._sync_attachments_badge()
+        self._sync_attachments_handle()
         if fresh:
-            # A dot on a pill at the edge of a terminal somebody is reading
-            # is not something anybody notices; the flash is what makes them
-            # look at it. The app's one attention flash, the same as a bell's.
+            # A pill quietly changing color at the edge of a terminal
+            # somebody is reading is not something anybody notices; the flash
+            # is what makes them look at it, and it settles into the lit
+            # color rather than draining back to the resting one — the same
+            # .bell-flash class as the visual bell, a different animation
+            # under it (see themes._apply_dynamic_theme_css).
             flash(self._attachments_btn)
 
     def _clear_attachment_news(self) -> None:
@@ -2210,22 +2203,25 @@ class TerminalTab(Gtk.Box):
         what has been *announced*, while `attachrecords.unseen` re-reads the
         whole list on every change. A baseline left back at the tab's opening
         would hand every picture this session has shown back as news the next
-        time anything landed — the panel would badge for images it had
+        time anything landed — the handle would light for images it had
         already shown somebody, over and over, and only a session that had
-        never opened it would ever be right.
+        never opened the panel would ever be right.
         """
         self._attachments_since = time.time()
         if not self._attachments_unseen:
             return
         self._attachments_unseen = set()
-        self._sync_attachments_badge()
+        self._sync_attachments_handle()
 
-    def _sync_attachments_badge(self) -> None:
-        """Dress the handle for what it is holding: the dot says there is
+    def _sync_attachments_handle(self) -> None:
+        """Dress the handle for what it is holding: lit says there is
         something new, and the tooltip — the only room on an 18px pill for a
         number — says how much."""
         count = len(self._attachments_unseen)
-        self._attachments_badge.set_visible(bool(count))
+        if count:
+            self._attachments_btn.add_css_class("unseen")
+        else:
+            self._attachments_btn.remove_css_class("unseen")
         self._attachments_btn.set_tooltip_text(
             # One form rather than an ngettext pair: po/generate.py writes
             # flat msgid/msgstr, so a plural msgid is a string no language
