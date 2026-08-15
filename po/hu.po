@@ -965,6 +965,9 @@ msgstr "A mellékletek panel lebegtetése a terminál felett"
 msgid "Images this session has seen"
 msgstr "A munkamenet által látott képek"
 
+msgid "Images this session has seen ({n} new)"
+msgstr "A munkamenet által látott képek ({n} új)"
+
 msgid "Open With…"
 msgstr "Megnyitás ezzel…"
 

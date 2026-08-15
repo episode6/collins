@@ -199,6 +199,75 @@ def test_union_keeps_both_sides_and_merges_the_overlap():
     assert joined["/tmp/a.png"].last == 50.0
 
 
+# -- what the handle's badge counts ---------------------------------------
+
+
+def unseen(listed, noted=(), since=1000.0):
+    """The badge set and the just-arrived part of it, for a fold's values."""
+    return attachrecords.unseen(listed.values(), noted=noted, since=since)
+
+
+def test_a_restored_history_is_not_news():
+    """The case the baseline exists for: everything a session ever saw
+    arrives in one go when a tab adopts it, all of it dated when it
+    happened."""
+    listed = attachrecords.fold(
+        {}, *[shot(f"/tmp/{index}.png", now=float(index)) for index in range(20)]
+    )
+    assert unseen(listed, since=1000.0) == (set(), set())
+
+
+def test_a_sighting_after_the_baseline_is_news():
+    listed = attachrecords.fold({}, shot("/tmp/old.png", now=10.0), shot("/tmp/new.png", now=2000.0))
+    assert unseen(listed) == ({"/tmp/new.png"}, {"/tmp/new.png"})
+
+
+def test_news_stays_news_until_it_is_cleared():
+    """A second offering of the same list is not a second arrival: the badge
+    keeps its count, and nothing flashes for it."""
+    listed = attachrecords.fold({}, shot("/tmp/new.png", now=2000.0))
+    assert unseen(listed, noted={"/tmp/new.png"}) == ({"/tmp/new.png"}, set())
+
+
+def test_a_second_sighting_of_a_counted_image_doesnt_count_twice():
+    listed = attachrecords.fold({}, shot("/tmp/new.png", now=2000.0))
+    again = attachrecords.fold(listed, shot("/tmp/new.png", now=3000.0))
+    assert unseen(again, noted={"/tmp/new.png"}) == ({"/tmp/new.png"}, set())
+
+
+def test_a_struck_row_takes_its_share_of_the_badge_with_it():
+    """A badge counting rows nobody can open is a badge that can't be
+    cleared by opening the panel."""
+    listed = attachrecords.fold({}, shot("/tmp/a.png", now=2000.0), shot("/tmp/b.png", now=2000.0))
+    struck = attachrecords.strike(listed, {"/tmp/a.png"})
+    assert unseen(struck, noted={"/tmp/a.png", "/tmp/b.png"}) == ({"/tmp/b.png"}, set())
+
+
+def test_a_struck_row_is_never_news_in_the_first_place():
+    listed = attachrecords.strike(
+        attachrecords.fold({}, shot("/tmp/a.png", now=2000.0)), {"/tmp/a.png"}
+    )
+    assert unseen(listed) == (set(), set())
+
+
+def test_a_looked_at_picture_stays_looked_at_once_the_baseline_moves():
+    """The set is only what has been announced; the baseline is what keeps an
+    announced picture from coming straight back, since this reads the whole
+    list every call. Emptying one without moving the other hands a session
+    every image it ever showed the next time anything lands."""
+    listed = attachrecords.fold({}, shot("/tmp/a.png", now=2000.0))
+    assert unseen(listed, since=2500.0) == (set(), set())
+    later = attachrecords.fold(listed, shot("/tmp/b.png", now=3000.0))
+    assert unseen(later, since=2500.0) == ({"/tmp/b.png"}, {"/tmp/b.png"})
+
+
+def test_an_undated_sighting_is_not_news():
+    """A record read back with no usable timestamp fails closed: a badge for
+    a picture nobody can date is a badge nobody can explain."""
+    listed = {"/tmp/a.png": Attachment(key="/tmp/a.png")}
+    assert attachrecords.unseen(listed.values(), noted=(), since=0.0) == (set(), set())
+
+
 # -- striking a record off ------------------------------------------------
 
 

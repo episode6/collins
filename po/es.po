@@ -965,6 +965,9 @@ msgstr "Hacer flotar el panel de adjuntos sobre la terminal"
 msgid "Images this session has seen"
 msgstr "Imágenes que ha visto esta sesión"
 
+msgid "Images this session has seen ({n} new)"
+msgstr "Imágenes que ha visto esta sesión ({n} nuevas)"
+
 msgid "Open With…"
 msgstr "Abrir con…"
 

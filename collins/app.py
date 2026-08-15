@@ -674,6 +674,18 @@ tabbar tab.bell-flash,
 row.session-child.bell-flash {
   animation: bell-flash 400ms ease-out;
 }
+/* The attachments handle takes the same .bell-flash class (flash.py is the
+   app's one "look here", see TerminalTab._note_attachment_news) but not this
+   animation, for two reasons. An inset shadow spread across a 9999px-radius
+   capsule bands -- a hard-edged bright rectangle between two dimmer caps,
+   invisible on the near-square widgets above and plain to see on a 20px
+   pill. And this one fades back to nothing, while the handle's flash has to
+   *land* somewhere: it fires as the pill lights up for an unseen image, so
+   draining out would flash orange, fade to grey, then snap back to orange.
+   It animates background-color into the lit color instead -- and since both
+   ends of that are terminal colors, the rule lives with the rest of the
+   handle's paint in themes._apply_dynamic_theme_css. */
+
 /* a busy row's barber pole also claims the animation property, with one more
    class on its selector, which would silently drop the flash exactly when a
    bell is most likely (the agent is mid-turn): the row that is busy while its

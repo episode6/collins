@@ -965,6 +965,9 @@ msgstr "Anhänge-Panel über dem Terminal schweben lassen"
 msgid "Images this session has seen"
 msgstr "Bilder, die diese Sitzung gesehen hat"
 
+msgid "Images this session has seen ({n} new)"
+msgstr "Bilder, die diese Sitzung gesehen hat ({n} neu)"
+
 msgid "Open With…"
 msgstr "Öffnen mit…"
 

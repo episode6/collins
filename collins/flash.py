@@ -1,8 +1,15 @@
-"""Visual bell: flash a widget by pulsing the .bell-flash CSS class on it.
+"""The app's attention flash: pulse the .bell-flash CSS class on a widget.
 
 One flash is one run of the bell-flash animation in app.py's CSS; the class
 is held slightly longer than the animation so the fade-out finishes before
 the class comes off.
+
+Named for the visual bell it was written for — a terminal's BEL tinting the
+header bar, the ringing session's tab and its sidebar row — but it is the
+only "look here" the app has, so anything else with the same thing to say
+uses it rather than growing a second animation under another name (the
+attachments handle, when an image lands in a panel nobody has open). Every
+widget it can reach names itself in that CSS rule.
 """
 
 from __future__ import annotations
