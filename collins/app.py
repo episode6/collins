@@ -1491,6 +1491,14 @@ class App(Adw.Application):
             cwd = tab.current_agent_cwd()
             if not cwd:
                 return False, "Couldn't work out a directory to start the session in."
+        # New sessions belong in the project proper, never inside an existing
+        # worktree: launching from `<repo>/.claude/worktrees/<name>` roots the
+        # fresh spawn there, and the transcript resolver — which baselines and
+        # follows relative to the launch dir — mismaps the tab, so the id never
+        # comes back. The foreground new-session path collapses the same way
+        # (see window._visible_project_dir); mirror it here. No-op (returns
+        # None) for any cwd that isn't a Claude-managed worktree.
+        cwd = worktree_project_root(cwd) or cwd
 
         mode = args.get("permission_mode")
         if mode:
