@@ -72,20 +72,23 @@ def enable_copy_on_secondary_click(
 
     Confirmation is the button's own face: it wears a checkmark for the
     same beat a copyable label reads "Copied to clipboard", then goes back
-    to the icon it was built with. A tooltip can't say it — the pointer
-    that asked for the copy is holding one open — and these buttons sit
-    nowhere near a toast overlay. `button` must therefore be an icon
-    button; anything else has no face to borrow.
+    to the icon it was wearing. A tooltip can't say it — the pointer that
+    asked for the copy is holding one open — and these buttons sit nowhere
+    near a toast overlay. A button with no icon of its own has no face to
+    borrow, so it copies without one; nothing is overwritten to say so.
 
     GtkButton answers the primary button and only that, so this never
     doubles up with the click that opens the link.
     """
-    icon = button.get_icon_name() or ""
+    # The face to come back to, read when the copy happens rather than
+    # here: an icon that changes over the button's life is still restored
+    # to whatever it had become, and one it never had is left alone.
+    icon: list[str] = []
     flash_source: list[int] = []
 
     def restore() -> bool:
         flash_source.clear()
-        button.set_icon_name(icon)
+        button.set_icon_name(icon.pop())
         return GLib.SOURCE_REMOVE
 
     def on_pressed(gesture: Gtk.GestureClick, _n_press: int, _x: float, _y: float) -> None:
@@ -94,9 +97,16 @@ def enable_copy_on_secondary_click(
             return
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         button.get_clipboard().set(text)
-        button.set_icon_name(_COPIED_ICON)
         if flash_source:
+            # Still wearing the checkmark from the press before this one, so
+            # the face underneath is the one already remembered.
             GLib.source_remove(flash_source.pop())
+        else:
+            face = button.get_icon_name()
+            if not face:
+                return  # no icon to borrow — the copy still happened
+            icon.append(face)
+        button.set_icon_name(_COPIED_ICON)
         flash_source.append(GLib.timeout_add(_FLASH_MS, restore))
 
     secondary = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
