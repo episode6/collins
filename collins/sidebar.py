@@ -2196,10 +2196,13 @@ class SessionSidebar(Gtk.Box):
 
         open_section = Gio.Menu()
         open_section.append_item(item(_("Open"), "open-session"))
-        # Only for a session that isn't already running in a tab somewhere:
-        # opening a live one in a second window would resume its transcript
-        # twice. A blank status is the "not running anywhere" signal.
-        if row.item.status == "":
+        # Not for a session already open in a tab: opening it in a second
+        # window would resume its transcript twice, and open_session would only
+        # redirect back to the window that already holds it, leaving an empty
+        # window behind. A detached background agent has no tab, so it gets the
+        # item too — open_session attaches to the live agent, exactly as "Open"
+        # already does for it.
+        if row.item.status not in _IN_TAB_STATUSES:
             open_section.append_item(item(_("Open in new window"), "open-session-new-window"))
         if _GHOSTTY:
             open_section.append_item(item(_("Open in Ghostty"), "open-ghostty"))

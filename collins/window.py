@@ -4169,14 +4169,20 @@ class MainWindow(Adw.ApplicationWindow):
             self.open_session(session)
 
     def _on_open_new_window(self, _action, param: GLib.Variant) -> None:
-        # A fresh window for this session, rather than a tab here. Offered only
-        # for non-running rows, so open_session won't find an existing tab to
-        # jump to and resumes the transcript cleanly in the new window.
+        # A fresh window for this session, rather than a tab here. The menu only
+        # offers this for a session with no tab, but its status can flip to open
+        # between the menu opening and the click: if some window now holds it,
+        # jump there rather than spawn a new window that open_session would just
+        # redirect out of, stranding it empty.
         session = self._session_for(param)
         if session is None:
             return
-        window = self.get_application().open_new_window()
-        window.open_session(session)
+        app = self.get_application()
+        other = session_window(app, session.session_id)
+        if other is not None:
+            other.focus_session(session.session_id)
+            return
+        app.open_new_window().open_session(session)
 
     def _on_new_session_new_window(self, _action, param: GLib.Variant) -> None:
         cwd = param.get_string()
