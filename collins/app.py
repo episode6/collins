@@ -1764,6 +1764,11 @@ class App(Adw.Application):
         window.present()
         return window
 
+    def open_new_window(self) -> MainWindow:
+        """Public entry for the row/project menus that launch a session into a
+        fresh window; the empty window is the caller's to fill."""
+        return self._new_window()
+
     def _main_window(self) -> MainWindow | None:
         """The active window, unless that's a popped-out editor window (or
         some other non-main window): those must never be handed a main

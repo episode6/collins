@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-14. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -1075,6 +1075,8 @@ class MainWindow(Adw.ApplicationWindow):
             "new-session-advanced": lambda _a, p: self._new_session_advanced(get_provider(p.get_string())),
             "continue-session": lambda _a, p: self._continue_session(get_provider(p.get_string())),
             "open-session": self._on_open_action,
+            "open-session-new-window": self._on_open_new_window,
+            "new-session-in-new-window": self._on_new_session_new_window,
             "fork-session": self._on_fork_action,
             "replay-session": self._on_replay_action,
             "resume-chat": self._on_resume_chat_action,
@@ -4165,6 +4167,21 @@ class MainWindow(Adw.ApplicationWindow):
         session = self._session_for(param)
         if session:
             self.open_session(session)
+
+    def _on_open_new_window(self, _action, param: GLib.Variant) -> None:
+        # A fresh window for this session, rather than a tab here. Offered only
+        # for non-running rows, so open_session won't find an existing tab to
+        # jump to and resumes the transcript cleanly in the new window.
+        session = self._session_for(param)
+        if session is None:
+            return
+        window = self.get_application().open_new_window()
+        window.open_session(session)
+
+    def _on_new_session_new_window(self, _action, param: GLib.Variant) -> None:
+        cwd = param.get_string()
+        window = self.get_application().open_new_window()
+        window._start_new_session(cwd)
 
     def _on_fork_action(self, _action, param: GLib.Variant) -> None:
         session = self._session_for(param)

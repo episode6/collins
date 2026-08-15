@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-14. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -2196,6 +2196,11 @@ class SessionSidebar(Gtk.Box):
 
         open_section = Gio.Menu()
         open_section.append_item(item(_("Open"), "open-session"))
+        # Only for a session that isn't already running in a tab somewhere:
+        # opening a live one in a second window would resume its transcript
+        # twice. A blank status is the "not running anywhere" signal.
+        if row.item.status == "":
+            open_section.append_item(item(_("Open in new window"), "open-session-new-window"))
         if _GHOSTTY:
             open_section.append_item(item(_("Open in Ghostty"), "open-ghostty"))
         if provider.supports_fork:
@@ -2297,6 +2302,12 @@ class SessionSidebar(Gtk.Box):
                 "win.new-session-in", GLib.Variant("s", row.cwd)
             )
             open_section.append_item(new_item)
+
+            nw_item = Gio.MenuItem.new(_("New session in new window"), None)
+            nw_item.set_action_and_target_value(
+                "win.new-session-in-new-window", GLib.Variant("s", row.cwd)
+            )
+            open_section.append_item(nw_item)
 
         # One-off launch the other way around from the project's effective
         # worktree choice — for trying the other method without touching the
