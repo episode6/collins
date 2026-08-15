@@ -182,6 +182,81 @@ TOOLS: list[dict] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "start_session",
+        "description": (
+            "Start a NEW agent session in Collins, in the background, and hand "
+            "it a prompt to begin on — a sibling of yours working in parallel "
+            "while you keep going. It opens in a tab that never takes the "
+            "user's tab selection, keyboard focus, or view: they find it as a "
+            "new session row in the sidebar, the same as any session, and it "
+            "rings and flashes if it needs them. Returns the new session's id "
+            "(and the directory it started in) once the prompt is submitted. "
+            "Reach for it to spread a self-contained piece of work to a fresh "
+            "agent — an independent change, a long job to babysit, an "
+            "exploration to run alongside your own — rather than doing it "
+            "inline. The spawned session gets these same Collins tools, so it "
+            "can spawn its own; a prompt is required because a session with "
+            "nothing to do is a leaked process."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "minLength": 1,
+                    # The socket frame caps at MAX_LINE (1 MiB); this leaves a
+                    # wide margin, and a prompt this long is a design smell
+                    # regardless.
+                    "maxLength": 50_000,
+                    "description": (
+                        "The prompt the new session starts on — submitted to "
+                        "it the moment its input box is ready, as if typed and "
+                        "sent. May be multiple lines; make it self-contained, "
+                        "since no one is watching the box to add to it."
+                    ),
+                },
+                "cwd": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "description": (
+                        "The directory to start the session in. Defaults to "
+                        "your own current working directory. Must be an "
+                        "existing directory; it need not be a project Collins "
+                        "already lists — a new one appears in the sidebar for "
+                        "it."
+                    ),
+                },
+                "worktree": {
+                    "type": "boolean",
+                    "description": (
+                        "Force starting in a fresh git worktree on or off. "
+                        "Omit to use the project's usual setting. Ignored "
+                        "outside a git checkout (the result says so)."
+                    ),
+                },
+                "permission_mode": {
+                    "type": "string",
+                    # The provider's own permission_modes() values, minus
+                    # bypassPermissions — handing a sibling that would be
+                    # privilege the user never saw, so it is refused in the
+                    # handler (the only human gate on this call is your MCP
+                    # permission prompt). The enum tracks the sole MCP-serving
+                    # provider's modes; the handler re-checks against the live
+                    # provider list.
+                    "enum": ["plan", "acceptEdits", "bypassPermissions"],
+                    "description": (
+                        "Permission mode for the new session: 'plan' "
+                        "(read-only) or 'acceptEdits'. Omit for the CLI's "
+                        "default. 'bypassPermissions' is refused."
+                    ),
+                },
+            },
+            "required": ["prompt"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -264,11 +339,23 @@ def _validate_value(key: str, value, spec: dict) -> str | None:
             return f"'{key}' must be at least {spec['minLength']} characters"
         if len(value) > spec.get("maxLength", float("inf")):
             return f"'{key}' must be at most {spec['maxLength']} characters"
+        # An enum-shaped string (start_session's permission_mode) constrains the
+        # value to a fixed set. A handler may narrow it further — the enum is
+        # the shape, not the whole allowlist.
+        choices = spec.get("enum")
+        if choices is not None and value not in choices:
+            return f"'{key}' must be one of: {', '.join(choices)}"
     elif kind == "integer":
         if isinstance(value, bool) or not isinstance(value, int):
             return f"'{key}' must be an integer"
         if value < spec.get("minimum", value):
             return f"'{key}' must be at least {spec['minimum']}"
+    elif kind == "boolean":
+        # bool is the one JSON type that is also an int in Python, so it is
+        # checked before nothing else can mistake it — and integer above
+        # rejects a bool for the same reason.
+        if not isinstance(value, bool):
+            return f"'{key}' must be true or false"
     return None
 
 

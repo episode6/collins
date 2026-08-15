@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-14. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -128,6 +128,10 @@ _MCP_TOOL_LABELS = {
     "attach_pr": (
         N_("Attach pull requests"),
         N_("attach_pr — put a pull request on the session's own footer and sidebar row"),
+    ),
+    "start_session": (
+        N_("Start sessions in the background"),
+        N_("start_session — spawn a sibling agent in a new background tab, with a prompt"),
     ),
 }
 
