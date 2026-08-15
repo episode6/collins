@@ -701,6 +701,9 @@ msgstr "Kattintson a műveletekhez"
 msgid "Right-click to open"
 msgstr "Jobb kattintás a megnyitáshoz"
 
+msgid "Right-click to copy the link"
+msgstr "Jobb kattintás a hivatkozás másolásához"
+
 msgid "Click to view in Collins"
 msgstr "Kattintson a Collinsban való megtekintéshez"
 

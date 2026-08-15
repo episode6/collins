@@ -701,6 +701,9 @@ msgstr "Haz clic para ver las acciones"
 msgid "Right-click to open"
 msgstr "Haz clic derecho para abrir"
 
+msgid "Right-click to copy the link"
+msgstr "Haz clic derecho para copiar el enlace"
+
 msgid "Click to view in Collins"
 msgstr "Haz clic para verlo en Collins"
 

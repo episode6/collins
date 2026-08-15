@@ -286,6 +286,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Click to open": "Kattintson a megnyitáshoz",
         "Click for actions": "Kattintson a műveletekhez",
         "Right-click to open": "Jobb kattintás a megnyitáshoz",
+        "Right-click to copy the link": "Jobb kattintás a hivatkozás másolásához",
         "Click to view in Collins": "Kattintson a Collinsban való megtekintéshez",
         "Click to view #{number} in Collins":
             "Kattintson a(z) #{number} Collinsban való megtekintéshez",
@@ -703,6 +704,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Click to open": "Zum Öffnen klicken",
         "Click for actions": "Für Aktionen klicken",
         "Right-click to open": "Zum Öffnen rechtsklicken",
+        "Right-click to copy the link": "Zum Kopieren des Links rechtsklicken",
         "Click to view in Collins": "Zum Anzeigen in Collins klicken",
         "Click to view #{number} in Collins":
             "Zum Anzeigen von #{number} in Collins klicken",
@@ -1121,6 +1123,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Click to open": "Haz clic para abrir",
         "Click for actions": "Haz clic para ver las acciones",
         "Right-click to open": "Haz clic derecho para abrir",
+        "Right-click to copy the link": "Haz clic derecho para copiar el enlace",
         "Click to view in Collins": "Haz clic para verlo en Collins",
         "Click to view #{number} in Collins":
             "Haz clic para ver #{number} en Collins",
@@ -1541,6 +1544,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Click to open": "Cliquer pour ouvrir",
         "Click for actions": "Cliquer pour les actions",
         "Right-click to open": "Clic droit pour ouvrir",
+        "Right-click to copy the link": "Clic droit pour copier le lien",
         "Click to view in Collins": "Cliquer pour l'ouvrir dans Collins",
         "Click to view #{number} in Collins":
             "Cliquer pour ouvrir #{number} dans Collins",
