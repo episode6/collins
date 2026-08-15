@@ -3939,11 +3939,23 @@ class TerminalTab(Gtk.Box):
         # session's own transcript exists). We see the cwd move within one
         # poll of the CLI starting, long before a first prompt can land, so
         # the baseline can't swallow our own transcript.
+        #
+        # Match on the *project root*, not the launch dir: when this tab was
+        # itself launched from inside a worktree (a background session spawned
+        # by an agent already in one), git still roots the new worktree at the
+        # main repo, so worktree_project_root(live) is that repo while the
+        # launch dir is the caller's worktree. Collapse both sides to the shared
+        # root — for a launch dir that is already a repo root, that root is
+        # itself (worktree_project_root returns None), so the ordinary case is
+        # unchanged.
         live = self.current_agent_cwd()
+        resolver_root = (
+            worktree_project_root(self._resolver_cwd) or self._resolver_cwd
+        )
         if live and live != self._resolver_cwd:
             root = worktree_project_root(live)
             if root is not None and os.path.realpath(root) == os.path.realpath(
-                self._resolver_cwd
+                resolver_root
             ):
                 if live not in self._baselined_dirs:
                     self._baselined_dirs.add(live)
