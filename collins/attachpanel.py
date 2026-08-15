@@ -453,6 +453,16 @@ class _Row(Gtk.Button):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self._slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._slot.add_css_class("attachment-thumb")
+        # The slot wears a chip border once it has a face (.filled — a border
+        # around a still-empty slot would draw as a stray hairline while the
+        # row waits its turn to decode), and clips its child to the border's
+        # rounded corners: a picture doesn't round itself. A chip hugs what
+        # is in it rather than stretching to the row: previews decode at the
+        # panel's floor width and a picture never upscales, so a stretched
+        # slot frames its own margins the moment it has a border to show
+        # where it ends.
+        self._slot.set_halign(Gtk.Align.START)
+        self._slot.set_overflow(Gtk.Overflow.HIDDEN)
         box.append(self._slot)
         self._label = Gtk.Label(xalign=0.0)
         self._label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -464,6 +474,7 @@ class _Row(Gtk.Button):
             # than in the fill loop, since there is nothing to decode and no
             # reason for the row to stand empty even one idle turn.
             self._slot.append(self._file_face(one))
+            self._slot.add_css_class("filled")
         self.connect("clicked", lambda *_a: self._view.open(self._one))
         right_click = Gtk.GestureClick(button=3)
         right_click.connect("pressed", self._on_right_click)
@@ -550,11 +561,11 @@ class _Row(Gtk.Button):
         while old is not None:
             self._slot.remove(old)
             old = self._slot.get_first_child()
+        self._slot.add_css_class("filled")
         if paintable is None:
             self._slot.append(_missing(error, remote=self._one.remote))
             return
         picture = pictures.BoundedPicture(paintable, max_height=_THUMB_HEIGHT)
-        picture.set_halign(Gtk.Align.FILL)
         self._slot.append(picture)
 
     def _on_right_click(self, gesture: Gtk.GestureClick, _n, x: float, y: float) -> None:
