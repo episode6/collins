@@ -1,6 +1,7 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
-"""The images a session has seen, as a list that outlives the app run.
+"""The images a session has seen — and the files it delivered — as a list
+that outlives the app run.
 
 Images flow through a session constantly — screenshots the agent captured,
 pictures it `show_image`d, files dragged into the prompt, URLs it was handed
@@ -9,6 +10,9 @@ short of hunting through the scrollback for a path. So every image the
 session puts on screen is written down as a record here, keyed by where it
 came from, and the list is persisted per session (see
 AppState.set_session_attachments) exactly the way the session's PRs are.
+Files of every other kind reach the list one way only: handed straight to
+the user through the harness's file-delivery tool (see `delivered`), which
+is the one signal deliberate enough to put a non-picture in a gallery.
 
 The record is a log of what the session *saw*, not a claim about what is
 still there: a file that has since been deleted keeps its entry (the panel
@@ -75,10 +79,12 @@ MAX_STRUCK = 50
 # a caption from being written to disk 100 times over.
 MAX_TEXT = 160
 
-# The only kind today. "file" is the one the door is left open for — the
-# panel is images-only until there is a story for which files belong in it
-# — and an unknown kind read back from disk is dropped rather than shown.
-KINDS = frozenset({"image"})
+# "image" rows draw a decoded preview; "file" is everything else the agent
+# handed over through its file-delivery tool (see `delivered`) — those rows
+# draw a file-type icon instead, because a deliverable is worth finding
+# again even when there is nothing to thumbnail. An unknown kind read back
+# from disk is dropped rather than shown.
+KINDS = frozenset({"image", "file"})
 # Where a sighting came from, which is what decides whether it may write a
 # caption (see `merged`).
 LIGHTBOX = "lightbox"
@@ -90,7 +96,8 @@ _REMOTE_RE = re.compile(r"^https?://", re.IGNORECASE)
 
 @dataclass(frozen=True)
 class Attachment:
-    """One image the session saw, and everything known about the sighting.
+    """One image the session saw — or file it delivered — and everything
+    known about the sighting.
 
     Frozen: the tab keeps these in a dict it replaces wholesale rather than
     mutates (an update landing from a worker thread would otherwise race a
@@ -109,11 +116,17 @@ class Attachment:
     hidden: bool = False  # struck off the list by hand; kept as a tombstone
 
     @property
+    def filename(self) -> str:
+        """The bare file name — what a file row prints beside its icon; the
+        path it came off is tooltip material."""
+        return os.path.basename(self.key.rstrip("/")) or self.key
+
+    @property
     def label(self) -> str:
         """The one line to show under the preview: the real caption if there
         ever was one, else what it was mentioned alongside, else the file's
         own name — which is never nothing."""
-        return self.caption or self.context or os.path.basename(self.key.rstrip("/")) or self.key
+        return self.caption or self.context or self.filename
 
 
 def is_remote(key: str) -> bool:
@@ -552,35 +565,40 @@ def delivered(
     now: float | None = None,
 ) -> Attachment | None:
     """A file the agent handed straight to the user, as a sighting — or None
-    when it isn't an image the panel could reopen.
+    when nothing is at *path*.
 
     This is `scan`'s sibling for the harness's file-delivery tool
     (SendUserFile): the paths live in the tool call's arguments, not in any
-    message text, so the grammar pass never sees them — yet an image sent
-    this way is the most deliberately shown picture in the whole transcript.
-    That intent is why the sighting ranks as `LIGHTBOX`: the call's caption
-    is a real caption, written for exactly this picture (or batch), and it
-    would be thrown away as mere context otherwise.
+    message text, so the grammar pass never sees them — yet a file sent this
+    way is the most deliberately given thing in the whole transcript. That
+    intent is why the sighting ranks as `LIGHTBOX`: the call's caption is a
+    real caption, written for exactly this file (or batch), and it would be
+    thrown away as mere context otherwise.
 
-    Only images are taken — the tool sends any kind of file, the panel shows
-    one kind — and only ones something is at right now, same as `scan`: the
-    delivery that actually succeeded had a file there, so what this skips is
-    a call that failed, and a scratchpad since cleaned up — whose earlier
-    sightings the saved records still hold. Only *local* ones, too: the real
-    tool never carries a URL, so a remote-looking entry is a doctored
-    transcript (this module trusts nothing read from disk), refused before
-    it costs anything.
+    *Every* kind of file is taken, where `scan` takes only images: the scan
+    reads prose, which names paths for a hundred reasons, but this tool has
+    exactly one meaning — "this file is for you" — so a report or an archive
+    sent through it belongs in the panel as much as a screenshot does. An
+    image lands as an image row; anything else as a `file` row, which shows
+    a file-type icon where the preview would be. Only files something is at
+    right now, same as `scan`: the delivery that actually succeeded had a
+    file there, so what this skips is a call that failed, and a scratchpad
+    since cleaned up — whose earlier sightings the saved records still hold.
+    Only *local* ones, too: the real tool never carries a URL, so a
+    remote-looking entry is a doctored transcript (this module trusts
+    nothing read from disk), refused before it costs anything.
     """
     if not isinstance(path, str) or not path.strip():
         return None
     written = path.strip()
-    if is_remote(written) or not editorfiles.is_image_path(written):
+    if is_remote(written):
         return None
     key = linkpatterns.resolve_path(written, roots)
     if key is None:
-        log.debug("delivered image resolved nowhere: %r", written)
+        log.debug("delivered file resolved nowhere: %r", written)
         return None
-    return sighting(key, source=LIGHTBOX, caption=caption, now=now)
+    kind = "image" if editorfiles.is_image_path(written) else "file"
+    return sighting(key, kind=kind, source=LIGHTBOX, caption=caption, now=now)
 
 
 def _names_an_image(match: re.Match) -> bool:

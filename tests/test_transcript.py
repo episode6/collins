@@ -556,11 +556,28 @@ def test_images_sent_with_senduserfile_are_listed_with_their_caption(tmp_path):
     assert all(one.source == "lightbox" for one in by_key.values())
 
 
-def test_a_sent_non_image_is_not_listed(tmp_path):
+def test_a_sent_non_image_is_listed_as_a_file(tmp_path):
+    """The delivery tool is the one feed that records more than pictures:
+    a report handed straight to the user lands as a `file` row, with the
+    call's caption — where the same path merely mentioned in prose (the
+    scan) stays out of the panel."""
     report = tmp_path / "report.txt"
     report.write_text("words")
     p = tmp_path / "s.jsonl"
-    _write(p, [_sent_line([str(report)])])
+    _write(p, [_sent_line([str(report)], "the summary")])
+    m = TranscriptModel(p)
+    assert m.update() is True
+    (one,) = m.attachments()
+    assert one.key == str(report)
+    assert one.kind == "file"
+    assert one.caption == "the summary"
+
+
+def test_a_non_image_mentioned_in_prose_is_still_not_listed(tmp_path):
+    report = tmp_path / "report.txt"
+    report.write_text("words")
+    p = tmp_path / "s.jsonl"
+    _write(p, [_said(f"wrote it all up in {report}")])
     m = TranscriptModel(p)
     m.update()
     assert m.attachments() == []

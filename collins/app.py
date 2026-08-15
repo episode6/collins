@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-14. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -198,11 +198,24 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   padding: 6px;
   border-radius: 8px;
 }
+/* the preview / file-face slot draws as a chip: a hairline of the panel's
+   own foreground around rounded corners (the widget clips its child to
+   them, so a picture's corners follow). .filled only -- while an image row
+   waits its turn to decode the slot is empty, and a border around nothing
+   is a stray line over the caption. */
 .attachments-panel .attachment-thumb {
   border-radius: 6px;
 }
+.attachments-panel .attachment-thumb.filled {
+  border: 1px solid alpha(currentColor, 0.25);
+}
 .attachments-panel .attachment-standin {
-  padding: 12px 4px;
+  padding: 12px 8px;
+}
+/* a non-picture file's row face: file-type icon beside the bare name,
+   padded like the stand-in so the two one-line chips rhyme */
+.attachments-panel .attachment-file {
+  padding: 8px;
 }
 .attachments-panel .attachment-caption {
   font-size: 0.9em;
