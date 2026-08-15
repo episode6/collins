@@ -4,7 +4,11 @@
 
 `attachrecords` writes down each image a session puts on screen; this is
 where that list is finally shown — a narrow column of previews sliding in
-from the terminal's right edge, newest at the top, one row per picture.
+from the terminal's right edge, one row per picture, in the order the
+conversation beside it runs: oldest at the top, newest at the bottom, the
+list parked at that bottom edge. It sits alongside a terminal transcript
+that grows downward, and a column that grew the other way would have the
+picture just shown at the far end from the message that showed it.
 Clicking a row opens the lightbox it came out of, with the caption the agent
 gave it; right-clicking offers the picture to another app, to the file
 manager, or to the clipboard, and can strike a row off the list.
@@ -20,7 +24,7 @@ A row is a preview, and a preview is not a full-size decode: `pictures`
 scales while decoding so a hundred screenshots cost a column's worth of
 memory rather than a screenshot's worth each, and rows fill one at a time
 from the idle loop so a panel opening on a long session appears at once and
-fills top-down instead of freezing on ninety-nine decodes.
+fills newest-first instead of freezing on ninety-nine decodes.
 
 The list is a record of what the session saw, not a claim about what is
 still there. A file that has been deleted keeps its row and draws a stand-in
@@ -57,6 +61,11 @@ PANEL_WIDTH = 280
 # The tallest a preview grows. A portrait phone screenshot would otherwise
 # be a whole panel's worth of one picture.
 _THUMB_HEIGHT = 200
+# How far off the bottom edge still counts as being parked at it, so the
+# list keeps following new pictures. A preview is tall, so this is generous
+# on purpose: a nudge of the wheel shouldn't unstick the list, and reading
+# a row properly means scrolling well clear of this.
+_STUCK_SLACK = 48
 
 
 class AttachmentsView(Gtk.Box):
@@ -93,6 +102,11 @@ class AttachmentsView(Gtk.Box):
         # works through them (0 when none is armed).
         self._pending: list[_Row] = []
         self._fill_source = 0
+        # Whether the list is following the bottom edge — true until someone
+        # scrolls up off it, and true again when they come back down — and
+        # the idle that re-parks it there (0 when none is armed).
+        self._stuck = True
+        self._pin_source = 0
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         header.add_css_class("attachments-header")
@@ -117,6 +131,14 @@ class AttachmentsView(Gtk.Box):
         scroller = Gtk.ScrolledWindow(child=self._list, vexpand=True)
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self._scroller = scroller
+        vadj = scroller.get_vadjustment()
+        vadj.connect("value-changed", self._on_scrolled)
+        # The list grows two ways — a picture lands, or a row that was
+        # waiting its turn finally decodes and stops being a caption's worth
+        # of height — and both come through as a taller `upper`. Following
+        # that rather than the appends alone is what keeps a panel filling in
+        # the background from creeping off the bottom of itself.
+        vadj.connect("notify::upper", self._on_grown)
         self._stack = Gtk.Stack(vexpand=True)
         self._stack.add_named(scroller, "list")
         self._stack.add_named(_empty_state(), "empty")
@@ -186,10 +208,11 @@ class AttachmentsView(Gtk.Box):
             )
 
     def focus_list(self) -> None:
-        """Put the keyboard on the newest picture — a row is a button, so
-        that is one Enter from the lightbox and one Tab from the next one.
-        An empty list has only its scroller to offer."""
-        row = self._list.get_first_child()
+        """Put the keyboard on the newest picture — the last row, since this
+        list runs oldest-first. A row is a button, so that is one Enter from
+        the lightbox and one Shift+Tab from the picture before it. An empty
+        list has only its scroller to offer."""
+        row = self._list.get_last_child()
         (row if row is not None else self._scroller).grab_focus()
 
     def has_focus_within(self) -> bool:
@@ -200,35 +223,73 @@ class AttachmentsView(Gtk.Box):
     # -- the list --------------------------------------------------------------
 
     def set_records(self, attachments: list[Attachment]) -> None:
-        """Show *attachments*, newest first, keeping the rows already up.
+        """Show *attachments*, keeping the rows already up.
+
+        They arrive newest-first (`attachrecords` ranks and caps them that
+        way) and are hung the other way up, so the newest is the bottom row —
+        see the module docstring for why.
 
         Called on every sighting, so it diffs rather than rebuilds: a row
         whose key is still in the list keeps its widget, its decoded preview
         and its place in the scroll, and only the order and the labels are
-        brought into line. A rebuild would scroll the panel back to the top
-        and re-decode every picture each time a new one landed.
+        brought into line. A rebuild would throw away the scroll position and
+        re-decode every picture each time a new one landed.
         """
         self._records = {one.key: one for one in attachments}
         for key in [key for key in self._rows if key not in self._records]:
             row = self._rows.pop(key)
             self._list.remove(row)
+        fresh: list[_Row] = []
         previous: _Row | None = None
-        for one in attachments:
+        for one in reversed(attachments):
             row = self._rows.get(one.key)
             if row is None:
                 row = _Row(one, self)
                 self._rows[one.key] = row
                 self._list.append(row)
-                self._pending.append(row)
-                self._schedule_fill()
+                fresh.append(row)
             else:
                 row.update(one)
             if row.get_prev_sibling() is not previous:
-                # None puts it at the head, which is where a new sighting of
-                # an image seen before belongs.
+                # None puts it at the head, the oldest end; the tail is where
+                # a new sighting of an image seen before belongs.
                 self._list.reorder_child_after(row, previous)
             previous = row
+        if fresh:
+            # Queued newest-first, against the oldest-first order they were
+            # built in: the bottom of the column is what the panel opens on,
+            # so those are the previews worth decoding first.
+            self._pending.extend(reversed(fresh))
+            self._schedule_fill()
         self._stack.set_visible_child_name("list" if attachments else "empty")
+
+    # -- following the bottom edge ---------------------------------------------
+
+    def _on_scrolled(self, adj: Gtk.Adjustment) -> None:
+        self._stuck = adj.get_value() >= adj.get_upper() - adj.get_page_size() - _STUCK_SLACK
+
+    def _on_grown(self, _adj: Gtk.Adjustment, _pspec) -> None:
+        """The list got taller — follow it down, but not from in here.
+
+        A taller `upper` is announced from inside the viewport's own size
+        allocation, and a value set during that allocation is a value the
+        scroller has already finished laying out against: the adjustment
+        reads as parked at the bottom while the column is still drawn where
+        it was, and the next attempt to park it is the no-op that setting an
+        adjustment to the value it already holds always is. So this only
+        marks the intent, and the idle below — which runs after the frame,
+        not inside it — is what moves the list.
+        """
+        if self._stuck and self._pin_source == 0:
+            self._pin_source = GLib.idle_add(self._pin_bottom)
+
+    def _pin_bottom(self) -> bool:
+        """Park the list on its newest row (the idle `_on_grown` arms)."""
+        self._pin_source = 0
+        if self._stuck:
+            adj = self._scroller.get_vadjustment()
+            adj.set_value(adj.get_upper() - adj.get_page_size())
+        return GLib.SOURCE_REMOVE
 
     def _schedule_fill(self) -> None:
         if self._fill_source == 0:
@@ -238,8 +299,9 @@ class AttachmentsView(Gtk.Box):
         """Decode one waiting row, then hand the loop back.
 
         A hundred decodes in one go is a frozen window; one per idle turn is
-        a panel that paints immediately and fills from the top, which is
-        where the pictures anyone opened the panel for are.
+        a panel that paints immediately and fills from the newest picture
+        back, which is the end anyone opened the panel for and the end it is
+        parked at.
         """
         self._fill_source = 0
         while self._pending:
