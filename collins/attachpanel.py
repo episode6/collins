@@ -49,7 +49,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import pictures, scrolling  # noqa: E402
+from . import editorfiles, pictures, scrolling  # noqa: E402
 from .attachrecords import Attachment  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -71,11 +71,13 @@ _THUMB_HEIGHT = 200
 class AttachmentsView(Gtk.Box):
     """The panel widget itself (see module docstring).
 
-    *open_image(attachment, path)* shows one picture: the host has the
-    lightbox's editor gating in hand, and *path* is a local file — a remote
-    image is downloaded before it is ever passed on. Only image rows go
-    through it; a file row's activation stays in the panel, which launches
-    the desktop's default handler (see `open`). *forget(key)* drops a
+    *open_image(attachment, path, navigate)* shows one picture: the host has
+    the lightbox's editor gating in hand, and *path* is a local file — a
+    remote image is downloaded before it is ever passed on. *navigate* is the
+    arrow-key hook the lightbox drives with -1/+1 to walk this list's images
+    (see `_navigate_from`). Only image rows go through it; a file row's
+    activation stays in the panel, which launches the desktop's default
+    handler (see `open`). *forget(key)* drops a
     record from the session's list, and *notify(message)* is where the
     things that can only be said in words go (the terminal's feed_message).
     """
@@ -89,7 +91,7 @@ class AttachmentsView(Gtk.Box):
 
     def __init__(
         self,
-        open_image: Callable[[Attachment, str], None],
+        open_image: Callable[[Attachment, str, Callable[[int], None]], None],
         forget: Callable[[str], None],
         notify: Callable[[str], None],
     ) -> None:
@@ -331,9 +333,40 @@ class AttachmentsView(Gtk.Box):
         way to show a spreadsheet, and the default handler is what a
         double-click on the file anywhere else would do."""
         if one.kind == "image":
-            self._with_local_file(one, lambda path: self._open_image(one, path))
+            self._with_local_file(
+                one,
+                lambda path: self._open_image(
+                    one, path, lambda step: self._navigate_from(one, step)
+                ),
+            )
         else:
             self._with_local_file(one, self._launch_default)
+
+    def _navigate_from(self, one: Attachment, step: int) -> None:
+        """Open the image *step* rows away from *one* (the lightbox's arrow
+        keys, -1 for the previous picture, +1 for the next). The stepping
+        rules — pictures only, ends don't wrap — live in the GTK-free
+        `editorfiles.gallery_step`, so all this does is read the rows for
+        their order and open whatever it names. `open` builds a fresh
+        lightbox, which (being one-at-a-time) replaces the one the arrow was
+        pressed in."""
+        key = editorfiles.gallery_step(self._ordered_entries(), one.key, step)
+        target = self._records.get(key) if key is not None else None
+        if target is not None:
+            self.open(target)
+
+    def _ordered_entries(self) -> list[tuple[str, str]]:
+        """Every row as a `(kind, key)` pair in the order they hang — oldest
+        at the top, newest at the bottom — the raw material
+        `editorfiles.gallery_step` walks. Read off the live rows, the
+        authority on both order and which records are still listed."""
+        entries: list[tuple[str, str]] = []
+        row = self._list.get_first_child()
+        while row is not None:
+            if isinstance(row, _Row):
+                entries.append((row.attachment.kind, row.attachment.key))
+            row = row.get_next_sibling()
+        return entries
 
     def _with_local_file(self, one: Attachment, then: Callable[[str], None]) -> None:
         """Hand *then* a real file for *one*, downloading it if it is remote.
@@ -480,6 +513,12 @@ class _Row(Gtk.Button):
         right_click.connect("pressed", self._on_right_click)
         self.add_controller(right_click)
         self.update(one)
+
+    @property
+    def attachment(self) -> Attachment:
+        """The record this row currently stands for (the panel reads it back
+        to order the gallery for the lightbox's arrow keys)."""
+        return self._one
 
     @property
     def needs_decode(self) -> bool:

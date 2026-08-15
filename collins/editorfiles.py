@@ -335,6 +335,30 @@ def lightbox_zoombar_inside(bar_h: int, slot_h: int) -> bool:
     return bar_h * 2 <= slot_h
 
 
+def gallery_step(
+    entries: list[tuple[str, str]], current_key: str, step: int
+) -> str | None:
+    """The key of the image *step* positions from *current_key* when the
+    lightbox's arrow keys walk a gallery — the attachments panel's rows.
+
+    *entries* is every row in display order as a `(kind, key)` pair; only the
+    `"image"` ones are walked, so a file row between two pictures is stepped
+    straight over. The ends don't wrap: an arrow at the first/last image (or
+    stepping off either end) returns None, as does a *current_key* that names
+    no picture — a file row, or a record struck off the list while its
+    lightbox was still up. GTK-free on purpose, like lightbox_layout, so the
+    stepping invariants can be unit-tested without a display."""
+    images = [key for kind, key in entries if kind == "image"]
+    try:
+        here = images.index(current_key)
+    except ValueError:
+        return None
+    target = here + step
+    if 0 <= target < len(images):
+        return images[target]
+    return None
+
+
 def path_from_file_uri(uri: str) -> str | None:
     """The local filesystem path a `file:` URI points at, or None when it
     isn't one (other scheme, or a remote host). Sheds any query/fragment —

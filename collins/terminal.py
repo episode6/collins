@@ -2470,11 +2470,17 @@ class TerminalTab(Gtk.Box):
         revealer.set_reveal_child(False)
         self.grab_terminal_focus()
 
-    def _show_attachment(self, one: attachrecords.Attachment, path: str) -> None:
+    def _show_attachment(
+        self,
+        one: attachrecords.Attachment,
+        path: str,
+        navigate: Callable[[int], None],
+    ) -> None:
         """Open a row's picture in the lightbox, with the caption it was
         shown under. Same editor gating as every other image this tab opens:
         the button appears only for a file this session could edit — which a
-        downloaded copy of a remote image never is."""
+        downloaded copy of a remote image never is. *navigate* is the panel's
+        arrow-key hook, walking its gallery to the previous/next picture."""
         can_edit = self.can_open_in_editor(path)
         on_open = None
         if can_edit:
@@ -2491,6 +2497,7 @@ class TerminalTab(Gtk.Box):
             on_open_in_editor=on_open,
             caption=one.caption or one.context,
             origin=one.origin if one.remote else None,
+            navigate=navigate,
         )
 
     def _toggle_attachments_dock(self) -> None:

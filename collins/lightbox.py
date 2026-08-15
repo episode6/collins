@@ -34,8 +34,20 @@ shade clicks produce no event propagation at all and no controller anywhere
 sees them. This widget IS the shade, added to the main window's
 `lightbox_overlay` (a Gtk.Overlay wrapping the window content), so every
 pixel is targetable by us: any press that isn't the image, the zoom bar or
-a button closes, as does Esc (a capture-phase key controller on the window,
-so focus doesn't matter).
+a button closes, as does Esc. The key controller is capture-phase on the
+window, so focus doesn't matter: it acts on Esc (close) and the arrows (step
+to the previous/next image in the gallery the caller wired up via `navigate`).
+Opening the lightbox also moves the keyboard focus onto the shade itself, so
+that while it is up nothing typed at a picture leaks through to the terminal
+behind it — the controller swallows every key it doesn't act on, but Tab
+still walks the shade's own buttons (trapped so focus can't wander back out)
+and Enter/Space still activate the focused one, so the buttons stay reachable
+from the keyboard.
+
+Only one lightbox floats at a time: presenting a second image (a fresh
+click, or an arrow walking the gallery) closes whatever shade is already up
+and takes its place, rather than stacking shades (and leaking their root key
+controllers). The overlay remembers its live one in `_active_lightbox`.
 
 Presented when a clicked file reference turns out to be an image (see
 terminal._setup_links), and by the `show_image` session tool — which may
@@ -105,9 +117,16 @@ class ImageLightbox(Gtk.Box):
         on_open_in_editor: Callable[[], None] | None = None,
         caption: str | None = None,
         origin: str | None = None,
+        navigate: Callable[[int], None] | None = None,
     ) -> None:
         super().__init__()
         self._path = Path(path)
+        # Called with -1/+1 when the left/right (or up/down) arrow is pressed,
+        # to step to the previous/next image; None when this lightbox was
+        # opened somewhere with no gallery to walk (a clicked path, the
+        # composer, show_image). See the attachments panel for the one caller
+        # that supplies it.
+        self._navigate = navigate
         # What the image is called when it can't be shown: the file's own
         # name, unless the caller knows the path is a stand-in for something
         # the user would recognize better (show_image's downloaded copy of a
@@ -129,6 +148,12 @@ class ImageLightbox(Gtk.Box):
         self.add_css_class("lightbox-shade")
         self.set_hexpand(True)
         self.set_vexpand(True)
+        # The shade takes focus when it opens (present_over), so the terminal
+        # behind it stops receiving keystrokes; Tab then dives into the action
+        # buttons from here. Focusable, but no focus ring of its own — it is
+        # the empty backdrop, not a control.
+        self.set_focusable(True)
+        self.set_can_focus(True)
 
         self._paintable = self._load_paintable()
         if self._paintable is not None:
@@ -290,6 +315,15 @@ class ImageLightbox(Gtk.Box):
             launcher.launch(root, None, lambda lch, res: _launch_done(lch, res))
             return
         self._overlay = overlay
+        # One lightbox at a time: a second image (a fresh click, or an arrow
+        # stepping through the gallery) replaces whatever is already floating
+        # rather than stacking a shade — and each shade owns its own root Esc
+        # controller, which stacking would leak. The overlay is held by
+        # MainWindow, so this attribute rides the same live wrapper.
+        previous = getattr(overlay, "_active_lightbox", None)
+        if previous is not None and previous is not self:
+            previous.close()
+        overlay._active_lightbox = self
 
         win_w, win_h = root.get_width(), root.get_height()
         side, width, height = lightbox_layout(*self._image_size, win_w, win_h)
@@ -348,8 +382,12 @@ class ImageLightbox(Gtk.Box):
         click.connect("pressed", self._on_shade_pressed)
         self.add_controller(click)
 
-        # Esc closes no matter what holds keyboard focus: capture phase on
-        # the window itself, removed again on close.
+        # Esc and the arrows work no matter what holds focus: capture phase on
+        # the window itself, so the controller wins first, acts on the keys it
+        # owns (Esc, arrows) and swallows the rest so nothing typed at a
+        # picture reaches the terminal behind the shade — bar the keys that
+        # operate the shade's own buttons (_on_root_key). Removed again on
+        # close.
         esc = Gtk.EventControllerKey()
         esc.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         esc.connect("key-pressed", self._on_root_key)
@@ -367,6 +405,15 @@ class ImageLightbox(Gtk.Box):
             ]
 
         overlay.add_overlay(self)
+        # Take the keyboard off the terminal so it stops seeing keystrokes
+        # while the lightbox is up. From an idle: the shade has to be mapped
+        # before it can hold focus.
+        GLib.idle_add(self._grab_shade_focus)
+
+    def _grab_shade_focus(self) -> bool:
+        if self._overlay is not None:
+            self.grab_focus()
+        return GLib.SOURCE_REMOVE
 
     def close(self) -> None:
         if self._fade_source:
@@ -380,6 +427,8 @@ class ImageLightbox(Gtk.Box):
                 self._surface.disconnect(handler)
             self._surface, self._surface_handlers = None, []
         if self._overlay is not None:
+            if getattr(self._overlay, "_active_lightbox", None) is self:
+                self._overlay._active_lightbox = None
             self._overlay.remove_overlay(self)
             self._overlay = None
 
@@ -647,11 +696,46 @@ class ImageLightbox(Gtk.Box):
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self.close()
 
-    def _on_root_key(self, _ctrl, keyval, _keycode, _state) -> bool:
-        if keyval != Gdk.KEY_Escape:
-            return False
-        self.close()
-        return True
+    def _on_root_key(self, _ctrl, keyval, _keycode, state) -> bool:
+        """The lightbox owns the keyboard while it is up. Esc closes; the
+        arrows (and their keypad twins) walk the gallery; Tab walks the
+        shade's own buttons and is trapped so focus can't slip back to the
+        terminal; Enter/Space fall through to activate the focused button.
+        Everything else is swallowed, so nothing typed at a picture reaches
+        the terminal behind the shade."""
+        if keyval == Gdk.KEY_Escape:
+            self.close()
+            return True
+        if keyval in (Gdk.KEY_Left, Gdk.KEY_Up, Gdk.KEY_KP_Left, Gdk.KEY_KP_Up):
+            if self._navigate is not None:
+                self._navigate(-1)
+            return True
+        if keyval in (Gdk.KEY_Right, Gdk.KEY_Down, Gdk.KEY_KP_Right, Gdk.KEY_KP_Down):
+            if self._navigate is not None:
+                self._navigate(1)
+            return True
+        if keyval in (Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_KP_Tab):
+            backward = keyval == Gdk.KEY_ISO_Left_Tab or bool(
+                state & Gdk.ModifierType.SHIFT_MASK
+            )
+            self._cycle_focus(backward)
+            return True
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_ISO_Enter, Gdk.KEY_space):
+            return False  # let the focused button activate itself
+        return True  # swallowed: never reaches the terminal
+
+    def _cycle_focus(self, backward: bool) -> None:
+        """Move focus to the shade's next/previous focusable (its buttons),
+        wrapping at the ends rather than letting Tab escape to the terminal
+        the shade is covering."""
+        direction = (
+            Gtk.DirectionType.TAB_BACKWARD if backward else Gtk.DirectionType.TAB_FORWARD
+        )
+        if not self.child_focus(direction):
+            # Off the end of the strip: re-seed from the shade so the next
+            # step wraps to the far button instead of leaving the lightbox.
+            self.grab_focus()
+            self.child_focus(direction)
 
     # -- actions -------------------------------------------------------------
 
@@ -681,7 +765,8 @@ def present_image_lightbox(
     on_open_in_editor: Callable[[], None] | None = None,
     caption: str | None = None,
     origin: str | None = None,
+    navigate: Callable[[int], None] | None = None,
 ) -> None:
     ImageLightbox(
-        path, can_open_in_editor, on_open_in_editor, caption, origin
+        path, can_open_in_editor, on_open_in_editor, caption, origin, navigate
     ).present_over(parent)
