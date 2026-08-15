@@ -58,6 +58,25 @@ def worktree_project_root(cwd: str | None) -> str | None:
     return None
 
 
+def worktree_shares_project(cwd: str | None, project_dir: str | None) -> bool:
+    """Whether `cwd` is a Claude-managed worktree belonging to the same project
+    as `project_dir`.
+
+    `project_dir` may itself be a worktree of that project — the case a
+    background `start_session` makes ordinary, when an agent already working in
+    a worktree spawns a sibling and git roots the sibling's new worktree at the
+    *main* repo, not under the caller's worktree. Both sides are collapsed to
+    the repo they belong to before comparing (a `project_dir` that is already a
+    repo root is its own root, since worktree_project_root returns None there).
+
+    False when `cwd` isn't a worktree at all — there is no project to share."""
+    root = worktree_project_root(cwd)
+    if root is None or not project_dir:
+        return False
+    project_root = worktree_project_root(project_dir) or project_dir
+    return os.path.realpath(root) == os.path.realpath(project_root)
+
+
 def project_name_for_cwd(cwd: str) -> str:
     """The project a working directory belongs to: the repository for
     Claude-managed worktrees, the directory's own name otherwise."""
