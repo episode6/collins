@@ -392,12 +392,12 @@ class PreferencesDialog(Adw.Dialog):
         self._tab_drag_row.connect("notify::active", self._on_tab_drag_changed)
         panels_group.add(self._tab_drag_row)
         self._attach_autodock_row = Adw.SwitchRow(
-            title=_("Show the images panel automatically"),
+            title=_("Show the attachments panel automatically"),
             subtitle=_(
-                "Dock a session's gallery of images beside it the first "
-                "time it shows one — only in a tab wide enough to spare "
-                "the column, past the terminal's maximum width. Once per "
-                "session tab, so one you close again stays closed"
+                "Dock a session's attachments panel beside it the first "
+                "time it shows an image — only in a tab wide enough to "
+                "spare the column, past the terminal's maximum width. Once "
+                "per session tab, so one you close again stays closed"
             ),
         )
         self._attach_autodock_row.set_active(
@@ -405,7 +405,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._attach_autodock_row.connect("notify::active", self._on_attach_autodock_changed)
         panels_group.add(
-            _searchable(self._attach_autodock_row, "attachments", "gallery", "dock")
+            _searchable(self._attach_autodock_row, "images", "gallery", "dock")
         )
         page.add(panels_group)
 

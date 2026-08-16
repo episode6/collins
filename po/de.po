@@ -935,11 +935,11 @@ msgstr "Neue Pull-Requests automatisch öffnen"
 msgid "Open a pull request's panel beside its session as soon as the session picks the PR up. Once per pull request, so one you close again stays closed"
 msgstr "Das Panel eines Pull-Requests neben seiner Sitzung öffnen, sobald die Sitzung den Pull-Request aufnimmt. Einmal pro Pull-Request — ein wieder geschlossenes Panel bleibt also zu"
 
-msgid "Show the images panel automatically"
-msgstr "Das Bilder-Panel automatisch anzeigen"
+msgid "Show the attachments panel automatically"
+msgstr "Das Anhänge-Panel automatisch anzeigen"
 
-msgid "Dock a session's gallery of images beside it the first time it shows one — only in a tab wide enough to spare the column, past the terminal's maximum width. Once per session tab, so one you close again stays closed"
-msgstr "Die Bildergalerie einer Sitzung neben ihr andocken, sobald sie das erste Bild zeigt — nur in einem Tab, der breit genug für eine eigene Spalte jenseits der maximalen Terminalbreite ist. Einmal pro Sitzungstab — ein wieder geschlossenes Panel bleibt also zu"
+msgid "Dock a session's attachments panel beside it the first time it shows an image — only in a tab wide enough to spare the column, past the terminal's maximum width. Once per session tab, so one you close again stays closed"
+msgstr "Das Anhänge-Panel einer Sitzung neben ihr andocken, sobald sie das erste Bild zeigt — nur in einem Tab, der breit genug für eine eigene Spalte jenseits der maximalen Terminalbreite ist. Einmal pro Sitzungstab — ein wieder geschlossenes Panel bleibt also zu"
 
 msgid "Open composer (Ctrl+.)"
 msgstr "Composer öffnen (Strg+.)"
