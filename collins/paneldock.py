@@ -19,11 +19,17 @@ into slivers.
 One page at a time can step out of that tree entirely: the tab row's
 overlay button *maximizes* it, floating it over the whole session tab —
 terminal, every other strip, and the editor column beside the dock — until
-the restore button at its top-left drops it back into the tab row it came
-from. It is still one of its strip's pages while it is up there (see
-`_strip_pages`): its scrollback saves, its running command blocks a close,
-and the strip it left stays in the tree however empty, because "restore it
-to where it was" has to have a where.
+the restore button at its top-left (or Escape) drops it back into the tab
+row it came from. It is still one of its strip's pages while it is up
+there (see `_strip_pages`): its scrollback saves, its running command
+blocks a close, and the strip it left stays in the tree however empty,
+because "restore it to where it was" has to have a where.
+
+A maximized page also owns the keyboard for as long as it is up: the pane
+hides everything the overlay covers, so a keystroke that reached anything
+under it would be typed into a window the user cannot see — most of all
+the agent's own terminal. The focus trap (`_on_root_focus_changed`) sends
+any focus that lands behind the overlay straight back to the page.
 
 The *home strip* is the strip Ctrl+J toggles: it lives on the home edge
 of the terminal (`home_position`, "bottom" | "right"), can be hidden
@@ -41,7 +47,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import paneldnd  # noqa: E402
+from . import paneldnd, panelkeys  # noqa: E402
 from .docktree import DockTree, Leaf, Split  # noqa: E402
 from .dockzones import EDGE_ZONES  # noqa: E402
 from .i18n import _  # noqa: E402
@@ -180,8 +186,22 @@ class PanelDock(Adw.Bin):
         self._max_pane = _MaxPane(self.restore_maximized)
         self._max_host = overlay
         overlay.add_overlay(self._max_pane)
+        # Escape puts a maximized page back down. CAPTURE, so it is decided
+        # before the page's own widgets see it — a maximized shell's VTE
+        # consumes every key it is given, and a bubbling Escape would never
+        # reach here (see `_on_max_key` for what a shell keeps).
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self._on_max_key)
+        self._max_pane.add_controller(keys)
+        # The focus trap that keeps the keyboard inside a maximized page:
+        # the window whose focus it watches while one is up, the handler on
+        # it, and the re-entrancy latch its own grab trips.
+        self._focus_root: Gtk.Window | None = None
+        self._focus_handler = 0
+        self._refocusing = False
         # The guard group for this dock's strip views dies with the dock.
-        self.connect("destroy", lambda *_: guard.clear_fallback(self))
+        self.connect("destroy", self._on_destroy)
 
     # -- wiring ------------------------------------------------------------
 
@@ -851,6 +871,7 @@ class PanelDock(Adw.Bin):
         self._wire_max_page(widget)
         self._max_pane.set_page_title(widget.page_title())
         self._max_pane.set_visible(True)
+        self._arm_focus_trap()
         GLib.idle_add(widget.grab_page_focus)
 
     def restore_maximized(self) -> bool:
@@ -866,6 +887,7 @@ class PanelDock(Adw.Bin):
         if rec is None:
             return False
         self._max = None
+        self._disarm_focus_trap()
         self._max_pane.set_visible(False)
         for handler in rec.handlers:
             rec.widget.disconnect(handler)
@@ -899,6 +921,77 @@ class PanelDock(Adw.Bin):
                     "title-changed", lambda page: self._max_pane.set_page_title(page.page_title())
                 )
             )
+
+    def _on_max_key(self, _controller, keyval: int, _keycode: int, state) -> bool:
+        """Escape, typed anywhere inside a maximized page: put it back down.
+
+        Bare Escape only, and only where the page doesn't want the key for
+        itself — the decision is `panelkeys.escape_restores` (GTK-free, so
+        the tests can reach it). A page states its claim with the optional
+        `holds_escape()` hook: a maximized shell running vim or a pager
+        needs Escape to reach it, and at a bare prompt it doesn't. Pages
+        without the hook never keep it.
+        """
+        rec = self._max
+        if rec is None:
+            return False
+        holds = getattr(rec.widget, "holds_escape", None)
+        if not panelkeys.escape_restores(
+            int(keyval), int(state), holds if holds is not None else lambda: False
+        ):
+            return False
+        self.restore_maximized()
+        return True
+
+    def _arm_focus_trap(self) -> None:
+        """Watch the window's focus for as long as a page is maximized.
+
+        Everything the pane covers is still there, focusable and one Tab
+        (or one tab switch, which re-grabs the agent terminal) away — and
+        typing into a widget hidden under an opaque overlay is typing
+        blind. Nothing is made insensitive to achieve it: the agent's VTE
+        stays live, it just doesn't get to hold the keyboard."""
+        root = self.get_root()
+        if root is None or self._focus_handler:
+            return
+        self._focus_root = root
+        self._focus_handler = root.connect(
+            "notify::focus-widget", self._on_root_focus_changed
+        )
+
+    def _disarm_focus_trap(self) -> None:
+        if self._focus_handler and self._focus_root is not None:
+            self._focus_root.disconnect(self._focus_handler)
+        self._focus_root = None
+        self._focus_handler = 0
+
+    def _on_root_focus_changed(self, root, _pspec) -> None:
+        """Focus moved: pull it back if it landed behind the overlay.
+
+        "Behind" is the maximize host's own child — the whole session tab
+        minus its footer, which the pane deliberately doesn't cover (see
+        `set_maximize_host`). Focus anywhere else is left alone: a dialog,
+        a popover, the sidebar, another tab, and the footer's chips are all
+        outside what the page is covering, so none of them is a keystroke
+        going somewhere unseen."""
+        rec = self._max
+        if rec is None or self._refocusing:
+            return
+        focus = root.get_focus()
+        behind = self._max_host.get_child()
+        if focus is None or behind is None:
+            return
+        if focus is not behind and not focus.is_ancestor(behind):
+            return
+        self._refocusing = True
+        try:
+            rec.widget.grab_page_focus()
+        finally:
+            self._refocusing = False
+
+    def _on_destroy(self, *_args) -> None:
+        self._disarm_focus_trap()
+        guard.clear_fallback(self)
 
     def _on_max_shell_exited(self, shell) -> None:
         """`exit` typed in a maximized shell: the page goes home and then
