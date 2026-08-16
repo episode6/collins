@@ -233,11 +233,11 @@ def check_close_recent() -> None:
     )
 
 
-def open_page_dock(width: int, max_width: int, seed: int = 400) -> PanelDock:
+def open_page_dock(width: int, max_width: int, seed: int = 400, home="bottom") -> PanelDock:
     """A dock whose terminal is *width* px across and stops growing at
     *max_width*, with *seed* px as the app-wide size for docked-page strips
     (0 = never sized, so a new strip opens at the default fraction)."""
-    dock = make_dock(terminal=FakeTerminal(width))
+    dock = make_dock(home=home, terminal=FakeTerminal(width))
     dock.apply_settings({"terminal_max_width": max_width})
     dock.set_size_lookup(lambda _scope, _mode, s=seed: s)
     return dock
@@ -308,6 +308,40 @@ def check_open_page_splits() -> None:
         "...and refused when that width won't fit",
         len(unsized_tight.strips()) == 1 and unsized_tight.strips()[0].page_count == 2,
         unsized_tight.strips(),
+    )
+
+    # A right-docked home strip is a strip on that axis like any other: with
+    # room to spare the page takes its own column rather than a seat in the
+    # shells' tab row, and the panel Ctrl+J toggles is left as it was — same
+    # pages, same home role, same divider against the terminal.
+    right_home = open_page_dock(2400, 1200, home="right")
+    right_home.show_home()
+    drain()
+    home_strip = right_home._home_strip
+    page = FakePage(1)
+    right_home.open_page(page)
+    drain()
+    check(
+        "a right-docked panel isn't joined when there's room beside it",
+        len(right_home.strips()) == 2 and right_home._strip_of(page) is not home_strip,
+        right_home.strips(),
+    )
+    check(
+        "...and keeps its shells, its home role and its divider",
+        right_home._home_strip is home_strip
+        and len(home_strip.shell_pages()) == 1
+        and right_home._home_rec() is not None,
+        (right_home._home_strip, home_strip.shell_pages()),
+    )
+    tight_home = open_page_dock(1400, 1200, home="right")
+    tight_home.show_home()
+    drain()
+    tight_home.open_page(FakePage(1))
+    drain()
+    check(
+        "with no room it joins the panel as before",
+        len(tight_home.strips()) == 1 and tight_home.strips()[0] is tight_home._home_strip,
+        tight_home.strips(),
     )
 
     below = open_page_dock(2400, 1200)

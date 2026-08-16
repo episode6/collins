@@ -528,7 +528,14 @@ class PanelDock(Adw.Bin):
         width — the pixels past it are there to be spent — and one page
         per column beats two stacked in a tab row whenever nothing has to
         give them up. Once the free width is gone the next page joins as
-        before, so the dock still can't be shredded into slivers."""
+        before, so the dock still can't be shredded into slivers.
+
+        A right-docked *home* strip is one of the strips this steps past,
+        deliberately: with the room to spare, a pull request opens beside
+        the shells rather than in their tab row, and the panel Ctrl+J
+        toggles is left exactly as it was — the new column comes out of
+        the terminal's branch, so the home divider (`_home_rec`, the split
+        *separating* the two) is still the one that sizes it."""
         self.restore_maximized()  # a page opening behind the overlay is a page lost
         if side not in ("right", "below"):
             side = "right"
