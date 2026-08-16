@@ -95,11 +95,13 @@ def get_theme(name: str | None) -> dict | None:
 def terminal_foreground(name: str | None) -> tuple[int, int, int] | None:
     """The colour a named theme draws plain terminal text in, as 0-255 RGB.
 
-    None for "Default" (and for a theme we don't know), where the terminal
-    follows the system colours and VTE offers no getter for the one it settled
-    on. Callers that can't work without it — telling a dimmed foreground from a
-    colour of the agent's own, see vtehtml.is_dim_run — fall back rather than
-    guess.
+    None for "Default" (and for a theme we don't know), where the colour is
+    VTE's rather than ours and VTE has no getter for it. _VTE_DEFAULT_FG is
+    what it draws today, but that is a colour to *style against* — a shade off
+    is invisible in a gutter or a border. Here a shade off is the whole answer:
+    the one caller, telling a dimmed foreground from a colour of the agent's
+    own (vtehtml.is_dim_run), divides by it. So it falls back to asking whether
+    the run is a grey, which holds for any neutral foreground VTE picks.
     """
     theme = _THEMES.get(name or DEFAULT_THEME)
     if not theme:
@@ -116,8 +118,9 @@ def _rgba(hex_str: str) -> Gdk.RGBA:
 
 def apply_terminal_theme(terminal: Vte.Terminal, name: str | None) -> None:
     theme = _THEMES.get(name or DEFAULT_THEME)
-    if not theme:  # "Default" / unknown → follow the system colors
+    if not theme:  # "Default" / unknown → VTE's own colors
         terminal.set_default_colors()
+        theme = _vte_default_colors(terminal)
     else:
         terminal.set_colors(
             _rgba(theme["fg"]),
@@ -125,6 +128,38 @@ def apply_terminal_theme(terminal: Vte.Terminal, name: str | None) -> None:
             [_rgba(c) for c in theme["palette"]],
         )
     _apply_dynamic_theme_css(theme)
+
+
+# What "Default" actually looks like. The name promises the system's own
+# colors, but `set_default_colors` hands the terminal to VTE, and VTE's
+# defaults are its own: 75% grey on black, in a light window as much as a dark
+# one. Styling the surfaces around such a terminal as though it followed the
+# app — @window_bg_color — is what left a black terminal sitting in a grey
+# gutter, so they follow VTE instead.
+#
+# The background is read off the widget rather than assumed, since VTE answers
+# for the one it draws (0.78+); these are the fallback for a version that
+# doesn't, and the foreground outright, there being no getter for that one.
+# The grey is the same #C0C0C0 that VTE's dim arithmetic scales to #808080
+# (see vtehtml and its tests).
+_VTE_DEFAULT_FG = "c0c0c0"
+_VTE_DEFAULT_BG = "000000"
+
+
+def _vte_default_colors(terminal: Vte.Terminal) -> dict:
+    """The foreground and background an unthemed *terminal* draws with."""
+    getter = getattr(terminal, "get_color_background_for_draw", None)
+    background = getter() if getter is not None else None
+    return {
+        "fg": _VTE_DEFAULT_FG,
+        "bg": _hex(background) if background is not None else _VTE_DEFAULT_BG,
+    }
+
+
+def _hex(color: Gdk.RGBA) -> str:
+    """*color*'s channels as a six-digit hex string, alpha dropped."""
+    channels = (color.red, color.green, color.blue)
+    return "".join(f"{round(channel * 255):02x}" for channel in channels)
 
 
 # A few places need to track whatever `apply_terminal_theme` just set on the
@@ -158,7 +193,7 @@ _OVERLAY_ALPHA = 0.9
 _COMPOSER_BOX_ALPHA = 0.6
 
 
-def _apply_dynamic_theme_css(theme: dict | None) -> None:
+def _apply_dynamic_theme_css(theme: dict) -> None:
     global _dynamic_theme_provider
     if _dynamic_theme_provider is None:
         _dynamic_theme_provider = Gtk.CssProvider()
@@ -167,10 +202,11 @@ def _apply_dynamic_theme_css(theme: dict | None) -> None:
             _dynamic_theme_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
-    # "Default" tracks the system light/dark scheme, so it has no fixed hex —
-    # @window_bg_color is the same stand-in the chat-card overlay uses for it.
-    bg_css = f"#{theme['bg']}" if theme else "@window_bg_color"
-    fg_css = f"#{theme['fg']}" if theme else "@window_fg_color"
+    # Every theme has a fixed pair of hexes, "Default" included: it is the
+    # colors VTE settled on rather than a palette of ours, but they are just
+    # as concrete (see _vte_default_colors).
+    bg_css = f"#{theme['bg']}"
+    fg_css = f"#{theme['fg']}"
     _dynamic_theme_provider.load_from_data(
         f".terminal-gutter {{ background-color: {bg_css}; }}"
         f"tabbar tab:selected {{ background-color: {bg_css}; }}"
