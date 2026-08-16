@@ -937,6 +937,21 @@ _SCHEME_CSS = """
 .pr-checks-failed { color: %(failed_red)s; }
 .pr-checks-pending { color: %(pending_yellow)s; }
 
+/* The PR panel's merge buttons — the immediate merge and auto-merge both — in
+   GitHub's own primary green rather than the accent: the button that lands a
+   branch is green on the PR page itself, and the bar only ever shows one
+   recommended action at a time, so nothing else in the header is competing for
+   the eye. The hover and pressed shades are GitHub's pairs too; disabled is the
+   merge running (see prview's _ActionBar), where the button holds its color
+   while the spinner takes its word. */
+.pr-merge-action { background-color: %(merge_green)s; color: #ffffff; }
+.pr-merge-action:hover { background-color: %(merge_green_hover)s; }
+.pr-merge-action:active { background-color: %(merge_green_active)s; }
+.pr-merge-action:disabled {
+  background-color: alpha(%(merge_green)s, 0.5);
+  color: alpha(#ffffff, 0.6);
+}
+
 /* the file tree's file-type icon palette (see filetypes.py for the mapping).
    Hues from VS Code's Seti icon theme, which is built for dark backgrounds;
    the light shades are the same hues pulled down far enough to read on
@@ -957,6 +972,9 @@ _MARK_COLORS = {
         "failed_red": "#cf222e",
         "pending_yellow": "#bf8700",
         "draft_grey": "#59636e",
+        "merge_green": "#1f883d",
+        "merge_green_hover": "#1a7f37",
+        "merge_green_active": "#187733",
     },
     True: {  # dark
         "merged_purple": "#a371f7",
@@ -964,6 +982,9 @@ _MARK_COLORS = {
         "failed_red": "#f85149",
         "pending_yellow": "#d29922",
         "draft_grey": "#9198a1",
+        "merge_green": "#238636",
+        "merge_green_hover": "#2ea043",
+        "merge_green_active": "#1f7a33",
     },
 }
 # The file-type icon palette, same keying. The dark shades are Seti's own
