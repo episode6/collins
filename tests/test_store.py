@@ -563,6 +563,23 @@ def test_set_unread_ignores_a_session_with_no_row(store):
     store.set_unread(str(uuid.uuid4()), True)  # must not raise
 
 
+def test_unread_changed_announces_only_actual_flips(store):
+    # The status icon's badge repaints off this signal, so it must fire on
+    # every real flip and never on a no-op — a repeat would be a wasted
+    # D-Bus repaint, a miss would be a stale badge.
+    session_id = store._last_sessions[0].session_id
+    flips = []
+    store.connect("unread-changed", lambda _s, sid, flag: flips.append((sid, flag)))
+
+    store.set_unread(session_id, True)
+    store.set_unread(session_id, True)  # already set: silent
+    store.set_unread(session_id, False)
+    store.set_unread(session_id, False)  # already clear: silent
+    store.set_unread(str(uuid.uuid4()), True)  # no row: silent
+
+    assert flips == [(session_id, True), (session_id, False)]
+
+
 def test_row_ids_covers_every_row_so_the_gate_can_sweep(store):
     # The background gate is app-wide — one handoff at a time — so closing it
     # means re-evaluating every row, not just the one being handed over.

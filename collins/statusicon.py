@@ -29,6 +29,13 @@ GNOME's `ubuntu-appindicators@ubuntu.com` — actually behaves:
   `IconName` and `IconThemePath` alongside as a courtesy to hosts that would
   rather look it up themselves.
 
+The unread badge is composited into those pixmaps rather than sent as text:
+the shell has no badge slot, and the one text affordance (`XAyatanaLabel`)
+renders *beside* the icon as a panel-widening label. The count is drawn fresh
+at every exported size so the host never scales a numeral, and the same
+repaint broadcasts `com.canonical.Unity.LauncherEntry.Update` so Ubuntu Dock
+badges the launcher icon too.
+
 Where there is no watcher on the bus there is no host, and nothing appears.
 That is a supported outcome rather than a bug to work around: `available()`
 says so, Preferences repeats it, and the item quietly waits for a watcher to
@@ -39,14 +46,19 @@ same name watch it re-registers from.
 from __future__ import annotations
 
 import logging
+import math
 import os
+import sys
 
+import cairo
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+gi.require_version("PangoCairo", "1.0")
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 
 from . import traymodel  # noqa: E402
 from .traymodel import TrayView  # noqa: E402
@@ -62,8 +74,21 @@ MENU_PATH = "/MenuBar"
 
 # The sizes the item exports. Panels ask for 22 or 24 logical pixels and
 # double both on HiDPI; handing over all four means the host never scales one
-# of ours, which matters more once PR 3 draws a badge into them.
+# of ours — the badge is drawn fresh at each size, and a scaled numeral is a
+# smeared one.
 ICON_SIZES = (22, 24, 32, 44)
+
+# The badge inherits nothing: it has to read against whatever is behind it —
+# a light panel, a dark one, the icon's own art underneath — so it carries
+# its own background (GNOME's destructive red) and its own numeral color.
+BADGE_FILL = (0.878, 0.106, 0.141)  # #e01b24
+BADGE_INK = (1.0, 1.0, 1.0)
+
+# Ubuntu Dock (and KDE's task manager) listen for this broadcast and badge
+# the launcher icon with `count`. Subscribers key on the app uri in the
+# signal's body, not on the sender's object path, so the path is just ours.
+LAUNCHER_INTERFACE = "com.canonical.Unity.LauncherEntry"
+LAUNCHER_PATH = "/com/canonical/unity/launcherentry/collins"
 
 # What a session row says about itself, in the one column a shell menu offers:
 # its label. Filled for working (the barber pole is moving), hollow for a run
@@ -298,15 +323,105 @@ def _load_icon(icon_name: str, size: int) -> GdkPixbuf.Pixbuf | None:
         return None
 
 
-def icon_pixmaps(icon_name: str) -> list[tuple[int, int, bytes]]:
-    """The item's artwork at every exported size, largest last. Empty when the
-    icon can't be found at all, which leaves the host to try `IconName`."""
+def _surface_argb_bytes(surface: cairo.ImageSurface) -> bytes:
+    """A rendered surface's pixels as the protocol wants them: ARGB32 in
+    network byte order, straight alpha, rows packed tight.
+
+    Cairo keeps its pixels premultiplied in native endianness, so each one is
+    unpremultiplied and reordered on the way out — handing them over as-is
+    would darken every translucent edge on the host's side.
+    """
+    width, height = surface.get_width(), surface.get_height()
+    stride = surface.get_stride()
+    pixels = surface.get_data()
+    little = sys.byteorder == "little"
+    out = bytearray(width * height * 4)
+    dst = 0
+    for y in range(height):
+        row = y * stride
+        for x in range(width):
+            i = row + x * 4
+            if little:
+                b, g, r, a = pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]
+            else:
+                a, r, g, b = pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]
+            if 0 < a < 255:
+                r = min(255, r * 255 // a)
+                g = min(255, g * 255 // a)
+                b = min(255, b * 255 // a)
+            out[dst], out[dst + 1], out[dst + 2], out[dst + 3] = a, r, g, b
+            dst += 4
+    return bytes(out)
+
+
+def _draw_badge(ctx: cairo.Context, badge: str, size: int) -> None:
+    """The unread count, drawn into the bottom-right quadrant.
+
+    A filled disc that widens into a pill when the text does ("9+"), sized
+    off the icon so every exported resolution gets its own crisp numeral. The
+    text is measured before the shape is drawn: the shape fits the number,
+    never the other way around.
+    """
+    diameter = max(round(size * 0.55), 11)
+    layout = PangoCairo.create_layout(ctx)
+    # Grayscale antialiasing, never the desktop's subpixel kind: LCD fringes
+    # baked into a pixmap travel with it, and the panel it lands on is not
+    # the display geometry they were hinted for.
+    options = cairo.FontOptions()
+    options.set_antialias(cairo.ANTIALIAS_GRAY)
+    PangoCairo.context_set_font_options(layout.get_context(), options)
+    desc = Pango.FontDescription("Sans Bold")
+    desc.set_absolute_size(round(diameter * 0.76) * Pango.SCALE)
+    layout.set_font_description(desc)
+    layout.set_text(badge, -1)
+    _ink, logical = layout.get_pixel_extents()
+    width = min(max(diameter, logical.width + max(round(diameter * 0.45), 5)), size)
+    x, y = size - width, size - diameter
+    radius = diameter / 2
+    ctx.new_path()
+    ctx.arc(x + radius, y + radius, radius, 0.5 * math.pi, 1.5 * math.pi)
+    ctx.arc(x + width - radius, y + radius, radius, 1.5 * math.pi, 0.5 * math.pi)
+    ctx.close_path()
+    ctx.set_source_rgb(*BADGE_FILL)
+    ctx.fill()
+    ctx.set_source_rgb(*BADGE_INK)
+    ctx.move_to(
+        x + (width - logical.width) / 2 - logical.x,
+        y + (diameter - logical.height) / 2 - logical.y,
+    )
+    PangoCairo.show_layout(ctx, layout)
+
+
+def _badged_surface(pixbuf: GdkPixbuf.Pixbuf, badge: str, size: int) -> cairo.ImageSurface:
+    """The icon with the badge composited on: the artwork centered on a
+    size×size canvas, the count drawn over its bottom-right corner."""
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, size, size)
+    ctx = cairo.Context(surface)
+    Gdk.cairo_set_source_pixbuf(
+        ctx,
+        pixbuf,
+        (size - pixbuf.get_width()) // 2,
+        (size - pixbuf.get_height()) // 2,
+    )
+    ctx.paint()
+    _draw_badge(ctx, badge, size)
+    surface.flush()
+    return surface
+
+
+def icon_pixmaps(icon_name: str, badge: str = "") -> list[tuple[int, int, bytes]]:
+    """The item's artwork at every exported size, largest last, with *badge*
+    (if any) composited onto each. Empty when the icon can't be found at all,
+    which leaves the host to try `IconName`."""
     pixmaps = []
     for size in ICON_SIZES:
         pixbuf = _load_icon(icon_name, size)
         if pixbuf is None:
             continue
-        pixmaps.append((pixbuf.get_width(), pixbuf.get_height(), _argb_bytes(pixbuf)))
+        if badge:
+            pixmaps.append((size, size, _surface_argb_bytes(_badged_surface(pixbuf, badge, size))))
+        else:
+            pixmaps.append((pixbuf.get_width(), pixbuf.get_height(), _argb_bytes(pixbuf)))
     return pixmaps
 
 
@@ -369,6 +484,12 @@ class StatusIcon:
         self._registered = False
         self._revision = 1
         self._pixmaps: list[tuple[int, int, bytes]] | None = None
+        self._pixmap_badge = ""
+        # What the dock was last told, None for "nothing yet": the first
+        # refresh always broadcasts, so a badge left behind by a crashed run
+        # is cleared even when this one starts with nothing unread.
+        self._dock_count: int | None = None
+        self._launcher_uri = f"application://{app_id}.desktop"
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -419,7 +540,13 @@ class StatusIcon:
 
     def stop(self) -> None:
         """Take the item off the bus. The host notices the name go away and
-        drops the icon; there is no Unregister call in the protocol."""
+        drops the icon; there is no Unregister call in the protocol.
+
+        The dock is told separately: its badge is keyed to the desktop id,
+        not to a bus name, so nothing clears it for us when we go."""
+        if self._bus is not None:
+            self._dock_update(0)
+        self._dock_count = None
         if self._watch_id:
             Gio.bus_unwatch_name(self._watch_id)
             self._watch_id = 0
@@ -502,11 +629,41 @@ class StatusIcon:
             return moved
         if self._view.status != old.status:
             self._emit_item("NewStatus", GLib.Variant("(s)", (self._view.status,)))
+        if self._view.badge != old.badge:
+            # Both artworks carry the badge, and a host reads whichever its
+            # Status picks — so both are announced when the count moves.
+            self._emit_item("NewIcon", None)
+            self._emit_item("NewAttentionIcon", None)
         if self._view.tooltip != old.tooltip:
             self._emit_item("NewToolTip", None)
         if moved:
             self._emit_menu("LayoutUpdated", GLib.Variant("(ui)", (self._revision, 0)))
+        self._dock_update(self._view.unread)
         return moved
+
+    def _dock_update(self, count: int) -> None:
+        """Tell Ubuntu Dock (and anything else listening for LauncherEntry
+        broadcasts) the unread count, once per change. The dock draws its own
+        numeral over the launcher icon — a properly rendered badge for one
+        signal — and hides it again on count-visible going false."""
+        if count == self._dock_count:
+            return
+        self._dock_count = count
+        self._emit(
+            LAUNCHER_PATH,
+            LAUNCHER_INTERFACE,
+            "Update",
+            GLib.Variant(
+                "(sa{sv})",
+                (
+                    self._launcher_uri,
+                    {
+                        "count": GLib.Variant("x", count),
+                        "count-visible": GLib.Variant("b", count > 0),
+                    },
+                ),
+            ),
+        )
 
     def _emit_item(self, signal: str, params: GLib.Variant | None) -> None:
         self._emit(ITEM_PATH, ITEM_INTERFACE, signal, params)
@@ -525,8 +682,12 @@ class StatusIcon:
     # -- org.kde.StatusNotifierItem ----------------------------------------
 
     def _pixmap_variant(self) -> GLib.Variant:
-        if self._pixmaps is None:
-            self._pixmaps = icon_pixmaps(self._icon_name)
+        # Rendered when a host asks and kept until the badge moves — checked
+        # here rather than invalidated on refresh, so a badge that changed in
+        # an unannounced refresh (AboutToShow's) still reads back right.
+        if self._pixmaps is None or self._pixmap_badge != self._view.badge:
+            self._pixmaps = icon_pixmaps(self._icon_name, self._view.badge)
+            self._pixmap_badge = self._view.badge
         return GLib.Variant(
             "a(iiay)", [(w, h, list(data)) for w, h, data in self._pixmaps]
         )
@@ -554,7 +715,9 @@ class StatusIcon:
         if prop in ("IconName", "AttentionIconName"):
             return GLib.Variant("s", self._icon_name)
         if prop in ("IconPixmap", "AttentionIconPixmap"):
-            # One artwork for both states until PR 3 badges the attention one.
+            # One artwork for both states, badge and all: NeedsAttention and
+            # a non-empty badge are the same fact (unread > 0), so whichever
+            # property the host's Status sends it to, it shows the count.
             return self._pixmap_variant()
         if prop == "OverlayIconName":
             return GLib.Variant("s", "")

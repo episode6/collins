@@ -3342,11 +3342,13 @@ class MainWindow(Adw.ApplicationWindow):
         placeholder_id = self._placeholder_pages.get(page)
         if placeholder_id is not None:
             self.sidebar.set_placeholder_unread(placeholder_id, True)
+            # A placeholder's flag lives in the sidebar, not the store, so the
+            # store's unread-changed signal never speaks for it.
+            self._notify_tray()
         session_id = self._session_id_of(page)
         if session_id:
             for row_id in self.store.rows_representing(session_id):
                 self.store.set_unread(row_id, True)
-        self._notify_tray()  # unread is what takes the item to NeedsAttention
 
     def _clear_unread(self, page: Adw.TabPage) -> None:
         """The user is at this tab (selected it, or typed into it): whatever
@@ -3354,11 +3356,11 @@ class MainWindow(Adw.ApplicationWindow):
         placeholder_id = self._placeholder_pages.get(page)
         if placeholder_id is not None:
             self.sidebar.set_placeholder_unread(placeholder_id, False)
+            self._notify_tray()  # the store's signal never speaks for these
         session_id = self._session_id_of(page)
         if session_id:
             for row_id in self.store.rows_representing(session_id):
                 self.store.set_unread(row_id, False)
-        self._notify_tray()
 
     def _sync_process_poll(self) -> None:
         """Run the process-tree poll only while some session has an open tab.

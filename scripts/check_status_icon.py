@@ -244,6 +244,14 @@ def main():
     bus.signal_subscribe(BUS_NAME, statusicon.ITEM_INTERFACE, "NewStatus", statusicon.ITEM_PATH,
                          None, Gio.DBusSignalFlags.NONE,
                          lambda *a: seen.append(a[-1].unpack()[0]))
+    icons = []
+    bus.signal_subscribe(BUS_NAME, statusicon.ITEM_INTERFACE, "NewIcon", statusicon.ITEM_PATH,
+                         None, Gio.DBusSignalFlags.NONE, lambda *a: icons.append(True))
+    dock = []
+    bus.signal_subscribe(BUS_NAME, statusicon.LAUNCHER_INTERFACE, "Update",
+                         statusicon.LAUNCHER_PATH, None, Gio.DBusSignalFlags.NONE,
+                         lambda *a: dock.append(a[-1].unpack()))
+    plain_pixmaps = item_prop("IconPixmap")
     state["sessions"] = [
         sessions[0],
         traymodel.TraySession("s-beta", "podcast-hacker", "fix CI", unread=True,
@@ -254,6 +262,19 @@ def main():
           str(seen))
     check("Status reads back NeedsAttention",
           item_prop("Status") == traymodel.STATUS_ATTENTION, item_prop("Status"))
+
+    # -- the badge ---------------------------------------------------------
+
+    check("the badge announces NewIcon", spin(lambda: bool(icons)))
+    badged_pixmaps = item_prop("IconPixmap")
+    check("the badge is drawn into the artwork", badged_pixmaps != plain_pixmaps)
+    check("attention artwork carries the same badge",
+          item_prop("AttentionIconPixmap") == badged_pixmaps)
+    check("the dock hears the count",
+          spin(lambda: any(p.get("count") == 1 and p.get("count-visible") for _u, p in dock)),
+          str(dock))
+    check("the dock broadcast names the desktop id", all(
+        uri == "application://com.episode6.Collins.desktop" for uri, _p in dock), str(dock))
 
     # A tab that hasn't resolved its session id still holds the item Active.
     state["sessions"] = []
@@ -270,8 +291,19 @@ def main():
     state["placeholders"] = 0
     icon.refresh()
     check("nothing open goes Passive", item_prop("Status") == "Passive", item_prop("Status"))
+    check("the dock badge hides at zero",
+          spin(lambda: dock and dock[-1][1].get("count-visible") is False), str(dock[-2:]))
 
+    # The dock badge is keyed to the desktop id, not our bus name, so nothing
+    # clears it for us when the item goes: stop() has to.
+    state["sessions"] = [traymodel.TraySession("s-beta", "podcast-hacker", "fix CI",
+                                               unread=True, last_active=100.0)]
+    icon.refresh()
+    spin(lambda: dock and dock[-1][1].get("count") == 1)
+    dock.clear()
     icon.stop()
+    check("stopping clears the dock badge",
+          spin(lambda: any(p.get("count-visible") is False for _u, p in dock)), str(dock))
     print()
     if failures:
         print(f"{len(failures)} FAILED: {', '.join(failures)}")
