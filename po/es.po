@@ -365,6 +365,9 @@ msgstr "Buscar sesiones"
 msgid "Close search"
 msgstr "Cerrar la búsqueda"
 
+msgid "A session is working"
+msgstr "Una sesión está trabajando"
+
 msgid "Collapse all groups"
 msgstr "Contraer todos los grupos"
 
