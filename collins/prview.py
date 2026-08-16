@@ -482,6 +482,17 @@ class PrViewPage(Adw.Bin):
         "you asked for this page again"."""
         self._fetch(force=True)
 
+    def refresh_if_stale(self) -> None:
+        """Re-read the PR unless one just landed — the news that the world may
+        have moved, rather than a demand for a fresh read.
+
+        What the session's finish edge asks for (see
+        TerminalTab.note_run_finished): nobody clicked anything, so the page
+        keeps the same arrival throttle a re-map gets, and a run that ends
+        seconds after the page was read is left with the answer it has.
+        """
+        self._fetch()
+
     def sync_summary(self) -> None:
         """Redraw the header from the status cache — the PR hub's news.
 

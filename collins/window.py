@@ -3259,17 +3259,26 @@ class MainWindow(Adw.ApplicationWindow):
         self._sync_row_busy(session_id)
 
     def _on_session_finished(self, session_id: str) -> None:
-        """A run's output stopped coming on its own: flag its rows unread.
+        """A run's output stopped coming on its own: flag its rows unread, and
+        re-read what GitHub says about the pull requests it was working on.
 
         The selected tab's row is flagged like any other — a finish is a
         finish whether or not the user was looking, and they may not have
         been — and its flag falls to the next keystroke or click into its
         terminal, or to leaving the tab and coming back (all through
         _clear_unread). Every other row's falls to selecting its tab.
+
+        The PR refresh rides the same edge for the same reason the flag does:
+        this is the moment the session has something to say. What it costs is
+        the tab's business (see TerminalTab.note_run_finished), and a run that
+        is only being handed to the background — or whose conversation is
+        still going under another of its ids — is skipped here exactly as its
+        flag is below.
         """
         if self.sidebar.has_placeholder(session_id):
             self.sidebar.set_placeholder_unread(session_id, True)
             return
+        self._refresh_prs_after_run(session_id)
         for row_id in self.store.rows_representing(session_id):
             # A row whose conversation still runs under another of its ids —
             # a /bg fork mid-turn, say — hasn't finished; its own edge comes.
@@ -3288,6 +3297,24 @@ class MainWindow(Adw.ApplicationWindow):
             if self._is_detached(row_id) and self._page_for(row_id) is None:
                 continue
             self.store.set_unread(row_id, True)
+
+    def _refresh_prs_after_run(self, session_id: str) -> None:
+        """Hand the finish edge to the tab that just went quiet, so its pull
+        requests are re-read while the run's work is still landing on GitHub.
+
+        Same two exemptions the unread flag takes: a conversation still
+        running under another of its ids hasn't finished anything yet, and a
+        detach's parting progress-clear is a handoff rather than a turn. A
+        session with no tab in this window has nothing to ask with — its
+        chips, pages and poll all live where the tab is — and one with no
+        pull requests spends no `gh` call at all.
+        """
+        if self._chain(session_id) & self._activity.busy() or self._detaching_now(session_id):
+            return
+        page = self._page_for(session_id)
+        tab = page.get_child() if page is not None else None
+        if isinstance(tab, TerminalTab):
+            tab.note_run_finished()
 
     def _flag_unread(self, page: Adw.TabPage) -> None:
         """Flag every row standing for this tab unread, whatever its session is
