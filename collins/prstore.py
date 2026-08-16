@@ -21,7 +21,10 @@ app knows about pull requests:
   side as ``session-changed``. An unchanged write is swallowed whole — no
   disk write, no signal — which is also what keeps the subscribers from
   echoing each other into a loop: a tab that adopts a list and writes the
-  same one back is a wave that stops at the shore.
+  same one back is a wave that stops at the shore. A write that puts a PR
+  on a session for the *first* time says so as well, with ``pr-attached``:
+  the saved list is where "seen already" is written down, so that one is
+  the once-per-PR announcement of a session picking one up.
 
 Everything here runs on the main loop except `_status_moved`, which is the
 prstatus listener and arrives on whatever worker thread fetched; it hops
@@ -50,6 +53,14 @@ class PrStore(GObject.Object):
         # whose baked-in status moved. Emitted after the write is on disk, so
         # a handler that re-reads sees what was written.
         "session-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # (session_id, url) — a pull request this session had never been
+        # associated with just joined it, whichever path put it there. Fires
+        # once per PR per session for as long as the association survives,
+        # because the saved list is itself the record of what has been seen:
+        # a PR already on it is not news, and it stays on it across restarts.
+        # Emitted after session-changed, so a handler has already adopted the
+        # list the newcomer is on.
+        "pr-attached": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
     }
 
     def __init__(self, state: AppState, dispatch=None) -> None:
@@ -98,11 +109,26 @@ class PrStore(GObject.Object):
         An identical list is dropped without a disk write or a signal — that
         equality is what lets subscribers write back what they adopted without
         starting a carousel. Main loop only, like every write here.
+
+        A URL the session's previous list didn't carry also comes out as
+        `pr-attached`, once each: the newcomers are named against what was on
+        disk a moment ago, so whether they arrived from this tab's poll, the
+        first-prompt attacher or a row's menu makes no difference to who hears
+        about them.
         """
         if not session_id or records == self._state.get_session_prs(session_id):
             return
+        # Both sides through from_records: the saved list is untrusted (it
+        # began life in a transcript), and a URL announced here is one a
+        # handler may well hand straight to `gh`.
+        had = {pr.url for pr in prstatus.from_records(self._state.get_session_prs(session_id))}
+        fresh = list(dict.fromkeys(
+            pr.url for pr in prstatus.from_records(records) if pr.url not in had
+        ))
         self._state.set_session_prs(session_id, records)
         self.emit("session-changed", session_id)
+        for url in fresh:
+            self.emit("pr-attached", session_id, url)
 
     def set_prs(self, session_id: str, prs: list[PullRequest]) -> None:
         """`set_records`, from PullRequests (status is persisted with them)."""

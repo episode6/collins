@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -420,6 +420,17 @@ class PreferencesDialog(Adw.Dialog):
         self._pr_images_row.set_active(bool(state.get_setting("pr_inline_images")))
         self._pr_images_row.connect("notify::active", self._on_pr_images_changed)
         pr_view_group.add(self._pr_images_row)
+        self._pr_autoshow_row = Adw.SwitchRow(
+            title=_("Open new pull requests automatically"),
+            subtitle=_(
+                "Open a pull request's panel beside its session as soon as "
+                "the session picks the PR up. Once per pull request, so one "
+                "you close again stays closed"
+            ),
+        )
+        self._pr_autoshow_row.set_active(bool(state.get_setting("open_pr_panel_on_attach")))
+        self._pr_autoshow_row.connect("notify::active", self._on_pr_autoshow_changed)
+        pr_view_group.add(_searchable(self._pr_autoshow_row, "attach", "dock"))
         page.add(pr_view_group)
 
         appearance_group = _SearchableGroup(title=_("Appearance"))
@@ -1030,6 +1041,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_pr_images_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("pr_inline_images", bool(row.get_active()))
+        self._on_change()
+
+    def _on_pr_autoshow_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("open_pr_panel_on_attach", bool(row.get_active()))
         self._on_change()
 
     def _on_theme_radio(self, radio: Gtk.CheckButton, name: str) -> None:

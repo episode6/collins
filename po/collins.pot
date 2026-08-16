@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 
 # SOME DESCRIPTIVE TITLE.
 # Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
@@ -2493,6 +2493,16 @@ msgid ""
 "Render the images a description or comment embeds, in place; click one to "
 "open it full size. Off, they stay links and opening a pull request "
 "downloads nothing"
+msgstr ""
+
+#: collins/prefs.py:352
+msgid "Open new pull requests automatically"
+msgstr ""
+
+#: collins/prefs.py:353
+msgid ""
+"Open a pull request's panel beside its session as soon as the session picks "
+"the PR up. Once per pull request, so one you close again stays closed"
 msgstr ""
 
 #: collins/bodyimages.py:122
