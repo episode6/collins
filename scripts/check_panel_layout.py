@@ -400,6 +400,23 @@ def check_panel_terminal() -> None:
         row.pages(),
     )
 
+    stacked = open_page_dock(1400, 1200, home="right")  # none free, edge split in two
+    top_page, bottom_page = FakePage(1), FakePage(2)
+    stacked.open_page(top_page)
+    drain()
+    stacked.open_page(bottom_page)  # joins the same row (no free width)
+    drain()
+    row = stacked._strip_of(top_page)
+    stacked.split_move(row, bottom_page, row, "below")
+    drain()
+    stacked.show_panel_terminal()
+    drain()
+    check(
+        "an edge split into strips seats the shell in the topmost",
+        len(stacked.strips()) == 2 and stacked._strip_of(stacked.panel_terminal) is row,
+        stacked.strips(),
+    )
+
     roomy = open_page_dock(2400, 1200, home="right")  # 1200 px of gutter
     roomy_pr = FakePage(1)
     roomy.open_page(roomy_pr)

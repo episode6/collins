@@ -531,6 +531,9 @@ class PanelDock(Adw.Bin):
         if axis == "right":
             # The width is not free — the split at the top would have taken
             # it — so a new column here comes out of the terminal itself.
+            # An edge the user has split into several strips seats the
+            # shell in the first by `strips()`' spatial order — the
+            # topmost, deliberately: it reads as "the" panel on that edge.
             docked = next(
                 (
                     strip
