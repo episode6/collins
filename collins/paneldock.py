@@ -804,16 +804,11 @@ class PanelDock(Adw.Bin):
         self.restore_maximized()  # a page opening behind the overlay is a page lost
         if side not in ("right", "below"):
             side = "right"
-        # Splitting the terminal off under a new paned unparents it for a
-        # moment, and an unparented widget takes the keyboard with it: GTK
-        # hands the focus on to whatever it finds first, which is the page
-        # that has just appeared. Suppressing the strip's own grab is
-        # therefore not enough to leave the cursor alone — where it was has
-        # to be remembered and put back.
-        keep = None
-        if not focus:
-            root = self.get_root()
-            keep = root.get_focus() if root is not None else None
+        # Suppressing the strip's own grab is not enough to leave the cursor
+        # alone: the split itself moves the focus (see _quiet_focus), so where
+        # it was has to be noted here and put back on the other side.
+        root = None if focus else self.get_root()
+        keep = root.get_focus() if root is not None else None
         strip = self._strip_past_terminal("h" if side == "right" else "v")
         if strip is not None and side == "right" and self._split_is_free():
             strip = None
@@ -825,15 +820,33 @@ class PanelDock(Adw.Bin):
         self._reveal_strip(strip)
         if focus:
             GLib.idle_add(widget.grab_page_focus)
-        elif keep is not None:
-            GLib.idle_add(self._restore_focus, keep)
+        elif root is not None:
+            GLib.idle_add(self._quiet_focus, root, keep, widget)
 
     @staticmethod
-    def _restore_focus(widget) -> bool:
-        """Put the keyboard back where a quiet open found it, unless the
-        widget left the window in the meantime."""
-        if widget.get_root() is not None:
-            widget.grab_focus()
+    def _quiet_focus(root, keep, opened) -> bool:
+        """Leave the keyboard exactly where the quiet open found it —
+        including nowhere.
+
+        Both halves are needed. A window that *had* a focus loses it to the
+        split: the terminal is unparented to be re-placed under the new
+        paned, an unparented widget takes the keyboard with it, and GTK
+        hands the focus on to the first thing it finds — the page that has
+        just appeared. And a window that had *no* focus is handed the same
+        page for the same reason, which is how a panel nobody asked for
+        ends up owning the keyboard in a window where nothing did; so the
+        focus is dropped again rather than left in it.
+
+        Only ever *out of* the new page: a focus that landed anywhere else
+        in the meantime is somebody's own doing and is left alone, as is a
+        remembered widget that has since left this window."""
+        if keep is not None:
+            if keep.get_root() is root:
+                keep.grab_focus()
+            return GLib.SOURCE_REMOVE
+        landed = root.get_focus()
+        if landed is not None and (landed is opened or landed.is_ancestor(opened)):
+            root.set_focus(None)
         return GLib.SOURCE_REMOVE
 
     def room_for_a_column(self) -> bool:
