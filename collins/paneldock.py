@@ -11,16 +11,27 @@ ever flips an existing paned's axis; the old bottom↔right *swap* is now
 
 Opening, swapping and rotating share one rule: **join, don't split**. A
 strip already on the axis being aimed at takes the pages as tabs — the
-shell Ctrl+J opens, the panel a swap sends across, the one tab the rotate
-button moves — and only an axis with no strip at all splits the terminal
-to make one. Five PRs' worth of docking would otherwise shred the dock
-into slivers.
+panel a swap sends across, the one tab the rotate button moves — and only
+an axis with no strip at all splits the terminal to make one. Five PRs'
+worth of docking would otherwise shred the dock into slivers.
 
-Opening a page is the one thing that will still split an occupied axis,
-and only where the split is free: a terminal already wider than its
-maximum width (`_split_is_free`) is sitting on gutter it will never use,
-so the column comes out of that rather than out of the terminal. The
-moment the gutter is spent the rule above takes over again.
+Two things still split an occupied axis, and only where the split is
+free: a terminal already wider than its maximum width (`_split_is_free`)
+is sitting on gutter it will never use, so the column comes out of that
+rather than out of the terminal. The moment the gutter is spent the rule
+above takes over again. Opening a docked page is one (`open_page`); the
+other is Ctrl+J.
+
+**Ctrl+J is bound to a terminal, not to a strip.** It owns one shell page
+— `panel_terminal`, the first one opened in the session and, once that
+closes, the next — and shows or hides *that*, wherever it happens to
+live. A terminal alone in its strip hides the strip around it, node and
+size intact; one sharing a tab row is stowed off screen on its own (see
+`_stow`), so the pages beside it stay exactly where they are. And a new
+one never joins a strip that isn't already showing shells: the PR page
+docked right is not a tab row Ctrl+J may move into. Both halves are the
+same rule — the shortcut may only ever put on screen, and take off it,
+the terminal it is speaking for.
 
 One page at a time can step out of that tree entirely: the tab row's
 overlay button *maximizes* it, floating it over the whole session tab —
@@ -37,12 +48,13 @@ under it would be typed into a window the user cannot see — most of all
 the agent's own terminal. The focus trap (`_on_root_focus_changed`) sends
 any focus that lands behind the overlay straight back to the page.
 
-The *home strip* is the strip Ctrl+J toggles: it lives on the home edge
-of the terminal (`home_position`, "bottom" | "right"), can be hidden
-without closing (pages keep running), and is recreated on demand after it
-collapses. Any strip whose last page closes collapses — its node is
-removed and the sibling promotes — so trees only get as deep as the pages
-the user actually keeps.
+The *home strip* is where the shells live: it sits on the home edge of
+the terminal (`home_position`, "bottom" | "right"), can be hidden without
+closing (pages keep running), and is recreated on demand after it
+collapses. It is also the divider the app-wide "home" size seed speaks
+for. Any strip whose last page closes collapses — its node is removed and
+the sibling promotes — so trees only get as deep as the pages the user
+actually keeps.
 """
 
 from __future__ import annotations
@@ -109,10 +121,33 @@ class _MaxPane(Gtk.Box):
         self._title.set_label(title)
 
 
-class _MaxRec:
-    """The page currently maximized: which strip it came out of, and the
-    tab position it drops back into. `handlers` are the page signals
-    rewired to the dock for as long as no strip is carrying them."""
+class _StowPane(Gtk.Box):
+    """Where Ctrl+J's terminal waits while it is off screen: a bare
+    `Adw.TabView` in a box that is never shown.
+
+    Same trick as `_MaxPane` and for the same reason — `transfer_page`
+    moves the page out of its strip without destroying it, so the shell's
+    process never notices it left — but with nothing to look at: this is
+    the hidden half of a toggle, not a way of showing a page. Only a
+    terminal sharing its strip with other pages comes here; one alone in
+    its strip is hidden by hiding the strip."""
+
+    def __init__(self) -> None:
+        super().__init__(visible=False)
+        self._view = Adw.TabView()
+        self.append(self._view)
+
+    @property
+    def tab_view(self) -> Adw.TabView:
+        """The view a page is transferred into (see PanelStrip.transfer_to)."""
+        return self._view
+
+
+class _LiftRec:
+    """A page lifted out of its strip — maximized over the tab, or stowed
+    off screen by Ctrl+J: which strip it came out of, and the tab position
+    it drops back into. `handlers` are the page signals rewired to the dock
+    for as long as no strip is carrying them."""
 
     def __init__(self, strip, widget, position: int) -> None:
         self.strip = strip
@@ -151,7 +186,7 @@ class PanelDock(Adw.Bin):
     def __init__(self, terminal: Gtk.Widget, strip_factory, home_position: str) -> None:
         """*terminal* is the agent-terminal widget (the dock's fixed leaf);
         `strip_factory() -> PanelStrip` builds a strip wired for shells;
-        *home_position* seeds where Ctrl+J's strip opens."""
+        *home_position* seeds which edge the shells open on."""
         super().__init__()
         self._terminal = terminal
         self._strip_factory = strip_factory
@@ -171,6 +206,14 @@ class PanelDock(Adw.Bin):
         self._next_shell = 1
         self._next_hist = 0  # next shell's persistent panel-history ordinal
         self._restoring = False  # restore_layout is rebuilding the tree
+        # The shell page Ctrl+J shows and hides (see `panel_terminal`), and
+        # the record of where it came out of while it waits off screen in
+        # the stow pane. The pane hangs off the dock's own overlay so the
+        # page it holds keeps a parent — and its shell a process — however
+        # long it stays hidden; it is never made visible.
+        self._toggle_shell = None
+        self._stowed: _LiftRec | None = None
+        self._stow_pane = _StowPane()
         # The page Ctrl+; rotates when the focus has moved on to the agent
         # terminal: the last one added to a strip or brought to its front
         # (see _recent_page).
@@ -182,13 +225,14 @@ class PanelDock(Adw.Bin):
         self._zones = paneldnd.DropZones(self._on_zone_drop)
         overlay = Gtk.Overlay(child=self._content)
         overlay.add_overlay(self._zones)
+        overlay.add_overlay(self._stow_pane)
         self.set_child(overlay)
         # The maximized page and the record of where it came from. The pane
         # starts in the dock's own overlay so a dock nobody hands a wider
         # one to still works; the session tab swaps in its own right after
         # construction, which is what makes the overlay cover the editor
         # column too (see set_maximize_host).
-        self._max: _MaxRec | None = None
+        self._max: _LiftRec | None = None
         self._max_pane = _MaxPane(self.restore_maximized)
         self._max_host = overlay
         overlay.add_overlay(self._max_pane)
@@ -245,10 +289,11 @@ class PanelDock(Adw.Bin):
         self._settings = settings
         for strip in self.strips():
             strip.apply_settings(settings)
-        if self._max is not None:
-            # A maximized page is out of every strip's fan-out and would
+        for rec in (self._max, self._stowed):
+            # A lifted page is out of every strip's fan-out and would
             # otherwise be the one page a font change misses.
-            self._max.widget.apply_settings(settings)
+            if rec is not None:
+                rec.widget.apply_settings(settings)
 
     # -- queries -----------------------------------------------------------
 
@@ -262,8 +307,46 @@ class PanelDock(Adw.Bin):
         return self._home_position
 
     @property
-    def home_visible(self) -> bool:
-        return self._home_strip is not None and self._home_strip.get_visible()
+    def panel_terminal(self):
+        """The one shell page Ctrl+J shows and hides, or None when it has
+        none: nothing has ever been opened here, or the page it was bound
+        to has closed. The binding is checked here rather than watched —
+        a page leaves a strip for a transfer as readily as for a close, and
+        "is it still somewhere in this dock" is the only form of the
+        question with one answer. Once it is free, the next shell to turn
+        up anywhere in the dock takes it (see `_on_page_touched`)."""
+        shell = self._toggle_shell
+        if shell is None:
+            return None
+        for rec in (self._max, self._stowed):
+            if rec is not None and rec.widget is shell:
+                return shell  # lifted out of every strip, but still ours
+        if self._strip_of(shell) is None:
+            self._toggle_shell = None
+            return None
+        return shell
+
+    @property
+    def panel_terminal_showing(self) -> bool:
+        """Whether the panel terminal is on screen — the state Ctrl+J
+        toggles. False when it is stowed, when the strip holding it is
+        hidden, and when there is no panel terminal at all.
+
+        Also false when it is a *background* tab of a strip that is up: the
+        row is showing something else, and a shortcut whose whole job is
+        "let me see my terminal" has to front it before it may hide it.
+        The second press then hides it, as always."""
+        shell = self.panel_terminal
+        if shell is None or self._stowed is not None:
+            return False
+        if self._max is not None and self._max.widget is shell:
+            return True
+        strip = self._strip_of(shell)
+        return (
+            strip is not None
+            and strip.get_visible()
+            and strip.selected_page_widget() is shell
+        )
 
     def strips(self) -> list:
         """Every strip, in the tree's spatial order."""
@@ -278,14 +361,22 @@ class PanelDock(Adw.Bin):
         return [page for page in self.pages() if getattr(page, "page_kind", None) == "shell"]
 
     def _strip_pages(self, strip) -> list:
-        """*strip*'s pages, including the one lifted out of it into the
-        maximize overlay — back at the position it will return to, so
-        every count, capture and serialization of a strip reads the same
-        whether its tab is floating over the tab or sitting in its row."""
+        """*strip*'s pages, including any lifted out of it — the maximized
+        one, the terminal Ctrl+J stowed — back at the position it will
+        return to, so every count, capture and serialization of a strip
+        reads the same whether its tab is up over the session, waiting off
+        screen, or sitting in its row.
+
+        A stowed terminal therefore persists as the tab of this strip it
+        will be again: a saved layout has one hidden state per *strip*, and
+        one page of a shared row being off screen isn't it. It comes back
+        with the session showing, which is the honest half-truth — the
+        shell, its scrollback and its place in the row are all where the
+        user left them."""
         pages = strip.pages()
-        rec = self._max
-        if rec is not None and rec.strip is strip:
-            pages.insert(min(rec.position, len(pages)), rec.widget)
+        for rec in (self._max, self._stowed):
+            if rec is not None and rec.strip is strip:
+                pages.insert(min(rec.position, len(pages)), rec.widget)
         return pages
 
     def _strip_selected(self, strip):
@@ -321,60 +412,189 @@ class PanelDock(Adw.Bin):
         self._next_hist += 1
         return ordinal
 
-    # -- the home strip ----------------------------------------------------
+    # -- the panel terminal (Ctrl+J) ----------------------------------------
 
-    def show_home(self, restore_texts: list[str] | None = None) -> None:
-        """Show the shells' home strip, conjuring one on first use;
-        `restore_texts` recreates one shell per saved panel history when
-        the strip spawns its first shells.
+    def show_panel_terminal(self, restore_texts: list[str] | None = None) -> None:
+        """Put Ctrl+J's terminal on screen: the page it is bound to, back
+        from wherever it was hidden, or a fresh shell when it has none —
+        which then becomes the binding. `restore_texts` recreates one shell
+        per saved panel history the first time a session's panel opens; the
+        first of them takes the binding.
 
-        Conjuring follows the same join-don't-split rule as `swap_home`
-        and `rotate_page`: a strip already on the home axis — a PR tab
-        docked right, with the home position set to right — becomes the
-        home and the shell opens *in* it as another tab, rather than a
-        second column being carved out beside it. Only an empty home axis
-        splits the terminal."""
-        # Ctrl+J is about a strip, and no strip is visible under a
-        # maximized page: the tab comes back to its row first, which also
-        # spares `open` from spawning a second shell for a home strip whose
-        # only one is floating over the tab.
+        A terminal already open is re-pointed at the agent's cwd on the way
+        up, since the agent may have moved into a worktree while it was
+        hidden.
+
+        Where a *new* one opens follows two rules. It never joins a strip
+        that isn't already showing shells — the PR page docked right is not
+        a tab row Ctrl+J may move into, and a shortcut that hides what it
+        shows has no business adopting someone else's panel. And it yields
+        to spare width exactly as `open_page` does: on a screen wide enough
+        that the terminal has stopped growing (`_split_is_free`), the shell
+        takes a column of its own out of the gutter rather than a tab in
+        the shell strip already there."""
+        # No strip is visible under a maximized page: the tab comes back to
+        # its row first, so what this shows is something the user can see.
         self.restore_maximized()
-        if self._home_strip is None:
-            target = self._axis_strip(self._home_position)
-            if target is not None:
-                self._adopt_home(target, self._home_position)
-            else:
-                self._create_home_strip()
-        strip = self._home_strip
-        strip.open(restore_texts)
-        if not strip.get_visible():
-            strip.set_visible(True)
-            self._home_rec().sizer.apply()
+        shell = self.panel_terminal
+        if shell is None:
+            self._open_panel_terminal(restore_texts)
+            return
+        if self._stowed is not None:
+            self._unstow()
+            return
+        strip = self._strip_of(shell)
+        self._reveal_strip(strip)
+        strip.refresh_shell(shell)
+        strip.select_widget(shell)
         # The tab Ctrl+J just put on screen is the freshest one there is, so
-        # Ctrl+; rotates it. A strip that already had a shell selects
-        # nothing on the way up, and without this the remembered page would
-        # still be whatever was fronted last — a PR tab in another strip,
-        # say, which the keyboard would then rotate instead of the terminal
-        # the user was looking at (see _recent_page).
-        self._recent = strip.selected_page_widget() or self._recent
+        # Ctrl+; rotates it. Without this the remembered page would still be
+        # whatever was fronted last — a PR tab in another strip, say, which
+        # the keyboard would then rotate instead of the terminal the user
+        # was looking at (see _recent_page).
+        self._recent = shell
 
-    def hide_home(self) -> None:
-        """Hide (don't close) the home strip: pages keep running, the node
-        and its size survive for the next show."""
-        self.restore_maximized()  # the panel can't go down with a tab still up
-        strip = self._home_strip
+    def hide_panel_terminal(self) -> None:
+        """Take Ctrl+J's terminal off screen without closing it — its shell
+        keeps running either way.
+
+        Alone in its strip, it hides the strip around it: the node and its
+        size survive for the next show, as they always did. Sharing a tab
+        row, it is stowed on its own (`_stow`) and the row stays up — the
+        PR page or composer beside it is not what the user asked to hide."""
+        self.restore_maximized()  # a page up over the tab is in no strip to hide
+        shell = self.panel_terminal
+        if shell is None or self._stowed is not None:
+            return
+        strip = self._strip_of(shell)
         if strip is None or not strip.get_visible():
             return
-        rec = self._home_rec()
-        rec.sizer.remember()
         refocus = strip.has_page_focus()
-        strip.set_visible(False)
+        if strip.page_count > 1:
+            self._stow(shell, strip)
+        else:
+            self._hide_strip(strip)
         if refocus and self._focus_terminal is not None:
             self._focus_terminal()
 
-    def focus_home(self) -> None:
-        if self._home_strip is not None:
-            self._home_strip.grab_page_focus()
+    def focus_panel_terminal(self) -> None:
+        shell = self.panel_terminal
+        if shell is not None and self._stowed is None:
+            shell.grab_page_focus()
+
+    def _open_panel_terminal(self, restore_texts: list[str] | None = None) -> None:
+        """Spawn the terminal Ctrl+J binds to, in the strip `_panel_target`
+        nominates. Saved panel history opens as one shell per file; the
+        oldest is the one the shortcut keeps."""
+        strip = self._panel_target()
+        shells = strip.new_shells(restore_texts)
+        if not shells:
+            return
+        self._toggle_shell = shells[0]
+        self._recent = shells[0]
+
+    def _panel_target(self):
+        """The strip Ctrl+J's terminal opens in: a column split off the
+        terminal whenever that width is free, else a strip on the home axis
+        that is already showing shells, else a new strip on the home edge.
+        Never a strip without shells in it (see `show_panel_terminal`)."""
+        axis = self._home_position
+        if axis == "right" and self._split_is_free("home"):
+            return self._create_home_strip()
+        target = next(
+            (
+                strip
+                for strip in self.strips()
+                if strip.shell_pages() and self._strip_axis(strip) == axis
+            ),
+            None,
+        )
+        if target is None:
+            return self._create_home_strip()
+        if target is not self._home_strip:
+            self._adopt_home(target, axis)
+        return target
+
+    def _stow(self, shell, strip) -> None:
+        """Lift the panel terminal out of a strip it shares with other
+        pages: off screen, still running, remembering the tab position it
+        drops back into. Hiding the strip around it would take those other
+        pages down with it — the whole reason Ctrl+J is bound to a terminal
+        rather than to a strip."""
+        position = strip.pages().index(shell)
+        self._stowed = _LiftRec(strip, shell, position)  # before the transfer
+        strip.transfer_to(shell, self._stow_pane, 0)
+        self._wire_stowed(shell)
+
+    def _unstow(self) -> None:
+        """Drop the stowed terminal back into its tab row, selected: the
+        strip it left when that is still in the tree, else wherever a fresh
+        one would open. (Emptying the strip around a stowed page hides it
+        rather than collapsing it — see `_collapse_strip` — so the fallback
+        is for a collapse that raced this.)"""
+        rec = self._stowed
+        if rec is None:
+            return
+        self._stowed = None
+        for handler in rec.handlers:
+            rec.widget.disconnect(handler)
+        rec.handlers.clear()
+        view = self._stow_pane.tab_view
+        page = view.get_nth_page(0) if view.get_n_pages() else None
+        if page is None:
+            self._toggle_shell = None  # gone from under us; the binding is free
+            return
+        strip = rec.strip if rec.strip in self._tree else self._panel_target()
+        target = strip.tab_view
+        view.transfer_page(page, target, min(rec.position, target.get_n_pages()))
+        self._reveal_strip(strip)
+        strip.refresh_shell(rec.widget)
+        strip.select_widget(rec.widget)
+        self._recent = rec.widget
+
+    def _wire_stowed(self, widget) -> None:
+        """Carry the stowed page's signals while it is out of every strip,
+        the way `_wire_max_page` does for a maximized one: a shell that
+        exits off screen still has to be noticed, and a bell it rings is
+        still the session tab's bell."""
+        rec = self._stowed
+        if GObject.signal_lookup("shell-exited", widget.__gtype__):
+            rec.handlers.append(widget.connect("shell-exited", self._on_stowed_shell_exited))
+        if GObject.signal_lookup("bell", widget.__gtype__):
+            rec.handlers.append(widget.connect("bell", lambda *_: self.emit("bell")))
+
+    def _on_stowed_shell_exited(self, shell) -> None:
+        """A stowed shell ran out — a long command that ended in `exit`, or
+        a login shell timing out. Its page goes with it (there is no tab row
+        to leave a dead screen in), and Ctrl+J's binding is free for the
+        next terminal opened."""
+        rec = self._stowed
+        if rec is None or rec.widget is not shell:
+            return
+        self._stowed = None
+        for handler in rec.handlers:
+            shell.disconnect(handler)
+        rec.handlers.clear()
+        if self._toggle_shell is shell:
+            self._toggle_shell = None
+        closed = getattr(shell, "page_closed", None)
+        if closed is not None:
+            closed()
+        view = self._stow_pane.tab_view
+        page = view.get_nth_page(0) if view.get_n_pages() else None
+        if page is not None:
+            view.close_page(page)
+
+    def _hide_strip(self, strip) -> None:
+        """Hide a strip whole, remembering its size on the way down: the
+        divider parks somewhere meaningless once the child it sizes is
+        gone (see PanedSizer.occupied)."""
+        rec = self._rec_for(strip)
+        if rec is not None:
+            rec.sizer.remember()
+            if strip is self._home_strip:
+                self._home_sizes.update(rec.sizer.snapshot())
+        strip.set_visible(False)
 
     def set_home_position(self, mode: str) -> None:
         """Re-home a (typically hidden) strip: session restore applying the
@@ -431,6 +651,14 @@ class PanelDock(Adw.Bin):
             # from under `_home_rec`, so swapping back restores it.
             rec.sizer.remember()
             self._home_sizes.update(rec.sizer.snapshot())
+        if self._stowed is not None and self._stowed.strip is home:
+            # The panel terminal is off screen but it is one of the shells
+            # this swap is gathering: it comes along by re-pointing the row
+            # it drops back into, since a page in no strip can't be moved
+            # between them. Without this it would wait on the old edge for
+            # a strip that is about to collapse.
+            self._stowed.strip = target
+            self._stowed.position = target.page_count
         refocus = home.has_page_focus()
         selected = home.selected_page_widget()
         for widget in home.panel_pages():
@@ -462,22 +690,40 @@ class PanelDock(Adw.Bin):
             for mode, size in self._home_sizes.items():
                 rec.sizer.set_remembered(mode, size)
 
-    def _home_rec(self) -> _PaneRec | None:
-        """The record of the paned dividing the home strip's branch from
-        the terminal's — the divider whose position *is* the home strip
-        size. Not simply the home leaf's parent: splitting a tab inside
-        the home strip inserts new splits between the leaf and that
-        divider, so it is the split *separating* the two (see
-        `DockTree.separator_of`)."""
-        if self._home_strip is None:
+    def _rec_for(self, strip) -> _PaneRec | None:
+        """The record of the paned dividing *strip*'s branch from the
+        terminal's — the divider whose position *is* that strip's size.
+        Not simply the leaf's parent: splitting a tab inside the strip
+        inserts new splits between the leaf and that divider, so it is the
+        split *separating* the two (see `DockTree.separator_of`)."""
+        if strip is None:
             return None
         try:
-            split = self._tree.separator_of(self._home_strip, self._terminal)
+            split = self._tree.separator_of(strip, self._terminal)
         except ValueError:
             return None  # the strip left the tree (a collapse in flight)
         return self._panes.get(split)
 
-    def _create_home_strip(self) -> None:
+    def _home_rec(self) -> _PaneRec | None:
+        """The home strip's divider — the one the app-wide "home" size seed
+        speaks for (see `_scope_of`)."""
+        return self._rec_for(self._home_strip)
+
+    def _stash_home_size(self) -> None:
+        """Fold the live home divider's position into the remembered set,
+        for a home strip about to stop being one (collapsed, merged away,
+        or replaced by a fresh column): `_home_rec` answers for whichever
+        strip holds the role, so the old one's size has to be taken while
+        it still does."""
+        rec = self._home_rec()
+        if rec is not None:
+            rec.sizer.remember()
+            self._home_sizes.update(rec.sizer.snapshot())
+
+    def _create_home_strip(self):
+        """Split a fresh strip off the terminal's home edge and give it the
+        home role, at the size the last home strip was left at. Returns it."""
+        self._stash_home_size()
         strip = self._new_strip()
         self._home_strip = strip
         self._split_leaf(self._terminal, strip, _HOME_SIDES[self._home_position])
@@ -485,6 +731,7 @@ class PanelDock(Adw.Bin):
         for mode, size in self._home_sizes.items():
             rec.sizer.set_remembered(mode, size)
         rec.sizer.apply()
+        return strip
 
     def _relocate_home(self) -> None:
         """Detach the home strip's node and re-split it onto the terminal's
@@ -510,8 +757,16 @@ class PanelDock(Adw.Bin):
 
     def pages(self) -> list:
         """Every page across every strip, in spatial-then-tab order, a
-        maximized one among its strip's (see `_strip_pages`)."""
-        return [page for strip in self.strips() for page in self._strip_pages(strip)]
+        lifted one among its strip's (see `_strip_pages`). A stowed
+        terminal whose strip has left the tree brings up the rear rather
+        than dropping out: its shell is running, and a page nothing counts
+        is a page whose scrollback isn't saved and whose live command
+        doesn't block a close."""
+        pages = [page for strip in self.strips() for page in self._strip_pages(strip)]
+        rec = self._stowed
+        if rec is not None and rec.widget not in pages:
+            pages.append(rec.widget)
+        return pages
 
     def open_page(self, widget, side: str = "right") -> None:
         """Open a non-shell page as a tab in a strip beside the terminal:
@@ -532,10 +787,10 @@ class PanelDock(Adw.Bin):
 
         A right-docked *home* strip is one of the strips this steps past,
         deliberately: with the room to spare, a pull request opens beside
-        the shells rather than in their tab row, and the panel Ctrl+J
-        toggles is left exactly as it was — the new column comes out of
-        the terminal's branch, so the home divider (`_home_rec`, the split
-        *separating* the two) is still the one that sizes it."""
+        the shells rather than in their tab row, and the shells' panel is
+        left exactly as it was — the new column comes out of the terminal's
+        branch, so the home divider (`_home_rec`, the split *separating*
+        the two) is still the one that sizes it."""
         self.restore_maximized()  # a page opening behind the overlay is a page lost
         if side not in ("right", "below"):
             side = "right"
@@ -559,22 +814,33 @@ class PanelDock(Adw.Bin):
         from while it is up, and its own chrome's close button is one of
         the ways here. Closing anything else leaves the overlay alone —
         that page is out of sight behind it either way, and dropping the
-        overlay for it would be a side effect no caller asked for."""
+        overlay for it would be a side effect no caller asked for.
+
+        A *stowed* terminal comes back for the same reason: closing it has
+        to go through its strip's funnel, busy-ask and all, and it has no
+        strip while it waits off screen."""
         if self._max is not None and self._max.widget is widget:
             self.restore_maximized()
+        if self._stowed is not None and self._stowed.widget is widget:
+            self._unstow()
         strip = self._strip_of(widget)
         if strip is not None:
             strip.close_widget(widget)
 
     def reveal_page(self, widget) -> None:
-        """Front an existing page: select its tab, and show its strip if it
-        is the hidden home strip (the one strip that can hide). A page
-        already maximized is as fronted as a page gets; any *other* one
-        comes down first, since nothing behind the overlay can be shown."""
+        """Front an existing page: select its tab, and show its strip if
+        that was hidden. A page already maximized is as fronted as a page
+        gets; any *other* one comes down first, since nothing behind the
+        overlay can be shown. The stowed terminal comes back to its row —
+        it is off screen, not merely behind something."""
         if self._max is not None and self._max.widget is widget:
             GLib.idle_add(widget.grab_page_focus)
             return
         self.restore_maximized()
+        if self._stowed is not None and self._stowed.widget is widget:
+            self._unstow()
+            GLib.idle_add(widget.grab_page_focus)
+            return
         for strip in self.strips():
             if widget in strip.pages():
                 strip.select_widget(widget)
@@ -583,9 +849,15 @@ class PanelDock(Adw.Bin):
                 return
 
     def _reveal_strip(self, strip) -> None:
-        if strip is self._home_strip and not strip.get_visible():
-            strip.set_visible(True)
-            self._home_rec().sizer.apply()
+        """Show a strip that was hidden — the panel terminal's own is the
+        only kind that ever is — re-applying the size its divider parked at
+        on the way down."""
+        if strip is None or strip.get_visible():
+            return
+        rec = self._rec_for(strip)
+        strip.set_visible(True)
+        if rec is not None:
+            rec.sizer.apply()
 
     def _strip_past_terminal(self, orientation: str):
         """The first strip in the subtree right of ("h") or below ("v") the
@@ -597,16 +869,19 @@ class PanelDock(Adw.Bin):
     # -- shells across strips ----------------------------------------------
 
     def select_busy_shell(self) -> None:
-        """Front the first busy shell — revealing a hidden home strip if
-        that's where it lives — so a close confirmation's "will be
-        terminated" points at something visible."""
+        """Front the first busy shell — bringing it back from a hidden
+        strip or the stow pane if that's where it is — so a close
+        confirmation's "will be terminated" points at something visible."""
         if self._max is not None and getattr(self._max.widget, "page_busy", bool)():
             return  # already the only thing on screen
         self.restore_maximized()  # nothing behind the overlay can be pointed at
+        rec = self._stowed
+        if rec is not None and rec.widget.page_busy():
+            self._unstow()
+            return
         for strip in self.strips():
             if any(shell.page_busy() for shell in strip.shell_pages()):
-                if strip is self._home_strip and not strip.get_visible():
-                    self.show_home()
+                self._reveal_strip(strip)
                 strip.select_busy_page()
                 return
 
@@ -832,12 +1107,11 @@ class PanelDock(Adw.Bin):
         terminal to make one.
 
         Rotating the home strip's last *shell* away hands the home role
-        after it (see `_adopt_home`) — Ctrl+J follows the terminal it
-        speaks for. Without that, a home strip sharing its tab row with a
-        PR page or the docked composer would go on toggling that page at
-        the old edge, and the next Ctrl+J that showed it would spawn a
-        second shell beside it while the rotated one sat on the far axis,
-        unreachable from the keyboard.
+        after it (see `_adopt_home`): the role names the divider the
+        app-wide panel size speaks for, so it follows the shells rather
+        than staying with an edge they have left. What Ctrl+J shows and
+        hides needs no help here — it is bound to the terminal itself, and
+        a rotation carries the binding along with the page.
         """
         if strip not in self._tree or widget not in strip.pages():
             return
@@ -891,7 +1165,7 @@ class PanelDock(Adw.Bin):
             return
         self.restore_maximized()
         position = strip.pages().index(widget)
-        self._max = _MaxRec(strip, widget, position)  # before the transfer can empty strip
+        self._max = _LiftRec(strip, widget, position)  # before the transfer can empty strip
         strip.transfer_to(widget, self._max_pane, 0)
         self._wire_max_page(widget)
         self._max_pane.set_page_title(widget.page_title())
@@ -1027,12 +1301,13 @@ class PanelDock(Adw.Bin):
 
     def _adopt_home(self, strip, position: str) -> None:
         """Hand the home role to *strip* on *position*'s axis, the old home
-        strip having run out of shells (a rotation took its last one) or
-        given way (a swap merged it in). Without this Ctrl+J would go on
-        toggling a strip whose terminal has left — conjuring a fresh shell
-        on the old edge while the one it moved sits on the new one, out of
-        the toggle's reach. The home strip's remembered size comes along,
-        so a panel sent bottom→right opens at the width it always had."""
+        strip having run out of shells (a rotation took its last one),
+        given way (a swap merged it in), or never existed (Ctrl+J opening
+        its terminal in a shell strip that was already there). The role is
+        about *size and edge*, not about the toggle: it names the divider
+        the app-wide "home" seed speaks for, so it has to follow the shells
+        wherever they end up. Its remembered size comes along, so a panel
+        sent bottom→right opens at the width it always had."""
         self._home_strip = strip
         self._home_position = position
         rec = self._home_rec()
@@ -1053,8 +1328,8 @@ class PanelDock(Adw.Bin):
 
     def _axis_strip(self, axis: str, exclude=None):
         """A strip already on *axis*, or None. The home strip wins when it
-        qualifies — a rotation should land in the panel Ctrl+J toggles
-        rather than beside it — otherwise the tree's spatial order picks."""
+        qualifies — a rotation should land in the shells' own panel rather
+        than beside it — otherwise the tree's spatial order picks."""
         strips = [
             other
             for other in self.strips()
@@ -1118,19 +1393,34 @@ class PanelDock(Adw.Bin):
         target = strips[(strips.index(source) + 1) % len(strips)]
         self.move_page(source, widget, target)
 
-    def _on_page_touched(self, _strip, widget) -> None:
-        """A page arrived in a strip or came to its front. Remembered rather
-        than looked up on demand because the rotate shortcut is usually
-        pressed with the focus back in the agent terminal, where no strip
-        can answer for it."""
+    def _on_page_touched(self, _strip, widget, arrived: bool) -> None:
+        """A page arrived in a strip (*arrived*) or came to its front.
+        Remembered rather than looked up on demand because the rotate
+        shortcut is usually pressed with the focus back in the agent
+        terminal, where no strip can answer for it.
+
+        An arrival is also where a free Ctrl+J binding finds its terminal:
+        with none bound, the next shell to turn up anywhere in the dock
+        takes the shortcut — whether Ctrl+J opened it, a strip's own + did,
+        or a session restore rebuilt it (see `panel_terminal`). Arrivals
+        only, so that closing the bound terminal hands the shortcut to the
+        next one *opened* rather than to whichever tab the closing tab row
+        happened to select behind it."""
         self._recent = widget
+        if (
+            arrived
+            and getattr(widget, "page_kind", None) == "shell"
+            and self.panel_terminal is None
+        ):
+            self._toggle_shell = widget
 
     def _recent_page(self):
         """(strip, widget) for the panel tab the rotate shortcut acts on:
         whichever page holds the focus right now, else the last one added or
-        fronted. Hidden strips don't answer — the home strip Ctrl+J closed
-        has a selected tab still, and rotating a panel nobody can see would
-        be a move with nothing to watch it happen."""
+        fronted. Hidden strips don't answer — the strip Ctrl+J took off
+        screen has a selected tab still, and rotating a panel nobody can
+        see would be a move with nothing to watch it happen. Nor does a
+        stowed terminal: `_strip_of` finds it in no strip at all."""
         for strip in self.strips():
             if strip.get_visible() and strip.has_page_focus():
                 return strip, strip.selected_page_widget()
@@ -1154,8 +1444,8 @@ class PanelDock(Adw.Bin):
         "nothing on show to close": the caller closes the whole session tab on
         it, and no visible page may be left behind by that answer. Hence the
         fallback past `_recent_page` to any visible strip's selected tab — the
-        last-touched page can be sitting in the home strip Ctrl+J has since
-        hidden while a satellite strip is still up.
+        last-touched page can be the terminal Ctrl+J has since taken off
+        screen while a satellite strip is still up.
 
         True while a busy shell's confirmation is only *asked*: the press has
         landed on the panel either way, and taking the session tab out from
@@ -1203,10 +1493,20 @@ class PanelDock(Adw.Bin):
         root = self.get_root()
         focus = root.get_focus() if root is not None else None
         refocus = focus is None or focus is strip or focus.is_ancestor(strip)
+        if self._stowed is not None and strip is self._stowed.strip:
+            # Emptied around a stowed terminal: its tab row's other pages
+            # have all closed, and what is left of the strip is the page
+            # Ctrl+J is holding off screen. Rather than collapse the row it
+            # has to come back to, put it back and hide the strip around
+            # it — the same off screen, by the other of the two means (see
+            # `hide_panel_terminal`).
+            self._unstow()
+            self._hide_strip(strip)
+            if refocus and self._focus_terminal is not None:
+                self._focus_terminal()
+            return GLib.SOURCE_REMOVE
         if strip is self._home_strip:
-            rec = self._home_rec()
-            rec.sizer.remember()
-            self._home_sizes.update(rec.sizer.snapshot())
+            self._stash_home_size()
             self._home_strip = None
         self._remove_leaf(strip)
         guard.unregister(strip.tab_view)
@@ -1352,17 +1652,18 @@ class PanelDock(Adw.Bin):
             return None  # the strip left the tree (a collapse in flight)
         return self._panes.get(split)
 
-    def _split_is_free(self) -> bool:
+    def _split_is_free(self, scope: str = "page") -> bool:
         """Whether a new column beside the terminal would cost the terminal
-        nothing — `open_page`'s reason to split an axis that already has a
-        strip on it instead of joining.
+        nothing — the reason `open_page` and Ctrl+J will split an axis that
+        already has a strip on it instead of joining.
 
         The terminal stops growing at the "terminal_max_width" setting and
         centers itself in whatever it was given, so on a wide screen it is
         sitting on gutter it will never use: a strip carved out of that is
         width nobody loses. The seed handed over is the very one the new
-        strip's own sizer would open at, so what's measured is the column
-        that is actually about to appear, not a guess at it (see
+        strip's own sizer would open at — *scope*'s, "page" for a docked
+        page's column and "home" for the shells' — so what's measured is
+        the column that is actually about to appear, not a guess at it (see
         `panelsizing.room_for_a_split`).
 
         False whenever the answer isn't certain — no maximum width set, no
@@ -1378,7 +1679,7 @@ class PanelDock(Adw.Bin):
             keep = int(settings.get("terminal_max_width") or 0)
         except (TypeError, ValueError):
             keep = 0  # untrusted setting; treat it as "no maximum"
-        wanted = int(self._size_lookup("page", "right") or 0) if self._size_lookup else 0
+        wanted = int(self._size_lookup(scope, "right") or 0) if self._size_lookup else 0
         return panelsizing.room_for_a_split(self._terminal.get_width(), keep, wanted)
 
     def _scope_of(self, sizer, axis: str) -> str:
