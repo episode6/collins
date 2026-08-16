@@ -558,6 +558,17 @@ msgid ""
 "grip on each panel"
 msgstr ""
 
+#: collins/prefs.py:394
+msgid "Show the attachments panel automatically"
+msgstr ""
+
+#: collins/prefs.py:395
+msgid ""
+"Dock a session's attachments panel beside it the first time it shows an "
+"image — only in a tab wide enough to spare the column, past the terminal's "
+"maximum width. Once per session tab, so one you close again stays closed"
+msgstr ""
+
 #: collins/prefs.py:128
 msgid "Color theme"
 msgstr ""
@@ -2549,11 +2560,11 @@ msgid "Float the attachments panel over the terminal"
 msgstr ""
 
 #: collins/terminal.py:1183
-msgid "Images this session has seen"
+msgid "Images and files this session has seen"
 msgstr ""
 
 #: collins/terminal.py
-msgid "Images this session has seen ({n} new)"
+msgid "Images and files this session has seen ({n} new)"
 msgstr ""
 
 #: collins/attachpanel.py:241

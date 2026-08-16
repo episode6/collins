@@ -156,6 +156,12 @@ _PR_FOCUS_REFRESH_MIN_US = 10 * 1_000_000
 # frame from the chip that just appeared, short enough to read as "and the
 # page opened".
 _PR_PAGE_SETTLE_MS = 250
+# And how long the attachments panel waits after a tab is shown before asking
+# whether there is room for it beside the terminal (see
+# TerminalTab._consider_attachments_dock): a tab that has just been switched
+# to measures 0 until the frame that allocates it, and a width of 0 has room
+# for nothing.
+_ATTACH_ROOM_SETTLE_MS = 250
 
 # PCRE2 flags for the find bar: multiline, case-insensitive.
 _PCRE2_CASELESS = 0x00000008
@@ -1257,7 +1263,7 @@ class TerminalTab(Gtk.Box):
             halign=Gtk.Align.END,
             valign=Gtk.Align.CENTER,
             margin_end=5,
-            tooltip_text=_("Images this session has seen"),
+            tooltip_text=_("Images and files this session has seen"),
         )
         self._attachments_btn.add_css_class("attach-overlay")
         self._attachments_btn.add_css_class("attachments-handle")
@@ -1281,6 +1287,20 @@ class TerminalTab(Gtk.Box):
         # the handle never lights for: whoever it would be alerting watched
         # them arrive full-screen (see _behold_attachment).
         self._attachments_beheld: set[str] = set()
+        # The panel opening by itself: whether it still may (armed until the
+        # panel is opened, however it was opened — see
+        # _consider_attachments_dock), whether one is on its way to the
+        # screen, and the moment this tab opened, which is what separates a
+        # picture landing now from the history a resumed session hands over.
+        self._attachments_autodock = True  # the setting; apply_settings pushes it in
+        self._attachments_armed = True
+        self._attachments_docking = False
+        self._attachments_remap = False
+        self._attachments_born = self._attachments_since
+        # Room is a thing only a tab on screen has: an unmapped one measures
+        # 0 and can never be found wide enough, so every tab switch re-asks
+        # for the tab being switched to.
+        self.connect("map", lambda *_: self._recheck_attachments_room())
 
         self._content_overlay = Gtk.Overlay(child=scrolled)
         content_overlay = self._content_overlay
@@ -2370,6 +2390,7 @@ class TerminalTab(Gtk.Box):
         shown = attachrecords.visible(everything)
         if self._attachments_view is not None:
             self._attachments_view.set_records(shown)
+        self._consider_attachments_dock(shown)
         self._note_attachment_news(shown)
         self.emit("attachments-changed", records)
 
@@ -2399,8 +2420,13 @@ class TerminalTab(Gtk.Box):
         point of it: a restored session and the first read of a long
         transcript both deliver a history all at once, and none of it
         happened while this tab was up.
+
+        A panel already on its way to the screen counts as showing: the
+        handle it would light is about to be hidden by the dock it is
+        waiting for, and a pill that flashes for a quarter of a second and
+        then disappears is a signal nobody can act on.
         """
-        if self._attachments_showing():
+        if self._attachments_docking or self._attachments_showing():
             self._clear_attachment_news()
             return
         unseen, fresh = attachrecords.unseen(
@@ -2481,10 +2507,90 @@ class TerminalTab(Gtk.Box):
             # One form rather than an ngettext pair: po/generate.py writes
             # flat msgid/msgstr, so a plural msgid is a string no language
             # ever gets, and the number is parenthesized here anyway.
-            _("Images this session has seen ({n} new)").format(n=count)
+            _("Images and files this session has seen ({n} new)").format(n=count)
             if count
-            else _("Images this session has seen")
+            else _("Images and files this session has seen")
         )
+
+    # -- opening itself -------------------------------------------------------
+
+    def _consider_attachments_dock(self, shown: list | None = None) -> None:
+        """Dock the gallery beside this session without being asked, when
+        the tab has the room to give it a column for nothing.
+
+        Two things have to be true, and each is asked at the moment it can
+        change: a picture has landed *while this tab was up* (the list, on
+        every change to it), and the terminal is sitting on gutter wide
+        enough for a column of its own (the dock's own `room_for_a_column`,
+        asked again after every map — a tab that was too narrow when the
+        picture arrived, or was never on screen to be measured, gets its
+        chance when it is looked at; see `_recheck_attachments_room`). A
+        history handed over by a resumed session is not a picture landing
+        (see `attachrecords.landed_since`), and neither is anything at all
+        on a tab with no images in it.
+
+        Once per tab: the arming flag is put out by the panel being opened,
+        whichever way it opened — this, the handle, Ctrl+', the chrome's
+        dock button, a saved layout bringing one back — so a panel closed
+        again is never re-opened over somebody, and a session whose images
+        arrive in a burst gets one panel rather than one per picture.
+
+        The dock itself waits `_PR_PAGE_SETTLE_MS` for the same reason the
+        automatic PR page does: this can arrive inside the transcript
+        update that found the picture, and carving a strip out of the dock
+        in that same breath is the relayout GTK's Wayland backend segfaults
+        on.
+        """
+        if not self._attachments_autodock or not self._attachments_armed:
+            return
+        if self._attachments_docking or self.attachments_open():
+            return
+        if not self._saved_attachment_records:
+            return  # nothing to show; cheap out before folding the list
+        if shown is None:
+            shown = self.attachments()
+        if not attachrecords.landed_since(shown, self._attachments_born):
+            return
+        if not self._dock.room_for_a_column():
+            return  # stays armed: the next picture, or the next map, re-asks
+        self._attachments_docking = True
+        GLib.timeout_add(_PR_PAGE_SETTLE_MS, self._autodock_attachments)
+
+    def _recheck_attachments_room(self) -> None:
+        """The map path: this tab has been switched to, so ask again — from
+        a beat later, since a tab that has just been shown measures 0 until
+        the frame that allocates it, and the answer now would be "no room"
+        every time.
+
+        One outstanding re-check at a time: switching back and forth between
+        two tabs is a stream of maps, and each one would otherwise leave a
+        timer behind it."""
+        if not self._attachments_autodock or not self._attachments_armed:
+            return
+        if self._attachments_remap or self._attachments_docking:
+            return
+        self._attachments_remap = True
+        GLib.timeout_add(_ATTACH_ROOM_SETTLE_MS, self._reconsider_attachments_dock)
+
+    def _reconsider_attachments_dock(self) -> bool:
+        self._attachments_remap = False
+        self._consider_attachments_dock()
+        return GLib.SOURCE_REMOVE
+
+    def _autodock_attachments(self) -> bool:
+        """Open the panel the wait above was for, if the room and the reason
+        are both still there — a tab closed inside the wait, a panel opened
+        by hand, a window dragged narrow. Nothing is disarmed by giving up:
+        the next picture asks again."""
+        self._attachments_docking = False
+        if self.get_root() is None or self.attachments_open():
+            return GLib.SOURCE_REMOVE
+        if not self._dock.room_for_a_column():
+            return GLib.SOURCE_REMOVE
+        # Focus stays in the terminal: a panel nobody asked for must not take
+        # the next thing typed at the agent.
+        self.dock_attachments(focus=False)
+        return GLib.SOURCE_REMOVE
 
     # -- the attachments panel ------------------------------------------------
 
@@ -2567,6 +2673,7 @@ class TerminalTab(Gtk.Box):
             return
         if self.attachments_open():
             return
+        self._attachments_armed = False  # opened; it never opens itself again
         view = self._ensure_attachments_panel()
         view.set_records(self.attachments())
         revealer = self._attachments_revealer
@@ -2641,16 +2748,20 @@ class TerminalTab(Gtk.Box):
         else:
             self.undock_attachments()
 
-    def dock_attachments(self) -> None:
+    def dock_attachments(self, focus: bool = True) -> None:
         """Move the live panel out of the overlay into a tab of its own
         beside the terminal — the composer's dock on the other axis:
         reparented, never rebuilt, so the previews already decoded and the
         place the list was scrolled to ride along. Join-don't-split places
         it, which beside a terminal usually means the strip a pull request is
-        already open in; only a bare right edge is split for it."""
+        already open in; only a bare right edge is split for it.
+
+        *focus* False leaves the keyboard alone, which is how the panel
+        docks itself (see `_consider_attachments_dock`)."""
         if self._attachments_page is not None:
             self._dock.reveal_page(self._attachments_page)
             return
+        self._attachments_armed = False  # opened; it never opens itself again
         view = self._ensure_attachments_panel()
         view.set_records(self.attachments())
         revealer = self._attachments_revealer
@@ -2665,7 +2776,7 @@ class TerminalTab(Gtk.Box):
             view, on_closed=self._on_attachments_page_closed
         )
         self._sync_attachments_handle()
-        self._dock.open_page(self._attachments_page, side="right")
+        self._dock.open_page(self._attachments_page, side="right", focus=focus)
 
     def undock_attachments(self) -> None:
         """Raise the docked panel back over the terminal (the chrome's float
@@ -4316,6 +4427,7 @@ class TerminalTab(Gtk.Box):
         restored strip."""
         if self._attachments_page is not None or self.attachments_open():
             return None
+        self._attachments_armed = False  # this session's answer, already given
         view = self._ensure_attachments_panel()
         view.set_records(self.attachments())
         self._attachments_revealer.set_child(None)
@@ -4733,6 +4845,7 @@ class TerminalTab(Gtk.Box):
             self._composer.set_font(self._composer_font)
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
         self._auto_open_prs = bool(settings.get("open_pr_panel_on_attach"))
+        self._attachments_autodock = bool(settings.get("dock_attachments_when_room", True))
         # Read on the click rather than baked into the menus and the PR page's
         # button (see _pr_action_host), so a switch flipped in Preferences
         # takes effect on chips and pages that were built before it.

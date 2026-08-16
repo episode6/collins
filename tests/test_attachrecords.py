@@ -302,6 +302,39 @@ def test_an_undated_sighting_is_not_news():
     assert attachrecords.unseen(listed.values(), noted=(), since=0.0) == (set(), set())
 
 
+# -- a picture landing while the tab is up ---------------------------------
+
+
+def test_a_sighting_after_the_moment_has_landed():
+    listed = attachrecords.fold({}, shot("/tmp/a.png", now=1000.0))
+    assert attachrecords.landed_since(listed.values(), 500.0) is True
+
+
+def test_a_history_older_than_the_tab_has_not_landed():
+    """What a resumed session hands over: everything it ever saw, all dated
+    when it happened. None of it is a reason to open a panel."""
+    listed = attachrecords.fold(
+        {}, shot("/tmp/a.png", now=100.0), shot("/tmp/b.png", now=200.0)
+    )
+    assert attachrecords.landed_since(listed.values(), 500.0) is False
+    assert attachrecords.landed_since((), 500.0) is False
+
+
+def test_a_struck_record_never_lands():
+    """A row removed by hand is a row the panel would open empty-handed for."""
+    listed = attachrecords.strike(
+        attachrecords.fold({}, shot("/tmp/a.png", now=1000.0)), {"/tmp/a.png"}
+    )
+    assert attachrecords.landed_since(listed.values(), 500.0) is False
+
+
+def test_a_picture_already_seen_full_screen_still_lands():
+    """Unlike `unseen`, which lets a beheld picture go: a lightbox showing is
+    the very case a gallery beside the session is worth having open for."""
+    listed = attachrecords.fold({}, shot("/tmp/a.png", source=LIGHTBOX, now=1000.0))
+    assert attachrecords.landed_since(listed.values(), 500.0) is True
+
+
 # -- striking a record off ------------------------------------------------
 
 

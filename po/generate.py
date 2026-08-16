@@ -394,6 +394,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Egy pull request paneljének megnyitása a munkamenete mellett, "
             "amint a munkamenet felveszi a PR-t. Pull requestenként egyszer, "
             "így a bezárt panel zárva marad",
+        "Show the attachments panel automatically":
+            "A mellékletek panel automatikus megjelenítése",
+        "Dock a session's attachments panel beside it the first "
+        "time it shows an image — only in a tab wide enough to "
+        "spare the column, past the terminal's maximum width. Once "
+        "per session tab, so one you close again stays closed":
+            "A munkamenet mellékletek paneljének dokkolása a munkamenet "
+            "mellé, amint az először mutat képet — de csak akkor, ha a lap "
+            "elég széles egy külön oszlophoz a terminál legnagyobb "
+            "szélességén túl. Munkamenetlaponként egyszer, így a bezárt "
+            "panel zárva marad",
         "Open composer (Ctrl+.)": "Üzenetszerkesztő megnyitása (Ctrl+.)",
         "Attach file": "Fájl csatolása",
         "Remove image": "Kép eltávolítása",
@@ -442,9 +453,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "A mellékletek panel dokkolása a terminál mellé",
         "Float the attachments panel over the terminal":
             "A mellékletek panel lebegtetése a terminál felett",
-        "Images this session has seen": "A munkamenet által látott képek",
-        "Images this session has seen ({n} new)":
-            "A munkamenet által látott képek ({n} új)",
+        "Images and files this session has seen":
+            "A munkamenet által látott képek és fájlok",
+        "Images and files this session has seen ({n} new)":
+            "A munkamenet által látott képek és fájlok ({n} új)",
         "Open With…": "Megnyitás ezzel…",
         "Show in Folder": "Megjelenítés a mappában",
         "Copy Path": "Elérési út másolása",
@@ -841,6 +853,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Das Panel eines Pull-Requests neben seiner Sitzung öffnen, "
             "sobald die Sitzung den Pull-Request aufnimmt. Einmal pro "
             "Pull-Request — ein wieder geschlossenes Panel bleibt also zu",
+        "Show the attachments panel automatically":
+            "Das Anhänge-Panel automatisch anzeigen",
+        "Dock a session's attachments panel beside it the first "
+        "time it shows an image — only in a tab wide enough to "
+        "spare the column, past the terminal's maximum width. Once "
+        "per session tab, so one you close again stays closed":
+            "Das Anhänge-Panel einer Sitzung neben ihr andocken, sobald sie "
+            "das erste Bild zeigt — nur in einem Tab, der breit genug für "
+            "eine eigene Spalte jenseits der maximalen Terminalbreite ist. "
+            "Einmal pro Sitzungstab — ein wieder geschlossenes Panel bleibt "
+            "also zu",
         "Open composer (Ctrl+.)": "Composer öffnen (Strg+.)",
         "Attach file": "Datei anhängen",
         "Remove image": "Bild entfernen",
@@ -887,9 +910,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Anhänge-Panel neben dem Terminal andocken",
         "Float the attachments panel over the terminal":
             "Anhänge-Panel über dem Terminal schweben lassen",
-        "Images this session has seen": "Bilder, die diese Sitzung gesehen hat",
-        "Images this session has seen ({n} new)":
-            "Bilder, die diese Sitzung gesehen hat ({n} neu)",
+        "Images and files this session has seen":
+            "Bilder und Dateien, die diese Sitzung gesehen hat",
+        "Images and files this session has seen ({n} new)":
+            "Bilder und Dateien, die diese Sitzung gesehen hat ({n} neu)",
         "Open With…": "Öffnen mit…",
         "Show in Folder": "Im Ordner anzeigen",
         "Copy Path": "Pfad kopieren",
@@ -1285,6 +1309,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Abre el panel de un pull request junto a su sesión en cuanto "
             "la sesión lo adopta. Una vez por pull request, así que el que "
             "cierres seguirá cerrado",
+        "Show the attachments panel automatically":
+            "Mostrar automáticamente el panel de adjuntos",
+        "Dock a session's attachments panel beside it the first "
+        "time it shows an image — only in a tab wide enough to "
+        "spare the column, past the terminal's maximum width. Once "
+        "per session tab, so one you close again stays closed":
+            "Acopla el panel de adjuntos de una sesión junto a ella la "
+            "primera vez que muestra una imagen — solo en una pestaña lo "
+            "bastante ancha para ceder la columna, más allá del ancho máximo "
+            "de la terminal. Una vez por pestaña de sesión, así que el que "
+            "cierres seguirá cerrado",
         "Open composer (Ctrl+.)": "Abrir el redactor (Ctrl+.)",
         "Attach file": "Adjuntar archivo",
         "Remove image": "Quitar imagen",
@@ -1331,9 +1366,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Acoplar el panel de adjuntos junto a la terminal",
         "Float the attachments panel over the terminal":
             "Hacer flotar el panel de adjuntos sobre la terminal",
-        "Images this session has seen": "Imágenes que ha visto esta sesión",
-        "Images this session has seen ({n} new)":
-            "Imágenes que ha visto esta sesión ({n} nuevas)",
+        "Images and files this session has seen":
+            "Imágenes y archivos que ha visto esta sesión",
+        "Images and files this session has seen ({n} new)":
+            "Imágenes y archivos que ha visto esta sesión ({n} nuevos)",
         "Open With…": "Abrir con…",
         "Show in Folder": "Mostrar en la carpeta",
         "Copy Path": "Copiar la ruta",
@@ -1730,6 +1766,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Ouvre le panneau d’une pull request à côté de sa session dès "
             "que la session l’adopte. Une fois par pull request : celle que "
             "vous refermez reste fermée",
+        "Show the attachments panel automatically":
+            "Afficher automatiquement le panneau des pièces jointes",
+        "Dock a session's attachments panel beside it the first "
+        "time it shows an image — only in a tab wide enough to "
+        "spare the column, past the terminal's maximum width. Once "
+        "per session tab, so one you close again stays closed":
+            "Ancre le panneau des pièces jointes d’une session à côté "
+            "d’elle dès qu’elle affiche une image — uniquement dans un "
+            "onglet assez large pour céder la colonne, au-delà de la largeur "
+            "maximale du terminal. Une fois par onglet de session : celui "
+            "que vous refermez reste fermé",
         "Open composer (Ctrl+.)": "Ouvrir le rédacteur (Ctrl+.)",
         "Attach file": "Joindre un fichier",
         "Remove image": "Retirer l'image",
@@ -1776,9 +1823,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Ancrer le panneau des pièces jointes à côté du terminal",
         "Float the attachments panel over the terminal":
             "Faire flotter le panneau des pièces jointes au-dessus du terminal",
-        "Images this session has seen": "Images vues par cette session",
-        "Images this session has seen ({n} new)":
-            "Images vues par cette session ({n} nouvelles)",
+        "Images and files this session has seen":
+            "Images et fichiers vus par cette session",
+        "Images and files this session has seen ({n} new)":
+            "Images et fichiers vus par cette session ({n} nouveaux)",
         "Open With…": "Ouvrir avec…",
         "Show in Folder": "Afficher dans le dossier",
         "Copy Path": "Copier le chemin",

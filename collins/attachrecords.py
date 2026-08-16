@@ -295,6 +295,24 @@ def visible(attachments: Iterable[Attachment]) -> list[Attachment]:
     return [one for one in attachments if not one.hidden]
 
 
+def landed_since(attachments: Iterable[Attachment], moment: float) -> bool:
+    """Whether any shown record was sighted after *moment* — "did a picture
+    arrive while this tab was up, or is this a history?".
+
+    The question a panel that opens on its own has to answer: a session
+    resumed at breakfast hands over everything it ever saw, all at once, and
+    none of it is a reason to put a gallery on somebody's screen. Sightings
+    are dated when they happened rather than when they were read (a
+    transcript scan stamps each one with its message's own timestamp), so a
+    moment taken when the tab opened separates the two.
+
+    Unlike `unseen`, nothing here is excluded for having been looked at: an
+    image that went straight to the lightbox is exactly the kind that makes
+    a gallery worth having open, and it is the panel's arrival being decided
+    here, not a badge's."""
+    return any(one.last > moment for one in attachments if not one.hidden)
+
+
 def unseen(
     attachments: Iterable[Attachment],
     *,

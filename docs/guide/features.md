@@ -346,6 +346,14 @@ that lives below or beside the agent terminal, with **tabs of its own**:
   shells' panel: drag a PR page wider and the next PR you open (in any
   session) is that wide, while `Ctrl+J`'s panel stays where you left it.
   Those pages share a strip, so they share one size per side.
+- The **attachments panel** — the gallery of pictures a session has been
+  shown, which `Ctrl+'` and the handle on the terminal's right edge raise —
+  docks itself there the first time a session shows a picture, on a screen
+  wide enough to spare the column: past the terminal's *Max width* the
+  terminal has stopped growing, so the room is gutter it was never going to
+  use. It happens **once per session tab**, so a panel you close again stays
+  closed, and it never takes the keyboard from the agent. Turn it off with
+  *Show the attachments panel automatically* in Preferences → Panels.
 - Typing `exit` in a panel tab closes that tab (closing the last one hides
   the panel).
 - Closing a session tab while a command is running in any of its panel's
