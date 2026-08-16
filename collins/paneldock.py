@@ -1039,16 +1039,13 @@ class PanelDock(Adw.Bin):
         True while a busy shell's confirmation is only *asked*: the press has
         landed on the panel either way, and taking the session tab out from
         under the dialog is the one thing it must not do."""
-        if self._max is not None:
-            self.close_page(self._max.widget)
-            return True
-        strip, widget = self._recent_page()
+        widget = self.maximized_page or self._recent_page()[1]
         if widget is None:
             strip = next((s for s in self.strips() if s.get_visible() and s.page_count), None)
             widget = strip.selected_page_widget() if strip is not None else None
-        if strip is None or widget is None:
+        if widget is None:
             return False
-        strip.close_widget(widget)
+        self.close_page(widget)  # brings a maximized page down on the way
         return True
 
     # -- strip lifecycle -----------------------------------------------------
