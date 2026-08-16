@@ -1014,6 +1014,17 @@ class PanelTerminal(Gtk.Box):
     def page_busy(self) -> bool:
         return self.has_running_command()
 
+    def holds_escape(self) -> bool:
+        """Whether Escape belongs to this shell rather than to the dock's
+        "put the maximized page back down" (see paneldock._on_max_key).
+
+        It does whenever something owns the terminal's foreground: vim,
+        less and every other full-screen program reads Escape, and a
+        maximized one losing the key would be unusable. A shell sitting at
+        its prompt has no use for a bare Escape, so there the restore wins
+        — the same foreground test the close confirmation asks."""
+        return self.has_running_command()
+
     def _on_key_pressed(self, _ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
         shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
@@ -4660,6 +4671,17 @@ class TerminalTab(Gtk.Box):
         self.terminal.feed(f"\r\n\x1b[1;33m[session manager]\x1b[0m {text}\r\n".encode())
 
     def grab_terminal_focus(self) -> None:
+        """Put the keyboard in the agent terminal — unless a panel page is
+        maximized, in which case that page is what the tab is showing and
+        the terminal is under an opaque overlay. Every road back to this
+        tab runs through here (a tab switch, a dialog closing, the dock
+        losing a strip that held focus), so the redirect belongs here
+        rather than at each of them; the dock's focus trap catches the rest
+        (see paneldock._on_root_focus_changed)."""
+        maximized = self._dock.maximized_page
+        if maximized is not None:
+            maximized.grab_page_focus()
+            return
         self.terminal.grab_focus()
 
     def _on_key_pressed(self, _ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:

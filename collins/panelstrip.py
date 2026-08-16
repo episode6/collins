@@ -16,6 +16,9 @@ widget implementing the duck-typed `PanelPage` protocol:
     page_closed() -> None          # optional: tab is closing for real (not
                                    # a transfer) — last chance to rescue
                                    # anything living inside the widget
+    holds_escape() -> bool         # optional: keep Escape from the dock's
+                                   # restore-from-maximized (paneldock);
+                                   # absent means the page never wants it
 
 A page may additionally emit "bell" (re-emitted by the strip for the
 window's visual bell) and "shell-exited" (shells: the process ended, so
