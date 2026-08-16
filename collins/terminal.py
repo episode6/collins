@@ -1050,10 +1050,12 @@ class TerminalTab(Gtk.Box):
         # Emitted when a tab started without a session id (new / continue)
         # discovers which session it is running (str = session id).
         "session-resolved": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
-        # Emitted (debounced) when the panel divider is moved: (mode, size)
-        # where mode is "bottom" | "right" and size the new panel px size,
-        # so the window can persist it as the app-wide default.
-        "panel-size-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, int)),
+        # Emitted (debounced) when a panel divider is moved: (scope, mode,
+        # size) where scope is "home" (the shells' panel) | "page" (the
+        # strip PR views and the other docked pages open into), mode is
+        # "bottom" | "right", and size the new panel px size, so the window
+        # can persist each as its own app-wide default.
+        "panel-size-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, str, int)),
         # Emitted when rotating a tab re-homed the panel: "bottom" | "right",
         # the edge the window persists as the app-wide default (as it does
         # for the whole-panel swap win.swap-panel fires).
@@ -1305,7 +1307,8 @@ class TerminalTab(Gtk.Box):
         )
         self._dock.connect("bell", lambda *_: self.emit("bell"))
         self._dock.connect(
-            "size-changed", lambda _d, mode, size: self.emit("panel-size-changed", mode, size)
+            "size-changed",
+            lambda _d, scope, mode, size: self.emit("panel-size-changed", scope, mode, size),
         )
         self._dock.connect(
             "home-changed", lambda _d, mode: self.emit("panel-position-changed", mode)
@@ -4384,8 +4387,9 @@ class TerminalTab(Gtk.Box):
         return self._dock.swap_home()
 
     def set_panel_size_lookup(self, lookup) -> None:
-        """`lookup(mode) -> px` supplies the app-wide last-set strip size,
-        seeding splits this tab hasn't sized itself yet."""
+        """`lookup(scope, mode) -> px` supplies the app-wide last-set strip
+        size for one scope ("home" | "page") on one axis, seeding splits
+        this tab hasn't sized itself yet."""
         self._dock.set_size_lookup(lookup)
 
     # -- editor panel --------------------------------------------------------

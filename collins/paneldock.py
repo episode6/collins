@@ -125,9 +125,11 @@ class PanelDock(Adw.Bin):
     __gsignals__ = {
         # Re-emitted from any strip page ringing BEL, for the visual bell.
         "bell": (GObject.SignalFlags.RUN_FIRST, None, ()),
-        # The user resized the home strip: (mode, px) — the axis seed the
-        # window persists app-wide (panel_size_bottom / panel_size_right).
-        "size-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, int)),
+        # The user resized one of the two strips whose size is an app-wide
+        # default: (scope, mode, px), scope "home" for the shells' panel and
+        # "page" for the strip docked pages open into. The window persists
+        # each under its own setting (see state.panel_size_key).
+        "size-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, str, int)),
         # The home strip moved to the other axis under a rotation: (mode) —
         # the app-wide panel_position default follows it, as it followed the
         # bottom/right swap this button used to fire.
@@ -150,7 +152,7 @@ class PanelDock(Adw.Bin):
         self._tree = DockTree(terminal)
         self._panes: dict[Split, _PaneRec] = {}
         self._settings: dict | None = None
-        self._size_lookup = None  # (key) -> app-wide px seed, set by the window
+        self._size_lookup = None  # (scope, axis) -> app-wide px seed, set by the window
         self._focus_terminal = None  # () -> None, grabs the agent VTE
         self._page_factory = None  # (page_dict) -> PanelPage | None, for restore
         self._ever_spawned = False  # any shell ever ran in this dock
@@ -184,8 +186,9 @@ class PanelDock(Adw.Bin):
     # -- wiring ------------------------------------------------------------
 
     def set_size_lookup(self, lookup) -> None:
-        """`lookup(mode) -> px` supplies the app-wide last-set strip size
-        ("bottom"/"right"), seeding splits this dock hasn't sized yet."""
+        """`lookup(scope, mode) -> px` supplies the app-wide last-set strip
+        size for a scope ("home"/"page") on an axis ("bottom"/"right"),
+        seeding splits this dock hasn't sized yet."""
         self._size_lookup = lookup
 
     def set_focus_terminal(self, grab) -> None:
@@ -1170,7 +1173,7 @@ class PanelDock(Adw.Bin):
             occupied=managed.get_visible,
             end_child=managed_slot == "b",
         )
-        sizer.set_lookup(self._lookup_size)
+        sizer.set_lookup(lambda axis, s=sizer: self._lookup_size(s, axis))
         sizer.connect("size-changed", self._on_strip_size_changed)
         rec = _PaneRec(paned, sizer, managed)
         self._panes[split] = rec
@@ -1212,12 +1215,44 @@ class PanelDock(Adw.Bin):
 
     # -- sizing --------------------------------------------------------------
 
-    def _lookup_size(self, key: str) -> int:
-        return int(self._size_lookup(key) or 0) if self._size_lookup is not None else 0
+    def _page_rec(self, axis: str) -> _PaneRec | None:
+        """The record of the paned dividing the terminal from the strip
+        `open_page` lands a docked page in on *axis* — the divider whose
+        position *is* the PR/attachments/composer panel's size. None when
+        that side is empty, or holds the home strip (whose size is the home
+        seed's business, not this one's).
+
+        Found the way `_home_rec` finds its own: the split *separating* the
+        two, since strips split off that one carry it deeper into the tree.
+        """
+        strip = self._strip_past_terminal("v" if axis == "bottom" else "h")
+        if strip is None or strip is self._home_strip:
+            return None
+        try:
+            split = self._tree.separator_of(strip, self._terminal)
+        except ValueError:
+            return None  # the strip left the tree (a collapse in flight)
+        return self._panes.get(split)
+
+    def _scope_of(self, sizer, axis: str) -> str:
+        """Which app-wide seed a divider speaks for: "home" for the shells'
+        strip, "page" for anything else. Dividers deeper in the tree (a
+        strip a drag split in two) speak for no seed of their own — they
+        still *read* the page one, which sizes the column they live in."""
+        rec = self._home_rec()
+        return "home" if rec is not None and rec.sizer is sizer else "page"
+
+    def _lookup_size(self, sizer, axis: str) -> int:
+        if self._size_lookup is None:
+            return 0
+        return int(self._size_lookup(self._scope_of(sizer, axis), axis) or 0)
 
     def _on_strip_size_changed(self, sizer, key: str, size: int) -> None:
-        """Only the home strip's divider updates the app-wide axis seeds —
-        satellite strips size themselves without shifting the defaults."""
-        rec = self._home_rec()
+        """The two dividers that update the app-wide axis seeds: the home
+        strip's, and the one sizing the strip docked pages open into — so a
+        PR page dragged wider is that wide the next time one opens. Deeper
+        strips size themselves without shifting either default."""
+        scope = self._scope_of(sizer, key)
+        rec = self._home_rec() if scope == "home" else self._page_rec(key)
         if rec is not None and rec.sizer is sizer:
-            self.emit("size-changed", key, size)
+            self.emit("size-changed", scope, key, size)

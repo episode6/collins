@@ -150,6 +150,14 @@ DEFAULT_SETTINGS = {
     "panel_tab_drag_handles": True,
     "panel_size_bottom": 0,  # last-set panel height in px (0 = default fraction)
     "panel_size_right": 0,  # last-set panel width in px (0 = default fraction)
+    # The same, for the strip docked *pages* open into — PR views, the
+    # attachments list, a docked composer — which is a different strip from
+    # the shells' Ctrl+J panel above and remembers its own size, so sizing a
+    # PR page doesn't move the shell panel (or the other way around). One
+    # size per axis, not per kind: those pages share a strip (see
+    # paneldock.open_page's join-don't-split rule), so they share its size.
+    "page_panel_size_bottom": 0,  # last-set docked-page strip height in px
+    "page_panel_size_right": 0,  # last-set docked-page strip width in px
     "window_width": 1280,  # last window size (floating, unmaximized)
     "window_height": 800,
     "window_maximized": False,
@@ -223,6 +231,19 @@ def clamp_window_size(width: int, height: int, monitor_sizes: list[tuple[int, in
         width = min(width, max(w for w, _h in monitor_sizes))
         height = min(height, max(h for _w, h in monitor_sizes))
     return max(width, _MIN_WINDOW_SIZE[0]), max(height, _MIN_WINDOW_SIZE[1])
+
+
+def panel_size_key(scope: str, mode: str) -> str:
+    """The setting holding one dock strip's app-wide last-set size.
+
+    *scope* is which strip the divider speaks for — "home" for the shells'
+    panel, "page" for the strip docked pages (PR views, attachments, the
+    docked composer) open into — and *mode* the axis it sits on
+    ("bottom" | "right"). The home strip keeps the original key names, so
+    a panel size saved before docked pages had their own survives.
+    """
+    prefix = "page_panel_size" if scope == "page" else "panel_size"
+    return f"{prefix}_{mode}"
 
 
 def editor_pops_out(monitor_width: int, limit: int) -> bool:
