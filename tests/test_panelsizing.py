@@ -2,7 +2,14 @@
 
 """Unit tests for the paned-sizing arithmetic (panelsizing)."""
 
-from collins.panelsizing import DEFAULT_FRACTION, SizeMemory
+from collins.panelsizing import (
+    DEFAULT_FRACTION,
+    HANDLE_SIZE,
+    MIN_SPLIT_SIZE,
+    SizeMemory,
+    room_for_a_split,
+    split_size,
+)
 
 
 def test_get_defaults_to_zero():
@@ -104,3 +111,57 @@ def test_target_none_without_extent():
     mem.set("bottom", 300)
     assert mem.target("bottom", 0) is None
     assert mem.target("bottom", -1) is None
+
+
+def test_split_size_is_the_app_wide_size_when_it_fits():
+    assert split_size(2000, 400) == 400
+
+
+def test_split_size_falls_back_to_the_same_fraction_the_sizer_does():
+    # The size a divider with nothing to go on lands at (SizeMemory.target
+    # with no memory and no fallback) is what the split really costs.
+    total = 2000
+    assert split_size(total) == total - SizeMemory().target("right", total)
+    assert split_size(total, 2000) == split_size(total)  # too wide to fit
+
+
+def test_split_is_free_when_the_gutter_covers_it():
+    # 2400 px of terminal, 1200 of which it will ever use: the 400-px panel
+    # and the handle come out of the 1200 px of gutter.
+    assert room_for_a_split(2400, 1200, 400)
+
+
+def test_split_is_not_free_when_it_would_reach_past_the_gutter():
+    assert not room_for_a_split(1500, 1200, 400)
+
+
+def test_split_is_free_at_an_exact_fit():
+    # Every pixel of gutter spent, and not one of the terminal's own.
+    assert room_for_a_split(1200 + 400 + HANDLE_SIZE, 1200, 400)
+    assert not room_for_a_split(1200 + 400 + HANDLE_SIZE - 1, 1200, 400)
+
+
+def test_split_is_never_free_without_a_maximum_width():
+    # No maximum: the terminal uses everything it is given, so there is no
+    # gutter to hand a new column.
+    assert not room_for_a_split(4000, 0, 400)
+    assert not room_for_a_split(4000, -1, 400)
+
+
+def test_split_is_not_free_before_the_terminal_is_allocated():
+    assert not room_for_a_split(0, 1200, 400)
+    assert not room_for_a_split(-1, 1200, 400)
+
+
+def test_unsized_split_is_measured_at_its_fraction_not_a_minimum():
+    # Nothing sized yet: the column opens at the default fraction, so that
+    # is what has to fit in the gutter — a minimum-width test would call a
+    # split free and then take a third of the terminal.
+    total = 2400
+    assert room_for_a_split(total, total - split_size(total) - HANDLE_SIZE)
+    assert not room_for_a_split(total, total - split_size(total) - HANDLE_SIZE + 1)
+
+
+def test_narrow_wanted_is_refused_however_much_room_there_is():
+    assert not room_for_a_split(4000, 1200, MIN_SPLIT_SIZE - 1)
+    assert room_for_a_split(4000, 1200, MIN_SPLIT_SIZE)

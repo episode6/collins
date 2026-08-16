@@ -16,6 +16,12 @@ button moves — and only an axis with no strip at all splits the terminal
 to make one. Five PRs' worth of docking would otherwise shred the dock
 into slivers.
 
+Opening a page is the one thing that will still split an occupied axis,
+and only where the split is free: a terminal already wider than its
+maximum width (`_split_is_free`) is sitting on gutter it will never use,
+so the column comes out of that rather than out of the terminal. The
+moment the gutter is spent the rule above takes over again.
+
 One page at a time can step out of that tree entirely: the tab row's
 overlay button *maximizes* it, floating it over the whole session tab —
 terminal, every other strip, and the editor column beside the dock — until
@@ -47,7 +53,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import paneldnd, panelkeys  # noqa: E402
+from . import paneldnd, panelkeys, panelsizing  # noqa: E402
 from .docktree import DockTree, Leaf, Split  # noqa: E402
 from .dockzones import EDGE_ZONES  # noqa: E402
 from .i18n import _  # noqa: E402
@@ -512,11 +518,30 @@ class PanelDock(Adw.Bin):
         the first strip on *side* of it ("right" | "below"), else a new one
         split off that edge. The join-don't-split default keeps opening
         five PRs from carving the dock into five slivers — and lands the
-        composer in a bottom home strip as a tab rather than beneath it."""
+        composer in a bottom home strip as a tab rather than beneath it.
+
+        Joining yields to spare *width*, though: on a screen wide enough
+        that the terminal has stopped growing (see `_split_is_free`), a
+        page opening to the right gets a column of its own rather than a
+        tab in the one already there, since the room for it is gutter the
+        terminal wasn't using. That's the whole point of the maximum
+        width — the pixels past it are there to be spent — and one page
+        per column beats two stacked in a tab row whenever nothing has to
+        give them up. Once the free width is gone the next page joins as
+        before, so the dock still can't be shredded into slivers.
+
+        A right-docked *home* strip is one of the strips this steps past,
+        deliberately: with the room to spare, a pull request opens beside
+        the shells rather than in their tab row, and the panel Ctrl+J
+        toggles is left exactly as it was — the new column comes out of
+        the terminal's branch, so the home divider (`_home_rec`, the split
+        *separating* the two) is still the one that sizes it."""
         self.restore_maximized()  # a page opening behind the overlay is a page lost
         if side not in ("right", "below"):
             side = "right"
         strip = self._strip_past_terminal("h" if side == "right" else "v")
+        if strip is not None and side == "right" and self._split_is_free():
+            strip = None
         if strip is None:
             strip = self._new_strip()
             split = self._split_leaf(self._terminal, strip, side)
@@ -1326,6 +1351,35 @@ class PanelDock(Adw.Bin):
         except ValueError:
             return None  # the strip left the tree (a collapse in flight)
         return self._panes.get(split)
+
+    def _split_is_free(self) -> bool:
+        """Whether a new column beside the terminal would cost the terminal
+        nothing — `open_page`'s reason to split an axis that already has a
+        strip on it instead of joining.
+
+        The terminal stops growing at the "terminal_max_width" setting and
+        centers itself in whatever it was given, so on a wide screen it is
+        sitting on gutter it will never use: a strip carved out of that is
+        width nobody loses. The seed handed over is the very one the new
+        strip's own sizer would open at, so what's measured is the column
+        that is actually about to appear, not a guess at it (see
+        `panelsizing.room_for_a_split`).
+
+        False whenever the answer isn't certain — no maximum width set, no
+        settings yet, a terminal that hasn't been allocated — which leaves
+        the plain join-don't-split rule in charge. Two pages opened in the
+        same frame are that last case: `_split_leaf` unparents the terminal
+        to re-place it under the new paned, and an unparented widget
+        measures 0 until the next layout pass, so the second page joins.
+        Nothing the user can do by hand opens two pages without a frame in
+        between."""
+        settings = self._settings or {}
+        try:
+            keep = int(settings.get("terminal_max_width") or 0)
+        except (TypeError, ValueError):
+            keep = 0  # untrusted setting; treat it as "no maximum"
+        wanted = int(self._size_lookup("page", "right") or 0) if self._size_lookup else 0
+        return panelsizing.room_for_a_split(self._terminal.get_width(), keep, wanted)
 
     def _scope_of(self, sizer, axis: str) -> str:
         """Which app-wide seed a divider speaks for: "home" for the shells'

@@ -100,13 +100,34 @@ class FakeShell(Gtk.Box):
         return {"kind": "shell", "hist": self.hist}
 
 
+class FakePage(FakeShell):
+    """The same stand-in, docked as a page rather than a shell — what
+    `open_page` puts in a strip (a PR view, the attachments list)."""
+
+    page_kind = "page"
+
+
+class FakeTerminal(Gtk.Label):
+    """The agent terminal at a width of our choosing: nothing is ever shown
+    in this script, so no widget here is allocated. `open_page` asks the
+    terminal how wide it is (see PanelDock._split_is_free), and get_width is
+    a plain method a Python subclass can answer for."""
+
+    def __init__(self, width=0):
+        super().__init__(label="agent")
+        self._width = width
+
+    def get_width(self):
+        return self._width
+
+
 _WINDOWS = []  # keep roots alive for the run
 
 
-def make_dock(home="bottom") -> PanelDock:
+def make_dock(home="bottom", terminal=None) -> PanelDock:
     """A dock wired the way TerminalTab wires the real one: strips spawn
     FakeShells numbered and ordinal'd by the dock."""
-    terminal = Gtk.Label(label="agent")
+    terminal = terminal if terminal is not None else Gtk.Label(label="agent")
     dock = PanelDock(terminal, None, home)
 
     def make_shell():
@@ -212,6 +233,129 @@ def check_close_recent() -> None:
     )
 
 
+def open_page_dock(width: int, max_width: int, seed: int = 400, home="bottom") -> PanelDock:
+    """A dock whose terminal is *width* px across and stops growing at
+    *max_width*, with *seed* px as the app-wide size for docked-page strips
+    (0 = never sized, so a new strip opens at the default fraction)."""
+    dock = make_dock(home=home, terminal=FakeTerminal(width))
+    dock.apply_settings({"terminal_max_width": max_width})
+    dock.set_size_lookup(lambda _scope, _mode, s=seed: s)
+    return dock
+
+
+def check_open_page_splits() -> None:
+    """open_page's join-don't-split rule yielding to spare width: past the
+    maximum terminal width the terminal is sitting on gutter it will never
+    use, so a second page opens in a column of its own rather than as
+    another tab in the first one's strip."""
+    print("open-page splits:")
+    wide = open_page_dock(2400, 1200)  # 1200 px of gutter, 408 of it needed
+    wide.open_page(FakePage(1))
+    drain()
+    second = FakePage(2)
+    wide.open_page(second)
+    drain()
+    check(
+        "a terminal past its maximum gives the second page a column",
+        len(wide.strips()) == 2,
+        wide.strips(),
+    )
+    check(
+        "the new column lands beside the terminal",
+        wide._strip_past_terminal("h") is wide._strip_of(second),
+    )
+
+    tight = open_page_dock(1400, 1200)  # 200 px of gutter: not enough
+    tight.open_page(FakePage(1))
+    drain()
+    tight.open_page(FakePage(2))
+    drain()
+    check(
+        "a terminal with no room to spare takes the tab",
+        len(tight.strips()) == 1 and tight.strips()[0].page_count == 2,
+        tight.strips(),
+    )
+
+    unlimited = open_page_dock(4000, 0)  # no maximum: the terminal uses it all
+    unlimited.open_page(FakePage(1))
+    drain()
+    unlimited.open_page(FakePage(2))
+    drain()
+    check(
+        "no maximum width means no free room",
+        len(unlimited.strips()) == 1 and unlimited.strips()[0].page_count == 2,
+        unlimited.strips(),
+    )
+
+    # Nothing ever sized: the column opens at the default fraction of the
+    # terminal, which is what has to fit in the gutter.
+    unsized = open_page_dock(2400, 1200, seed=0)
+    unsized.open_page(FakePage(1))
+    drain()
+    unsized.open_page(FakePage(2))
+    drain()
+    check(
+        "an unsized column is measured at its real width",
+        len(unsized.strips()) == 2,
+        unsized.strips(),
+    )
+    unsized_tight = open_page_dock(1800, 1200, seed=0)
+    unsized_tight.open_page(FakePage(1))
+    drain()
+    unsized_tight.open_page(FakePage(2))
+    drain()
+    check(
+        "...and refused when that width won't fit",
+        len(unsized_tight.strips()) == 1 and unsized_tight.strips()[0].page_count == 2,
+        unsized_tight.strips(),
+    )
+
+    # A right-docked home strip is a strip on that axis like any other: with
+    # room to spare the page takes its own column rather than a seat in the
+    # shells' tab row, and the panel Ctrl+J toggles is left as it was — same
+    # pages, same home role, same divider against the terminal.
+    right_home = open_page_dock(2400, 1200, home="right")
+    right_home.show_home()
+    drain()
+    home_strip = right_home._home_strip
+    page = FakePage(1)
+    right_home.open_page(page)
+    drain()
+    check(
+        "a right-docked panel isn't joined when there's room beside it",
+        len(right_home.strips()) == 2 and right_home._strip_of(page) is not home_strip,
+        right_home.strips(),
+    )
+    check(
+        "...and keeps its shells, its home role and its divider",
+        right_home._home_strip is home_strip
+        and len(home_strip.shell_pages()) == 1
+        and right_home._home_rec() is not None,
+        (right_home._home_strip, home_strip.shell_pages()),
+    )
+    tight_home = open_page_dock(1400, 1200, home="right")
+    tight_home.show_home()
+    drain()
+    tight_home.open_page(FakePage(1))
+    drain()
+    check(
+        "with no room it joins the panel as before",
+        len(tight_home.strips()) == 1 and tight_home.strips()[0] is tight_home._home_strip,
+        tight_home.strips(),
+    )
+
+    below = open_page_dock(2400, 1200)
+    below.open_page(FakePage(1), side="below")
+    drain()
+    below.open_page(FakePage(2), side="below")
+    drain()
+    check(
+        "spare width doesn't split the bottom axis",
+        len(below.strips()) == 1 and below.strips()[0].page_count == 2,
+        below.strips(),
+    )
+
+
 def main() -> int:
     print("capture:")
     dock, layout = split_layout()
@@ -290,6 +434,7 @@ def main() -> int:
     drain()
     check("restore refuses a dock already split", len(dock5.strips()) == before)
 
+    check_open_page_splits()
     check_close_recent()
 
     print(f"\n{PASSED} passed, {FAILED} failed")
