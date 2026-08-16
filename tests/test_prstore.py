@@ -83,6 +83,38 @@ def test_a_sessionless_write_goes_nowhere(store, heard):
     assert heard == []
 
 
+def test_a_subscriber_writing_back_what_it_adopted_does_not_carousel(store, state, heard):
+    """The subscribers' echo, at the level this GTK-free suite can reach: a
+    session-changed handler that re-reads the saved list and writes it back —
+    the shape of a tab adopting somebody else's write — must not re-emit.
+    The handler runs re-entrantly inside the emission, before the writer's
+    own bookkeeping continues, which is exactly the ordering a widget test
+    would be probing."""
+
+    def adopt(_store, session_id):
+        store.set_records(session_id, state.get_session_prs(session_id))
+
+    store.connect("session-changed", adopt)
+    store.set_records(SESSION, [{"number": 55, "url": URL}])
+    assert heard == [("session", SESSION)]
+
+
+def test_a_subscriber_amending_a_write_lands_both(store, state, heard):
+    """Re-entrant writes that *do* change something are legal, and settle: a
+    handler that amends what was written (a tab appending the PR only it
+    knows about) emits once more, converges on the amendment, and stops."""
+    amended = [{"number": 55, "url": URL}, {"number": 56, "url": OTHER_URL}]
+
+    def amend(_store, session_id):
+        if state.get_session_prs(session_id) != amended:
+            store.set_records(session_id, amended)
+
+    store.connect("session-changed", amend)
+    store.set_records(SESSION, [{"number": 55, "url": URL}])
+    assert state.get_session_prs(SESSION) == amended
+    assert heard == [("session", SESSION), ("session", SESSION)]
+
+
 def test_attach_appends_only_what_is_new(store, state, heard):
     """The first-prompt attacher's contract: newcomers go after what the
     session already has, and a PR both sides know keeps the saved copy —

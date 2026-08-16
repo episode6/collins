@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -2118,7 +2118,14 @@ class TerminalTab(Gtk.Box):
         only they knew about (a branch lookup's find, say) would be dropped
         from the saved list by this tab's next poll. The tab's own write comes
         straight back around here, and leaves again just as fast: it is
-        exactly what `_saved_pr_records` already holds."""
+        exactly what `_saved_pr_records` already holds.
+
+        Adoption deliberately leaves `_saved_pr_records` alone — what the tab
+        will actually show isn't known until the update `restore_prs` requests
+        merges the adopted list with its own sources (`_collect_prs`) — so
+        that update ends in one more `set_records`. When the merge changed
+        nothing, the hub's equality guard makes that write the no-op it
+        deserves to be: no disk, no signal, one spare comparison."""
         if session_id != self.session_id or self._pr_store is None:
             return
         records = self._pr_store.records(session_id)
