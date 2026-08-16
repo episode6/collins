@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-13. Full change history: git log for this file.
+fork. Last modified: 2026-08-16. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -11,7 +11,7 @@ fork. Last modified: 2026-08-13. Full change history: git log for this file.
 | `Ctrl+Shift+F` | Open the sidebar search (`Esc` closes it) |
 | `Ctrl+Shift+T` | New session |
 | `Ctrl+Shift+N` | New window |
-| `Ctrl+W` | Close the current tab |
+| `Ctrl+W` | Close the panel tab you were last in — and once no panel is left open, the session tab itself |
 | `Ctrl+PgUp` / `Ctrl+PgDn` | Previous / next tab |
 | `Ctrl+C` / `Ctrl+V` | Copy selection / paste (easy copy & paste, on by default) |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in the terminal (always available) |

@@ -4265,6 +4265,12 @@ class TerminalTab(Gtk.Box):
         axis (win.rotate-panel-page)."""
         self._dock.rotate_recent_page()
 
+    def close_recent_panel_page(self) -> bool:
+        """Close the focused (or last-touched) visible panel tab, as its own X
+        would. False when this tab's dock has no page on show — Ctrl+W's cue to
+        close the session tab instead (win.close-tab)."""
+        return self._dock.close_recent_page()
+
     def _load_panel_history(self) -> dict[int, str]:
         """Saved shell scrollbacks by history ordinal for this session —
         forks don't restore (their panel would clash with the original

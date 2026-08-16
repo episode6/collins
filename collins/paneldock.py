@@ -1026,6 +1026,31 @@ class PanelDock(Adw.Bin):
         if strip is not None and widget is not None:
             self.rotate_page(strip, widget)
 
+    def close_recent_page(self) -> bool:
+        """Close one panel tab — a maximized page first, else the focused (or
+        last-touched) one — through the strip's own close funnel, busy-ask and
+        all. This is Ctrl+W's first stop (win.close-tab), so False has to mean
+        "nothing on show to close": the caller closes the whole session tab on
+        it, and no visible page may be left behind by that answer. Hence the
+        fallback past `_recent_page` to any visible strip's selected tab — the
+        last-touched page can be sitting in the home strip Ctrl+J has since
+        hidden while a satellite strip is still up.
+
+        True while a busy shell's confirmation is only *asked*: the press has
+        landed on the panel either way, and taking the session tab out from
+        under the dialog is the one thing it must not do."""
+        if self._max is not None:
+            self.close_page(self._max.widget)
+            return True
+        strip, widget = self._recent_page()
+        if widget is None:
+            strip = next((s for s in self.strips() if s.get_visible() and s.page_count), None)
+            widget = strip.selected_page_widget() if strip is not None else None
+        if strip is None or widget is None:
+            return False
+        strip.close_widget(widget)
+        return True
+
     # -- strip lifecycle -----------------------------------------------------
 
     def _new_strip(self):

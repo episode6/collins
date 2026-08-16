@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -1005,7 +1005,7 @@ class MainWindow(Adw.ApplicationWindow):
             "preferences": lambda *_: self._show_preferences(),
             "mcp-servers": lambda *_: dialogs.mcp_browser_dialog(self),
             "focus-search": lambda *_: self.sidebar.focus_search(),
-            "close-tab": lambda *_: self._close_current_tab(),
+            "close-tab": lambda *_: self._close_panel_page_or_tab(),
             "next-tab": lambda *_: self.tab_view.select_next_page(),
             "prev-tab": lambda *_: self.tab_view.select_previous_page(),
             "about": lambda *_: self._show_about(),
@@ -2374,6 +2374,18 @@ class MainWindow(Adw.ApplicationWindow):
         self._caffeine_idle_action.set_state(
             GLib.Variant.new_boolean(bool(getattr(app, "caffeine_follows_activity", False)))
         )
+
+    def _close_panel_page_or_tab(self) -> None:
+        """Ctrl+W, closing one thing at a time from the inside out: the panel
+        tab holding the focus (or the last one fronted), and only once this
+        tab's dock has none left on show does the press reach the session tab
+        itself. Dismissing a split is the cheap, repeated intent; ending a
+        session is the expensive one, and it shouldn't sit one keystroke deep
+        behind an open panel."""
+        tab = self._current_terminal_tab()
+        if tab is not None and tab.close_recent_panel_page():
+            return
+        self._close_current_tab()
 
     def _close_current_tab(self) -> None:
         page = self.tab_view.get_selected_page()
