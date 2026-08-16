@@ -18,6 +18,48 @@ from __future__ import annotations
 # the panel.
 DEFAULT_FRACTION = 0.62
 
+# The narrowest column worth opening a page in, and the room a paned's
+# wide handle takes between its two children — the two constants in
+# "would a new split beside the terminal cost it anything?" (see
+# room_for_a_split).
+MIN_SPLIT_SIZE = 240
+HANDLE_SIZE = 8
+
+
+def split_size(total: int, wanted: int = 0) -> int:
+    """How wide a new strip split off a *total*-px leaf actually ends up:
+    *wanted* (the app-wide last-set size) when it fits, else the same
+    DEFAULT_FRACTION share `SizeMemory.target` falls back to. The two must
+    agree — this is the size the divider is about to be given, not an
+    estimate of it."""
+    if 0 < wanted < total:
+        return wanted
+    return max(total - int(total * DEFAULT_FRACTION), 0)
+
+
+def room_for_a_split(total: int, keep: int, wanted: int = 0) -> bool:
+    """Whether a new column can be split off a *total*-px terminal without
+    taking the terminal itself below *keep* px.
+
+    *keep* is the terminal's maximum width (the "terminal_max_width"
+    setting): past it the terminal stops growing and centers itself in
+    whatever it was given, so every pixel beyond *keep* is gutter — room a
+    new panel can have for free. 0 means no maximum, and then there is no
+    free room at all: anything a split takes is width the terminal was
+    using.
+
+    The column is measured at the width it will really open at (see
+    `split_size`), handle included, and one narrower than MIN_SPLIT_SIZE
+    is refused however much room there is for it: a column too thin to
+    read a pull request in is not a column worth opening one in.
+    """
+    if total <= 0 or keep <= 0:
+        return False
+    size = split_size(total, wanted)
+    if size < MIN_SPLIT_SIZE:
+        return False
+    return total - size - HANDLE_SIZE >= keep
+
 
 class SizeMemory:
     """Remembered end-child pixel sizes for one paned, keyed by mode."""
