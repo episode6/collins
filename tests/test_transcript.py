@@ -402,7 +402,7 @@ def test_relocate_keeps_the_model(tmp_path):
 # -- images the conversation named ------------------------------------------
 
 
-def _said(text, *, role="assistant", cwd=None, at=None, sidechain=False):
+def _said(text, *, role="assistant", cwd=None, at=None, sidechain=False, meta=False):
     line = {
         "type": role,
         "message": {"role": role, "content": [{"type": "text", "text": text}]},
@@ -413,6 +413,8 @@ def _said(text, *, role="assistant", cwd=None, at=None, sidechain=False):
         line["timestamp"] = at
     if sidechain:
         line["isSidechain"] = True
+    if meta:
+        line["isMeta"] = True
     return line
 
 
@@ -490,6 +492,22 @@ def test_a_subagents_images_are_its_own(tmp_path):
     shot = _png(tmp_path, "shot.png")
     p = tmp_path / "s.jsonl"
     _write(p, [_said(f"found {shot}", sidechain=True)])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.attachments() == []
+
+
+def test_injected_instruction_text_is_not_scanned(tmp_path):
+    """A loaded skill (or slash-command expansion) lands in the transcript as
+    a user entry flagged ``isMeta``: it is the harness speaking, not the
+    conversation, and an example image a skill happens to name — one shipped
+    in the repo, say — was never shown to anyone in this session."""
+    _png(tmp_path, "data/screenshot.png")
+    p = tmp_path / "s.jsonl"
+    _write(p, [
+        _said("the hero scene renders data/screenshot.png", role="user",
+              cwd=str(tmp_path), meta=True),
+    ])
     m = TranscriptModel(p)
     m.update()
     assert m.attachments() == []

@@ -178,7 +178,12 @@ class TranscriptModel:
         gallery of the pictures a conversation was about into every png
         under the project root. Sidechain records are skipped for the reason
         `_record_model` gives — a subagent's turns are somebody else's
-        conversation that happens to share the file.
+        conversation that happens to share the file. ``isMeta`` records are
+        skipped too: those are text the harness injected (a skill's SKILL.md,
+        a slash command's expansion), which is neither side speaking, and
+        instructions name paths for a hundred reasons — a repo-shipped
+        example image mentioned in a skill would land in the gallery of
+        every session that ever loaded it.
 
         One tool call *is* read: SendUserFile (see ``_deliveries``), because
         handing the user a file is saying it as deliberately as prose can,
@@ -195,6 +200,8 @@ class TranscriptModel:
         every image in it under this minute.
         """
         if entry.get("type") not in ("user", "assistant") or entry.get("isSidechain"):
+            return False
+        if entry.get("isMeta"):
             return False
         content = message.get("content")
         cwd = entry.get("cwd")
