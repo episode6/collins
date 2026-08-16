@@ -1349,9 +1349,44 @@ class SessionSidebar(Gtk.Box):
         # AdwOverlaySplitView coordinating the two bars, hide them here so they
         # aren't duplicated at the pane boundary.
         header.set_show_end_title_buttons(False)
-        self._header = header
-        self._window_title = Adw.WindowTitle(title=_("Sessions"))
-        header.set_title_widget(self._window_title)
+        # "Something in this panel is working" — the header's answer for a list
+        # scrolled away from whichever row is carrying the barber pole, or
+        # folded shut over it. It says so in the pole's own paint: the same two
+        # blues climbing at the same cadence (see .working-pole in app.py), so
+        # the header and the row read as one signal in two places rather than
+        # as two unrelated ones.
+        #
+        # It rides in the title widget, immediately left of "Sessions", and
+        # keeps that slot whether or not anything is working — only the paint
+        # comes and goes (see set_sessions_working). Hiding the widget instead
+        # would re-centre the title every time a turn starts or stops, and
+        # this header watches every session in the window.
+        self._working_pole = Gtk.Box(valign=Gtk.Align.CENTER)
+        self._working_pole.add_css_class("working-pole")
+        # The pole sits beside what the header is showing rather than inside
+        # it, so opening search (which swaps title for entry, see
+        # _set_search_active) doesn't take the window's one "something is
+        # working" light away with it. No spacing on the box: AdwWindowTitle
+        # brings its own horizontal padding, which is the gap the pole wants,
+        # and the entry has a frame of its own to sit off.
+        # Neither expanding nor horizontally homogeneous, so the title box
+        # sits at the width of whichever child is showing and the header
+        # centres it as a unit — which is what keeps the pole against the
+        # title rather than stranded out by the search button, an entry's
+        # natural width away from it. Search turns the expansion on (see
+        # _set_search_active), because an entry that doesn't fill the bar
+        # looks like a mistake.
+        self._title_stack = Gtk.Stack(hhomogeneous=False)
+        self._title_stack.add_named(Adw.WindowTitle(title=_("Sessions")), "title")
+        # Centred, not filled: a title widget that fills gets the whole bar
+        # between the buttons, and the pole would ride its far-left edge while
+        # AdwWindowTitle centred the words half a header away. Centring the
+        # box is what puts the pole against the title. Search fills again (see
+        # _set_search_active).
+        self._title_box = Gtk.Box(halign=Gtk.Align.CENTER)
+        self._title_box.append(self._working_pole)
+        self._title_box.append(self._title_stack)
+        header.set_title_widget(self._title_box)
 
         # Search is folded away behind a button: it costs the list a whole row
         # when it sits there permanently, and it is reached a handful of times
@@ -1360,6 +1395,7 @@ class SessionSidebar(Gtk.Box):
         self.search_entry = Gtk.SearchEntry(placeholder_text=_("Search sessions…"), hexpand=True)
         self.search_entry.connect("search-changed", lambda *_: self._invalidate())
         self.search_entry.connect("stop-search", lambda *_: self.search_btn.set_active(False))
+        self._title_stack.add_named(self.search_entry, "search")
 
         menu = Gio.Menu()
         menu.append(_("Select multiple sessions"), "win.select-sessions")
@@ -1378,17 +1414,6 @@ class SessionSidebar(Gtk.Box):
         self.search_btn.set_tooltip_text(_("Search sessions"))
         self.search_btn.connect("toggled", lambda b: self._set_search_active(b.get_active()))
         header.pack_start(self.search_btn)
-
-        # "Something in this panel is working" — the header's answer for a list
-        # scrolled away from whichever row is carrying the barber pole, or
-        # folded shut over it. Hidden rather than merely still while nothing
-        # is: an idle header shouldn't spend a slot saying nothing. It goes
-        # last in the start group, so the buttons stay put as it comes and
-        # goes — it grows into the gap before the title (see
-        # set_sessions_working).
-        self._working_spinner = Gtk.Spinner(visible=False, valign=Gtk.Align.CENTER)
-        self._working_spinner.set_tooltip_text(_("A session is working"))
-        header.pack_start(self._working_spinner)
 
         # Packed at the end first, so the additive action sits furthest right,
         # past the refresh button.
@@ -1781,18 +1806,22 @@ class SessionSidebar(Gtk.Box):
         self._refresh_btn.set_sensitive(not busy)
 
     def set_sessions_working(self, working: bool) -> None:
-        """Spin the header's activity spinner while any session in this window
-        is working, and hide it again when none is.
+        """Run the header's barber pole while any session in this window is
+        working, and blank it again when none is.
 
         Which sessions count is the window's call, not this panel's — it owns
         the activity tracker, and it is the one that knows a row's
         conversation has been handed to the background (see
-        Window._sync_working_spinner). The spinner is stopped as well as
-        hidden, so nothing is left animating behind a header that has nothing
-        to say.
+        Window._sync_working_pole). The pole keeps its slot beside the title
+        either way; what goes is the paint and the animation with it, so
+        nothing is left moving behind a header with nothing to say. The
+        tooltip goes too — an unpainted slot has nothing to explain.
         """
-        self._working_spinner.set_visible(working)
-        self._working_spinner.set_spinning(working)
+        if working:
+            self._working_pole.add_css_class("working")
+        else:
+            self._working_pole.remove_css_class("working")
+        self._working_pole.set_tooltip_text(_("A session is working") if working else None)
 
     def set_active_session(self, session_id: str | None) -> None:
         """Highlight the row of the session (or new-session placeholder)
@@ -2028,18 +2057,28 @@ class SessionSidebar(Gtk.Box):
 
         The entry takes the title's place, so it stretches across everything
         between the header's buttons — those all stay put and reachable, and
-        the X the search button turns into folds the entry away again.
+        the X the search button turns into folds the entry away again. Both
+        live in the title widget's stack, which leaves the working pole (the
+        stack's neighbour) standing through the swap: searching shouldn't cost
+        the window its one "something is working" light.
         """
         self.search_btn.set_icon_name(
             "window-close-symbolic" if active else "system-search-symbolic"
         )
         self.search_btn.set_tooltip_text(_("Close search") if active else _("Search sessions"))
+        # The entry stretches across the bar; the title only takes the room it
+        # needs, so that the pole stays beside it. And the pole holds the entry
+        # off with a gap of its own, the title's padding having been the gap
+        # on that side.
+        self._title_box.set_halign(Gtk.Align.FILL if active else Gtk.Align.CENTER)
+        self._title_stack.set_hexpand(active)
+        self._working_pole.set_margin_end(6 if active else 0)
         if active:
-            self._header.set_title_widget(self.search_entry)
+            self._title_stack.set_visible_child_name("search")
             self.search_entry.grab_focus()
         else:
             self.search_entry.set_text("")  # closing search unfilters the list
-            self._header.set_title_widget(self._window_title)
+            self._title_stack.set_visible_child_name("title")
 
     def focus_search(self) -> None:
         """Open search if it is folded away, and put the cursor in it."""
