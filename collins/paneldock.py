@@ -27,11 +27,13 @@ other is Ctrl+J.
 closes, the next — and shows or hides *that*, wherever it happens to
 live. A terminal alone in its strip hides the strip around it, node and
 size intact; one sharing a tab row is stowed off screen on its own (see
-`_stow`), so the pages beside it stay exactly where they are. And a new
-one never joins a strip that isn't already showing shells: the PR page
-docked right is not a tab row Ctrl+J may move into. Both halves are the
-same rule — the shortcut may only ever put on screen, and take off it,
-the terminal it is speaking for.
+`_stow`), so the pages beside it stay exactly where they are. A new one
+keeps to its own company where it can — the shell strip already on the
+home axis, or a fresh column when the width is free. Only when the panel
+opens right, the width is spoken for, and a docked page already holds
+that edge does it take a seat in that page's tab row (`_panel_target`):
+joined, never adopted, so the shortcut still speaks for its terminal
+alone, and the next hide stows just that page.
 
 One page at a time can step out of that tree entirely: the tab row's
 overlay button *maximizes* it, floating it over the whole session tab —
@@ -425,14 +427,16 @@ class PanelDock(Adw.Bin):
         up, since the agent may have moved into a worktree while it was
         hidden.
 
-        Where a *new* one opens follows two rules. It never joins a strip
-        that isn't already showing shells — the PR page docked right is not
-        a tab row Ctrl+J may move into, and a shortcut that hides what it
-        shows has no business adopting someone else's panel. And it yields
-        to spare width exactly as `open_page` does: on a screen wide enough
-        that the terminal has stopped growing (`_split_is_free`), the shell
-        takes a column of its own out of the gutter rather than a tab in
-        the shell strip already there."""
+        Where a *new* one opens is `_panel_target`'s call: a column of its
+        own out of the gutter when the terminal has width to spare
+        (`_split_is_free`, exactly the spare width `open_page` yields to),
+        else the shell strip already on the home axis, else — the panel
+        set to open right with a docked page holding that edge and no
+        width free for another column — a seat in that page's tab row.
+        The seat is joined, never adopted: a shortcut that hides what it
+        shows has no business making a home of someone else's panel, and
+        hiding from a shared row stows the terminal alone (`_stow`), so
+        the page beside it keeps its row either way."""
         # No strip is visible under a maximized page: the tab comes back to
         # its row first, so what this shows is something the user can see.
         self.restore_maximized()
@@ -501,9 +505,14 @@ class PanelDock(Adw.Bin):
 
     def _panel_target(self):
         """The strip Ctrl+J's terminal opens in: a column split off the
-        terminal whenever that width is free, else a strip on the home axis
-        that is already showing shells, else a new strip on the home edge.
-        Never a strip without shells in it (see `show_panel_terminal`)."""
+        terminal whenever that width is free, else a strip on the home
+        axis that is already showing shells, else a new strip on the home
+        edge — unless that edge is "right" and a docked page already holds
+        it. There a second column would squeeze the terminal below its
+        maximum width for an edge that already has a panel, so the shell
+        takes a seat in the docked page's tab row instead: joined, never
+        adopted (see `show_panel_terminal`), leaving the home role — and
+        the sizes it speaks for — untouched."""
         axis = self._home_position
         if axis == "right" and self._split_is_free("home"):
             return self._create_home_strip()
@@ -515,11 +524,24 @@ class PanelDock(Adw.Bin):
             ),
             None,
         )
-        if target is None:
-            return self._create_home_strip()
-        if target is not self._home_strip:
-            self._adopt_home(target, axis)
-        return target
+        if target is not None:
+            if target is not self._home_strip:
+                self._adopt_home(target, axis)
+            return target
+        if axis == "right":
+            # The width is not free — the split at the top would have taken
+            # it — so a new column here comes out of the terminal itself.
+            docked = next(
+                (
+                    strip
+                    for strip in self.strips()
+                    if strip.get_visible() and self._strip_axis(strip) == axis
+                ),
+                None,
+            )
+            if docked is not None:
+                return docked
+        return self._create_home_strip()
 
     def _stow(self, shell, strip) -> None:
         """Lift the panel terminal out of a strip it shares with other
