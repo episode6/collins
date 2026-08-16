@@ -662,6 +662,30 @@ msgstr "Mettre à la corbeille"
 msgid "New window"
 msgstr "Nouvelle fenêtre"
 
+msgid "Quit"
+msgstr "Quitter"
+
+msgid "Show Collins"
+msgstr "Afficher Collins"
+
+msgid "no sessions open"
+msgstr "aucune session ouverte"
+
+msgid "1 session"
+msgstr "1 session"
+
+msgid "1 working"
+msgstr "1 en cours"
+
+msgid "{n} working"
+msgstr "{n} en cours"
+
+msgid "1 unread"
+msgstr "1 non lue"
+
+msgid "{n} unread"
+msgstr "{n} non lues"
+
 msgid "You interrupted Claude here"
 msgstr "Vous avez interrompu Claude ici"
 

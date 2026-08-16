@@ -662,6 +662,30 @@ msgstr "Kukába"
 msgid "New window"
 msgstr "Új ablak"
 
+msgid "Quit"
+msgstr "Kilépés"
+
+msgid "Show Collins"
+msgstr "Collins megjelenítése"
+
+msgid "no sessions open"
+msgstr "nincs nyitott munkamenet"
+
+msgid "1 session"
+msgstr "1 munkamenet"
+
+msgid "1 working"
+msgstr "1 dolgozik"
+
+msgid "{n} working"
+msgstr "{n} dolgozik"
+
+msgid "1 unread"
+msgstr "1 olvasatlan"
+
+msgid "{n} unread"
+msgstr "{n} olvasatlan"
+
 msgid "You interrupted Claude here"
 msgstr "Itt szakítottad meg a Claude-ot"
 
