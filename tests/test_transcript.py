@@ -495,6 +495,21 @@ def test_a_subagents_images_are_its_own(tmp_path):
     assert m.attachments() == []
 
 
+def test_injected_instruction_text_is_not_scanned(tmp_path):
+    """A loaded skill (or slash-command expansion) lands in the transcript as
+    a user entry flagged ``isMeta``: it is the harness speaking, not the
+    conversation, and an example image a skill happens to name — one shipped
+    in the repo, say — was never shown to anyone in this session."""
+    _png(tmp_path, "data/screenshot.png")
+    p = tmp_path / "s.jsonl"
+    line = _said("the hero scene renders data/screenshot.png", role="user", cwd=str(tmp_path))
+    line["isMeta"] = True
+    _write(p, [line])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.attachments() == []
+
+
 def test_a_re_mentioned_image_is_not_a_change(tmp_path):
     """Repeating a path must not report a change on every poll — it would
     have the tab rewriting state.json for the rest of the session."""
