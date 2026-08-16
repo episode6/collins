@@ -38,7 +38,7 @@ from .gitinfo import github_url
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .projecticons import project_icon_data
-from .providers import get_provider
+from .providers import default_provider, get_provider
 from .prstatus import (
     PullRequest,
     describe_all,
@@ -489,7 +489,10 @@ class NewThreadRow(Gtk.ListBoxRow):
         # icon, so it lands in the same column, and the title beside it starts
         # where every title in the group does. .agent-mark carries the inset
         # this row used to fake with a 6px margin of its own.
-        agent_mark = Gtk.Image.new_from_icon_name(get_provider("claude").icon_name)
+        # Read from default_provider(), which is what start_session() below
+        # ends up launching -- the icon is a promise about the session this row
+        # makes, so it has to come from the same place the launch does.
+        agent_mark = Gtk.Image.new_from_icon_name(default_provider().icon_name)
         agent_mark.set_pixel_size(prmenu.ROW_ICON_PX)
         agent_mark.set_valign(Gtk.Align.CENTER)
         agent_mark.add_css_class("agent-mark")

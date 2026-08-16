@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 
 import os
 import shutil
@@ -15,6 +15,7 @@ from collins.providers import (
     ClaudeProvider,
     Provider,
     available_providers,
+    default_provider,
     get_provider,
     split_screen_rows,
 )
@@ -52,6 +53,15 @@ def test_available_providers_gating(monkeypatch):
     assert [p.id for p in available_providers()] == ["claude"]
     monkeypatch.setattr(providers.ClaudeProvider, "available", lambda self: False)
     assert available_providers() == []
+
+
+def test_default_provider_falls_back_when_nothing_installed(monkeypatch):
+    monkeypatch.setattr(providers.ClaudeProvider, "available", lambda self: True)
+    assert default_provider().id == "claude"
+    # Nothing on PATH still names an agent: what the offer row draws and the
+    # quick button launches has to be something either way.
+    monkeypatch.setattr(providers.ClaudeProvider, "available", lambda self: False)
+    assert default_provider().id == "claude"
 
 
 def test_resume_and_new_commands(monkeypatch):

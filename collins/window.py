@@ -75,7 +75,7 @@ from .licenses import legal_sections
 from .models import SessionItem
 from .prefs import PreferencesDialog
 from .projecticons import project_icon_data
-from .providers import SessionOptions, available_providers, get_provider
+from .providers import SessionOptions, available_providers, default_provider, get_provider
 from .prstatus import newest_title
 from .quickopen import QuickOpenDialog
 from .replayview import ReplayTab
@@ -1397,8 +1397,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _default_provider(self):
         """First installed agent (Claude when present), used by the quick button."""
-        providers = available_providers()
-        return providers[0] if providers else get_provider("claude")
+        return default_provider()
 
     def _visible_project_dir(self) -> str | None:
         """Project directory of the session in the visible tab. A session's
