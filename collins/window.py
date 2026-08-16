@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -74,6 +74,7 @@ from .i18n import _
 from .licenses import legal_sections
 from .models import SessionItem
 from .prefs import PreferencesDialog
+from .projecticons import project_icon_data
 from .providers import SessionOptions, available_providers, get_provider
 from .prstatus import newest_title
 from .quickopen import QuickOpenDialog
@@ -3870,7 +3871,9 @@ class MainWindow(Adw.ApplicationWindow):
         replaces its own notification instead of stacking a queue nobody
         reads. The bell-flash rides along for the user who is looking: it
         marks the ringing tab and row in-app, where a desktop notification
-        says nothing.
+        says nothing. It wears the project's icon where the project ships one
+        (see _notification_icon), so a glance at the banner says which project
+        is asking before the title is read.
 
         The row is also flagged unread on the way through (_flag_unread). The
         flash says "this session" for the second it lasts; the flag says it
@@ -3901,11 +3904,43 @@ class MainWindow(Adw.ApplicationWindow):
         session_id = self._session_id_of(page) or ""
         notification = Gio.Notification.new(page.get_title())
         notification.set_body(message)
+        notification.set_icon(self._notification_icon(tab, session_id))
         notification.set_default_action_and_target(
             "app.focus-session", GLib.Variant("s", session_id)
         )
         app.send_notification(session_id or page.get_title(), notification)
         return True
+
+    def _notification_icon(self, tab: TerminalTab, session_id: str) -> Gio.Icon:
+        """The icon a session's notification wears: the project's own
+        project-icon.svg where it ships one, else the app icon.
+
+        Resolved exactly like the sidebar's project header — project_icon_data
+        on the repository root, so a session running in a worktree wears its
+        project's icon rather than none — so the banner and the row a click
+        lands on can't show different artwork for the same project. A session
+        the store hasn't discovered yet is asked where it is running instead,
+        which is the case the notification is most useful in: a brand-new tab
+        the user walked away from.
+
+        The vetted bytes go over as a GBytesIcon rather than the path as a
+        GFileIcon. The notification's icon is rendered by whatever daemon
+        shows the banner, not by us, and project_icon_data is the gate that
+        keeps repo-controlled artwork from reaching an image loader unread —
+        handing over a path would send the raw file instead and skip it.
+
+        The app icon is named explicitly rather than left to the daemon's
+        desktop-file lookup: a demo or debug instance runs under its own
+        application id, which resolves to a desktop file that isn't installed
+        and so to a generic icon. _app_icon_name already knows which of the
+        two icons that instance wears.
+        """
+        session = self.store.get_session(session_id) if session_id else None
+        cwd = session.cwd if session is not None else tab.current_agent_cwd()
+        data = project_icon_data(worktree_project_root(cwd) or cwd) if cwd else None
+        if data is not None:
+            return Gio.BytesIcon.new(GLib.Bytes.new(data))
+        return Gio.ThemedIcon.new(_app_icon_name(self))
 
     def has_session_tab(self, session_id: str) -> bool:
         """Whether this window is the one holding this session's tab — asked

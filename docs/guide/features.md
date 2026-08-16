@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-14. Full change history: git log for this file.
+fork. Last modified: 2026-08-16. Full change history: git log for this file.
 -->
 
 # Features
@@ -406,10 +406,12 @@ Toggle it in Preferences (*Show Claude usage*).
 - **Desktop notifications the session raises itself** — the agent calls
   Collins' `notify_user` tool when it wants you back (see [Tools a session can
   call](#tools-a-session-can-call)), and the notification is titled with the
-  session, so clicking it jumps straight to that tab. It also flags that
-  session's sidebar row, so the ask outlives the notification: miss the popup
-  and the row is still holding it. Nothing is guessed from a quiet terminal: a
-  notification means the agent asked for you.
+  session, so clicking it jumps straight to that tab. It wears the project's
+  own `project-icon.svg` where the project ships one (the same icon its
+  sidebar header shows), so a stack of notifications reads apart by project at
+  a glance. It also flags that session's sidebar row, so the ask outlives the
+  notification: miss the popup and the row is still holding it. Nothing is
+  guessed from a quiet terminal: a notification means the agent asked for you.
 - **Session details** (right-click → *Details…*): message and tool-call counts,
   models used, token totals, timestamps, transcript size — plus a **recent
   activity** peek of the last messages, so you can identify a session without
