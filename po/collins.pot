@@ -2509,11 +2509,11 @@ msgid ""
 "the PR up. Once per pull request, so one you close again stays closed"
 msgstr ""
 
-#: collins/prefs.py:355
+#: collins/prefs.py:438
 msgid "Confirm before merging"
 msgstr ""
 
-#: collins/prefs.py:356
+#: collins/prefs.py:440
 msgid ""
 "Ask before merging a pull request, enabling auto-merge, or merging and "
 "archiving the session. Off, the click merges; closing a pull request "
