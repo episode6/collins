@@ -371,20 +371,64 @@ def check_panel_terminal() -> None:
     docked.show_panel_terminal()
     drain()
     shell = docked.panel_terminal
-    check("a shell-less strip is never joined", len(docked.strips()) == 2, docked.strips())
+    row = docked._strip_of(pr)
     check(
-        "the terminal opens in a strip of its own",
-        shell is not None and docked._strip_of(shell) is not docked._strip_of(pr),
+        "no width for a column: the shell takes a seat in the docked row",
+        shell is not None and len(docked.strips()) == 1 and docked._strip_of(shell) is row,
+        docked.strips(),
     )
+    check(
+        "...selected, so Ctrl+J shows what it opened",
+        docked.panel_terminal_showing and row.selected_page_widget() is shell,
+    )
+    check("the row is joined, not adopted as home", docked._home_strip is not row)
     docked.hide_panel_terminal()
     drain()
     check(
-        "hiding it leaves the PR page up",
-        not docked.panel_terminal_showing and docked._strip_of(pr).get_visible(),
+        "hiding it stows the terminal and leaves the PR page up",
+        not docked.panel_terminal_showing
+        and row.get_visible()
+        and pr in row.pages()
+        and shell not in row.pages(),
+        row.pages(),
     )
     docked.show_panel_terminal()
     drain()
-    check("and it comes back", docked.panel_terminal_showing)
+    check(
+        "and it comes back to its seat",
+        docked.panel_terminal_showing and row.pages() == [pr, shell],
+        row.pages(),
+    )
+
+    stacked = open_page_dock(1400, 1200, home="right")  # none free, edge split in two
+    top_page, bottom_page = FakePage(1), FakePage(2)
+    stacked.open_page(top_page)
+    drain()
+    stacked.open_page(bottom_page)  # joins the same row (no free width)
+    drain()
+    row = stacked._strip_of(top_page)
+    stacked.split_move(row, bottom_page, row, "below")
+    drain()
+    stacked.show_panel_terminal()
+    drain()
+    check(
+        "an edge split into strips seats the shell in the topmost",
+        len(stacked.strips()) == 2 and stacked._strip_of(stacked.panel_terminal) is row,
+        stacked.strips(),
+    )
+
+    roomy = open_page_dock(2400, 1200, home="right")  # 1200 px of gutter
+    roomy_pr = FakePage(1)
+    roomy.open_page(roomy_pr)
+    drain()
+    roomy.show_panel_terminal()
+    drain()
+    check(
+        "with width to spare the docked row is never joined",
+        len(roomy.strips()) == 2
+        and roomy._strip_of(roomy.panel_terminal) is not roomy._strip_of(roomy_pr),
+        roomy.strips(),
+    )
 
     wide = open_page_dock(2400, 1200, home="right")  # 1200 px of gutter
     wide.show_panel_terminal()
