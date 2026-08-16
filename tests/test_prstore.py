@@ -164,14 +164,31 @@ def test_only_the_newcomer_is_announced(store, attached):
 
 
 def test_a_pr_is_announced_once_per_session(store, attached):
-    """The once-per-PR promise: dropped and re-added inside the same list is
-    still the same association, and a resume — the saved list written back
-    as it was found — is not an arrival at all."""
+    """The once-per-PR promise, over the writes a session actually makes: a
+    reorder is not an arrival, and neither is a resume — the saved list
+    written back as it was found."""
     records = [{"number": 55, "url": URL}, {"number": 56, "url": OTHER_URL}]
     store.set_records(SESSION, records)
     store.set_records(SESSION, list(reversed(records)))
     store.set_records(SESSION, list(records))
     assert attached == [(SESSION, URL), (SESSION, OTHER_URL)]
+
+
+def test_a_pr_the_session_lost_is_new_again(store, attached):
+    """"Once per PR" means once per *association*, not once ever: the saved
+    list is all that is remembered, so a PR taken off it and put back is a
+    second arrival.
+
+    Nothing a live session does reaches this — every writer sends the whole
+    list it holds, and the one path that empties a list is forgetting the
+    session outright (MainWindow._forget_transcript, after its transcript is
+    gone). Should that id ever come back, it comes back as a stranger, and
+    saying so is the right answer.
+    """
+    store.set_records(SESSION, [{"number": 55, "url": URL}])
+    store.set_records(SESSION, [])
+    store.set_records(SESSION, [{"number": 55, "url": URL}])
+    assert attached == [(SESSION, URL), (SESSION, URL)]
 
 
 def test_the_newcomer_arrives_after_the_list_it_is_on(store, state, attached):
