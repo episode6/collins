@@ -111,7 +111,7 @@ class ComposerView(Gtk.Box):
         # libspelling's adapter is built for it.
         self._buffer.set_highlight_matching_brackets(False)
         # No style scheme either. A GtkSource.Buffer starts out on "classic",
-        # a light scheme, and the view paints its own text from it -- black
+        # a light scheme, and the view paints its own text from it — black
         # glyphs on a dark card, in dark mode, whatever the app's colors say.
         # A scheme is for code the buffer is highlighting; with none set the
         # box takes the theme's own view colors like every other text box in
