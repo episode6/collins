@@ -53,6 +53,16 @@ fork. Last modified: 2026-08-16. Full change history: git log for this file.
   them — turn it off with *Refresh pull requests at launch* in Preferences.
   Marks are restored from the last run either way, so the panel reads
   immediately and then settles.
+- **A finished run re-reads its own pull requests**, without anybody pressing
+  anything: the moment a session's agent stops — the same moment its row starts
+  breathing green for output you haven't read — Collins re-asks GitHub about
+  the PRs that session has open, and re-reads any PR page showing beside its
+  tab. That is when the answer changes: the turn that just ended is the one
+  that pushed the branch, opened the PR or replied to the review, so the checks
+  it kicked off and the comments it left show up on the mark instead of waiting
+  for a click. Only the session that finished, and only its status (finding a
+  PR nobody mentioned stays with the refresh buttons); a session that goes
+  quiet twice in a few seconds is only asked once.
 - A **`+` button on every project header** starts a new session in that
   project; right-click a header for *New session here* and *Archive project*.
   Projects whose sessions are all archived or favorited still show their header,

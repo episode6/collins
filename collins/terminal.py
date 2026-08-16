@@ -2760,6 +2760,34 @@ class TerminalTab(Gtk.Box):
                 invalidate(pr.url)
         self._request_update()
 
+    def note_run_finished(self) -> None:
+        """The agent's output stopped: re-ask GitHub about this session's PRs.
+
+        The window calls this on the same edge that flags the row unread (see
+        _on_session_finished), because a finished run is the likeliest moment
+        for a pull request to have moved and the least likely one for anybody
+        to be watching it: the turn that just ended is the one that pushed the
+        branch, opened the PR or answered a review, and GitHub's answer — new
+        checks, a comment, a mergeability verdict — lands seconds later. The
+        row's mark, the chips and any PR page open beside them would otherwise
+        show the pre-run answer until a TTL ran out or somebody went and asked.
+
+        Both halves keep their own throttles (`refresh_pr_statuses` and
+        `PrViewPage.refresh_if_stale`), so a session that goes quiet between
+        every permission prompt costs one round of `gh` calls rather than one
+        per pause. Only the *status* is re-asked, as on arrival: looking for a
+        PR the transcript never mentioned stays with the refresh button, whose
+        click says to go and look.
+        """
+        self.refresh_pr_statuses()
+        for page in self._dock.pages():
+            # A page in a hidden strip (or an unselected panel tab) refetches
+            # when it is next shown, on its own "map" — spending gh calls on
+            # a conversation nobody has in front of them is what that hook is
+            # there to avoid.
+            if getattr(page, "page_kind", None) == "pr" and page.get_mapped():
+                page.refresh_if_stale()
+
     # -- graceful close ----------------------------------------------------
 
     def feed_child_text(self, text: str) -> None:
