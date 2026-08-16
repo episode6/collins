@@ -935,6 +935,12 @@ msgstr "Abrir automáticamente los nuevos pull requests"
 msgid "Open a pull request's panel beside its session as soon as the session picks the PR up. Once per pull request, so one you close again stays closed"
 msgstr "Abre el panel de un pull request junto a su sesión en cuanto la sesión lo adopta. Una vez por pull request, así que el que cierres seguirá cerrado"
 
+msgid "Show the images panel automatically"
+msgstr "Mostrar automáticamente el panel de imágenes"
+
+msgid "Dock a session's gallery of images beside it the first time it shows one — only in a tab wide enough to spare the column, past the terminal's maximum width. Once per session tab, so one you close again stays closed"
+msgstr "Acopla la galería de imágenes de una sesión junto a ella la primera vez que muestra una — solo en una pestaña lo bastante ancha para ceder la columna, más allá del ancho máximo de la terminal. Una vez por pestaña de sesión, así que la que cierres seguirá cerrada"
+
 msgid "Open composer (Ctrl+.)"
 msgstr "Abrir el redactor (Ctrl+.)"
 

@@ -499,6 +499,46 @@ def check_panel_terminal() -> None:
     )
 
 
+def check_quiet_open() -> None:
+    """A page that opens without being asked for: `room_for_a_column` is the
+    same answer `open_page` acts on, and `focus=False` leaves the keyboard
+    where it was — what the attachments panel docking itself relies on (see
+    TerminalTab._consider_attachments_dock)."""
+    print("quiet open:")
+    wide = open_page_dock(2400, 1200)
+    check("room where a column is free", wide.room_for_a_column() is True)
+    # Nothing here is allocated, so the fake terminal answers the same width
+    # however many columns come off it: what a second open shows is that the
+    # room this reports and the room `open_page` acts on are the one answer.
+    wide.open_page(FakePage(1))
+    drain()
+    wide.open_page(FakePage(2))
+    drain()
+    check(
+        "the room it reports is the room open_page spends",
+        len(wide.strips()) == 2 and wide.room_for_a_column() is True,
+        wide.strips(),
+    )
+    tight = open_page_dock(1400, 1200)
+    check("no room where the terminal would pay for it", tight.room_for_a_column() is False)
+    unlimited = open_page_dock(4000, 0)
+    check("no maximum width means no free room", unlimited.room_for_a_column() is False)
+
+    grabbed = []
+
+    class LoudPage(FakePage):
+        def grab_page_focus(self):
+            grabbed.append(self)
+
+    quiet = open_page_dock(2400, 1200)
+    quiet.open_page(LoudPage(1), focus=False)
+    drain()
+    check("a quiet open takes no focus", grabbed == [], grabbed)
+    quiet.open_page(LoudPage(2))
+    drain()
+    check("...while an ordinary one still does", len(grabbed) == 1, grabbed)
+
+
 def main() -> int:
     print("capture:")
     dock, layout = split_layout()
@@ -578,6 +618,7 @@ def main() -> int:
     check("restore refuses a dock already split", len(dock5.strips()) == before)
 
     check_open_page_splits()
+    check_quiet_open()
     check_panel_terminal()
     check_close_recent()
 

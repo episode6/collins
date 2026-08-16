@@ -774,12 +774,16 @@ class PanelDock(Adw.Bin):
             pages.append(rec.widget)
         return pages
 
-    def open_page(self, widget, side: str = "right") -> None:
+    def open_page(self, widget, side: str = "right", focus: bool = True) -> None:
         """Open a non-shell page as a tab in a strip beside the terminal:
         the first strip on *side* of it ("right" | "below"), else a new one
         split off that edge. The join-don't-split default keeps opening
         five PRs from carving the dock into five slivers — and lands the
         composer in a bottom home strip as a tab rather than beneath it.
+
+        *focus* False leaves the keyboard where it is, for a page that opens
+        without being asked for: nobody typing at an agent should have the
+        next word land in a panel that appeared by itself.
 
         Joining yields to spare *width*, though: on a screen wide enough
         that the terminal has stopped growing (see `_split_is_free`), a
@@ -800,6 +804,16 @@ class PanelDock(Adw.Bin):
         self.restore_maximized()  # a page opening behind the overlay is a page lost
         if side not in ("right", "below"):
             side = "right"
+        # Splitting the terminal off under a new paned unparents it for a
+        # moment, and an unparented widget takes the keyboard with it: GTK
+        # hands the focus on to whatever it finds first, which is the page
+        # that has just appeared. Suppressing the strip's own grab is
+        # therefore not enough to leave the cursor alone — where it was has
+        # to be remembered and put back.
+        keep = None
+        if not focus:
+            root = self.get_root()
+            keep = root.get_focus() if root is not None else None
         strip = self._strip_past_terminal("h" if side == "right" else "v")
         if strip is not None and side == "right" and self._split_is_free():
             strip = None
@@ -807,9 +821,31 @@ class PanelDock(Adw.Bin):
             strip = self._new_strip()
             split = self._split_leaf(self._terminal, strip, side)
             self._panes[split].sizer.apply()
-        strip.add_page(widget)
+        strip.add_page(widget, focus=focus)
         self._reveal_strip(strip)
-        GLib.idle_add(widget.grab_page_focus)
+        if focus:
+            GLib.idle_add(widget.grab_page_focus)
+        elif keep is not None:
+            GLib.idle_add(self._restore_focus, keep)
+
+    @staticmethod
+    def _restore_focus(widget) -> bool:
+        """Put the keyboard back where a quiet open found it, unless the
+        widget left the window in the meantime."""
+        if widget.get_root() is not None:
+            widget.grab_focus()
+        return GLib.SOURCE_REMOVE
+
+    def room_for_a_column(self) -> bool:
+        """Whether a page opening on the right would get a column of its own
+        rather than a tab in the strip already there — `_split_is_free`, for
+        a caller that has to decide *whether* to open a page at all.
+
+        A panel that opens by itself is welcome where it costs the terminal
+        nothing and an imposition where it doesn't, so "is there room?" is
+        the same question `open_page` asks itself a moment later, asked one
+        step earlier."""
+        return self._split_is_free()
 
     def close_page(self, widget) -> None:
         """Close *widget*'s tab wherever it lives, through the strip's own

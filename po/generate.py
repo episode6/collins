@@ -394,6 +394,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Egy pull request paneljének megnyitása a munkamenete mellett, "
             "amint a munkamenet felveszi a PR-t. Pull requestenként egyszer, "
             "így a bezárt panel zárva marad",
+        "Show the images panel automatically":
+            "A képek panel automatikus megjelenítése",
+        "Dock a session's gallery of images beside it the first "
+        "time it shows one — only in a tab wide enough to spare "
+        "the column, past the terminal's maximum width. Once per "
+        "session tab, so one you close again stays closed":
+            "A munkamenet képgalériájának dokkolása a munkamenet mellé, "
+            "amint az először mutat képet — de csak akkor, ha a lap elég "
+            "széles egy külön oszlophoz a terminál legnagyobb szélességén "
+            "túl. Munkamenetlaponként egyszer, így a bezárt panel zárva marad",
         "Open composer (Ctrl+.)": "Üzenetszerkesztő megnyitása (Ctrl+.)",
         "Attach file": "Fájl csatolása",
         "Remove image": "Kép eltávolítása",
@@ -841,6 +851,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Das Panel eines Pull-Requests neben seiner Sitzung öffnen, "
             "sobald die Sitzung den Pull-Request aufnimmt. Einmal pro "
             "Pull-Request — ein wieder geschlossenes Panel bleibt also zu",
+        "Show the images panel automatically":
+            "Das Bilder-Panel automatisch anzeigen",
+        "Dock a session's gallery of images beside it the first "
+        "time it shows one — only in a tab wide enough to spare "
+        "the column, past the terminal's maximum width. Once per "
+        "session tab, so one you close again stays closed":
+            "Die Bildergalerie einer Sitzung neben ihr andocken, sobald sie "
+            "das erste Bild zeigt — nur in einem Tab, der breit genug für "
+            "eine eigene Spalte jenseits der maximalen Terminalbreite ist. "
+            "Einmal pro Sitzungstab — ein wieder geschlossenes Panel bleibt "
+            "also zu",
         "Open composer (Ctrl+.)": "Composer öffnen (Strg+.)",
         "Attach file": "Datei anhängen",
         "Remove image": "Bild entfernen",
@@ -1285,6 +1306,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Abre el panel de un pull request junto a su sesión en cuanto "
             "la sesión lo adopta. Una vez por pull request, así que el que "
             "cierres seguirá cerrado",
+        "Show the images panel automatically":
+            "Mostrar automáticamente el panel de imágenes",
+        "Dock a session's gallery of images beside it the first "
+        "time it shows one — only in a tab wide enough to spare "
+        "the column, past the terminal's maximum width. Once per "
+        "session tab, so one you close again stays closed":
+            "Acopla la galería de imágenes de una sesión junto a ella la "
+            "primera vez que muestra una — solo en una pestaña lo bastante "
+            "ancha para ceder la columna, más allá del ancho máximo de la "
+            "terminal. Una vez por pestaña de sesión, así que la que cierres "
+            "seguirá cerrada",
         "Open composer (Ctrl+.)": "Abrir el redactor (Ctrl+.)",
         "Attach file": "Adjuntar archivo",
         "Remove image": "Quitar imagen",
@@ -1730,6 +1762,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Ouvre le panneau d’une pull request à côté de sa session dès "
             "que la session l’adopte. Une fois par pull request : celle que "
             "vous refermez reste fermée",
+        "Show the images panel automatically":
+            "Afficher automatiquement le panneau des images",
+        "Dock a session's gallery of images beside it the first "
+        "time it shows one — only in a tab wide enough to spare "
+        "the column, past the terminal's maximum width. Once per "
+        "session tab, so one you close again stays closed":
+            "Ancre la galerie d’images d’une session à côté d’elle dès "
+            "qu’elle affiche une image — uniquement dans un onglet assez "
+            "large pour céder la colonne, au-delà de la largeur maximale du "
+            "terminal. Une fois par onglet de session : celui que vous "
+            "refermez reste fermé",
         "Open composer (Ctrl+.)": "Ouvrir le rédacteur (Ctrl+.)",
         "Attach file": "Joindre un fichier",
         "Remove image": "Retirer l'image",

@@ -87,6 +87,7 @@ class PanelStrip(Gtk.Box):
         self._close_ok: set[Adw.TabPage] = set()  # busy closes the user confirmed
         self._close_asking: set[Adw.TabPage] = set()  # a confirm dialog is up
         self._page_signals: dict = {}  # page widget -> its handler ids here
+        self._quiet_focus = False  # one selection that must not take the cursor
 
         self._view = Adw.TabView(vexpand=True)
         self._view.connect("close-page", self._on_close_page)
@@ -262,16 +263,25 @@ class PanelStrip(Gtk.Box):
             self.select_widget(shell)
         return shell
 
-    def add_page(self, widget, select: bool = True) -> None:
+    def add_page(self, widget, select: bool = True, focus: bool = True) -> None:
         """Append any PanelPage as a tab — the non-shell kinds' way in (a
         shell needs `new_shell`, which also spawns it). Settings fan out to
-        the new page like they do to the rest."""
+        the new page like they do to the rest.
+
+        Selecting a tab normally lands the cursor in it (`_on_selected`);
+        *focus* False makes this one selection quiet, for a page that
+        appears without having been asked for."""
         if self._settings is not None:
             widget.apply_settings(self._settings)
         page = self._view.append(widget)
         self._sync_tab(page)
         if select:
+            # Read and cleared inside the selection notify below, which
+            # Adw.TabView emits synchronously from set_selected_page; the
+            # reset after covers a selection that never fired.
+            self._quiet_focus = not focus
             self._view.set_selected_page(page)
+            self._quiet_focus = False
 
     def _find_page(self, widget) -> Adw.TabPage | None:
         for i in range(self._view.get_n_pages()):
@@ -564,8 +574,9 @@ class PanelStrip(Gtk.Box):
         widget = self.selected_page_widget()
         if getattr(widget, "page_kind", None) is not None:
             self.emit("page-touched", widget, False)
+        quiet, self._quiet_focus = self._quiet_focus, False
         grab = getattr(widget, "grab_page_focus", None)
-        if grab is not None and self.get_mapped():
+        if grab is not None and not quiet and self.get_mapped():
             GLib.idle_add(grab)
 
     def grab_page_focus(self) -> None:

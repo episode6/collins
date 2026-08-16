@@ -391,6 +391,22 @@ class PreferencesDialog(Adw.Dialog):
         self._tab_drag_row.set_active(bool(state.get_setting("panel_tab_drag_handles")))
         self._tab_drag_row.connect("notify::active", self._on_tab_drag_changed)
         panels_group.add(self._tab_drag_row)
+        self._attach_autodock_row = Adw.SwitchRow(
+            title=_("Show the images panel automatically"),
+            subtitle=_(
+                "Dock a session's gallery of images beside it the first "
+                "time it shows one — only in a tab wide enough to spare "
+                "the column, past the terminal's maximum width. Once per "
+                "session tab, so one you close again stays closed"
+            ),
+        )
+        self._attach_autodock_row.set_active(
+            bool(state.get_setting("dock_attachments_when_room"))
+        )
+        self._attach_autodock_row.connect("notify::active", self._on_attach_autodock_changed)
+        panels_group.add(
+            _searchable(self._attach_autodock_row, "attachments", "gallery", "dock")
+        )
         page.add(panels_group)
 
         self._build_editor_group(state, page)
@@ -1191,6 +1207,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_tab_drag_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("panel_tab_drag_handles", row.get_active())
+        self._on_change()
+
+    def _on_attach_autodock_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("dock_attachments_when_room", bool(row.get_active()))
         self._on_change()
 
     def _add_running_behavior_row(

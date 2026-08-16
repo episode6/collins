@@ -935,6 +935,12 @@ msgstr "Új pull requestek automatikus megnyitása"
 msgid "Open a pull request's panel beside its session as soon as the session picks the PR up. Once per pull request, so one you close again stays closed"
 msgstr "Egy pull request paneljének megnyitása a munkamenete mellett, amint a munkamenet felveszi a PR-t. Pull requestenként egyszer, így a bezárt panel zárva marad"
 
+msgid "Show the images panel automatically"
+msgstr "A képek panel automatikus megjelenítése"
+
+msgid "Dock a session's gallery of images beside it the first time it shows one — only in a tab wide enough to spare the column, past the terminal's maximum width. Once per session tab, so one you close again stays closed"
+msgstr "A munkamenet képgalériájának dokkolása a munkamenet mellé, amint az először mutat képet — de csak akkor, ha a lap elég széles egy külön oszlophoz a terminál legnagyobb szélességén túl. Munkamenetlaponként egyszer, így a bezárt panel zárva marad"
+
 msgid "Open composer (Ctrl+.)"
 msgstr "Üzenetszerkesztő megnyitása (Ctrl+.)"
 

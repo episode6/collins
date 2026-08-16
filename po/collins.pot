@@ -558,6 +558,17 @@ msgid ""
 "grip on each panel"
 msgstr ""
 
+#: collins/prefs.py:394
+msgid "Show the images panel automatically"
+msgstr ""
+
+#: collins/prefs.py:395
+msgid ""
+"Dock a session's gallery of images beside it the first time it shows one — "
+"only in a tab wide enough to spare the column, past the terminal's maximum "
+"width. Once per session tab, so one you close again stays closed"
+msgstr ""
+
 #: collins/prefs.py:128
 msgid "Color theme"
 msgstr ""
