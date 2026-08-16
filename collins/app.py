@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -369,9 +369,9 @@ row.session-child checkbutton {
    counting it as gap left the colored mark reading as crowded against the
    line however even the two sides measured. This padding is the gap the
    overhang cannot be, and it is the one value to move to change how far the
-   mark stands off the line: image.agent-mark below and the two mark-less rows
-   in sidebar.py (PlaceholderRow, NewThreadRow) all align to this column and
-   have to move with it.
+   mark stands off the line: image.agent-mark below -- which is what the offer
+   row carries too (see NewThreadRow) -- and the mark-less PlaceholderRow in
+   sidebar.py all align to this column and have to move with it.
    A base with no badge over it -- a merged PR's mark, and the agent mark
    below -- is centered inside the slot rather than filling it (see
    prmenu._mark), so it inherits the slot's own 8-and-6 and reads about 2px

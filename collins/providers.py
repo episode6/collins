@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -875,3 +875,12 @@ def get_provider(provider_id: str) -> Provider:
 def available_providers() -> list[Provider]:
     """Providers whose CLI is installed on PATH."""
     return [p for p in ALL_PROVIDERS if p.available()]
+
+
+def default_provider() -> Provider:
+    """The agent a plain "new session" starts: the first installed one, which
+    is Claude wherever it is on PATH. Anything that says which agent that will
+    be before it runs -- the offer row's icon (see NewThreadRow) -- reads it
+    from here, so the promise and the launch can't drift apart."""
+    installed = available_providers()
+    return installed[0] if installed else get_provider("claude")
