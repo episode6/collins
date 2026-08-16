@@ -662,6 +662,30 @@ msgstr "Mover a la papelera"
 msgid "New window"
 msgstr "Nueva ventana"
 
+msgid "Quit"
+msgstr "Salir"
+
+msgid "Show Collins"
+msgstr "Mostrar Collins"
+
+msgid "no sessions open"
+msgstr "no hay sesiones abiertas"
+
+msgid "1 session"
+msgstr "1 sesión"
+
+msgid "1 working"
+msgstr "1 trabajando"
+
+msgid "{n} working"
+msgstr "{n} trabajando"
+
+msgid "1 unread"
+msgstr "1 sin leer"
+
+msgid "{n} unread"
+msgstr "{n} sin leer"
+
 msgid "You interrupted Claude here"
 msgstr "Interrumpiste a Claude aquí"
 

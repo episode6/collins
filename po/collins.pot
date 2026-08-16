@@ -2598,3 +2598,38 @@ msgstr ""
 #, python-brace-format
 msgid "couldn't download that image: {reason}"
 msgstr ""
+
+#: collins/traymodel.py:142
+msgid "no sessions open"
+msgstr ""
+
+#: collins/traymodel.py:132
+msgid "1 session"
+msgstr ""
+
+#: collins/traymodel.py:132
+#, python-brace-format
+msgid "{n} sessions"
+msgstr ""
+
+#: collins/traymodel.py:132
+msgid "1 working"
+msgstr ""
+
+#: collins/traymodel.py:132
+#, python-brace-format
+msgid "{n} working"
+msgstr ""
+
+#: collins/traymodel.py:132
+msgid "1 unread"
+msgstr ""
+
+#: collins/traymodel.py:132
+#, python-brace-format
+msgid "{n} unread"
+msgstr ""
+
+#: collins/traymodel.py:207
+msgid "Show Collins"
+msgstr ""

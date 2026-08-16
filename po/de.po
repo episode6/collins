@@ -662,6 +662,30 @@ msgstr "In den Papierkorb"
 msgid "New window"
 msgstr "Neues Fenster"
 
+msgid "Quit"
+msgstr "Beenden"
+
+msgid "Show Collins"
+msgstr "Collins anzeigen"
+
+msgid "no sessions open"
+msgstr "keine Sitzungen geöffnet"
+
+msgid "1 session"
+msgstr "1 Sitzung"
+
+msgid "1 working"
+msgstr "1 arbeitet"
+
+msgid "{n} working"
+msgstr "{n} arbeiten"
+
+msgid "1 unread"
+msgstr "1 ungelesen"
+
+msgid "{n} unread"
+msgstr "{n} ungelesen"
+
 msgid "You interrupted Claude here"
 msgstr "Du hast Claude hier unterbrochen"
 
