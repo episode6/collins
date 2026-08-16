@@ -1263,7 +1263,7 @@ class TerminalTab(Gtk.Box):
             halign=Gtk.Align.END,
             valign=Gtk.Align.CENTER,
             margin_end=5,
-            tooltip_text=_("Images this session has seen"),
+            tooltip_text=_("Images and files this session has seen"),
         )
         self._attachments_btn.add_css_class("attach-overlay")
         self._attachments_btn.add_css_class("attachments-handle")
@@ -2507,9 +2507,9 @@ class TerminalTab(Gtk.Box):
             # One form rather than an ngettext pair: po/generate.py writes
             # flat msgid/msgstr, so a plural msgid is a string no language
             # ever gets, and the number is parenthesized here anyway.
-            _("Images this session has seen ({n} new)").format(n=count)
+            _("Images and files this session has seen ({n} new)").format(n=count)
             if count
-            else _("Images this session has seen")
+            else _("Images and files this session has seen")
         )
 
     # -- opening itself -------------------------------------------------------

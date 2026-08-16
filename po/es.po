@@ -1019,11 +1019,11 @@ msgstr "Acoplar el panel de adjuntos junto a la terminal"
 msgid "Float the attachments panel over the terminal"
 msgstr "Hacer flotar el panel de adjuntos sobre la terminal"
 
-msgid "Images this session has seen"
-msgstr "Imágenes que ha visto esta sesión"
+msgid "Images and files this session has seen"
+msgstr "Imágenes y archivos que ha visto esta sesión"
 
-msgid "Images this session has seen ({n} new)"
-msgstr "Imágenes que ha visto esta sesión ({n} nuevas)"
+msgid "Images and files this session has seen ({n} new)"
+msgstr "Imágenes y archivos que ha visto esta sesión ({n} nuevos)"
 
 msgid "Open With…"
 msgstr "Abrir con…"

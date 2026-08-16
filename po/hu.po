@@ -1019,11 +1019,11 @@ msgstr "A mellékletek panel dokkolása a terminál mellé"
 msgid "Float the attachments panel over the terminal"
 msgstr "A mellékletek panel lebegtetése a terminál felett"
 
-msgid "Images this session has seen"
-msgstr "A munkamenet által látott képek"
+msgid "Images and files this session has seen"
+msgstr "A munkamenet által látott képek és fájlok"
 
-msgid "Images this session has seen ({n} new)"
-msgstr "A munkamenet által látott képek ({n} új)"
+msgid "Images and files this session has seen ({n} new)"
+msgstr "A munkamenet által látott képek és fájlok ({n} új)"
 
 msgid "Open With…"
 msgstr "Megnyitás ezzel…"

@@ -2560,11 +2560,11 @@ msgid "Float the attachments panel over the terminal"
 msgstr ""
 
 #: collins/terminal.py:1183
-msgid "Images this session has seen"
+msgid "Images and files this session has seen"
 msgstr ""
 
 #: collins/terminal.py
-msgid "Images this session has seen ({n} new)"
+msgid "Images and files this session has seen ({n} new)"
 msgstr ""
 
 #: collins/attachpanel.py:241

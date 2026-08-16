@@ -1019,11 +1019,11 @@ msgstr "Ancrer le panneau des pièces jointes à côté du terminal"
 msgid "Float the attachments panel over the terminal"
 msgstr "Faire flotter le panneau des pièces jointes au-dessus du terminal"
 
-msgid "Images this session has seen"
-msgstr "Images vues par cette session"
+msgid "Images and files this session has seen"
+msgstr "Images et fichiers vus par cette session"
 
-msgid "Images this session has seen ({n} new)"
-msgstr "Images vues par cette session ({n} nouvelles)"
+msgid "Images and files this session has seen ({n} new)"
+msgstr "Images et fichiers vus par cette session ({n} nouveaux)"
 
 msgid "Open With…"
 msgstr "Ouvrir avec…"

@@ -453,9 +453,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "A mellékletek panel dokkolása a terminál mellé",
         "Float the attachments panel over the terminal":
             "A mellékletek panel lebegtetése a terminál felett",
-        "Images this session has seen": "A munkamenet által látott képek",
-        "Images this session has seen ({n} new)":
-            "A munkamenet által látott képek ({n} új)",
+        "Images and files this session has seen":
+            "A munkamenet által látott képek és fájlok",
+        "Images and files this session has seen ({n} new)":
+            "A munkamenet által látott képek és fájlok ({n} új)",
         "Open With…": "Megnyitás ezzel…",
         "Show in Folder": "Megjelenítés a mappában",
         "Copy Path": "Elérési út másolása",
@@ -909,9 +910,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Anhänge-Panel neben dem Terminal andocken",
         "Float the attachments panel over the terminal":
             "Anhänge-Panel über dem Terminal schweben lassen",
-        "Images this session has seen": "Bilder, die diese Sitzung gesehen hat",
-        "Images this session has seen ({n} new)":
-            "Bilder, die diese Sitzung gesehen hat ({n} neu)",
+        "Images and files this session has seen":
+            "Bilder und Dateien, die diese Sitzung gesehen hat",
+        "Images and files this session has seen ({n} new)":
+            "Bilder und Dateien, die diese Sitzung gesehen hat ({n} neu)",
         "Open With…": "Öffnen mit…",
         "Show in Folder": "Im Ordner anzeigen",
         "Copy Path": "Pfad kopieren",
@@ -1364,9 +1366,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Acoplar el panel de adjuntos junto a la terminal",
         "Float the attachments panel over the terminal":
             "Hacer flotar el panel de adjuntos sobre la terminal",
-        "Images this session has seen": "Imágenes que ha visto esta sesión",
-        "Images this session has seen ({n} new)":
-            "Imágenes que ha visto esta sesión ({n} nuevas)",
+        "Images and files this session has seen":
+            "Imágenes y archivos que ha visto esta sesión",
+        "Images and files this session has seen ({n} new)":
+            "Imágenes y archivos que ha visto esta sesión ({n} nuevos)",
         "Open With…": "Abrir con…",
         "Show in Folder": "Mostrar en la carpeta",
         "Copy Path": "Copiar la ruta",
@@ -1820,9 +1823,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Ancrer le panneau des pièces jointes à côté du terminal",
         "Float the attachments panel over the terminal":
             "Faire flotter le panneau des pièces jointes au-dessus du terminal",
-        "Images this session has seen": "Images vues par cette session",
-        "Images this session has seen ({n} new)":
-            "Images vues par cette session ({n} nouvelles)",
+        "Images and files this session has seen":
+            "Images et fichiers vus par cette session",
+        "Images and files this session has seen ({n} new)":
+            "Images et fichiers vus par cette session ({n} nouveaux)",
         "Open With…": "Ouvrir avec…",
         "Show in Folder": "Afficher dans le dossier",
         "Copy Path": "Copier le chemin",

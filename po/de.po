@@ -1019,11 +1019,11 @@ msgstr "Anhänge-Panel neben dem Terminal andocken"
 msgid "Float the attachments panel over the terminal"
 msgstr "Anhänge-Panel über dem Terminal schweben lassen"
 
-msgid "Images this session has seen"
-msgstr "Bilder, die diese Sitzung gesehen hat"
+msgid "Images and files this session has seen"
+msgstr "Bilder und Dateien, die diese Sitzung gesehen hat"
 
-msgid "Images this session has seen ({n} new)"
-msgstr "Bilder, die diese Sitzung gesehen hat ({n} neu)"
+msgid "Images and files this session has seen ({n} new)"
+msgstr "Bilder und Dateien, die diese Sitzung gesehen hat ({n} neu)"
 
 msgid "Open With…"
 msgstr "Öffnen mit…"
