@@ -925,6 +925,10 @@ msgstr ""
 msgid "Open"
 msgstr ""
 
+#: collins/sidebar.py:2239
+msgid "Move to new window"
+msgstr ""
+
 #: collins/sidebar.py:763
 msgid "Open in Ghostty"
 msgstr ""

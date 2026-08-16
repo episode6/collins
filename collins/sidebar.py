@@ -2200,6 +2200,17 @@ class SessionSidebar(Gtk.Box):
 
     # -- context menu ------------------------------------------------------------
 
+    def _can_move_to_new_window(self, session_id: str) -> bool:
+        """Whether the session's tab can be handed to a window of its own.
+
+        The window's call, not the sidebar's: tabs are per-window and the row
+        only knows that *some* window has one. Asked through the root, with
+        getattr, so a sidebar hosted anywhere else (a capture harness) simply
+        doesn't offer the item.
+        """
+        can_move = getattr(self.get_root(), "can_move_session_to_new_window", None)
+        return bool(can_move is not None and can_move(session_id))
+
     def show_row_menu(self, row: SessionRow, x: float, y: float) -> None:
         session_id = row.item.session_id
         variant = GLib.Variant("s", session_id)
@@ -2221,6 +2232,11 @@ class SessionSidebar(Gtk.Box):
         # already does for it.
         if row.item.status not in _IN_TAB_STATUSES:
             open_section.append_item(item(_("Open in new window"), "open-session-new-window"))
+        elif self._can_move_to_new_window(session_id):
+            # It *is* in a tab: the window it's running in can hand that tab
+            # over to a fresh one instead — the agent keeps running, its
+            # terminal is only reparented.
+            open_section.append_item(item(_("Move to new window"), "move-session-new-window"))
         if _GHOSTTY:
             open_section.append_item(item(_("Open in Ghostty"), "open-ghostty"))
         if provider.supports_fork:

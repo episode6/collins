@@ -180,6 +180,34 @@ class _KeepProjects(NamedTuple):
     projects: list[str]
 
 
+class _TabWiring(NamedTuple):
+    """What a page's tab was connected to its window by — the signal handlers
+    (object and id, so they can be disconnected) and the event controllers
+    mounted on its terminal. See MainWindow._wire_tab."""
+
+    handlers: list[tuple[GObject.Object, int]]
+    controllers: list[tuple[Gtk.Widget, Gtk.EventController]]
+
+
+class _CarriedPage(NamedTuple):
+    """A page's per-window bookkeeping, packed up for the window it is moving
+    to (see MainWindow.hand_over_page). Everything here is keyed by page in the
+    window that holds it, so it has to travel by hand — the watches most of
+    all: recreating them mid-turn would lose the busy state they hold and drop
+    the session's pole until its next burst of output."""
+
+    echo_gate: EchoGate | None
+    spinner: SpinnerWatch | None
+    progress: ProgressWatch | None
+    fresh_spawn: bool
+    baseline: set[str] | None
+    base_title: str | None
+    local_title: bool
+    pending_resolved: tuple[str, str] | None
+    archive_on_close: str | None
+    busy: bool
+
+
 # Tabs carry no status dot of their own: AdwTabView already marks a tab with
 # unread output, and the dot it competed with said only "this tab is open",
 # which the tab being there says already.
@@ -384,6 +412,10 @@ class MainWindow(Adw.ApplicationWindow):
         # (see mcptools.infrastructure_cmdlines).
         self._baseline_captures: dict[Adw.TabPage, set[str]] = {}
         self._infra_cmdlines = mcptools.infrastructure_cmdlines()
+        # What each open page's tab is connected to this window by: the
+        # handlers and controllers _wire_tab put on it, kept so a page handed
+        # to another window can be unwired from this one first.
+        self._tab_wiring: dict[Adw.TabPage, _TabWiring] = {}
 
         self._install_actions()
         self._install_shortcuts()
@@ -1072,6 +1104,7 @@ class MainWindow(Adw.ApplicationWindow):
             "continue-session": lambda _a, p: self._continue_session(get_provider(p.get_string())),
             "open-session": self._on_open_action,
             "open-session-new-window": self._on_open_new_window,
+            "move-session-new-window": self._on_move_session_new_window,
             "new-session-in-new-window": self._on_new_session_new_window,
             "fork-session": self._on_fork_action,
             "replay-session": self._on_replay_action,
@@ -1755,22 +1788,11 @@ class MainWindow(Adw.ApplicationWindow):
         page = self.tab_view.append(tab)
         page.set_title(title)
         page.set_tooltip(tooltip)
-        tab.connect("process-exited", self._on_process_exited, page)
-        tab.connect("session-resolved", self._on_session_resolved, page)
-        tab.connect("panel-size-changed", self._on_panel_size_changed)
-        tab.connect("panel-position-changed", self._on_panel_position_changed)
-        tab.connect("editor-size-changed", self._on_editor_size_changed)
-        tab.connect("editor-pop-out-requested", self._pop_out_editor)
-        tab.connect("bell", self._on_bell)
-        tab.connect("attachments-changed", self._on_tab_attachments_changed)
-        # The PR hub: the tab writes its footer list through it and follows
-        # everyone else's writes and fetches from it (see prstore).
-        tab.set_pr_store(self.store.pr_store)
-        tab.set_panel_size_lookup(self._panel_size_seed)
-        tab.set_editor_width_lookup(lambda: int(self.state.get_setting("editor_width") or 0))
         gate = EchoGate()
         self._echo_gates[page] = gate
         self._spinner_watches[page] = SpinnerWatch()
+        if PROGRESS_HINT_TERMPROP is not None:
+            self._progress_watches[page] = ProgressWatch()
         if tab.session_id is None:
             # A new session or a --continue: the CLI is being spawned right
             # now, so nothing can be mid-turn behind it (unlike a tab bound
@@ -1782,30 +1804,7 @@ class MainWindow(Adw.ApplicationWindow):
             # poll's first interval leaves a capture attempt behind it.
             self._sync_process_poll()
             self._absorb_baseline(page)
-        # "commit" is everything the app sends this terminal's child — the
-        # keystrokes the user types, and the focus reports VTE emits on a tab
-        # switch — so the redraw that answers one is not the agent working.
-        # The text goes along so the gate can arm itself on the first submit.
-        tab.terminal.connect("commit", self._on_terminal_commit, page)
-        tab.terminal.connect("contents-changed", self._on_terminal_output, page)
-        # The agent's own busy signal, where the CLI and VTE both speak it —
-        # see ProgressWatch (and _agent_tab_environment for how it's coaxed
-        # out of the CLI). Skipped on a VTE too old for termprops.
-        if PROGRESS_HINT_TERMPROP is not None:
-            self._progress_watches[page] = ProgressWatch()
-            tab.terminal.connect("termprop-changed", self._on_progress_termprop, page)
-        # Capture phase so the keystroke is seen even though VTE consumes it;
-        # EVENT_PROPAGATE below leaves it for VTE to deliver as usual.
-        keys = Gtk.EventControllerKey()
-        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        keys.connect("key-pressed", self._on_terminal_key_pressed, page)
-        tab.terminal.add_controller(keys)
-        # Any button, capture phase, never claimed: the click still reaches
-        # VTE untouched, this only wants to know the user is at the terminal.
-        clicks = Gtk.GestureClick(button=0)
-        clicks.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        clicks.connect("pressed", self._on_terminal_click, page)
-        tab.terminal.add_controller(clicks)
+        self._wire_tab(tab, page)
         if not background:
             self.tab_view.set_selected_page(page)
             self.content_stack.set_visible_child_name("tabs")
@@ -1815,6 +1814,76 @@ class MainWindow(Adw.ApplicationWindow):
         if not background:
             GLib.idle_add(tab.grab_terminal_focus)
         return page
+
+    # -- tab wiring ----------------------------------------------------------
+
+    def _wire_tab(self, tab: TerminalTab, page: Adw.TabPage) -> None:
+        """Connect a page's tab to this window — every signal and controller an
+        open tab is watched through, plus the lookups it reads back.
+
+        Recorded rather than fired and forgotten, because a page can leave for
+        another window (see hand_over_page) and everything wired here has to
+        come off first: the handlers are bound to *this* window, and a
+        transferred page left wired to the one it came from would go on
+        reporting its agent's turns to a sidebar it no longer sits in.
+        """
+        handlers: list[tuple[GObject.Object, int]] = []
+        controllers: list[tuple[Gtk.Widget, Gtk.EventController]] = []
+
+        def watch(obj: GObject.Object, signal: str, handler, *args) -> None:
+            handlers.append((obj, obj.connect(signal, handler, *args)))
+
+        watch(tab, "process-exited", self._on_process_exited, page)
+        watch(tab, "session-resolved", self._on_session_resolved, page)
+        watch(tab, "panel-size-changed", self._on_panel_size_changed)
+        watch(tab, "panel-position-changed", self._on_panel_position_changed)
+        watch(tab, "editor-size-changed", self._on_editor_size_changed)
+        watch(tab, "editor-pop-out-requested", self._pop_out_editor)
+        watch(tab, "bell", self._on_bell)
+        watch(tab, "attachments-changed", self._on_tab_attachments_changed)
+        # The PR hub: the tab writes its footer list through it and follows
+        # everyone else's writes and fetches from it (see prstore).
+        tab.set_pr_store(self.store.pr_store)
+        tab.set_panel_size_lookup(self._panel_size_seed)
+        tab.set_editor_width_lookup(lambda: int(self.state.get_setting("editor_width") or 0))
+        # "commit" is everything the app sends this terminal's child — the
+        # keystrokes the user types, and the focus reports VTE emits on a tab
+        # switch — so the redraw that answers one is not the agent working.
+        # The text goes along so the gate can arm itself on the first submit.
+        watch(tab.terminal, "commit", self._on_terminal_commit, page)
+        watch(tab.terminal, "contents-changed", self._on_terminal_output, page)
+        # The agent's own busy signal, where the CLI and VTE both speak it —
+        # see ProgressWatch (and _agent_tab_environment for how it's coaxed
+        # out of the CLI). Skipped on a VTE too old for termprops.
+        if PROGRESS_HINT_TERMPROP is not None:
+            watch(tab.terminal, "termprop-changed", self._on_progress_termprop, page)
+        # Capture phase so the keystroke is seen even though VTE consumes it;
+        # EVENT_PROPAGATE below leaves it for VTE to deliver as usual.
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self._on_terminal_key_pressed, page)
+        tab.terminal.add_controller(keys)
+        controllers.append((tab.terminal, keys))
+        # Any button, capture phase, never claimed: the click still reaches
+        # VTE untouched, this only wants to know the user is at the terminal.
+        clicks = Gtk.GestureClick(button=0)
+        clicks.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        clicks.connect("pressed", self._on_terminal_click, page)
+        tab.terminal.add_controller(clicks)
+        controllers.append((tab.terminal, clicks))
+        self._tab_wiring[page] = _TabWiring(handlers, controllers)
+
+    def _unwire_tab(self, page: Adw.TabPage) -> None:
+        """Undo _wire_tab: the page's tab stops talking to this window. Only
+        the handover path calls this — a closing tab is destroyed with its
+        wiring, and _on_page_detached drops the record."""
+        wiring = self._tab_wiring.pop(page, None)
+        if wiring is None:
+            return
+        for obj, handler in wiring.handlers:
+            obj.disconnect(handler)
+        for widget, controller in wiring.controllers:
+            widget.remove_controller(controller)
 
     # -- tab order mirrors the sidebar ---------------------------------------
 
@@ -2271,7 +2340,10 @@ class MainWindow(Adw.ApplicationWindow):
         if handler is not None:
             page.disconnect(handler)
         # Closed or dragged to another window either way: this window's
-        # per-page trackers are done with it.
+        # per-page trackers are done with it. (A handover has already taken
+        # copies of the ones the destination keeps, and unwired the tab —
+        # this pop finds nothing left for it.)
+        self._tab_wiring.pop(page, None)
         self._echo_gates.pop(page, None)
         self._spinner_watches.pop(page, None)
         self._progress_watches.pop(page, None)
@@ -4069,6 +4141,163 @@ class MainWindow(Adw.ApplicationWindow):
         self.present()
         return True
 
+    # -- handing a live tab to another window --------------------------------
+
+    def _owner_window(self, session_id: str) -> MainWindow | None:
+        """The window whose tab this session is running in — this one first,
+        since the sidebar asking is usually the one holding it."""
+        if self._page_for(session_id) is not None:
+            return self
+        return session_window(self.get_application(), session_id, skip=self)
+
+    def _page_settling(self, page: Adw.TabPage) -> bool:
+        """Whether a page is mid-close: the agent is being asked about, exiting
+        gracefully, or waiting its turn in the quit-time /bg queue. All of that
+        is tracked per page *in this window*, so such a page must stay put."""
+        return (
+            page in self._closing_pages
+            or page in self._close_asking
+            or page in self._bg_closing
+            or page in self._bg_queue
+        )
+
+    def can_move_session_to_new_window(self, session_id: str) -> bool:
+        """Whether "Move to new window" has anything to do for this session: it
+        is running in a tab somewhere, that tab isn't already draining, and the
+        window holding it has other tabs — moving a window's only tab would
+        just swap one window for an identical one and leave an empty shell."""
+        owner = self._owner_window(session_id)
+        if owner is None:
+            return False
+        page = owner._page_for(session_id)
+        return owner.tab_view.get_n_pages() > 1 and not owner._page_settling(page)
+
+    def move_session_to_new_window(self, session_id: str) -> MainWindow | None:
+        """Lift this session's live tab out into a window of its own. The
+        terminal (and the agent under it) is reparented, never restarted.
+
+        Asks again, at the click, exactly what the menu asked before offering
+        the item — the answer can change in between. The tab may have started
+        closing, and it may have become this window's *last* tab, because the
+        sibling it was offered beside exited on its own (an idle agent's exit
+        closes its tab without asking). Moving then would empty this window
+        into an identical one, which is the case the menu leaves out.
+        """
+        page = self._page_for(session_id)
+        if page is None or not self.can_move_session_to_new_window(session_id):
+            return None
+        window = self.get_application().open_new_window()
+        self.hand_over_page(page, window)
+        return window
+
+    def hand_over_page(self, page: Adw.TabPage, target: MainWindow) -> None:
+        """Move an open page — the running terminal and everything hanging off
+        it — from this window to *target*.
+
+        The widget is reparented by `Adw.TabView.transfer_page`, so the PTY
+        never learns it happened (destroying the widget is what would kill the
+        child; see terminal.py). What has to be redone is the *bookkeeping*:
+        the tab's signals are bound to this window's handlers and its watches
+        are keyed per page here, so this window unwires and forgets the page,
+        the destination adopts the watches as they stand and wires the tab up
+        to itself. Sidebar status is left to the destination alone — the row
+        never stops being "open", and this window recomputing it after the
+        detach would blank the row (and its unread flag) mid-handover.
+        """
+        tab = page.get_child()
+        session_id = self._session_id_of(page)
+        carried = _CarriedPage(
+            echo_gate=self._echo_gates.get(page),
+            spinner=self._spinner_watches.get(page),
+            progress=self._progress_watches.get(page),
+            fresh_spawn=page in self._fresh_spawns,
+            baseline=self._baseline_captures.get(page),
+            base_title=self._base_titles.pop(page, None),
+            local_title=page in self._local_titles,
+            pending_resolved=self._pending_resolved.pop(page, None),
+            archive_on_close=self._archive_on_close.pop(page, None),
+            busy=bool(session_id) and self._activity.is_busy(session_id),
+        )
+        # A popped-out editor window is held by *this* window, and docks back
+        # through a callback that closes over it. Bring the pane home before
+        # the tab leaves, and let the destination pop it out again — the pane
+        # (buffers, cursors, dirty state) rides along inside the tab either way.
+        popped_out = isinstance(tab, TerminalTab) and tab in self._editor_windows
+        if popped_out:
+            self._release_editor_window(tab)
+        self._unwire_tab(page)
+        self._local_titles.discard(page)
+        self._confirmed_closes.discard(page)
+        self._close_ok.discard(page)
+        self._bg_ok.discard(page)
+        self._remove_placeholder(page)  # the destination's sidebar shows the real row
+        if self._menu_page is page:
+            self._menu_page = None
+        if session_id and self._pages.get(session_id) is page:
+            self._pages.pop(session_id)
+            # The terminal feeding this session's pole is about to be another
+            # window's; stop reading its silence as a finished turn here.
+            self._activity.clear(session_id)
+        self.tab_view.transfer_page(page, target.tab_view, target.tab_view.get_n_pages())
+        # _on_page_detached ran on the way out: the per-page watches are gone
+        # from here, the polls are resized, and the sidebar's own trackers are
+        # done. All that's left is the window itself, which may be empty now.
+        if self.tab_view.get_n_pages() == 0:
+            self.content_stack.set_visible_child_name("empty")
+        self._refresh_background_affordances()
+        self._sync_window_title()
+        target._adopt_page(page, carried, pop_out_editor=popped_out)
+
+    def _adopt_page(
+        self, page: Adw.TabPage, carried: _CarriedPage, pop_out_editor: bool = False
+    ) -> None:
+        """Take over a page another window just transferred here (see
+        hand_over_page): its watches carry on where they left off, and the tab
+        is wired to this window as if it had been opened in it."""
+        tab = page.get_child()
+        self._echo_gates[page] = carried.echo_gate or EchoGate()
+        self._spinner_watches[page] = carried.spinner or SpinnerWatch()
+        if PROGRESS_HINT_TERMPROP is not None:
+            self._progress_watches[page] = carried.progress or ProgressWatch()
+        if carried.fresh_spawn:
+            self._fresh_spawns.add(page)
+        if carried.baseline is not None:
+            self._baseline_captures[page] = carried.baseline
+        if carried.base_title is not None:
+            self._base_titles[page] = carried.base_title
+        if carried.local_title:
+            self._local_titles.add(page)
+        if carried.pending_resolved is not None:
+            self._pending_resolved[page] = carried.pending_resolved
+        if carried.archive_on_close:
+            self._archive_on_close[page] = carried.archive_on_close
+        self._wire_tab(tab, page)
+        session_id = self._session_id_of(page)
+        if session_id:
+            self._pages[session_id] = page
+            if carried.busy:
+                # Mid-turn: the window it left had it marked busy, and its
+                # tracker let go of that on the way out. Re-mark it here or
+                # the row's pole would stop dead until the agent's next burst
+                # of output — which, mid-thought, can be a while.
+                self._activity.mark(session_id)
+        self._sync_process_poll()
+        self._sync_background_busy_poll()
+        self.content_stack.set_visible_child_name("tabs")
+        self.tab_view.set_selected_page(page)
+        self._sort_tabs()
+        if session_id:
+            self._sync_status(session_id)  # the row's tab lives here now
+        self._apply_resolved_sessions()  # a tab still waiting for its row keeps waiting, here
+        self._update_active_row()
+        self._refresh_background_affordances()
+        self._sync_window_title()
+        self.present()
+        if pop_out_editor and isinstance(tab, TerminalTab):
+            self._pop_out_editor(tab)
+        if isinstance(tab, TerminalTab):
+            GLib.idle_add(tab.grab_terminal_focus)
+
     # -- tab rename / menu ---------------------------------------------------
 
     def _on_tab_setup_menu(self, _view: Adw.TabView, page: Adw.TabPage | None) -> None:
@@ -4273,6 +4502,17 @@ class MainWindow(Adw.ApplicationWindow):
             other.focus_session(session.session_id)
             return
         app.open_new_window().open_session(session)
+
+    def _on_move_session_new_window(self, _action, param: GLib.Variant) -> None:
+        # The session's live tab, lifted into a window of its own. The menu
+        # only offers this where it means something, but what it means can
+        # change between the menu opening and the click — move_session_to_new_
+        # window asks again, and a move that no longer applies simply doesn't
+        # happen, rather than spawning a window to strand.
+        session_id = param.get_string()
+        owner = self._owner_window(session_id)
+        if owner is not None:
+            owner.move_session_to_new_window(session_id)
 
     def _on_new_session_new_window(self, _action, param: GLib.Variant) -> None:
         cwd = param.get_string()
