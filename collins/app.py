@@ -216,6 +216,14 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   background-color: @window_bg_color;
   border-top: none;
 }
+/* The text box goes solid with it, rather than leaning on the pane behind
+   it to hide the last 4%. That fill and the pane's are two independent
+   theme colors now, so what shows through is a tint of the window color
+   rather than more of the same -- imperceptible in stock Adwaita, where the
+   two are a shade apart, but only by coincidence of the palette. */
+.composer-panel.docked textview text {
+  background-color: @view_bg_color;
+}
 
 /* the attachments handle on the terminal's right edge: the same pill as
    .attach-overlay above (whose colors it also borrows), stood on end -- tall
