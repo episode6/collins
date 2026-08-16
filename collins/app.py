@@ -1346,6 +1346,11 @@ class App(Adw.Application):
         self.connect("window-added", lambda *_: self.refresh_status_icon())
         self.connect("window-removed", lambda *_: self.refresh_status_icon())
         self.store.connect("refreshed", lambda *_: self.refresh_status_icon())
+        # The badge's own edge: set_unread announces every actual flip, so the
+        # repaint no longer leans on each caller remembering to notify. The
+        # placeholder half still arrives through MainWindow._notify_tray —
+        # those flags live in a sidebar, not the store.
+        self.store.connect("unread-changed", lambda *_: self.refresh_status_icon())
         self.apply_status_icon_setting()
 
     # -- quitting ------------------------------------------------------------

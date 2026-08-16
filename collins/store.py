@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -88,6 +88,10 @@ class SessionStore(GObject.Object):
     __gsignals__ = {
         # order_changed: True when rows were re-spliced (UI must rebuild rows)
         "refreshed": (GObject.SignalFlags.RUN_FIRST, None, (bool,)),
+        # A session's unread flag actually flipped (session id, new value).
+        # Emitted from set_unread itself so no caller has to remember to
+        # announce it — the status icon's badge repaints off this edge.
+        "unread-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, bool)),
     }
 
     def __init__(self, state: AppState) -> None:
@@ -747,6 +751,7 @@ class SessionStore(GObject.Object):
         item = self._items.get(session_id)
         if item is not None and item.unread != flag:
             item.unread = flag
+            self.emit("unread-changed", session_id, flag)
 
     def set_backgrounding(self, session_id: str, flag: bool) -> None:
         item = self._items.get(session_id)
