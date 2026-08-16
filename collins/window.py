@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ from .sessions import (
 )
 from .shellinput import shell_command
 from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar
-from .state import AppState, clamp_window_size, editor_pops_out
+from .state import AppState, clamp_window_size, editor_pops_out, panel_size_key
 from .store import SessionStore, emptied_projects
 from .switcher import QuickSwitcher
 from .taborder import tab_order
@@ -1757,7 +1757,7 @@ class MainWindow(Adw.ApplicationWindow):
         # The PR hub: the tab writes its footer list through it and follows
         # everyone else's writes and fetches from it (see prstore).
         tab.set_pr_store(self.store.pr_store)
-        tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
+        tab.set_panel_size_lookup(self._panel_size_seed)
         tab.set_editor_width_lookup(lambda: int(self.state.get_setting("editor_width") or 0))
         gate = EchoGate()
         self._echo_gates[page] = gate
@@ -1983,10 +1983,24 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self.state.set_session_attachments(tab.session_id, list(records or []))
 
-    def _on_panel_size_changed(self, _tab: TerminalTab, mode: str, size: int) -> None:
+    def _panel_size_seed(self, scope: str, mode: str) -> int:
+        """The app-wide px a dock strip opens at before the tab has sized it
+        itself: the last size set for that scope on that axis. A docked-page
+        strip nobody has resized yet falls back to the shell panel's size —
+        the only evidence there is of how wide a panel this user wants —
+        rather than jumping to the default fraction."""
+        size = int(self.state.get_setting(panel_size_key(scope, mode)) or 0)
+        if not size and scope != "home":
+            size = int(self.state.get_setting(panel_size_key("home", mode)) or 0)
+        return size
+
+    def _on_panel_size_changed(self, _tab: TerminalTab, scope: str, mode: str, size: int) -> None:
         """A divider was dragged: remember the size app-wide, so every panel
-        opened from now on (in any tab) defaults to it."""
-        key = f"panel_size_{mode}"
+        of that kind opened from now on (in any tab) defaults to it. The
+        shells' panel and the strip docked pages (PR views, attachments, the
+        composer) live in keep their sizes apart — widening a PR page should
+        not widen the shell panel behind it."""
+        key = panel_size_key(scope, mode)
         if self.state.get_setting(key) != size:
             self.state.set_setting(key, size)
 

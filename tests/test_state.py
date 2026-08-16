@@ -1,10 +1,16 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-12. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 
 import json
 
-from collins.state import clamp_window_size, editor_pops_out, merge_project_order, move_in_order
+from collins.state import (
+    clamp_window_size,
+    editor_pops_out,
+    merge_project_order,
+    move_in_order,
+    panel_size_key,
+)
 
 
 def test_roundtrip(app_state):
@@ -235,6 +241,30 @@ def test_panel_size_settings_roundtrip(app_state):
     fresh = app_state.AppState()
     assert fresh.get_setting("panel_size_bottom") == 420
     assert fresh.get_setting("panel_size_right") == 512
+
+
+def test_page_panel_size_settings_roundtrip(app_state):
+    state = app_state.AppState()
+    assert state.get_setting("page_panel_size_bottom") == 0
+    assert state.get_setting("page_panel_size_right") == 0
+    state.set_setting("page_panel_size_right", 640)
+    fresh = app_state.AppState()
+    assert fresh.get_setting("page_panel_size_right") == 640
+    # Sizing the docked-page strip leaves the shells' panel alone.
+    assert fresh.get_setting("panel_size_right") == 0
+
+
+def test_panel_size_key_scopes(app_state):
+    # The shells' panel keeps the original key names, so a size saved
+    # before docked pages had their own still lands.
+    assert panel_size_key("home", "bottom") == "panel_size_bottom"
+    assert panel_size_key("home", "right") == "panel_size_right"
+    assert panel_size_key("page", "bottom") == "page_panel_size_bottom"
+    assert panel_size_key("page", "right") == "page_panel_size_right"
+    # Every key it can name has a default, so an unset one reads as 0.
+    for scope in ("home", "page"):
+        for mode in ("bottom", "right"):
+            assert panel_size_key(scope, mode) in app_state.DEFAULT_SETTINGS
 
 
 _LAYOUT = {

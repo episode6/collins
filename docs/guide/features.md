@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-14. Full change history: git log for this file.
+fork. Last modified: 2026-08-16. Full change history: git log for this file.
 -->
 
 # Features
@@ -314,6 +314,11 @@ that lives below or beside the agent terminal, with **tabs of its own**:
   "restored panel history" marker.
 - Each session remembers its panel's open state, position, and size; the
   last-used position and size also become the default for new panels.
+- The strip that **pages** dock into — a PR view, the attachments list, a
+  docked composer — remembers its own size the same way, kept apart from the
+  shells' panel: drag a PR page wider and the next PR you open (in any
+  session) is that wide, while `Ctrl+J`'s panel stays where you left it.
+  Those pages share a strip, so they share one size per side.
 - Typing `exit` in a panel tab closes that tab (closing the last one hides
   the panel).
 - Closing a session tab while a command is running in any of its panel's
