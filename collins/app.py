@@ -943,11 +943,30 @@ _SCHEME_CSS = """
    recommended action at a time, so nothing else in the header is competing for
    the eye. The hover and pressed shades are GitHub's pairs too; disabled is the
    merge running (see prview's _ActionBar), where the button holds its color
-   while the spinner takes its word. */
-.pr-merge-action { background-color: %(merge_green)s; color: #ffffff; }
-.pr-merge-action:hover { background-color: %(merge_green_hover)s; }
-.pr-merge-action:active { background-color: %(merge_green_active)s; }
-.pr-merge-action:disabled {
+   while the spinner takes its word.
+
+   The second selector is the dialog those buttons ask through: a merge is
+   confirmed before it goes ahead, and the question is answered in the color it
+   was asked in rather than handing the merge back to the accent halfway
+   (practions.MERGE_CONFIRM_CSS, which dialogs.confirm_dialog puts on the
+   dialog). It reaches the confirming button through the appearance class Adw
+   gave it — AlertDialog exposes no API for its buttons — so it lands on that
+   one and never on Cancel, which carries no class at all. */
+.pr-merge-action,
+.pr-merge-confirm button.suggested-action {
+  background-color: %(merge_green)s;
+  color: #ffffff;
+}
+.pr-merge-action:hover,
+.pr-merge-confirm button.suggested-action:hover {
+  background-color: %(merge_green_hover)s;
+}
+.pr-merge-action:active,
+.pr-merge-confirm button.suggested-action:active {
+  background-color: %(merge_green_active)s;
+}
+.pr-merge-action:disabled,
+.pr-merge-confirm button.suggested-action:disabled {
   background-color: alpha(%(merge_green)s, 0.5);
   color: alpha(#ffffff, 0.6);
 }

@@ -786,6 +786,9 @@ def _on_action_clicked(
             confirm.label,
             lambda: _start_action(pr, action, host, root, None, None),
             destructive=confirm.destructive,
+            confirm_class=(
+                practions.MERGE_CONFIRM_CSS if action.key in practions.MERGES else None
+            ),
         )
         return
     _start_action(pr, action, host, root, popover, spinner)

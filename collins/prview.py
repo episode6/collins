@@ -1278,7 +1278,7 @@ class _ActionBar(Gtk.Box):
             # auto-merge included, since it is the same act on a delay.
             # "Ready for review" is the one recommendation left wearing the
             # accent: it is what moves a draft along, not what lands it.
-            merge = key in (practions.MERGE, practions.AUTO_MERGE)
+            merge = key in practions.MERGES
             button.add_css_class("pr-merge-action" if merge else "suggested-action")
             button.connect("clicked", self._on_clicked, key)
             # GtkButton answers the primary button and only that, so this
@@ -1422,6 +1422,9 @@ class _ActionBar(Gtk.Box):
             confirm.label,
             lambda: self._start(pr, action, button),
             destructive=confirm.destructive,
+            confirm_class=(
+                practions.MERGE_CONFIRM_CSS if action.key in practions.MERGES else None
+            ),
         )
 
     def _start(self, pr: PullRequest, action: practions.Action, button: _BusyButton) -> None:
