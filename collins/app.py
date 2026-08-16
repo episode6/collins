@@ -135,13 +135,15 @@ _CSS = b"""
 row.drop-above { box-shadow: inset 0 2px 0 0 @accent_bg_color; }
 row.drop-below { box-shadow: inset 0 -2px 0 0 @accent_bg_color; }
 
-/* make the active tab clearly stand out from inactive ones. Its background
-   color is set dynamically, not here: themes._apply_dynamic_theme_css keeps
-   it matched to the current terminal theme's background (see themes.py), so
-   the tab reads as part of the terminal it sits above rather than a
-   mismatched frame around it. libadwaita marks the active AdwTabBar row
-   with the GTK state `:selected`, not `:checked` (`:checked` is for
-   checkbox/toggle-style widgets and silently matches nothing here). */
+/* make the active tab clearly stand out from inactive ones -- the accent
+   underline and a bold label, over whatever fill the system theme gives a
+   selected tab. The fill used to be painted here too, matched to the
+   terminal's background so the tab read as part of the session below it,
+   but a tab is a piece of app chrome sitting in a header bar: dressed in a
+   terminal palette it looked like a hole cut in that bar rather than the
+   session's own tab. libadwaita marks the active AdwTabBar row with the GTK
+   state `:selected`, not `:checked` (`:checked` is for checkbox/toggle-style
+   widgets and silently matches nothing here). */
 tabbar tab:selected {
   box-shadow: inset 0 -3px 0 #D97757;
 }
@@ -164,13 +166,31 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   padding: 3px;
 }
 
-/* the composer panel sliding up over the terminal's bottom edge. Shape only,
-   as with .attach-overlay above: its colors come from
-   themes._apply_dynamic_theme_css so it reads as a surface of the terminal's
-   own theme rather than an app-colored card floating on it. */
+/* the composer panel sliding up over the terminal's bottom edge: a card of
+   the app's own surface, floating on the session rather than replacing it.
+   The window background just short of solid, so the prompt underneath shows
+   faintly through and the panel reads as raised over a session that is still
+   there -- but not so far that the draft has to compete with the text behind
+   it. Fenced off from the terminal by the hairline the rest of the app draws
+   seams with. */
 .composer-panel {
   padding: 8px;
   border-radius: 12px 12px 0 0;
+  background-color: alpha(@window_bg_color, 0.9);
+  border-top: 1px solid alpha(currentColor, 0.15);
+}
+/* The text box is the one part of the panel you read and write, so the
+   terminal creeping through it costs more than it does behind the chrome: its
+   own near-solid view fill, painted over the panel's, lifts it back to 96%
+   against the terminal. It goes on the `text` node alone -- that node covers
+   the box's whole visible area, margins included, and painting `textview` too
+   would stack a second coat over most of it. The node left without a fill
+   still has to say `transparent`, or Adwaita's own view fill lands there. */
+.composer-panel textview {
+  background-color: transparent;
+}
+.composer-panel textview text {
+  background-color: alpha(@view_bg_color, 0.96);
 }
 
 /* a panel tab floated over the whole session tab by the tab row's overlay
@@ -187,9 +207,22 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   border-bottom: 1px solid alpha(currentColor, 0.15);
 }
 
-/* docked in a panel page, the composer is a pane, not a floating card */
+/* docked in a panel page, the composer is a pane, not a floating card: solid,
+   and fenced by the strip's own edge rather than a border of its own, which
+   would read as a stray line mid-pane. A pane covers no terminal, so a
+   see-through one would only look like a rendering fault. */
 .composer-panel.docked {
   border-radius: 0;
+  background-color: @window_bg_color;
+  border-top: none;
+}
+/* The text box goes solid with it, rather than leaning on the pane behind
+   it to hide the last 4%. That fill and the pane's are two independent
+   theme colors now, so what shows through is a tint of the window color
+   rather than more of the same -- imperceptible in stock Adwaita, where the
+   two are a shade apart, but only by coincidence of the palette. */
+.composer-panel.docked textview text {
+  background-color: @view_bg_color;
 }
 
 /* the attachments handle on the terminal's right edge: the same pill as
@@ -201,13 +234,16 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   padding: 3px 1px;
 }
 
-/* the attachments panel sliding in over the terminal's right edge. Shape
-   only, as with the composer above: its colors come from
-   themes._apply_dynamic_theme_css, so it reads as a surface of the
-   terminal's own theme. Rows are flat buttons -- a preview with its caption
-   under it -- outlined only enough to tell one picture from the next. */
+/* the attachments panel sliding in over the terminal's right edge: the
+   composer's counterpart on the other edge, and an app surface for the same
+   reason, floating at the same near-solid alpha behind the same hairline
+   fence. Rows are flat buttons -- a preview with its caption under it --
+   outlined only enough to tell one picture from the next, and lifting out of
+   the surface only under the pointer. */
 .attachments-panel {
   border-radius: 12px 0 0 12px;
+  background-color: alpha(@window_bg_color, 0.9);
+  border-left: 1px solid alpha(currentColor, 0.15);
 }
 .attachments-panel .attachments-header {
   padding: 6px 6px 6px 12px;
@@ -221,6 +257,9 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
 .attachments-panel .attachment-row {
   padding: 6px;
   border-radius: 8px;
+}
+.attachments-panel .attachment-row:hover {
+  background-color: alpha(currentColor, 0.1);
 }
 /* the preview / file-face slot draws as a chip: a hairline of the panel's
    own foreground around rounded corners (the widget clips its child to
@@ -247,9 +286,11 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
 }
 
 /* docked in a panel page, the panel is a pane, not a floating card (see
-   .composer-panel.docked above) */
+   .composer-panel.docked above): solid, and fenced by the strip's own edge */
 .attachments-panel.docked {
   border-radius: 0;
+  background-color: @window_bg_color;
+  border-left: none;
 }
 
 /* dropped-image previews above the composer's text box: square crops with
