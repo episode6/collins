@@ -6,7 +6,9 @@ tests/test_panellayout.py (validation/prune/migration) and
 tests/test_docktree.py (tree mutations) can't reach: building a multi-strip
 dock out of real PanelStrips, serializing it with capture_layout, and
 rebuilding it into a fresh dock with restore_layout — ordinals, scrollback
-routing, home marker, hidden-strip semantics and all.
+routing, home marker, hidden-strip semantics and all. It ends on the same
+kind of check for `close_recent_page`, the walk out through the panel tabs
+Ctrl+W makes before it reaches the session tab.
 
 This is a script, not a pytest test, on purpose: tests/conftest.py blocks
 the GTK-stack namespaces for the whole suite so local runs reproduce CI
@@ -159,6 +161,57 @@ def shape(node):
     return ("split", node["split"], node["managed"], shape(node["a"]), shape(node["b"]))
 
 
+def check_close_recent() -> None:
+    """Ctrl+W's first stop: `close_recent_page` walks out through the panel
+    tabs one press at a time and only then answers False, which is the
+    window's cue to close the session tab itself (win.close-tab)."""
+    print("close-recent:")
+    dock = make_dock()
+    dock.show_home()
+    home = dock.strips()[0]
+    second = home.new_shell()
+    drain()
+    dock.split_move(home, second, dock._terminal, "right")
+    drain()
+    closed = dock.close_recent_page()
+    drain()
+    check(
+        "closes the last-touched tab, leaving the other",
+        closed and second not in dock.pages() and len(dock.pages()) == 1,
+        dock.pages(),
+    )
+    closed = dock.close_recent_page()
+    drain()
+    check("the next press takes the tab behind it", closed and dock.pages() == [], dock.pages())
+    check("an emptied dock keeps no strips", dock.strips() == [], dock.strips())
+    check("nothing on show answers False", dock.close_recent_page() is False)
+
+    hidden = make_dock()
+    hidden.show_home()
+    drain()
+    hidden.hide_home()
+    drain()
+    check(
+        "a hidden home strip is not closed unseen",
+        hidden.close_recent_page() is False and len(hidden.pages()) == 1,
+        hidden.pages(),
+    )
+
+    maxed = make_dock()
+    maxed.show_home()
+    drain()
+    strip = maxed.strips()[0]
+    maxed.maximize_page(strip, strip.selected_page_widget())
+    drain()
+    closed = maxed.close_recent_page()
+    drain()
+    check(
+        "a maximized page comes down and closes",
+        closed and maxed.maximized_page is None and maxed.pages() == [],
+        (maxed.maximized_page, maxed.pages()),
+    )
+
+
 def main() -> int:
     print("capture:")
     dock, layout = split_layout()
@@ -236,6 +289,8 @@ def main() -> int:
     dock5.restore_layout(layout["tree"], {})
     drain()
     check("restore refuses a dock already split", len(dock5.strips()) == before)
+
+    check_close_recent()
 
     print(f"\n{PASSED} passed, {FAILED} failed")
     return 1 if FAILED else 0
