@@ -95,6 +95,7 @@ from .store import SessionStore, emptied_projects
 from .switcher import QuickSwitcher
 from .taborder import neighbour_tab, tab_order
 from .terminal import PROGRESS_HINT_TERMPROP, TerminalTab
+from .traymodel import TraySession
 
 log = logging.getLogger(__name__)
 
@@ -2334,6 +2335,9 @@ class MainWindow(Adw.ApplicationWindow):
         # Titles are set from a dozen places (session rename, emoji, store
         # refresh…); watching the page itself catches all of them.
         self._title_handlers[page] = page.connect("notify::title", self._on_page_title_changed)
+        # An unresolved tab has no session to sync a status for, and it is
+        # still a tab: the item is Active for it and counts it in the tooltip.
+        self._notify_tray()
 
     def _on_page_detached(self, _view: Adw.TabView, page: Adw.TabPage, _pos: int) -> None:
         handler = self._title_handlers.pop(page, None)
@@ -2349,6 +2353,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._progress_watches.pop(page, None)
         self._fresh_spawns.discard(page)
         self._baseline_captures.pop(page, None)
+        self._notify_tray()
         self._sync_process_poll()
         self._sync_background_busy_poll()
 
@@ -3167,6 +3172,9 @@ class MainWindow(Adw.ApplicationWindow):
         # A session that just became (or stopped being) a background agent may
         # be the only one the header's pole was running for.
         self._sync_working_pole()
+        # A tab appearing or going away moves everything the item shows:
+        # whether it is Active at all, its tooltip, and its menu.
+        self._notify_tray()
 
     def _on_background_ids_changed(self, changed: set[str]) -> None:
         # Confirmed detaches: membership owns the yellow line from here on, so
@@ -3243,6 +3251,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_activity_changed(self, session_id: str, busy: bool) -> None:
         log.debug("activity: %s -> %s", session_id, "busy" if busy else "idle")
         self._sync_working_pole()
+        self._notify_tray()  # the item's menu marks a working session
         if self.sidebar.has_placeholder(session_id):
             # A "New Thread" row has no session item to hang the flag on.
             self.sidebar.set_placeholder_busy(session_id, busy)
@@ -3310,6 +3319,7 @@ class MainWindow(Adw.ApplicationWindow):
         if session_id:
             for row_id in self.store.rows_representing(session_id):
                 self.store.set_unread(row_id, True)
+        self._notify_tray()  # unread is what takes the item to NeedsAttention
 
     def _clear_unread(self, page: Adw.TabPage) -> None:
         """The user is at this tab (selected it, or typed into it): whatever
@@ -3321,6 +3331,7 @@ class MainWindow(Adw.ApplicationWindow):
         if session_id:
             for row_id in self.store.rows_representing(session_id):
                 self.store.set_unread(row_id, False)
+        self._notify_tray()
 
     def _sync_process_poll(self) -> None:
         """Run the process-tree poll only while some session has an open tab.
@@ -4129,6 +4140,57 @@ class MainWindow(Adw.ApplicationWindow):
         """Whether this window is the one holding this session's tab — asked
         across windows by session_window()."""
         return self._page_for(session_id) is not None
+
+    # -- what the status icon shows ------------------------------------------
+
+    def _notify_tray(self) -> None:
+        """Something the item shows has moved: tabs, unread, or a run starting
+        or stopping. The app coalesces the repaint, so calling this from every
+        edge costs one idle callback per burst, not one per edge.
+
+        Asked for by name rather than held as a reference: the app has no
+        status icon at all on a desktop with no host for one, or with the
+        setting off, and a window under an e2e harness has no App at all.
+        """
+        app = self.get_application()
+        refresh = getattr(app, "refresh_status_icon", None)
+        if refresh is not None:
+            refresh()
+
+    def tray_sessions(self) -> list[TraySession]:
+        """This window's open session tabs, as the status icon reads them.
+
+        Tabs, not rows: the item's menu jumps to a tab, and the app asks every
+        window in turn (see App.tray_view). A tab whose session the store
+        hasn't got a row for yet is skipped rather than guessed at — it has no
+        name to show and no busy or unread flag to carry.
+        """
+        sessions = []
+        for session_id in self._pages:
+            item = self.store.get_item(session_id)
+            if item is None:
+                continue
+            sessions.append(
+                TraySession(
+                    session_id=session_id,
+                    project=item.session.project_name,
+                    title=item.display_name,
+                    busy=item.busy,
+                    unread=item.unread,
+                    last_active=item.session.mtime,
+                )
+            )
+        return sessions
+
+    def tray_placeholders(self) -> tuple[int, int]:
+        """How many of this window's tabs are still waiting for a session id,
+        and how many of those are unread.
+
+        Their flags live in the sidebar rather than the store — there is no
+        session item to hang one on until the id resolves — so they can only
+        be counted, never listed.
+        """
+        return self.sidebar.placeholder_counts()
 
     def focus_session(self, session_id: str) -> bool:
         """Raise this session's tab, and this window with it: the caller may be
@@ -5081,6 +5143,10 @@ class MainWindow(Adw.ApplicationWindow):
         if hasattr(app, "refresh_caffeine_inhibit"):
             # Keep-the-screen-on may have flipped under a running Caffeine Mode.
             app.refresh_caffeine_inhibit()
+        if hasattr(app, "apply_status_icon_setting"):
+            # The status icon registers or unregisters where the switch was
+            # flipped — never at the next launch.
+            app.apply_status_icon_setting()
         self.sidebar.refresh_folder_path()
         self.sidebar.refresh_usage_panel()
         self.sidebar.refresh_project_icon_size()

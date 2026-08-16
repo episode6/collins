@@ -28,6 +28,7 @@ from . import (  # noqa: E402
     footerapps,
     mcptools,
     prefssearch,
+    statusicon,
 )
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label, grace_seconds
 from .i18n import LANGUAGES, N_, _, ngettext
@@ -459,6 +460,8 @@ class PreferencesDialog(Adw.Dialog):
         appearance_group.add(_searchable(scheme_row, *scheme_labels))
         page.add(appearance_group)
 
+        page.add(self._build_status_icon_group(state))
+
         caffeine_group = _SearchableGroup(title=_("Caffeine Mode"))
         self._caffeine_screen_row = Adw.SwitchRow(
             title=_("Keep screen on"),
@@ -834,6 +837,52 @@ class PreferencesDialog(Adw.Dialog):
         editor_group.add(pop_out_row)
 
         page.add(editor_group)
+
+    def _build_status_icon_group(self, state: AppState) -> _SearchableGroup:
+        """The status icon's switch, and the truth about whether this desktop
+        can show one.
+
+        An ActionRow carrying its own Gtk.Switch rather than an Adw.SwitchRow:
+        with no host on the bus the switch has to go insensitive, and an
+        insensitive widget is skipped by GTK's tooltip picking (so is
+        everything inside it), which would take the explanation down with it.
+        The row stays sensitive and keeps the tooltip; only the switch inside
+        it stops responding.
+        """
+        group = _SearchableGroup(title=_("Status icon"))
+        self._status_icon_row = Adw.ActionRow(title=_("Show status icon"))
+        self._status_icon_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self._status_icon_switch.set_active(bool(state.get_setting("status_icon")))
+        self._status_icon_switch.connect("notify::active", self._on_status_icon_changed)
+        self._status_icon_row.add_suffix(self._status_icon_switch)
+        self._status_icon_row.set_activatable_widget(self._status_icon_switch)
+        group.add(_searchable(self._status_icon_row, "tray", "top bar", "indicator", "AppIndicator"))
+        # Seeded synchronously so the row opens saying something, then
+        # followed live: availability moves under a running app — extensions
+        # get switched on and off, and an X11 shell restart takes the watcher
+        # with it — and the watch's own first answer is a main-loop turn away.
+        self._on_status_icon_host(statusicon.available())
+        self._status_icon_watch = statusicon.watch_availability(self._on_status_icon_host)
+        self.connect("closed", lambda *_: statusicon.unwatch(self._status_icon_watch))
+        return group
+
+    def _on_status_icon_host(self, present: bool) -> None:
+        self._status_icon_switch.set_sensitive(present)
+        self._status_icon_row.set_subtitle(
+            _("Shows Collins in the top bar with a badge for sessions you haven't looked at")
+            if present
+            else _(
+                "No status-icon support was found in this desktop — GNOME "
+                "needs an AppIndicator extension"
+            )
+        )
+        self._status_icon_row.set_tooltip_text(
+            None if present else _("Nothing on this desktop can show a status icon")
+        )
+
+    def _on_status_icon_changed(self, switch: Gtk.Switch, _pspec) -> None:
+        self._state.set_setting("status_icon", switch.get_active())
+        self._on_change()
 
     def _build_cli_group(self, state: AppState, page: _SearchablePage) -> None:
         """Where the Claude Code CLI is — the same question the welcome

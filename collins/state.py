@@ -104,6 +104,11 @@ DEFAULT_SETTINGS = {
     "archive_running_session": "ask",  # archiving a session whose tab is busy
     "quit_with_running_sessions": "ask",  # closing a window while sessions run
     "show_tab_bar": True,  # tab bar visibility (tabs keep working underneath)
+    # A StatusNotifierItem in the top bar: presence, and a menu that jumps to
+    # any open session (see statusicon.py). On by default — an icon nobody
+    # knows to turn on isn't presence — and free on a desktop with no host for
+    # one, where it never registers at all.
+    "status_icon": True,
     # The floating composer button over each agent terminal's bottom-left
     # corner (see terminal.py; it was the attach-file button once, and keeps
     # that key so saved preferences carry over). Off hides it everywhere;

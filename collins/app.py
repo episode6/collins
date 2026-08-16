@@ -34,7 +34,9 @@ from . import (
     proctree,
     providers,
     remoteimages,
+    statusicon,
     tooltipmute,
+    traymodel,
 )
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
 from .i18n import _
@@ -1334,6 +1336,128 @@ class App(Adw.Application):
         self.add_action(new_window)
         self.set_accels_for_action("app.new-window", ["<Control><Shift>n"])
 
+        quit_action = Gio.SimpleAction.new("quit", None)
+        quit_action.connect("activate", lambda *_: self.quit_all_windows())
+        self.add_action(quit_action)
+        self.set_accels_for_action("app.quit", ["<Control>q"])
+
+        self._status_icon: statusicon.StatusIcon | None = None
+        self._status_icon_source: int | None = None
+        self.connect("window-added", lambda *_: self.refresh_status_icon())
+        self.connect("window-removed", lambda *_: self.refresh_status_icon())
+        self.store.connect("refreshed", lambda *_: self.refresh_status_icon())
+        self.apply_status_icon_setting()
+
+    # -- quitting ------------------------------------------------------------
+
+    def quit_all_windows(self) -> None:
+        """app.quit: close every main window the way its own close button
+        would. A tray menu without a Quit item is a trap, and this is the one
+        place that offers it while no window is on screen.
+
+        Deliberately not Gio.Application.quit(), which would tear the process
+        down with running agents and unsaved buffers still in it: each window
+        gets its usual close request, so the Save Changes? and active-sessions
+        dialogs still appear, and cancelling one leaves that window open.
+        """
+        for window in list(self.get_windows()):
+            if isinstance(window, MainWindow):
+                window.close()
+
+    # -- the status icon -----------------------------------------------------
+
+    def apply_status_icon_setting(self) -> None:
+        """Bring the item into line with the setting, right now.
+
+        Called at startup and again whenever Preferences closes a change, so
+        the switch takes effect where the user flipped it rather than at the
+        next launch.
+
+        Throwaway instances never register. A screenshot or e2e run launches
+        under a generated COLLINS_APP_ID and several may be up at once (see
+        the capture-screenshots skill); each putting an item on the bus would
+        litter the user's panel with duplicates mid-capture. The two real ids
+        are named exactly rather than matched by prefix, which is what tells
+        the debug build (com.episode6.Collins.Debug) apart from a capture run
+        (com.episode6.Collins.E2E.<run>) — both start with the release id.
+        """
+        app_id = self.get_application_id() or ""
+        wanted = bool(self.state.get_setting("status_icon")) and app_id in (APP_ID, DEBUG_APP_ID)
+        if wanted == (self._status_icon is not None):
+            return
+        if not wanted:
+            self._status_icon.stop()
+            self._status_icon = None
+            return
+        debug = app_id == DEBUG_APP_ID
+        icon = statusicon.StatusIcon(
+            app_id=app_id,
+            title=self._tray_name(),
+            icon_name=DEBUG_APP_ID if debug else APP_ID,
+            icon_theme_path=str(_BUNDLED_ICONS) if _BUNDLED_ICONS.is_dir() else "",
+            view_provider=self.tray_view,
+            on_show=self._present_main_window,
+            on_focus=lambda sid: self.activate_action("focus-session", GLib.Variant("s", sid)),
+            on_new_window=lambda: self.activate_action("new-window", None),
+            on_quit=self.quit_all_windows,
+        )
+        if icon.start():
+            self._status_icon = icon
+
+    def _tray_name(self) -> str:
+        """What the item calls itself, in its title and at the head of its
+        tooltip. The debug build says so: two Collinses in one panel are
+        otherwise the same icon twice. Untranslated, like traymodel.APP_NAME —
+        it is the product's name, not a word."""
+        if (self.get_application_id() or "") == DEBUG_APP_ID:
+            return f"{traymodel.APP_NAME} (Debug)"
+        return traymodel.APP_NAME
+
+    def tray_view(self) -> traymodel.TrayView:
+        """What the item shows right now, gathered from every window.
+
+        Only tabs are asked, never the store's whole list: an unread flag
+        never outlives the tab it spoke for, and a menu row has to lead
+        somewhere. Tabs whose session id hasn't resolved arrive as bare counts
+        — they have no id to jump to (see traymodel).
+        """
+        sessions: list[traymodel.TraySession] = []
+        placeholders = placeholder_unread = 0
+        for window in self.get_windows():
+            if not isinstance(window, MainWindow):
+                continue
+            sessions.extend(window.tray_sessions())
+            open_count, unread_count = window.tray_placeholders()
+            placeholders += open_count
+            placeholder_unread += unread_count
+        return traymodel.tray_view(
+            sessions, placeholders, placeholder_unread, name=self._tray_name()
+        )
+
+    def refresh_status_icon(self) -> None:
+        """Repaint the item, once, after the current burst of changes.
+
+        Coalesced on an idle: a window closing takes its tabs with it one at a
+        time, and every one of those would otherwise be its own round of D-Bus
+        property reads for a state nobody saw.
+        """
+        if self._status_icon is None or self._status_icon_source is not None:
+            return
+        self._status_icon_source = GLib.idle_add(self._do_refresh_status_icon)
+
+    def _do_refresh_status_icon(self) -> bool:
+        self._status_icon_source = None
+        if self._status_icon is not None:
+            self._status_icon.refresh()
+        return GLib.SOURCE_REMOVE
+
+    def _present_main_window(self) -> None:
+        window = self._main_window()
+        if window is None:
+            self.activate()
+            return
+        window.present()
+
     # -- session MCP tools ---------------------------------------------------
     #
     # The socket service every launched session's MCP shim relays tool calls
@@ -1381,6 +1505,9 @@ class App(Adw.Application):
         # errors rather than breaking the session.
         if self._mcp_service is not None:
             self._mcp_service.stop()
+        if self._status_icon is not None:
+            self._status_icon.stop()
+            self._status_icon = None
         Adw.Application.do_shutdown(self)
 
     def _mcp_tool_enabled(self, name: str) -> bool:
