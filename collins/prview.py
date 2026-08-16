@@ -1208,7 +1208,9 @@ class _ActionBar(Gtk.Box):
     conflicting one, or one nothing has been fetched for yet show no button
     rather than a dead one. What is shown is what Collins recommends doing
     next about this PR (the merge that fits its checks, not both merges to
-    choose between), so it wears the accent.
+    choose between), so it wears the accent — except the merges, immediate and
+    auto alike, which wear GitHub's own merge green (app.py's _SCHEME_CSS), the
+    color that button has on the pull request's page.
 
     The button is `practions.perform` on a worker thread behind the merge's
     own confirmation dialog, spinning where its word was and the bar held
@@ -1271,7 +1273,13 @@ class _ActionBar(Gtk.Box):
         self._buttons: dict[str, _BusyButton] = {}
         for key in (practions.READY, practions.AUTO_MERGE, practions.MERGE):
             button = _BusyButton()
-            button.add_css_class("suggested-action")
+            # Either merge is green rather than accent-colored (app.py's
+            # _SCHEME_CSS), the way both are on the pull request's own page —
+            # auto-merge included, since it is the same act on a delay.
+            # "Ready for review" is the one recommendation left wearing the
+            # accent: it is what moves a draft along, not what lands it.
+            merge = key in practions.MERGES
+            button.add_css_class("pr-merge-action" if merge else "suggested-action")
             button.connect("clicked", self._on_clicked, key)
             # GtkButton answers the primary button and only that, so this
             # never doubles up with the click above it.
@@ -1414,6 +1422,9 @@ class _ActionBar(Gtk.Box):
             confirm.label,
             lambda: self._start(pr, action, button),
             destructive=confirm.destructive,
+            confirm_class=(
+                practions.MERGE_CONFIRM_CSS if action.key in practions.MERGES else None
+            ),
         )
 
     def _start(self, pr: PullRequest, action: practions.Action, button: _BusyButton) -> None:

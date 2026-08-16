@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -257,6 +257,7 @@ def confirm_dialog(
     extra_child: Gtk.Widget | None = None,
     keys: dict[str, str] | None = None,
     destructive: bool = True,
+    confirm_class: str | None = None,
 ) -> None:
     """Two-button confirmation (Cancel + a destructive `confirm_label`).
     `extra_label`/`on_extra` add a third, non-destructive choice between them;
@@ -265,8 +266,16 @@ def confirm_dialog(
     answered without reaching for the mouse.
     `destructive=False` asks about something that isn't a loss (merging a pull
     request), so the confirming button reads as the suggested course rather
-    than as a warning."""
+    than as a warning.
+    `confirm_class` is a CSS class for the dialog, for a caller that wants its
+    confirming button in a color of its own — the PR panel's merge questions
+    are answered in the merge green their button was pressed in
+    (practions.MERGE_CONFIRM_CSS). On the dialog rather than the button because
+    AlertDialog exposes no API for its buttons; the rule reaches the one it
+    means through the appearance class Adw put there."""
     dialog = Adw.AlertDialog(heading=heading, body=body)
+    if confirm_class:
+        dialog.add_css_class(confirm_class)
     if extra_child is not None:
         dialog.set_extra_child(extra_child)
     dialog.add_response("cancel", _("Cancel"))

@@ -173,8 +173,16 @@ class Action:
 
 # The three ways of landing a pull request: now, when GitHub says the checks
 # are done, and now-with-the-session-put-away. What the confirm_merges setting
-# is about — see `confirmation`.
+# is about — see `confirmation` — and what wears the merge green, both on the
+# button (prview's _ActionBar) and, through the class below, in the dialog it
+# asks through.
 MERGES = (MERGE, AUTO_MERGE, MERGE_ARCHIVE)
+# The CSS class a merge's confirmation dialog wears, which paints its
+# confirming button in the same GitHub green the button that opened it is drawn
+# in (see app.py's _SCHEME_CSS). Named here, beside the keys that ask for it, so
+# both askers — the chips' menu and the PR page — dress the question the same
+# way.
+MERGE_CONFIRM_CSS = "pr-merge-confirm"
 
 
 def confirmation(action: Action, confirm_merges: bool = True) -> Confirm | None:
