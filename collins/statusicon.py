@@ -27,7 +27,9 @@ GNOME's `ubuntu-appindicators@ubuntu.com` — actually behaves:
   about the `data/icons` path a source checkout adds to its own. So the
   artwork ships as `IconPixmap` — decoded here, handed over as ARGB32 — with
   `IconName` and `IconThemePath` alongside as a courtesy to hosts that would
-  rather look it up themselves.
+  rather look it up themselves. The courtesy pauses while the badge is up:
+  hosts prefer a name they can resolve over any pixmap, so the name reads
+  back empty until the count clears.
 
 The unread badge is composited into those pixmaps rather than sent as text:
 the shell has no badge slot, and the one text affordance (`XAyatanaLabel`)
@@ -713,7 +715,12 @@ class StatusIcon:
             # to it; with it True the menu is all there is.
             return GLib.Variant("b", False)
         if prop in ("IconName", "AttentionIconName"):
-            return GLib.Variant("s", self._icon_name)
+            # Empty while the badge is up. Hosts try the name before the
+            # pixmap — GNOME's appindicator resolves it against IconThemePath,
+            # then its own theme, and only a name that yields *nothing* lets
+            # the pixmap through — so a resolvable name here would paint the
+            # plain artwork over the count.
+            return GLib.Variant("s", "" if view.badge else self._icon_name)
         if prop in ("IconPixmap", "AttentionIconPixmap"):
             # One artwork for both states, badge and all: NeedsAttention and
             # a non-empty badge are the same fact (unread > 0), so whichever
