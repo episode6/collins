@@ -148,6 +148,15 @@ _dynamic_theme_provider: Gtk.CssProvider | None = None
 # anything, and a see-through one would only look like a rendering fault.
 _OVERLAY_ALPHA = 0.9
 
+# The composer's text box sits a step more solid than the card around it: it
+# is the one part of the panel you read and write, so the terminal creeping
+# through it costs more than it does behind the chrome. This is the box's own
+# fill, painted *over* a panel already at _OVERLAY_ALPHA, so the two compose
+# -- 0.9 then 0.6 lands the box at 0.96 against the terminal, against the
+# card's 0.9. Docked, the panel under it is opaque and this fill is the same
+# color, so it costs nothing there and needs no second rule.
+_COMPOSER_BOX_ALPHA = 0.6
+
 
 def _apply_dynamic_theme_css(theme: dict | None) -> None:
     global _dynamic_theme_provider
@@ -212,12 +221,20 @@ def _apply_dynamic_theme_css(theme: dict | None) -> None:
         # overlay's top border would read as a stray line mid-pane. A pane
         # covers no terminal, so it goes back to solid too.
         f".composer-panel.docked {{ background-color: {bg_css}; border-top: none; }}"
-        # The text box takes no fill of its own: painting terminal bg over a
-        # panel that is already 90% terminal bg would leave the one part you
-        # actually read as a solid patch inside a see-through card. Transparent
-        # lets it be whatever its panel is, floating or docked.
+        # Text and caret are set on both nodes: GTK paints a text view's
+        # glyphs from the `textview` node's own color, so moving it down to
+        # `text` alone leaves them to fall back to the theme's near-black.
         f".composer-panel textview, .composer-panel textview text {{ "
-        f"background-color: transparent; color: {fg_css}; caret-color: {fg_css}; }}"
+        f"color: {fg_css}; caret-color: {fg_css}; }}"
+        # The fill is what differs between the two nodes. It lifts the box
+        # back toward solid (see _COMPOSER_BOX_ALPHA), and goes on `text`
+        # alone -- that node covers the box's whole visible area, margins
+        # included, and painting `textview` too would stack a second coat of
+        # it over most of that area. The node left without a fill still has
+        # to say `transparent`, or Adwaita's own view fill lands there.
+        f".composer-panel textview {{ background-color: transparent; }}"
+        f".composer-panel textview text {{ "
+        f"background-color: alpha({bg_css}, {_COMPOSER_BOX_ALPHA}); }}"
         # The attachments panel is the composer's counterpart on the other
         # edge, and a surface of the terminal for the same reason: it covers
         # the terminal's right margin, fenced off by a faint fg-colored edge,
