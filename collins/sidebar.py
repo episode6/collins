@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -483,10 +483,18 @@ class NewThreadRow(Gtk.ListBoxRow):
         box.set_valign(Gtk.Align.CENTER)  # match SessionRow in a taller row
         box.set_margin_top(4)
         box.set_margin_bottom(4)
-        # As in PlaceholderRow: stand in for the mark column (button padding
-        # plus half the overhang) so the offer starts where a real row's mark
-        # does.
-        box.set_margin_start(6)
+
+        # The agent the row would start, in the slot a real row leads with (see
+        # SessionRow's agent mark): the offer is for a session with the same
+        # icon, so it lands in the same column, and the title beside it starts
+        # where every title in the group does. .agent-mark carries the inset
+        # this row used to fake with a 6px margin of its own.
+        agent_mark = Gtk.Image.new_from_icon_name(get_provider("claude").icon_name)
+        agent_mark.set_pixel_size(prmenu.ROW_ICON_PX)
+        agent_mark.set_valign(Gtk.Align.CENTER)
+        agent_mark.add_css_class("agent-mark")
+        agent_mark.add_css_class("dim-label")
+        box.append(agent_mark)
 
         label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
         label.add_css_class("session-title")
