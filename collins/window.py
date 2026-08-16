@@ -4174,9 +4174,17 @@ class MainWindow(Adw.ApplicationWindow):
 
     def move_session_to_new_window(self, session_id: str) -> MainWindow | None:
         """Lift this session's live tab out into a window of its own. The
-        terminal (and the agent under it) is reparented, never restarted."""
+        terminal (and the agent under it) is reparented, never restarted.
+
+        Asks again, at the click, exactly what the menu asked before offering
+        the item — the answer can change in between. The tab may have started
+        closing, and it may have become this window's *last* tab, because the
+        sibling it was offered beside exited on its own (an idle agent's exit
+        closes its tab without asking). Moving then would empty this window
+        into an identical one, which is the case the menu leaves out.
+        """
         page = self._page_for(session_id)
-        if page is None or self._page_settling(page):
+        if page is None or not self.can_move_session_to_new_window(session_id):
             return None
         window = self.get_application().open_new_window()
         self.hand_over_page(page, window)
@@ -4497,9 +4505,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_move_session_new_window(self, _action, param: GLib.Variant) -> None:
         # The session's live tab, lifted into a window of its own. The menu
-        # only offers this for a session that has one, but the tab can close
-        # (or start closing) between the menu opening and the click — the move
-        # is simply off in that case, rather than spawning an empty window.
+        # only offers this where it means something, but what it means can
+        # change between the menu opening and the click — move_session_to_new_
+        # window asks again, and a move that no longer applies simply doesn't
+        # happen, rather than spawning a window to strand.
         session_id = param.get_string()
         owner = self._owner_window(session_id)
         if owner is not None:
