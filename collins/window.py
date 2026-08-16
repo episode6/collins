@@ -1023,6 +1023,8 @@ class MainWindow(Adw.ApplicationWindow):
             "rotate-panel-page": lambda *_: self._rotate_panel_page(),
             "clear-panel": lambda *_: self._clear_panel(),
             "toggle-composer": lambda *_: self._toggle_composer(),
+            "toggle-attachments": lambda *_: self._toggle_attachments(),
+            "open-pr-page": lambda *_: self._open_pr_page(),
             # Deliberately no default accelerator or menu surface: the
             # dock's visible affordances (per-tab drag handles, drop
             # zones) cover moving, and Ctrl+; rotates a single tab; these
@@ -1209,13 +1211,20 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control>k", "win.clear-panel"),
             # Punctuation on purpose: every Ctrl+letter this controller
             # claims is one the agent's own input box never sees again, and
-            # neither of these sends a byte a terminal app would have wanted.
+            # none of these sends a byte a terminal app would have wanted.
             # Ctrl+L is the input box's clear-screen, so the J-K run of panel
-            # chords carries on at the next free key along instead.
+            # chords carries on at the next free key along instead. Period
+            # and apostrophe are neighbours because what they raise is: the
+            # composer and the gallery of what this session has been shown
+            # are the same gesture, the tab's two overlays over the terminal.
             ("<Control>period", "win.toggle-composer"),
+            ("<Control>apostrophe", "win.toggle-attachments"),
             ("<Control>semicolon", "win.rotate-panel-page"),
+            # The function keys are the surfaces: what the window can put in
+            # front of you, in the order they sit beside the terminal.
             ("F9", "win.toggle-sidebar"),
             ("F8", "win.toggle-editor"),
+            ("F7", "win.open-pr-page"),
             ("<Control><Shift>o", "win.quick-open"),
         ):
             controller.add_shortcut(
@@ -3750,6 +3759,34 @@ class MainWindow(Adw.ApplicationWindow):
             tab.close_composer()
         else:
             tab.open_composer()
+
+    def _toggle_attachments(self) -> None:
+        """Ctrl+apostrophe: raise this tab's gallery of the images the session
+        has been shown over the terminal, or lower one already up — the slim
+        handle on the terminal's right edge, from the keyboard.
+
+        Docked as a panel tab it is fronted rather than lowered, exactly as
+        the handle leaves it (see `TerminalTab.toggle_attachments`): a panel
+        behind another page, or in a strip that is hidden, is one the press
+        was asking to *see*. Closing that one stays where closing a panel tab
+        lives, on the tab itself."""
+        tab = self._current_terminal_tab()
+        if tab is not None:
+            tab.toggle_attachments()
+
+    def _open_pr_page(self) -> None:
+        """F7: open — or front — the page for the pull request this session
+        linked most recently, joining F8 and F9 as the third surface the
+        window can put in front of you.
+
+        Deliberately not a toggle, unlike those two: a PR page is a panel tab
+        carrying a fetch of its own, and one press should never be able to
+        throw away the diff you were half way through reading."""
+        tab = self._current_terminal_tab()
+        if tab is None:
+            return
+        if not tab.open_latest_pr_page():
+            tab.feed_message(_("No pull request is linked to this session yet"))
 
     def _move_panel_page(self) -> None:
         """Cycle the focused panel page to the next strip; a dock with one

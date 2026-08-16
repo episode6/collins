@@ -65,6 +65,8 @@ Features:
 | `Ctrl+K` | Clear the terminal panel (screen and saved history) |
 | `Ctrl+;` | Move the current panel tab to the panel's other side (bottom ↔ right) |
 | `Ctrl+.` | Show/hide the composer (pressed while composing, it closes and puts the draft back in the agent's box) |
+| `Ctrl+'` | Show/hide the attachments gallery (docked as a panel tab, it comes to the front instead) |
+| `F7` | Open the page for the session's most recently linked pull request |
 | `F8` | Show/hide the editor panel |
 | `Ctrl+S` (in the editor) | Save the current file |
 | `Ctrl+F` (in the editor) | Find in file |

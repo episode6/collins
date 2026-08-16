@@ -26,6 +26,8 @@ fork. Last modified: 2026-08-16. Full change history: git log for this file.
 | `Ctrl+;` | Move the current panel tab to the panel's other side (bottom ↔ right) — the same thing as its tab row's rotate button |
 | `Esc` | Bring a panel tab that's overlaying the whole session back to its place in the panel (a shell with a program running in it keeps the key) |
 | `Ctrl+.` | Show/hide the composer — raised, the cursor lands in it; pressed again while composing it closes and puts the draft back in the agent's own input box |
+| `Ctrl+'` | Show/hide the attachments gallery — the images this session has been shown, the same panel the handle on the terminal's right edge raises; docked as a panel tab it comes to the front (revealing a hidden strip) instead of closing |
+| `F7` | Open the pull request page for the newest PR this session is linked to — already open, it comes to the front and re-reads itself |
 | `F8` | Show/hide the editor panel (brings a popped-out editor back first) |
 | `Ctrl+Shift+O` | Quick open — fuzzy-find a file in the project, opened in the editor |
 | `Ctrl+S` (in the editor) | Save the current file |

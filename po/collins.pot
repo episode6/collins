@@ -1896,6 +1896,10 @@ msgstr ""
 msgid "New session in {project} (in a worktree)"
 msgstr ""
 
+#: collins/window.py:3789
+msgid "No pull request is linked to this session yet"
+msgstr ""
+
 #: collins/editor.py:376
 msgid "{name} couldn't be decoded as an image."
 msgstr ""

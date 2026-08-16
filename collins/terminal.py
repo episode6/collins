@@ -4220,6 +4220,23 @@ class TerminalTab(Gtk.Box):
             pr = known(pr)
         self.open_pr_page(pr, unresolved=unresolved)
 
+    def open_latest_pr_page(self) -> bool:
+        """F7: show the page for the pull request this session linked most
+        recently, fronting it when it is already open.
+
+        The footer's chip row is the list and it runs oldest first (see
+        `_collect_prs`), so the last of them is the newest thing this session
+        got itself involved with — the same PR a tab with
+        `open_pr_panel_on_attach` on would have opened by itself. False when
+        the session has no pull request at all yet, which the caller says out
+        loud: a shortcut that silently does nothing is indistinguishable from
+        one that was never installed.
+        """
+        if not self._footer_prs:
+            return False
+        self.open_pr_page(self._footer_prs[-1])
+        return True
+
     def _find_pr_page(self, url: str) -> PrViewPage | None:
         for page in self._dock.pages():
             if getattr(page, "page_kind", None) == "pr" and page.pr_url == url:
