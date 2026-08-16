@@ -151,6 +151,11 @@ _PR_CHIP_SPACING = 8  # between chips; their own parts sit 4 apart
 # Focus comes and goes much faster than CI does — alt-tabbing past the window
 # must not turn into a flurry of subprocesses.
 _PR_FOCUS_REFRESH_MIN_US = 10 * 1_000_000
+# How long an auto-opened PR page waits for the arrival that prompted it to
+# finish laying out (see _on_hub_pr_attached). Long enough to be a different
+# frame from the chip that just appeared, short enough to read as "and the
+# page opened".
+_PR_PAGE_SETTLE_MS = 250
 
 # PCRE2 flags for the find bar: multiline, case-insensitive.
 _PCRE2_CASELESS = 0x00000008
@@ -1383,6 +1388,9 @@ class TerminalTab(Gtk.Box):
         # tests, mostly) keeps its chips to itself.
         self._pr_store = None
         self._pr_store_handlers: list[int] = []
+        # Whether a PR joining this session opens its page unbidden (the
+        # open_pr_panel_on_attach setting, pushed in by apply_settings).
+        self._auto_open_prs = False
         # Every image this session has been shown, key -> the sighting (see
         # attachrecords). Kept apart from anything a poll produces and folded
         # in on collection, for the reason attach_pr gives: a sighting lands
@@ -2088,6 +2096,7 @@ class TerminalTab(Gtk.Box):
         self._pr_store_handlers = [
             pr_store.connect("status-changed", self._on_hub_status_changed),
             pr_store.connect("session-changed", self._on_hub_session_changed),
+            pr_store.connect("pr-attached", self._on_hub_pr_attached),
         ]
         self.connect("destroy", self._leave_pr_store)
 
@@ -2132,6 +2141,43 @@ class TerminalTab(Gtk.Box):
         if records == self._saved_pr_records:
             return
         self.restore_prs(records)
+
+    def _on_hub_pr_attached(self, _hub, session_id: str, url: str) -> None:
+        """A pull request joined this session for the first time: show it.
+
+        Only with the setting on, and it doesn't matter which path put the PR
+        there — this tab's own poll, the first-prompt attacher, the attach_pr
+        tool, a row's menu — because the hub announces the association rather
+        than the discovery. Once per PR per session comes free with it: the
+        saved list is what "already seen" is written on, so a page closed
+        again is not reopened, and a resume (whose PRs are all on that list
+        before any of this runs) opens nothing at all.
+
+        A fork's tab sits on the original's session id and would open a second
+        copy of the same page beside it, so it sits this out — the same reason
+        it never writes the list either.
+
+        The open is held off for a beat rather than run here or from the next
+        idle. This arrives re-entrantly inside the hub write — for the tab's
+        own path, inside the chip rebuild that started it — and carving a new
+        strip out of the dock relayouts the whole tab. Asked for in that same
+        breath, on top of the resize the new chip has just requested, GTK's
+        Wayland backend segfaults; it does so reproducibly under a headless
+        compositor, and neither an idle nor a low-priority one is late enough
+        to escape it. `_PR_PAGE_SETTLE_MS` later the layout has settled and
+        the same open is uneventful — and a panel that opens by itself is not
+        something a fraction of a second is noticed in.
+        """
+        if not self._auto_open_prs or self.fork or session_id != self.session_id:
+            return
+        GLib.timeout_add(_PR_PAGE_SETTLE_MS, self._open_attached_pr_page, url)
+
+    def _open_attached_pr_page(self, url: str) -> bool:
+        # A tab that closed inside the wait has dropped its hub connections;
+        # its dock is gone and there is nothing left to open a page in.
+        if self._pr_store is not None:
+            self.open_pr_page_url(url)
+        return GLib.SOURCE_REMOVE
 
     def restore_prs(self, records: object) -> None:
         """Re-adopt the PRs saved for this session.
@@ -4605,6 +4651,7 @@ class TerminalTab(Gtk.Box):
             self._composer.set_enter_sends(self._composer_enter_sends)
             self._composer.set_font(self._composer_font)
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
+        self._auto_open_prs = bool(settings.get("open_pr_panel_on_attach"))
         self._apply_terminal_max_width(settings)
         self._set_footer_apps(settings.get("footer_apps") or [])
         self._dock.apply_settings(settings)

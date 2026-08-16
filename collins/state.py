@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -167,6 +167,12 @@ DEFAULT_SETTINGS = {
     # opening a PR fetches the pictures its description and comments name.
     # Off: they stay alt-text links, and nothing is fetched.
     "pr_inline_images": True,
+    # Whether a pull request joining a session opens its page beside that
+    # session on its own (see PrStore's pr-attached and TerminalTab's
+    # _on_hub_pr_attached). Off by default: it spends the session's panel
+    # room without being asked. Once per PR per session — the saved list is
+    # what remembers, so a page closed again stays closed.
+    "open_pr_panel_on_attach": False,
     "editor_window_width": 1000,  # last popped-out editor window size (floating, unmaximized)
     "editor_window_height": 700,
     "editor_window_maximized": False,

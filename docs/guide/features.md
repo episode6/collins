@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-14. Full change history: git log for this file.
+fork. Last modified: 2026-08-16. Full change history: git log for this file.
 -->
 
 # Features
@@ -193,6 +193,12 @@ agents' own session files are never modified.
   **opening that PR's page beside the session on click** — the same view the
   menu's *View in Collins* reaches. The caret beside them lists every one with
   its title — the same list a sidebar row's pull request mark opens.
+- That page can also open **by itself**, the moment a session picks a pull
+  request up — turn on *Open new pull requests automatically* in Preferences.
+  It happens **once per pull request per session**, whichever way the PR
+  arrived (the agent opened it, `attach_pr` named it, the first prompt
+  mentioned it), so a page you close again stays closed, and reopening the
+  session later opens nothing.
 - **Right-click a chip** (or left-click a PR in either list) for what to *do*
   with it: mark a draft **ready for review**, **merge** it — or turn on
   **auto-merge** while its checks are still running — or **ask Claude for a

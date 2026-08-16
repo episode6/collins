@@ -52,6 +52,14 @@ def heard(store):
     return events
 
 
+@pytest.fixture
+def attached(store):
+    """The (session, url) pairs the store announced as newly attached."""
+    events = []
+    store.connect("pr-attached", lambda _store, sid, url: events.append((sid, url)))
+    return events
+
+
 # -- the session → PRs association ------------------------------------------
 
 
@@ -133,6 +141,62 @@ def test_attach_with_nothing_new_says_nothing(store, heard):
     store.set_records(SESSION, [{"number": 55, "url": URL}])
     store.attach(SESSION, [prstatus.parse_pr_url(URL)])
     assert heard == [("session", SESSION)]
+
+
+# -- newly attached pull requests -------------------------------------------
+
+
+def test_a_first_sighting_is_announced(store, attached):
+    store.set_records(SESSION, [{"number": 55, "url": URL}])
+    assert attached == [(SESSION, URL)]
+
+
+def test_only_the_newcomer_is_announced(store, attached):
+    """A write that keeps one PR and adds another says only what is new —
+    the poll that rewrites the whole list every time it learns a title must
+    not read as the session picking every PR up again."""
+    store.set_records(SESSION, [{"number": 55, "url": URL}])
+    store.set_records(
+        SESSION,
+        [{"number": 55, "url": URL, "title": "Add the thing"}, {"number": 56, "url": OTHER_URL}],
+    )
+    assert attached == [(SESSION, URL), (SESSION, OTHER_URL)]
+
+
+def test_a_pr_is_announced_once_per_session(store, attached):
+    """The once-per-PR promise: dropped and re-added inside the same list is
+    still the same association, and a resume — the saved list written back
+    as it was found — is not an arrival at all."""
+    records = [{"number": 55, "url": URL}, {"number": 56, "url": OTHER_URL}]
+    store.set_records(SESSION, records)
+    store.set_records(SESSION, list(reversed(records)))
+    store.set_records(SESSION, list(records))
+    assert attached == [(SESSION, URL), (SESSION, OTHER_URL)]
+
+
+def test_the_newcomer_arrives_after_the_list_it_is_on(store, state, attached):
+    """Ordering the subscribers rely on: by the time a handler hears about a
+    PR, the saved list it can read already carries it."""
+    seen = []
+    store.connect(
+        "pr-attached", lambda _s, sid, _url: seen.append(list(state.get_session_prs(sid)))
+    )
+    store.set_records(SESSION, [{"number": 55, "url": URL}])
+    assert seen == [[{"number": 55, "url": URL}]]
+
+
+def test_attach_announces_what_it_appended(store, attached):
+    store.set_records(SESSION, [{"number": 55, "url": URL}])
+    store.attach(SESSION, [prstatus.parse_pr_url(URL), prstatus.parse_pr_url(OTHER_URL)])
+    assert attached == [(SESSION, URL), (SESSION, OTHER_URL)]
+
+
+def test_an_unusable_record_is_not_announced(store, attached):
+    """The URL goes out to handlers that hand it to `gh`, so it passes the
+    same gate every restored PR passes — a record that can't be read back
+    is not an arrival."""
+    store.set_records(SESSION, [{"number": 55, "url": "https://example.com/pull/55"}])
+    assert attached == []
 
 
 def test_prs_wears_the_freshest_status(store):
