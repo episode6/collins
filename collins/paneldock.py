@@ -490,6 +490,12 @@ class PanelDock(Adw.Bin):
         shells = strip.new_shells(restore_texts)
         if not shells:
             return
+        # The arrival has almost certainly bound this already (a free
+        # binding takes the first shell to turn up — see `_on_page_touched`,
+        # which runs synchronously inside `new_shells`). Said outright
+        # anyway, because "the shortcut owns what the shortcut just opened"
+        # is this method's whole job, and it shouldn't rest on the order two
+        # signals happen to fire in.
         self._toggle_shell = shells[0]
         self._recent = shells[0]
 

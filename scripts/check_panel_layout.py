@@ -463,6 +463,41 @@ def check_panel_terminal() -> None:
     drain()
     check("and Ctrl+J still finds it there", shared.panel_terminal_showing)
 
+    # The same emptying, by the other route: a rotation carrying the row's
+    # last live tab to the far axis. The home role goes with it (a strip
+    # with no shells left in it is no home), and the collapse the move
+    # leaves behind lands on the stowed terminal a deferred idle later —
+    # two independently deferred paths that have to agree on where the
+    # page ends up.
+    rotated = open_page_dock(1400, 1200, home="right")
+    rotated.show_panel_terminal()
+    drain()
+    bound = rotated.panel_terminal
+    row = rotated._strip_of(bound)
+    mate = row.new_shell()
+    drain()
+    rotated.hide_panel_terminal()
+    drain()
+    rotated.rotate_page(row, mate)
+    drain()
+    check(
+        "a rotation out of a stowed terminal's row leaves it hidden, not homeless",
+        row in rotated._tree and not row.get_visible() and row.pages() == [bound],
+        (row in rotated._tree, row.pages()),
+    )
+    check(
+        "the home role follows the shell that moved",
+        rotated._home_strip is rotated._strip_of(mate) and rotated.home_position == "bottom",
+        (rotated._home_strip, rotated.home_position),
+    )
+    check("the binding is untouched", rotated.panel_terminal is bound)
+    rotated.show_panel_terminal()
+    drain()
+    check(
+        "and Ctrl+J brings it back where it was left",
+        rotated.panel_terminal_showing and row.get_visible(),
+    )
+
 
 def main() -> int:
     print("capture:")
