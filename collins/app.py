@@ -608,6 +608,45 @@ row.session-child.running.busy {
   background-image: repeating-linear-gradient(135deg,
     #1c71d8 0px, #1c71d8 4.243px, #99c1f1 4.243px, #99c1f1 8.485px);
 }
+
+/* The same pole, standing in the sidebar header beside the "Sessions" title:
+   the panel's answer when the row carrying one is scrolled out of the list or
+   folded shut inside a collapsed project (see SessionPanel's header, and
+   set_sessions_working for which sessions count). Same two blues, same 135deg,
+   same 8.485px period, same 900ms cycle -- one signal in two places, and the
+   shared numbers are what make the header read as the row's pole rather than
+   as some second blue thing that also moves.
+
+   What differs is the shape: 4px wide with softened ends, standing 18px tall
+   so it sits level with the symbolic icons across the bar. The row's own 2px
+   is right against a card edge but reads as a stray hairline out here among
+   buttons, and square ends read as a crop rather than as an object.
+
+   No border and no padding here, so unlike the row above this needs neither
+   the background-position fudge nor the widened clip -- the layer starts at
+   the widget box, which is where the stripes belong. Its own keyframes
+   because of that: the row's travel the same 12px per cycle, but from an
+   x-offset that counts back over a border this widget doesn't have.
+
+   The paint is all in the .working half, so an idle header holds the slot
+   (the title never re-centres as turns come and go) while drawing nothing and
+   animating nothing. */
+@keyframes barber-pole-header {
+  from { background-position: 0 12px; }
+  to   { background-position: 0 0; }
+}
+.working-pole {
+  min-width: 4px;
+  min-height: 18px;
+  border-radius: 2px;
+}
+.working-pole.working {
+  background-repeat: repeat-y;
+  background-size: 4px 12px;
+  animation: barber-pole-header 900ms linear infinite;
+  background-image: repeating-linear-gradient(135deg,
+    #1c71d8 0px, #1c71d8 4.243px, #99c1f1 4.243px, #99c1f1 8.485px);
+}
 /* the session shown in the currently selected tab: the fill says which one it
    is, and the card runs out to the panel's right edge (square-cornered, with
    no right border) so the row reads as joined to the terminal it is showing

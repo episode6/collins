@@ -3093,8 +3093,8 @@ class MainWindow(Adw.ApplicationWindow):
         # is the gate's call.
         self._refresh_background_affordances()
         # A session that just became (or stopped being) a background agent may
-        # be the only one the header spinner was spinning for.
-        self._sync_working_spinner()
+        # be the only one the header's pole was running for.
+        self._sync_working_pole()
 
     def _on_background_ids_changed(self, changed: set[str]) -> None:
         # Confirmed detaches: membership owns the yellow line from here on, so
@@ -3144,12 +3144,12 @@ class MainWindow(Adw.ApplicationWindow):
         """
         return bool(self._activity.busy())
 
-    def _sync_working_spinner(self) -> None:
-        """Spin the sidebar header's spinner while a session this window is
+    def _sync_working_pole(self) -> None:
+        """Run the sidebar header's barber pole while a session this window is
         watching itself is working.
 
         Backgrounded conversations are left out, which is the whole point of
-        the spinner: it says "someone here is mid-turn", and a /bg agent runs
+        the header's pole: it says "someone here is mid-turn", and a /bg agent runs
         on with nobody watching by definition. A detached session with no tab
         never reaches the tracker at all (see activity.py), so the filter is
         really about the one that does — a tab *attached* to a background
@@ -3170,7 +3170,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_activity_changed(self, session_id: str, busy: bool) -> None:
         log.debug("activity: %s -> %s", session_id, "busy" if busy else "idle")
-        self._sync_working_spinner()
+        self._sync_working_pole()
         if self.sidebar.has_placeholder(session_id):
             # A "New Thread" row has no session item to hang the flag on.
             self.sidebar.set_placeholder_busy(session_id, busy)
@@ -3427,9 +3427,9 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self._set_row_backgrounding(session_id, True)
         self._refresh_background_affordances()  # the gate closes app-wide
-        # Assumed-detached counts as detached everywhere else; the header
-        # spinner shouldn't be the one place still claiming otherwise.
-        self._sync_working_spinner()
+        # Assumed-detached counts as detached everywhere else; the header's
+        # pole shouldn't be the one place still claiming otherwise.
+        self._sync_working_pole()
 
     def _confirm_backgrounding(self, session_id: str) -> None:
         """The detach is confirmed. Re-enable the row immediately: clicking it
