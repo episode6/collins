@@ -270,6 +270,12 @@ def main():
     check("the badge is drawn into the artwork", badged_pixmaps != plain_pixmaps)
     check("attention artwork carries the same badge",
           item_prop("AttentionIconPixmap") == badged_pixmaps)
+    # A host tries the name before the pixmap, so while the badge is up the
+    # names must read back empty or the plain theme artwork wins.
+    check("the badge blanks IconName", item_prop("IconName") == "",
+          item_prop("IconName"))
+    check("the badge blanks AttentionIconName", item_prop("AttentionIconName") == "",
+          item_prop("AttentionIconName"))
     check("the dock hears the count",
           spin(lambda: any(p.get("count") == 1 and p.get("count-visible") for _u, p in dock)),
           str(dock))
@@ -291,6 +297,8 @@ def main():
     state["placeholders"] = 0
     icon.refresh()
     check("nothing open goes Passive", item_prop("Status") == "Passive", item_prop("Status"))
+    check("the icon name returns once the badge clears",
+          item_prop("IconName") == "com.episode6.Collins", item_prop("IconName"))
     check("the dock badge hides at zero",
           spin(lambda: dock and dock[-1][1].get("count-visible") is False), str(dock[-2:]))
 
