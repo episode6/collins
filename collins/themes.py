@@ -167,30 +167,13 @@ def _hex(color: Gdk.RGBA) -> str:
 # mismatched frame around it: the empty space beside a width-clamped
 # terminal (.terminal-gutter, see TerminalTab's Adw.Clamp), the selected
 # tab's row in the tab bar, which sits directly above the terminal it shows,
-# the floating composer button in the terminal's corner (.attach-overlay),
-# which inverts the terminal's colors so it contrasts with any palette, and
-# the two panels those buttons open (.composer-panel over the bottom edge,
-# .attachments-panel over the right one), drawn as surfaces of the terminal
-# itself. One provider for the whole app: terminal_theme is a single global
-# setting, not per-tab.
+# and the two pills floating in the terminal's own margins (.attach-overlay
+# and .attachments-handle), which invert the terminal's colors so they
+# contrast with any palette. The panels those pills open are app surfaces
+# rather than terminal ones, so their colors are static (app.py's _CSS). One
+# provider for the whole app: terminal_theme is a single global setting, not
+# per-tab.
 _dynamic_theme_provider: Gtk.CssProvider | None = None
-
-# How solid the two overlay panels are while they float over the terminal.
-# Just shy of opaque: enough that the prompt they cover still shows through
-# and they read as sitting *on* the session rather than replacing it, but not
-# so much that what you're typing has to compete with the text underneath.
-# Docked, both panels go fully opaque again -- a pane is not floating over
-# anything, and a see-through one would only look like a rendering fault.
-_OVERLAY_ALPHA = 0.9
-
-# The composer's text box sits a step more solid than the card around it: it
-# is the one part of the panel you read and write, so the terminal creeping
-# through it costs more than it does behind the chrome. This is the box's own
-# fill, painted *over* a panel already at _OVERLAY_ALPHA, so the two compose
-# -- 0.9 then 0.6 lands the box at 0.96 against the terminal, against the
-# card's 0.9. Docked, the panel under it is opaque and this fill is the same
-# color, so it costs nothing there and needs no second rule.
-_COMPOSER_BOX_ALPHA = 0.6
 
 
 def _apply_dynamic_theme_css(theme: dict) -> None:
@@ -246,43 +229,5 @@ def _apply_dynamic_theme_css(theme: dict) -> None:
         f"from {{ background-color: shade(#D97757, 1.5); }} "
         f"to {{ background-color: #D97757; }} }}"
         f"button.attachments-handle.bell-flash {{ "
-        f"animation: attachments-handle-flash 400ms ease-out; }}"
-        # The composer panel is a surface of the terminal itself: terminal bg
-        # just short of full strength while it floats (see _OVERLAY_ALPHA),
-        # fenced off by a faint fg-colored top edge. Shape is static (app.py's
-        # _CSS).
-        f".composer-panel {{ background-color: alpha({bg_css}, {_OVERLAY_ALPHA}); "
-        f"color: {fg_css}; border-top: 1px solid alpha({fg_css}, 0.3); }}"
-        # Docked as a panel page the fence is the strip's own edge; the
-        # overlay's top border would read as a stray line mid-pane. A pane
-        # covers no terminal, so it goes back to solid too.
-        f".composer-panel.docked {{ background-color: {bg_css}; border-top: none; }}"
-        # Text and caret are set on both nodes: GTK paints a text view's
-        # glyphs from the `textview` node's own color, so moving it down to
-        # `text` alone leaves them to fall back to the theme's near-black.
-        f".composer-panel textview, .composer-panel textview text {{ "
-        f"color: {fg_css}; caret-color: {fg_css}; }}"
-        # The fill is what differs between the two nodes. It lifts the box
-        # back toward solid (see _COMPOSER_BOX_ALPHA), and goes on `text`
-        # alone -- that node covers the box's whole visible area, margins
-        # included, and painting `textview` too would stack a second coat of
-        # it over most of that area. The node left without a fill still has
-        # to say `transparent`, or Adwaita's own view fill lands there.
-        f".composer-panel textview {{ background-color: transparent; }}"
-        f".composer-panel textview text {{ "
-        f"background-color: alpha({bg_css}, {_COMPOSER_BOX_ALPHA}); }}"
-        # The attachments panel is the composer's counterpart on the other
-        # edge, and a surface of the terminal for the same reason: it covers
-        # the terminal's right margin, fenced off by a faint fg-colored edge,
-        # and floats at the same near-solid alpha. Its rows only lift out of
-        # that surface under the pointer.
-        f".attachments-panel {{ background-color: alpha({bg_css}, {_OVERLAY_ALPHA}); "
-        f"color: {fg_css}; border-left: 1px solid alpha({fg_css}, 0.3); }}"
-        # Docked as a panel tab the fence is the strip's own edge, as it is
-        # for the composer; the overlay's left border would read as a stray
-        # line down the middle of a pane. Solid again for the same reason.
-        f".attachments-panel.docked {{ background-color: {bg_css}; "
-        f"border-left: none; }}"
-        f".attachments-panel .attachment-row:hover {{ "
-        f"background-color: alpha({fg_css}, 0.12); }}".encode()
+        f"animation: attachments-handle-flash 400ms ease-out; }}".encode()
     )

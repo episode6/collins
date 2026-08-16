@@ -187,12 +187,11 @@ class AttachmentsView(Gtk.Box):
     def set_docked(self, docked: bool) -> None:
         """Dress the panel for its host: docked as a panel tab it is a pane
         and not a card raised over the terminal, so the floating shape goes —
-        the rounded left corners and the fence along that edge, both hung off
-        this class (app.py's _CSS and themes._apply_dynamic_theme_css). What
-        it is *made of* doesn't change with the host: the same terminal
-        surface, because these are still that terminal's pictures, and a view
-        that repainted itself on the way into a strip would read as a
-        different panel rather than the same one moved.
+        the rounded left corners, the fence along that edge, and the sliver of
+        terminal showing through, all three hung off this class (app.py's
+        _CSS). What it is *made of* doesn't change with the host: the app's
+        own surface either way, so a panel dropped into a strip reads as the
+        same panel moved rather than one that repainted itself on the way in.
         """
         self._docked = bool(docked)
         # Both icons are pictures of where the press puts the panel: the
