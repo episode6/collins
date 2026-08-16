@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-13. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -25,7 +25,8 @@ from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .prattach import PromptAttacher
 from .providers import available_providers
-from .prstatus import from_records, newest_title, to_records
+from .prstatus import newest_title
+from .prstore import PrStore
 from .sessions import (
     Session,
     discover_sessions,
@@ -87,15 +88,21 @@ class SessionStore(GObject.Object):
     __gsignals__ = {
         # order_changed: True when rows were re-spliced (UI must rebuild rows)
         "refreshed": (GObject.SignalFlags.RUN_FIRST, None, (bool,)),
-        # A session's first prompt named PRs and they were just saved to its
-        # list (see prattach): (session_id, records). The window adopts them
-        # into the session's open tab, the sidebar re-reads the row's mark.
-        "prs-attached": (GObject.SignalFlags.RUN_FIRST, None, (str, object)),
     }
 
     def __init__(self, state: AppState) -> None:
         super().__init__()
         self.state = state
+        # The app-wide pull request hub: every surface writes a session's PR
+        # list through it and hears about every change — see prstore. It
+        # lives on the session store because everything that shows a PR (the
+        # window, the sidebar, each tab) already holds this store.
+        self.pr_store = PrStore(state)
+        # pr_title_sessions rides the same hub: any write that lands a titled
+        # record — a tab's poll, the sweep, a row's menu — can retitle.
+        self.pr_store.connect(
+            "session-changed", lambda _store, session_id: self.apply_pr_title(session_id)
+        )
         self.model = Gio.ListStore(item_type=SessionItem)
         self.sessions: dict[str, Session] = {}
         self.group_counts: dict[tuple, int] = {}
@@ -276,21 +283,11 @@ class SessionStore(GObject.Object):
 
     def _on_prompt_prs(self, session_id: str, prs: list) -> bool:
         """Land one first prompt's PRs (main loop; the attacher's callback
-        hops here). Saved-list order is respected — the prompt's PRs go after
-        whatever the session has already accumulated — and a PR both sides
-        know keeps the saved copy, which carries what has been learned since.
-        The prs-attached signal fans the write out to the open tab and the
-        sidebar row, which would otherwise re-save over it (see the sweep's
-        twin of this dance, SessionSidebar._prs_swept)."""
-        saved = from_records(self.state.get_session_prs(session_id))
-        have = {pr.url for pr in saved}
-        fresh = [pr for pr in prs if pr.url not in have]
-        if not fresh:
-            return GLib.SOURCE_REMOVE
-        records = to_records(saved + fresh)
-        self.state.set_session_prs(session_id, records)
-        self.apply_pr_title(session_id)
-        self.emit("prs-attached", session_id, records)
+        hops here). The hub does the merging — the prompt's PRs go after
+        whatever the session has already accumulated, and a PR both sides
+        know keeps the saved copy — and its session-changed signal is what
+        reaches the open tab and the sidebar row."""
+        self.pr_store.attach(session_id, prs)
         return GLib.SOURCE_REMOVE
 
     def regenerate_name(self, session_id: str) -> None:
@@ -531,9 +528,10 @@ class SessionStore(GObject.Object):
     def apply_pr_title(self, session_id: str) -> None:
         """Retitle *session_id* after the newest PR it has opened.
 
-        The whole pr_title_sessions setting: called wherever a session's
-        saved PR list is (re)written — a tab's poll, the sidebar's PR menu —
-        and a no-op until one of those lands a titled record. Writes the
+        The whole pr_title_sessions setting: runs off the PR hub's
+        session-changed signal, so it fires whenever a session's saved list
+        is rewritten — a tab's poll, the sweep, a row's menu — and is a
+        no-op until one of those lands a titled record. Writes the
         generated-name slot, so a manual rename still wins in display_name
         and the auto-title paths already know to skip the session.
         """

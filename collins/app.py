@@ -1449,8 +1449,9 @@ class App(Adw.Application):
         """Put a PR on the calling session's row without a gh call: the
         dispatch runs on the main loop, so the number and repository are read
         off the URL here and the tab's own update thread fetches title and
-        status right after. Persistence rides the existing prs-changed path,
-        which is keyed by session id — hence the resolution guard."""
+        status right after. Persistence rides the tab's ordinary write to the
+        PR hub (see TerminalTab._remember_prs), which is keyed by session id
+        — hence the resolution guard."""
         _window, tab = found
         if not tab.session_id:
             return False, (

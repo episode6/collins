@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 import json
 import sys
@@ -144,3 +144,15 @@ def app_state(tmp_path, monkeypatch):
     # the real user's state dir.
     monkeypatch.setattr(panelhistory_mod, "_HISTORY_DIR", tmp_path / "panel_history")
     return state_mod
+
+
+@pytest.fixture(autouse=True)
+def _drop_pr_status_listeners():
+    """prstatus's listener registry is module-global, and every PrStore —
+    including the one inside every SessionStore a test builds — registers
+    into it. Cleared after each test, or stores built by one test would keep
+    hearing about fetches made by another."""
+    yield
+    import collins.prstatus as prstatus_mod
+
+    prstatus_mod._listeners.clear()

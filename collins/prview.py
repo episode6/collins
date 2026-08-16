@@ -105,7 +105,7 @@ from .formatting import (  # noqa: E402
     split_body,
 )
 from .i18n import _, ngettext  # noqa: E402
-from .prstatus import PullRequest, invalidate  # noqa: E402
+from .prstatus import PullRequest, invalidate, known  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -481,6 +481,24 @@ class PrViewPage(Adw.Bin):
         """Re-read the PR now — the Refresh button, and the dedupe path's
         "you asked for this page again"."""
         self._fetch(force=True)
+
+    def sync_summary(self) -> None:
+        """Redraw the header from the status cache — the PR hub's news.
+
+        The tab calls this whenever a fetch made anywhere changes what is
+        known about this URL (see TerminalTab._on_hub_status_changed), the
+        page's own fetch included: absorbing its reply is one of those
+        fetches. `known` is a dictionary lookup, so this is main-loop safe
+        and re-entry proof — it reads the cache and never asks for it to be
+        filled, which is what keeps the page's fetch → absorb → hub → here
+        chain from circling back into another fetch. The conversation and
+        diff aren't touched: they live outside the summary cache, and re-
+        reading them costs real gh calls the Refresh button (or the next
+        map) is entitled to spend where a passing status change is not.
+        """
+        self._pr = known(self._pr)
+        self._sync_header()
+        self.emit("title-changed")  # the dock tab's icon tracks the state
 
     def reveal_unresolved(self) -> None:
         """Front the Conversation view at its first unresolved thread.

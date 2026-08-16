@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-14. Full change history: git log for this file.
+# fork. Last modified: 2026-08-15. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -711,10 +711,14 @@ class AppState:
     def set_session_prs(self, session_id: str, prs: list) -> None:
         """Persist a session's PRs (prstatus records); an empty list drops it.
 
-        Only their identity is saved — CI status is refetched on every run, so
-        a chip never shows a check that went stale overnight. A tab re-derives
-        this list on every transcript poll, so an unchanged one is deliberately
-        not rewritten to disk.
+        Status is saved with them (see prstatus.to_record), so a restored mark
+        reads as the last thing gh said until this run's first fetch replaces
+        it. A tab re-derives this list on every transcript poll, so an
+        unchanged one is deliberately not rewritten to disk.
+
+        This pair is the persistence only: everything above it reads and
+        writes through the PR hub (see prstore.PrStore), whose signals are
+        how every surface showing the session hears about a write.
         """
         if not session_id:
             return
