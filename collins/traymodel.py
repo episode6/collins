@@ -237,11 +237,18 @@ def tray_view(
     `placeholders` is how many open tabs have no session id yet (their unread
     flags live in their window's sidebar, hence `placeholder_unread`): they
     count towards the totals but cannot be jumped to, so they get no row.
+
+    The unread half is clamped to the tabs it counts rather than trusted. The
+    aggregate reads the two numbers from each window in turn, and a
+    placeholder that resolves between the reads leaves the pair briefly
+    disagreeing — a badge counting more sessions than the tooltip beside it
+    admits to having is worse than a badge one short for one repaint.
     """
     placeholders = max(placeholders, 0)
+    placeholder_unread = min(max(placeholder_unread, 0), placeholders)
     open_count = len(sessions) + placeholders
     working = sum(1 for session in sessions if session.busy)
-    unread = sum(1 for session in sessions if session.unread) + max(placeholder_unread, 0)
+    unread = sum(1 for session in sessions if session.unread) + placeholder_unread
     return TrayView(
         status=status_for(open_count, unread),
         badge=badge_text(unread),

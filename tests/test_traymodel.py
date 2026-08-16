@@ -84,6 +84,15 @@ def test_badge_sums_placeholder_unread():
     assert view.sessions == 3
 
 
+def test_placeholder_unread_cannot_outrun_the_placeholders():
+    # The two numbers are read window by window, so a placeholder resolving
+    # between the reads can leave them disagreeing for a repaint. The badge
+    # must never claim more sessions than the tooltip beside it admits to.
+    view = tray_view([], placeholders=1, placeholder_unread=3)
+    assert (view.badge, view.sessions, view.unread) == ("1", 1, 1)
+    assert tray_view([], placeholders=0, placeholder_unread=2).status == STATUS_PASSIVE
+
+
 # -- the tooltip --------------------------------------------------------------
 
 
