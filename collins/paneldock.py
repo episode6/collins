@@ -45,9 +45,9 @@ import gi
 
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import paneldnd  # noqa: E402
+from . import paneldnd, panelkeys  # noqa: E402
 from .docktree import DockTree, Leaf, Split  # noqa: E402
 from .dockzones import EDGE_ZONES  # noqa: E402
 from .i18n import _  # noqa: E402
@@ -922,25 +922,20 @@ class PanelDock(Adw.Bin):
     def _on_max_key(self, _controller, keyval: int, _keycode: int, state) -> bool:
         """Escape, typed anywhere inside a maximized page: put it back down.
 
-        Bare Escape only — a modified one is somebody's chord, and none of
-        this dock's are it. A page may keep the key by answering True to
-        `holds_escape()`: a maximized shell running vim or a pager needs
-        Escape to reach it (at a bare prompt it doesn't, so there Escape
-        restores like everywhere else). Pages without the hook never do.
+        Bare Escape only, and only where the page doesn't want the key for
+        itself — the decision is `panelkeys.escape_restores` (GTK-free, so
+        the tests can reach it). A page states its claim with the optional
+        `holds_escape()` hook: a maximized shell running vim or a pager
+        needs Escape to reach it, and at a bare prompt it doesn't. Pages
+        without the hook never keep it.
         """
         rec = self._max
-        if rec is None or keyval != Gdk.KEY_Escape:
-            return False
-        modifiers = (
-            Gdk.ModifierType.CONTROL_MASK
-            | Gdk.ModifierType.ALT_MASK
-            | Gdk.ModifierType.SHIFT_MASK
-            | Gdk.ModifierType.SUPER_MASK
-        )
-        if state & modifiers:
+        if rec is None:
             return False
         holds = getattr(rec.widget, "holds_escape", None)
-        if holds is not None and holds():
+        if not panelkeys.escape_restores(
+            int(keyval), int(state), holds if holds is not None else lambda: False
+        ):
             return False
         self.restore_maximized()
         return True
