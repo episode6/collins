@@ -38,6 +38,13 @@ fetch (an open tab's poll, a menu opening, the refresh sweep).
 Those gh calls are the only subprocesses here; everything else is a filesystem
 read, they always happen off the main thread, and every failure degrades to "no
 status" (or "no PR") rather than raising.
+
+Every fetch lands in one URL-keyed cache, wherever it was asked from — a tab's
+poll, a sweep, the PR page absorbing its own bigger reply — and whenever what
+is stored for a URL actually moves, registered listeners hear which one
+(`add_listener`), on whatever thread did the storing. The app's one listener is
+the PrStore (see prstore), which turns those into main-loop signals so every
+surface showing a PR follows every fetch, whoever made it.
 """
 
 from __future__ import annotations
@@ -172,6 +179,9 @@ _statuses: dict[str, tuple[float, dict | None]] = {}
 _inflight: set[str] = set()
 _gh_missing = False  # gh isn't on PATH; nothing to retry against this run
 _viewer = ""  # the signed-in login, once asked for; "" until then (viewer_login)
+# Told which URL whenever what `_statuses` holds for it changes (see
+# add_listener). Fired outside `_lock`, on whatever thread stored the entry.
+_listeners: list = []
 
 # What a PR's badge — the small status mark riding its base icon — can say.
 # Pure names rather than icon names: which icon and color each one gets is the
@@ -964,6 +974,46 @@ def _run_gh(url: str) -> dict | None:
     return _entry(data) if isinstance(data, dict) else None
 
 
+def add_listener(listener) -> None:
+    """Register a callable told which URL whenever its stored status moves.
+
+    Fired for every write that changes what the cache holds for a URL —
+    a poll's refresh, a sweep's, a branch discovery, an absorbed detail reply
+    — and only for those: a re-fetch that came back identical says nothing.
+    Delivery is on whatever thread stored the entry, so a listener that
+    touches widgets must hop to the main loop itself (PrStore does).
+    """
+    _listeners.append(listener)
+
+
+def remove_listener(listener) -> None:
+    """Unregister *listener*; unknown ones are ignored."""
+    if listener in _listeners:
+        _listeners.remove(listener)
+
+
+def _notify(url: str) -> None:
+    """Tell every listener *url*'s stored status changed. Never raises."""
+    for listener in list(_listeners):
+        try:
+            listener(url)
+        except Exception:
+            log.debug("prstatus: a status listener failed for %s", url, exc_info=True)
+
+
+def _put(url: str, entry: dict | None) -> bool:
+    """Store *url*'s entry (caller holds `_lock`); whether it changed anything.
+
+    The one way an entry reaches `_statuses`, so every fetch stamps its TTL
+    the same way and the changed verdict — what `_notify` fans out on — is
+    computed against whatever was there before, a failed fetch's None
+    included.
+    """
+    stamped = _statuses.get(url)
+    _statuses[url] = (_now(), entry)
+    return (stamped[1] if stamped else None) != entry
+
+
 def refresh(url: str) -> None:
     """Fetch *url*'s status now and remember it. Never call on the main thread.
 
@@ -976,8 +1026,10 @@ def refresh(url: str) -> None:
         log.debug("prstatus: refreshing %s failed", url, exc_info=True)
         entry = None
     with _lock:
-        _statuses[url] = (_now(), entry)
+        changed = _put(url, entry)
         _inflight.discard(url)
+    if changed:
+        _notify(url)
 
 
 def _schedule(url: str) -> None:
@@ -1075,7 +1127,9 @@ def discover_pr(cwd: str | None, branch: str | None) -> PullRequest | None:
         return None
     number, url = found["number"], found["url"]
     with _lock:
-        _statuses[url] = (_now(), _entry(found))
+        changed = _put(url, _entry(found))
+    if changed:
+        _notify(url)
     log.info("prstatus: branch %s -> #%s", branch, number)
     repository = _FETCHABLE.match(url).group(1)  # _newest only keeps matching URLs
     return enrich(PullRequest(number=number, url=url, repository=repository))
@@ -1110,7 +1164,9 @@ def absorb(url: str, data: object) -> None:
     if not isinstance(data, dict) or not isinstance(url, str) or not _FETCHABLE.match(url):
         return
     with _lock:
-        _statuses[url] = (_now(), _entry(data))
+        changed = _put(url, _entry(data))
+    if changed:
+        _notify(url)
 
 
 def summarize(url: str, data: object) -> PullRequest | None:

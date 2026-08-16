@@ -177,7 +177,7 @@ def test_parse_pr_url_rejects_anything_not_shaped_like_a_pr_page(url):
 
 def test_parse_pr_url_accepts_what_a_record_round_trip_accepts():
     """A URL accepted here must be one to_record will persist — attach_pr
-    hands its result straight down the prs-changed path."""
+    hands its result straight down the tab's write to the PR hub."""
     assert to_record(parse_pr_url(URL)) is not None
 
 
@@ -888,6 +888,57 @@ def test_summarize_reduces_a_detail_reply():
 def test_summarize_rejects_what_is_not_a_pr():
     assert prstatus.summarize("https://example.com/x", _DETAIL_REPLY) is None
     assert prstatus.summarize(URL, []) is None
+
+
+# -- listeners (what the PR hub fans out — see prstore) -----------------------
+
+
+def test_a_changed_fetch_notifies_listeners(scheduled, gh):
+    heard = []
+    prstatus.add_listener(heard.append)
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}})
+    prstatus.refresh(URL)
+    assert heard == [URL]
+
+
+def test_a_fetch_that_came_back_the_same_says_nothing(scheduled, gh):
+    heard = []
+    prstatus.add_listener(heard.append)
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 0}})
+    prstatus.refresh(URL)
+    prstatus.refresh(URL)
+    assert heard == [URL]
+
+
+def test_a_failed_fetch_over_a_real_entry_is_still_news(scheduled, gh):
+    """The entry moved — a widget reading `known` now gets the saved record's
+    status back instead of the fetched one, so it deserves the redraw."""
+    heard = []
+    prstatus.add_listener(heard.append)
+    prstatus.absorb(URL, _DETAIL_REPLY)
+    gh(None)
+    prstatus.refresh(URL)
+    assert heard == [URL, URL]
+
+
+def test_a_broken_listener_neither_breaks_the_write_nor_its_peers(scheduled):
+    def explode(_url):
+        raise RuntimeError("boom")
+
+    heard = []
+    prstatus.add_listener(explode)
+    prstatus.add_listener(heard.append)
+    prstatus.absorb(URL, _DETAIL_REPLY)
+    assert heard == [URL]
+    assert known(PullRequest(number=55, url=URL)).state == "OPEN"
+
+
+def test_a_removed_listener_hears_nothing_more(scheduled):
+    heard = []
+    prstatus.add_listener(heard.append)
+    prstatus.remove_listener(heard.append)
+    prstatus.absorb(URL, _DETAIL_REPLY)
+    assert heard == []
 
 
 def test_run_gh_passes_the_url_as_an_argument(monkeypatch):

@@ -47,7 +47,6 @@ from .prstatus import (
     newest_titled,
     resync,
     sweep,
-    to_records,
 )
 from .scrolling import offset_into_view
 from .sessions import Session, project_name_for_cwd, resume_cwd, worktree_project_root
@@ -677,6 +676,14 @@ class SessionRow(Gtk.ListBoxRow):
             ),
         )
         self.sync_prs()
+        # The PR hub is what keeps the mark honest between sweeps: any fetch
+        # anywhere (a tab's poll, a PR page's load, another row's menu) that
+        # changes a PR this row lists redraws the mark, and any rewrite of
+        # this session's saved list re-reads it. Disconnected in do_unroot
+        # like the item handlers — the hub outlives every row.
+        pr_hub = sidebar.store.pr_store
+        self._hub_status_handler = pr_hub.connect("status-changed", self._on_hub_status_changed)
+        self._hub_session_handler = pr_hub.connect("session-changed", self._on_hub_session_changed)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         actions.append(stop_btn)
@@ -785,38 +792,41 @@ class SessionRow(Gtk.ListBoxRow):
     def sync_prs(self) -> None:
         """Re-read the session's saved PRs; the mark is only there with one.
 
-        Called as the row is built and again whenever the session's tab reports
-        a new list, so a session that opens its first PR grows the mark without
-        waiting for the sidebar to be rebuilt around it.
+        Called as the row is built and again whenever the hub says this
+        session's list changed, so a session that opens its first PR grows
+        the mark without waiting for the sidebar to be rebuilt around it.
 
-        The saved list carries the status it was saved with (see
-        prstatus.to_record), and `known` puts anything this run has since
-        fetched over the top of it — a dictionary lookup, no file and no `gh`,
-        safe on the main loop. So a mark reads as the last thing anything knew
-        rather than as "nothing known", and it tracks an open tab's own poll:
-        the tab saves its list whenever its chips change, this re-reads it, and
-        the status the tab just fetched is sitting there waiting.
+        The hub reads the saved list with the status it was saved with (see
+        prstatus.to_record) and puts anything this run has since fetched over
+        the top of it — a dictionary lookup, no file and no `gh`, safe on the
+        main loop. So a mark reads as the last thing anything knew rather
+        than as "nothing known".
         """
-        self._prs = [
-            known(pr)
-            for pr in from_records(
-                self._sidebar.store.state.get_session_prs(self.item.session_id)
-            )
-        ]
+        self._prs = self._sidebar.store.pr_store.prs(self.item.session_id)
         self._sync_pr_mark()
 
-    def apply_prs(self, prs: list[PullRequest]) -> None:
-        """Land a freshly fetched list on this row (see SessionSidebar's sweep).
-
-        A menu fetch already in flight is dropped: this list is newer than
-        anything it will come back with, and its results would only overwrite
-        them with what the sweep already replaced.
-        """
+    def _on_hub_session_changed(self, _hub, session_id: str) -> None:
+        """This session's saved list was rewritten — by its tab's poll, the
+        sweep, the first-prompt attacher, whoever: re-read it. A menu fetch
+        already in flight is dropped (the generation bump); what it would
+        land is a fetch of the list this write just replaced."""
+        if session_id != self.item.session_id:
+            return
         self._pr_fetch += 1
-        self._prs = list(prs)
+        self.sync_prs()
+        if self._pr_menu.get_visible():
+            prmenu.update(self._pr_menu, self._prs, self._pr_host)
+
+    def _on_hub_status_changed(self, _hub, url: str) -> None:
+        """A PR this row lists was fetched somewhere — a tab's poll, a PR
+        page's load, the sweep: redraw the mark from what just landed. Any
+        other URL is somebody else's news."""
+        if all(pr.url != url for pr in self._prs):
+            return
+        self._prs = [known(pr) for pr in self._prs]
         self._sync_pr_mark()
         if self._pr_menu.get_visible():
-            prmenu.update(self._pr_menu, prs, self._pr_host)
+            prmenu.update(self._pr_menu, self._prs, self._pr_host)
 
     def _sync_pr_mark(self) -> None:
         """Rebuild the leading mark from the row's current list.
@@ -889,8 +899,9 @@ class SessionRow(Gtk.ListBoxRow):
             return GLib.SOURCE_REMOVE
         self._prs = prs
         self._sync_pr_mark()  # the status the menu just fetched is the row's too
-        self._sidebar.store.state.set_session_prs(self.item.session_id, to_records(prs))
-        self._sidebar.store.apply_pr_title(self.item.session_id)
+        # Through the hub, so every other surface showing these PRs — the
+        # session's open tab, its docked PR pages — hears about the write.
+        self._sidebar.store.pr_store.set_prs(self.item.session_id, prs)
         if self._pr_menu.get_visible():
             prmenu.update(self._pr_menu, prs, self._pr_host)
         return GLib.SOURCE_REMOVE
@@ -1008,6 +1019,13 @@ class SessionRow(Gtk.ListBoxRow):
         if self._can_background_handler is not None:
             self.item.disconnect(self._can_background_handler)
             self._can_background_handler = None
+        pr_hub = self._sidebar.store.pr_store
+        if self._hub_status_handler is not None:
+            pr_hub.disconnect(self._hub_status_handler)
+            self._hub_status_handler = None
+        if self._hub_session_handler is not None:
+            pr_hub.disconnect(self._hub_session_handler)
+            self._hub_session_handler = None
         Gtk.ListBoxRow.do_unroot(self)
 
     def _on_sensitive_changed(self, item: SessionItem, _pspec) -> None:
@@ -1272,12 +1290,6 @@ class SessionSidebar(Gtk.Box):
         # the window on the same terms; None means no tab, and the transcript
         # answers instead (see _session_cwd).
         self.live_cwd: Callable[[str], str | None] = lambda _session_id: None
-        # "This session's PR list has changed under you" — for a session whose
-        # tab is open, whose own copy of that list would otherwise overwrite
-        # what a sweep just found on the next poll. Replaced by the window on
-        # the same terms as the callables above; with no tab there is nothing
-        # to tell, and the saved list stands on its own.
-        self.prs_updated: Callable[[str, list], None] = lambda _session_id, _records: None
         # "Is this session open in a tab, anywhere?" — what a row's PR mark
         # asks to know whether a plain click has somewhere to jump to. Replaced
         # by the window on the same terms as the callables above; until then no
@@ -1315,7 +1327,6 @@ class SessionSidebar(Gtk.Box):
         self.insert_action_group("sidebar", actions)
 
         store.connect("refreshed", self._on_store_refreshed)
-        store.connect("prs-attached", self._on_prs_attached)
 
         # -- header ---------------------------------------------------------
         header = Adw.HeaderBar()
@@ -1652,20 +1663,6 @@ class SessionSidebar(Gtk.Box):
             row.check.set_visible(self._selection_mode)
             row.check.set_active(row.item.session_id in self._selected)
 
-    def sync_session_prs(self, session_id: str) -> None:
-        """A session's PRs changed: re-read them on that session's row.
-
-        The window calls this whenever a tab saves a new list — so a session
-        that has just opened its first PR gains the mark that opens it; the
-        rows themselves are only rebuilt when the list's order changes, which
-        opening a PR isn't — and whenever an open tab's chips change how they
-        read, so the row's mark follows the status that tab just fetched
-        instead of waiting for the next sweep.
-        """
-        row = self._rows.get(session_id)
-        if row is not None:
-            row.sync_prs()
-
     # -- pull request sweep ----------------------------------------------------
 
     def refresh_pull_requests(self) -> None:
@@ -1694,7 +1691,7 @@ class SessionSidebar(Gtk.Box):
         targets = [
             (
                 session_id,
-                from_records(self.store.state.get_session_prs(session_id)),
+                from_records(self.store.pr_store.records(session_id)),
                 session,
                 self.live_cwd(session_id),
             )
@@ -1725,41 +1722,21 @@ class SessionSidebar(Gtk.Box):
         GLib.idle_add(self._prs_swept, swept)
 
     def _prs_swept(self, swept: dict[str, list[PullRequest]]) -> bool:
-        """Land a sweep: onto every row it covers, its open tab, and disk.
+        """Land a sweep: one write per session, through the hub.
 
-        A session whose list is unchanged is not written back — status is no
-        part of a record, so there would be nothing new to write — but both
-        places that show the session hear about it either way, because the
-        status that came back is the point of the exercise: the row is handed
-        the swept list for its mark, and the tab is told so its chips leave
-        whatever they were showing before the button was clicked.
+        The hub's session-changed reaches everything a changed list is shown
+        by — the session's row, its open tab, whoever else has subscribed —
+        and the statuses the sweep fetched already went out one by one as it
+        fetched them (every refresh that changes an answer fires the hub's
+        status-changed), so a session whose *list* didn't move still had its
+        mark and chips redrawn along the way. What used to be three hand-run
+        deliveries from here is now none.
         """
         self._pr_sweep = False
         self._set_refresh_busy(False)
         for session_id, prs in swept.items():
-            records = to_records(prs)
-            if records != self.store.state.get_session_prs(session_id):
-                self.store.state.set_session_prs(session_id, records)
-                self.store.apply_pr_title(session_id)
-            # An open tab re-derives this list from its own sources every poll,
-            # so a PR the branch lookup just found would otherwise be written
-            # now and overwritten a second later; handing it over also puts the
-            # tab's own chips on the status this sweep fetched.
-            self.prs_updated(session_id, records)
-            row = self._rows.get(session_id)
-            if row is not None:
-                row.apply_prs(prs)
+            self.store.pr_store.set_prs(session_id, prs)
         return GLib.SOURCE_REMOVE
-
-    def _on_prs_attached(self, _store, session_id: str, _records: object) -> None:
-        """The store put a first prompt's PRs on a session (see prattach);
-        the row's mark re-reads the saved list it just wrote. `sync_prs`
-        rather than `apply_prs`: what was attached may be a bare PR still
-        waiting on its first status fetch, and the saved list plus `known`
-        is exactly the reading order the mark already trusts."""
-        row = self._rows.get(session_id)
-        if row is not None:
-            row.sync_prs()
 
     def _set_refresh_busy(self, busy: bool) -> None:
         """Turn the header's refresh button into a spinner while it works.
@@ -2239,7 +2216,7 @@ class SessionSidebar(Gtk.Box):
         # item is for the one session somebody wants named that way with the
         # setting off — or for putting the name back after a hand rename,
         # which pins the manual slot the setting never writes.
-        saved_prs = self.store.state.get_session_prs(session_id)
+        saved_prs = self.store.pr_store.records(session_id)
         pr = newest_titled(saved_prs)
         if pr is not None:
             # Which PR the name would come from is worth naming when the

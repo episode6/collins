@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-16. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -1056,22 +1056,10 @@ class TerminalTab(Gtk.Box):
         # Emitted when either of the tab's terminals rings BEL, for the
         # window's visual bell.
         "bell": (GObject.SignalFlags.RUN_FIRST, None, ()),
-        # Emitted when the PRs on the footer row change (object = their
-        # prstatus records, oldest first), so the window can save them against
-        # the session. Never fires for a tab that has nothing to say yet.
-        "prs-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
-        # Emitted whenever the chips are rebuilt — a check went red, a PR
-        # merged, a new one turned up — so the session's sidebar row can
-        # re-read its own mark from the status this tab just fetched. Separate
-        # from prs-changed because the two questions are: prs-changed asks
-        # "does the saved list need writing?", this one asks "does anything
-        # else showing this session need redrawing?" — and a rebuild that
-        # changed no record (a fetch that came back the same) still redraws.
-        "pr-status-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
         # Emitted when the images this session has seen change (object = their
         # attachrecords records, newest first), so the window can save them
-        # against the session. Guarded like prs-changed: a sighting of an
-        # image already on the list that changes nothing about it says
+        # against the session. Guarded like the tab's PR writes: a sighting of
+        # an image already on the list that changes nothing about it says
         # nothing.
         "attachments-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         # Emitted (debounced) when the editor panel's divider is moved: the
@@ -1388,7 +1376,13 @@ class TerminalTab(Gtk.Box):
         # Replaced wholesale too, for the same thread-safety reason.
         self._attached_prs: dict[str, PullRequest] = {}
         self._footer_prs: list[PullRequest] = []  # what the chips currently show
-        self._saved_pr_records: list[dict] = []  # last records handed to the window
+        self._saved_pr_records: list[dict] = []  # last records written to the hub
+        # The app-wide PR hub (see prstore), handed over by the window as the
+        # tab is added. The tab writes its footer list through it and follows
+        # everyone else's writes and fetches from it; a tab without one (unit
+        # tests, mostly) keeps its chips to itself.
+        self._pr_store = None
+        self._pr_store_handlers: list[int] = []
         # Every image this session has been shown, key -> the sighting (see
         # attachrecords). Kept apart from anything a poll produces and folded
         # in on collection, for the reason attach_pr gives: a sighting lands
@@ -2042,12 +2036,11 @@ class TerminalTab(Gtk.Box):
         # no PRs at all the hidden group never allocates, so this is also what
         # retires the button when the last chip goes.
         self._pr_menu_btn.set_visible(False)
+        # The save is what everything else follows: the hub's session-changed
+        # sends the sidebar row (and anyone else showing this session) back to
+        # the saved list, and the statuses these chips wear already went out
+        # as status-changed when whichever fetch landed them.
         self._remember_prs(prs)
-        # After the save, never before it: the sidebar row rebuilds its mark
-        # from this session's saved list plus the status now sitting in
-        # prstatus, so a list that just gained a PR has to be on disk by the
-        # time the row goes looking.
-        self.emit("pr-status-changed")
         self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
 
@@ -2062,27 +2055,93 @@ class TerminalTab(Gtk.Box):
         self._pr_menu_btn.set_visible(overflowing)
 
     def _remember_prs(self, prs: list[PullRequest]) -> None:
-        """Hand the row's PRs to the window, which saves them for this session.
+        """Write the row's PRs to the hub, which saves them for this session.
 
         Status goes with them (see prstatus.to_record), so this fires for a
         check that turned red as well as for a PR that turned up — but only
         when the records actually differ, so a poll that came back with the
-        same answer writes nothing. A session that has opened no PRs never
-        emits at all.
+        same answer writes nothing.
+
+        A fork writes nothing (its tab shares the original's session id and
+        would overwrite its list), and neither does a tab whose session isn't
+        resolved yet — it has nowhere to write, and its list is re-derived
+        from the transcript the moment it is.
         """
         records = to_records(prs)
         if records == self._saved_pr_records:
             return
         self._saved_pr_records = records
-        self.emit("prs-changed", records)
+        if self._pr_store is not None and self.session_id and not self.fork:
+            self._pr_store.set_records(self.session_id, records)
+
+    def set_pr_store(self, pr_store) -> None:
+        """Join the app-wide PR hub (see prstore). The window calls this once,
+        as the tab is added.
+
+        The hub outlives every tab, so the connections are dropped on destroy
+        rather than left holding a dead widget — and they survive a tab
+        moving between windows, which unroots it without destroying it.
+        """
+        if self._pr_store is not None or pr_store is None:
+            return
+        self._pr_store = pr_store
+        self._pr_store_handlers = [
+            pr_store.connect("status-changed", self._on_hub_status_changed),
+            pr_store.connect("session-changed", self._on_hub_session_changed),
+        ]
+        self.connect("destroy", self._leave_pr_store)
+
+    def _leave_pr_store(self, *_args) -> None:
+        if self._pr_store is None:
+            return
+        for handler in self._pr_store_handlers:
+            self._pr_store.disconnect(handler)
+        self._pr_store_handlers = []
+        self._pr_store = None
+
+    def _on_hub_status_changed(self, _hub, url: str) -> None:
+        """A PR this tab shows was fetched somewhere — the sidebar's sweep, a
+        row's menu, another tab's poll, a PR page's own load: put what landed
+        on screen now rather than up to a poll later. `known` is a dictionary
+        lookup, so both redraws are main-loop safe; the chips route through
+        `_refresh_pr_chips`, whose equality guard drops the fetches that
+        changed nothing this tab wears."""
+        page = self._find_pr_page(url)
+        if page is not None:
+            page.sync_summary()
+        if any(pr.url == url for pr in self._footer_prs):
+            self._refresh_pr_chips([known(pr) for pr in self._footer_prs])
+
+    def _on_hub_session_changed(self, _hub, session_id: str) -> None:
+        """This session's saved list was rewritten by somebody else — the
+        sweep, the first-prompt attacher, its row's menu: adopt it, or a PR
+        only they knew about (a branch lookup's find, say) would be dropped
+        from the saved list by this tab's next poll. The tab's own write comes
+        straight back around here, and leaves again just as fast: it is
+        exactly what `_saved_pr_records` already holds.
+
+        Adoption deliberately leaves `_saved_pr_records` alone — what the tab
+        will actually show isn't known until the update `restore_prs` requests
+        merges the adopted list with its own sources (`_collect_prs`) — so
+        that update ends in one more `set_records`. When the merge changed
+        nothing, the hub's equality guard makes that write the no-op it
+        deserves to be: no disk, no signal, one spare comparison."""
+        if session_id != self.session_id or self._pr_store is None:
+            return
+        records = self._pr_store.records(session_id)
+        if records == self._saved_pr_records:
+            return
+        self.restore_prs(records)
 
     def restore_prs(self, records: object) -> None:
-        """Re-adopt the PRs saved for this session by a previous run.
+        """Re-adopt the PRs saved for this session.
 
-        The window calls this once the tab's session is known. The transcript's
-        own pr-links come back on the next poll anyway, but a PR the refresh
-        button found by branch is written down nowhere else, and a PR that was
-        already merged shows its mark before any `gh` call goes out.
+        The window calls this once the tab's session is known, and the hub's
+        session-changed calls it again for every list somebody else writes
+        while the tab is open. The transcript's own pr-links come back on the
+        next poll anyway, but a PR a branch lookup found is written down
+        nowhere else, and a PR that was already merged shows its mark before
+        any `gh` call goes out.
         """
         restored = from_records(records)
         if not restored:

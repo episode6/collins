@@ -528,7 +528,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.prompt_block = self._session_prompt_block
         self.sidebar.has_changes = self._session_has_changes
         self.sidebar.live_cwd = self._session_live_cwd
-        self.sidebar.prs_updated = self._adopt_session_prs
         self.sidebar.has_tab = self._session_has_tab
         self.sidebar.connect("open-session", self._on_sidebar_open)
         self.sidebar.connect("open-many", self._on_sidebar_open_many)
@@ -538,12 +537,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("close-placeholder", self._on_sidebar_close_placeholder)
         self.sidebar.connect("rows-reordered", lambda *_: self._sort_tabs())
         self.store.connect("refreshed", self._on_store_refreshed)
-        # First-prompt PRs (prattach): an open tab must adopt them, or its
-        # next poll re-saves its own list over the store's write.
-        self.store.connect(
-            "prs-attached",
-            lambda _store, session_id, records: self._adopt_session_prs(session_id, records),
-        )
 
         # Yellow "running detached" guide lines: keep the set of backgrounded session
         # ids fresh (see bgstatus.py for the trigger strategy).
@@ -1390,7 +1383,7 @@ class MainWindow(Adw.ApplicationWindow):
                 tab.restore_editor_state(saved_editor)
             # The PRs this session opened, back on the footer row before the
             # first transcript poll (and including any that only a lookup knew).
-            tab.restore_prs(self.state.get_session_prs(bound_id))
+            tab.restore_prs(self.store.pr_store.records(bound_id))
             # And the images it was shown, which nothing else would recover:
             # the terminal's scrollback starts empty on a resume.
             tab.restore_attachments(self.state.get_session_attachments(bound_id))
@@ -1760,9 +1753,10 @@ class MainWindow(Adw.ApplicationWindow):
         tab.connect("editor-size-changed", self._on_editor_size_changed)
         tab.connect("editor-pop-out-requested", self._pop_out_editor)
         tab.connect("bell", self._on_bell)
-        tab.connect("prs-changed", self._on_tab_prs_changed)
         tab.connect("attachments-changed", self._on_tab_attachments_changed)
-        tab.connect("pr-status-changed", self._on_tab_pr_status_changed)
+        # The PR hub: the tab writes its footer list through it and follows
+        # everyone else's writes and fetches from it (see prstore).
+        tab.set_pr_store(self.store.pr_store)
         tab.set_panel_size_lookup(lambda mode: int(self.state.get_setting(f"panel_size_{mode}") or 0))
         tab.set_editor_width_lookup(lambda: int(self.state.get_setting("editor_width") or 0))
         gate = EchoGate()
@@ -1963,7 +1957,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.state.set_process_baseline(session_id, captured)
         # A `--continue` tab lands on a session that may already have PRs
         # saved; a brand-new one has none, and this is a no-op for it.
-        tab.restore_prs(self.state.get_session_prs(session_id))
+        tab.restore_prs(self.store.pr_store.records(session_id))
         # The same for its images — and this call does double duty, writing
         # down anything the tab was shown while it still had no id to file it
         # under (see TerminalTab.restore_attachments).
@@ -1976,51 +1970,18 @@ class MainWindow(Adw.ApplicationWindow):
         # store gives it a row, which _on_store_refreshed picks up.
         self._refresh_background_affordances()
 
-    def _on_tab_prs_changed(self, tab: TerminalTab, records: object) -> None:
-        """A tab's PR row changed: save it against that tab's session.
-
-        A fork writes nothing (its tab shares the original's session id and
-        would overwrite its list), and neither does a tab whose session isn't
-        resolved yet — it has nowhere to write, and its list is re-derived from
-        the transcript the moment it is.
-
-        The sidebar reads the same saved list for its own PR button, so it is
-        told the moment one is written: a session's first PR is what puts that
-        button on its row.
-        """
-        if tab.fork or not tab.session_id:
-            return
-        self.state.set_session_prs(tab.session_id, list(records or []))
-        self.sidebar.sync_session_prs(tab.session_id)
-        self.store.apply_pr_title(tab.session_id)
-
     def _on_tab_attachments_changed(self, tab: TerminalTab, records: object) -> None:
         """A tab saw an image: save the list against that tab's session.
 
-        Skipped for the same two tabs prs-changed skips. A fork shares the
-        original's session id and would overwrite its list; a tab whose
-        session isn't resolved yet has nowhere to write, and hands the list
-        over again the moment it is (see _on_session_resolved).
+        Skipped for two tabs (as the tab's own PR writes are — see
+        TerminalTab._remember_prs). A fork shares the original's session id
+        and would overwrite its list; a tab whose session isn't resolved yet
+        has nowhere to write, and hands the list over again the moment it is
+        (see _on_session_resolved).
         """
         if tab.fork or not tab.session_id:
             return
         self.state.set_session_attachments(tab.session_id, list(records or []))
-
-    def _on_tab_pr_status_changed(self, tab: TerminalTab) -> None:
-        """A tab's chips read differently now: rebuild its row's mark to match.
-
-        The row builds its mark from the saved list plus whatever this run has
-        fetched (prstatus.known), and the tab's poll is what does most of that
-        fetching — so the row needs telling whenever the answer moved, whether
-        or not it was worth writing down. A fork tab counts too: it saves no
-        list, but it fetches, and the row it shares deserves the answer.
-
-        Nothing is saved here. (A list change arrives as prs-changed first and
-        syncs the row too — one extra rebuild of one row, and the alternative
-        is either signal depending on the other's ordering.)
-        """
-        if tab.session_id:
-            self.sidebar.sync_session_prs(tab.session_id)
 
     def _on_panel_size_changed(self, _tab: TerminalTab, mode: str, size: int) -> None:
         """A divider was dragged: remember the size app-wide, so every panel
@@ -2505,23 +2466,6 @@ class MainWindow(Adw.ApplicationWindow):
         """
         tab = self._session_tab(session_id)
         return tab.current_agent_cwd() if tab is not None else None
-
-    def _adopt_session_prs(self, session_id: str, records: list) -> None:
-        """The sweep covered this session: hand the result to its open tab.
-
-        Two things ride on this, and only a tab that is open cares about
-        either. A PR that reached the session by branch lookup lives nowhere
-        the tab would look — its own list is rebuilt from the transcript and
-        from whatever it has tracked — so without this it would be dropped from
-        the saved list on the tab's next poll. And the refresh button is a
-        refresh of what the user is looking at, not only of the panel beside
-        it: adopting the list asks the tab for an update, which rebuilds its
-        chips from the status the sweep just fetched (see
-        SessionSidebar._prs_swept).
-        """
-        tab = self._session_tab(session_id)
-        if tab is not None:
-            tab.restore_prs(records)
 
     def _send_prompt(self, session_id: str, prompt: str) -> None:
         """A sidebar PR menu's prompt action: type it into the session's own
@@ -4225,7 +4169,7 @@ class MainWindow(Adw.ApplicationWindow):
         by the time the click lands the list is the same one it read.
         """
         session_id = param.get_string()
-        title = newest_title(self.state.get_session_prs(session_id))
+        title = newest_title(self.store.pr_store.records(session_id))
         if title:
             self.rename_session_tab(session_id, title)
 
@@ -4617,7 +4561,7 @@ class MainWindow(Adw.ApplicationWindow):
         panelhistory.delete(session_id)
         self.state.set_panel_layout(session_id, None)
         self.state.set_editor_state(session_id, None)
-        self.state.set_session_prs(session_id, [])
+        self.store.pr_store.set_records(session_id, [])
         self.state.set_session_attachments(session_id, [])
 
     def _on_trash_session(self, _action, param: GLib.Variant) -> None:
