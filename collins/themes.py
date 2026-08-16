@@ -162,17 +162,22 @@ def _hex(color: Gdk.RGBA) -> str:
     return "".join(f"{round(channel * 255):02x}" for channel in channels)
 
 
-# A few places need to track whatever `apply_terminal_theme` just set on the
-# VTE widget itself, so they read as part of the terminal rather than a
-# mismatched frame around it: the empty space beside a width-clamped
-# terminal (.terminal-gutter, see TerminalTab's Adw.Clamp), the selected
-# tab's row in the tab bar, which sits directly above the terminal it shows,
+# What tracks whatever `apply_terminal_theme` just set on the VTE widget
+# itself is what the terminal's own rectangle spills into: the empty space
+# beside a width-clamped terminal (.terminal-gutter, see TerminalTab's
+# Adw.Clamp), which would otherwise frame the terminal in a color it isn't,
 # and the two pills floating in the terminal's own margins (.attach-overlay
-# and .attachments-handle), which invert the terminal's colors so they
-# contrast with any palette. The panels those pills open are app surfaces
-# rather than terminal ones, so their colors are static (app.py's _CSS). One
-# provider for the whole app: terminal_theme is a single global setting, not
-# per-tab.
+# and .attachments-handle), which invert its colors so they contrast with any
+# palette.
+#
+# Nothing outside that rectangle does. Chrome that merely sits next to a
+# terminal — the tab bar's selected row, the panels those pills open — is
+# part of the app and wears the app's colors (app.py's _CSS); dressed in a
+# terminal palette it read as a hole cut in the window rather than as the
+# session's own furniture.
+#
+# One provider for the whole app: terminal_theme is a single global setting,
+# not per-tab.
 _dynamic_theme_provider: Gtk.CssProvider | None = None
 
 
@@ -192,7 +197,6 @@ def _apply_dynamic_theme_css(theme: dict) -> None:
     fg_css = f"#{theme['fg']}"
     _dynamic_theme_provider.load_from_data(
         f".terminal-gutter {{ background-color: {bg_css}; }}"
-        f"tabbar tab:selected {{ background-color: {bg_css}; }}"
         # Semi-transparent terminal-fg pill with a terminal-bg icon: readable
         # over the terminal without fully hiding what's underneath, solidifying
         # on hover. Shape and placement are static (see app.py's _CSS).

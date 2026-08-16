@@ -135,13 +135,15 @@ _CSS = b"""
 row.drop-above { box-shadow: inset 0 2px 0 0 @accent_bg_color; }
 row.drop-below { box-shadow: inset 0 -2px 0 0 @accent_bg_color; }
 
-/* make the active tab clearly stand out from inactive ones. Its background
-   color is set dynamically, not here: themes._apply_dynamic_theme_css keeps
-   it matched to the current terminal theme's background (see themes.py), so
-   the tab reads as part of the terminal it sits above rather than a
-   mismatched frame around it. libadwaita marks the active AdwTabBar row
-   with the GTK state `:selected`, not `:checked` (`:checked` is for
-   checkbox/toggle-style widgets and silently matches nothing here). */
+/* make the active tab clearly stand out from inactive ones -- the accent
+   underline and a bold label, over whatever fill the system theme gives a
+   selected tab. The fill used to be painted here too, matched to the
+   terminal's background so the tab read as part of the session below it,
+   but a tab is a piece of app chrome sitting in a header bar: dressed in a
+   terminal palette it looked like a hole cut in that bar rather than the
+   session's own tab. libadwaita marks the active AdwTabBar row with the GTK
+   state `:selected`, not `:checked` (`:checked` is for checkbox/toggle-style
+   widgets and silently matches nothing here). */
 tabbar tab:selected {
   box-shadow: inset 0 -3px 0 #D97757;
 }
