@@ -1375,6 +1375,17 @@ class SessionSidebar(Gtk.Box):
         self.search_btn.connect("toggled", lambda b: self._set_search_active(b.get_active()))
         header.pack_start(self.search_btn)
 
+        # "Something in this panel is working" — the header's answer for a list
+        # scrolled away from whichever row is carrying the barber pole, or
+        # folded shut over it. Hidden rather than merely still while nothing
+        # is: an idle header shouldn't spend a slot saying nothing. It goes
+        # last in the start group, so the buttons stay put as it comes and
+        # goes — it grows into the gap before the title (see
+        # set_sessions_working).
+        self._working_spinner = Gtk.Spinner(visible=False, valign=Gtk.Align.CENTER)
+        self._working_spinner.set_tooltip_text(_("A session is working"))
+        header.pack_start(self._working_spinner)
+
         # Packed at the end first, so the additive action sits furthest right,
         # past the refresh button.
         self._add_project_btn = Gtk.Button(icon_name="folder-new-symbolic")
@@ -1764,6 +1775,20 @@ class SessionSidebar(Gtk.Box):
             self._refresh_btn.set_icon_name("view-refresh-symbolic")
             self._refresh_btn.set_tooltip_text(_("Refresh session list and pull requests"))
         self._refresh_btn.set_sensitive(not busy)
+
+    def set_sessions_working(self, working: bool) -> None:
+        """Spin the header's activity spinner while any session in this window
+        is working, and hide it again when none is.
+
+        Which sessions count is the window's call, not this panel's — it owns
+        the activity tracker, and it is the one that knows a row's
+        conversation has been handed to the background (see
+        Window._sync_working_spinner). The spinner is stopped as well as
+        hidden, so nothing is left animating behind a header that has nothing
+        to say.
+        """
+        self._working_spinner.set_visible(working)
+        self._working_spinner.set_spinning(working)
 
     def set_active_session(self, session_id: str | None) -> None:
         """Highlight the row of the session (or new-session placeholder)

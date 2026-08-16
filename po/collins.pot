@@ -835,6 +835,10 @@ msgstr ""
 msgid "Close search"
 msgstr ""
 
+#: collins/sidebar.py:1375
+msgid "A session is working"
+msgstr ""
+
 #: collins/sidebar.py:541
 msgid "Select multiple sessions"
 msgstr ""

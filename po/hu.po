@@ -365,6 +365,9 @@ msgstr "Munkamenetek keresése"
 msgid "Close search"
 msgstr "Keresés bezárása"
 
+msgid "A session is working"
+msgstr "Egy munkamenet dolgozik"
+
 msgid "Collapse all groups"
 msgstr "Összes csoport összecsukása"
 
