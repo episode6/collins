@@ -6,9 +6,12 @@ tests/test_panellayout.py (validation/prune/migration) and
 tests/test_docktree.py (tree mutations) can't reach: building a multi-strip
 dock out of real PanelStrips, serializing it with capture_layout, and
 rebuilding it into a fresh dock with restore_layout — ordinals, scrollback
-routing, home marker, hidden-strip semantics and all. It ends on the same
-kind of check for `close_recent_page`, the walk out through the panel tabs
-Ctrl+W makes before it reaches the session tab.
+routing, home marker, hidden-strip semantics and all. It goes on to the
+docking rules the same widgets decide: where `open_page` puts a page, and
+what Ctrl+J shows and hides now that it is bound to one terminal rather
+than to a strip (`check_panel_terminal`). It ends on the same kind of check
+for `close_recent_page`, the walk out through the panel tabs Ctrl+W makes
+before it reaches the session tab.
 
 This is a script, not a pytest test, on purpose: tests/conftest.py blocks
 the GTK-stack namespaces for the whole suite so local runs reproduce CI
@@ -157,7 +160,7 @@ def split_layout():
     """A dock with the home strip below the terminal (2 shells, one moved
     to a satellite right of the terminal), and its captured layout."""
     dock = make_dock()
-    dock.show_home()
+    dock.show_panel_terminal()
     home = dock.strips()[0]
     second = home.new_shell()
     drain()
@@ -188,7 +191,7 @@ def check_close_recent() -> None:
     window's cue to close the session tab itself (win.close-tab)."""
     print("close-recent:")
     dock = make_dock()
-    dock.show_home()
+    dock.show_panel_terminal()
     home = dock.strips()[0]
     second = home.new_shell()
     drain()
@@ -208,9 +211,9 @@ def check_close_recent() -> None:
     check("nothing on show answers False", dock.close_recent_page() is False)
 
     hidden = make_dock()
-    hidden.show_home()
+    hidden.show_panel_terminal()
     drain()
-    hidden.hide_home()
+    hidden.hide_panel_terminal()
     drain()
     check(
         "a hidden home strip is not closed unseen",
@@ -219,7 +222,7 @@ def check_close_recent() -> None:
     )
 
     maxed = make_dock()
-    maxed.show_home()
+    maxed.show_panel_terminal()
     drain()
     strip = maxed.strips()[0]
     maxed.maximize_page(strip, strip.selected_page_widget())
@@ -315,7 +318,7 @@ def check_open_page_splits() -> None:
     # shells' tab row, and the panel Ctrl+J toggles is left as it was — same
     # pages, same home role, same divider against the terminal.
     right_home = open_page_dock(2400, 1200, home="right")
-    right_home.show_home()
+    right_home.show_panel_terminal()
     drain()
     home_strip = right_home._home_strip
     page = FakePage(1)
@@ -334,7 +337,7 @@ def check_open_page_splits() -> None:
         (right_home._home_strip, home_strip.shell_pages()),
     )
     tight_home = open_page_dock(1400, 1200, home="right")
-    tight_home.show_home()
+    tight_home.show_panel_terminal()
     drain()
     tight_home.open_page(FakePage(1))
     drain()
@@ -353,6 +356,146 @@ def check_open_page_splits() -> None:
         "spare width doesn't split the bottom axis",
         len(below.strips()) == 1 and below.strips()[0].page_count == 2,
         below.strips(),
+    )
+
+
+def check_panel_terminal() -> None:
+    """Ctrl+J is bound to one terminal, not to a strip: it opens its own
+    rather than moving into somebody else's panel, and takes only that page
+    off screen again — see PanelDock.show_panel_terminal."""
+    print("panel terminal (Ctrl+J):")
+    docked = open_page_dock(1400, 1200, home="right")  # 200 px of gutter: none free
+    pr = FakePage(1)
+    docked.open_page(pr)
+    drain()
+    docked.show_panel_terminal()
+    drain()
+    shell = docked.panel_terminal
+    check("a shell-less strip is never joined", len(docked.strips()) == 2, docked.strips())
+    check(
+        "the terminal opens in a strip of its own",
+        shell is not None and docked._strip_of(shell) is not docked._strip_of(pr),
+    )
+    docked.hide_panel_terminal()
+    drain()
+    check(
+        "hiding it leaves the PR page up",
+        not docked.panel_terminal_showing and docked._strip_of(pr).get_visible(),
+    )
+    docked.show_panel_terminal()
+    drain()
+    check("and it comes back", docked.panel_terminal_showing)
+
+    wide = open_page_dock(2400, 1200, home="right")  # 1200 px of gutter
+    wide.show_panel_terminal()
+    drain()
+    first = wide.panel_terminal
+    strip = wide.strips()[0]
+    other = strip.new_shell()
+    drain()
+    check("a second shell doesn't steal the binding", wide.panel_terminal is first)
+    wide.close_page(first)
+    drain()
+    check("closing the bound terminal frees the shortcut", wide.panel_terminal is None)
+    wide.show_panel_terminal()
+    drain()
+    check(
+        "the next press opens a column of its own in the free width",
+        len(wide.strips()) == 2 and wide._strip_of(wide.panel_terminal) is not strip,
+        wide.strips(),
+    )
+    check("...and binds to it", wide.panel_terminal is not other)
+
+    print("stowing a shared tab row:")
+    shared = open_page_dock(1400, 1200, home="right")
+    shared.show_panel_terminal()
+    drain()
+    shell = shared.panel_terminal
+    row = shared._strip_of(shell)
+    page = FakePage(2)
+    row.add_page(page)  # dragged in beside the shells by hand, and selected
+    drain()
+    check(
+        "a terminal in the background of its row isn't showing",
+        not shared.panel_terminal_showing,
+    )
+    shared.show_panel_terminal()
+    drain()
+    check(
+        "so Ctrl+J fronts it rather than hiding it",
+        shared.panel_terminal_showing and row.selected_page_widget() is shell,
+    )
+    shared.hide_panel_terminal()
+    drain()
+    check(
+        "the row stays up with its other page",
+        row.get_visible() and page in row.pages() and shell not in row.pages(),
+        row.pages(),
+    )
+    check(
+        "the stowed terminal is still the dock's",
+        shell in shared.shell_pages() and not shared.panel_terminal_showing,
+        shared.shell_pages(),
+    )
+    check(
+        "its scrollback still saves",
+        shell.hist in shared.capture_shell_texts(),
+        shared.capture_shell_texts(),
+    )
+    shared.show_panel_terminal()
+    drain()
+    check(
+        "Ctrl+J puts it back where it was",
+        row.pages() == [shell, page] and shared.panel_terminal_showing,
+        row.pages(),
+    )
+
+    shared.hide_panel_terminal()
+    drain()
+    shared.close_page(page)
+    drain()
+    check(
+        "emptying the row around it hides the strip instead of collapsing it",
+        row in shared._tree and not row.get_visible() and row.pages() == [shell],
+        (row in shared._tree, row.pages()),
+    )
+    shared.show_panel_terminal()
+    drain()
+    check("and Ctrl+J still finds it there", shared.panel_terminal_showing)
+
+    # The same emptying, by the other route: a rotation carrying the row's
+    # last live tab to the far axis. The home role goes with it (a strip
+    # with no shells left in it is no home), and the collapse the move
+    # leaves behind lands on the stowed terminal a deferred idle later —
+    # two independently deferred paths that have to agree on where the
+    # page ends up.
+    rotated = open_page_dock(1400, 1200, home="right")
+    rotated.show_panel_terminal()
+    drain()
+    bound = rotated.panel_terminal
+    row = rotated._strip_of(bound)
+    mate = row.new_shell()
+    drain()
+    rotated.hide_panel_terminal()
+    drain()
+    rotated.rotate_page(row, mate)
+    drain()
+    check(
+        "a rotation out of a stowed terminal's row leaves it hidden, not homeless",
+        row in rotated._tree and not row.get_visible() and row.pages() == [bound],
+        (row in rotated._tree, row.pages()),
+    )
+    check(
+        "the home role follows the shell that moved",
+        rotated._home_strip is rotated._strip_of(mate) and rotated.home_position == "bottom",
+        (rotated._home_strip, rotated.home_position),
+    )
+    check("the binding is untouched", rotated.panel_terminal is bound)
+    rotated.show_panel_terminal()
+    drain()
+    check(
+        "and Ctrl+J brings it back where it was left",
+        rotated.panel_terminal_showing and row.get_visible(),
     )
 
 
@@ -389,7 +532,7 @@ def main() -> int:
         {shell.hist: shell.restored_text for shell in shells} == {0: "one", 1: "two"},
         {shell.hist: shell.restored_text for shell in shells},
     )
-    check("home marker restored", dock2._home_strip is not None and dock2.home_visible)
+    check("home marker restored", dock2._home_strip is not None and dock2.panel_terminal_showing)
     check(
         "restored tab titles stay unique",
         sorted(shell.number for shell in shells) == [1, 2],
@@ -406,9 +549,9 @@ def main() -> int:
 
     print("hidden home strip:")
     dock3 = make_dock()
-    dock3.show_home()
+    dock3.show_panel_terminal()
     drain()
-    dock3.hide_home()
+    dock3.hide_panel_terminal()
     drain()
     hidden = dock3.capture_layout()
     node = hidden["tree"]["b"] if "strip" in hidden["tree"].get("b", {}) else hidden["tree"]["a"]
@@ -419,15 +562,15 @@ def main() -> int:
     check(
         "restores hidden, shell running",
         dock4._home_strip is not None
-        and not dock4.home_visible
+        and not dock4.panel_terminal_showing
         and len(dock4.shell_pages()) == 1,
     )
-    dock4.show_home()
-    check("Ctrl+J reveals it", dock4.home_visible)
+    dock4.show_panel_terminal()
+    check("Ctrl+J reveals it", dock4.panel_terminal_showing)
 
     print("guards:")
     dock5 = make_dock()
-    dock5.show_home()  # the user got there first
+    dock5.show_panel_terminal()  # the user got there first
     drain()
     before = len(dock5.strips())
     dock5.restore_layout(layout["tree"], {})
@@ -435,6 +578,7 @@ def main() -> int:
     check("restore refuses a dock already split", len(dock5.strips()) == before)
 
     check_open_page_splits()
+    check_panel_terminal()
     check_close_recent()
 
     print(f"\n{PASSED} passed, {FAILED} failed")

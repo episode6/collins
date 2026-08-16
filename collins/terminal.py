@@ -4300,9 +4300,11 @@ class TerminalTab(Gtk.Box):
 
     @property
     def panel_visible(self) -> bool:
-        """Whether the shells' home strip is showing — the state Ctrl+J
-        toggles. Satellite strips are always visible while they exist."""
-        return self._dock.home_visible
+        """Whether Ctrl+J's terminal is on screen — the state it toggles.
+        The shortcut speaks for one shell page (the dock's
+        `panel_terminal`), not for a strip: every other panel tab is
+        visible whenever its own strip is."""
+        return self._dock.panel_terminal_showing
 
     def toggle_panel(self, default_mode: str | None = None) -> None:
         if self.panel_visible:
@@ -4311,12 +4313,16 @@ class TerminalTab(Gtk.Box):
             self.show_panel(default_mode)
 
     def show_panel(self, default_mode: str | None = None, focus: bool = True) -> None:
-        """Show the home strip, starting (or re-pointing) its shell at the
-        agent's current working directory. `default_mode` ("bottom" |
-        "right") opens it at the app-wide last-used home edge; None keeps
-        the tab's own. `focus=False` leaves keyboard focus where it is
-        (session restore)."""
-        if not self.panel_visible and default_mode in ("bottom", "right"):
+        """Put Ctrl+J's terminal on screen, starting (or re-pointing) its
+        shell at the agent's current working directory. `default_mode`
+        ("bottom" | "right") opens a new one at the app-wide last-used home
+        edge; None keeps the tab's own. `focus=False` leaves keyboard focus
+        where it is (session restore)."""
+        # Freshly opened — no terminal bound to the shortcut at all — takes
+        # the app-wide edge. One that exists keeps the edge it is on: an
+        # existing terminal being brought back (or merely fronted in a row
+        # showing something else) is no reason to move the panel.
+        if self._dock.panel_terminal is None and default_mode in ("bottom", "right"):
             self._dock.set_home_position(default_mode)
         restore = None
         if not self._dock.ever_spawned:
@@ -4325,12 +4331,12 @@ class TerminalTab(Gtk.Box):
             # file, oldest ordinal first (the shells take fresh ordinals —
             # the files re-key to them on the next save).
             restore = [texts[ordinal] for ordinal in sorted(texts)] or None
-        self._dock.show_home(restore)
+        self._dock.show_panel_terminal(restore)
         if focus:
-            GLib.idle_add(self._dock.focus_home)
+            GLib.idle_add(self._dock.focus_panel_terminal)
 
     def hide_panel(self) -> None:
-        self._dock.hide_home()
+        self._dock.hide_panel_terminal()
 
     def panel_has_running_command(self) -> bool:
         """True when a command is running in any shell page of any strip —

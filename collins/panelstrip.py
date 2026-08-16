@@ -67,9 +67,11 @@ class PanelStrip(Gtk.Box):
         # Emitted with the page widget whenever a *protocol* page arrives in
         # this strip or comes to the front of it: the dock's record of which
         # panel tab the rotate shortcut acts on (see PanelDock._on_page_touched).
+        # The bool says which of the two it was — True for an arrival, which
+        # is the only kind Ctrl+J's free binding will attach itself to.
         # Gated like every other protocol touch here, so the foreign tab native
         # DnD can land for one main-loop turn is never what gets remembered.
-        "page-touched": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
+        "page-touched": (GObject.SignalFlags.RUN_FIRST, None, (object, bool)),
     }
 
     def __init__(self, shell_factory) -> None:
@@ -224,34 +226,31 @@ class PanelStrip(Gtk.Box):
 
     def set_cwd_lookup(self, lookup) -> None:
         """`lookup() -> path` supplies the agent's current cwd for the shells
-        the + button (and open) start."""
+        the + button (and Ctrl+J) start."""
         self._cwd_lookup = lookup
 
     def _cwd(self) -> str | None:
         return self._cwd_lookup() if self._cwd_lookup is not None else None
 
-    def open(self, restore_texts: list[str] | None = None) -> None:
-        """Make sure at least one shell page exists and points at the agent's
-        cwd. `restore_texts` (first open only) recreates one shell per saved
-        panel history, oldest first.
+    def new_shells(self, restore_texts: list[str] | None = None) -> list:
+        """Append one shell page per saved panel-history text — a single
+        blank one when there is no history — oldest first, and select the
+        first of them. Returns them in that order: the dock binds Ctrl+J to
+        the first (see PanelDock.show_panel_terminal)."""
+        shells = [
+            self.new_shell(restore_text=text, select=False)
+            for text in (restore_texts or [None])
+        ]
+        if shells:
+            self.select_widget(shells[0])
+        return shells
 
-        The test is for *shells*, not pages: a strip can hold a PR tab and
-        no terminal — the dock adopts one as the panel's home rather than
-        splitting a second strip beside it — and Ctrl+J there still has to
-        produce the terminal it promises."""
-        shells = self.shell_pages()
-        if not shells:
-            first = None
-            for text in restore_texts or [None]:
-                shell = self.new_shell(restore_text=text, select=False)
-                if first is None:
-                    first = shell
-            if first is not None:
-                self.select_widget(first)
-        else:
-            cwd = self._cwd()
-            for shell in shells:
-                shell.open_shell(cwd)
+    def refresh_shell(self, shell) -> None:
+        """Re-point an existing shell page at the agent's cwd — what showing
+        a hidden terminal again does, since the agent may have moved into a
+        worktree while it was off screen. Idle shells only; one with a
+        command running is left alone (see PanelPage.open_shell)."""
+        shell.open_shell(self._cwd())
 
     def new_shell(self, restore_text: str | None = None, select: bool = True):
         """Append a shell page (its shell spawns right away) and optionally
@@ -345,7 +344,7 @@ class PanelStrip(Gtk.Box):
             if self.tab_drag_handles:
                 page.set_indicator_icon(Gio.ThemedIcon.new(paneldnd.HANDLE_ICON))
                 paneldnd.wire_tab_drag(self, widget)
-            self.emit("page-touched", widget)
+            self.emit("page-touched", widget, True)
 
     def _sync_tab(self, page: Adw.TabPage) -> None:
         """Bring a tab's title and icon in line with its page widget."""
@@ -564,7 +563,7 @@ class PanelStrip(Gtk.Box):
         # nothing the dock should remember as the tab to rotate either.
         widget = self.selected_page_widget()
         if getattr(widget, "page_kind", None) is not None:
-            self.emit("page-touched", widget)
+            self.emit("page-touched", widget, False)
         grab = getattr(widget, "grab_page_focus", None)
         if grab is not None and self.get_mapped():
             GLib.idle_add(grab)

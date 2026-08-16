@@ -144,7 +144,7 @@ def _new_page_while_off_is_unwired(dock) -> bool:
     that fallback is the only drag its tabs have."""
     dock2 = make_dock()
     dock2.apply_settings({"panel_tab_drag_handles": False})
-    dock2.show_home()
+    dock2.show_panel_terminal()
     strip = dock2.strips()[0]
     drain()
     widget = strip.pages()[0]
@@ -162,7 +162,7 @@ def main() -> int:
     print("wiring:")
     dock = make_dock()
     _WINDOWS[-1].present()
-    dock.show_home()
+    dock.show_panel_terminal()
     home = dock.strips()[0]
     second = home.new_shell()
     drain()
@@ -190,7 +190,7 @@ def main() -> int:
         phases,
     )
     fresh = make_dock()
-    fresh.show_home()
+    fresh.show_panel_terminal()
     check(
         "a strip is disarmed before its first page",
         all(p == Gtk.PropagationPhase.NONE for p in native_phases(fresh.strips()[0].tab_bar)),

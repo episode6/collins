@@ -3798,10 +3798,12 @@ class MainWindow(Adw.ApplicationWindow):
         return tab if isinstance(tab, TerminalTab) else None
 
     def _toggle_panel(self) -> None:
-        """Show or hide this tab's shell strip — Ctrl+J and the footer
-        button, which mean the same plain thing. Moving the panel around
-        is Ctrl+; (_rotate_panel_page), which acts on one tab of any kind
-        rather than on the shells as a group."""
+        """Show or hide this tab's panel terminal — Ctrl+J and the footer
+        button, which mean the same plain thing. One terminal, the one the
+        shortcut opened (see PanelDock.panel_terminal): it never shows or
+        hides anything else that happens to share a tab row with it.
+        Moving the panel around is Ctrl+; (_rotate_panel_page), which acts
+        on one tab of any kind."""
         tab = self._current_terminal_tab()
         if tab is not None:
             # Freshly opened: last-used mode.
