@@ -60,11 +60,13 @@ cd "\$REPO" || bail "\$REPO is gone — reinstall the launcher from a checkout."
 
 # Every check below appends its own stderr here, so an unwritable log would
 # fail them all and report the wrong reason. Say what actually went wrong.
-echo "=== \$(date -Is) git pull in \$REPO ===" >"\$LOG" 2>/dev/null \\
+echo "=== \$(date -Is) collins-debug-pull in \$REPO ===" >"\$LOG" 2>/dev/null \\
   || bail "can't write the log at \$LOG"
 
+# A detached HEAD is the everyday way this fails, but a repo git can't read at
+# all lands here too — so name the symptom, not one of its causes.
 BRANCH="\$(git symbolic-ref --quiet --short HEAD 2>>"\$LOG")" \\
-  || bail "\$REPO has a detached HEAD, not main. See \$LOG"
+  || bail "\$REPO isn't on a branch — detached HEAD, or git can't read it. See \$LOG"
 [ "\$BRANCH" = main ] \\
   || bail "\$REPO is on '\$BRANCH', not main."
 
