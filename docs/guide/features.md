@@ -587,6 +587,13 @@ A session only ever runs in one tab. Clicking a session that another window
 already has open — or clicking a notification it raised — raises that window and
 selects its tab instead of resuming the conversation a second time.
 
+**Move a running session to a window of its own**: right-click its sidebar row
+→ *Move to new window*. The tab is lifted out and dropped into a fresh window
+live — the agent keeps running, its scrollback, panel, and editor come along,
+and nothing is resumed or restarted. It replaces *Open in new window* on rows
+that already have a tab (and stays away when that tab is its window's last one,
+where the move would only swap one window for another).
+
 ## Preferences
 
 Terminal **font**, **scrollback** size, **easy copy & paste** (on by default),
