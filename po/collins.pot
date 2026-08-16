@@ -2646,16 +2646,16 @@ msgstr ""
 msgid "Show status icon"
 msgstr ""
 
-#: collins/prefs.py:872
-msgid "Shows Collins in the top bar with a badge for sessions you haven't looked at"
+#: collins/prefs.py:875
+msgid "Shows Collins in the top bar, with a menu that jumps to any open session"
 msgstr ""
 
-#: collins/prefs.py:874
+#: collins/prefs.py:877
 msgid ""
 "No status-icon support was found in this desktop — GNOME needs an "
 "AppIndicator extension"
 msgstr ""
 
-#: collins/prefs.py:880
+#: collins/prefs.py:883
 msgid "Nothing on this desktop can show a status icon"
 msgstr ""

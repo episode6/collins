@@ -867,9 +867,12 @@ class PreferencesDialog(Adw.Dialog):
         return group
 
     def _on_status_icon_host(self, present: bool) -> None:
+        # The subtitle describes what the item does *today*: the unread count
+        # is drawn onto the icon by a later change, and a row promising a
+        # badge nothing draws yet would be a row that lies.
         self._status_icon_switch.set_sensitive(present)
         self._status_icon_row.set_subtitle(
-            _("Shows Collins in the top bar with a badge for sessions you haven't looked at")
+            _("Shows Collins in the top bar, with a menu that jumps to any open session")
             if present
             else _(
                 "No status-icon support was found in this desktop — GNOME "

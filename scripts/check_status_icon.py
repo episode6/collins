@@ -26,14 +26,15 @@ live session:
         org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems
 """
 
+import os
 import sys
 
-import gi
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk  # noqa: E402
-
-sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 
 from collins import statusicon, traymodel  # noqa: E402
 
@@ -52,7 +53,7 @@ WATCHER_XML = """
 
 # The name the item owns, and the only address the checks below use: an item
 # is found by its well-known name, exactly as a host finds it.
-BUS_NAME = f"org.kde.StatusNotifierItem-{__import__('os').getpid()}-1"
+BUS_NAME = f"org.kde.StatusNotifierItem-{os.getpid()}-1"
 
 failures = []
 
