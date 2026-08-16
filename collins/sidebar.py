@@ -1405,6 +1405,10 @@ class SessionSidebar(Gtk.Box):
         menu.append(_("MCP servers"), "win.mcp-servers")
         menu.append(_("Preferences"), "win.preferences")
         menu.append(_("About Collins"), "win.about")
+        # Last, and app-scoped: it closes every window, not this one. The
+        # status icon's menu offers the same item, and this is where someone
+        # looks for it when a window is on screen.
+        menu.append(_("Quit"), "app.quit")
         # Menu and search hold the left end; the title carries two buttons on
         # its left and three on its right.
         self._menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
@@ -2040,6 +2044,19 @@ class SessionSidebar(Gtk.Box):
 
     def placeholder_unread(self, placeholder_id: str) -> bool:
         return placeholder_id in self._unread_placeholders
+
+    def placeholder_counts(self) -> tuple[int, int]:
+        """How many placeholder rows there are and how many are unread — what
+        the status icon adds to the store's own totals (see traymodel). Counts
+        rather than a list because a placeholder has no session id to jump to:
+        the whole reason its flag lives here and not on a session item.
+
+        The unread half is clamped to the rows it belongs to: a placeholder is
+        dropped by remove_placeholder, which clears both sets together, but
+        the pair is read a window at a time and the two numbers must not be
+        able to disagree on the way past.
+        """
+        return len(self._placeholders), len(self._unread_placeholders & set(self._placeholders))
 
     def remove_placeholder(self, placeholder_id: str) -> None:
         self._busy_placeholders.discard(placeholder_id)
