@@ -110,6 +110,14 @@ class ComposerView(Gtk.Box):
         # the one GtkSource behavior wanted from the buffer is that
         # libspelling's adapter is built for it.
         self._buffer.set_highlight_matching_brackets(False)
+        # No style scheme either. A GtkSource.Buffer starts out on "classic",
+        # a light scheme, and the view paints its own text from it — black
+        # glyphs on a dark card, in dark mode, whatever the app's colors say.
+        # A scheme is for code the buffer is highlighting; with none set the
+        # box takes the theme's own view colors like every other text box in
+        # the app, which is what a prompt should be drawn in. Spell-check
+        # squiggles don't come from the scheme, so they survive it.
+        self._buffer.set_style_scheme(None)
         self._view = GtkSource.View(buffer=self._buffer)
         self._view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self._view.set_monospace(True)
