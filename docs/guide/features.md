@@ -206,6 +206,12 @@ agents' own session files are never modified.
   Code GitHub action). Every one of those menus starts with the two ways to
   read the PR — its page in Collins, and **Open on GitHub** — so a PR with
   nothing left to do still opens onto something rather than onto a gap.
+- **Merging asks first** — the immediate merge, auto-merge and the PR page's
+  **Merge and archive** alike — since it is the one thing here that everybody
+  watching the repository sees and nobody can take back. Once that stops being
+  news, turn **Confirm before merging** off in Preferences and the click
+  merges. **Closing** a pull request unmerged keeps asking either way: it is
+  the one action that ends a PR by throwing its work away.
 - Four of those items are **sent to the session as a prompt** instead of run
   against GitHub: **address the CI errors** when that PR's CI is red,
   **rebase / resolve conflicts** when GitHub says the branch no longer merges,

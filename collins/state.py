@@ -181,6 +181,12 @@ DEFAULT_SETTINGS = {
     # room without being asked. Once per PR per session — the saved list is
     # what remembers, so a page closed again stays closed.
     "open_pr_panel_on_attach": False,
+    # Whether merging a pull request asks first (see practions.confirmation).
+    # On: Merge, Merge when checks pass and Merge and archive each put up
+    # their dialog, as they always have. Off: the click merges. Only the
+    # merges — closing a pull request unmerged still asks, since that is the
+    # one PR action that throws the work away rather than landing it.
+    "confirm_merges": True,
     "editor_window_width": 1000,  # last popped-out editor window size (floating, unmaximized)
     "editor_window_height": 700,
     "editor_window_maximized": False,

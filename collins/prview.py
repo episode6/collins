@@ -1396,19 +1396,24 @@ class _ActionBar(Gtk.Box):
 
     def _pick(self, button: _BusyButton, pr: PullRequest, action: practions.Action) -> None:
         """Ask, if *action* asks, and then run it — spinning in *button*,
-        which is the one that was pressed however the action was reached."""
+        which is the one that was pressed however the action was reached.
+
+        Whether it asks is `practions.confirmation`'s answer, the same one the
+        menus take: the merges' dialog can be turned off in Preferences, and
+        the page's button and a chip's menu must not disagree about that."""
         if self._running:
             return
-        if action.confirm is None:
+        confirm = practions.confirmation(action, self._host_factory().confirm_merges())
+        if confirm is None:
             self._start(pr, action, button)
             return
         dialogs.confirm_dialog(
             button.get_root(),
-            action.confirm.heading,
-            action.confirm.body,
-            action.confirm.label,
+            confirm.heading,
+            confirm.body,
+            confirm.label,
             lambda: self._start(pr, action, button),
-            destructive=action.confirm.destructive,
+            destructive=confirm.destructive,
         )
 
     def _start(self, pr: PullRequest, action: practions.Action, button: _BusyButton) -> None:

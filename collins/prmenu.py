@@ -169,6 +169,12 @@ class ActionHost:
     # the PR awaits a reply; None hides it wherever no page can be shown —
     # except on the page's own menu, where it stays as an in-page jump.
     view_unresolved: Callable[[PullRequest], None] | None = None
+    # Whether a merge asks before it goes ahead (the confirm_merges setting,
+    # see practions.confirmation). A callable like the rest: a menu built once
+    # is opened much later, and Preferences may have been visited in between.
+    # Defaulted so a host built without an opinion asks, which is what every
+    # merge did before the setting existed.
+    confirm_merges: Callable[[], bool] = lambda: True
     # Archive the session this PR belongs to — what "Merge and archive" does
     # once its merge has landed (practions.MERGE_ARCHIVE). None where there is
     # no session to put away: a host built for a record rather than for a live
@@ -760,21 +766,26 @@ def _on_action_clicked(
     pointer grab a popover is holding, closing it — so those run with the menu
     already down. What is left runs under a spinner in its own row, which is
     the only case where there is anything to watch.
+
+    Whether an action asks at all is `practions.confirmation`'s answer rather
+    than the action's own: a merge stops asking when the setting says so, and
+    then it is one of the ones that runs under the spinner.
     """
     root = button.get_root()
     if action.prompt:
         popover.popdown()
         host.send_prompt(action.prompt)
         return
-    if action.confirm is not None:
+    confirm = practions.confirmation(action, host.confirm_merges())
+    if confirm is not None:
         popover.popdown()
         dialogs.confirm_dialog(
             root,
-            action.confirm.heading,
-            action.confirm.body,
-            action.confirm.label,
+            confirm.heading,
+            confirm.body,
+            confirm.label,
             lambda: _start_action(pr, action, host, root, None, None),
-            destructive=action.confirm.destructive,
+            destructive=confirm.destructive,
         )
         return
     _start_action(pr, action, host, root, popover, spinner)

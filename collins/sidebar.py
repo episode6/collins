@@ -685,6 +685,10 @@ class SessionRow(Gtk.ListBoxRow):
                 "win.view-pr",
                 GLib.Variant("(ssb)", (self.item.session_id, pr.url, True)),
             ),
+            # Straight off the app's state, on the click: a row's menu is built
+            # long before it is opened, and Preferences may have been visited
+            # in between (see practions.confirmation).
+            confirm_merges=lambda: bool(sidebar.store.state.get_setting("confirm_merges")),
         )
         self.sync_prs()
         # The PR hub is what keeps the mark honest between sweeps: any fetch
