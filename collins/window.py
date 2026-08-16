@@ -93,7 +93,7 @@ from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar
 from .state import AppState, clamp_window_size, editor_pops_out, panel_size_key
 from .store import SessionStore, emptied_projects
 from .switcher import QuickSwitcher
-from .taborder import tab_order
+from .taborder import neighbour_tab, tab_order
 from .terminal import PROGRESS_HINT_TERMPROP, TerminalTab
 
 log = logging.getLogger(__name__)
@@ -2713,12 +2713,39 @@ class MainWindow(Adw.ApplicationWindow):
             self._close_confirmed(page)
             return
         self._closing_pages[page] = 0
+        self._leave_closing_tab(page)
         # Raw keystrokes, exactly as the provider spells them: a control byte
         # for Claude's Ctrl+C Ctrl+C, and for a typed command like /bg the
         # Enter that submits it — carriage return in a raw-mode TUI, not
         # newline.
         tab.feed_child_text(exit_text)
         GLib.timeout_add(_CLOSE_POLL_MS, self._poll_graceful, page, tab)
+
+    def _leave_closing_tab(self, page: Adw.TabPage) -> None:
+        """Hand the screen to a neighbouring tab as *page* starts draining.
+
+        Stopping or archiving the session that is up on screen is the user
+        saying they're done with it, but the tab lives on for as long as the
+        graceful exit takes — Ctrl+C Ctrl+C, its nudges, then the shell's own
+        exit — which is seconds of watching a session die. So make the switch
+        the close is heading for now instead of when the page finally goes:
+        the next tab along, or the previous one at the end of the strip, the
+        same order AdwTabView would pick.
+
+        Only when this page is the visible one, and only for a neighbour that
+        isn't draining itself — closing every tab at quit would otherwise walk
+        the selection across all of them on its way out (and the window is
+        going anyway). With nothing else open there is nowhere to go and the
+        tab stays up until it closes.
+        """
+        if self.tab_view.get_selected_page() is not page or self._quitting:
+            return
+        n_pages = self.tab_view.get_n_pages()
+        pages = [self.tab_view.get_nth_page(i) for i in range(n_pages)]
+        draining = {i for i, other in enumerate(pages) if other in self._closing_pages}
+        position = neighbour_tab(self.tab_view.get_page_position(page), n_pages, draining)
+        if position is not None:
+            self.tab_view.set_selected_page(pages[position])
 
     def _watch_background_fork(self, tab: TerminalTab) -> None:
         """Confirm the session is running detached, and record its successor
