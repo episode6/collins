@@ -1227,6 +1227,10 @@ class TerminalTab(Gtk.Box):
         self._composer_enter_sends = True
         self._composer_font = ""
         self._composer_on_typing = False
+        # The confirm_merges setting, at its shipped default until the first
+        # apply_settings lands: a merge asks before it goes ahead. Read by the
+        # PR actions this tab hosts (see _pr_action_host).
+        self._confirm_merges = True
         # An open that has been asked for but hasn't reached the screen yet:
         # the panel is revealed from an idle, so two keys pressed in the same
         # frame both find a composer that isn't open (see open_composer).
@@ -2008,6 +2012,10 @@ class TerminalTab(Gtk.Box):
         Archiving is the same kind of answer: this session is the one a PR
         page docked here would put away once its merge lands, and a tab with
         no session yet has nothing to offer that for.
+
+        Whether a merge asks first isn't about the session at all — it is the
+        app's confirm_merges setting — but it rides here for the same reason
+        the rest does: this is what a PR's actions have to ask on the click.
         """
         return prmenu.ActionHost(
             prompt_block=self.prompt_block,
@@ -2016,6 +2024,7 @@ class TerminalTab(Gtk.Box):
             refresh=self._request_update,
             view_pr=self.open_pr_page,
             view_unresolved=lambda pr: self.open_pr_page(pr, unresolved=True),
+            confirm_merges=lambda: self._confirm_merges,
             archive=self._archive_this_session if self.session_id else None,
         )
 
@@ -4673,6 +4682,10 @@ class TerminalTab(Gtk.Box):
             self._composer.set_font(self._composer_font)
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
         self._auto_open_prs = bool(settings.get("open_pr_panel_on_attach"))
+        # Read on the click rather than baked into the menus and the PR page's
+        # button (see _pr_action_host), so a switch flipped in Preferences
+        # takes effect on chips and pages that were built before it.
+        self._confirm_merges = bool(settings.get("confirm_merges", True))
         self._apply_terminal_max_width(settings)
         self._set_footer_apps(settings.get("footer_apps") or [])
         self._dock.apply_settings(settings)

@@ -2475,7 +2475,7 @@ msgid "Show less"
 msgstr ""
 
 #: collins/prefs.py:325
-msgid "Pull request view"
+msgid "Pull requests"
 msgstr ""
 
 #: collins/prefs.py:327
@@ -2507,6 +2507,17 @@ msgstr ""
 msgid ""
 "Open a pull request's panel beside its session as soon as the session picks "
 "the PR up. Once per pull request, so one you close again stays closed"
+msgstr ""
+
+#: collins/prefs.py:438
+msgid "Confirm before merging"
+msgstr ""
+
+#: collins/prefs.py:440
+msgid ""
+"Ask before merging a pull request, enabling auto-merge, or merging and "
+"archiving the session. Off, the click merges; closing a pull request "
+"unmerged still asks either way"
 msgstr ""
 
 #: collins/bodyimages.py:122

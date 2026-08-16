@@ -130,6 +130,9 @@ class Confirm:
     the suggested course (see dialogs.confirm_dialog). Merging isn't a loss,
     however final it is; closing a pull request unmerged is the one action
     here that throws work away, so it is the one that asks in red.
+
+    Carried on the action either way — whether it is actually put up is
+    `confirmation`'s answer, since the merges' dialog can be turned off.
     """
 
     heading: str
@@ -166,6 +169,29 @@ class Action:
     prompt: str = ""
     blocked: str = ""
     short: str = ""
+
+
+# The three ways of landing a pull request: now, when GitHub says the checks
+# are done, and now-with-the-session-put-away. What the confirm_merges setting
+# is about — see `confirmation`.
+MERGES = (MERGE, AUTO_MERGE, MERGE_ARCHIVE)
+
+
+def confirmation(action: Action, confirm_merges: bool = True) -> Confirm | None:
+    """The dialog to put up before *action* runs, or None to just run it.
+
+    What every surface offering an action asks, rather than reading
+    `Action.confirm` itself: the merges ask by default and stop asking when
+    the setting is turned off, and one answer to "does this one ask?" keeps
+    the page's button and the menus' rows agreeing about it.
+
+    Only the merges follow the setting. Closing a pull request unmerged is the
+    one action here that ends it by throwing the work away rather than landing
+    it, and a preference about merging isn't consent to that.
+    """
+    if action.key in MERGES and not confirm_merges:
+        return None
+    return action.confirm
 
 
 def checks_green(pr: PullRequest) -> bool:
@@ -417,11 +443,12 @@ def merge_action(pr: PullRequest, auto: bool) -> Action:
 
     Merging is the one thing in this menu that can't be taken back and that
     everybody watching the repository sees, and auto-merge is the same act on
-    a delay, so neither happens on a single stray click. The immediate
-    merge's question says which of the two situations it is being asked in:
-    the checks are in and green, or they aren't — the second is a real thing
-    to offer (a branch with no required checks merges fine), but not one to
-    ask about in the first one's words.
+    a delay, so neither happens on a single stray click — unless the
+    confirm_merges setting says the asking is in the way (see
+    `confirmation`). The immediate merge's question says which of the two
+    situations it is being asked in: the checks are in and green, or they
+    aren't — the second is a real thing to offer (a branch with no required
+    checks merges fine), but not one to ask about in the first one's words.
     """
     if auto:
         return Action(

@@ -394,7 +394,10 @@ class PreferencesDialog(Adw.Dialog):
 
         self._build_editor_group(state, page)
 
-        pr_view_group = _SearchableGroup(title=_("Pull request view"))
+        # "Pull requests", not "Pull request view": the confirmation switch
+        # below reaches every surface a PR's actions are offered on — the
+        # page's button, a chip's menu, a sidebar row's — and not just the page.
+        pr_view_group = _SearchableGroup(title=_("Pull requests"))
         pr_scale_row = Adw.SpinRow.new_with_range(50, 300, 5)
         pr_scale_row.set_title(_("Text size"))
         pr_scale_row.set_subtitle(
@@ -431,6 +434,17 @@ class PreferencesDialog(Adw.Dialog):
         self._pr_autoshow_row.set_active(bool(state.get_setting("open_pr_panel_on_attach")))
         self._pr_autoshow_row.connect("notify::active", self._on_pr_autoshow_changed)
         pr_view_group.add(_searchable(self._pr_autoshow_row, "attach", "dock"))
+        self._confirm_merges_row = Adw.SwitchRow(
+            title=_("Confirm before merging"),
+            subtitle=_(
+                "Ask before merging a pull request, enabling auto-merge, or "
+                "merging and archiving the session. Off, the click merges; "
+                "closing a pull request unmerged still asks either way"
+            ),
+        )
+        self._confirm_merges_row.set_active(bool(state.get_setting("confirm_merges")))
+        self._confirm_merges_row.connect("notify::active", self._on_confirm_merges_changed)
+        pr_view_group.add(_searchable(self._confirm_merges_row, "merge", "archive", "dialog"))
         page.add(pr_view_group)
 
         appearance_group = _SearchableGroup(title=_("Appearance"))
@@ -1045,6 +1059,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_pr_autoshow_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("open_pr_panel_on_attach", bool(row.get_active()))
+        self._on_change()
+
+    def _on_confirm_merges_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("confirm_merges", bool(row.get_active()))
         self._on_change()
 
     def _on_theme_radio(self, radio: Gtk.CheckButton, name: str) -> None:

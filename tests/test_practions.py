@@ -292,6 +292,34 @@ def test_only_merging_asks_first():
     assert {a.key: a.confirm is not None for a in actions_for(_pr())}[MERGE]
 
 
+def test_the_merges_ask_until_the_setting_says_not_to():
+    """What every surface asks before it runs an action (see confirmation):
+    on, each merge puts its own dialog up; off, all three go straight ahead."""
+    merges = [
+        practions.merge_action(_pr(), auto=False),
+        practions.merge_action(_pr(pending=1), auto=True),
+        practions.merge_archive_action(_pr()),
+    ]
+    assert [a.key for a in merges] == [MERGE, AUTO_MERGE, MERGE_ARCHIVE]
+    assert all(practions.confirmation(a) is a.confirm for a in merges)
+    assert all(practions.confirmation(a, confirm_merges=False) is None for a in merges)
+
+
+def test_closing_asks_whatever_the_merge_setting_says():
+    """A preference about merging isn't consent to throw the work away: the
+    one action that ends a PR unmerged keeps its dialog either way."""
+    close = practions.close_action(_pr())
+    assert practions.confirmation(close, confirm_merges=False) is close.confirm
+    assert close.confirm is not None and close.confirm.destructive
+
+
+def test_the_actions_that_never_asked_still_dont():
+    """Turning the merge dialogs off doesn't turn any others on."""
+    for action in actions_for(_pr(passed=1, failed=1)) + [practions.ready_action(_pr())]:
+        if action.key not in practions.MERGES:
+            assert practions.confirmation(action, confirm_merges=False) is action.confirm
+
+
 def test_the_prompt_actions_are_the_ones_carrying_a_prompt():
     """What the menu dispatches on: an action with text to type goes to the
     session, and everything else goes to gh."""
