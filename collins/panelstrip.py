@@ -233,17 +233,18 @@ class PanelStrip(Gtk.Box):
     def _cwd(self) -> str | None:
         return self._cwd_lookup() if self._cwd_lookup is not None else None
 
-    def new_shells(self, restore_texts: list[str] | None = None) -> list:
+    def new_shells(self, restore_texts: list[str] | None = None, focus: bool = True) -> list:
         """Append one shell page per saved panel-history text — a single
         blank one when there is no history — oldest first, and select the
-        first of them. Returns them in that order: the dock binds Ctrl+J to
-        the first (see PanelDock.show_panel_terminal)."""
+        first of them (*focus* False without taking the keyboard). Returns
+        them in that order: the dock binds Ctrl+J to the first (see
+        PanelDock.show_panel_terminal)."""
         shells = [
             self.new_shell(restore_text=text, select=False)
             for text in (restore_texts or [None])
         ]
         if shells:
-            self.select_widget(shells[0])
+            self.select_widget(shells[0], focus=focus)
         return shells
 
     def refresh_shell(self, shell) -> None:

@@ -2191,6 +2191,25 @@ msgid ""
 "start_session — spawn a sibling agent in a new background tab, with a prompt"
 msgstr ""
 
+#: collins/prefs.py:138
+msgid "Read the terminal panel"
+msgstr ""
+
+#: collins/prefs.py:141
+msgid ""
+"read_terminal — the panel tabs' text and scrollback, your own typing included"
+msgstr ""
+
+#: collins/prefs.py:143
+msgid "Run commands in the terminal panel"
+msgstr ""
+
+#: collins/prefs.py:144
+msgid ""
+"run_in_terminal — type a command into an idle panel tab (or a new one) and "
+"run it"
+msgstr ""
+
 #: collins/cliwelcome.py:70
 msgid "Collins needs the Claude Code CLI"
 msgstr ""

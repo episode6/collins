@@ -26,6 +26,12 @@ from . import APP_ID, DEBUG_APP_ID
 # that does is garbage or an attack, not a tool call. Mirrored in mcp_shim.py.
 MAX_LINE = 1024 * 1024
 
+# read_terminal's caps: how much of the panel shells' scrollback one call
+# carries. The default is a generous screenful-and-then-some; the maximum is
+# where terminal_reply's own frame-budget shrinking takes over anyway.
+TERMINAL_DEFAULT_LINES = 200
+TERMINAL_MAX_LINES = 2000
+
 # The tools Collins serves to sessions, in MCP's own tool shape (the app
 # hands these to the shim verbatim for `tools/list`). A tool earns its place
 # only if it needs the app — anything the agent can do from its shell stays
@@ -257,6 +263,103 @@ TOOLS: list[dict] = [
             "additionalProperties": False,
         },
     },
+    {
+        # The one tool that reads anything back to the agent — including
+        # whatever the user typed into their own shells, echoed passwords
+        # and all. The user's gates are the CLI's per-session permission
+        # prompt and the Preferences switch, same as every tool here; what
+        # keeps this one honest is that it only ever reads, and only the
+        # calling session's own panel.
+        "name": "read_terminal",
+        "description": (
+            "Read the terminal-panel tabs open alongside this session in "
+            "Collins — the plain shells the user runs next to you (the "
+            "Ctrl+J panel, tabs titled 'Terminal 1', 'Terminal 2', …). "
+            "Returns each one's text, scrollback included: the commands "
+            "typed into it, their output, and whatever a still-running "
+            "command has printed so far. Reach for it when the user refers "
+            "to something in their own terminal — 'the error over there', a "
+            "server they left running, a command they tried — instead of "
+            "asking them to paste it. Reading is all this does: it cannot "
+            "type into a shell, and it says so when no panel terminal is "
+            "open."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "terminal": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Which terminal to read, by the number in its tab "
+                        "title ('Terminal 2' → 2). Omit to read all of them."
+                    ),
+                },
+                "lines": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": TERMINAL_MAX_LINES,
+                    "description": (
+                        "Trailing lines to return per terminal — the end of "
+                        "the scrollback, where the latest output is. "
+                        f"Defaults to {TERMINAL_DEFAULT_LINES}."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        # read_terminal's writing half, and the more consequential one: it
+        # types into a shell the user owns. Its guardrails are visibility
+        # and consent — the command runs where the user can watch it (the
+        # target is revealed, never a hidden strip), a terminal with a
+        # command already running is refused rather than typed into, and
+        # the CLI's permission prompt plus the Preferences switch gate it
+        # like every tool here.
+        "name": "run_in_terminal",
+        "description": (
+            "Type a command into one of this session's terminal-panel tabs "
+            "in Collins and run it — visibly, in the user's own split "
+            "terminal (the Ctrl+J panel), where they can watch it, interact "
+            "with it, and keep the shell afterwards. The terminal is opened "
+            "if none exists, and brought on screen if hidden. Reach for it "
+            "when the user should own or watch what runs — a dev server, a "
+            "REPL, a watch task, anything they asked to have running in "
+            "their terminal — not for your own work: ordinary commands "
+            "belong in your normal shell tool. Returns as soon as the "
+            "command is typed, without waiting for output — follow up with "
+            "read_terminal to see how it's going. A terminal busy running "
+            "a command is never typed into."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10_000,
+                    "description": (
+                        "The command to run, typed into the shell with a "
+                        "trailing Enter. Multiple lines run in order, one "
+                        "Enter per line."
+                    ),
+                },
+                "terminal": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Which terminal to type into, by the number in its "
+                        "tab title ('Terminal 2' → 2); it must be idle. "
+                        "Omit to use the first idle terminal, opening a new "
+                        "tab when there is none (or all are busy)."
+                    ),
+                },
+            },
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -350,6 +453,8 @@ def _validate_value(key: str, value, spec: dict) -> str | None:
             return f"'{key}' must be an integer"
         if value < spec.get("minimum", value):
             return f"'{key}' must be at least {spec['minimum']}"
+        if value > spec.get("maximum", value):
+            return f"'{key}' must be at most {spec['maximum']}"
     elif kind == "boolean":
         # bool is the one JSON type that is also an int in Python, so it is
         # checked before nothing else can mistake it — and integer above
@@ -357,6 +462,56 @@ def _validate_value(key: str, value, spec: dict) -> str | None:
         if not isinstance(value, bool):
             return f"'{key}' must be true or false"
     return None
+
+
+# The room a read_terminal reply's text leaves inside one MAX_LINE frame for
+# the JSON-RPC envelope around it.
+_TERMINAL_REPLY_MARGIN = 16 * 1024
+
+
+def _terminal_tail(text: str, lines: int) -> str:
+    """The last *lines* lines of one terminal's dump.
+
+    The dump ends in the screen's unused rows, so trailing whitespace goes
+    first — the tail should spend itself on output, not blanks.
+    """
+    return "\n".join(text.rstrip().split("\n")[-lines:])
+
+
+def _terminal_section(number: int, busy: bool, text: str) -> str:
+    state = "command running" if busy else "idle"
+    return f"── Terminal {number} ({state}) ──\n{text or '(empty)'}"
+
+
+def terminal_reply(sections: list[tuple[int, bool, str]], lines: int) -> str:
+    """The read_terminal reply: each of *sections* — (tab-title number,
+    has-a-running-command, full scrollback dump) — tailed to *lines* lines
+    under a header naming the terminal.
+
+    Guaranteed to fit one wire frame: an oversize reply doesn't degrade, it
+    closes the shim's connection (see mcpserver._send), so after the line
+    tail the reply is measured as it will be encoded — JSON escaping can
+    multiply a dump full of control bytes — and every tail keeps halving,
+    oldest half dropped first, until the frame takes it. Should the halving
+    run dry — every tail already empty, the headers alone over budget, which
+    takes tens of thousands of tabs — the reply is cut off outright rather
+    than looped on: a section count that absurd is its own answer, and the
+    guarantee this function exists for is "returns, and fits".
+    """
+    tails = [(number, busy, _terminal_tail(text, lines)) for number, busy, text in sections]
+    budget = MAX_LINE - _TERMINAL_REPLY_MARGIN
+    while True:
+        reply = "\n\n".join(_terminal_section(*tail) for tail in tails)
+        if len(json.dumps(reply).encode("utf-8")) <= budget:
+            return reply
+        if not any(text for _number, _busy, text in tails):
+            # Headers only by now, so every character is ASCII or "─" and
+            # encodes in at most 6 bytes (─) — a sixth of the budget
+            # in characters always fits it.
+            return reply[: budget // 6]
+        tails = [
+            (number, busy, text[(len(text) + 1) // 2 :]) for number, busy, text in tails
+        ]
 
 
 class DeferredResult:

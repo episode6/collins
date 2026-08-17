@@ -21,6 +21,8 @@ def test_serves_exactly_the_landed_tools():
         "notify_user",
         "attach_pr",
         "start_session",
+        "read_terminal",
+        "run_in_terminal",
     ]
 
 
@@ -64,6 +66,8 @@ def test_enabled_tools_serves_only_what_is_switched_on():
         "notify_user",
         "attach_pr",
         "start_session",
+        "read_terminal",
+        "run_in_terminal",
     ]
 
 
@@ -259,6 +263,102 @@ def test_start_session_rejects_unexpected_arguments():
     assert "surprise" in mcptools.validate_args(
         "start_session", {"prompt": "go", "surprise": 1}
     )
+
+
+def test_read_terminal_args_all_default():
+    """Both arguments are optional: the bare call reads every panel tab."""
+    assert mcptools.validate_args("read_terminal", {}) is None
+    assert mcptools.validate_args("read_terminal", {"terminal": 2}) is None
+    assert mcptools.validate_args("read_terminal", {"lines": 40}) is None
+
+
+def test_read_terminal_terminal_is_a_positive_integer():
+    assert "integer" in mcptools.validate_args("read_terminal", {"terminal": "2"})
+    assert "integer" in mcptools.validate_args("read_terminal", {"terminal": True})
+    assert "at least 1" in mcptools.validate_args("read_terminal", {"terminal": 0})
+
+
+def test_read_terminal_lines_are_capped():
+    """The schema's maximum is enforced — the first integer bound above, so
+    the validator's `maximum` branch exists for it."""
+    top = mcptools.TERMINAL_MAX_LINES
+    assert mcptools.validate_args("read_terminal", {"lines": top}) is None
+    assert f"at most {top}" in mcptools.validate_args(
+        "read_terminal", {"lines": top + 1}
+    )
+    assert "at least 1" in mcptools.validate_args("read_terminal", {"lines": 0})
+
+
+def test_run_in_terminal_args():
+    assert mcptools.validate_args("run_in_terminal", {"command": "make test"}) is None
+    assert (
+        mcptools.validate_args("run_in_terminal", {"command": "ls", "terminal": 1})
+        is None
+    )
+    assert "command" in mcptools.validate_args("run_in_terminal", {})
+    assert "empty" in mcptools.validate_args("run_in_terminal", {"command": ""})
+    assert "10000" in mcptools.validate_args(
+        "run_in_terminal", {"command": "x" * 10_001}
+    )
+    assert "at least 1" in mcptools.validate_args(
+        "run_in_terminal", {"command": "ls", "terminal": 0}
+    )
+
+
+# ---- the read_terminal reply -------------------------------------------------
+
+
+def test_terminal_reply_names_each_terminal_and_its_state():
+    reply = mcptools.terminal_reply(
+        [(1, False, "$ echo hi\nhi"), (3, True, "$ sleep 99")], lines=200
+    )
+    assert "── Terminal 1 (idle) ──\n$ echo hi\nhi" in reply
+    assert "── Terminal 3 (command running) ──\n$ sleep 99" in reply
+
+
+def test_terminal_reply_tails_to_the_asked_lines():
+    dump = "\n".join(f"line {i}" for i in range(100))
+    reply = mcptools.terminal_reply([(1, False, dump)], lines=3)
+    assert reply == "── Terminal 1 (idle) ──\nline 97\nline 98\nline 99"
+
+
+def test_terminal_reply_spends_the_tail_on_output_not_blanks():
+    """A VTE dump ends in the screen's unused rows; the tail must not."""
+    dump = "real output\n" + "\n" * 40
+    reply = mcptools.terminal_reply([(1, False, dump)], lines=2)
+    assert reply.endswith("real output")
+
+
+def test_terminal_reply_says_empty_for_a_blank_terminal():
+    reply = mcptools.terminal_reply([(2, False, "")], lines=200)
+    assert reply == "── Terminal 2 (idle) ──\n(empty)"
+
+
+def test_terminal_reply_returns_even_when_headers_alone_blow_the_budget():
+    """The halving loop's termination guard: an empty tail can't shrink, so
+    a dock with enough tabs that the bare headers exceed the frame budget
+    must cut the reply off rather than loop forever."""
+    reply = mcptools.terminal_reply([(n, False, "") for n in range(1, 20_001)], lines=200)
+    frame = mcptools.encode_message(
+        {"id": 1, "result": {"content": [{"type": "text", "text": reply}]}}
+    )
+    assert len(frame) <= mcptools.MAX_LINE
+    assert reply.startswith("── Terminal 1 (idle) ──\n(empty)")
+
+
+def test_terminal_reply_always_fits_one_wire_frame():
+    """An oversize reply doesn't degrade, it closes the shim's connection —
+    so even a pathological dump (control bytes escape six-to-one in JSON)
+    must come back under MAX_LINE once framed."""
+    dump = ("\x07" * 100 + "\n") * mcptools.TERMINAL_MAX_LINES
+    reply = mcptools.terminal_reply(
+        [(n, False, dump) for n in (1, 2, 3)], lines=mcptools.TERMINAL_MAX_LINES
+    )
+    frame = mcptools.encode_message(
+        {"id": 1, "result": {"content": [{"type": "text", "text": reply}]}}
+    )
+    assert len(frame) <= mcptools.MAX_LINE
+    assert "── Terminal 2" in reply  # shrunk, not dropped
 
 
 # ---- the dispatch skeleton ---------------------------------------------------

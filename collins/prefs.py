@@ -134,6 +134,16 @@ _MCP_TOOL_LABELS = {
         N_("Start sessions in the background"),
         N_("start_session — spawn a sibling agent in a new background tab, with a prompt"),
     ),
+    "read_terminal": (
+        N_("Read the terminal panel"),
+        # "everything you typed" is the disclosure: the dump carries the
+        # user's own input, echoed passwords included, not just output.
+        N_("read_terminal — the panel tabs' text and scrollback, your own typing included"),
+    ),
+    "run_in_terminal": (
+        N_("Run commands in the terminal panel"),
+        N_("run_in_terminal — type a command into an idle panel tab (or a new one) and run it"),
+    ),
 }
 
 
