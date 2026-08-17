@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from collins import statusicon, traymodel  # noqa: E402
 
@@ -149,6 +149,14 @@ def _finish(bus, result):
 def main():
     # A display, so the icon lookup behind IconPixmap has a theme to ask.
     Gtk.init()
+
+    # This checkout's icons, ahead of the system theme — the same prepend
+    # App does at startup. Without it the artwork checks only pass on a
+    # machine that has run data/install.sh (CI hasn't).
+    bundled = os.path.join(os.path.dirname(__file__), "..", "data", "icons")
+    if os.path.isdir(bundled):
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        theme.set_search_path([os.path.abspath(bundled), *theme.get_search_path()])
 
     watcher = StubWatcher()
     check("stub watcher on the bus", statusicon.available())
