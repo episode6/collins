@@ -907,25 +907,32 @@ class PanelDock(Adw.Bin):
         if strip is not None:
             strip.close_widget(widget)
 
-    def reveal_page(self, widget) -> None:
+    def reveal_page(self, widget, focus: bool = True) -> None:
         """Front an existing page: select its tab, and show its strip if
         that was hidden. A page already maximized is as fronted as a page
         gets; any *other* one comes down first, since nothing behind the
         overlay can be shown. The stowed terminal comes back to its row —
-        it is off screen, not merely behind something."""
+        it is off screen, not merely behind something.
+
+        *focus* False fronts the page without handing it the keyboard —
+        the same bargain as `open_page`'s, for a page revealed without
+        being asked for."""
         if self._max is not None and self._max.widget is widget:
-            GLib.idle_add(widget.grab_page_focus)
+            if focus:
+                GLib.idle_add(widget.grab_page_focus)
             return
         self.restore_maximized()
         if self._stowed is not None and self._stowed.widget is widget:
             self._unstow()
-            GLib.idle_add(widget.grab_page_focus)
+            if focus:
+                GLib.idle_add(widget.grab_page_focus)
             return
         for strip in self.strips():
             if widget in strip.pages():
-                strip.select_widget(widget)
+                strip.select_widget(widget, focus=focus)
                 self._reveal_strip(strip)
-                GLib.idle_add(widget.grab_page_focus)
+                if focus:
+                    GLib.idle_add(widget.grab_page_focus)
                 return
 
     def _reveal_strip(self, strip) -> None:

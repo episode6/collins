@@ -305,10 +305,15 @@ class PanelStrip(Gtk.Box):
                 position = view.get_n_pages()
             self._view.transfer_page(page, view, position)
 
-    def select_widget(self, widget) -> None:
+    def select_widget(self, widget, focus: bool = True) -> None:
+        """Front *widget*'s tab. *focus* False keeps the selection quiet
+        (see add_page): for fronting a page without being asked, where the
+        keyboard must stay wherever it already is."""
         page = self._find_page(widget)
         if page is not None:
+            self._quiet_focus = not focus
             self._view.set_selected_page(page)
+            self._quiet_focus = False
 
     def close_widget(self, widget) -> None:
         """Close *widget*'s tab through the same funnel its own X uses —
