@@ -485,6 +485,9 @@ msgstr "advertencia: el directorio del proyecto {cwd} ya no existe, iniciando en
 msgid "recreating removed worktree {path}"
 msgstr "recreando el worktree eliminado {path}"
 
+msgid "couldn't create a worktree — starting the session in {cwd} instead"
+msgstr "no se pudo crear un worktree — iniciando la sesión en {cwd}"
+
 msgid "warning: `{cli}` not found in PATH — starting a plain shell"
 msgstr "advertencia: no se encontró `{cli}` en PATH — iniciando una shell simple"
 

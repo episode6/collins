@@ -148,3 +148,58 @@ def test_trust_dir_answers_is_trusted(claude_config):
     trust.trust_dir("/home/u/dev/proj")
     assert trust.is_trusted("/home/u/dev/proj")
     assert trust.is_trusted("/home/u/dev/proj/.claude/worktrees/lively-otter")
+
+
+# -- trust_launch_dir ---------------------------------------------------------
+
+
+def test_trust_launch_dir_writes_the_launch_directory_itself(claude_config):
+    """A project under a trusted parent needs no dialog — but `claude -w`
+    reads the launch directory's own entry and nothing above it, so the
+    inherited answer has to be spelled out there before a worktree launch."""
+    _write(claude_config, {"/home/u/dev": {"hasTrustDialogAccepted": True}})
+
+    assert trust.trust_launch_dir("/home/u/dev/proj") is True
+
+    assert _entry(claude_config, "/home/u/dev/proj") is True
+    assert _entry(claude_config, "/home/u/dev") is True  # the ancestor is left as it was
+
+
+def test_trust_launch_dir_writes_the_repository_of_a_worktree(claude_config):
+    """A session launched from inside a worktree cuts its sibling from the
+    repository, which is where the CLI's check lands — so both are written."""
+    worktree = "/home/u/dev/proj/.claude/worktrees/lively-otter"
+
+    trust.trust_launch_dir(worktree)
+
+    assert _entry(claude_config, worktree) is True
+    assert _entry(claude_config, "/home/u/dev/proj") is True
+
+
+def test_trust_launch_dir_overwrites_a_stale_false(claude_config):
+    """An entry the CLI wrote while trusting an ancestor says False, which is
+    exactly the state that makes `-w` fail. Collins is acting on the trust it
+    inherited; the record catches up with it."""
+    _write(
+        claude_config,
+        {
+            "/home/u/dev": {"hasTrustDialogAccepted": True},
+            "/home/u/dev/proj": {"hasTrustDialogAccepted": False, "lastCost": 2},
+        },
+    )
+
+    trust.trust_launch_dir("/home/u/dev/proj")
+
+    assert _entry(claude_config, "/home/u/dev/proj") is True
+    assert json.loads(claude_config.read_text())["projects"]["/home/u/dev/proj"]["lastCost"] == 2
+
+
+def test_trust_dirs_writes_every_directory_in_one_pass(claude_config):
+    assert trust.trust_dirs(["/home/u/alpha", "", "/home/u/beta"]) is True
+    assert _entry(claude_config, "/home/u/alpha") is True
+    assert _entry(claude_config, "/home/u/beta") is True
+
+
+def test_trust_dirs_ignores_an_empty_list(claude_config):
+    assert trust.trust_dirs(["", ""]) is False
+    assert not claude_config.exists()

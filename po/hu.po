@@ -485,6 +485,9 @@ msgstr "figyelmeztetés: a(z) {cwd} projektkönyvtár már nem létezik, indít�
 msgid "recreating removed worktree {path}"
 msgstr "az eltávolított {path} munkafa újralétrehozása"
 
+msgid "couldn't create a worktree — starting the session in {cwd} instead"
+msgstr "nem sikerült munkafát létrehozni — a munkamenet indítása itt: {cwd}"
+
 msgid "warning: `{cli}` not found in PATH — starting a plain shell"
 msgstr "figyelmeztetés: a `{cli}` nem található a PATH-ban — egyszerű parancsértelmező indítása"
 

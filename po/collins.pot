@@ -1076,6 +1076,11 @@ msgstr ""
 msgid "recreating removed worktree {path}"
 msgstr ""
 
+#: collins/terminal.py:1635
+#, python-brace-format
+msgid "couldn't create a worktree — starting the session in {cwd} instead"
+msgstr ""
+
 #: collins/terminal.py:357
 #, python-brace-format
 msgid "warning: `{cli}` not found in PATH — starting a plain shell"

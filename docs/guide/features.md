@@ -516,6 +516,11 @@ tool list is handed over once at startup.
 - **Advanced new session** (New Session menu): choose a **model**, a
   **permission mode**, or an **extra directory** (`--add-dir`).
 - **Continue** the most recent session in a folder (`claude --continue`).
+- **Worktree launches fall back to the project itself.** With *Start new
+  sessions in a git worktree* on, a launch the agent can't cut a worktree for
+  — a repository with nothing committed yet, say — used to leave the tab at a
+  bare shell prompt. Now the tab says so and starts the session in the project
+  directory instead, so a new session always ends up being a session.
 - **Folder trust is asked once, up front**: the first launch in a project the
   agent doesn't trust yet asks *Do you trust this folder?* before anything
   starts. Decline and nothing happens at all — no tab, no project in the

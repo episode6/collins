@@ -11,6 +11,7 @@ import shlex
 import threading
 import time
 from collections.abc import Callable, Collection
+from dataclasses import replace
 from pathlib import Path
 
 import gi
@@ -99,6 +100,14 @@ _EDITOR_FOLLOW_TICKS = 2
 # that sends it (see inject_prompt). Long enough that the CLI has stopped
 # reading the text as a paste, short enough that nobody watching sees a pause.
 _PROMPT_SUBMIT_MS = 250
+# How a worktree launch that never started is caught (see
+# _check_worktree_launch): poll the screen for the CLI's own error line, from
+# the moment the command is typed until the agent has plainly come up. The
+# failure is printed within a second — the budget only has to outlast a slow
+# machine's shell startup, and a launch still on its feet at the end of it is
+# one that worked.
+_WORKTREE_LAUNCH_POLL_MS = 500
+_WORKTREE_LAUNCH_POLL_TICKS = 30  # ~15s
 # The bracketed-paste control sequences (ESC[200~ … ESC[201~) that tell a
 # terminal app the text between them was pasted, not typed — so its newlines
 # stay literal instead of each submitting. See inject_prompt_unfocused.
@@ -1128,6 +1137,10 @@ class TerminalTab(Gtk.Box):
         self._baselined_dirs: set[str] = set()  # dirs whose pre-existing transcripts are excluded
         self._known_transcripts: set[Path] = set()  # transcripts predating this tab
         self._resolver_armed_at = 0.0  # wall-clock time polling (re)started
+        # A `-w` launch this tab is still watching for an early failure, and
+        # how many times it has looked (see _check_worktree_launch).
+        self._worktree_launch = False
+        self._worktree_launch_ticks = 0
         self._updating = False  # an off-thread transcript parse is in flight
         # Every _RootNameLinks watching a terminal inside this tab — the agent's
         # and one per panel shell — so a re-root can re-point them all. They
@@ -1534,6 +1547,15 @@ class TerminalTab(Gtk.Box):
             )
         else:
             self._initial_command = command
+            # A fresh launch that asked for a worktree is the one launch that
+            # can die before the agent ever draws a frame, and the tab is what
+            # notices (see _check_worktree_launch). Resumes and command
+            # overrides don't cut worktrees, so they have nothing to watch.
+            self._worktree_launch = (
+                session_id is None
+                and self._command_override is None
+                and bool(self._options and self._options.worktree)
+            )
 
         shell = os.environ.get("SHELL") or "/bin/bash"
         argv = [shell]
@@ -1560,6 +1582,62 @@ class TerminalTab(Gtk.Box):
         self._child_pid = pid
         if self._initial_command:
             terminal.feed_child(f"{self._initial_command}\n".encode())
+        if self._worktree_launch:
+            self._worktree_launch_ticks = 0
+            GLib.timeout_add(_WORKTREE_LAUNCH_POLL_MS, self._check_worktree_launch)
+
+    def _check_worktree_launch(self) -> bool:
+        """Catch a worktree launch that never started, and start the session
+        without the worktree instead.
+
+        `claude -w` cuts the worktree before it starts a session, and when it
+        can't it prints one line and exits (see
+        Provider.worktree_launch_failed). Nothing downstream notices: the
+        shell is alive, so the tab stays open; no session is ever created, so
+        the transcript resolver polls on forever and the sidebar keeps a "New
+        Thread" placeholder that never resolves. All the user sees is a shell
+        prompt where their session should be.
+
+        The fallback is the session they asked for, minus the part that
+        failed: the same command in the same directory, without the worktree
+        flag. It is typed into the same shell, visibly, so what happened
+        reads off the terminal itself.
+
+        Two things have to be true before anything is typed: the error is on
+        screen, and the CLI is not running. The second is what makes a false
+        positive harmless — a screen that merely quotes the error while an
+        agent is up (its own scrollback discussing this very code, say) is
+        never typed into.
+        """
+        if self.get_root() is None or not self._worktree_launch:
+            return GLib.SOURCE_REMOVE
+        self._worktree_launch_ticks += 1
+        if self._worktree_launch_ticks > _WORKTREE_LAUNCH_POLL_TICKS:
+            self._worktree_launch = False  # long since up; nothing failed
+            return GLib.SOURCE_REMOVE
+        if not self.provider.worktree_launch_failed(self._visible_screen_text()):
+            return GLib.SOURCE_CONTINUE
+        if self._agent_is_running():
+            return GLib.SOURCE_CONTINUE
+        self._worktree_launch = False
+        self._relaunch_without_worktree()
+        return GLib.SOURCE_REMOVE
+
+    def _relaunch_without_worktree(self) -> None:
+        """Type the same new-session command again with the worktree dropped.
+        The tab's own options lose the flag too, so anything that later asks
+        what this session was started with is told what actually ran."""
+        self._options = replace(self._options, worktree=False) if self._options else None
+        command = self.provider.new_command(self._options)
+        if command is None:  # the CLI vanished from PATH between the two launches
+            return
+        self.feed_message(
+            _("couldn't create a worktree — starting the session in {cwd} instead").format(
+                cwd=display_path(self._cwd or "")
+            )
+        )
+        self._initial_command = command
+        self.terminal.feed_child(f"{command}\n".encode())
 
     def _on_child_exited(self, terminal: Vte.Terminal, status: int) -> None:
         self.emit("process-exited", status)
@@ -3950,6 +4028,23 @@ class TerminalTab(Gtk.Box):
             and self.takes_prompt()
         )
 
+    def _visible_screen_text(self) -> str:
+        """Everything on the terminal's visible screen, as plain text.
+
+        Anchored to the cursor rather than to the scroll position, like the
+        other screen readers here: what the user has scrolled back to never
+        changes what the provider is shown. "" with no child running.
+        """
+        if self._child_pid is None:
+            return ""
+        _, cursor_row = self.terminal.get_cursor_position()
+        top_row = max(0, cursor_row - self.terminal.get_row_count() + 1)
+        screen = self.terminal.get_text_range_format(
+            Vte.Format.TEXT, top_row, 0, cursor_row, self.terminal.get_column_count()
+        )
+        text = screen[0] if isinstance(screen, tuple) else screen
+        return text or ""
+
     def worktree_exit_prompt_keystrokes(self) -> str | None:
         """Keystrokes that accept the agent's "leaving a worktree" dialog if
         it's showing right now, or None if it isn't (see
@@ -3958,13 +4053,7 @@ class TerminalTab(Gtk.Box):
         drawn at the input prompt."""
         if self._child_pid is None:
             return None
-        _, cursor_row = self.terminal.get_cursor_position()
-        top_row = max(0, cursor_row - self.terminal.get_row_count() + 1)
-        screen = self.terminal.get_text_range_format(
-            Vte.Format.TEXT, top_row, 0, cursor_row, self.terminal.get_column_count()
-        )
-        text = screen[0] if isinstance(screen, tuple) else screen
-        return self.provider.worktree_exit_prompt(text or "")
+        return self.provider.worktree_exit_prompt(self._visible_screen_text())
 
     def screen_first_column(self) -> tuple[tuple[str, ...], tuple[int, int]] | None:
         """The first character of each visible screen row ("" for a blank
