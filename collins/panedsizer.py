@@ -115,9 +115,23 @@ class PanedSizer(GObject.Object):
         """Record the end child's size for the current key. Skipped while an
         apply is still queued — the value it would read is a stale layout's,
         and saving it would corrupt the remembered size the apply is about
-        to use (the first-show width bug)."""
-        if not self._occupied() or self._apply_pending:
+        to use (the first-show width bug).
+
+        Skipped, that is, unless the user is dragging the divider right
+        now: a drag inside the apply/settle window is still theirs to make,
+        and the settle checkpoints alone can miss one made quickly between
+        them — leaving the panel at the dragged size but the size never
+        recorded (so never persisted app-wide). A live gesture is proof the
+        position isn't a clamp's, so the apply chain cedes here exactly as
+        a checkpoint would have: cancel it, open the gate, and fall through
+        to record."""
+        if not self._occupied():
             return
+        if self._apply_pending:
+            if not self._drag_active():
+                return
+            self._apply_seq += 1
+            self._apply_pending = False
         key = self._key()
         size = self._memory.record(key, self._total(), self._mirrored())
         if size is None:
