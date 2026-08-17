@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-16. Full change history: git log for this file.
+# fork. Last modified: 2026-08-17. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -1314,8 +1314,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     def restore_last_session(self) -> None:
         """Reopen the session that was in the active tab when the app was last
-        closed. Called only for a launch's first window; the store scans in
-        the background, so the open may wait for its first refresh."""
+        closed — only when the opt-in setting says so; by default a launch
+        starts with no session open. Called only for a launch's first window;
+        the store scans in the background, so the open may wait for its first
+        refresh."""
+        if not self.state.get_setting("restore_last_session"):
+            return
         session_id = self.state.get_setting("last_active_session")
         if not session_id:
             return

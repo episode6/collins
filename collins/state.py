@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-16. Full change history: git log for this file.
+# fork. Last modified: 2026-08-17. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -167,6 +167,11 @@ DEFAULT_SETTINGS = {
     "window_height": 800,
     "window_maximized": False,
     "last_active_session": "",  # session in the active tab when the last window closed
+    # Whether a launch reopens last_active_session. Off by default: launching
+    # into an old session resumes it, and a resume the user didn't ask for is
+    # a surprise. The id above is recorded either way, so switching this on
+    # works from the very next launch.
+    "restore_last_session": False,
     "editor_width": 0,  # last-set editor panel width in px (0 = default fraction)
     "editor_style_scheme": "",  # GtkSource style scheme id; "" = follow the app's light/dark scheme
     "editor_font": "",  # empty = system monospace

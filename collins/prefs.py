@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-16. Full change history: git log for this file.
+# fork. Last modified: 2026-08-17. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -683,6 +683,21 @@ class PreferencesDialog(Adw.Dialog):
         lang_group.add(_searchable(self._lang_expander, *(label for _c, label in LANGUAGES)))
         page.add(lang_group)
 
+        startup_group = _SearchableGroup(title=_("Startup"))
+        self._restore_session_row = Adw.SwitchRow(
+            title=_("Reopen the last session"),
+            subtitle=_(
+                "Open the session that was active when the app was last "
+                "closed. Off, the app launches with no session open"
+            ),
+        )
+        self._restore_session_row.set_active(bool(state.get_setting("restore_last_session")))
+        self._restore_session_row.connect("notify::active", self._on_restore_session_changed)
+        startup_group.add(
+            _searchable(self._restore_session_row, "launch", "restore", "resume", "startup")
+        )
+        page.add(startup_group)
+
         new_sessions_group = _SearchableGroup(title=_("New sessions"))
         self._worktree_row = Adw.SwitchRow(
             title=_("Start new sessions in a git worktree"),
@@ -1301,6 +1316,11 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_worktree_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("worktree_new_sessions", row.get_active())
+        self._on_change()
+
+    def _on_restore_session_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        # Only ever read at startup, so this takes effect from the next launch.
+        self._state.set_setting("restore_last_session", row.get_active())
         self._on_change()
 
     # -- footer apps ---------------------------------------------------------
