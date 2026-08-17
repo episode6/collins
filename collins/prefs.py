@@ -745,6 +745,22 @@ class PreferencesDialog(Adw.Dialog):
         )
         page.add(running_group)
 
+        archive_group = _SearchableGroup(title=_("Archiving"))
+        self._remote_archive_row = Adw.SwitchRow(
+            title=_("Archive on claude.ai too"),
+            subtitle=_(
+                "A session that also appears on claude.ai is archived and "
+                "restored there along with the toggle here; best-effort, "
+                "archiving locally never waits on it"
+            ),
+        )
+        self._remote_archive_row.set_active(bool(state.get_setting("archive_on_claude_ai")))
+        self._remote_archive_row.connect("notify::active", self._on_remote_archive_changed)
+        archive_group.add(
+            _searchable(self._remote_archive_row, "claude.ai", "remote", "web", "sync")
+        )
+        page.add(archive_group)
+
         bg_group = _SearchableGroup(title=_("Background sessions"))
         self._bg_poll_row = Adw.SwitchRow(
             title=_("Poll for background sessions"),
@@ -1253,6 +1269,11 @@ class PreferencesDialog(Adw.Dialog):
     def _on_running_behavior_changed(self, row: Adw.ComboRow, _pspec, key: str) -> None:
         self._state.set_setting(key, _RUNNING_BEHAVIORS[row.get_selected()][0])
         self._on_change()
+
+    def _on_remote_archive_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        # Read at each archive, so it takes effect immediately; no listener
+        # needs an apply nudge.
+        self._state.set_setting("archive_on_claude_ai", row.get_active())
 
     def _on_bg_poll_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("background_status_poll", row.get_active())

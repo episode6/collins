@@ -338,6 +338,15 @@ msgstr "À la fermeture avec des sessions en cours"
 msgid "Closing a window while agent sessions are still running"
 msgstr "Fermer une fenêtre alors que des sessions d’agent sont encore en cours"
 
+msgid "Archiving"
+msgstr "Archivage"
+
+msgid "Archive on claude.ai too"
+msgstr "Archiver aussi sur claude.ai"
+
+msgid "A session that also appears on claude.ai is archived and restored there along with the toggle here; best-effort, archiving locally never waits on it"
+msgstr "Une session qui apparaît aussi sur claude.ai y est archivée et restaurée avec la bascule d’ici ; au mieux — l’archivage local ne l’attend jamais"
+
 msgid "Ask"
 msgstr "Demander"
 

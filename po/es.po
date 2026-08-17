@@ -338,6 +338,15 @@ msgstr "Al salir con sesiones en ejecución"
 msgid "Closing a window while agent sessions are still running"
 msgstr "Cerrar una ventana mientras las sesiones del agente siguen en ejecución"
 
+msgid "Archiving"
+msgstr "Archivado"
+
+msgid "Archive on claude.ai too"
+msgstr "Archivar también en claude.ai"
+
+msgid "A session that also appears on claude.ai is archived and restored there along with the toggle here; best-effort, archiving locally never waits on it"
+msgstr "Una sesión que también aparece en claude.ai se archiva y se restaura allí junto con el conmutador de aquí; según lo posible — archivar localmente nunca espera a ello"
+
 msgid "Ask"
 msgstr "Preguntar"
 

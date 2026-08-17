@@ -553,6 +553,13 @@ def test_restore_last_session_defaults_off(app_state):
     assert app_state.AppState().get_setting("restore_last_session") is True
 
 
+def test_archive_on_claude_ai_defaults_on(app_state):
+    state = app_state.AppState()
+    assert state.get_setting("archive_on_claude_ai") is True  # opt-out, not opt-in
+    state.set_setting("archive_on_claude_ai", False)
+    assert app_state.AppState().get_setting("archive_on_claude_ai") is False
+
+
 def test_window_geometry_roundtrip(app_state):
     state = app_state.AppState()
     state.update_settings({"window_width": 1600, "window_height": 900, "window_maximized": True})
