@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
+  <!--
+  Panel variant of com.episode6.Collins.svg (original artwork for the ghackett
+  fork), for the status icon and nothing else. Same Tom Collins, redrawn for
+  22 pixels instead of scaled down to them.
+
+  Keep this comment INSIDE the root element: gdk-pixbuf only recognizes an
+  SVG when the <svg> tag appears within its sniff buffer, and a long pre-root
+  comment pushes it out, leaving the icon blank.
+
+  Why a second file rather than the app icon at a smaller size: the app icon
+  is drawn on a 128 grid with 5-6 unit strokes, which land on about one pixel
+  at panel size and smear across two. This one is drawn on a 22 grid — the
+  size a panel actually asks for — with 2 unit strokes on whole-pixel edges,
+  so it rasterizes 1:1 at 22 and doubles cleanly to 44. Detail that cannot
+  survive the size is gone rather than shrunk: no tile (the panel is the
+  background), no second ice cube, no glass highlight.
+
+  Dropping the tile costs the icon its own background, and a cream glass on a
+  light panel is a cream glass on nothing. So every light stroke is laid over
+  a slightly wider dark one: on a dark panel the keyline falls into the
+  background and is not there, on a light panel it is the edge that holds the
+  shape. One artwork that reads on both beats a pair chosen from a colour
+  scheme that describes the app's windows, not the shell's panel.
+  -->
+
+  <!-- keylines: the same shapes, a shade wider, under everything -->
+  <g stroke="#262320" fill="none" opacity="0.5" stroke-linecap="round">
+    <line x1="14.3" y1="2.2" x2="11.6" y2="8" stroke-width="2.6"/>
+    <rect x="6" y="3" width="10" height="16" rx="2" stroke-width="3"/>
+  </g>
+
+  <!-- straw: clears the rim by a hair, no more — at 22px a longer overhang
+       is a horn on the corner rather than a straw -->
+  <line x1="14.3" y1="2.2" x2="11.6" y2="8" stroke="#EDE9E1" stroke-width="1.8"
+        stroke-linecap="round"/>
+
+  <!-- drink -->
+  <rect x="7" y="9" width="8" height="9" rx="1" fill="#D97757"/>
+
+  <!-- cursor-block ice cube -->
+  <rect x="8" y="10.2" width="3.6" height="2.6" rx="0.6" fill="#EDE9E1"/>
+
+  <!-- glass: 2 wide on whole-pixel edges, so 5..17 and 2..20 stay crisp -->
+  <rect x="6" y="3" width="10" height="16" rx="2" fill="none" stroke="#EDE9E1"
+        stroke-width="2"/>
+</svg>

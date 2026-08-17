@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
+  <!--
+  Debug-build panel variant (original artwork for the ghackett fork): the
+  same 22-grid glass as com.episode6.Collins-panel.svg with the debug build's
+  lime pour, and the bug reduced to the one coral mark that survives 22
+  pixels — a body on the rim, no legs and no wings.
+
+  Keep this comment INSIDE the root element: gdk-pixbuf only recognizes an
+  SVG when the <svg> tag appears within its sniff buffer, and a long pre-root
+  comment pushes it out, leaving the icon blank.
+
+  Keylines under the light strokes for the same reason as the release
+  variant: with no tile behind it, a cream glass needs a dark edge to survive
+  a light panel, and the edge disappears into a dark one.
+  -->
+
+  <!-- keylines: the same shapes, a shade wider, under everything -->
+  <g stroke="#262320" fill="none" opacity="0.5" stroke-linecap="round">
+    <line x1="14.3" y1="2.2" x2="11.6" y2="8" stroke-width="2.6"/>
+    <rect x="6" y="3" width="10" height="16" rx="2" stroke-width="3"/>
+  </g>
+
+  <!-- straw: clears the rim by a hair, no more — at 22px a longer overhang
+       is a horn on the corner rather than a straw -->
+  <line x1="14.3" y1="2.2" x2="11.6" y2="8" stroke="#EDE9E1" stroke-width="1.8"
+        stroke-linecap="round"/>
+
+  <!-- drink -->
+  <rect x="7" y="9" width="8" height="9" rx="1" fill="#7FB05A"/>
+
+  <!-- cursor-block ice cube -->
+  <rect x="8" y="10.2" width="3.6" height="2.6" rx="0.6" fill="#EDE9E1"/>
+
+  <!-- glass: 2 wide on whole-pixel edges, so 5..17 and 2..20 stay crisp -->
+  <rect x="6" y="3" width="10" height="16" rx="2" fill="none" stroke="#EDE9E1"
+        stroke-width="2"/>
+
+  <!-- the bug, astride the rim: centred on the top edge so it reads as
+       perched on the glass rather than floating beside it, and left of the
+       straw so the two marks do not merge -->
+  <ellipse cx="8.6" cy="3" rx="2.1" ry="1.5" fill="#D97757"/>
+</svg>

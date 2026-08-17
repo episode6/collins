@@ -201,9 +201,8 @@ def main():
             GLib.Variant("(ss)", (statusicon.ITEM_INTERFACE, name)), "(v)",
         )[0]
 
-    def menu_call(method, params, reply_type):
-        return call(bus, statusicon.MENU_PATH, statusicon.MENU_INTERFACE, method,
-                    params, reply_type)
+    def menu_call(method, params, reply_type, path=statusicon.MENU_PATH):
+        return call(bus, path, statusicon.MENU_INTERFACE, method, params, reply_type)
 
     check("Status is Active with tabs open", item_prop("Status") == "Active",
           item_prop("Status"))
@@ -213,6 +212,13 @@ def main():
     tooltip = item_prop("ToolTip")[2]
     check("tooltip counts the sessions", tooltip == "Collins — 2 sessions, 1 working",
           tooltip)
+    # What a screen reader reads in place of the artwork. Both halves carry it:
+    # the host takes the Attention one while the item is asking for attention
+    # and the Icon one the rest of the time, and the counts are worth having
+    # either way.
+    for prop in ("IconAccessibleDesc", "AttentionAccessibleDesc"):
+        check(f"{prop} reads the tooltip's sentence", item_prop(prop) == tooltip,
+              item_prop(prop))
 
     # Introspection is how the host decides a double click has somewhere to go.
     xml = call(bus, statusicon.ITEM_PATH, "org.freedesktop.DBus.Introspectable",
@@ -221,6 +227,16 @@ def main():
     iface = node.lookup_interface(statusicon.ITEM_INTERFACE)
     check("Activate is introspectable", iface is not None and
           iface.lookup_method("Activate") is not None)
+
+    # The artwork is the panel variant, not the launcher's: the app icon's
+    # strokes land on about a pixel at 22 and smear across two.
+    check("the panel variant is what gets exported",
+          statusicon.panel_icon_name("com.episode6.Collins")
+          == "com.episode6.Collins-panel",
+          statusicon.panel_icon_name("com.episode6.Collins"))
+    check("an app with no panel variant keeps its own icon",
+          statusicon.panel_icon_name("com.episode6.Collins.NotAnIcon")
+          == "com.episode6.Collins.NotAnIcon")
 
     pixmaps = item_prop("IconPixmap")
     check("icon exports a pixmap per size", len(pixmaps) == len(statusicon.ICON_SIZES),
@@ -253,8 +269,28 @@ def main():
     check("separators are typed", types == [
         "separator" if e.separator else None for e in expected], f"{types}")
 
+    # -- the dock's quicklist ----------------------------------------------
+
+    # The same rows, filtered to the sessions: the dock grafts what it finds
+    # on to a launcher menu that already has New Window and Quit of its own.
+    _qrev, qlayout = menu_call("GetLayout", GLib.Variant("(iias)", (0, -1, [])),
+                               "(u(ia{sv}av))", statusicon.QUICKLIST_PATH)
+    qlabels = [c[1].get("label") for c in qlayout[2]]
+    session_labels = [statusicon.menu_label(e) for e in expected
+                      if e.action == traymodel.ACTION_FOCUS]
+    check("the quicklist carries the session rows", qlabels == session_labels, f"{qlabels}")
+    check("the quicklist carries nothing else", len(qlabels) == 2, f"{qlabels}")
+
     focus_id = next(e.id for e in expected if e.action == traymodel.ACTION_FOCUS
                     and e.target == "s-beta")
+    # An id means the same row on both menus, so a click on the dock's copy
+    # lands in the same place as a click on the item's.
+    call(bus, statusicon.QUICKLIST_PATH, statusicon.MENU_INTERFACE, "Event",
+         GLib.Variant("(isvu)", (focus_id, "clicked", GLib.Variant("i", 0), 0)))
+    check("a quicklist row focuses its session",
+          spin(lambda: ("focus", "s-beta") in clicks), str(clicks))
+    clicks.clear()
+
     call(bus, statusicon.MENU_PATH, statusicon.MENU_INTERFACE, "Event",
          GLib.Variant("(isvu)", (focus_id, "clicked", GLib.Variant("i", 0), 0)))
     check("a session row focuses its session", spin(lambda: ("focus", "s-beta") in clicks),
@@ -278,6 +314,14 @@ def main():
     icons = []
     bus.signal_subscribe(BUS_NAME, statusicon.ITEM_INTERFACE, "NewIcon", statusicon.ITEM_PATH,
                          None, Gio.DBusSignalFlags.NONE, lambda *a: icons.append(True))
+    # Announced by name, because no other signal refreshes them: the host maps
+    # NewIcon on to IconAccessibleDesc, but looks for the Attention one under a
+    # name it does not have and so never re-Gets it.
+    descs = []
+    for signal in ("NewIconAccessibleDesc", "NewAttentionAccessibleDesc"):
+        bus.signal_subscribe(BUS_NAME, statusicon.ITEM_INTERFACE, signal,
+                             statusicon.ITEM_PATH, None, Gio.DBusSignalFlags.NONE,
+                             lambda *a, name=signal: descs.append(name))
     dock = []
     bus.signal_subscribe(BUS_NAME, statusicon.LAUNCHER_INTERFACE, "Update",
                          statusicon.LAUNCHER_PATH, None, Gio.DBusSignalFlags.NONE,
@@ -293,6 +337,11 @@ def main():
           str(seen))
     check("Status reads back NeedsAttention",
           item_prop("Status") == traymodel.STATUS_ATTENTION, item_prop("Status"))
+    check("both accessible descriptions are announced",
+          spin(lambda: len(set(descs)) == 2), str(descs))
+    check("the accessible description picks up the unread count",
+          item_prop("AttentionAccessibleDesc") == view().tooltip,
+          item_prop("AttentionAccessibleDesc"))
 
     # -- the badge ---------------------------------------------------------
 
@@ -310,6 +359,8 @@ def main():
           str(dock))
     check("the dock broadcast names the desktop id", all(
         uri == "application://com.episode6.Collins.desktop" for uri, _p in dock), str(dock))
+    check("the dock broadcast points at the quicklist", all(
+        p.get("quicklist") == statusicon.QUICKLIST_PATH for _u, p in dock), str(dock))
 
     # A tab that hasn't resolved its session id still holds the item Active.
     state["sessions"] = []

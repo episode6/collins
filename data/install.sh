@@ -24,7 +24,10 @@ for old_id in io.github.r4nd3l.AgentSessionManager io.github.ghackett.Collins; d
         "$ICON_DIR/$old_id.svg" "$METAINFO_DIR/$old_id.metainfo.xml"
 done
 
-cp "$DATA_DIR/icons/$APP_ID.svg" "$DATA_DIR/icons/$APP_ID.Debug.svg" "$ICON_DIR/"
+# ...-panel.svg is the status icon's artwork, drawn for 22px (see statusicon.py)
+cp "$DATA_DIR/icons/$APP_ID.svg" "$DATA_DIR/icons/$APP_ID.Debug.svg" \
+   "$DATA_DIR/icons/$APP_ID-panel.svg" "$DATA_DIR/icons/$APP_ID.Debug-panel.svg" \
+   "$ICON_DIR/"
 cp "$DATA_DIR/icons/hicolor/scalable/actions/"*.svg "$ACTION_ICON_DIR/"
 cp "$DATA_DIR/$APP_ID.metainfo.xml" "$METAINFO_DIR/"
 

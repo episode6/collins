@@ -43,7 +43,10 @@ mkdir -p "$BUILD/usr/share/applications" \
 # system-wide desktop entry: binary on PATH, no hardcoded working directory
 sed -e "s|^Exec=.*|Exec=$PKG|" -e "/^Path=/d" \
     "$ROOT/data/$APP_ID.desktop" > "$BUILD/usr/share/applications/$APP_ID.desktop"
-cp "$ROOT/data/icons/$APP_ID.svg" "$BUILD/usr/share/icons/hicolor/scalable/apps/"
+# ...-panel.svg is the status icon's artwork, drawn for 22px (see statusicon.py);
+# the Debug variants are a source-checkout thing and stay out of the package.
+cp "$ROOT/data/icons/$APP_ID.svg" "$ROOT/data/icons/$APP_ID-panel.svg" \
+   "$BUILD/usr/share/icons/hicolor/scalable/apps/"
 cp "$ROOT/data/icons/hicolor/scalable/actions/"*.svg \
     "$BUILD/usr/share/icons/hicolor/scalable/actions/"
 cp "$ROOT/data/$APP_ID.metainfo.xml" "$BUILD/usr/share/metainfo/"
