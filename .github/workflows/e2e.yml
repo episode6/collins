@@ -23,7 +23,12 @@ jobs:
       # (dbus-run-session, one per check, provided by the runner).
       - run: >
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
-          python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91-gtk4
+          python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
           gir1.2-gtksource-5 gir1.2-gdkpixbuf-2.0
           xvfb xauth dbus fonts-dejavu-core git
+      # The GTK4 VTE gir was renamed between Ubuntu releases: noble ships it
+      # as gir1.2-vte-3.91, newer releases as gir1.2-vte-3.91-gtk4.
+      - run: >
+          sudo apt-get install -y --no-install-recommends gir1.2-vte-3.91-gtk4
+          || sudo apt-get install -y --no-install-recommends gir1.2-vte-3.91
       - run: xvfb-run -a -s "-screen 0 1920x1200x24" python3 scripts/run_e2e.py
