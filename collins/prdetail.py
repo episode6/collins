@@ -49,6 +49,12 @@ log = logging.getLogger(__name__)
 _GH_DETAIL_FIELDS = (
     "number,url,title,state,isDraft,body,author,createdAt,baseRefName,"
     "headRefName,additions,deletions,changedFiles,labels,comments,reviews,"
+    # Nothing on the page renders this one: it is here for `absorb`, which
+    # reads the reply as a status fetch — and the page's own merge button is
+    # what follows it (practions.header_actions). A field the summary layer
+    # asks for and this reply doesn't carry comes back as "not enabled" and
+    # overwrites whatever the last real fetch knew.
+    "autoMergeRequest,"
     "statusCheckRollup,mergeable,files"
 )
 

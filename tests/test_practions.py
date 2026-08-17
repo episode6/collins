@@ -9,6 +9,7 @@ from collins.practions import (
     CI_PROMPT,
     CLOSE,
     COMMENTS,
+    DISABLE_AUTO_MERGE,
     FIX_ALL,
     FIX_ALL_PROMPT,
     FIX_CI,
@@ -128,6 +129,27 @@ def test_a_closed_pr_offers_nothing():
     """Closed, not merged: whatever it was for was abandoned, so there is no
     "the next one" to offer."""
     assert _keys(_pr(state="CLOSED"), takes_prompt=True, has_changes=True) == []
+
+
+def test_a_pr_github_is_holding_trades_its_merge_for_the_way_out():
+    """Auto-merge is already on: asking for it again says nothing, so the one
+    thing left to offer about landing this PR is calling it off."""
+    keys = _keys(_pr(passed=1, pending=2, auto_merge=True))
+    assert keys == [DISABLE_AUTO_MERGE, REVIEW]
+
+
+def test_the_way_out_is_offered_however_the_checks_are_doing():
+    """Auto-merge outranks what the checks say: a green PR GitHub is holding is
+    one it is about to land by itself, not one to offer a second merge for."""
+    assert _keys(_pr(auto_merge=True))[0] == DISABLE_AUTO_MERGE
+    assert _keys(_pr(passed=1, failed=1, auto_merge=True))[0] == DISABLE_AUTO_MERGE
+
+
+def test_a_settled_pr_is_never_offered_the_way_out():
+    """GitHub keeps reporting the auto-merge request that landed a PR; there is
+    nothing left to cancel."""
+    assert DISABLE_AUTO_MERGE not in _keys(_pr(state="MERGED", auto_merge=True))
+    assert DISABLE_AUTO_MERGE not in _keys(_pr(state="CLOSED", auto_merge=True))
 
 
 def test_a_conflicting_pr_trades_its_merge_for_a_rebase():
@@ -368,6 +390,13 @@ def test_a_green_pr_has_nothing_left_to_wait_for():
     assert _header(_pr()) == [MERGE]
 
 
+def test_the_button_switches_once_github_is_holding_the_pr():
+    """The state the button reads back to the user: auto-merge is on, and the
+    press that is left is the one that turns it off."""
+    assert _header(_pr(passed=1, pending=2, auto_merge=True)) == [DISABLE_AUTO_MERGE]
+    assert _header(_pr(auto_merge=True)) == [DISABLE_AUTO_MERGE]
+
+
 def test_nothing_is_offered_where_the_menu_offers_no_merge_either():
     """A conflicting PR, a settled one, and one nothing has been fetched for:
     the bar goes away rather than showing buttons GitHub would refuse."""
@@ -381,14 +410,25 @@ def test_the_page_shows_one_button_and_it_is_the_menu_s_own_answer():
     """The page never offers a choice the menu doesn't: whatever it shows is
     `actions_for`'s first item, so the two can't recommend different things
     about the same PR."""
-    for pr in (_pr(state="DRAFT"), _pr(), _pr(passed=1, pending=2), _pr(passed=1, failed=1)):
+    for pr in (
+        _pr(state="DRAFT"),
+        _pr(),
+        _pr(passed=1, pending=2),
+        _pr(passed=1, failed=1),
+        _pr(passed=1, pending=2, auto_merge=True),
+    ):
         assert _header(pr) == _keys(pr)[:1]
 
 
 def test_the_page_button_has_a_word_to_wear():
     """It shares a line with the view switcher, so it carries a short label
     for the button and keeps the full sentence for its tooltip."""
-    for pr in (_pr(state="DRAFT"), _pr(), _pr(passed=1, pending=2)):
+    for pr in (
+        _pr(state="DRAFT"),
+        _pr(),
+        _pr(passed=1, pending=2),
+        _pr(pending=2, auto_merge=True),
+    ):
         for action in practions.header_actions(pr):
             assert action.short and len(action.short) <= len(action.label)
             assert action.tooltip
@@ -398,6 +438,15 @@ def test_the_merge_still_asks_first_whichever_one_it_is():
     for pr in (_pr(pending=1), _pr()):
         (action,) = practions.header_actions(pr)
         assert action.confirm is not None
+
+
+def test_calling_auto_merge_off_never_asks():
+    """Nothing lands and nothing is lost — the PR goes back to sitting where it
+    was, and the same button offers auto-merge again on the next fetch."""
+    (action,) = practions.header_actions(_pr(pending=2, auto_merge=True))
+    assert action.key == DISABLE_AUTO_MERGE
+    assert action.confirm is None
+    assert practions.confirmation(action) is None
 
 
 def test_merging_past_unfinished_checks_says_so_when_it_asks():
@@ -450,6 +499,17 @@ def test_merging_and_archiving_only_ever_stands_beside_the_merge_itself():
     assert MERGE_ARCHIVE not in _alternates(_pr(passed=1, failed=1))
     assert MERGE_ARCHIVE not in _alternates(_pr(state="DRAFT"))
     assert MERGE_ARCHIVE not in _alternates(_pr(mergeable="CONFLICTING"))
+
+
+def test_the_merge_moves_behind_the_button_that_stopped_offering_it():
+    """With auto-merge on, the button says "Disable Auto-Merge" — so "land it
+    now" lives on the right-click rather than being unreachable without turning
+    auto-merge off first."""
+    assert _alternates(_pr(pending=2, auto_merge=True)) == [MERGE, MERGE_ARCHIVE, CLOSE]
+    (merge, _archive, _close) = practions.alternate_actions(
+        _pr(pending=2, auto_merge=True), True
+    )
+    assert merge.confirm is not None  # the immediate merge, dialog and all
 
 
 def test_archiving_is_only_offered_where_a_session_is_there_to_archive():
@@ -621,6 +681,14 @@ def test_merge_names_a_method_and_auto_merge_adds_the_flag(gh):
     perform(AUTO_MERGE, _pr(pending=1))
     assert calls[0] == ["pr", "merge", URL, "--squash"]
     assert calls[1] == ["pr", "merge", URL, "--squash", "--auto"]
+
+
+def test_calling_auto_merge_off_names_no_method(gh):
+    """It cancels a merge request rather than making one, and gh refuses
+    --disable-auto beside a method flag."""
+    calls, _serve = gh
+    assert perform(DISABLE_AUTO_MERGE, _pr(pending=1, auto_merge=True)) is None
+    assert calls == [["pr", "merge", URL, "--disable-auto"]]
 
 
 def test_merge_and_archive_is_the_plain_merge_as_far_as_gh_is_concerned(gh):

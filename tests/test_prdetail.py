@@ -143,6 +143,17 @@ def test_the_summary_gets_the_full_status_shaping():
     assert pr.unresolved is True  # the newest comment is someone else's
 
 
+def test_the_view_reply_asks_for_auto_merge_too():
+    """Nothing on the page renders it, but the reply is absorbed as a status
+    fetch — a field the summary layer reads and this one doesn't ask for comes
+    back as "not enabled" and overwrites what the last real fetch knew."""
+    assert "autoMergeRequest" in prdetail._GH_DETAIL_FIELDS
+    detail = parse_detail(URL, _reply(), DIFF)
+    assert detail.summary.auto_merge is False  # the recorded reply has none on
+    with_auto = _reply(autoMergeRequest={"enabledBy": {"login": "ghackett"}})
+    assert parse_detail(URL, with_auto, DIFF).summary.auto_merging is True
+
+
 def test_the_header_fields_arrive_whole():
     detail = parse_detail(URL, _reply(), DIFF)
     assert detail.body.startswith("The strip's tabs now drag.")
