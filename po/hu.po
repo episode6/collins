@@ -338,6 +338,15 @@ msgstr "Kilépéskor futó munkamenetekkel"
 msgid "Closing a window while agent sessions are still running"
 msgstr "Ablak bezárása, miközben ügynök-munkamenetek még futnak"
 
+msgid "Archiving"
+msgstr "Archiválás"
+
+msgid "Archive on claude.ai too"
+msgstr "Archiválás a claude.ai-n is"
+
+msgid "A session that also appears on claude.ai is archived and restored there along with the toggle here; best-effort, archiving locally never waits on it"
+msgstr "A claude.ai-n is megjelenő munkamenet ott is archiválódik és visszaáll az itteni kapcsolóval együtt; csak kísérlet — a helyi archiválás sosem vár rá"
+
 msgid "Ask"
 msgstr "Rákérdezés"
 

@@ -103,6 +103,13 @@ DEFAULT_SETTINGS = {
     # tab has to close: ask (the dialog, as before) | exit | background.
     "archive_running_session": "ask",  # archiving a session whose tab is busy
     "quit_with_running_sessions": "ask",  # closing a window while sessions run
+    # Mirror the archive toggle to claude.ai: a session that has a page there
+    # (it was remote-controlled, so its transcript names a remote session id)
+    # is archived and restored there too, best-effort on a background thread —
+    # the local toggle never waits on it and never fails with it (see
+    # remotearchive.py). On by default; sessions with no remote page cost one
+    # transcript scan and no network.
+    "archive_on_claude_ai": True,
     "show_tab_bar": True,  # tab bar visibility (tabs keep working underneath)
     # A StatusNotifierItem in the top bar: presence, and a menu that jumps to
     # any open session (see statusicon.py). On by default — an icon nobody

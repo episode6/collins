@@ -49,6 +49,46 @@ def test_restore_many_undoes_an_archive(store):
     assert store.archived_sessions() == []
 
 
+def test_archive_toggle_syncs_to_claude_ai(store, monkeypatch):
+    # The user toggle mirrors to claude.ai: archive and restore each hand the
+    # affected transcripts to remotearchive on their way out (which then does
+    # its best-effort work off-thread; here the handoff is the contract).
+    calls = []
+
+    def record(paths, archived):
+        calls.append((list(paths), archived))
+
+    monkeypatch.setattr(store_mod.remotearchive, "sync_archived_async", record)
+    session = store._last_sessions[0]
+    store.set_archived(session.session_id, True)
+    assert calls == [([session.jsonl_path], True)]
+
+    store.restore_many([session.session_id])
+    assert calls[-1] == ([session.jsonl_path], False)
+
+
+def test_archive_sync_respects_the_opt_out(store, monkeypatch):
+    monkeypatch.setattr(
+        store_mod.remotearchive,
+        "sync_archived_async",
+        lambda paths, archived: pytest.fail("opted out — nothing should sync"),
+    )
+    store.state.set_setting("archive_on_claude_ai", False)
+    store.set_archived(store._last_sessions[0].session_id, True)
+
+
+def test_archive_sync_failure_never_blocks_the_toggle(store, monkeypatch):
+    # remotearchive itself never raises, but even if the handoff did, the
+    # local archive must already be done and stay done.
+    def explode(paths, archived):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(store_mod.remotearchive, "sync_archived_async", explode)
+    session_id = store._last_sessions[0].session_id
+    store.set_archived(session_id, True)
+    assert [s.session_id for s in store.archived_sessions()] == [session_id]
+
+
 def test_archived_sessions_include_archived_projects(store):
     project = store._last_sessions[0].project_name
     store.set_project_archived(project, True)

@@ -145,6 +145,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "When quitting with running sessions": "Kilépéskor futó munkamenetekkel",
         "Closing a window while agent sessions are still running":
             "Ablak bezárása, miközben ügynök-munkamenetek még futnak",
+        "Archiving": "Archiválás",
+        "Archive on claude.ai too": "Archiválás a claude.ai-n is",
+        "A session that also appears on claude.ai is archived and restored "
+        "there along with the toggle here; best-effort, archiving locally "
+        "never waits on it":
+            "A claude.ai-n is megjelenő munkamenet ott is archiválódik és "
+            "visszaáll az itteni kapcsolóval együtt; csak kísérlet — a helyi "
+            "archiválás sosem vár rá",
         "Ask": "Rákérdezés",
         "Remove from favorites": "Eltávolítás a kedvencekből",
         "Add to favorites": "Hozzáadás a kedvencekhez",
@@ -605,6 +613,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "When quitting with running sessions": "Beim Beenden mit laufenden Sitzungen",
         "Closing a window while agent sessions are still running":
             "Schließen eines Fensters, während Agenten-Sitzungen noch laufen",
+        "Archiving": "Archivierung",
+        "Archive on claude.ai too": "Auch auf claude.ai archivieren",
+        "A session that also appears on claude.ai is archived and restored "
+        "there along with the toggle here; best-effort, archiving locally "
+        "never waits on it":
+            "Eine Sitzung, die auch auf claude.ai erscheint, wird dort mit dem "
+            "Umschalter hier archiviert und wiederhergestellt; nach bestem "
+            "Bemühen — das lokale Archivieren wartet nie darauf",
         "Ask": "Nachfragen",
         "Remove from favorites": "Aus Favoriten entfernen",
         "Add to favorites": "Zu Favoriten hinzufügen",
@@ -1071,6 +1087,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "When quitting with running sessions": "Al salir con sesiones en ejecución",
         "Closing a window while agent sessions are still running":
             "Cerrar una ventana mientras las sesiones del agente siguen en ejecución",
+        "Archiving": "Archivado",
+        "Archive on claude.ai too": "Archivar también en claude.ai",
+        "A session that also appears on claude.ai is archived and restored "
+        "there along with the toggle here; best-effort, archiving locally "
+        "never waits on it":
+            "Una sesión que también aparece en claude.ai se archiva y se "
+            "restaura allí junto con el conmutador de aquí; según lo posible — "
+            "archivar localmente nunca espera a ello",
         "Ask": "Preguntar",
         "Remove from favorites": "Quitar de favoritos",
         "Add to favorites": "Añadir a favoritos",
@@ -1535,6 +1559,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "When quitting with running sessions": "À la fermeture avec des sessions en cours",
         "Closing a window while agent sessions are still running":
             "Fermer une fenêtre alors que des sessions d’agent sont encore en cours",
+        "Archiving": "Archivage",
+        "Archive on claude.ai too": "Archiver aussi sur claude.ai",
+        "A session that also appears on claude.ai is archived and restored "
+        "there along with the toggle here; best-effort, archiving locally "
+        "never waits on it":
+            "Une session qui apparaît aussi sur claude.ai y est archivée et "
+            "restaurée avec la bascule d’ici ; au mieux — l’archivage local "
+            "ne l’attend jamais",
         "Ask": "Demander",
         "Remove from favorites": "Retirer des favoris",
         "Add to favorites": "Ajouter aux favoris",

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-16. Full change history: git log for this file.
+# fork. Last modified: 2026-08-17. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -13,6 +13,7 @@ row *order* actually changes.
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Iterable
 from datetime import datetime
@@ -20,7 +21,7 @@ from pathlib import Path
 
 from gi.repository import Gio, GLib, GObject
 
-from . import chats, panelhistory
+from . import chats, panelhistory, remotearchive
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .prattach import PromptAttacher
@@ -36,6 +37,8 @@ from .sessions import (
 )
 from .state import AppState, merge_project_order, move_in_order
 from .titles import TitleGenerator, fallback_title
+
+log = logging.getLogger(__name__)
 
 _DEBOUNCE_MS = 2000
 
@@ -588,6 +591,7 @@ class SessionStore(GObject.Object):
     def set_archived(self, session_id: str, archived: bool) -> None:
         self.state.set_archived(session_id, archived)
         self._apply()
+        self._sync_remote_archive([session_id], archived)
 
     def set_favorites(self, session_ids: list[str], favorite: bool) -> None:
         for session_id in session_ids:
@@ -599,11 +603,34 @@ class SessionStore(GObject.Object):
         for session_id in session_ids:
             self.state.set_archived(session_id, True)
         self._apply()
+        self._sync_remote_archive(session_ids, True)
 
     def restore_many(self, session_ids: list[str]) -> None:
         for session_id in session_ids:
             self.state.set_archived(session_id, False)
         self._apply()
+        self._sync_remote_archive(session_ids, False)
+
+    def _sync_remote_archive(self, session_ids: list[str], archived: bool) -> None:
+        """Carry a user archive/restore over to claude.ai (see remotearchive).
+
+        Only the toggle's own paths land here — the automatic archives
+        (worktree adoption, orphaned /bg originals) write state directly and
+        stay local. Best-effort by contract: runs after the local change and
+        `_apply` have both landed, hands the work to a daemon thread, and a
+        failure of any kind changes nothing here.
+        """
+        if not self.state.get_setting("archive_on_claude_ai"):
+            return
+        try:
+            paths = [
+                session.jsonl_path
+                for session_id in session_ids
+                if (session := self.sessions.get(session_id)) is not None
+            ]
+            remotearchive.sync_archived_async(paths, archived)
+        except Exception:  # pragma: no cover - belt and suspenders
+            log.warning("remote archive sync failed to start", exc_info=True)
 
     def is_out_of_sight(self, session: Session) -> bool:
         """Every reason the sidebar keeps a row out of the list: the user

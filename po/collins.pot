@@ -725,6 +725,20 @@ msgstr ""
 msgid "Closing a window while agent sessions are still running"
 msgstr ""
 
+#: collins/prefs.py:748
+msgid "Archiving"
+msgstr ""
+
+#: collins/prefs.py:750
+msgid "Archive on claude.ai too"
+msgstr ""
+
+#: collins/prefs.py:751
+msgid ""
+"A session that also appears on claude.ai is archived and restored there "
+"along with the toggle here; best-effort, archiving locally never waits on it"
+msgstr ""
+
 #: collins/prefs.py:223
 msgid "Background sessions"
 msgstr ""
