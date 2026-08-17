@@ -11,10 +11,7 @@ on:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    # Experimental: results are informative only and never fail the workflow
-    # run. Remove continue-on-error once the suite has proven stable in CI.
-    continue-on-error: true
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       # Unlike the unit-test job (which deliberately stays GTK-free to match
@@ -31,7 +28,9 @@ jobs:
       - run: >
           sudo apt-get install -y --no-install-recommends gir1.2-vte-3.91-gtk4
           || sudo apt-get install -y --no-install-recommends gir1.2-vte-3.91
-      # Per-check cap well under timeout-minutes even at 8 timeouts, so a
+      # Worst case, every check hangs on both attempts: checks x 2 x 120s
+      # (40 min at 10 checks) plus the apt-get setup. timeout-minutes must
+      # stay comfortably above that — and grow as checks are added — so a
       # pathological run still writes its step-summary table instead of
       # being hard-killed by GitHub mid-suite. The whole suite passes in
       # under two minutes; a check that needs more than 120s is hung.

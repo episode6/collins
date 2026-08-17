@@ -10,6 +10,10 @@ session bus when `dbus-run-session` is available, so a check that owns bus
 names (check_status_icon.py) never collides with the user's desktop or a
 previous check — enforces a per-check timeout, and reports a summary.
 
+A check that fails (or times out) gets exactly one retry; a pass on the
+retry is reported as "flaky" and does not fail the suite, so a rare one-off
+flake doesn't block a PR while still staying visible in the summary.
+
 The checks need a display. On a dev machine, run the whole suite behind the
 headless compositor wrapper so no window ever appears on screen:
 
@@ -71,7 +75,7 @@ def write_github_summary(results):
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_path:
         return
-    icons = {"pass": "✅", "fail": "❌", "timeout": "⏰"}
+    icons = {"pass": "✅", "flaky": "⚠️", "fail": "❌", "timeout": "⏰"}
     with open(summary_path, "a", encoding="utf-8") as f:
         f.write("## E2E checks\n\n")
         f.write("| Check | Result | Time |\n|---|---|---|\n")
@@ -109,13 +113,19 @@ def main():
         name = os.path.basename(path)
         print(f"\n=== [{i}/{len(checks)}] {name} ===", flush=True)
         status, secs = run_check(path, args.timeout, use_dbus)
+        if status != "pass":
+            print(f"=== {name}: {status.upper()} ({secs:.1f}s), retrying ===",
+                  flush=True)
+            status2, secs2 = run_check(path, args.timeout, use_dbus)
+            secs += secs2
+            status = "flaky" if status2 == "pass" else status2
         print(f"=== {name}: {status.upper()} ({secs:.1f}s) ===", flush=True)
         results.append((name, status, secs))
 
     print("\n=== e2e summary ===")
     for name, status, secs in results:
         print(f"  {status.upper():7}  {secs:6.1f}s  {name}")
-    failed = [r for r in results if r[1] != "pass"]
+    failed = [r for r in results if r[1] not in ("pass", "flaky")]
     total = sum(secs for _, _, secs in results)
     print(f"  {len(results) - len(failed)}/{len(results)} passed in {total:.1f}s")
     write_github_summary(results)
