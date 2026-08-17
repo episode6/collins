@@ -11,7 +11,7 @@ on:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       # Unlike the unit-test job (which deliberately stays GTK-free to match
@@ -28,11 +28,12 @@ jobs:
       - run: >
           sudo apt-get install -y --no-install-recommends gir1.2-vte-3.91-gtk4
           || sudo apt-get install -y --no-install-recommends gir1.2-vte-3.91
-      # Per-check cap well under timeout-minutes even with the runner's
-      # retry doubling a handful of hung checks, so a pathological run
-      # still writes its step-summary table instead of being hard-killed
-      # by GitHub mid-suite. The whole suite passes in under two minutes;
-      # a check that needs more than 120s is hung.
+      # Worst case, every check hangs on both attempts: checks x 2 x 120s
+      # (40 min at 10 checks) plus the apt-get setup. timeout-minutes must
+      # stay comfortably above that — and grow as checks are added — so a
+      # pathological run still writes its step-summary table instead of
+      # being hard-killed by GitHub mid-suite. The whole suite passes in
+      # under two minutes; a check that needs more than 120s is hung.
       - run: xvfb-run -a -s "-screen 0 1920x1200x24" python3 scripts/run_e2e.py --timeout 120
         env:
           # No a11y bus exists under Xvfb; stop GTK warning about it.
