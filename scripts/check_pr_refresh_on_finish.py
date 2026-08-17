@@ -232,6 +232,14 @@ def step_chips() -> bool:
 
 
 def step_status_refetched() -> bool:
+    # The refetch may ride the next poll tick rather than the finish itself:
+    # note_run_finished's own update request is dropped when a poll is
+    # mid-flight (_request_update's _updating gate), and the invalidation is
+    # then spent a tick later. A fixed wait is enough on a dev machine but
+    # not on a loaded CI runner, so wait for it — bounded.
+    if status_fetches() <= state["before"] and state.setdefault("refetch_waits", 0) < 20:
+        state["refetch_waits"] += 1
+        return later(step_status_refetched, 500)
     check("a finish edge refetches the PR's status", status_fetches() > state["before"],
           f"{state['before']} -> {status_fetches()}")
     # No aging this time: a session that goes quiet between every permission
