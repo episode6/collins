@@ -895,6 +895,10 @@ class PanelTerminal(Gtk.Box):
         self._spawned = False
         self._ever_spawned = False  # panel was used at some point in this tab's life
         self._easy_copy_paste = False
+        # Agent input (run_command) that arrived while the shell was still
+        # spawning, fed the moment the pty is up. Cleared on spawn failure
+        # and on exit — a queued command must never surprise a later shell.
+        self._pending_input: list[bytes] = []
 
         self.terminal = Vte.Terminal()
         self.terminal.set_scrollback_lines(10_000)
@@ -921,6 +925,12 @@ class PanelTerminal(Gtk.Box):
     @property
     def ever_spawned(self) -> bool:
         return self._ever_spawned
+
+    @property
+    def number(self) -> int:
+        """The 1-based ordinal this shell's tab title shows ("Terminal N") —
+        how the read_terminal tool names one to the agent."""
+        return self._number
 
     def open_shell(self, cwd: str | None, restore_text: str | None = None) -> None:
         """Spawn the shell on first show; on later shows follow the agent's
@@ -957,15 +967,20 @@ class PanelTerminal(Gtk.Box):
 
     def _on_spawned(self, terminal: Vte.Terminal, pid: int, error: GLib.Error | None) -> None:
         if error is not None:
+            self._pending_input.clear()
             terminal.feed(
                 _("failed to start shell: {msg}").format(msg=error.message).encode()
             )
             return
         self._child_pid = pid
+        pending, self._pending_input = self._pending_input, []
+        for data in pending:
+            terminal.feed_child(data)
 
     def _on_child_exited(self, _terminal: Vte.Terminal, _status: int) -> None:
         self._spawned = False  # a fresh shell is spawned on the next show
         self._child_pid = None
+        self._pending_input.clear()
         self.terminal.reset(True, True)
         self.emit("shell-exited")
 
@@ -982,6 +997,19 @@ class PanelTerminal(Gtk.Box):
 
     def has_running_command(self) -> bool:
         return _has_running_command(self.terminal, self._child_pid)
+
+    def run_command(self, command: str) -> None:
+        """Type *command* into this shell and run it — behind a line reset,
+        so nothing already sitting on the input line joins it (see
+        shellinput). The Enter is supplied; embedded newlines run as further
+        commands, one Enter each. Input for a shell still spawning queues
+        and is fed the moment the pty is up (spawn_async answers on the
+        main loop, like the callers here, so the flush can't be raced)."""
+        data = shell_command(command.rstrip("\n") + "\n").encode()
+        if self._child_pid is None:
+            self._pending_input.append(data)
+        else:
+            self.terminal.feed_child(data)
 
     def clear(self) -> None:
         """Wipe the screen and scrollback; a running shell keeps running and
@@ -4584,7 +4612,7 @@ class TerminalTab(Gtk.Box):
             # file, oldest ordinal first (the shells take fresh ordinals —
             # the files re-key to them on the next save).
             restore = [texts[ordinal] for ordinal in sorted(texts)] or None
-        self._dock.show_panel_terminal(restore)
+        self._dock.show_panel_terminal(restore, focus=focus)
         if focus:
             GLib.idle_add(self._dock.focus_panel_terminal)
 
@@ -4600,6 +4628,28 @@ class TerminalTab(Gtk.Box):
         """Front the shell page whose command is live, so the close
         confirmation's "will be terminated" points at something visible."""
         self._dock.select_busy_shell()
+
+    def panel_shells(self) -> list:
+        """Every shell page in this tab's dock, in spatial-then-tab order —
+        maximized and stowed pages included (see PanelDock.shell_pages).
+        What the read_terminal tool reads."""
+        return self._dock.shell_pages()
+
+    def open_panel_shell(self):
+        """A fresh shell page for the run_in_terminal tool: the Ctrl+J
+        panel when the dock has no shells at all — saved history restored,
+        exactly as the footer button would open it — else a new tab beside
+        the last shell page. Neither takes the keyboard: the agent typing
+        is not the user typing. None when no shell could be opened."""
+        if not self._dock.shell_pages():
+            self.show_panel(focus=False)
+            return self._dock.panel_terminal
+        return self._dock.open_shell_page()
+
+    def reveal_panel_shell(self, shell) -> None:
+        """Put *shell* on the user's screen without moving keyboard focus
+        (PanelDock.reveal_page, on its quiet setting)."""
+        self._dock.reveal_page(shell, focus=False)
 
     def move_focused_panel_page(self) -> None:
         """Cycle the focused panel page to the next strip (win.move-panel-page)."""

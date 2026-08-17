@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-16. Full change history: git log for this file.
+fork. Last modified: 2026-08-17. Full change history: git log for this file.
 -->
 
 # Features
@@ -491,11 +491,24 @@ is running in:
   a session's own output by itself; this is for one it can't see — a PR
   opened by a subagent, opened outside the session, or one the session is
   reviewing rather than authoring.
+- **`read_terminal(terminal?, lines?)`** — read the terminal panel's tabs:
+  each shell's text and scrollback, exactly as you see it, so "the error
+  over there" is something the agent can just look at instead of asking you
+  to paste it. Reading is all it does — and it reads your side of the shell
+  too, everything you typed included.
+- **`run_in_terminal(command, terminal?)`** — type a command into one of the
+  panel's shells and run it, visibly, where you can watch it, interact with
+  it, and keep the shell afterwards — a dev server, a REPL, a build you asked
+  to have running in your terminal. It picks an idle tab and never types into
+  one with a command still running; when there's nothing idle (or no panel at
+  all) it opens a new tab, and it brings the shell on screen without moving
+  your keyboard focus.
 
 Each tool asks for permission the first time a session calls it, like any
-other MCP tool. They only ever touch Collins' own windows: nothing is read
-back to the agent and nothing is written to your repo. Two reach past the
-window, and only when a session hands them something to reach for:
+other MCP tool. They only ever touch Collins' own windows: nothing is
+written to your repo, and the only thing ever read back to the agent is
+what `read_terminal` is for — the terminal panel's own text. Two reach past
+the window, and only when a session hands them something to reach for:
 `attach_pr` asks `gh` how the named PR is doing — the same fetch the
 footer's refresh button runs — and `show_image` given a URL fetches it, a
 plain GET with none of your cookies or credentials, capped at 25 MB and ten

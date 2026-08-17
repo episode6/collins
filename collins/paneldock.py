@@ -416,7 +416,9 @@ class PanelDock(Adw.Bin):
 
     # -- the panel terminal (Ctrl+J) ----------------------------------------
 
-    def show_panel_terminal(self, restore_texts: list[str] | None = None) -> None:
+    def show_panel_terminal(
+        self, restore_texts: list[str] | None = None, focus: bool = True
+    ) -> None:
         """Put Ctrl+J's terminal on screen: the page it is bound to, back
         from wherever it was hidden, or a fresh shell when it has none —
         which then becomes the binding. `restore_texts` recreates one shell
@@ -436,21 +438,25 @@ class PanelDock(Adw.Bin):
         The seat is joined, never adopted: a shortcut that hides what it
         shows has no business making a home of someone else's panel, and
         hiding from a shared row stows the terminal alone (`_stow`), so
-        the page beside it keeps its row either way."""
+        the page beside it keeps its row either way.
+
+        *focus* False keeps every selection along the way quiet — a show
+        that isn't the user's own keystroke (session restore, the
+        run_in_terminal tool) must not move the keyboard."""
         # No strip is visible under a maximized page: the tab comes back to
         # its row first, so what this shows is something the user can see.
         self.restore_maximized()
         shell = self.panel_terminal
         if shell is None:
-            self._open_panel_terminal(restore_texts)
+            self._open_panel_terminal(restore_texts, focus=focus)
             return
         if self._stowed is not None:
-            self._unstow()
+            self._unstow(focus=focus)
             return
         strip = self._strip_of(shell)
         self._reveal_strip(strip)
         strip.refresh_shell(shell)
-        strip.select_widget(shell)
+        strip.select_widget(shell, focus=focus)
         # The tab Ctrl+J just put on screen is the freshest one there is, so
         # Ctrl+; rotates it. Without this the remembered page would still be
         # whatever was fronted last — a PR tab in another strip, say, which
@@ -486,12 +492,14 @@ class PanelDock(Adw.Bin):
         if shell is not None and self._stowed is None:
             shell.grab_page_focus()
 
-    def _open_panel_terminal(self, restore_texts: list[str] | None = None) -> None:
+    def _open_panel_terminal(
+        self, restore_texts: list[str] | None = None, focus: bool = True
+    ) -> None:
         """Spawn the terminal Ctrl+J binds to, in the strip `_panel_target`
         nominates. Saved panel history opens as one shell per file; the
         oldest is the one the shortcut keeps."""
         strip = self._panel_target()
-        shells = strip.new_shells(restore_texts)
+        shells = strip.new_shells(restore_texts, focus=focus)
         if not shells:
             return
         # The arrival has almost certainly bound this already (a free
@@ -557,12 +565,13 @@ class PanelDock(Adw.Bin):
         strip.transfer_to(shell, self._stow_pane, 0)
         self._wire_stowed(shell)
 
-    def _unstow(self) -> None:
+    def _unstow(self, focus: bool = True) -> None:
         """Drop the stowed terminal back into its tab row, selected: the
         strip it left when that is still in the tree, else wherever a fresh
         one would open. (Emptying the strip around a stowed page hides it
         rather than collapsing it — see `_collapse_strip` — so the fallback
-        is for a collapse that raced this.)"""
+        is for a collapse that raced this.) *focus* False keeps the
+        keyboard where it is, like `select_widget`'s."""
         rec = self._stowed
         if rec is None:
             return
@@ -580,7 +589,7 @@ class PanelDock(Adw.Bin):
         view.transfer_page(page, target, min(rec.position, target.get_n_pages()))
         self._reveal_strip(strip)
         strip.refresh_shell(rec.widget)
-        strip.select_widget(rec.widget)
+        strip.select_widget(rec.widget, focus=focus)
         self._recent = rec.widget
 
     def _wire_stowed(self, widget) -> None:
@@ -923,7 +932,7 @@ class PanelDock(Adw.Bin):
             return
         self.restore_maximized(focus=focus)
         if self._stowed is not None and self._stowed.widget is widget:
-            self._unstow()
+            self._unstow(focus=focus)
             if focus:
                 GLib.idle_add(widget.grab_page_focus)
             return
@@ -971,6 +980,18 @@ class PanelDock(Adw.Bin):
                 self._reveal_strip(strip)
                 strip.select_busy_page()
                 return
+
+    def open_shell_page(self):
+        """Append a fresh shell tab beside the last shell page — the
+        + button's move, made for run_in_terminal when every open shell is
+        busy. Returns the new shell unselected (the caller reveals it), or
+        None when there is no strip to sit beside — no shells at all, which
+        is `show_panel_terminal`'s case, not this one."""
+        for shell in reversed(self.shell_pages()):
+            strip = self._strip_of(shell)  # skips a lifted page's shell
+            if strip is not None:
+                return strip.new_shell(select=False)
+        return None
 
     def capture_shell_texts(self) -> dict[int, str]:
         """Every shell page's scrollback under its persistent history

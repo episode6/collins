@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-16. Full change history: git log for this file.
+# fork. Last modified: 2026-08-17. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1558,6 +1558,8 @@ class App(Adw.Application):
                 "notify_user": self._mcp_notify_user,
                 "attach_pr": self._mcp_attach_pr,
                 "start_session": self._mcp_start_session,
+                "read_terminal": self._mcp_read_terminal,
+                "run_in_terminal": self._mcp_run_in_terminal,
             },
             is_enabled=self._mcp_tool_enabled,
         )
@@ -1715,6 +1717,62 @@ class App(Adw.Application):
         if not tab.attach_pr(pr):
             return True, f"{pr.slug} is already attached to this session."
         return True, f"Attached {pr.slug} to this session."
+
+    def _mcp_read_terminal(self, found, args: dict) -> tuple[bool, str]:
+        """Hand the agent its session's terminal-panel shells, as text: each
+        one's scrollback tail under a header naming it. The dump is VTE's
+        own (capture_contents — what panel history saves), read here on the
+        main loop like every dispatch, so the screen can't change mid-read;
+        mcptools.terminal_reply does the tailing and keeps the reply inside
+        the socket's frame limit."""
+        _window, tab = found
+        shells = tab.panel_shells()
+        if not shells:
+            return True, "No terminal-panel tabs are open in this session."
+        wanted = args.get("terminal")
+        if wanted is not None:
+            shells = [shell for shell in shells if shell.number == wanted]
+            if not shells:
+                numbers = ", ".join(str(s.number) for s in tab.panel_shells())
+                return False, f"No terminal numbered {wanted} — open: {numbers}"
+        sections = [
+            (shell.number, shell.has_running_command(), shell.capture_contents())
+            for shell in shells
+        ]
+        lines = args.get("lines", mcptools.TERMINAL_DEFAULT_LINES)
+        return True, mcptools.terminal_reply(sections, lines)
+
+    def _mcp_run_in_terminal(self, found, args: dict) -> tuple[bool, str]:
+        """Type a command into one of the session's panel shells — an idle
+        one, never a busy one (its stdin belongs to the running program),
+        opening a fresh tab when there is nothing idle to type into. The
+        target is revealed but never focused: the user must see what the
+        agent runs, and must not have their keyboard moved by it."""
+        _window, tab = found
+        wanted = args.get("terminal")
+        opened = False
+        if wanted is not None:
+            target = next((s for s in tab.panel_shells() if s.number == wanted), None)
+            if target is None:
+                numbers = ", ".join(str(s.number) for s in tab.panel_shells())
+                return False, f"No terminal numbered {wanted} — open: {numbers or 'none'}"
+            if target.has_running_command():
+                return False, (
+                    f"Terminal {wanted} is busy running a command — pick an "
+                    "idle one, or omit 'terminal' to open a new tab"
+                )
+        else:
+            shells = tab.panel_shells()
+            target = next((s for s in shells if not s.has_running_command()), None)
+            if target is None:
+                target = tab.open_panel_shell()
+                opened = True
+            if target is None:
+                return False, "Collins couldn't open a terminal in this session"
+        tab.reveal_panel_shell(target)
+        target.run_command(args["command"])
+        prefix = "Running in new" if opened else "Running in"
+        return True, f"{prefix} Terminal {target.number}."
 
     def _mcp_start_session(self, found, args: dict) -> mcptools.ToolResult:
         """Spawn a sibling session in a background tab and hand it a prompt.
