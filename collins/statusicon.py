@@ -34,13 +34,19 @@ GNOME's `ubuntu-appindicators@ubuntu.com` — actually behaves:
   underneath the themed icon forever. The name is kept only for the case
   where the artwork can't be decoded at all and an unresolvable name still
   beats nothing; `IconThemePath` rides along for that.
+- **The artwork is its own drawing**, `<app id>-panel`, not the launcher icon
+  at a smaller size: the app icon is drawn on a 128 grid whose strokes land on
+  about one pixel at 22 and smear across two. See `panel_icon_name`.
 
 The unread badge is composited into those pixmaps rather than sent as text:
 the shell has no badge slot, and the one text affordance (`XAyatanaLabel`)
 renders *beside* the icon as a panel-widening label. The count is drawn fresh
 at every exported size so the host never scales a numeral, and the same
 repaint broadcasts `com.canonical.Unity.LauncherEntry.Update` so Ubuntu Dock
-badges the launcher icon too.
+badges the launcher icon too. That broadcast also hands the dock a second
+DBusMenu (`/QuickList`) holding the session rows on their own, which it grafts
+into the launcher's right-click menu — the whole jump list would arrive on top
+of a menu that already has New Window and Quit.
 
 Where there is no watcher on the bus there is no host, and nothing appears.
 That is a supported outcome rather than a bug to work around: `available()`
@@ -77,12 +83,21 @@ ITEM_INTERFACE = "org.kde.StatusNotifierItem"
 ITEM_PATH = "/StatusNotifierItem"
 MENU_INTERFACE = "com.canonical.dbusmenu"
 MENU_PATH = "/MenuBar"
+# A second DBusMenu, carrying the session rows and nothing else, for the dock
+# to graft into its own launcher menu. It cannot be MENU_PATH: the dock appends
+# what it finds to a menu that already offers New Window and Quit, so handing
+# over the whole jump list would duplicate both. Sessions are the half the dock
+# has no way of knowing about.
+QUICKLIST_PATH = "/QuickList"
 
 # The sizes the item exports. Panels ask for 22 or 24 logical pixels and
 # double both on HiDPI; handing over all four means the host never scales one
 # of ours — the badge is drawn fresh at each size, and a scaled numeral is a
 # smeared one.
 ICON_SIZES = (22, 24, 32, 44)
+
+# Appended to the app id to find the panel-sized artwork (see panel_icon_name).
+PANEL_ICON_SUFFIX = "-panel"
 
 # The badge inherits nothing: it has to read against whatever is behind it —
 # a light panel, a dark one, the icon's own art underneath — so it carries
@@ -122,6 +137,8 @@ _ITEM_XML = f"""
     <property name="AttentionIconName" type="s" access="read"/>
     <property name="AttentionIconPixmap" type="a(iiay)" access="read"/>
     <property name="AttentionMovieName" type="s" access="read"/>
+    <property name="IconAccessibleDesc" type="s" access="read"/>
+    <property name="AttentionAccessibleDesc" type="s" access="read"/>
     <property name="ToolTip" type="(sa(iiay)ss)" access="read"/>
     <method name="ContextMenu">
       <arg name="x" type="i" direction="in"/>
@@ -147,6 +164,8 @@ _ITEM_XML = f"""
     <signal name="NewAttentionIcon"/>
     <signal name="NewOverlayIcon"/>
     <signal name="NewToolTip"/>
+    <signal name="NewIconAccessibleDesc"/>
+    <signal name="NewAttentionAccessibleDesc"/>
     <signal name="NewIconThemePath">
       <arg name="icon_theme_path" type="s"/>
     </signal>
@@ -303,6 +322,24 @@ def _argb_bytes(pixbuf: GdkPixbuf.Pixbuf) -> bytes:
     return bytes(out)
 
 
+def panel_icon_name(icon_name: str) -> str:
+    """The artwork to export: the panel variant of *icon_name* if the theme
+    has one, else *icon_name* itself.
+
+    The app icon is drawn on a 128 grid for a launcher, and at the 22 pixels
+    a panel asks for its strokes land on about one pixel and smear across
+    two. `<app id>-panel` is the same drink redrawn on a 22 grid, and it is
+    only ever the item's artwork — the launcher, the dock and the window all
+    keep the full icon. Looked up rather than assumed so a checkout whose
+    icons have not been installed still shows something.
+    """
+    display = Gdk.Display.get_default()
+    if display is None:
+        return icon_name
+    panel = f"{icon_name}{PANEL_ICON_SUFFIX}"
+    return panel if Gtk.IconTheme.get_for_display(display).has_icon(panel) else icon_name
+
+
 def _load_icon(icon_name: str, size: int) -> GdkPixbuf.Pixbuf | None:
     """The app's icon, decoded at *size*, or None if the theme hasn't got it.
 
@@ -367,6 +404,14 @@ def _draw_badge(ctx: cairo.Context, badge: str, size: int) -> None:
     off the icon so every exported resolution gets its own crisp numeral. The
     text is measured before the shape is drawn: the shape fits the number,
     never the other way around.
+
+    The pill is sized off the advance box and the numeral placed by its ink,
+    which are two different rectangles and deliberately so. Advance widths
+    are uniform across digits in the faces this picks up, so sizing the pill
+    off one keeps it the same shape whichever number it carries; ink is
+    where the mark actually lands, and it is not centred in its advance —
+    "1" keeps most of its slack on the right — so centring the advance box
+    is what leaves a numeral looking pushed to one side.
     """
     diameter = max(round(size * 0.55), 11)
     layout = PangoCairo.create_layout(ctx)
@@ -380,7 +425,7 @@ def _draw_badge(ctx: cairo.Context, badge: str, size: int) -> None:
     desc.set_absolute_size(round(diameter * 0.76) * Pango.SCALE)
     layout.set_font_description(desc)
     layout.set_text(badge, -1)
-    _ink, logical = layout.get_pixel_extents()
+    ink, logical = layout.get_pixel_extents()
     width = min(max(diameter, logical.width + max(round(diameter * 0.45), 5)), size)
     x, y = size - width, size - diameter
     radius = diameter / 2
@@ -391,9 +436,13 @@ def _draw_badge(ctx: cairo.Context, badge: str, size: int) -> None:
     ctx.set_source_rgb(*BADGE_FILL)
     ctx.fill()
     ctx.set_source_rgb(*BADGE_INK)
+    # Left on the half pixel it works out to rather than snapped to a whole
+    # one: the slack either side is odd as often as not, and rounding the
+    # origin hands the odd pixel to the same side every time — which is the
+    # lopsidedness this is here to take out, reintroduced at 22px.
     ctx.move_to(
-        x + (width - logical.width) / 2 - logical.x,
-        y + (diameter - logical.height) / 2 - logical.y,
+        x + (width - ink.width) / 2 - ink.x,
+        y + (diameter - ink.height) / 2 - ink.y,
     )
     PangoCairo.show_layout(ctx, layout)
 
@@ -420,8 +469,11 @@ def icon_pixmaps(icon_name: str, badge: str = "") -> list[tuple[int, int, bytes]
     (if any) composited onto each. Empty when the icon can't be found at all,
     which leaves the host to try `IconName`."""
     pixmaps = []
+    # Resolved once, not per size: a theme carrying the panel variant at some
+    # sizes and not others would otherwise export a mix of two drawings.
+    name = panel_icon_name(icon_name)
     for size in ICON_SIZES:
-        pixbuf = _load_icon(icon_name, size)
+        pixbuf = _load_icon(name, size)
         if pixbuf is None:
             continue
         if badge:
@@ -486,6 +538,7 @@ class StatusIcon:
         self._watch_id = 0
         self._item_reg = 0
         self._menu_reg = 0
+        self._quicklist_reg = 0
         self._owned = False
         self._registered = False
         self._revision = 1
@@ -516,15 +569,18 @@ class StatusIcon:
             self._menu_reg = register_object(
                 bus, MENU_PATH, _MENU_XML, self._menu_call, self._menu_get
             )
+            self._quicklist_reg = register_object(
+                bus, QUICKLIST_PATH, _MENU_XML, self._menu_call, self._menu_get
+            )
         except GLib.Error:
             log.exception("status icon: objects not exportable")
-            # The item may have gone up before the menu failed; a path left
-            # exported with nothing behind it would answer a host that found
-            # it later.
-            for reg in (self._item_reg, self._menu_reg):
+            # Any of the three may have gone up before a later one failed; a
+            # path left exported with nothing behind it would answer a host
+            # that found it later.
+            for reg in (self._item_reg, self._menu_reg, self._quicklist_reg):
                 if reg:
                     bus.unregister_object(reg)
-            self._item_reg = self._menu_reg = 0
+            self._item_reg = self._menu_reg = self._quicklist_reg = 0
             return False
         self._bus = bus
         # Ask once before anyone can: the host reads every property the moment
@@ -561,10 +617,10 @@ class StatusIcon:
             self._name_id = 0
         bus, self._bus = self._bus, None
         if bus is not None:
-            for reg in (self._item_reg, self._menu_reg):
+            for reg in (self._item_reg, self._menu_reg, self._quicklist_reg):
                 if reg:
                     bus.unregister_object(reg)
-        self._item_reg = self._menu_reg = 0
+        self._item_reg = self._menu_reg = self._quicklist_reg = 0
         self._owned = self._registered = False
 
     def _on_name_acquired(self, *_a) -> None:
@@ -642,8 +698,24 @@ class StatusIcon:
             self._emit_item("NewAttentionIcon", None)
         if self._view.tooltip != old.tooltip:
             self._emit_item("NewToolTip", None)
+            # The accessible descriptions say what the tooltip says, so they
+            # move with it — and they are announced by name because nothing
+            # else announces them. The host turns a `New<Property>` signal
+            # back into a property to re-Get, and for `NewIcon` it also
+            # refreshes `IconAccessibleDesc` — but the same code reaches for
+            # `AttentionIconAccessibleDesc` on `NewAttentionIcon`, which is
+            # not what the property is called, so the Attention one is read
+            # once when the item registers and never again. That is the half
+            # a screen reader is on while anything is unread.
+            self._emit_item("NewIconAccessibleDesc", None)
+            self._emit_item("NewAttentionAccessibleDesc", None)
         if moved:
-            self._emit_menu("LayoutUpdated", GLib.Variant("(ui)", (self._revision, 0)))
+            # Both menus, and the same revision for both: they are two views
+            # of one list, and the dock's client believes a rebuild only when
+            # the number it was given last climbs.
+            layout_moved = GLib.Variant("(ui)", (self._revision, 0))
+            self._emit_menu("LayoutUpdated", layout_moved)
+            self._emit(QUICKLIST_PATH, MENU_INTERFACE, "LayoutUpdated", layout_moved)
         self._dock_update(self._view.unread)
         return moved
 
@@ -651,7 +723,11 @@ class StatusIcon:
         """Tell Ubuntu Dock (and anything else listening for LauncherEntry
         broadcasts) the unread count, once per change. The dock draws its own
         numeral over the launcher icon — a properly rendered badge for one
-        signal — and hides it again on count-visible going false."""
+        signal — and hides it again on count-visible going false.
+
+        The same broadcast points it at the quicklist, so the launcher's
+        right-click menu grows the session list the dock has no other way of
+        knowing about."""
         if count == self._dock_count:
             return
         self._dock_count = count
@@ -666,6 +742,13 @@ class StatusIcon:
                     {
                         "count": GLib.Variant("x", count),
                         "count-visible": GLib.Variant("b", count > 0),
+                        # Rides along with every broadcast rather than being
+                        # sent once: the dock keys its menu client on the path
+                        # it was last handed and ignores a repeat of the same
+                        # one, so repeating costs nothing and the first
+                        # broadcast (which always goes out) is not the only
+                        # chance a dock has to hear about it.
+                        "quicklist": GLib.Variant("o", QUICKLIST_PATH),
                     },
                 ),
             ),
@@ -744,6 +827,18 @@ class StatusIcon:
             return GLib.Variant("a(iiay)", [])
         if prop == "AttentionMovieName":
             return GLib.Variant("s", "")
+        if prop in ("IconAccessibleDesc", "AttentionAccessibleDesc"):
+            # What a screen reader says instead of reading the artwork: the
+            # host uses it as the panel button's accessible name, taking the
+            # Attention one while Status is NeedsAttention and the Icon one
+            # otherwise. Both carry the tooltip's sentence, which is this same
+            # state already written out in words — and both, because which one
+            # is read is the host's choice, and the counts are exactly what a
+            # user who cannot see the badge is missing.
+            #
+            # Without them the name falls back to Title — a bare "Collins" on
+            # an item whose whole job is to say how many sessions want you.
+            return GLib.Variant("s", view.tooltip)
         if prop == "ToolTip":
             # (icon name, icon pixmaps, title, description). GNOME's
             # appindicator host reads none of it — its proxy leaves ToolTip
@@ -779,7 +874,17 @@ class StatusIcon:
         return None
 
     def _entry(self, item_id: int) -> traymodel.MenuEntry | None:
+        # Over the whole menu whichever path asked: traymodel numbers the rows
+        # once, so an id means the same row on both, and a click can be
+        # dispatched without caring where it came from.
         return next((e for e in self._view.menu if e.id == item_id), None)
+
+    def _entries_for(self, path: str) -> list[traymodel.MenuEntry]:
+        """The rows a menu path serves: everything for the item's own menu,
+        the session rows alone for the dock's quicklist."""
+        if path != QUICKLIST_PATH:
+            return self._view.menu
+        return [e for e in self._view.menu if e.action == traymodel.ACTION_FOCUS]
 
     @staticmethod
     def _properties(entry: traymodel.MenuEntry) -> dict[str, GLib.Variant]:
@@ -787,30 +892,31 @@ class StatusIcon:
             return {"type": GLib.Variant("s", "separator")}
         return {"label": GLib.Variant("s", menu_label(entry))}
 
-    def _root_layout(self) -> tuple:
+    def _root_layout(self, entries: list[traymodel.MenuEntry]) -> tuple:
         """The whole menu as one `(ia{sv}av)` value — a plain tuple, because it
         is nested inside GetLayout's own reply tuple. Only the `av` children
         are boxed as variants; box the root as well and the outer construction
         refuses it."""
         children = [
             GLib.Variant("(ia{sv}av)", (entry.id, self._properties(entry), []))
-            for entry in self._view.menu
+            for entry in entries
         ]
         return (0, {"children-display": GLib.Variant("s", "submenu")}, children)
 
-    def _menu_call(self, _conn, _sender, _path, _iface, method, params, invocation) -> None:
+    def _menu_call(self, _conn, _sender, path, _iface, method, params, invocation) -> None:
+        entries = self._entries_for(path)
         if method == "GetLayout":
             parent_id = params.unpack()[0]
             # Flat menu: only the root has children, and anything else asked
             # for answers for itself with none.
-            layout = self._root_layout() if parent_id == 0 else (parent_id, {}, [])
+            layout = self._root_layout(entries) if parent_id == 0 else (parent_id, {}, [])
             invocation.return_value(GLib.Variant("(u(ia{sv}av))", (self._revision, layout)))
             return
         if method == "GetGroupProperties":
             ids = params.unpack()[0]
             rows = [
                 (entry.id, self._properties(entry))
-                for entry in self._view.menu
+                for entry in entries
                 if not ids or entry.id in ids
             ]
             invocation.return_value(GLib.Variant("(a(ia{sv}))", (rows,)))

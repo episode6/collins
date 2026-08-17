@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-17. Full change history: git log for this file.
 # Build a Debian package: dist/collins_<version>_all.deb
 set -euo pipefail
 
@@ -43,7 +43,10 @@ mkdir -p "$BUILD/usr/share/applications" \
 # system-wide desktop entry: binary on PATH, no hardcoded working directory
 sed -e "s|^Exec=.*|Exec=$PKG|" -e "/^Path=/d" \
     "$ROOT/data/$APP_ID.desktop" > "$BUILD/usr/share/applications/$APP_ID.desktop"
-cp "$ROOT/data/icons/$APP_ID.svg" "$BUILD/usr/share/icons/hicolor/scalable/apps/"
+# ...-panel.svg is the status icon's artwork, drawn for 22px (see statusicon.py);
+# the Debug variants are a source-checkout thing and stay out of the package.
+cp "$ROOT/data/icons/$APP_ID.svg" "$ROOT/data/icons/$APP_ID-panel.svg" \
+   "$BUILD/usr/share/icons/hicolor/scalable/apps/"
 cp "$ROOT/data/icons/hicolor/scalable/actions/"*.svg \
     "$BUILD/usr/share/icons/hicolor/scalable/actions/"
 cp "$ROOT/data/$APP_ID.metainfo.xml" "$BUILD/usr/share/metainfo/"
