@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-16. Full change history: git log for this file.
+# fork. Last modified: 2026-08-17. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -2051,12 +2051,19 @@ class SessionSidebar(Gtk.Box):
         rather than a list because a placeholder has no session id to jump to:
         the whole reason its flag lives here and not on a session item.
 
+        A working placeholder is left out of the unread half, the way
+        traymodel's session_marker leaves a working session out: the row is
+        showing a barber pole, not a green pulse, and the badge counts what is
+        waiting for the user. Its flag stays put, so it is counted again the
+        moment the turn ends.
+
         The unread half is clamped to the rows it belongs to: a placeholder is
-        dropped by remove_placeholder, which clears both sets together, but
-        the pair is read a window at a time and the two numbers must not be
-        able to disagree on the way past.
+        dropped by remove_placeholder, which clears its busy and unread flags
+        along with it, but the pair is read a window at a time and the two
+        numbers must not be able to disagree on the way past.
         """
-        return len(self._placeholders), len(self._unread_placeholders & set(self._placeholders))
+        waiting = self._unread_placeholders & (set(self._placeholders) - self._busy_placeholders)
+        return len(self._placeholders), len(waiting)
 
     def remove_placeholder(self, placeholder_id: str) -> None:
         self._busy_placeholders.discard(placeholder_id)
