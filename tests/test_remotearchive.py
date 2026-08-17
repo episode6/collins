@@ -155,3 +155,78 @@ def test_sync_async_empty_batch_spawns_nothing(monkeypatch):
 
     monkeypatch.setattr(mod.threading, "Thread", no_threads)
     sync_archived_async([], True)
+
+
+# -- the worker queue ----------------------------------------------------------
+
+
+def _wait_for_drain():
+    import collins.remotearchive as mod
+
+    for _ in range(500):
+        with mod._lock:
+            if mod._worker is None and not mod._pending:
+                return
+        time.sleep(0.01)
+    raise AssertionError("remote-archive worker did not drain")  # pragma: no cover
+
+
+def test_sync_async_last_toggle_wins(tmp_path, monkeypatch):
+    # Archive, then Undo (twice over, to prove coalescing) while the first
+    # request is still on the wire: the single worker serializes them, so
+    # the flip-flops queued behind the in-flight archive collapse to one
+    # final unarchive — the remote side always ends where the local side did.
+    import threading
+
+    import collins.remotearchive as mod
+
+    calls = []
+    in_flight = threading.Event()
+    release = threading.Event()
+
+    def slow_sync(path, archived, transport=None, get_token=None):
+        calls.append((path, archived))
+        in_flight.set()
+        release.wait(timeout=5)
+        return True
+
+    monkeypatch.setattr(mod, "sync_archived", slow_sync)
+    path = tmp_path / "session.jsonl"
+    sync_archived_async([path], True)
+    assert in_flight.wait(timeout=5)
+    sync_archived_async([path], False)
+    sync_archived_async([path], True)
+    sync_archived_async([path], False)
+    release.set()
+    _wait_for_drain()
+    assert calls == [(path, True), (path, False)]
+
+
+def test_sync_async_reads_credentials_once_per_drain(tmp_path, monkeypatch):
+    import collins.remotearchive as mod
+
+    reads = []
+
+    def fake_read():
+        reads.append(1)
+        return "tok-1", "max"
+
+    monkeypatch.setattr(mod, "read_credentials", fake_read)
+    paths = []
+    for i in range(3):
+        subdir = tmp_path / f"s{i}"
+        subdir.mkdir()
+        paths.append(_transcript(subdir, [_bridge_line(f"cse_{i}")]))
+    transport = _Transport(200)
+    real_sync = mod.sync_archived
+
+    def sync_with_test_transport(path, archived, transport=None, get_token=None):
+        return real_sync(path, archived, transport=transport_stub, get_token=get_token)
+
+    transport_stub = transport
+    monkeypatch.setattr(mod, "sync_archived", sync_with_test_transport)
+    sync_archived_async(paths, True)
+    _wait_for_drain()
+    assert len(transport.calls) == 3
+    assert all(headers["Authorization"] == "Bearer tok-1" for _url, headers in transport.calls)
+    assert reads == [1]

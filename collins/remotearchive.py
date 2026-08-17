@@ -93,19 +93,26 @@ def sync_archived(
     jsonl_path: Path,
     archived: bool,
     transport: Callable[[str, dict[str, str]], int] = _http_post,
-    token: str | None = None,
+    get_token: Callable[[], str] | None = None,
 ) -> bool:
     """Archive (or restore) *jsonl_path*'s remote counterpart. Never raises.
 
     True means the remote side now matches — a 200, or a 409 saying it
     already did. False is every way there was nothing to do or it didn't
     work, each logged at a volume matching how expected it is.
+
+    *get_token* supplies the OAuth token and may raise ``UsageError`` like
+    the default (a fresh ``read_credentials``); the worker passes a memoized
+    one so a bulk archive reads the credentials file once, and either way it
+    is only consulted after a remote counterpart turns up.
     """
     try:
         session_id = bridge_session_id(jsonl_path)
         if not session_id:
             return False
-        if token is None:
+        if get_token is not None:
+            token = get_token()
+        else:
             token, _subscription = read_credentials()
         verb = "archive" if archived else "unarchive"
         status = transport(
@@ -129,20 +136,75 @@ def sync_archived(
     return False
 
 
+# The sync queue: the newest desired state per transcript, drained in toggle
+# order by a single worker so requests for one session can never interleave
+# on the wire (an archive whose HTTP call outlives a quick Undo would
+# otherwise land last and leave claude.ai opposite to the final local state).
+_lock = threading.Lock()
+_pending: dict[Path, bool] = {}
+_worker: threading.Thread | None = None
+
+
 def sync_archived_async(jsonl_paths: Iterable[Path], archived: bool) -> None:
-    """Fire-and-forget batch sync on a daemon thread.
+    """Fire-and-forget batch sync through the single worker thread.
 
     The caller's archive is already done; this only chases the remote side,
     so nothing is returned and nothing is waited on. Sessions that were never
     remote-controlled — the common case — cost one transcript scan and no
     network at all.
+
+    Ordering is the whole design: every sync drains through one worker, and
+    a transcript toggled again while still queued just has its pending state
+    replaced — so archive-then-Undo can't race itself, and the last toggle
+    always wins on the remote side too.
     """
     paths = list(jsonl_paths)
     if not paths:
         return
-
-    def work() -> None:
+    global _worker
+    with _lock:
         for path in paths:
-            sync_archived(path, archived)
+            # Re-queue at the end so the drain order follows the toggles.
+            _pending.pop(path, None)
+            _pending[path] = archived
+        if _worker is None or not _worker.is_alive():
+            _worker = threading.Thread(target=_drain, name="remote-archive", daemon=True)
+            _worker.start()
 
-    threading.Thread(target=work, name="remote-archive", daemon=True).start()
+
+def _memoized_token() -> Callable[[], str]:
+    """One credentials read for a whole drain, success and failure alike.
+
+    Still lazy: nothing is read until a transcript with a remote counterpart
+    actually needs the token, so a batch with none never touches the
+    credentials file. A failed read is remembered too — re-raised per
+    session so sync_archived logs each skip, without re-reading the file.
+    """
+    result: list[object] = []
+
+    def get() -> str:
+        if not result:
+            try:
+                token, _subscription = read_credentials()
+                result.append(token)
+            except Exception as err:
+                result.append(err)
+        value = result[0]
+        if isinstance(value, Exception):
+            raise value
+        return value  # type: ignore[return-value]
+
+    return get
+
+
+def _drain() -> None:
+    global _worker
+    get_token = _memoized_token()
+    while True:
+        with _lock:
+            if not _pending:
+                _worker = None
+                return
+            path = next(iter(_pending))
+            archived = _pending.pop(path)
+        sync_archived(path, archived, get_token=get_token)
