@@ -25,11 +25,15 @@ GNOME's `ubuntu-appindicators@ubuntu.com` — actually behaves:
   left-click-to-show to be had; the menu is the primary interface.
 - **Icons are resolved in the host's process**, whose icon theme knows nothing
   about the `data/icons` path a source checkout adds to its own. So the
-  artwork ships as `IconPixmap` — decoded here, handed over as ARGB32 — with
-  `IconName` and `IconThemePath` alongside as a courtesy to hosts that would
-  rather look it up themselves. The courtesy pauses while the badge is up:
-  hosts prefer a name they can resolve over any pixmap, so the name reads
-  back empty until the count clears.
+  artwork ships as `IconPixmap` — decoded here, handed over as ARGB32 — and
+  `IconName` reads back empty for as long as there are pixmaps to send. Two
+  reasons, and the second is the load-bearing one: hosts try a name they can
+  resolve before any pixmap, and GNOME's paints a pixmap into the icon
+  actor's `content` and has no path that ever clears it, so an item that
+  hands over one badged pixmap and then goes back to a name leaves the badge
+  underneath the themed icon forever. The name is kept only for the case
+  where the artwork can't be decoded at all and an unresolvable name still
+  beats nothing; `IconThemePath` rides along for that.
 
 The unread badge is composited into those pixmaps rather than sent as text:
 the shell has no badge slot, and the one text affordance (`XAyatanaLabel`)
@@ -683,15 +687,18 @@ class StatusIcon:
 
     # -- org.kde.StatusNotifierItem ----------------------------------------
 
-    def _pixmap_variant(self) -> GLib.Variant:
+    def _current_pixmaps(self) -> list[tuple[int, int, bytes]]:
         # Rendered when a host asks and kept until the badge moves — checked
         # here rather than invalidated on refresh, so a badge that changed in
         # an unannounced refresh (AboutToShow's) still reads back right.
         if self._pixmaps is None or self._pixmap_badge != self._view.badge:
             self._pixmaps = icon_pixmaps(self._icon_name, self._view.badge)
             self._pixmap_badge = self._view.badge
+        return self._pixmaps
+
+    def _pixmap_variant(self) -> GLib.Variant:
         return GLib.Variant(
-            "a(iiay)", [(w, h, list(data)) for w, h, data in self._pixmaps]
+            "a(iiay)", [(w, h, list(data)) for w, h, data in self._current_pixmaps()]
         )
 
     def _item_get(self, _conn, _sender, _path, _iface, prop: str):
@@ -715,12 +722,17 @@ class StatusIcon:
             # to it; with it True the menu is all there is.
             return GLib.Variant("b", False)
         if prop in ("IconName", "AttentionIconName"):
-            # Empty while the badge is up. Hosts try the name before the
-            # pixmap — GNOME's appindicator resolves it against IconThemePath,
-            # then its own theme, and only a name that yields *nothing* lets
-            # the pixmap through — so a resolvable name here would paint the
-            # plain artwork over the count.
-            return GLib.Variant("s", "" if view.badge else self._icon_name)
+            # Empty whenever there is a pixmap to send, badge or no badge.
+            # Hosts try the name before the pixmap — GNOME's appindicator
+            # resolves it against IconThemePath, then its own theme, and only
+            # a name that yields *nothing* lets the pixmap through — so a
+            # resolvable name here would paint the plain artwork over the
+            # count. Blanking it only while the badge is up is not enough:
+            # the host paints a pixmap into its icon actor's `content` and
+            # never clears it, so the name coming back at zero unread would
+            # draw the themed icon over a badge that stays underneath. The
+            # name is what is left when the artwork won't decode.
+            return GLib.Variant("s", "" if self._current_pixmaps() else self._icon_name)
         if prop in ("IconPixmap", "AttentionIconPixmap"):
             # One artwork for both states, badge and all: NeedsAttention and
             # a non-empty badge are the same fact (unread > 0), so whichever
