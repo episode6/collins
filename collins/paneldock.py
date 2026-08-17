@@ -826,7 +826,7 @@ class PanelDock(Adw.Bin):
         left exactly as it was — the new column comes out of the terminal's
         branch, so the home divider (`_home_rec`, the split *separating*
         the two) is still the one that sizes it."""
-        self.restore_maximized()  # a page opening behind the overlay is a page lost
+        self.restore_maximized(focus=focus)  # a page opening behind the overlay is a page lost
         if side not in ("right", "below"):
             side = "right"
         # Suppressing the strip's own grab is not enough to leave the cursor
@@ -921,7 +921,7 @@ class PanelDock(Adw.Bin):
             if focus:
                 GLib.idle_add(widget.grab_page_focus)
             return
-        self.restore_maximized()
+        self.restore_maximized(focus=focus)
         if self._stowed is not None and self._stowed.widget is widget:
             self._unstow()
             if focus:
@@ -1260,11 +1260,20 @@ class PanelDock(Adw.Bin):
         self._arm_focus_trap()
         GLib.idle_add(widget.grab_page_focus)
 
-    def restore_maximized(self) -> bool:
+    def restore_maximized(self, focus: bool = True) -> bool:
         """Drop the maximized page back into its own tab row, at the
         position it left from, selected and focused. False when nothing was
         up — every dock action that would otherwise happen unseen behind
         the overlay calls this first, and most of the time it does nothing.
+
+        *focus* False restores the page without *following* it with the
+        keyboard, for the quiet paths (`open_page` / `reveal_page` with
+        their own *focus* False): what brought the overlay down there was
+        nobody's click, so the cursor stays wherever it is. Wherever it
+        is can be the maximized page itself — the focus trap keeps it
+        there while one is up — and the transfer would drop it on the
+        floor, so a page that held the keyboard is re-granted it even on
+        a quiet restore: that is keeping, not moving.
 
         A strip that left the tree while its page was up (nothing does that
         today, but a collapse racing an idle would) sends the page to the
@@ -1272,6 +1281,13 @@ class PanelDock(Adw.Bin):
         rec = self._max
         if rec is None:
             return False
+        if not focus:
+            # Asked before the transfer below unparents the page and takes
+            # the answer with it. getattr, like the strip's aggregate: not
+            # every page kind reports focus, and one that can't counts as
+            # not holding it.
+            holds = getattr(rec.widget, "has_page_focus", None)
+            focus = bool(holds()) if holds is not None else False
         self._max = None
         self._disarm_focus_trap()
         self._max_pane.set_visible(False)
@@ -1285,9 +1301,10 @@ class PanelDock(Adw.Bin):
         view.transfer_page(page, home, min(rec.position, home.get_n_pages()))
         strip = self._strip_of(rec.widget)
         if strip is not None:
-            strip.select_widget(rec.widget)
+            strip.select_widget(rec.widget, focus=focus)
             self._reveal_strip(strip)
-            GLib.idle_add(rec.widget.grab_page_focus)
+            if focus:
+                GLib.idle_add(rec.widget.grab_page_focus)
         return True
 
     def _wire_max_page(self, widget) -> None:
