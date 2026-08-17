@@ -492,13 +492,23 @@ def terminal_reply(sections: list[tuple[int, bool, str]], lines: int) -> str:
     closes the shim's connection (see mcpserver._send), so after the line
     tail the reply is measured as it will be encoded — JSON escaping can
     multiply a dump full of control bytes — and every tail keeps halving,
-    oldest half dropped first, until the frame takes it.
+    oldest half dropped first, until the frame takes it. Should the halving
+    run dry — every tail already empty, the headers alone over budget, which
+    takes tens of thousands of tabs — the reply is cut off outright rather
+    than looped on: a section count that absurd is its own answer, and the
+    guarantee this function exists for is "returns, and fits".
     """
     tails = [(number, busy, _terminal_tail(text, lines)) for number, busy, text in sections]
+    budget = MAX_LINE - _TERMINAL_REPLY_MARGIN
     while True:
         reply = "\n\n".join(_terminal_section(*tail) for tail in tails)
-        if len(json.dumps(reply).encode("utf-8")) <= MAX_LINE - _TERMINAL_REPLY_MARGIN:
+        if len(json.dumps(reply).encode("utf-8")) <= budget:
             return reply
+        if not any(text for _number, _busy, text in tails):
+            # Headers only by now, so every character is ASCII or "─" and
+            # encodes in at most 6 bytes (─) — a sixth of the budget
+            # in characters always fits it.
+            return reply[: budget // 6]
         tails = [
             (number, busy, text[(len(text) + 1) // 2 :]) for number, busy, text in tails
         ]

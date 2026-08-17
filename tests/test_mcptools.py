@@ -334,6 +334,18 @@ def test_terminal_reply_says_empty_for_a_blank_terminal():
     assert reply == "── Terminal 2 (idle) ──\n(empty)"
 
 
+def test_terminal_reply_returns_even_when_headers_alone_blow_the_budget():
+    """The halving loop's termination guard: an empty tail can't shrink, so
+    a dock with enough tabs that the bare headers exceed the frame budget
+    must cut the reply off rather than loop forever."""
+    reply = mcptools.terminal_reply([(n, False, "") for n in range(1, 20_001)], lines=200)
+    frame = mcptools.encode_message(
+        {"id": 1, "result": {"content": [{"type": "text", "text": reply}]}}
+    )
+    assert len(frame) <= mcptools.MAX_LINE
+    assert reply.startswith("── Terminal 1 (idle) ──\n(empty)")
+
+
 def test_terminal_reply_always_fits_one_wire_frame():
     """An oversize reply doesn't degrade, it closes the shim's connection —
     so even a pathological dump (control bytes escape six-to-one in JSON)
