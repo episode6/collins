@@ -208,6 +208,11 @@ def dump_state(where: str) -> None:
     with _lock:
         print(f"  gh_calls: {gh_calls}")
     if tab is not None:
+        print(
+            f"  reqs={state.get('reqs')} drops={state.get('req_drops')} "
+            f"applies={state.get('applies')} last_apply_at={state.get('last_apply_at')} "
+            f"now={GLib.get_monotonic_time()}"
+        )
         print(f"  _updating={tab._updating} _pr_discover={tab._pr_discover}")
         print(f"  _poll_source={tab._poll_source} root={tab.get_root() is not None}")
         print(f"  _pr_focus_refresh_at={tab._pr_focus_refresh_at}")
@@ -223,6 +228,10 @@ def dump_state(where: str) -> None:
     else:
         print(f"  prstatus._statuses[url]: stamp={stamped[0]} entry_is_none={stamped[1] is None}")
     print(f"  prstatus._statuses keys={list(prstatus._statuses)}")
+    print(f"  threads={[t.name for t in threading.enumerate()]}", flush=True)
+    import faulthandler
+
+    faulthandler.dump_traceback(all_threads=True)
     print("--- end diag ---", flush=True)
 
 
@@ -244,6 +253,25 @@ def stage() -> bool:
     win.open_session(session)
     state["win"] = win
     state["tab"] = win.tab_view.get_selected_page().get_child()
+    tab = state["tab"]
+
+    # Temporary CI diagnostics: count update requests, gate drops, and applies.
+    orig_req = tab._request_update
+    orig_apply = tab._apply_update
+
+    def traced_req(discover: bool = False) -> None:
+        state["reqs"] = state.get("reqs", 0) + 1
+        if tab._updating:
+            state["req_drops"] = state.get("req_drops", 0) + 1
+        return orig_req(discover)
+
+    def traced_apply(*args) -> bool:
+        state["applies"] = state.get("applies", 0) + 1
+        state["last_apply_at"] = GLib.get_monotonic_time()
+        return orig_apply(*args)
+
+    tab._request_update = traced_req
+    tab._apply_update = traced_apply
     return later(step_chips, 4000)  # the tab's first poll, and its PR fetch
 
 
