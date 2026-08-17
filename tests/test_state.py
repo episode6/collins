@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-16. Full change history: git log for this file.
+# fork. Last modified: 2026-08-17. Full change history: git log for this file.
 
 import json
 
@@ -544,6 +544,13 @@ def test_last_active_session_roundtrip(app_state):
     assert state.get_setting("last_active_session") == ""  # default: nothing to reopen
     state.set_setting("last_active_session", "sid-42")
     assert app_state.AppState().get_setting("last_active_session") == "sid-42"
+
+
+def test_restore_last_session_defaults_off(app_state):
+    state = app_state.AppState()
+    assert state.get_setting("restore_last_session") is False  # launch opens nothing
+    state.set_setting("restore_last_session", True)
+    assert app_state.AppState().get_setting("restore_last_session") is True
 
 
 def test_window_geometry_roundtrip(app_state):
