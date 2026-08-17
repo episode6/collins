@@ -13,7 +13,11 @@ the settle checkpoints do, and this check pins all three sides of that:
   - a position change during the gate with no drag (a clamp) stays
     unrecorded — the original protection holds;
   - the same change with a live drag is recorded and emitted;
-  - a plain resize after the gate records and emits as it always has.
+  - a plain resize after the gate records and emits as it always has;
+  - and once more against a *live* apply()/settle chain, with the drag
+    landing mid-settle — the timing the bug lived in — proving the cede
+    also invalidates the queued checkpoints instead of being re-asserted
+    over.
 
 Real widgets in a real presented window (the sizer arithmetic needs the
 paned allocated); the drag itself is the one thing simulated, by stubbing
@@ -198,6 +202,39 @@ def main() -> int:
         "resize after the gate emits size-changed",
         events == [("page", "right", 750)],
         events,
+    )
+    events.clear()
+
+    # 4. The real chain: apply() runs for real and the drag lands mid-settle,
+    #    the timing the bug lived in. Only the gesture probe is stubbed — the
+    #    gate, the position() idle and the queued settle checkpoints are all
+    #    live, so this also pins that the cede's seq bump invalidates them
+    #    (a surviving checkpoint would re-assert the old target over the
+    #    drag). ~80ms lands between the 50ms and 150ms checkpoints; even on a
+    #    starved main loop the drag still meets the gate up and cedes, just
+    #    against the allocation-wait phase instead of a settle.
+    sizer.apply()
+    wait(80)
+    check("apply gate is up when the drag lands", sizer._apply_pending)
+    sizer._drag_active = lambda: True
+    paned.set_position(total - 680)
+    sizer._drag_active = lambda: False
+    check("mid-settle drag opens the gate", not sizer._apply_pending)
+    check(
+        "mid-settle drag is recorded",
+        sizer.remembered("right") == 680,
+        sizer.remembered("right"),
+    )
+    wait(600)
+    check(
+        "mid-settle drag emits size-changed",
+        events == [("page", "right", 680)],
+        events,
+    )
+    check(
+        "no leftover settle re-asserts the old size",
+        paned.get_position() == total - 680,
+        (paned.get_position(), total),
     )
 
     print(f"\n{PASSED} passed, {FAILED} failed")
