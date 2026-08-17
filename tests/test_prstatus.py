@@ -687,6 +687,7 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
         "commits": [
             {"oid": "271949c", "committedDate": "2026-08-13T09:30:00Z"},
         ],
+        "autoMergeRequest": None,
     })
     monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
     monkeypatch.setattr(prstatus.subprocess, "run", lambda *a, **kw: _completed(reply))
@@ -698,6 +699,7 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
         "unresolved": True,
         "claude_replied": True,
         "pushed_since": False,
+        "auto_merge": False,
     }
 
 
@@ -1130,6 +1132,16 @@ def test_a_record_carries_the_whole_pr():
         "unresolved": True,
     }
     assert from_record(to_record(pr)) == pr
+
+
+def test_a_record_carries_auto_merge_too():
+    """The button the page draws follows it (see practions.header_actions), so
+    it survives a restart the same way the check counts do."""
+    pr = PullRequest(55, URL, "episode6/collins", state="OPEN", pending=1, auto_merge=True)
+    assert to_record(pr)["auto_merge"] is True
+    assert from_record(to_record(pr)) == pr
+    assert "auto_merge" not in to_record(PullRequest(55, URL, state="OPEN"))
+    assert from_record({"number": 55, "url": URL, "auto_merge": "yes"}).auto_merge is False
 
 
 def test_a_record_says_only_what_was_known():
@@ -1624,6 +1636,54 @@ def test_unresolved_comments_survive_the_run():
     was waiting — which is the last thing anyone knew."""
     pr = PullRequest(55, URL, "episode6/collins", state="OPEN", unresolved=True)
     assert from_record(to_record(pr)).awaiting_reply is True
+
+
+# -- auto-merge (see practions: it decides which merge button the page draws) -
+
+
+def test_gh_answering_with_a_request_means_auto_merge_is_on():
+    """gh hands back the request itself — who asked and by which method — or
+    null; only the presence of one is kept."""
+    assert prstatus._entry({"autoMergeRequest": {"enabledBy": {"login": "ghackett"}}})[
+        "auto_merge"
+    ] is True
+    assert prstatus._entry({"autoMergeRequest": None})["auto_merge"] is False
+    assert prstatus._entry({})["auto_merge"] is False
+
+
+@pytest.mark.parametrize("state", ["OPEN", "DRAFT"])
+def test_a_live_pr_can_be_waiting_to_merge_itself(state):
+    assert PullRequest(55, URL, state=state, auto_merge=True).auto_merging is True
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED", None])
+def test_only_a_live_pr_is_auto_merging(state):
+    """GitHub keeps reporting the request that landed a PR; a merged one isn't
+    waiting on anything."""
+    assert PullRequest(55, URL, state=state, auto_merge=True).auto_merging is False
+
+
+def test_describe_says_the_pr_is_merging_itself():
+    pr = PullRequest(55, URL, "episode6/collins", state="OPEN",
+                     passed=2, failed=0, pending=1, auto_merge=True)
+    assert describe(pr) == (
+        "episode6/collins#55 · Open pull request · Merging when checks pass "
+        "· 2 passed, 1 pending"
+    )
+
+
+def test_enrich_fills_auto_merge(gh):
+    gh({"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 1},
+        "auto_merge": True})
+    refresh(URL)
+    assert enrich(parse_pr_link(_link())).auto_merging is True
+
+
+def test_the_cli_cache_carries_no_auto_merge(cache):
+    """Its entries have no such field, so a warm start says "not enabled" —
+    which only ever leaves the merge offer where it was."""
+    cache({URL: {"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 1}}})
+    assert enrich(parse_pr_link(_link())).auto_merge is False
 
 
 # -- who had the last word (see practions: it decides the review offer) ------

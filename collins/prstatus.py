@@ -105,7 +105,12 @@ _DUE = float("-inf")
 # whose login is what names Claude. ``commits`` answers the question that
 # outranks both: whether the branch has moved since that comment, because a
 # review of code nobody is looking at any more is worth asking for again.
-_GH_FIELDS = "title,state,isDraft,statusCheckRollup,mergeable,comments,commits"
+# ``autoMergeRequest`` rides along for one bit: whether GitHub has already been
+# told to land this PR on its own. It answers with the request (who asked, and
+# with which merge method) or with null, so only its presence is kept.
+_GH_FIELDS = (
+    "title,state,isDraft,statusCheckRollup,mergeable,comments,commits,autoMergeRequest"
+)
 # How deep gh reads a PR's list fields. It asks GitHub for one page of each and
 # doesn't page further, so a list exactly this long is a truncated one — and
 # commits arrive oldest-first, which is what makes the truncation matter: the
@@ -223,6 +228,11 @@ class PullRequest:
     # Whether a commit landed on the branch after that newest comment — the
     # code has moved on from whatever was said about it.
     pushed_since: bool = False
+    # Whether GitHub is already holding this PR to merge itself once its
+    # requirements are met. False for an unfetched PR and for a warm start from
+    # the CLI cache, exactly like `mergeable`: unknown reads as "not enabled",
+    # which only ever leaves the merge offer where it has always been.
+    auto_merge: bool = False
 
     @property
     def slug(self) -> str:
@@ -258,6 +268,17 @@ class PullRequest:
         closed one isn't going anywhere, whatever gh reports for it.
         """
         return self.state in ("OPEN", "DRAFT") and self.mergeable == "CONFLICTING"
+
+    @property
+    def auto_merging(self) -> bool:
+        """Whether GitHub is waiting to land this PR by itself.
+
+        Only a live PR can be waiting on anything: a merged one already landed
+        — by auto-merge as often as not, and GitHub keeps reporting the request
+        that did it — and a closed one never will. What turns the page's merge
+        button into the offer to call it off (see practions.header_actions).
+        """
+        return self.state in ("OPEN", "DRAFT") and self.auto_merge
 
     @property
     def awaiting_reply(self) -> bool:
@@ -353,6 +374,8 @@ def describe(pr: PullRequest) -> str:
         parts.append(state_text(pr.state))
     if pr.conflicting:
         parts.append(_("Has merge conflicts"))
+    if pr.auto_merging:
+        parts.append(_("Merging when checks pass"))
     if pr.awaiting_reply:
         parts.append(_("Has unresolved comments"))
     checks = [
@@ -463,11 +486,12 @@ def to_record(pr: PullRequest) -> dict | None:
     would achieve is putting an unvalidated URL on disk.
 
     Status goes out with the PR — state, check counts, mergeability, whether
-    someone is waiting on a reply and whether Claude was the one who spoke last
-    — so a mark reads as the last thing gh said rather than as "nothing known"
-    until the run's first fetch. Stale beats blank: grey says a PR nothing is
-    known about, and saying that about a PR the app has watched all week is the
-    more wrong of the two answers. A field gh never answered is left out of the
+    GitHub is holding it to merge itself, whether someone is waiting on a reply
+    and whether Claude was the one who spoke last — so a mark reads as the last
+    thing gh said rather than as "nothing known" until the run's first fetch.
+    Stale beats blank: grey says a PR nothing is known about, and saying that
+    about a PR the app has watched all week is the more wrong of the two
+    answers. A field gh never answered is left out of the
     record rather than written as null, so a record only ever says what was
     actually known.
     """
@@ -496,6 +520,8 @@ def to_record(pr: PullRequest) -> dict | None:
         record["claude_replied"] = True
     if pr.pushed_since:
         record["pushed_since"] = True
+    if pr.auto_merge:
+        record["auto_merge"] = True
     return record
 
 
@@ -539,6 +565,7 @@ def from_record(record: object) -> PullRequest | None:
         unresolved=record.get("unresolved") is True,
         claude_replied=record.get("claude_replied") is True,
         pushed_since=record.get("pushed_since") is True,
+        auto_merge=record.get("auto_merge") is True,
     )
 
 
@@ -845,6 +872,10 @@ def _entry(data: dict) -> dict:
         "unresolved": _unresolved(last),
         "claude_replied": _by_claude(last),
         "pushed_since": _pushed_since(last, data.get("commits")),
+        # gh answers with the request itself when auto-merge is on and null
+        # when it isn't; only that much is kept — who asked for it and by which
+        # method is GitHub's business, not the app's.
+        "auto_merge": isinstance(data.get("autoMergeRequest"), dict),
     }
 
 
@@ -1241,6 +1272,7 @@ def _applied(pr: PullRequest, entry: object) -> PullRequest:
         unresolved=entry.get("unresolved") is True,
         claude_replied=entry.get("claude_replied") is True,
         pushed_since=entry.get("pushed_since") is True,
+        auto_merge=entry.get("auto_merge") is True,
     )
 
 

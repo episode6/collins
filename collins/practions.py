@@ -10,7 +10,8 @@ PR offers.
 
 Which actions a PR offers is a question about its state, and the answer is
 deliberately narrow: a draft is asked to come out of draft, an open PR is
-merged now or told to merge itself when its checks go green, and anything the
+merged now or told to merge itself when its checks go green (and one already
+told to is offered the way back out of it), and anything the
 repository's own Claude workflow can be asked for goes through a comment
 (`@claude review`) rather than an API Collins would have to hold a token for —
 and only while Claude isn't the one who commented last on code that hasn't
@@ -68,6 +69,10 @@ from .prstatus import PullRequest, gh_json, gh_run, repository_for
 READY = "ready"
 MERGE = "merge"
 AUTO_MERGE = "auto-merge"
+# Call auto-merge off again. Stands exactly where the merge offer would have
+# been — a PR GitHub is already holding has no second merge to ask for, so the
+# one thing left to say about landing it is "don't".
+DISABLE_AUTO_MERGE = "disable-auto-merge"
 # The merge again, with the session that opened the PR archived behind it.
 # Never in the PR list's menu and never a button: only the page's alternates
 # (`alternate_actions`), since archiving is about a session and that menu is
@@ -250,7 +255,7 @@ def actions_for(
         # come back with GitHub's refusal, and auto-merge can't be enabled on
         # a branch GitHub can't merge. The rebase action below stands where
         # the merge would have — resolving is what makes merging offerable.
-        actions.append(merge_action(pr, auto=not checks_green(pr)))
+        actions.append(_landing_action(pr))
     if pr.state in LIVE and pr.conflicting:
         actions.append(rebase_action(pr, prompt_block))
     if pr.state in LIVE:
@@ -313,7 +318,8 @@ def header_actions(pr: PullRequest) -> list[Action]:
     One at a time, always: a draft is asked to come out of draft, and an open
     PR is offered the single merge that fits the state its checks are in —
     auto-merge while they are still running, the merge itself once they are
-    green. The same answer the menu gives, drawn as a button, so the page and
+    green, and the way back out of auto-merge once GitHub is already holding
+    the PR. The same answer the menu gives, drawn as a button, so the page and
     the menu can't recommend different things about the same PR; and since it
     is the one Collins recommends, it is the one that wears the accent.
     """
@@ -322,8 +328,22 @@ def header_actions(pr: PullRequest) -> list[Action]:
     if pr.state == "OPEN" and not pr.conflicting:
         # Same gate as the menu's: GitHub refuses a merge on a branch it can't
         # merge, and a draft can't be auto-merged either.
-        return [merge_action(pr, auto=not checks_green(pr))]
+        return [_landing_action(pr)]
     return []
+
+
+def _landing_action(pr: PullRequest) -> Action:
+    """The one thing left to say about landing *pr*, for an open PR that can.
+
+    Three states, one offer: GitHub is already holding it, so the offer is to
+    call that off; its checks aren't in yet, so the offer is to have GitHub
+    land it when they are; or they are green, so the offer is the merge itself.
+    Written once and read by both the menu and the page's button, which is what
+    keeps the two from disagreeing about the same pull request.
+    """
+    if pr.auto_merging:
+        return disable_auto_merge_action(pr)
+    return merge_action(pr, auto=not checks_green(pr))
 
 
 def alternate_actions(pr: PullRequest, can_archive: bool = False) -> list[Action]:
@@ -335,8 +355,14 @@ def alternate_actions(pr: PullRequest, can_archive: bool = False) -> list[Action
     doing it — merging and being done with the session behind it, or closing
     the pull request unmerged.
 
-    "Merge and archive" is only ever offered beside the immediate merge. On
-    auto-merge there is nothing to wait for in the app — GitHub lands the PR
+    A pull request GitHub is already holding gets one more: the immediate merge
+    itself, which its button has stopped offering (see `_landing_action`).
+    Waiting for the checks is the course Collins recommends there — it is the
+    one that was asked for — but "land it now" must stay reachable without
+    turning auto-merge off first and pressing merge afterwards.
+
+    "Merge and archive" is only ever offered beside a merge that happens now.
+    On auto-merge there is nothing to wait for in the app — GitHub lands the PR
     minutes or hours later, on its own — and a session archived now would be
     archived on a promise rather than on a merge. *can_archive* is the caller's
     answer to "is there a session here to archive at all?" (see
@@ -350,7 +376,12 @@ def alternate_actions(pr: PullRequest, can_archive: bool = False) -> list[Action
     worse than a menu with one row in it.
     """
     actions: list[Action] = []
-    if can_archive and any(action.key == MERGE for action in header_actions(pr)):
+    keys = {action.key for action in header_actions(pr)}
+    if DISABLE_AUTO_MERGE in keys:
+        actions.append(merge_action(pr, auto=False))
+    # Beside either merge-now: the button's own when the checks are green, or
+    # the alternate just added when GitHub is holding the PR instead.
+    if can_archive and (keys & {MERGE, DISABLE_AUTO_MERGE}):
         actions.append(merge_archive_action(pr))
     if pr.state in LIVE:
         actions.append(close_action(pr))
@@ -482,6 +513,23 @@ def merge_action(pr: PullRequest, auto: bool) -> Action:
     )
 
 
+def disable_auto_merge_action(pr: PullRequest) -> Action:
+    """Tell GitHub to stop waiting to merge *pr* by itself.
+
+    No confirmation, unlike the merges it stands in for: nothing lands and
+    nothing is thrown away — the pull request goes back to sitting where it
+    was, and the same button offers auto-merge again on the next fetch. It is
+    the undo, so it wears neither the merge green nor the accent (see prview's
+    _ActionBar).
+    """
+    return Action(
+        DISABLE_AUTO_MERGE,
+        _("Disable auto-merge"),
+        _("Stop GitHub from merging {slug} when its checks pass").format(slug=pr.slug),
+        short=_("Disable Auto-Merge"),
+    )
+
+
 def _merge_body(pr: PullRequest) -> str:
     """What an immediate merge's question says about where *pr*'s checks got
     to. A branch with no required checks merges fine, so merging past
@@ -569,6 +617,10 @@ def perform(key: str, pr: PullRequest) -> str | None:
         if key == AUTO_MERGE:
             args.append("--auto")
         return _run(args)
+    if key == DISABLE_AUTO_MERGE:
+        # No merge method here: this cancels the request rather than making
+        # one, and gh refuses the two flags together.
+        return _run(["pr", "merge", pr.url, "--disable-auto"])
     if key == CLOSE:
         return _run(["pr", "close", pr.url])
     if key == REVIEW:

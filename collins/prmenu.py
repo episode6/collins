@@ -121,6 +121,9 @@ _ACTION_ICONS = {
     practions.READY: ("git-pull-request-symbolic", "pr-open"),
     practions.MERGE: ("git-merge-symbolic", "pr-merged"),
     practions.AUTO_MERGE: ("git-merge-symbolic", "pr-merged"),
+    # Undoing the one above, and dressed as the undo: the same merge glyph
+    # without the purple, since nothing about it lands a pull request.
+    practions.DISABLE_AUTO_MERGE: ("git-merge-symbolic", None),
     # The two the PR page keeps behind its button (see practions.alternate_actions).
     # Each wears the half of itself the merge glyph doesn't already say: the
     # sidebar's own archive mark, and the closed-PR base icon in its red.

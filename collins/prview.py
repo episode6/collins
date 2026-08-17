@@ -17,14 +17,16 @@ under an inline banner — stale beats blank, as everywhere in the PR stack.
 On the switcher's own row, at its end, sits the action that moves the PR
 itself along, as one button: whatever `practions.header_actions` says its
 state offers — "Ready" for a draft, "Auto-Merge" or "Merge" for an open one,
-whichever fits its checks, naming in full on its tooltip what it is about to
+whichever fits its checks, and "Disable Auto-Merge" once GitHub is already
+holding it to land on its own, naming in full on its tooltip what it is about to
 do — behind the same confirmation and the same `gh` call the chip's actions
 menu runs it with (`_ActionBar`), and no button at all where a PR offers
 none. A right-click on that button opens the alternatives to what it says
 (`practions.alternate_actions`): "Close pull request" while there is still
-one to close, and — beside the immediate merge — "Merge and archive
-session", which lands the PR and then puts the session that opened it away,
-in that order and only if the merge worked. Everything else the PR offers
+one to close, "Merge pull request" where the button has stopped offering it,
+and — beside either merge-now — "Merge and archive session", which lands the
+PR and then puts the session that opened it away, in that order and only if
+the merge worked. Everything else the PR offers
 is still a chip's right-click menu away.
 
 The Checks list carries the page's other button. A conflicting branch shows
@@ -1221,7 +1223,9 @@ class _ActionBar(Gtk.Box):
     next about this PR (the merge that fits its checks, not both merges to
     choose between), so it wears the accent — except the merges, immediate and
     auto alike, which wear GitHub's own merge green (app.py's _SCHEME_CSS), the
-    color that button has on the pull request's page.
+    color that button has on the pull request's page, and "Disable Auto-Merge",
+    which wears neither: it takes a decision back rather than moving the pull
+    request anywhere.
 
     The button is `practions.perform` on a worker thread behind the merge's
     own confirmation dialog, spinning where its word was and the bar held
@@ -1238,8 +1242,9 @@ class _ActionBar(Gtk.Box):
 
     A right-click on it opens what the button deliberately isn't offering
     (`practions.alternate_actions`): closing the pull request instead of
-    landing it, and — beside the immediate merge only — merging and archiving
-    the session that opened it. Both are the *end* of this pull request, which
+    landing it, merging and archiving the session that opened it, and — where
+    the button says "Disable Auto-Merge" — the immediate merge that button has
+    stopped offering. All are the *end* of this pull request, which
     is what makes them belong on this button rather than anywhere else on the
     page, and neither is one to hand a stray click: they ask first, they open
     behind a right-click, and the tooltip says the menu is there. "Merge and
@@ -1278,19 +1283,29 @@ class _ActionBar(Gtk.Box):
         # expanding on it is laid out flush to that same edge (_WrapLayout).
         row = _WrapRow()
         # Built once and shown by key, rather than rebuilt per sync: the set is
-        # closed (three actions, at most one of them showing at a time), and a
+        # closed (four actions, at most one of them showing at a time), and a
         # button that only ever changes its visibility can't lose a click to a
         # rebuild landing under the pointer.
         self._buttons: dict[str, _BusyButton] = {}
-        for key in (practions.READY, practions.AUTO_MERGE, practions.MERGE):
+        for key in (
+            practions.READY,
+            practions.AUTO_MERGE,
+            practions.MERGE,
+            practions.DISABLE_AUTO_MERGE,
+        ):
             button = _BusyButton()
             # Either merge is green rather than accent-colored (app.py's
             # _SCHEME_CSS), the way both are on the pull request's own page —
             # auto-merge included, since it is the same act on a delay.
             # "Ready for review" is the one recommendation left wearing the
             # accent: it is what moves a draft along, not what lands it.
-            merge = key in practions.MERGES
-            button.add_css_class("pr-merge-action" if merge else "suggested-action")
+            # Turning auto-merge back off wears neither: it takes a decision
+            # back rather than moving the pull request anywhere, and a plain
+            # button is what an undo looks like.
+            if key in practions.MERGES:
+                button.add_css_class("pr-merge-action")
+            elif key != practions.DISABLE_AUTO_MERGE:
+                button.add_css_class("suggested-action")
             button.connect("clicked", self._on_clicked, key)
             # GtkButton answers the primary button and only that, so this
             # never doubles up with the click above it.
