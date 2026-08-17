@@ -217,11 +217,18 @@ def stage() -> bool:
     win.open_session(session)
     state["win"] = win
     state["tab"] = win.tab_view.get_selected_page().get_child()
-    return later(step_chips, 4000)  # the tab's first poll, and its PR fetch
+    return later(step_chips, 1000)  # the tab's first poll, and its PR fetch
 
 
 def step_chips() -> bool:
     tab = state["tab"]
+    # The chips ride the first update and the fetch rides the chips; how long
+    # either takes is the runner's business, not the check's. Wait for both —
+    # bounded, like every wait here.
+    ready = [pr.url for pr in tab._footer_prs] == [PR_URL] and status_fetches() >= 1
+    if not ready and state.setdefault("chip_waits", 0) < 40:
+        state["chip_waits"] += 1
+        return later(step_chips, 500)
     check("the transcript's PR is on the tab", [pr.url for pr in tab._footer_prs] == [PR_URL],
           [pr.url for pr in tab._footer_prs])
     check("its status was fetched at least once", status_fetches() >= 1, gh_calls)
@@ -232,6 +239,14 @@ def step_chips() -> bool:
 
 
 def step_status_refetched() -> bool:
+    # The refetch may ride the next poll tick rather than the finish itself:
+    # note_run_finished's own update request is dropped when a poll is
+    # mid-flight (_request_update's _updating gate), and the invalidation is
+    # then spent a tick later. A fixed wait is enough on a dev machine but
+    # not on a loaded CI runner, so wait for it — bounded.
+    if status_fetches() <= state["before"] and state.setdefault("refetch_waits", 0) < 20:
+        state["refetch_waits"] += 1
+        return later(step_status_refetched, 500)
     check("a finish edge refetches the PR's status", status_fetches() > state["before"],
           f"{state['before']} -> {status_fetches()}")
     # No aging this time: a session that goes quiet between every permission

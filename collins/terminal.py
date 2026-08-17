@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-16. Full change history: git log for this file.
+# fork. Last modified: 2026-08-17. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -4183,7 +4183,19 @@ class TerminalTab(Gtk.Box):
                 prs = [self._enriched(pr) for pr in tracked[-_MAX_PR_CHIPS:]]
             except Exception:
                 tracked, prs = None, self._footer_prs  # leave the chips as they are
-            GLib.idle_add(self._apply_update, prs, looking and found is None, tracked)
+            # PRIORITY_DEFAULT, not the idle default: this landing is what
+            # resets _updating, and a default-idle callback can be starved
+            # indefinitely by a busy frame clock (GTK's layout/paint phases
+            # outrank it) — under CI's Xvfb it never ran at all, wedging the
+            # gate and dropping every later update. A timeout-priority landing
+            # cannot be starved by redraw.
+            GLib.idle_add(
+                self._apply_update,
+                prs,
+                looking and found is None,
+                tracked,
+                priority=GLib.PRIORITY_DEFAULT,
+            )
 
         threading.Thread(target=work, daemon=True).start()
 
