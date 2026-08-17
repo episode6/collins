@@ -2296,8 +2296,10 @@ class TerminalTab(Gtk.Box):
     def _open_attached_pr_page(self, url: str) -> bool:
         # A tab that closed inside the wait has dropped its hub connections;
         # its dock is gone and there is nothing left to open a page in.
+        # Quiet on purpose: this open was nobody's click, and the keyboard
+        # may be mid-word in the composer or the agent's input box.
         if self._pr_store is not None:
-            self.open_pr_page_url(url)
+            self.open_pr_page_url(url, focus=False)
         return GLib.SOURCE_REMOVE
 
     def restore_prs(self, records: object) -> None:
@@ -4416,7 +4418,9 @@ class TerminalTab(Gtk.Box):
 
     # -- the native PR page --------------------------------------------------
 
-    def open_pr_page(self, pr: PullRequest, unresolved: bool = False) -> None:
+    def open_pr_page(
+        self, pr: PullRequest, unresolved: bool = False, focus: bool = True
+    ) -> None:
         """Show *pr*'s native page in a strip beside this session.
 
         One page per URL per tab: asking for a PR whose page is already open
@@ -4424,18 +4428,26 @@ class TerminalTab(Gtk.Box):
         rather than opening a twin. With *unresolved*, the page lands on its
         first unresolved thread — the badge's deep link — which a fresh page
         honors as soon as its first fetch does.
+
+        *focus* False shows the page without moving the keyboard, for the
+        one caller nobody clicked (`_open_attached_pr_page`): a page that
+        opens by itself must not take the next word typed at the agent —
+        or into the composer — the same bargain the attachments autodock
+        makes.
         """
         page = self._find_pr_page(pr.url)
         if page is None:
             page = self._make_pr_page(pr)
-            self._dock.open_page(page)
+            self._dock.open_page(page, focus=focus)
         else:
-            self._dock.reveal_page(page)
+            self._dock.reveal_page(page, focus=focus)
             page.refresh()
         if unresolved:
             page.reveal_unresolved()
 
-    def open_pr_page_url(self, url: str, unresolved: bool = False) -> None:
+    def open_pr_page_url(
+        self, url: str, unresolved: bool = False, focus: bool = True
+    ) -> None:
         """`open_pr_page` from a bare URL — the sidebar's way in, where the
         window action carries only strings. The tab's own copy of the PR is
         preferred (it has the title and status); a URL the tab isn't
@@ -4446,7 +4458,7 @@ class TerminalTab(Gtk.Box):
             if pr is None:
                 return
             pr = known(pr)
-        self.open_pr_page(pr, unresolved=unresolved)
+        self.open_pr_page(pr, unresolved=unresolved, focus=focus)
 
     def open_latest_pr_page(self) -> bool:
         """F7: show the page for the pull request this session linked most
