@@ -1,3 +1,5 @@
+# New in the ghackett fork of agent-session-manager (GPL-3.0).
+
 """A session's pull requests as a popover list: one row per PR, titles and all.
 
 Two buttons open this same list. The ellipsis beside the tab footer's PR chips

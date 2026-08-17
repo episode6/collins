@@ -1,3 +1,5 @@
+# New in the ghackett fork of agent-session-manager (GPL-3.0).
+
 """The pull request a Claude Code session is working on, read off disk.
 
 Claude Code links a session to a PR the moment one shows up in tool output:
