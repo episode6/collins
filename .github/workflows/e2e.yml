@@ -1,0 +1,29 @@
+# New in the ghackett fork of agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0).
+
+name: E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    # Experimental: results are informative only and never fail the workflow
+    # run. Remove continue-on-error once the suite has proven stable in CI.
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      # Unlike the unit-test job (which deliberately stays GTK-free to match
+      # tests/conftest.py's blocklist), the e2e checks drive real widgets:
+      # they need the full gir stack, a display (Xvfb), and a session bus
+      # (dbus-run-session, one per check, provided by the runner).
+      - run: >
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91-gtk4
+          gir1.2-gtksource-5 gir1.2-gdkpixbuf-2.0
+          xvfb xauth dbus fonts-dejavu-core git
+      - run: xvfb-run -a -s "-screen 0 1920x1200x24" python3 scripts/run_e2e.py
