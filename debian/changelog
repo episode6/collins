@@ -1,4 +1,4 @@
-collins (0.1.0) noble; urgency=medium
+collins (0.1.0) UNRELEASED; urgency=medium
 
   * Rebrand the app as Collins (fork of agent-session-manager): new package
     name, command (collins), app id (com.episode6.Collins), and config
