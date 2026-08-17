@@ -747,6 +747,50 @@ def test_base_providers_have_no_worktree_exit_dialog():
     assert Provider().worktree_exit_prompt("Keep worktree\nRemove worktree") is None
 
 
+# -- worktree launches that never started -------------------------------------
+
+
+def test_claude_worktree_trust_error_is_a_failed_launch():
+    """The screen a `claude -w` launch leaves behind in a directory whose
+    trust the CLI has no record of (captured from 2.1.233): one line, then
+    the shell prompt back where a session should be."""
+    claude = ClaudeProvider()
+    screen = (
+        "user@box:~/dev/proj$ claude -w\n"
+        "Error creating worktree: Workspace trust not yet accepted. Run `claude` once in "
+        "this directory and accept the trust dialog, then retry with --worktree.\n"
+        "user@box:~/dev/proj$ \n"
+    )
+    assert claude.worktree_launch_failed(screen) is True
+
+
+def test_claude_other_worktree_errors_are_failed_launches_too():
+    """Whatever stopped the worktree being cut, the tab is left in the same
+    place — so the whole family is caught, not just the trust sentence."""
+    claude = ClaudeProvider()
+    screen = "Error creating worktree: fatal: invalid reference: main\n"
+    assert claude.worktree_launch_failed(screen) is True
+
+
+def test_claude_a_launch_that_worked_is_not_a_failure():
+    claude = ClaudeProvider()
+    assert claude.worktree_launch_failed("") is False
+    assert claude.worktree_launch_failed("❯\xa0Try \"fix the flaky test\"") is False
+
+
+def test_claude_worktree_error_quoted_mid_line_is_not_a_failed_launch():
+    """The CLI prints the error as its own line. The same words inside a
+    sentence are someone talking about them — an agent explaining this very
+    fallback, say — and must not restart a session that is running fine."""
+    claude = ClaudeProvider()
+    screen = 'The CLI prints "Error creating worktree: ..." and exits.\n'
+    assert claude.worktree_launch_failed(screen) is False
+
+
+def test_base_providers_have_no_worktree_launch_failure():
+    assert Provider().worktree_launch_failed("Error creating worktree: nope") is False
+
+
 # -- file references (the editor's "Add to chat") -----------------------------
 
 

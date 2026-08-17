@@ -197,6 +197,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "figyelmeztetés: a(z) {cwd} projektkönyvtár már nem létezik, indítás itt: {fallback}",
         "recreating removed worktree {path}":
             "az eltávolított {path} munkafa újralétrehozása",
+        "couldn't create a worktree — starting the session in {cwd} instead":
+            "nem sikerült munkafát létrehozni — a munkamenet indítása itt: {cwd}",
         "warning: `{cli}` not found in PATH — starting a plain shell":
             "figyelmeztetés: a `{cli}` nem található a PATH-ban — egyszerű parancsértelmező indítása",
         "failed to start shell: {msg}": "nem sikerült elindítani a parancsértelmezőt: {msg}",
@@ -650,6 +652,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Warnung: Projektverzeichnis {cwd} existiert nicht mehr, starte in {fallback}",
         "recreating removed worktree {path}":
             "entfernter Worktree {path} wird neu erstellt",
+        "couldn't create a worktree — starting the session in {cwd} instead":
+            "Worktree konnte nicht erstellt werden — Sitzung wird stattdessen in {cwd} gestartet",
         "warning: `{cli}` not found in PATH — starting a plain shell":
             "Warnung: `{cli}` nicht im PATH gefunden — starte eine einfache Shell",
         "failed to start shell: {msg}": "Shell konnte nicht gestartet werden: {msg}",
@@ -1108,6 +1112,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "advertencia: el directorio del proyecto {cwd} ya no existe, iniciando en {fallback}",
         "recreating removed worktree {path}":
             "recreando el worktree eliminado {path}",
+        "couldn't create a worktree — starting the session in {cwd} instead":
+            "no se pudo crear un worktree — iniciando la sesión en {cwd}",
         "warning: `{cli}` not found in PATH — starting a plain shell":
             "advertencia: no se encontró `{cli}` en PATH — iniciando una shell simple",
         "failed to start shell: {msg}": "no se pudo iniciar la shell: {msg}",
@@ -1564,6 +1570,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "avertissement : le répertoire de projet {cwd} n’existe plus, démarrage dans {fallback}",
         "recreating removed worktree {path}":
             "recréation du worktree supprimé {path}",
+        "couldn't create a worktree — starting the session in {cwd} instead":
+            "impossible de créer un worktree — démarrage de la session dans {cwd}",
         "warning: `{cli}` not found in PATH — starting a plain shell":
             "avertissement : `{cli}` introuvable dans le PATH — démarrage d’un shell simple",
         "failed to start shell: {msg}": "échec du démarrage du shell : {msg}",

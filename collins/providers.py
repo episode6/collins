@@ -54,6 +54,25 @@ _PROMPT_HINT = 'Try "'
 _WORKTREE_EXIT_SELECTED_RE = re.compile(r"❯\s*Keep worktree\b")
 _WORKTREE_EXIT_OTHER_OPTION = "Remove worktree"
 
+# How a `claude -w` launch refuses to start at all. The CLI cuts the worktree
+# before it draws anything, and a failure there is fatal: this line goes to
+# stderr, the process exits, and the tab is left sitting at a bare shell
+# prompt with no session in it and nothing said about why.
+#
+# The cause Collins meets in practice is workspace trust, whose message names
+# the fix ("Run `claude` once in this directory and accept the trust dialog").
+# The worktree pre-check reads `hasTrustDialogAccepted` for the launch
+# directory *itself* — unlike an ordinary session, which inherits an
+# ancestor's answer (verified against 2.1.233; see trust.py, which now records
+# the launch directory before a worktree launch so this stops happening). Any
+# other cause — a git failure, a repository the CLI won't cut a worktree from
+# — leaves exactly the same dead prompt, and the same fallback answers all of
+# them, so the match is the shared prefix rather than the trust sentence.
+#
+# Anchored to the start of a line: the CLI prints it as its own line, and a
+# loose substring would also match the phrase quoted anywhere else on screen.
+_WORKTREE_LAUNCH_ERROR_RE = re.compile(r"^\s*Error creating worktree:", re.MULTILINE)
+
 # How Claude Code frames its input box (probed live against 2.1.226 — the
 # captured screens are in test_providers): a full-width rule row above and
 # below, the prompt-mark row, and continuation rows opening with two plain
@@ -421,6 +440,17 @@ class Provider:
         have no such dialog to detect."""
         return None
 
+    def worktree_launch_failed(self, screen_text: str) -> bool:
+        """Whether the screen shows a worktree launch that never started —
+        the CLI refusing to cut the worktree and exiting, leaving the shell
+        prompt where a session should be.
+
+        Read off the live screen for the same reason the dialogs above are:
+        this happens before any session exists, so there is no transcript to
+        learn it from. Base agents have no worktree flag, and so no way for
+        one to fail."""
+        return False
+
     def entered_prompt(
         self, rows: list[str], cursor_index: int, columns: int
     ) -> EnteredPrompt | None:
@@ -650,6 +680,13 @@ class ClaudeProvider(Provider):
         if _WORKTREE_EXIT_OTHER_OPTION not in screen_text:
             return None
         return "\r"
+
+    def worktree_launch_failed(self, screen_text: str) -> bool:
+        """Claude's "Error creating worktree: …", printed by a `-w` launch
+        that gave up before starting a session (see
+        _WORKTREE_LAUNCH_ERROR_RE for what prints it and why the whole
+        family is matched, not just the trust case)."""
+        return bool(_WORKTREE_LAUNCH_ERROR_RE.search(screen_text))
 
     def resume_command(self, session_id: str, fork: bool = False) -> str | None:
         # Attach-first: if the session is still running detached (e.g. after

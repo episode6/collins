@@ -1668,6 +1668,13 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             worktree = worktree and (Path(cwd) / ".git").exists()
         if worktree:
+            # The agent's worktree flag reads trust off the launch directory
+            # itself, with none of the inheritance an ordinary session enjoys
+            # — so the trust this launch is already proceeding on has to be
+            # written down before it starts, or the CLI refuses to cut the
+            # worktree and exits (see trust.trust_launch_dir; the tab catches
+            # what still slips through, in _check_worktree_launch).
+            trust.trust_launch_dir(cwd)
             options = replace(options or SessionOptions(), worktree=True)
         tab = TerminalTab(
             cwd=cwd, session_id=None, settings=self.state.settings, provider=provider,

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterable
 from pathlib import Path
 
 from . import sessions
@@ -88,14 +89,40 @@ def is_trusted(cwd: str) -> bool:
 
 def trust_dir(cwd: str) -> bool:
     """Record `cwd` as trusted in the agent CLI's config, so the launch that
-    follows doesn't ask the same question again inside the terminal.
+    follows doesn't ask the same question again inside the terminal."""
+    return trust_dirs([cwd])
+
+
+def trust_launch_dir(cwd: str) -> bool:
+    """Record trust for a directory a *worktree* launch is about to start in
+    — the launch directory itself and the repository it belongs to.
+
+    Ordinary sessions inherit an ancestor's answer (see is_trusted), so a
+    project under an already-trusted parent is launched without ever being
+    written down. `claude -w` doesn't inherit: cutting the worktree is gated
+    on `hasTrustDialogAccepted` for the launch directory *itself*, and
+    without it the launch dies before any session exists, printing "Error
+    creating worktree: Workspace trust not yet accepted…" (verified against
+    2.1.233). So the answer Collins is already acting on gets spelled out
+    where that check looks, rather than the launch failing over a question
+    nobody would be asked.
+
+    Only ever called once the folder is trusted — by the dialog's own answer
+    or by an ancestor's — so this records a decision, never makes one.
+    """
+    return trust_dirs([cwd, trust_root(cwd)])
+
+
+def trust_dirs(dirs: Iterable[str]) -> bool:
+    """Record every directory in `dirs` as trusted, in one rewrite.
 
     The CLI rewrites its config wholesale when a session ends, so an entry
     written while another session runs can occasionally be clobbered. That's
     fine: the cost is being asked once more. Best-effort by design — every
     failure is swallowed, and reported as False for callers that care.
     """
-    if not cwd:
+    paths = [d for d in dirs if d]
+    if not paths:
         return False
     config_path = Path(sessions.CLAUDE_CONFIG)
     try:
@@ -108,10 +135,11 @@ def trust_dir(cwd: str) -> bool:
         projects = config.setdefault("projects", {})
         if not isinstance(projects, dict):
             return False
-        for key in _keys(cwd):
-            entry = projects.setdefault(key, {})
-            if isinstance(entry, dict):
-                entry[_TRUST_KEY] = True
+        for path in paths:
+            for key in _keys(path):
+                entry = projects.setdefault(key, {})
+                if isinstance(entry, dict):
+                    entry[_TRUST_KEY] = True
         config_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = Path(str(config_path) + ".tmp")
         tmp.write_text(json.dumps(config, indent=2), encoding="utf-8")
