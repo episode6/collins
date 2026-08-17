@@ -199,42 +199,6 @@ def later(fn, ms: int = 1500) -> bool:
     return GLib.SOURCE_REMOVE
 
 
-def dump_state(where: str) -> None:
-    """CI diagnostics: everything the refetch path gates on, in one line each.
-    Temporary — here to explain a CI-only failure of the refetch check."""
-    tab = state.get("tab")
-    win = state.get("win")
-    print(f"--- diag ({where}) ---", flush=True)
-    with _lock:
-        print(f"  gh_calls: {gh_calls}")
-    if tab is not None:
-        print(
-            f"  reqs={state.get('reqs')} drops={state.get('req_drops')} "
-            f"applies={state.get('applies')} last_apply_at={state.get('last_apply_at')} "
-            f"now={GLib.get_monotonic_time()}"
-        )
-        print(f"  _updating={tab._updating} _pr_discover={tab._pr_discover}")
-        print(f"  _poll_source={tab._poll_source} root={tab.get_root() is not None}")
-        print(f"  _pr_focus_refresh_at={tab._pr_focus_refresh_at}")
-        print(f"  footer_prs={[(pr.url, pr.merged) for pr in tab._footer_prs]}")
-    if win is not None:
-        print(f"  activity_busy={win._activity.busy()}")
-        print(f"  detaching={win._detaching}")
-    print(f"  prstatus._gh_missing={prstatus._gh_missing}")
-    print(f"  prstatus._inflight={prstatus._inflight}")
-    stamped = prstatus._statuses.get(PR_URL)
-    if stamped is None:
-        print("  prstatus._statuses[url]: MISSING")
-    else:
-        print(f"  prstatus._statuses[url]: stamp={stamped[0]} entry_is_none={stamped[1] is None}")
-    print(f"  prstatus._statuses keys={list(prstatus._statuses)}")
-    print(f"  threads={[t.name for t in threading.enumerate()]}", flush=True)
-    import faulthandler
-
-    faulthandler.dump_traceback(all_threads=True)
-    print("--- end diag ---", flush=True)
-
-
 # -- the steps ---------------------------------------------------------------
 
 
@@ -253,38 +217,24 @@ def stage() -> bool:
     win.open_session(session)
     state["win"] = win
     state["tab"] = win.tab_view.get_selected_page().get_child()
-    tab = state["tab"]
-
-    # Temporary CI diagnostics: count update requests, gate drops, and applies.
-    orig_req = tab._request_update
-    orig_apply = tab._apply_update
-
-    def traced_req(discover: bool = False) -> None:
-        state["reqs"] = state.get("reqs", 0) + 1
-        if tab._updating:
-            state["req_drops"] = state.get("req_drops", 0) + 1
-        return orig_req(discover)
-
-    def traced_apply(*args) -> bool:
-        state["applies"] = state.get("applies", 0) + 1
-        state["last_apply_at"] = GLib.get_monotonic_time()
-        return orig_apply(*args)
-
-    tab._request_update = traced_req
-    tab._apply_update = traced_apply
-    return later(step_chips, 4000)  # the tab's first poll, and its PR fetch
+    return later(step_chips, 1000)  # the tab's first poll, and its PR fetch
 
 
 def step_chips() -> bool:
     tab = state["tab"]
+    # The chips ride the first update and the fetch rides the chips; how long
+    # either takes is the runner's business, not the check's. Wait for both —
+    # bounded, like every wait here.
+    ready = [pr.url for pr in tab._footer_prs] == [PR_URL] and status_fetches() >= 1
+    if not ready and state.setdefault("chip_waits", 0) < 40:
+        state["chip_waits"] += 1
+        return later(step_chips, 500)
     check("the transcript's PR is on the tab", [pr.url for pr in tab._footer_prs] == [PR_URL],
           [pr.url for pr in tab._footer_prs])
     check("its status was fetched at least once", status_fetches() >= 1, gh_calls)
     age_the_throttles()
     state["before"] = status_fetches()
-    dump_state("before the finish edge")
     finish_edge()
-    dump_state("after the finish edge")
     return later(step_status_refetched)
 
 
@@ -296,11 +246,7 @@ def step_status_refetched() -> bool:
     # not on a loaded CI runner, so wait for it — bounded.
     if status_fetches() <= state["before"] and state.setdefault("refetch_waits", 0) < 20:
         state["refetch_waits"] += 1
-        if state["refetch_waits"] in (1, 5, 10, 20):
-            dump_state(f"refetch wait #{state['refetch_waits']}")
         return later(step_status_refetched, 500)
-    if status_fetches() <= state["before"]:
-        dump_state("refetch never landed")
     check("a finish edge refetches the PR's status", status_fetches() > state["before"],
           f"{state['before']} -> {status_fetches()}")
     # No aging this time: a session that goes quiet between every permission
