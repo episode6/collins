@@ -102,6 +102,21 @@ def spin(predicate, seconds=5.0):
     return predicate()
 
 
+def name_owned():
+    """Whether the item's bus name has an owner right now.
+
+    Synchronous, unlike everything addressed to the item itself: this one is
+    answered by the daemon, so no reply is waiting on this process's own loop.
+    """
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    reply = bus.call_sync(
+        "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+        "NameHasOwner", GLib.Variant("(s)", (BUS_NAME,)), GLib.VariantType("(b)"),
+        Gio.DBusCallFlags.NONE, -1, None,
+    )
+    return reply.unpack()[0]
+
+
 def call(bus, path, interface, method, params, reply_type=None):
     """One D-Bus call, asynchronously, with the main loop turning underneath.
 
@@ -322,6 +337,29 @@ def main():
     icon.stop()
     check("stopping clears the dock badge",
           spin(lambda: any(p.get("count-visible") is False for _u, p in dock)), str(dock))
+
+    # -- the one thing left to the name ------------------------------------
+
+    # Artwork that will not decode is the only case the name still serves, and
+    # since the badge fix it is the only case at all — so it gets an item of
+    # its own, built on an icon no theme has ever heard of. It has to come
+    # last: a second item can only export /StatusNotifierItem once the first
+    # one has let the path (and the bus name) go.
+    nameless = statusicon.StatusIcon(
+        app_id="com.episode6.Collins",
+        title="Collins",
+        icon_name="com.episode6.Collins.NotAnIcon",
+        view_provider=view,
+    )
+    check("an item with undecodable artwork starts", nameless.start())
+    # Owning a name back is a round trip through the daemon, and until it
+    # lands there is nobody at this address to ask.
+    check("it takes the bus name back", spin(name_owned))
+    check("undecodable artwork exports no pixmap", item_prop("IconPixmap") == [],
+          str(item_prop("IconPixmap")))
+    check("undecodable artwork falls back to the name",
+          item_prop("IconName") == "com.episode6.Collins.NotAnIcon", item_prop("IconName"))
+    nameless.stop()
     print()
     if failures:
         print(f"{len(failures)} FAILED: {', '.join(failures)}")
