@@ -78,6 +78,22 @@ def test_badge_counts_unread_only_never_working():
     assert (view.sessions, view.working, view.unread) == (3, 2, 1)
 
 
+def test_badge_drops_a_flagged_session_that_goes_back_to_work():
+    # The flag itself stays up — the row keeps it, under the barber pole that
+    # outranks the green pulse — but a session mid-turn is not waiting for
+    # anyone, so it leaves the badge until the run ends.
+    view = tray_view([session("a", unread=True, busy=True), session("b", unread=True)])
+    assert (view.badge, view.working, view.unread) == ("1", 1, 1)
+    assert view.tooltip == "Collins — 2 sessions, 1 working, 1 unread"
+    assert view.status == STATUS_ATTENTION
+
+
+def test_badge_and_status_clear_when_every_flag_is_under_a_pole():
+    view = tray_view([session("a", unread=True, busy=True)])
+    assert (view.badge, view.unread, view.working) == ("", 0, 1)
+    assert view.status == STATUS_ACTIVE
+
+
 def test_badge_sums_placeholder_unread():
     view = tray_view([session("a", unread=True)], placeholders=2, placeholder_unread=2)
     assert view.badge == "3"

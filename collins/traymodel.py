@@ -21,6 +21,13 @@ act on and that will resolve itself. The badge means "n things are waiting for
 you", so a badge reading `0` while three agents work is correct, and the
 tooltip carries both numbers for the curious.
 
+That holds both ways round: a session already flagged unread that goes back
+to work drops out of the count for as long as the run lasts, because it is no
+longer waiting for anyone — exactly what its row says, where the barber pole
+takes the guide line off the green pulse (see the `.unread` CSS in app.py).
+The flag itself is untouched, so the badge comes back the moment the turn
+ends, alongside the pulse.
+
 Only sessions with an open tab are passed in, which is not a narrowing: an
 unread flag never outlives the tab it spoke for (MainWindow._sync_status
 takes it off a row whose tab goes away), so every unread session has a tab,
@@ -159,7 +166,11 @@ def session_label(session: TraySession) -> str:
 
 def session_marker(session: TraySession) -> str:
     """Working outranks unread on a row that is somehow both: the run the flag
-    was raised for has been overtaken by another that is still going."""
+    was raised for has been overtaken by another that is still going.
+
+    The badge is counted through this same answer (see tray_view), so what a
+    menu row says and what the icon counts can never disagree.
+    """
     if session.busy:
         return MARKER_WORKING
     return MARKER_UNREAD if session.unread else ""
@@ -235,8 +246,9 @@ def tray_view(
     """Everything the item exports, from the open session tabs.
 
     `placeholders` is how many open tabs have no session id yet (their unread
-    flags live in their window's sidebar, hence `placeholder_unread`): they
-    count towards the totals but cannot be jumped to, so they get no row.
+    flags live in their window's sidebar, hence `placeholder_unread`, which
+    the sidebar has already taken its working rows out of): they count towards
+    the totals but cannot be jumped to, so they get no row.
 
     The unread half is clamped to the tabs it counts rather than trusted. The
     aggregate reads the two numbers from each window in turn, and a
@@ -248,7 +260,9 @@ def tray_view(
     placeholder_unread = min(max(placeholder_unread, 0), placeholders)
     open_count = len(sessions) + placeholders
     working = sum(1 for session in sessions if session.busy)
-    unread = sum(1 for session in sessions if session.unread) + placeholder_unread
+    # Through session_marker, so a session that is both only counts once and
+    # counts as the thing its row shows: working, until the run ends.
+    unread = sum(1 for s in sessions if session_marker(s) == MARKER_UNREAD) + placeholder_unread
     return TrayView(
         status=status_for(open_count, unread),
         badge=badge_text(unread),
