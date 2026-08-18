@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-17. Full change history: git log for this file.
+# fork. Last modified: 2026-08-18. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -52,6 +52,28 @@ from .window import MainWindow, session_window
 
 # Bundled icons (e.g. tab-close-symbolic); found by name when installed.
 _BUNDLED_ICONS = Path(__file__).resolve().parent.parent / "data" / "icons"
+
+# Icon-theme search-path roots, most specific first; the first that exists wins.
+#
+# Collins' action icons are app-private artwork sitting on generic names —
+# alert-symbolic, archive-symbolic, ft-file-symbolic, tab-close-symbolic — so
+# they live in a Collins-owned root rather than in the shared hicolor theme.
+# Two packages cannot both own /usr/share/icons/hicolor/.../tab-close-symbolic.svg,
+# which is exactly how installing beside agent-session-manager used to fail; and
+# a name we put in the shared theme outranks the system's own for every other
+# app on the machine, not just ours. The app icon is the exception and stays in
+# hicolor/scalable/apps: it is namespaced by app id, and the shell has to find
+# it without asking us.
+_ICON_ROOTS = (
+    _BUNDLED_ICONS,                                # running from a checkout
+    Path.home() / ".local/share/collins/icons",    # data/install.sh
+    Path("/usr/share/collins/icons"),              # the .deb
+)
+
+
+def _icon_root() -> Path | None:
+    """The icon search-path root to prepend, or None if none is installed."""
+    return next((p for p in _ICON_ROOTS if p.is_dir()), None)
 
 # The start_session tool holds its reply until the spawned session has taken
 # the prompt and reported its id (see _BackgroundSpawn). This is the deadline
@@ -1268,7 +1290,7 @@ class App(Adw.Application):
         Gtk.StyleContext.add_provider_for_display(
             display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
-        if _BUNDLED_ICONS.is_dir():  # running from source; installed icons live in the system theme
+        if (icon_root := _icon_root()) is not None:
             # Ahead of the system theme, not behind it (which is all
             # add_search_path can do): a machine that ran data/install.sh
             # months ago has copies of these icons under ~/.local/share and
@@ -1280,7 +1302,7 @@ class App(Adw.Application):
             # silhouette or into nothing at all. Running from source means
             # running this checkout's icons.
             theme = Gtk.IconTheme.get_for_display(display)
-            theme.set_search_path([str(_BUNDLED_ICONS), *theme.get_search_path()])
+            theme.set_search_path([str(icon_root), *theme.get_search_path()])
 
         # No tooltips from the UI behind an open menu (see tooltipmute).
         tooltipmute.install()
@@ -1399,7 +1421,11 @@ class App(Adw.Application):
             app_id=app_id,
             title=self._tray_name(),
             icon_name=DEBUG_APP_ID if debug else APP_ID,
-            icon_theme_path=str(_BUNDLED_ICONS) if _BUNDLED_ICONS.is_dir() else "",
+            # The tray host is another process and cannot see our search path,
+            # so it needs the root as a filesystem path to find the -panel
+            # artwork. Installed builds have one now; they used to pass "" and
+            # silently fall back to the plain app icon.
+            icon_theme_path=str(root) if (root := _icon_root()) else "",
             view_provider=self.tray_view,
             on_show=self._present_main_window,
             on_focus=lambda sid: self.activate_action("focus-session", GLib.Variant("s", sid)),
