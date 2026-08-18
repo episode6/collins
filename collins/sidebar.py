@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-17. Full change history: git log for this file.
+# fork. Last modified: 2026-08-18. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -34,7 +34,7 @@ from . import footerapps, openwith, prmenu
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
 from .formatting import format_size
-from .gitinfo import github_url
+from .gitinfo import current_branch, github_url
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .projecticons import project_icon_data
@@ -2438,6 +2438,25 @@ class SessionSidebar(Gtk.Box):
             )
             open_section.append(_("New sessions use a worktree"), "sidebar.project-worktree")
 
+        # Repository upkeep, its own section so it doesn't read as another way
+        # to launch. Just the pull for now, run in the project root (row.cwd),
+        # naming the branch it would pull so there's no guessing which checkout
+        # state the click acts on. current_branch is a stat and a file read —
+        # cheap enough for a right-click, per gitinfo — and hands back an
+        # abbreviated commit hash on a detached HEAD, where the pull will
+        # refuse; git's own words for that surface in the error dialog.
+        repo_section = Gio.Menu()
+        if is_git:
+            branch = current_branch(row.cwd)
+            pull_item = Gio.MenuItem.new(
+                _("Git pull ({branch})").format(branch=branch) if branch else _("Git pull"),
+                None,
+            )
+            pull_item.set_action_and_target_value(
+                "win.git-pull", GLib.Variant("s", row.cwd)
+            )
+            repo_section.append_item(pull_item)
+
         # Anything cosmetic about the project's row itself.
         looks_section = Gio.Menu()
         if row.cwd:
@@ -2488,6 +2507,7 @@ class SessionSidebar(Gtk.Box):
 
         menu = Gio.Menu()
         menu.append_section(None, open_section)
+        menu.append_section(None, repo_section)
         menu.append_section(None, looks_section)
         menu.append_section(None, danger_section)
         self._popup_menu(menu, row, x, y, rows)
