@@ -96,6 +96,36 @@ something Launchpad rejects rather than something that quietly burns a number.
 Launchpad emails an acceptance notice, then builds and publishes the `.deb`.
 Expect minutes to hours in the build queue, plus ~20 minutes for the publisher.
 
+### Automated uploads on a tag
+
+`.github/workflows/release.yml` has a `ppa` job, matrixed over the supported
+series, that does steps 1–2 above on every `v*` tag. It exports git HEAD itself
+rather than consuming the `build` job's artifacts, but gates on that job so a
+broken wheel stops the whole release.
+
+Two required secrets:
+
+| Secret | Contents |
+| --- | --- |
+| `PPA_GPG_KEY` | `gpg --export-secret-subkeys --armor '3EBBA2410EE1077E!'` — the trailing `!` matters, it stubs the primary out to `gnu-dummy` so a leaked runner secret cannot certify uids or mint subkeys |
+| `PPA_GPG_PASS` | that key's passphrase |
+
+Because a version string is burned in the archive forever, the job refuses
+rather than guesses:
+
+- It compares `debian/changelog` against the tag and **fails** if they differ —
+  the upload version comes from the changelog, not the tag, so a forgotten
+  changelog entry would otherwise publish the wrong version permanently.
+- It asks Launchpad whether the version is already published and **skips** that
+  series if so, which makes re-running a tag's workflow harmless instead of a
+  confusing failure.
+
+Signing is non-interactive without relying on `gpg-agent` caching: the job
+writes a small wrapper that calls `gpg --batch --pinentry-mode loopback
+--passphrase-file`, and passes it to `debuild` as `-p<wrapper>` alongside
+`--prepend-path`, since `debuild` normalizes `PATH` and `debsign` takes the GPG
+program by name. That is what the script's `--` passthrough is for.
+
 ### Testing before you upload
 
 A `debuild` on a dev box proves very little — a source-only build does not

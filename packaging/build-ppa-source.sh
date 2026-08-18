@@ -35,12 +35,17 @@ Usage: packaging/build-ppa-source.sh --series <name> [--revision <n>] [-k <keyid
               has been burned by a rejection or a failed build.
   -k, --key   GPG key to sign with, passed through to debuild. Defaults to
               whatever debuild picks from the keyring.
+  --          Everything after this is passed to debuild verbatim, ahead of
+              its own options. CI uses it for non-interactive signing:
+              --prepend-path=<dir> -p<wrapper>, because debuild normalizes
+              PATH and debsign takes the gpg program by name.
 EOF
 }
 
 series=""
 revision=1
 keyid=""
+extra=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -48,6 +53,7 @@ while [ $# -gt 0 ]; do
         --revision) revision="${2-}"; shift 2 ;;
         -k|--key)   keyid="${2-}"; shift 2 ;;
         -h|--help)  usage; exit 0 ;;
+        --)         shift; extra=("$@"); break ;;
         *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
 done
@@ -129,11 +135,11 @@ src="$out/$pkg-$stamped"
 mv "$stage" "$src"
 
 cd "$src"
-if [ -n "$keyid" ]; then
-    debuild -S -sa -k"$keyid"
-else
-    debuild -S -sa
-fi
+# debuild's own options go ahead of the dpkg-buildpackage ones, per its
+# synopsis; -k is a debsign option and works at the end.
+debuild_args=(${extra[@]+"${extra[@]}"} -S -sa)
+[ -n "$keyid" ] && debuild_args+=(-k"$keyid")
+debuild "${debuild_args[@]}"
 
 echo
 echo "Built in $out:"
