@@ -2,10 +2,10 @@
 
 """The composer: a GUI prompt box for the agent's terminal.
 
-A `ComposerView` is a spell-checked multi-line text box under a button row
-that reads left to right as close, dock, then attach and Send — chrome at
-one end, composing at the other — everything the CLI's own input box isn't
-when a prompt outgrows one line. It owns no terminal plumbing at all: it
+A `ComposerView` is an optionally spell-checked multi-line text box under
+a button row that reads left to right as close, dock, then attach and Send
+— chrome at one end, composing at the other — everything the CLI's own
+input box isn't when a prompt outgrows one line. It owns no terminal plumbing at all: it
 announces ``send-requested`` / ``close-requested`` and its host
 (terminal.py's overlay or a dock panel page) decides what those mean — cut
 text out of the CLI's box on the way in, type it back or submit it on the
@@ -14,11 +14,12 @@ land as mentions, and images earn a strip of preview thumbnails over the
 text — through injected provider callbacks, so the view itself stays
 host-agnostic.
 
-libspelling is a hard dependency, the same bargain as GtkSourceView (which
-the spell-check adapter here is built for): nothing degrades without it, and
-a missing typelib exits with an install hint instead of a traceback — the
-`.deb` and the AUR package both pull it in; only a source checkout can hit
-this.
+libspelling is optional — unlike GtkSourceView (which the spell-check
+adapter is built for, and which stays a hard dependency): without the
+typelib — or with a typelib whose shared library is missing — the composer
+still works, just without squiggles or the spell-check context menu. The
+`.deb` and the AUR package recommend it, so in practice only a
+deliberately slimmed install runs without it.
 
 The box matches the terminal's font on purpose: the text is going to *be*
 terminal text a moment later, and a composer drawn in the UI font would read
@@ -39,11 +40,7 @@ try:
     gi.require_version("Spelling", "1")
     from gi.repository import Spelling
 except (ValueError, ImportError):
-    raise SystemExit(
-        "Collins requires libspelling, which isn't installed. Install it "
-        "(Debian/Ubuntu: gir1.2-spelling-1, Fedora/Arch: libspelling) "
-        "and relaunch."
-    ) from None
+    Spelling = None
 
 from . import composerkeys, dropimages  # noqa: E402
 from .editor import GtkSource  # noqa: E402
@@ -127,12 +124,22 @@ class ComposerView(Gtk.Box):
         self._view.set_right_margin(8)
         self._view.set_accepts_tab(False)
 
-        self._adapter = Spelling.TextBufferAdapter.new(
-            self._buffer, Spelling.Checker.get_default()
-        )
-        self._view.set_extra_menu(self._adapter.get_menu_model())
-        self._view.insert_action_group("spelling", self._adapter)
-        self._adapter.set_enabled(True)
+        if Spelling is not None:
+            try:
+                adapter = Spelling.TextBufferAdapter.new(
+                    self._buffer, Spelling.Checker.get_default()
+                )
+            except GLib.Error:
+                # The typelib can be installed without the shared library it
+                # references (GitHub's ubuntu runners ship exactly that), and
+                # nothing loads the library until this first call. Same
+                # degrade as no typelib at all: a plain text box.
+                pass
+            else:
+                self._adapter = adapter
+                self._view.set_extra_menu(adapter.get_menu_model())
+                self._view.insert_action_group("spelling", adapter)
+                adapter.set_enabled(True)
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key)
