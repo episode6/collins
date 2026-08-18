@@ -51,8 +51,11 @@ Ship the current release branch:
 ```
 
 ### Arguments
-- `--branch <branch>`: Target branch/ref to point the release to (defaults to
-  current branch). Must be a `release/*` branch (warning only on dry-run).
+- `--branch <branch>`: Target branch to point the release to (defaults to
+  current branch). Must be a `release/*` branch AND match the checked-out
+  branch — the version and notes are read from the working tree, so a
+  mismatch would ship this checkout's content under another branch's name
+  (both are warnings only on dry-run).
 - `--dry-run`: Prints release details and the `gh` command without executing.
 - `--output <file_path>`: (Required) Path to write a JSON report of the
   results (`success`, `tag`, `branch`, `url`, `notes`).

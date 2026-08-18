@@ -11,6 +11,7 @@ ship-release.py re-checks the exact-match cases at ship time.
 See RELEASE_CHECKLIST.md for which PR bumps which file.
 """
 
+import os
 import re
 import sys
 
@@ -30,6 +31,9 @@ def error(message):
 
 
 def read_file(path):
+    if not os.path.exists(path):
+        print(f"Error: {path} not found (run from the repo root).", file=sys.stderr)
+        sys.exit(1)
     with open(path, encoding="utf-8") as f:
         return f.read()
 

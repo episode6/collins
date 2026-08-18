@@ -210,7 +210,9 @@ def main():
     )
     parser.add_argument(
         "--branch",
-        help="Target branch/ref to point the release to (defaults to current branch)",
+        help="Target branch to point the release to (defaults to current "
+        "branch; must match the checked-out branch, since the version and "
+        "notes are read from the working tree)",
     )
     parser.add_argument(
         "--dry-run",
@@ -225,7 +227,20 @@ def main():
     if not args.output:
         fail("--output <file_path> is required to capture the execution results.")
 
-    branch = args.branch if args.branch else get_current_branch()
+    current_branch = get_current_branch()
+    branch = args.branch if args.branch else current_branch
+    if branch != current_branch:
+        # The version and notes are read from the working tree, so tagging a
+        # different branch would silently ship this checkout's content under
+        # that branch's name.
+        message = (
+            f"--branch '{branch}' does not match the checked-out branch "
+            f"'{current_branch}'. Check out the release branch and re-run."
+        )
+        if args.dry_run:
+            print(f"[DRY-RUN] Warning: {message}", file=sys.stderr)
+        else:
+            fail(message)
     check_release_branch(branch, args.dry_run)
     version = get_version()
     notes = get_changelog_notes(version)
