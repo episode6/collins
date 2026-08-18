@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-17. Full change history: git log for this file.
+fork. Last modified: 2026-08-18. Full change history: git log for this file.
 -->
 # Packaging
 
@@ -108,7 +108,7 @@ Two required secrets:
 | Secret | Contents |
 | --- | --- |
 | `PPA_GPG_KEY` | `gpg --export-secret-subkeys --armor '3EBBA2410EE1077E!'` — the trailing `!` matters, it stubs the primary out to `gnu-dummy` so a leaked runner secret cannot certify uids or mint subkeys |
-| `PPA_GPG_PASS` | that key's passphrase |
+| `GPG_PASS` | that key's passphrase |
 
 Because a version string is burned in the archive forever, the job refuses
 rather than guesses:

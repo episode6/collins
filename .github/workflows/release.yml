@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-17. Full change history: git log for this file.
+# fork. Last modified: 2026-08-18. Full change history: git log for this file.
 
 name: Release
 
@@ -134,10 +134,10 @@ jobs:
         if: steps.dupe.outputs.skip == 'false'
         env:
           PPA_GPG_KEY: ${{ secrets.PPA_GPG_KEY }}
-          PPA_GPG_PASS: ${{ secrets.PPA_GPG_PASS }}
+          GPG_PASS: ${{ secrets.GPG_PASS }}
         run: |
-          if [ -z "$PPA_GPG_KEY" ] || [ -z "$PPA_GPG_PASS" ]; then
-            echo "::error::PPA_GPG_KEY / PPA_GPG_PASS are not set. The first"
+          if [ -z "$PPA_GPG_KEY" ] || [ -z "$GPG_PASS" ]; then
+            echo "::error::PPA_GPG_KEY / GPG_PASS are not set. The first"
             echo "holds gpg --export-secret-subkeys --armor '$KEYID!' -- the"
             echo "bang matters, it stubs the primary out to gnu-dummy."
             exit 1
@@ -148,7 +148,7 @@ jobs:
           # Exits non-zero when the blob did not actually carry the subkey,
           # which otherwise surfaces much later as an opaque signing failure.
           gpg --list-secret-keys "$KEYID" > /dev/null
-          printf '%s' "$PPA_GPG_PASS" > "$RUNNER_TEMP/passphrase"
+          printf '%s' "$GPG_PASS" > "$RUNNER_TEMP/passphrase"
           # debsign takes the gpg program by name and debuild normalizes PATH,
           # so a wrapper on a prepended path is how the passphrase reaches gpg
           # without a tty. Nothing here depends on gpg-agent caching.
