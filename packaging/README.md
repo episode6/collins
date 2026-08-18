@@ -67,6 +67,14 @@ something Launchpad rejects rather than something that quietly burns a number.
 
 ### Releasing a new version
 
+Releases ride the repo's release-branch flow — cut `release/v<VER>`, harden,
+ship — described in [../RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md):
+shipping pushes tag `v<VER>`, and the release workflow's `ppa` job (below)
+uploads a source package per series automatically. The version bump and
+`debian/changelog` entry land in the version-bump PRs when the branch is cut.
+The steps below are the manual equivalent, for recovery or bootstrapping a new
+series:
+
 1. Bump the version in `pyproject.toml` / `__init__.py` as usual, and add a new
    top entry to `debian/changelog` — at the plain version, targeting
    `UNRELEASED`:
@@ -99,7 +107,8 @@ Expect minutes to hours in the build queue, plus ~20 minutes for the publisher.
 ### Automated uploads on a tag
 
 `.github/workflows/release.yml` has a `ppa` job, matrixed over the supported
-series, that does steps 1–2 above on every `v*` tag. It exports git HEAD itself
+series, that does step 2 above on every `v*` tag (normally pushed by
+`scripts/ship-release.py` from a release branch). It exports git HEAD itself
 rather than consuming the `build` job's artifacts, but gates on that job so a
 broken wheel stops the whole release.
 

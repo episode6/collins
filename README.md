@@ -120,7 +120,7 @@ Ubuntu 22.04 (jammy) is not supported — it ships libadwaita 1.1 and GTK 4.6, a
 **Debian and everything else — .deb package.** A Launchpad PPA can only serve Ubuntu, so on Debian this is the way in. Grab one from [the releases page](https://github.com/episode6/collins/releases), or build it with `./scripts/build_deb.sh`:
 
 ```bash
-sudo apt install ./collins_0.1.1_all.deb
+sudo apt install ./collins_*_all.deb
 ```
 
 Dependencies are pulled in automatically and the app appears in your app grid as "Collins". Note that a `.deb` installed this way **does not update itself** — it adds no apt source, deliberately, so nothing is subscribed to a third-party archive behind your back. Watch the releases page, or use the PPA if you are on Ubuntu.
@@ -156,20 +156,27 @@ data/
 scripts/
 ├── build_deb.sh                         # build the .deb package into dist/
 ├── install-debug-launcher.sh            # app-grid entry: pull this checkout, run debug
-└── make_demo_data.py                    # fake sessions for screenshots/demos
+├── make_demo_data.py                    # fake sessions for screenshots/demos
+├── ship-release.py                      # publish a release branch as a GitHub release
+└── verify_versions.py                   # CI check: all version copies agree
 ```
 
 ## Publishing (maintainers)
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds the
-wheel/sdist and the `.deb` and creates the GitHub Release (with the `.deb`
-attached and auto-generated notes). The PyPI job uses trusted publishing
-(OIDC) and only works once a trusted publisher is configured for this repo.
+Releases follow the episode6 release-branch flow: cut `release/v<VERSION>`,
+harden it, then ship from it. The whole process — versioning scheme,
+version-bump PRs, hardening, hotfixes — lives in
+[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md), and the `release-branch-skill`
+and `ship-release-skill` agent skills in [.agents/](.agents) automate most of
+it.
 
-```bash
-# bump version in pyproject.toml / __init__.py / debian/changelog, commit, then:
-git tag -a "v$VER" -m "v$VER" && git push origin "v$VER"
-```
+Shipping runs `./scripts/ship-release.py` from the release branch: it creates
+the GitHub Release (tag `v<VERSION>`, notes extracted from
+[docs/releases.md](docs/releases.md)), and the tag push runs
+`.github/workflows/release.yml` — build the wheel/sdist and the `.deb`,
+attach the `.deb` to the release, publish to PyPI (trusted publishing /
+OIDC), and upload a source package per Ubuntu series to
+`ppa:episode6/stable`.
 
 ## Credits & license
 

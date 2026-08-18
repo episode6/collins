@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-07-26. Full change history: git log for this file.
+fork. Last modified: 2026-08-18. Full change history: git log for this file.
 -->
 # AUR packaging
 
@@ -9,6 +9,11 @@ fork. Last modified: 2026-07-26. Full change history: git log for this file.
 `collins`.
 
 ## Updating for a new release
+
+The `pkgver` bump itself lands in the release version-bump PRs (see
+[../../RELEASE_CHECKLIST.md](../../RELEASE_CHECKLIST.md)); `pkgver` tracks the
+newest *released* version, since the source URL points at a real `v*` tag. The
+hash refresh below can only happen after the release ships and the tag exists.
 
 1. Bump `pkgver` in `PKGBUILD` and refresh the source hash:
    ```bash
