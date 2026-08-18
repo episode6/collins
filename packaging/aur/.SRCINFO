@@ -18,7 +18,9 @@ pkgbase = collins
 	depends = gtk4
 	depends = libadwaita
 	depends = vte4
+	depends = gtksourceview5
 	optdepends = claude-code: resume Claude Code sessions
+	optdepends = libspelling: spell-check in the prompt composer
 	source = collins-0.1.1.tar.gz::https://github.com/episode6/collins/archive/refs/tags/v0.1.1.tar.gz
 	sha256sums = SKIP
 

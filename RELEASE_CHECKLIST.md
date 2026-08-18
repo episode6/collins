@@ -72,8 +72,9 @@ Create 2 PRs (as drafts, per repo convention):
       copies stay current once it ships: add the `<release
       version="<VERSION>" date="...">` entry to the metainfo (date = the
       planned ship date), and set the AUR `pkgver` to `<VERSION>` in
-      `PKGBUILD` + `.SRCINFO` (sha256 gets refreshed after the tag exists —
-      see `packaging/aur/README.md`).
+      `PKGBUILD` + `.SRCINFO` (`sha256sums` stays `SKIP` in git; the release
+      workflow's `aur` job fills it in at publish time — see
+      `packaging/aur/README.md`).
 - `[VERSION] Release v<VERSION>` points at the new release branch
     - Make the same outgoing-release edits as above: finalize the
       `docs/releases.md` section (ship date in the heading, all changes since
@@ -106,13 +107,15 @@ Create 2 PRs (as drafts, per repo convention):
    - publishes to PyPI via trusted publishing,
    - uploads a signed source package per Ubuntu series (noble, resolute) to
      `ppa:episode6/stable` — Launchpad then builds and publishes the binaries
-     (minutes to hours in the queue, plus ~20 minutes for the publisher).
+     (minutes to hours in the queue, plus ~20 minutes for the publisher),
+   - fills the tag tarball's hash into the AUR `PKGBUILD`, regenerates
+     `.SRCINFO`, test-builds the package, and pushes both files to the AUR
+     repo (`packaging/aur/README.md`).
 3. Verify: the `.deb` is attached and carries the right version; Launchpad
    sends an acceptance email per series and the builds go green; `apt install
-   collins` from the PPA on a covered series picks up the new version.
-4. AUR (once the package is published there): refresh `sha256sums` from the
-   now-existing tag tarball, regenerate `.SRCINFO`, and push to the AUR repo
-   (`packaging/aur/README.md`).
+   collins` from the PPA on a covered series picks up the new version; the
+   [AUR page](https://aur.archlinux.org/packages/collins) shows the new
+   `pkgver`.
 
 ## Hotfixes
 

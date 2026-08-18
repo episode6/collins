@@ -15,7 +15,9 @@ depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'vte4' 'gtksourceview5')
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
 optdepends=('claude-code: resume Claude Code sessions'
             'libspelling: spell-check in the prompt composer')
-# Refresh the sha256 when a v$pkgver tag exists (see packaging/aur/README.md).
+# sha256sums stays SKIP in git -- the hash cannot exist before the tag does.
+# The release workflow's aur job fills it in at publish time (see
+# packaging/aur/README.md).
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 

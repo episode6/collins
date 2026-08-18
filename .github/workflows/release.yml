@@ -6,8 +6,9 @@ name: Release
 
 # Push a v* tag (scripts/ship-release.py, from a release branch) → build the
 # wheel/sdist + .deb, publish to PyPI (OIDC trusted publishing), attach the
-# .deb to the GitHub Release, and upload a source package per Ubuntu series
-# to ppa:episode6/stable. See RELEASE_CHECKLIST.md.
+# .deb to the GitHub Release, upload a source package per Ubuntu series
+# to ppa:episode6/stable, and push the updated recipe to the AUR.
+# See RELEASE_CHECKLIST.md.
 on:
   push:
     tags: ['v*']
@@ -195,3 +196,121 @@ jobs:
         run: |
           dput "$PPA" \
             "/tmp/collins-ppa/${{ matrix.series }}"/collins_*_source.changes
+
+  # Publishes the build recipe to the AUR package repo
+  # (ssh://aur@aur.archlinux.org/collins.git). The AUR hosts no binaries --
+  # publishing is a git push of PKGBUILD + .SRCINFO, and each user's machine
+  # fetches the tag tarball from GitHub and builds locally -- so this job's
+  # entire output is that push. scripts/ship-release.py creates the GitHub
+  # release (and with it the tag tarball) before the tag ever reaches CI, so
+  # the tarball this job hashes already exists.
+  #
+  # sha256sums stays SKIP in git, since the hash cannot exist before the tag
+  # does; this job fills it in, regenerates .SRCINFO with makepkg, and
+  # test-builds the package -- a typo'd dependency name or broken recipe
+  # stops here instead of on some Arch user's machine. Re-running a tag's
+  # workflow is harmless: an AUR repo already at this content skips the push.
+  aur:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install packaging tools
+        run: |
+          pacman -Sy --noconfirm archlinux-keyring
+          pacman -Su --noconfirm --needed base-devel git openssh
+
+      - uses: actions/checkout@v7
+
+      - name: Check the tag against PKGBUILD pkgver
+        run: |
+          pkgver="$(sed -n 's/^pkgver=//p' packaging/aur/PKGBUILD)"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$pkgver" != "$tag" ]; then
+            echo "::error::packaging/aur/PKGBUILD is at pkgver=$pkgver but the"
+            echo "tag is $tag. The version-bump PRs set pkgver when the release"
+            echo "branch is cut (RELEASE_CHECKLIST.md); fix the PKGBUILD and"
+            echo "re-tag."
+            exit 1
+          fi
+
+      - name: Check the AUR key is configured
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo "::error::AUR_SSH_PRIVATE_KEY is not set. It holds an OpenSSH"
+            echo "private key whose public half is registered on the episode6"
+            echo "AUR account (see packaging/aur/README.md)."
+            exit 1
+          fi
+
+      - name: Fill in the source tarball hash
+        run: |
+          cd packaging/aur
+          # Saved under the exact name the PKGBUILD's source array expects, so
+          # the test build below reuses this download and re-verifies its hash.
+          tarball="collins-${GITHUB_REF_NAME#v}.tar.gz"
+          curl -sfL --retry 5 --retry-delay 10 -o "$tarball" \
+            "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          hash="$(sha256sum "$tarball" | cut -d' ' -f1)"
+          sed -i "s/^sha256sums=.*/sha256sums=('$hash')/" PKGBUILD
+
+      - name: Regenerate .SRCINFO and test-build the package
+        run: |
+          useradd -m builder
+          chown -R builder packaging/aur
+          cd packaging/aur
+          # makepkg refuses to run as root, hence the builder user.
+          runuser -u builder -- makepkg --printsrcinfo > "$RUNNER_TEMP/srcinfo.new"
+          # The committed .SRCINFO is a tracked mirror; the generated copy is
+          # ground truth for what gets pushed. Drift is a repo-hygiene problem,
+          # not a release problem -- warn, don't block the release. (Ignores
+          # comment lines, blank lines, and the sha256sums value, which is
+          # SKIP in git by design.)
+          norm() {
+            grep -v '^#' "$1" | sed -e '/^[[:space:]]*$/d' \
+              -e 's/^\([[:space:]]*sha256sums = \).*/\1@/'
+          }
+          if ! diff -u <(norm .SRCINFO) <(norm "$RUNNER_TEMP/srcinfo.new"); then
+            echo "::warning::packaging/aur/.SRCINFO is out of date with what"
+            echo "makepkg generates from PKGBUILD. Publishing the generated"
+            echo "copy; regenerate the committed one to match."
+          fi
+          { grep '^#' .SRCINFO; echo; cat "$RUNNER_TEMP/srcinfo.new"; } \
+            > "$RUNNER_TEMP/srcinfo.aur"
+          # Test build before publishing anything: pacman resolving every
+          # declared dependency catches a typo'd name, and makepkg re-verifies
+          # the tarball hash and exercises the whole recipe.
+          (source PKGBUILD && \
+            pacman -S --noconfirm --needed "${depends[@]}" "${makedepends[@]}")
+          runuser -u builder -- makepkg --noconfirm
+
+      - name: Push to the AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/aur-key"
+          # The AUR's ed25519 host key, pinned like the ppa job pins its gpg
+          # key (verified 2026-08-18 via ssh-keyscan aur.archlinux.org);
+          # refresh this line if the AUR ever rotates it.
+          printf '%s\n' 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' \
+            > "$RUNNER_TEMP/aur-hosts"
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/aur-key -o UserKnownHostsFile=$RUNNER_TEMP/aur-hosts -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"
+          # Cloning the (possibly still empty) AUR repo: the first push
+          # creates the package.
+          git clone ssh://aur@aur.archlinux.org/collins.git "$RUNNER_TEMP/aur-repo"
+          cp packaging/aur/PKGBUILD "$RUNNER_TEMP/aur-repo/PKGBUILD"
+          cp "$RUNNER_TEMP/srcinfo.aur" "$RUNNER_TEMP/aur-repo/.SRCINFO"
+          cd "$RUNNER_TEMP/aur-repo"
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "::notice::The AUR already matches ${GITHUB_REF_NAME} -- nothing to push."
+            exit 0
+          fi
+          git add PKGBUILD .SRCINFO
+          git -c user.name='episode6' -c user.email='support@episode6.com' \
+            commit -m "Update to ${GITHUB_REF_NAME}"
+          # The AUR accepts exactly one branch, master.
+          git push origin HEAD:master
