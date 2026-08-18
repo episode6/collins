@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-16. Full change history: git log for this file.
+fork. Last modified: 2026-08-18. Full change history: git log for this file.
 -->
 
 # Collins
@@ -111,7 +111,7 @@ Or install the desktop launcher + icon (shows up in the app grid as "Collins"):
 **Debian/Ubuntu — .deb package** (build it with `./scripts/build_deb.sh`, or grab one from this repo's releases if published):
 
 ```bash
-sudo apt install ./collins_0.1.0_all.deb
+sudo apt install ./collins_0.1.1_all.deb
 ```
 
 Dependencies are pulled in automatically; the app appears in your app grid as "Collins".
@@ -157,7 +157,7 @@ attached and auto-generated notes). The PyPI job uses trusted publishing
 
 ```bash
 # bump version in pyproject.toml / __init__.py / debian/changelog, commit, then:
-git tag -a v0.1.0 -m v0.1.0 && git push origin v0.1.0
+git tag -a "v$VER" -m "v$VER" && git push origin "v$VER"
 ```
 
 ## Credits & license

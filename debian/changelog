@@ -1,3 +1,14 @@
+collins (0.1.1) UNRELEASED; urgency=medium
+
+  * Collins is now published to ppa:episode6/stable, for Ubuntu 24.04 (noble)
+    and 26.04 (resolute).
+  * Install alongside agent-session-manager instead of colliding with it: the
+    action icons move out of the shared hicolor theme into
+    /usr/share/collins/icons, which both packages claimed copies of
+    (agent-claude-symbolic.svg and tab-close-symbolic.svg).
+
+ -- Geoff Hackett <ghackett@episode6.com>  Tue, 18 Aug 2026 07:21:01 -0400
+
 collins (0.1.0) UNRELEASED; urgency=medium
 
   * Rebrand the app as Collins (fork of agent-session-manager): new package

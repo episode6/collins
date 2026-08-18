@@ -1,12 +1,12 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-09. Full change history: git log for this file.
+# fork. Last modified: 2026-08-18. Full change history: git log for this file.
 
 [project]
 # PyPI distribution name (suffixed to stay unambiguous on PyPI). The
 # installed command and the import package are both "collins".
 name = "collins-gtk"
-version = "0.1.0"
+version = "0.1.1"
 description = "Collins — native GTK4 GUI to manage and resume Claude Code sessions"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
