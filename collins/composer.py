@@ -2,10 +2,10 @@
 
 """The composer: a GUI prompt box for the agent's terminal.
 
-A `ComposerView` is a spell-checked multi-line text box under a button row
-that reads left to right as close, dock, then attach and Send — chrome at
-one end, composing at the other — everything the CLI's own input box isn't
-when a prompt outgrows one line. It owns no terminal plumbing at all: it
+A `ComposerView` is an optionally spell-checked multi-line text box under
+a button row that reads left to right as close, dock, then attach and Send
+— chrome at one end, composing at the other — everything the CLI's own
+input box isn't when a prompt outgrows one line. It owns no terminal plumbing at all: it
 announces ``send-requested`` / ``close-requested`` and its host
 (terminal.py's overlay or a dock panel page) decides what those mean — cut
 text out of the CLI's box on the way in, type it back or submit it on the
