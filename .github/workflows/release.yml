@@ -282,9 +282,12 @@ jobs:
             > "$RUNNER_TEMP/srcinfo.aur"
           # Test build before publishing anything: pacman resolving every
           # declared dependency catches a typo'd name, and makepkg re-verifies
-          # the tarball hash and exercises the whole recipe.
+          # the tarball hash and exercises the whole recipe. pacman -S takes
+          # bare package names, so any version constraint (foo>=1.2) is
+          # stripped first -- makepkg still enforces the constraint itself.
           (source PKGBUILD && \
-            pacman -S --noconfirm --needed "${depends[@]}" "${makedepends[@]}")
+            pacman -S --noconfirm --needed \
+              "${depends[@]%%[<>=]*}" "${makedepends[@]%%[<>=]*}")
           runuser -u builder -- makepkg --noconfirm
 
       - name: Push to the AUR

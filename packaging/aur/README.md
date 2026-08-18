@@ -48,7 +48,7 @@ One required secret:
 
 | Secret | Contents |
 | --- | --- |
-| `AUR_SSH_PRIVATE_KEY` | An OpenSSH private key whose public half is registered on the episode6 [AUR account](https://aur.archlinux.org/) (*My Account* → *SSH Public Key*) |
+| `AUR_SSH_PRIVATE_KEY` | An OpenSSH private key whose public half is registered on the episode6 [AUR account](https://aur.archlinux.org/) (*My Account* → *SSH Public Key*). Paste the key file verbatim, real newlines and all (`gh secret set AUR_SSH_PRIVATE_KEY < key`) — an escaped single-line `\n` rendition is not a valid key |
 
 The job pins the AUR's ed25519 SSH host key next to where it is used; if the
 AUR ever rotates it, refresh that line from `ssh-keyscan aur.archlinux.org`.
