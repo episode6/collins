@@ -6,6 +6,9 @@ collins (0.1.1) UNRELEASED; urgency=medium
     action icons move out of the shared hicolor theme into
     /usr/share/collins/icons, which both packages claimed copies of
     (agent-claude-symbolic.svg and tab-close-symbolic.svg).
+  * Require libadwaita 1.5 and GTK 4.10 explicitly, so a distribution too old
+    to run Collins refuses the package instead of installing it and failing at
+    launch.
 
  -- Geoff Hackett <ghackett@episode6.com>  Tue, 18 Aug 2026 07:21:01 -0400
 

@@ -108,13 +108,24 @@ Or install the desktop launcher + icon (shows up in the app grid as "Collins"):
 ./data/install.sh
 ```
 
-**Debian/Ubuntu — .deb package** (build it with `./scripts/build_deb.sh`, or grab one from this repo's releases if published):
+**Ubuntu — the episode6 PPA.** The maintained channel on Ubuntu 24.04 (noble) and 26.04 (resolute), and on the derivatives that share them: Linux Mint, Pop!_OS, elementary OS, Zorin. Collins upgrades with the rest of your system from here.
+
+```bash
+sudo add-apt-repository ppa:episode6/stable
+sudo apt install collins
+```
+
+Ubuntu 22.04 (jammy) is not supported — it ships libadwaita 1.1 and GTK 4.6, and Collins uses APIs from libadwaita 1.5 and GTK 4.10.
+
+**Debian and everything else — .deb package.** A Launchpad PPA can only serve Ubuntu, so on Debian this is the way in. Grab one from [the releases page](https://github.com/episode6/collins/releases), or build it with `./scripts/build_deb.sh`:
 
 ```bash
 sudo apt install ./collins_0.1.1_all.deb
 ```
 
-Dependencies are pulled in automatically; the app appears in your app grid as "Collins".
+Dependencies are pulled in automatically and the app appears in your app grid as "Collins". Note that a `.deb` installed this way **does not update itself** — it adds no apt source, deliberately, so nothing is subscribed to a third-party archive behind your back. Watch the releases page, or use the PPA if you are on Ubuntu.
+
+Debian 13 (trixie) and newer have everything Collins needs. Debian 12 (bookworm) does not — no libspelling, and libadwaita 1.2 against the 1.5 APIs.
 
 Terminal copy & paste works the way you'd expect out of the box: plain `Ctrl+C` (when text is selected) and `Ctrl+V` — see **easy copy & paste** above. `Ctrl+Shift+C` / `Ctrl+Shift+V` always work too.
 

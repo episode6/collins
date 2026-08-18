@@ -44,11 +44,22 @@ Ubuntu derivatives that share them — Linux Mint, Pop!_OS, elementary OS,
 Zorin. Ubuntu 22.04 (jammy) is out of scope: it ships libadwaita 1.1 and GTK
 4.6, and Collins uses APIs from libadwaita 1.5 and GTK 4.10.
 
+**On Debian, keep using the `.deb`** from the releases page. A Launchpad PPA
+can only ever serve Ubuntu, so the `.deb` is not a lesser fallback — it is the
+channel for Debian and everything that isn't Ubuntu, and it stays. It adds no
+apt source, so it does not update itself; watch the releases page. Debian 13
+(trixie) and newer have everything Collins needs.
+
 - **Installs alongside agent-session-manager.** Collins' action icons are
   app-private artwork on generic names, and they were being written into the
   shared `hicolor` icon theme, where they collided with the copies upstream's
   package owns. They now live in `/usr/share/collins/icons`, which also stops
   them outranking the system's own icons for every other application.
+- **The `.deb` declares what it actually needs.** It was missing
+  `gir1.2-gtksource-5` and `gir1.2-spelling-1` entirely, so it could install on
+  a machine without them and then exit on launch asking you to install them by
+  hand. Both packages now also require libadwaita 1.5 and GTK 4.10, turning a
+  crash on a too-old distribution into an apt refusal that says why.
 
 ### v0.1.0 — Collins
 
