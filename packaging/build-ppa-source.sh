@@ -20,15 +20,17 @@
 # failed build burns that version, so bump --revision rather than retrying.
 #
 # Usage:  packaging/build-ppa-source.sh --series noble [--revision 1] [-k KEYID]
-# Then:   dput ppa:episode6/stable /tmp/collins-ppa/collins_<VER>_source.changes
+# Then:   dput ppa:episode6/stable \
+#           /tmp/collins-ppa/<series>/collins_<VER>_source.changes
 set -euo pipefail
 
 usage() {
     cat <<'EOF'
 Usage: packaging/build-ppa-source.sh --series <name> [--revision <n>] [-k <keyid>]
 
-  --series    Ubuntu series to target, e.g. noble or resolute. Required; it
-              names both the changelog distribution and the version suffix.
+  --series    Ubuntu series to target: noble or resolute. Required; it names
+              both the changelog distribution and the version suffix, and
+              scopes the output directory.
   --revision  Per-series upload revision, default 1. Bump it when a version
               has been burned by a rejection or a failed build.
   -k, --key   GPG key to sign with, passed through to debuild. Defaults to
@@ -55,12 +57,32 @@ if [ -z "$series" ]; then
     usage >&2
     exit 2
 fi
+
+# Only series whose libadwaita/GTK versions have actually been checked against
+# Collins' API use. This is deliberately a hardcoded policy list rather than
+# "any real Ubuntu series": it catches a typo (--series noeble) locally and
+# instantly, and it catches a real-but-unsupported series (jammy) too. Adding
+# one belongs here and in packaging/README.md together, after checking the
+# stack -- not on a command line.
+case "$series" in
+    noble|resolute) ;;
+    *)  echo "error: unsupported series '$series'; expected noble or resolute." >&2
+        echo "       Adding a series means checking its libadwaita and GTK" >&2
+        echo "       versions against Collins' API use first -- see the" >&2
+        echo "       'Supported series' section of packaging/README.md." >&2
+        exit 2 ;;
+esac
+
 case "$revision" in
-    ''|*[!0-9]*) echo "error: --revision must be a positive integer" >&2; exit 2 ;;
+    [1-9]|[1-9][0-9]*) ;;
+    *)  echo "error: --revision must be a positive integer (got '$revision')" >&2
+        exit 2 ;;
 esac
 
 ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
-out="/tmp/collins-ppa"
+# Per-series, so that building the second series does not wipe the first one's
+# artifacts out from under an upload that has not happened yet.
+out="/tmp/collins-ppa/$series"
 stage="$out/.stage"
 
 rm -rf "$out"

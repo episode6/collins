@@ -77,13 +77,18 @@ something Launchpad rejects rather than something that quietly burns a number.
 2. Build a signed source package per series, from the committed HEAD:
    ```bash
    packaging/build-ppa-source.sh --series noble
-   dput ppa:episode6/stable /tmp/collins-ppa/collins_<VER>~noble1_source.changes
-
    packaging/build-ppa-source.sh --series resolute
-   dput ppa:episode6/stable /tmp/collins-ppa/collins_<VER>~resolute1_source.changes
+
+   dput ppa:episode6/stable \
+     /tmp/collins-ppa/noble/collins_<VER>~noble1_source.changes
+   dput ppa:episode6/stable \
+     /tmp/collins-ppa/resolute/collins_<VER>~resolute1_source.changes
    ```
-   Each run wipes `/tmp/collins-ppa`, so upload before building the next
-   series. Pass `-k <keyid>` to pick a signing key explicitly.
+   Output is scoped per series (`/tmp/collins-ppa/<series>/`), so the two
+   builds don't clobber each other and the upload order is up to you. Each run
+   wipes only its own series directory. Pass `-k <keyid>` to pick a signing key
+   explicitly; `--series` accepts only the supported series above, so a typo
+   fails immediately rather than after an upload round trip.
 
    (Requires `debhelper dh-python pybuild-plugin-pyproject devscripts dput` and
    the signing key in the keyring.)
