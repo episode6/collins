@@ -4758,7 +4758,10 @@ class MainWindow(Adw.ApplicationWindow):
         doesn't (a detached HEAD, a merge conflict, no upstream). Anything
         interactive is cut off up front: there is no terminal here to answer
         a username prompt, so GIT_TERMINAL_PROMPT=0 turns one into a fast
-        failure instead of a hang the timeout would otherwise sit out.
+        failure instead of a hang the timeout would otherwise sit out — and
+        the same goes for the editor a non-fast-forward merge would open for
+        its commit message, which --no-edit skips (GIT_EDITOR=true backstops
+        any other editor git finds a reason to launch).
         """
         cwd = param.get_string()
         project = project_name_for_cwd(cwd)
@@ -4772,12 +4775,12 @@ class MainWindow(Adw.ApplicationWindow):
         def work() -> None:
             try:
                 result = subprocess.run(
-                    [git, "pull"],
+                    [git, "pull", "--no-edit"],
                     capture_output=True,
                     text=True,
                     timeout=_GIT_PULL_TIMEOUT_S,
                     cwd=cwd,
-                    env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+                    env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true"},
                 )
             except (OSError, subprocess.SubprocessError) as err:
                 GLib.idle_add(dialogs.error_dialog, self, _("Git pull failed"), str(err))
