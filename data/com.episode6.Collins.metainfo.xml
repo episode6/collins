@@ -2,7 +2,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-09. Full change history: git log for this file.
+fork. Last modified: 2026-08-18. Full change history: git log for this file.
 -->
 <component type="desktop-application">
   <id>com.episode6.Collins</id>
@@ -48,6 +48,15 @@ fork. Last modified: 2026-08-09. Full change history: git log for this file.
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.1.1" date="2026-08-18">
+      <description>
+        <p>Available from the episode6 Ubuntu PPA.</p>
+        <ul>
+          <li>Install with ppa:episode6/stable on Ubuntu 24.04 and 26.04</li>
+          <li>Installs alongside agent-session-manager instead of clashing with it</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-07-26">
       <description>
         <p>Rebranded as Collins.</p>

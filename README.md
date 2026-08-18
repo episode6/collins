@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-16. Full change history: git log for this file.
+fork. Last modified: 2026-08-18. Full change history: git log for this file.
 -->
 
 # Collins
@@ -108,13 +108,24 @@ Or install the desktop launcher + icon (shows up in the app grid as "Collins"):
 ./data/install.sh
 ```
 
-**Debian/Ubuntu — .deb package** (build it with `./scripts/build_deb.sh`, or grab one from this repo's releases if published):
+**Ubuntu — the episode6 PPA.** The maintained channel on Ubuntu 24.04 (noble) and 26.04 (resolute), and on the derivatives that share them: Linux Mint, Pop!_OS, elementary OS, Zorin. Collins upgrades with the rest of your system from here.
 
 ```bash
-sudo apt install ./collins_0.1.0_all.deb
+sudo add-apt-repository ppa:episode6/stable
+sudo apt install collins
 ```
 
-Dependencies are pulled in automatically; the app appears in your app grid as "Collins".
+Ubuntu 22.04 (jammy) is not supported — it ships libadwaita 1.1 and GTK 4.6, and Collins uses APIs from libadwaita 1.5 and GTK 4.10.
+
+**Debian and everything else — .deb package.** A Launchpad PPA can only serve Ubuntu, so on Debian this is the way in. Grab one from [the releases page](https://github.com/episode6/collins/releases), or build it with `./scripts/build_deb.sh`:
+
+```bash
+sudo apt install ./collins_0.1.1_all.deb
+```
+
+Dependencies are pulled in automatically and the app appears in your app grid as "Collins". Note that a `.deb` installed this way **does not update itself** — it adds no apt source, deliberately, so nothing is subscribed to a third-party archive behind your back. Watch the releases page, or use the PPA if you are on Ubuntu.
+
+Debian 13 (trixie) and newer have everything Collins needs. Debian 12 (bookworm) does not — no libspelling, and libadwaita 1.2 against the 1.5 APIs.
 
 Terminal copy & paste works the way you'd expect out of the box: plain `Ctrl+C` (when text is selected) and `Ctrl+V` — see **easy copy & paste** above. `Ctrl+Shift+C` / `Ctrl+Shift+V` always work too.
 
@@ -157,7 +168,7 @@ attached and auto-generated notes). The PyPI job uses trusted publishing
 
 ```bash
 # bump version in pyproject.toml / __init__.py / debian/changelog, commit, then:
-git tag -a v0.1.0 -m v0.1.0 && git push origin v0.1.0
+git tag -a "v$VER" -m "v$VER" && git push origin "v$VER"
 ```
 
 ## Credits & license

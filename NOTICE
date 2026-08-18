@@ -13,7 +13,7 @@ formats):
 - collins/promptcard.py: deleted in this fork, 2026-08-08
 - data/banner.png: modified in this fork, 2026-07-26
 - data/icons/hicolor/scalable/actions/agent-cursor-symbolic.svg: deleted in this fork, 2026-07-26
-- debian/changelog: modified in this fork, 2026-08-09
+- debian/changelog: modified in this fork, 2026-08-18
 - docs/package.json: modified in this fork, 2026-07-31
 - docs/package-lock.json: modified in this fork, 2026-07-31
 - data/screenshot.png: modified in this fork, 2026-07-28

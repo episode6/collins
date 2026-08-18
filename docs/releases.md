@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-09. Full change history: git log for this file.
+fork. Last modified: 2026-08-18. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -22,13 +22,44 @@ downloads of each version, see the
 - ✅ **Theming** — light/dark plus selectable terminal color palettes
 - ✅ **Localization** — English, Hungarian, German, Spanish, French
 - ✅ **Multi-window**
-- ✅ **Distribution** — `.deb`, one-step tag-driven releases
+- ✅ **Distribution** — Ubuntu PPA (`ppa:episode6/stable`), `.deb`, one-step tag-driven releases
 
 ### Exploring next
 
 - 🔭 **Flathub** distribution
 
 ## Changelog
+
+### v0.1.1 — Ubuntu PPA
+
+Collins is now installable from an apt repository:
+
+```bash
+sudo add-apt-repository ppa:episode6/stable
+sudo apt install collins
+```
+
+The PPA covers **Ubuntu 24.04 (noble)** and **26.04 (resolute)**, and the
+Ubuntu derivatives that share them — Linux Mint, Pop!_OS, elementary OS,
+Zorin. Ubuntu 22.04 (jammy) is out of scope: it ships libadwaita 1.1 and GTK
+4.6, and Collins uses APIs from libadwaita 1.5 and GTK 4.10.
+
+**On Debian, keep using the `.deb`** from the releases page. A Launchpad PPA
+can only ever serve Ubuntu, so the `.deb` is not a lesser fallback — it is the
+channel for Debian and everything that isn't Ubuntu, and it stays. It adds no
+apt source, so it does not update itself; watch the releases page. Debian 13
+(trixie) and newer have everything Collins needs.
+
+- **Installs alongside agent-session-manager.** Collins' action icons are
+  app-private artwork on generic names, and they were being written into the
+  shared `hicolor` icon theme, where they collided with the copies upstream's
+  package owns. They now live in `/usr/share/collins/icons`, which also stops
+  them outranking the system's own icons for every other application.
+- **The `.deb` declares what it actually needs.** It was missing
+  `gir1.2-gtksource-5` and `gir1.2-spelling-1` entirely, so it could install on
+  a machine without them and then exit on launch asking you to install them by
+  hand. Both packages now also require libadwaita 1.5 and GTK 4.10, turning a
+  crash on a too-old distribution into an apt refusal that says why.
 
 ### v0.1.0 — Collins
 

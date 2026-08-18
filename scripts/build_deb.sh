@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-17. Full change history: git log for this file.
+# fork. Last modified: 2026-08-18. Full change history: git log for this file.
 # Build a Debian package: dist/collins_<version>_all.deb
 set -euo pipefail
 
@@ -37,7 +37,7 @@ chmod 755 "$BUILD/usr/bin/$PKG"
 # -- desktop file / icon / metainfo --------------------------------------------
 mkdir -p "$BUILD/usr/share/applications" \
          "$BUILD/usr/share/icons/hicolor/scalable/apps" \
-         "$BUILD/usr/share/icons/hicolor/scalable/actions" \
+         "$BUILD/usr/share/$PKG/icons/hicolor/scalable/actions" \
          "$BUILD/usr/share/metainfo" \
          "$BUILD/usr/share/doc/$PKG"
 # system-wide desktop entry: binary on PATH, no hardcoded working directory
@@ -45,23 +45,36 @@ sed -e "s|^Exec=.*|Exec=$PKG|" -e "/^Path=/d" \
     "$ROOT/data/$APP_ID.desktop" > "$BUILD/usr/share/applications/$APP_ID.desktop"
 # ...-panel.svg is the status icon's artwork, drawn for 22px (see statusicon.py);
 # the Debug variants are a source-checkout thing and stay out of the package.
-cp "$ROOT/data/icons/$APP_ID.svg" "$ROOT/data/icons/$APP_ID-panel.svg" \
+cp "$ROOT/data/icons/$APP_ID.svg" \
    "$BUILD/usr/share/icons/hicolor/scalable/apps/"
+# The action icons are app-private artwork on generic names, so they go in a
+# Collins-owned search-path root rather than the shared hicolor theme: two
+# packages cannot both own hicolor/.../tab-close-symbolic.svg, and
+# agent-session-manager does. app.py finds this root; the tray gets it as
+# IconThemePath, which is why -panel.svg belongs here rather than in apps/.
+cp "$ROOT/data/icons/$APP_ID.svg" "$ROOT/data/icons/$APP_ID-panel.svg" \
+   "$BUILD/usr/share/$PKG/icons/"
 cp "$ROOT/data/icons/hicolor/scalable/actions/"*.svg \
-    "$BUILD/usr/share/icons/hicolor/scalable/actions/"
+    "$BUILD/usr/share/$PKG/icons/hicolor/scalable/actions/"
 cp "$ROOT/data/$APP_ID.metainfo.xml" "$BUILD/usr/share/metainfo/"
 cp "$ROOT/LICENSE" "$BUILD/usr/share/doc/$PKG/copyright"
 
 # -- control ------------------------------------------------------------------
 mkdir -p "$BUILD/DEBIAN"
 INSTALLED_SIZE="$(du -sk "$BUILD" --exclude=DEBIAN | cut -f1)"
+# Keep Depends in step with debian/control -- this package is the only channel
+# Debian has, and both gtksourceview5 and libspelling are hard requirements
+# (editor.py and composer.py exit with an install hint when they are missing,
+# which apt should have made unnecessary). The two version floors are the
+# measured ones: GTK 4.10 for Gtk.FileDialog/FontDialog, libadwaita 1.5 for
+# Adw.AlertDialog and friends.
 cat > "$BUILD/DEBIAN/control" <<EOF
 Package: $PKG
 Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, gir1.2-vte-3.91
+Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0 (>= 4.10), gir1.2-adw-1 (>= 1.5), gir1.2-vte-3.91, gir1.2-gtksource-5, gir1.2-spelling-1
 Recommends: gir1.2-glib-2.0
 Installed-Size: $INSTALLED_SIZE
 Maintainer: episode6 <support@episode6.com>
