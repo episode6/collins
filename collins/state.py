@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-17. Full change history: git log for this file.
+# fork. Last modified: 2026-08-18. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -134,13 +134,13 @@ DEFAULT_SETTINGS = {
     "composer_new_sessions": "off",
     # Whether typing at an agent's empty input box raises the composer and
     # takes the character with it, so a prompt is written in the composer by
-    # default and in the CLI's box only on purpose. Off by default: it moves
-    # where ordinary typing lands. Only an *empty* box is typed away from —
-    # a permission dialog, a menu and a half-written line all keep the keys,
-    # and an agent mid-turn doesn't (its box is empty, and composing over a
-    # working agent is the point) — see composerkeys.typing_opens_composer
-    # and TerminalTab._typing_opens_composer.
-    "composer_on_typing": False,
+    # default and in the CLI's box only on purpose. On by default. Only an
+    # *empty* box is typed away from — a permission dialog, a menu and a
+    # half-written line all keep the keys, and an agent mid-turn doesn't
+    # (its box is empty, and composing over a working agent is the point)
+    # — see composerkeys.typing_opens_composer and
+    # TerminalTab._typing_opens_composer.
+    "composer_on_typing": True,
     "show_folder_path": False,  # show each session's project folder path in the sidebar
     "project_icon_size": 16,  # px size of the sidebar's project/folder (and group) icons
     "show_usage_panel": True,  # Claude subscription usage bars under the session list

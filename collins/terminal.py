@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-17. Full change history: git log for this file.
+# fork. Last modified: 2026-08-18. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -5122,7 +5122,7 @@ class TerminalTab(Gtk.Box):
 
         # Last, once every chord above has passed: a plain character typed
         # at an empty agent prompt can open the composer instead of landing
-        # in the CLI's box (opt-in — see _typing_opens_composer).
+        # in the CLI's box (on by default, opt-out — see _typing_opens_composer).
         if self._typing_opens_composer(keyval, state):
             return True
         return False
