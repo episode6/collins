@@ -25,7 +25,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk  # noqa: E402
+from gi.repository import GLib, Gtk  # noqa: E402
 
 import collins.composer as composer_mod  # noqa: E402
 
@@ -76,6 +76,33 @@ def main() -> int:
     finally:
         composer_mod.Spelling = real_spelling
     print("without libspelling OK: no adapter, no spelling menu, text still moves")
+
+    # A machine can also have the typelib but not the shared library it
+    # references (GitHub's runners shipped exactly that): the import
+    # succeeds and the first real call raises GLib.Error. Same degrade.
+    class _BrokenChecker:
+        @staticmethod
+        def get_default():
+            raise GLib.Error("libspelling-1.so.1: cannot open shared object file")
+
+    class _BrokenAdapter:
+        # Resolved before the get_default() argument raises; never called.
+        @staticmethod
+        def new(buffer, checker):
+            raise AssertionError("unreachable: get_default() raises first")
+
+    class _BrokenSpelling:
+        Checker = _BrokenChecker
+        TextBufferAdapter = _BrokenAdapter
+
+    composer_mod.Spelling = _BrokenSpelling
+    try:
+        broken = _build_view()
+        assert not hasattr(broken, "_adapter"), "broken lib must not leave _adapter"
+        _check_text_roundtrip(broken)
+    finally:
+        composer_mod.Spelling = real_spelling
+    print("with a library-less typelib OK: degrades the same way")
 
     print("ALL COMPOSER SPELLING CHECKS PASSED")
     return 0

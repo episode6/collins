@@ -28,6 +28,14 @@ jobs:
       - run: >
           sudo apt-get install -y --no-install-recommends gir1.2-vte-3.91-gtk4
           || sudo apt-get install -y --no-install-recommends gir1.2-vte-3.91
+      # gir1.2-spelling-1 brought only the typelib on the runner, not
+      # libspelling itself — and a typelib without its shared library fails
+      # at the first call, not at import (check_composer_spelling_optional
+      # asserts the wired path, so it caught this). The library package name
+      # tracks the soname across releases, hence the fallback.
+      - run: >
+          sudo apt-get install -y --no-install-recommends libspelling-1-2
+          || sudo apt-get install -y --no-install-recommends libspelling-1-1
       # Worst case, every check hangs on both attempts: checks x 2 x 120s
       # (40 min at 10 checks) plus the apt-get setup. timeout-minutes must
       # stay comfortably above that — and grow as checks are added — so a
