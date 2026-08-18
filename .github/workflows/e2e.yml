@@ -5,7 +5,7 @@ name: E2E
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   pull_request:
 
 jobs:

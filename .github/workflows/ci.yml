@@ -1,12 +1,12 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-30. Full change history: git log for this file.
+# fork. Last modified: 2026-08-18. Full change history: git log for this file.
 
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   pull_request:
 
 jobs:
@@ -33,3 +33,11 @@ jobs:
       # blocklist to match if you make it.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-gi python3-pytest
       - run: python3 -m pytest tests/ -q
+
+  # Every committed copy of the version must agree (see RELEASE_CHECKLIST.md);
+  # scripts/ship-release.py re-checks the same invariants at ship time.
+  verify-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 scripts/verify_versions.py

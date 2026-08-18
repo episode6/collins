@@ -4,9 +4,10 @@
 
 name: Release
 
-# Push a v* tag → build the wheel/sdist + .deb, publish to PyPI (OIDC trusted
-# publishing), create the GitHub Release with the .deb attached, and upload a
-# source package per Ubuntu series to ppa:episode6/stable.
+# Push a v* tag (scripts/ship-release.py, from a release branch) → build the
+# wheel/sdist + .deb, publish to PyPI (OIDC trusted publishing), attach the
+# .deb to the GitHub Release, and upload a source package per Ubuntu series
+# to ppa:episode6/stable. See RELEASE_CHECKLIST.md.
 on:
   push:
     tags: ['v*']
@@ -45,14 +46,24 @@ jobs:
         with:
           name: dist
           path: dist
-      - name: Create GitHub Release
+      # scripts/ship-release.py creates the release (with notes extracted
+      # from docs/releases.md) before the tag ever reaches CI, so the normal
+      # path is attaching to it. A bare tag pushed without a release still
+      # works, as a fallback.
+      - name: Attach the .deb to the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/*.deb \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes
+          if gh release view "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/*.deb \
+              --repo "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/*.deb \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi
 
   pypi:
     needs: build
