@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-12. Full change history: git log for this file.
+fork. Last modified: 2026-08-18. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -38,6 +38,10 @@ sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 libspelling
 ```
 
 :::
+
+The spelling package at the end of each line (`gir1.2-spelling-1` /
+`libspelling`) is optional — it adds spell-check to the prompt composer, and
+Collins runs fine without it.
 
 ## Install
 

@@ -11,9 +11,10 @@ pkgdesc="Native GTK4 desktop app to manage and resume Claude Code sessions"
 arch=('any')
 url="https://github.com/episode6/collins"
 license=('GPL-3.0-or-later')
-depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'vte4' 'gtksourceview5' 'libspelling')
+depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'vte4' 'gtksourceview5')
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
-optdepends=('claude-code: resume Claude Code sessions')
+optdepends=('claude-code: resume Claude Code sessions'
+            'libspelling: spell-check in the prompt composer')
 # Refresh the sha256 when a v$pkgver tag exists (see packaging/aur/README.md).
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')

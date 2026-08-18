@@ -9,6 +9,9 @@ collins (0.1.1) UNRELEASED; urgency=medium
   * Require libadwaita 1.5 and GTK 4.10 explicitly, so a distribution too old
     to run Collins refuses the package instead of installing it and failing at
     launch.
+  * libspelling is optional now (Depends -> Recommends): without it the
+    prompt composer is a plain text box instead of refusing to launch the
+    app.
 
  -- Geoff Hackett <ghackett@episode6.com>  Tue, 18 Aug 2026 07:21:01 -0400
 

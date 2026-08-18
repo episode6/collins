@@ -75,7 +75,7 @@ Features:
 
 ## Requirements
 
-Python ≥ 3.10, GTK 4, libadwaita ≥ 1.5, VTE (GTK 4 build), GtkSourceView 5, libspelling, PyGObject — from your distro's packages:
+Python ≥ 3.10, GTK 4, libadwaita ≥ 1.5, VTE (GTK 4 build), GtkSourceView 5, PyGObject — from your distro's packages. libspelling is optional: with it the prompt composer gets spell-check, without it the composer is a plain text box.
 
 ```bash
 # Ubuntu / Debian
@@ -125,7 +125,7 @@ sudo apt install ./collins_*_all.deb
 
 Dependencies are pulled in automatically and the app appears in your app grid as "Collins". Note that a `.deb` installed this way **does not update itself** — it adds no apt source, deliberately, so nothing is subscribed to a third-party archive behind your back. Watch the releases page, or use the PPA if you are on Ubuntu.
 
-Debian 13 (trixie) and newer have everything Collins needs. Debian 12 (bookworm) does not — no libspelling, and libadwaita 1.2 against the 1.5 APIs.
+Debian 13 (trixie) and newer have everything Collins needs. Debian 12 (bookworm) does not — libadwaita 1.2 against the 1.5 APIs.
 
 Terminal copy & paste works the way you'd expect out of the box: plain `Ctrl+C` (when text is selected) and `Ctrl+V` — see **easy copy & paste** above. `Ctrl+Shift+C` / `Ctrl+Shift+V` always work too.
 

@@ -14,11 +14,11 @@ land as mentions, and images earn a strip of preview thumbnails over the
 text — through injected provider callbacks, so the view itself stays
 host-agnostic.
 
-libspelling is a hard dependency, the same bargain as GtkSourceView (which
-the spell-check adapter here is built for): nothing degrades without it, and
-a missing typelib exits with an install hint instead of a traceback — the
-`.deb` and the AUR package both pull it in; only a source checkout can hit
-this.
+libspelling is optional — unlike GtkSourceView (which the spell-check
+adapter is built for, and which stays a hard dependency): without the
+typelib the composer still works, just without squiggles or the
+spell-check context menu. The `.deb` and the AUR package recommend it, so
+in practice only a deliberately slimmed install runs without it.
 
 The box matches the terminal's font on purpose: the text is going to *be*
 terminal text a moment later, and a composer drawn in the UI font would read
@@ -39,11 +39,7 @@ try:
     gi.require_version("Spelling", "1")
     from gi.repository import Spelling
 except (ValueError, ImportError):
-    raise SystemExit(
-        "Collins requires libspelling, which isn't installed. Install it "
-        "(Debian/Ubuntu: gir1.2-spelling-1, Fedora/Arch: libspelling) "
-        "and relaunch."
-    ) from None
+    Spelling = None
 
 from . import composerkeys, dropimages  # noqa: E402
 from .editor import GtkSource  # noqa: E402
@@ -127,12 +123,13 @@ class ComposerView(Gtk.Box):
         self._view.set_right_margin(8)
         self._view.set_accepts_tab(False)
 
-        self._adapter = Spelling.TextBufferAdapter.new(
-            self._buffer, Spelling.Checker.get_default()
-        )
-        self._view.set_extra_menu(self._adapter.get_menu_model())
-        self._view.insert_action_group("spelling", self._adapter)
-        self._adapter.set_enabled(True)
+        if Spelling is not None:
+            self._adapter = Spelling.TextBufferAdapter.new(
+                self._buffer, Spelling.Checker.get_default()
+            )
+            self._view.set_extra_menu(self._adapter.get_menu_model())
+            self._view.insert_action_group("spelling", self._adapter)
+            self._adapter.set_enabled(True)
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key)

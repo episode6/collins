@@ -22,17 +22,18 @@ Architecture: all
 # Adw.Dialog, Adw.PreferencesDialog and Adw.AboutDialog are libadwaita 1.5.
 # Without them a too-old stack installs cleanly and then dies at import, which
 # matters because this package is also the only channel Debian has.
-# gtksourceview5, vte and libspelling are deliberately unversioned: nothing
-# has established what their real minimum is, and a guessed floor locks out
-# users who would have been fine.
+# gtksourceview5 and vte are deliberately unversioned: nothing has
+# established what their real minimum is, and a guessed floor locks out
+# users who would have been fine. libspelling is only Recommends: the
+# composer degrades to an unchecked text box without it.
 Depends: ${python3:Depends},
          ${misc:Depends},
          python3-gi,
          gir1.2-gtk-4.0 (>= 4.10),
          gir1.2-adw-1 (>= 1.5),
          gir1.2-vte-3.91,
-         gir1.2-gtksource-5,
-         gir1.2-spelling-1
+         gir1.2-gtksource-5
+Recommends: gir1.2-spelling-1
 Description: native GTK4 desktop app to manage Claude Code sessions
  Collins browses every Claude Code session on your machine in a
  sidebar grouped by project, lets you name and star them, and resumes any of

@@ -63,19 +63,19 @@ cp "$ROOT/LICENSE" "$BUILD/usr/share/doc/$PKG/copyright"
 mkdir -p "$BUILD/DEBIAN"
 INSTALLED_SIZE="$(du -sk "$BUILD" --exclude=DEBIAN | cut -f1)"
 # Keep Depends in step with debian/control -- this package is the only channel
-# Debian has, and both gtksourceview5 and libspelling are hard requirements
-# (editor.py and composer.py exit with an install hint when they are missing,
-# which apt should have made unnecessary). The two version floors are the
-# measured ones: GTK 4.10 for Gtk.FileDialog/FontDialog, libadwaita 1.5 for
-# Adw.AlertDialog and friends.
+# Debian has, and gtksourceview5 is a hard requirement (editor.py exits with
+# an install hint when it is missing, which apt should have made unnecessary).
+# libspelling is only recommended: composer.py degrades to an unchecked text
+# box without it. The two version floors are the measured ones: GTK 4.10 for
+# Gtk.FileDialog/FontDialog, libadwaita 1.5 for Adw.AlertDialog and friends.
 cat > "$BUILD/DEBIAN/control" <<EOF
 Package: $PKG
 Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0 (>= 4.10), gir1.2-adw-1 (>= 1.5), gir1.2-vte-3.91, gir1.2-gtksource-5, gir1.2-spelling-1
-Recommends: gir1.2-glib-2.0
+Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0 (>= 4.10), gir1.2-adw-1 (>= 1.5), gir1.2-vte-3.91, gir1.2-gtksource-5
+Recommends: gir1.2-glib-2.0, gir1.2-spelling-1
 Installed-Size: $INSTALLED_SIZE
 Maintainer: episode6 <support@episode6.com>
 Homepage: https://github.com/episode6/collins
