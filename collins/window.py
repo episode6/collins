@@ -1,11 +1,12 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-17. Full change history: git log for this file.
+# fork. Last modified: 2026-08-18. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import threading
@@ -121,6 +122,12 @@ _BACKGROUND_TERMINAL_SIZE = (120, 40)
 # sliding away (see _offer_undo). The undo itself lives longer: Ctrl+Shift+Z
 # works until the next archive replaces it.
 _UNDO_TOAST_SECONDS = 4
+
+# The project row's "Git pull": long enough for a fetch over a slow link,
+# short enough that a pull hung on a dead remote or a credential prompt
+# (there's no terminal here to answer one) ends in an error dialog rather
+# than a thread parked forever.
+_GIT_PULL_TIMEOUT_S = 120
 
 # Quit-time backgrounding, which runs one session at a time. How long to wait
 # for a tab's session id to land before giving up and exiting it cleanly, how
@@ -1136,6 +1143,7 @@ class MainWindow(Adw.ApplicationWindow):
             "open-folder": self._on_open_folder,
             "open-folder-terminal": self._on_open_folder_terminal,
             "open-github": self._on_open_github,
+            "git-pull": self._on_git_pull,
         }
         for name, callback in per_session.items():
             action = Gio.SimpleAction(name=name, parameter_type=GLib.VariantType("s"))
@@ -4739,6 +4747,67 @@ class MainWindow(Adw.ApplicationWindow):
         which open_uri does nothing with.
         """
         open_uri(self, github_url(param.get_string()))
+
+    def _on_git_pull(self, _action, param: GLib.Variant) -> None:
+        """The project row's "Git pull (branch)": fetch and merge in the
+        project root the action carries.
+
+        On a worker thread — a pull talks to the network — with the outcome
+        marshalled back to the main loop: a sidebar toast carrying git's own
+        summary line when it lands, an error dialog with git's words when it
+        doesn't (a detached HEAD, a merge conflict, no upstream). Anything
+        interactive is cut off up front: there is no terminal here to answer
+        a username prompt, so GIT_TERMINAL_PROMPT=0 turns one into a fast
+        failure instead of a hang the timeout would otherwise sit out — and
+        the same goes for the editor a non-fast-forward merge would open for
+        its commit message, which --no-edit skips (GIT_EDITOR=true backstops
+        any other editor git finds a reason to launch).
+        """
+        cwd = param.get_string()
+        project = project_name_for_cwd(cwd)
+        git = shutil.which("git")
+        if git is None:
+            dialogs.error_dialog(
+                self, _("Git pull failed"), _("git was not found on PATH.")
+            )
+            return
+
+        def work() -> None:
+            try:
+                result = subprocess.run(
+                    [git, "pull", "--no-edit"],
+                    capture_output=True,
+                    text=True,
+                    timeout=_GIT_PULL_TIMEOUT_S,
+                    cwd=cwd,
+                    env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true"},
+                )
+            except (OSError, subprocess.SubprocessError) as err:
+                GLib.idle_add(dialogs.error_dialog, self, _("Git pull failed"), str(err))
+                return
+            if result.returncode == 0:
+                # git's last stdout line is the one worth repeating: the
+                # shortstat of a fast-forward, or "Already up to date."
+                lines = result.stdout.strip().splitlines()
+                summary = lines[-1].strip() if lines else ""
+                GLib.idle_add(self._git_pull_done, project, summary)
+            else:
+                detail = (
+                    result.stderr.strip()
+                    or result.stdout.strip()
+                    or _("git exited with status {code}").format(code=result.returncode)
+                )
+                GLib.idle_add(dialogs.error_dialog, self, _("Git pull failed"), detail)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _git_pull_done(self, project: str, summary: str) -> None:
+        title = (
+            _("Pulled {project} — {summary}").format(project=project, summary=summary)
+            if summary
+            else _("Pulled {project}").format(project=project)
+        )
+        self.sidebar.toast_overlay.add_toast(Adw.Toast(title=title))
 
     def _on_open_folder_app(self, _action, param: GLib.Variant) -> None:
         app_id, folder = param.unpack()
