@@ -35,8 +35,10 @@ def read_file(path):
 
 
 def parse_version(version, source):
-    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
-        error(f"{source}: version {version!r} is not plain MAJOR.MINOR.PATCH")
+    # MAJOR.MINOR.PATCH, plus an optional fourth segment used by hotfixes
+    # (0.1.1.1); tuple comparison orders 0.1.1 < 0.1.1.1 < 0.1.2 correctly.
+    if not re.fullmatch(r"\d+\.\d+\.\d+(\.\d+)?", version):
+        error(f"{source}: version {version!r} is not plain dotted numerals")
         return None
     return tuple(int(part) for part in version.split("."))
 

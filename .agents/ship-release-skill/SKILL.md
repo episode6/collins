@@ -17,8 +17,8 @@ The `./scripts/ship-release.py` script keeps it consistent:
 
 1. Resolves the release version from `pyproject.toml` on the target release
    branch (never assume the branch name matches the version — hotfixes append
-   to existing release branches, e.g. `release/v0.1.10` may be shipping
-   `0.1.11`), cross-checking `collins/__init__.py`, the top `debian/changelog`
+   to existing release branches, e.g. `release/v0.1.1` may be shipping
+   `0.1.1.1`), cross-checking `collins/__init__.py`, the top `debian/changelog`
    entry (which must target `UNRELEASED` — the PPA series is stamped at build
    time), and the metainfo's top `<release>` entry.
 2. Extracts release notes from the matching `### v<VERSION>` section of

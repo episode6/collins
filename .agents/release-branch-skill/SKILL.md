@@ -45,11 +45,11 @@ Create two separate Pull Requests (as drafts, per repo convention).
 - **Changes:**
     - **(VITAL)** Bump `version` in `pyproject.toml` AND `__version__` in
       `collins/__init__.py` to `<NEXT_VERSION>`. When computing
-      `<NEXT_VERSION>`, bump **the patch to the next multiple of 10**
-      (`0.1.10` → `0.1.20`). Never automatically increment the major or minor
-      version — those bumps require explicit human decision — and never hand
-      out the 9 patch values above a release: they're reserved for hotfixing
-      it.
+      `<NEXT_VERSION>`, bump **the patch by 1** (`0.1.1` → `0.1.2`). Never
+      automatically increment the major or minor version — those bumps
+      require explicit human decision. (Hotfix versions append a fourth
+      segment on the release branch instead and never involve main — see
+      `RELEASE_CHECKLIST.md`.)
     - **(VITAL)** Add a new top `debian/changelog` entry at `<NEXT_VERSION>`
       targeting `UNRELEASED` (`dch -v <NEXT_VERSION> -D UNRELEASED "..."`, or
       by hand matching the existing entries — author line

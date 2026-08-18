@@ -9,8 +9,9 @@ upload per Ubuntu series to `ppa:episode6/stable`. Agent skills in
 
 ## Versioning
 
-- `version` in `pyproject.toml` is the reference copy: plain
-  `MAJOR.MINOR.PATCH`, no suffixes. `collins/__init__.py` (`__version__`) and
+- `version` in `pyproject.toml` is the reference copy: plain dotted numerals,
+  no suffixes — `MAJOR.MINOR.PATCH`, plus a fourth segment on hotfixes (see
+  below). `collins/__init__.py` (`__version__`) and
   the top `debian/changelog` entry must match it exactly, and
   `docs/releases.md` must carry a `### v<VERSION>` section for it —
   `scripts/verify_versions.py` enforces all of that in CI (the `ci.yml`
@@ -25,14 +26,15 @@ upload per Ubuntu series to `ppa:episode6/stable`. Agent skills in
   branch inherits the correct version when cut — the release-finalization PR
   only finalizes docs. There are no `-SNAPSHOT` markers; a build from main is
   simply a version that hasn't shipped yet.
-- **Cutting a release branch bumps the patch to the next multiple of 10**
-  (`0.1.10` → `0.1.20`; and from the pre-scheme `0.1.1`, → `0.1.10`), so
-  regular releases land on multiples of 10 and the 9 values above each release
-  are reserved for hotfixing it (`0.1.10` → hotfixes `0.1.11`–`0.1.19`).
-  Major/minor bumps are an explicit human decision (never automatic) and reset
-  the lower segments to 0.
+- **Cutting a release branch bumps the patch by 1** (`0.1.1` → `0.1.2`).
+  Hotfixes append a fourth segment to the release they fix (`0.1.1` →
+  `0.1.1.1`), so they read as hotfixes at a glance and can never collide with
+  main's next version. (Unlike podcast-hacker, no platform Collins ships to
+  restricts versions to three segments — dpkg, PEP 440, pacman, and AppStream
+  all order `0.1.1 < 0.1.1.1 < 0.1.2` correctly.) Major/minor bumps are an
+  explicit human decision (never automatic) and reset the lower segments to 0.
 - `debian/changelog` stays targeted at `UNRELEASED` in git, forever — the
-  per-series PPA version (`0.1.10~noble1`) is stamped by
+  per-series PPA version (`0.1.2~noble1`) is stamped by
   `packaging/build-ppa-source.sh` in its temp tree only. See
   `packaging/README.md` for the scheme.
 - **Launchpad burns version strings permanently** (a rejected upload or failed
@@ -57,8 +59,8 @@ Create 2 PRs (as drafts, per repo convention):
 
 - `[VERSION] Next v<NEXT_VERSION>` points at `main`
     - Bump `version` in `pyproject.toml` and `__version__` in
-      `collins/__init__.py` to `<NEXT_VERSION>` (VITAL — patch to the next
-      multiple of 10, see Versioning above).
+      `collins/__init__.py` to `<NEXT_VERSION>` (VITAL — patch + 1, see
+      Versioning above).
     - Add a new top `debian/changelog` entry:
       `dch -v <NEXT_VERSION> -D UNRELEASED` (or by hand, matching the existing
       entries).
@@ -118,10 +120,10 @@ Create 2 PRs (as drafts, per repo convention):
   release branch and ship a new tag from it.
 - All fixes (including hotfixes) land on `main` first whenever possible and
   are cherry-picked onto the release branch (via PR).
-- A hotfix needs its own version bump PR on the release branch: bump the
-  patch by 1 within the release's reserved range (`0.1.10` → `0.1.11`, up to
-  `0.1.19`), add the `debian/changelog` entry, and give `docs/releases.md` a
+- A hotfix needs its own version bump PR on the release branch: append or
+  increment the fourth version segment (`0.1.1` → `0.1.1.1` → `0.1.1.2`), add
+  the `debian/changelog` entry, and give `docs/releases.md` a
   `### v<HOTFIX_VERSION>` section plus the metainfo/AUR updates. No
   coordination with `main` is needed — its next-release version already
-  outranks the whole hotfix range — but cherry-pick the docs updates back so
-  main's history stays complete.
+  outranks any hotfix of the previous release — but cherry-pick the docs
+  updates back so main's history stays complete.
