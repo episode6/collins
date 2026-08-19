@@ -145,7 +145,15 @@ def bail(win, why: str) -> bool:
     return GLib.SOURCE_REMOVE
 
 
-i18n.init(AppState().get_setting("language"))
+seed = AppState()
+i18n.init(seed.get_setting("language"))
+# Seeded before the App reads the same file: the behavior under test, and no
+# gh-welcome notice — on a runner with gh signed out that dialog lands over
+# the window, and a window close then dismisses the dialog instead of
+# reaching close-request at all (Adw closes the topmost dialog first).
+seed.update_settings(
+    {"quit_with_running_sessions": "hide", "gh_welcome_dismissed": True}
+)
 trust.trust_dir(TRUSTED)
 app = App()
 tries = 0
@@ -153,7 +161,7 @@ state: dict = {}
 
 
 def stage() -> bool:
-    """Wait for the window, turn hiding on, open the tab under test."""
+    """Wait for the window, then open the tab under test."""
     global tries
     tries += 1
     win = app.get_active_window()
@@ -161,7 +169,6 @@ def stage() -> bool:
         if tries > 40:  # ~10s
             return bail(None, "timed out waiting for the window")
         return GLib.SOURCE_CONTINUE
-    app.state.set_setting("quit_with_running_sessions", "hide")
     tab = win.start_background_session(TRUSTED)  # nothing open: lands foreground
     check("launch returns its tab", tab is not None)
     if tab is None:
@@ -218,10 +225,12 @@ def hide() -> bool:
         "panel layout persisted on hide",
         fresh.get_panel_layout(state["sid"]) is not None,
     )
+    # Presence in the persisted dict, not get_setting — the default answers
+    # that even when nothing was ever written.
     check(
         "window geometry persisted on hide",
-        int(fresh.get_setting("window_width")) > 0,
-        fresh.get_setting("window_width"),
+        "window_maximized" in fresh.settings,
+        sorted(k for k in fresh.settings if k.startswith("window_")),
     )
     GLib.timeout_add(2000, verify_hidden)
     return GLib.SOURCE_REMOVE
