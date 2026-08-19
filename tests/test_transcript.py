@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-19. Full change history: git log for this file.
 
 import json
 
@@ -397,6 +397,80 @@ def test_relocate_keeps_the_model(tmp_path):
     m.update()
     m.relocate(_move(old, tmp_path / "proj-repo-worktree", "s.jsonl"))
     assert m.model() == "claude-opus-5"
+
+
+# -- the session's permission mode -------------------------------------------
+
+
+def _mode_line(mode):
+    """The bare record the CLI writes each time the mode changes (shift+tab)."""
+    return {"type": "permission-mode", "permissionMode": mode, "sessionId": "s1"}
+
+
+def _prompt_line(text="hi", mode=None):
+    """A user turn; the CLI stamps each one with the session's current mode."""
+    line = {"type": "user", "message": {"role": "user", "content": text}}
+    if mode is not None:
+        line["permissionMode"] = mode
+    return line
+
+
+def test_no_mode_recorded_means_none(tmp_path):
+    """Old CLIs never stamp a mode; the model says so rather than guessing."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [_prompt_line(), _reply_line("claude-opus-5")])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.permission_mode() is None
+
+
+def test_mode_comes_from_the_latest_line(tmp_path):
+    """The user cycles modes mid-session; the last one recorded is the mode
+    the session is in now."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [_mode_line("default"), _prompt_line(mode="default"),
+               _mode_line("acceptEdits"), _mode_line("plan")])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.permission_mode() == "plan"
+
+
+def test_user_turns_carry_the_mode_too(tmp_path):
+    """Every user line is stamped, so a session with no explicit mode-change
+    record still reports the mode it runs in."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [_prompt_line(mode="auto")])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.permission_mode() == "auto"
+
+
+def test_a_junk_mode_is_ignored(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_mode_line("acceptEdits"), _mode_line(""), _mode_line(7)])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.permission_mode() == "acceptEdits"
+
+
+def test_set_path_clears_the_mode(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_mode_line("plan")])
+    m = TranscriptModel(p)
+    m.update()
+    m.set_path(tmp_path / "other.jsonl")
+    assert m.permission_mode() is None
+
+
+def test_relocate_keeps_the_mode(tmp_path):
+    """Entering a worktree moves the file, not the session."""
+    old = tmp_path / "proj-repo" / "s.jsonl"
+    old.parent.mkdir()
+    _write(old, [_mode_line("acceptEdits")])
+    m = TranscriptModel(old)
+    m.update()
+    m.relocate(_move(old, tmp_path / "proj-repo-worktree", "s.jsonl"))
+    assert m.permission_mode() == "acceptEdits"
 
 
 # -- images the conversation named ------------------------------------------

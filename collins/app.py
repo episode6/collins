@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-19. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1918,6 +1918,13 @@ class App(Adw.Application):
                 return False, (
                     f"permission_mode must be one of: {', '.join(sorted(allowed))}."
                 )
+        else:
+            # No explicit choice: the sibling works the way its spawner does,
+            # so it inherits the caller's *current* mode — the one live in the
+            # CLI now (shift+tab changes included), read off its transcript —
+            # not whatever flag this tab launched with. bypassPermissions is
+            # capped, junk is dropped; see inherited_permission_mode.
+            mode = mcptools.inherited_permission_mode(tab.current_permission_mode())
 
         worktree = args.get("worktree")  # bool, or None to use the project default
         options = SessionOptions(permission_mode=mode or "")

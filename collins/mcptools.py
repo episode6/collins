@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 from collections.abc import Callable
@@ -254,8 +255,9 @@ TOOLS: list[dict] = [
                     "enum": ["plan", "acceptEdits", "bypassPermissions"],
                     "description": (
                         "Permission mode for the new session: 'plan' "
-                        "(read-only) or 'acceptEdits'. Omit for the CLI's "
-                        "default. 'bypassPermissions' is refused."
+                        "(read-only) or 'acceptEdits'. Omit to inherit your "
+                        "own session's current mode. 'bypassPermissions' is "
+                        "refused (and never inherited)."
                     ),
                 },
             },
@@ -462,6 +464,33 @@ def _validate_value(key: str, value, spec: dict) -> str | None:
         if not isinstance(value, bool):
             return f"'{key}' must be true or false"
     return None
+
+
+# What a permission mode read off a transcript may look like before it is
+# trusted onto a command line: the CLI's own mode names, and nothing else.
+_MODE_TOKEN_RE = re.compile(r"[A-Za-z]{1,32}")
+
+
+def inherited_permission_mode(mode: str | None) -> str:
+    """The permission mode a start_session spawn inherits when its caller
+    didn't pick one: the calling session's own current mode, as its
+    transcript recorded it.
+
+    Passed through verbatim — the CLI wrote it, the CLI will accept it —
+    with two exceptions. Anything that doesn't look like a mode token is
+    dropped to "" (the CLI's default) rather than spliced into a command
+    line: the transcript is app data, but a file on disk all the same.
+    And bypassPermissions caps to acceptEdits: a bypass-mode caller has no
+    permission prompt gating this call at all, so inheriting bypass would
+    let one unattended session mint others no human ever approved —
+    acceptEdits is the strongest mode the tool grants explicitly, so it is
+    the strongest one inheritance grants too.
+    """
+    if not mode or not _MODE_TOKEN_RE.fullmatch(mode):
+        return ""
+    if mode == "bypassPermissions":
+        return "acceptEdits"
+    return mode
 
 
 # The room a read_terminal reply's text leaves inside one MAX_LINE frame for
