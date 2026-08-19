@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-18. Full change history: git log for this file.
+fork. Last modified: 2026-08-19. Full change history: git log for this file.
 -->
 # AUR packaging
 
