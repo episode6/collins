@@ -32,9 +32,12 @@ Only sessions with an open tab are passed in, which is not a narrowing: an
 unread flag never outlives the tab it spoke for (MainWindow._sync_status
 takes it off a row whose tab goes away), so every unread session has a tab,
 and every menu row leads somewhere — `app.focus-session` can only raise a tab
-that exists. Tabs whose session id hasn't resolved yet have no id to jump to,
-so they arrive as bare counts (`placeholders`) instead: they hold the item
-`Active` and can carry unread, but get no row.
+that exists. Nor does it outlive the *row*: archiving clears it (see the
+store's `_put_away`), so the badge can never count a session the user has put
+out of sight and has no way left to clear. Tabs whose session id hasn't
+resolved yet have no id to jump to, so they arrive as bare counts
+(`placeholders`) instead: they hold the item `Active` and can carry unread,
+but get no row.
 """
 
 from __future__ import annotations

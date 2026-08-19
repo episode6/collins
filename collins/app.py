@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-19. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1380,6 +1380,7 @@ class App(Adw.Application):
         # placeholder half still arrives through MainWindow._notify_tray —
         # those flags live in a sidebar, not the store.
         self.store.connect("unread-changed", lambda *_: self.refresh_status_icon())
+        self.store.connect("archived", self._on_session_archived)
         # Whether a tray host is on the bus, followed live from launch so the
         # close confirmation can pick its default response without a
         # synchronous bus round trip on the close path (see _confirm_quit).
@@ -1390,6 +1391,21 @@ class App(Adw.Application):
             self._on_tray_host_changed
         )
         self.apply_status_icon_setting()
+
+    def _on_session_archived(self, _store, session_id: str) -> None:
+        """A session was put away: take down the desktop notification it left
+        standing, if it left one.
+
+        A `notify_user` banner is posted under the session's own id (see
+        MainWindow.notify_user), so this withdraws that session's and no other
+        — and withdrawing one that was never posted, or that the desktop has
+        already dismissed, is a no-op. The in-app half of the same request is
+        the unread flag, which the archive clears (see the store's _put_away):
+        neither should outlive the session it speaks for, and a banner whose
+        click would land on a row that is no longer in the list is exactly the
+        dead end the flag was."""
+        if session_id:
+            self.withdraw_notification(session_id)
 
     def _on_tray_host_changed(self, present: bool) -> None:
         self._tray_host_present = present

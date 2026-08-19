@@ -620,6 +620,81 @@ def test_unread_changed_announces_only_actual_flips(store):
     assert flips == [(session_id, True), (session_id, False)]
 
 
+def test_archiving_clears_the_unread_flag(store):
+    # An archive puts the session's whole claim on the user away, notification
+    # included. The flag has to go *before* the row does: _apply drops the
+    # item along with the row, and a flag on an item that no longer exists can
+    # never be cleared — while the status icon goes on counting it for as long
+    # as the session's tab outlives its row (which a graceful exit routinely
+    # arranges). The badge would then be stuck on a session with nowhere left
+    # to click.
+    session_id = store._last_sessions[0].session_id
+    store.set_unread(session_id, True)
+    flips = []
+    store.connect("unread-changed", lambda _s, sid, flag: flips.append((sid, flag)))
+
+    store.set_archived(session_id, True)
+
+    assert flips == [(session_id, False)]  # announced, so the badge repaints
+    assert store.get_item(session_id) is None  # the row is gone with it
+
+    # And it stays clear when the row comes back: restoring a session doesn't
+    # restore a run the user has already been told about.
+    store.set_archived(session_id, False)
+    assert store.get_item(session_id).unread is False
+
+
+def test_archiving_clears_unread_with_show_archived_on(store):
+    # The row survives the archive here (it is drawn as an archived one), so
+    # the item does too — and with it a flag that nothing else would clear.
+    session_id = store._last_sessions[0].session_id
+    store.set_show_archived(True)
+    store.set_unread(session_id, True)
+
+    store.set_archived(session_id, True)
+
+    assert store.get_item(session_id).unread is False
+
+
+def test_archive_many_clears_every_flag(store):
+    ids = [s.session_id for s in store._last_sessions[:2]]
+    store.set_show_archived(True)  # keep the rows, so the flags are readable
+    for session_id in ids:
+        store.set_unread(session_id, True)
+
+    store.archive_many(ids)
+
+    assert [store.get_item(session_id).unread for session_id in ids] == [False, False]
+
+
+def test_archiving_a_project_clears_its_sessions_flags(store):
+    # Same rule one level up: a project archive takes every row it has out of
+    # sight, so every one of them is put away.
+    session_ids = _by_project(store, "alpha")
+    assert session_ids
+    store.set_show_archived(True)
+    for session_id in session_ids:
+        store.set_unread(session_id, True)
+
+    store.set_project_archived("alpha", True)
+
+    assert [store.get_item(sid).unread for sid in session_ids] == [False] * len(session_ids)
+
+
+def test_archived_signal_fires_once_per_session_put_away(store):
+    # What the app withdraws desktop notifications off (see App). Restoring is
+    # not an archive: nothing to put away, nothing announced.
+    ids = [s.session_id for s in store._last_sessions[:2]]
+    archived = []
+    store.connect("archived", lambda _s, sid: archived.append(sid))
+
+    store.archive_many(ids)
+    store.restore_many(ids)
+    store.set_archived(ids[0], True)
+
+    assert archived == ids + [ids[0]]
+
+
 def test_row_ids_covers_every_row_so_the_gate_can_sweep(store):
     # The background gate is app-wide — one handoff at a time — so closing it
     # means re-evaluating every row, not just the one being handed over.

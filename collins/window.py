@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-19. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -4640,7 +4640,7 @@ class MainWindow(Adw.ApplicationWindow):
             # Every ask that could still cancel this close is behind us: a
             # close carrying an archive starts its row's slide out here, not
             # under a dialog that might yet keep the session.
-            self._begin_archive_ghost(page)
+            self._archive_confirmed(page)
             if agent_busy:  # confirmed: start a graceful exit in the background
                 self._graceful_close(page)
                 view.close_page_finish(page, False)  # keep the tab until it exits cleanly
@@ -4657,7 +4657,7 @@ class MainWindow(Adw.ApplicationWindow):
         # that skipped it (a pre-confirmed re-entry): the ghost then bridges
         # the moment between the archive below and the rebuild removing the
         # row, instead of the row popping out mid-list.
-        self._begin_archive_ghost(page)
+        self._archive_confirmed(page)
         archive_session_id = self._archive_on_close.pop(page, None)
         if archive_session_id:
             self.store.set_archived(archive_session_id, True)
@@ -4985,13 +4985,29 @@ class MainWindow(Adw.ApplicationWindow):
         if isinstance(tab, TerminalTab) and tab.session_id:
             self._archive_session(tab.session_id)
 
-    def _begin_archive_ghost(self, page: Adw.TabPage) -> None:
-        """Start the slide-out of the row whose archive rides this close, if
-        one does (see _archive_session and the sidebar's begin_archiving).
+    def _archive_confirmed(self, page: Adw.TabPage) -> None:
+        """The archive riding this close is certain now — every ask that could
+        still have cancelled it is behind us — even though the archive itself
+        only lands once the tab really closes.
+
+        Two things follow from that, and both belong to this moment rather
+        than to the close: the row starts sliding out (see _archive_session
+        and the sidebar's begin_archiving), and the session's unread flag
+        comes off with it (why that matters is SessionStore._put_away's
+        docstring; this is the one path that can't wait for it). The flag
+        can't wait for the archive because the row doesn't: a running session
+        gets a graceful exit first, which takes seconds — longer for an agent
+        that won't drain — and for all of it the row is ghosted out of the
+        list while the badge still counts the session behind it.
+
         Idempotent — the close flow re-enters _on_close_page while a graceful
-        exit drains, and the row ignores a second ask."""
+        exit drains, and both the row and the flag ignore a second ask.
+        """
         session_id = self._archive_on_close.get(page)
-        if session_id is not None and not self.store.show_archived:
+        if session_id is None:
+            return
+        self.store.set_unread(session_id, False)
+        if not self.store.show_archived:
             self.sidebar.begin_archiving(session_id)
 
     def _archive_cancelled(self, page: Adw.TabPage) -> None:
@@ -5024,7 +5040,7 @@ class MainWindow(Adw.ApplicationWindow):
             # Close the tab through the normal close-page flow, so a busy tab
             # still gets its confirmation dialog — and archive the session
             # only once the tab really closes: cancelling the dialog keeps it
-            # visible. The row's slide-out (_begin_archive_ghost) waits for
+            # visible. The row's slide-out (_archive_confirmed) waits for
             # that flow too: it starts from _on_close_page once every ask that
             # could still cancel the close is behind it, never under a dialog
             # still deciding.
