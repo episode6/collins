@@ -288,6 +288,18 @@ def main():
     check("a row that becomes a separator is retyped", flipped, str(now))
     check("and drops the label it carried",
           all(now[i][1] == "" for i in flipped if now[i][0] == "separator"), str(now))
+    # And the same trade the other way: the id that was a separator is a row
+    # now, and has to arrive with the row's label rather than the blank a
+    # separator left behind.
+    check("a separator that becomes a row is retyped",
+          any(now[i][0] == "standard" for i in flipped), str(now))
+    check("and picks up the label it now carries",
+          all(now[i][1] for i in flipped if now[i][0] == "standard"), str(now))
+    grown_expected = view().menu
+    check("every grown row matches the model", [
+        ("separator", "") if e.separator else ("standard", statusicon.menu_label(e))
+        for e in grown_expected] == [(c[1].get("type"), c[1].get("label"))
+                                     for c in grown[2]], str(grown[2]))
     state["sessions"] = sessions
     icon.refresh()
 
