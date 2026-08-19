@@ -19,6 +19,12 @@ GNOME's `ubuntu-appindicators@ubuntu.com` — actually behaves:
 - **A `Passive` item defers its property refreshes** until it goes `Active`
   again, which is why traymodel.status_for lets unread outrank a session count
   of zero rather than reporting a badge nobody would see.
+- **Menu properties are merged onto the item held under that id**, never
+  replaced: a layout update hands the client a dict per row and it sets only
+  the keys it finds (`_doLayoutUpdate` in dbusMenu.js, which resets nothing).
+  Ids here are positional, so a row and a separator trade ids whenever a
+  session opens or closes — every row therefore states both `type` and
+  `label`, defaults and all. See `StatusIcon._properties`.
 - **Click routing keys on introspection finding `Activate`**, not on
   `ItemIsMenu`: with it exported, left single click opens the menu, left
   double click calls `Activate`, middle calls `SecondaryActivate`. There is no
@@ -888,9 +894,31 @@ class StatusIcon:
 
     @staticmethod
     def _properties(entry: traymodel.MenuEntry) -> dict[str, GLib.Variant]:
-        if entry.separator:
-            return {"type": GLib.Variant("s", "separator")}
-        return {"label": GLib.Variant("s", menu_label(entry))}
+        """One row's whole property set, defaults spelled out rather than left
+        to the client.
+
+        The protocol says a property sitting at its default may be omitted,
+        which invites the obvious dict — a `label` for a row, a `type` for a
+        separator, and nothing else. That is wrong here, because item ids are
+        handed out by position (traymodel numbers the rows top to bottom): a
+        session opening pushes every row below it down one, so the id that was
+        Quit becomes the second separator, and the id that was a separator
+        becomes New window.
+
+        GNOME's appindicator client keeps its items in a map keyed by that id
+        and, on a layout update, *merges* the properties it is handed onto
+        whatever it already holds — `_doLayoutUpdate` in dbusMenu.js resets
+        nothing and skips the property re-fetch that would. So an omitted
+        property keeps its old value: the row that turned into a separator
+        kept the label "Quit" and drew it, in the separator's own grey, beside
+        the dividing line. Stating both properties every time overwrites the
+        stale one, and the id's new kind is announced instead of inferred.
+        """
+        separator = entry.separator
+        return {
+            "type": GLib.Variant("s", "separator" if separator else "standard"),
+            "label": GLib.Variant("s", "" if separator else menu_label(entry)),
+        }
 
     def _root_layout(self, entries: list[traymodel.MenuEntry]) -> tuple:
         """The whole menu as one `(ia{sv}av)` value — a plain tuple, because it
