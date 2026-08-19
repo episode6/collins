@@ -1478,18 +1478,31 @@ class App(Adw.Application):
         never outlives the tab it spoke for, and a menu row has to lead
         somewhere. Tabs whose session id hasn't resolved arrive as bare counts
         — they have no id to jump to (see traymodel).
+
+        Hidden windows are windows: get_windows() keeps them, so their tabs
+        stay in the aggregate and the counts can't lie while nothing is on
+        screen — which is exactly when the icon is the only readout. Their
+        being hidden rides along as its own fact, for the menu's first row
+        and for holding the item Active (see traymodel.tray_view).
         """
         sessions: list[traymodel.TraySession] = []
         placeholders = placeholder_unread = 0
+        hidden_windows = False
         for window in self.get_windows():
             if not isinstance(window, MainWindow):
                 continue
+            if not window.get_visible():
+                hidden_windows = True
             sessions.extend(window.tray_sessions())
             open_count, unread_count = window.tray_placeholders()
             placeholders += open_count
             placeholder_unread += unread_count
         return traymodel.tray_view(
-            sessions, placeholders, placeholder_unread, name=self._tray_name()
+            sessions,
+            placeholders,
+            placeholder_unread,
+            name=self._tray_name(),
+            hidden_windows=hidden_windows,
         )
 
     def refresh_status_icon(self) -> None:
@@ -1510,11 +1523,25 @@ class App(Adw.Application):
         return GLib.SOURCE_REMOVE
 
     def _present_main_window(self) -> None:
-        window = self._main_window()
-        if window is None:
+        """The icon's "give me my app back" — Activate, SecondaryActivate and
+        the menu's Show Collins all land here, so one gesture is enough to
+        recover from any state.
+
+        Every hidden main window comes back, not just one: get_windows() is
+        sorted most recently focused first, so presenting the tail back to
+        front and the head last restores the stacking order the windows were
+        used in, with the last-focused one on top and holding focus. Windows
+        already on screen are left where they are — this shows what was
+        hidden and raises the front, it doesn't reshuffle the desktop.
+        """
+        windows = [w for w in self.get_windows() if isinstance(w, MainWindow)]
+        if not windows:
             self.activate()
             return
-        window.present()
+        for window in reversed(windows[1:]):
+            if not window.get_visible():
+                window.present()
+        windows[0].present()
 
     # -- session MCP tools ---------------------------------------------------
     #

@@ -119,17 +119,24 @@ def badge_text(unread: int) -> str:
     return str(unread)
 
 
-def status_for(sessions: int, unread: int) -> str:
+def status_for(sessions: int, unread: int, hidden_windows: bool = False) -> str:
     """The Status value for a session count and an unread count.
 
     Unread wins outright, including over a session count of zero it should
     never be seen with: a host that has hidden a Passive item defers every
     property change until the item goes Active again, so a badge landing on a
     Passive item would be invisible until something else moved.
+
+    Hidden windows hold the item Active on their own. With everything on
+    screen a session count is enough — a hidden window's tabs keep feeding
+    the count, so hiding never drops the item to Passive by itself — but the
+    icon is a hidden window's only reliable way back, and a host may take a
+    Passive item out of the panel. As long as anything is hidden, the item
+    stays findable.
     """
     if unread > 0:
         return STATUS_ATTENTION
-    return STATUS_ACTIVE if sessions > 0 else STATUS_PASSIVE
+    return STATUS_ACTIVE if sessions > 0 or hidden_windows else STATUS_PASSIVE
 
 
 def _count_phrase(n: int, one: str, many: str) -> str:
@@ -208,14 +215,22 @@ def _numbered(entries: list[MenuEntry]) -> list[MenuEntry]:
     ]
 
 
-def menu_entries(sessions: list[TraySession]) -> list[MenuEntry]:
+def menu_entries(sessions: list[TraySession], hidden_windows: bool = False) -> list[MenuEntry]:
     """The whole menu, top to bottom.
 
     Kept flat on purpose: a submenu in a tray menu is a usability tax, and
     shell menus cap their height the way the app's own popovers do.
+
+    The first row says when there are hidden windows to show. A user who hid
+    the window comes to this menu to get it back, and "(Hidden)" is the
+    confirmation that Collins went to the panel rather than away; with
+    everything on screen the row is a plain raise and keeps its plain name.
     """
     entries = [
-        MenuEntry(label=_("Show Collins"), action=ACTION_SHOW),
+        MenuEntry(
+            label=_("Show Collins (Hidden)") if hidden_windows else _("Show Collins"),
+            action=ACTION_SHOW,
+        ),
         MenuEntry(separator=True),
     ]
     for session in session_rows(sessions):
@@ -242,6 +257,7 @@ def tray_view(
     placeholders: int = 0,
     placeholder_unread: int = 0,
     name: str = APP_NAME,
+    hidden_windows: bool = False,
 ) -> TrayView:
     """Everything the item exports, from the open session tabs.
 
@@ -249,6 +265,14 @@ def tray_view(
     flags live in their window's sidebar, hence `placeholder_unread`, which
     the sidebar has already taken its working rows out of): they count towards
     the totals but cannot be jumped to, so they get no row.
+
+    `hidden_windows` is whether any main window is hidden right now — windows
+    that closed to the panel with their sessions running. Their tabs arrive
+    in `sessions` like anyone else's (the aggregate walks every window,
+    on screen or not), so the counts already stay honest; the flag is for the
+    two things a count can't say: the first menu row names the hidden state,
+    and the item stays Active while the icon is the only way back (see
+    status_for).
 
     The unread half is clamped to the tabs it counts rather than trusted. The
     aggregate reads the two numbers from each window in turn, and a
@@ -264,10 +288,10 @@ def tray_view(
     # counts as the thing its row shows: working, until the run ends.
     unread = sum(1 for s in sessions if session_marker(s) == MARKER_UNREAD) + placeholder_unread
     return TrayView(
-        status=status_for(open_count, unread),
+        status=status_for(open_count, unread, hidden_windows),
         badge=badge_text(unread),
         tooltip=tooltip_for(open_count, working, unread, name=name),
-        menu=menu_entries(sessions),
+        menu=menu_entries(sessions, hidden_windows),
         sessions=open_count,
         working=working,
         unread=unread,

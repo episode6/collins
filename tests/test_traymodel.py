@@ -109,6 +109,49 @@ def test_placeholder_unread_cannot_outrun_the_placeholders():
     assert tray_view([], placeholders=0, placeholder_unread=2).status == STATUS_PASSIVE
 
 
+# -- hidden windows -----------------------------------------------------------
+
+
+def test_hidden_windows_hold_the_item_active():
+    # The icon is a hidden window's only reliable way back, and a host may
+    # take a Passive item out of its panel — so hiddenness alone keeps it up,
+    # even with nothing countable open.
+    assert status_for(0, 0, hidden_windows=True) == STATUS_ACTIVE
+    assert tray_view([], hidden_windows=True).status == STATUS_ACTIVE
+
+
+def test_hidden_windows_never_downgrade_attention():
+    assert status_for(0, 1, hidden_windows=True) == STATUS_ATTENTION
+    assert tray_view([session("a", unread=True)], hidden_windows=True).status == STATUS_ATTENTION
+
+
+def test_a_hidden_window_reads_active_by_its_session_count_alone():
+    # A hidden window's tabs stay in the aggregate (App.tray_view walks every
+    # window, on screen or not), so the ordinary count already answers
+    # "sessions open but nothing on screen" — the flag is belt and braces.
+    view = tray_view([session("a", busy=True)], hidden_windows=True)
+    assert view.status == STATUS_ACTIVE
+    assert (view.sessions, view.working) == (1, 1)
+
+
+def test_menu_first_row_names_the_hidden_state():
+    assert labels(menu_entries([], hidden_windows=True))[0] == "Show Collins (Hidden)"
+    # Nothing hidden: the row is a plain raise and keeps its plain name.
+    assert labels(menu_entries([]))[0] == "Show Collins"
+
+
+def test_hidden_first_row_still_dispatches_show():
+    entries = menu_entries([session("a")], hidden_windows=True)
+    first = next(e for e in entries if not e.separator)
+    assert (first.label, first.action) == ("Show Collins (Hidden)", ACTION_SHOW)
+
+
+def test_view_menu_carries_the_hidden_first_row():
+    view = tray_view([session("a")], hidden_windows=True)
+    assert view.menu[0].label == "Show Collins (Hidden)"
+    assert tray_view([session("a")]).menu[0].label == "Show Collins"
+
+
 # -- the tooltip --------------------------------------------------------------
 
 
