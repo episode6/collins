@@ -38,6 +38,6 @@ git commit -m "Update to v<VER>"
 git push
 ```
 
-> If the package name `collins` is already taken on the AUR,
-> rename `pkgname`/`pkgbase` to `collins-gtk` to match the PyPI
-> distribution and re-clone the matching AUR repo.
+> If the package name `collins` is already taken on the AUR, rename
+> `pkgname`/`pkgbase` to `collins-gtk` and re-clone the matching AUR repo.
+> Every other channel -- PyPI, the PPA, the `.deb` -- is plain `collins`.
