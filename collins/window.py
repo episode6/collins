@@ -764,9 +764,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         A desktop notification rather than a dialog — a modal would interrupt
         the flow the user chose for being non-interruptive — sent through the
-        app like notify_session's, and clicking it brings a window back
-        (app.focus-session with no target presents the main window). On a
-        desktop with no tray host there is no top bar to point at, so the
+        app like notify_session's. Clicking it is the icon's own restore
+        (app.show-windows): every hidden window comes back, not just one —
+        the notice and the tray menu's Show Collins are the same promise. On
+        a desktop with no tray host there is no top bar to point at, so the
         wording says how to get back without one. The flag is recorded when
         the notice is sent: once per install means once, whichever desktop
         the first hide happened on.
@@ -781,9 +782,7 @@ class MainWindow(Adw.ApplicationWindow):
             body = _("Reopen it by relaunching Collins, or from a session's notification.")
         notification = Gio.Notification.new(_("Collins is still running"))
         notification.set_body(body)
-        notification.set_default_action_and_target(
-            "app.focus-session", GLib.Variant("s", "")
-        )
+        notification.set_default_action("app.show-windows")
         app.send_notification("collins-hidden", notification)
 
     def request_quit(self) -> None:

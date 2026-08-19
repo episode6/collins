@@ -295,7 +295,10 @@ def verify_hidden() -> bool:
     state["win2"] = win2
     check("second window hidden alongside", not win2.get_visible())
     check("first window still hidden", not win.get_visible())
-    app._present_main_window()
+    # Through the action rather than the method: app.show-windows is what
+    # the first-hide notification's click dispatches, so this covers its
+    # wiring and the unhide-all in one go.
+    app.activate_action("show-windows", None)
     GLib.timeout_add(1000, verify_presented)
     return GLib.SOURCE_REMOVE
 

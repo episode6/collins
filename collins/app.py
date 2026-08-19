@@ -1363,6 +1363,13 @@ class App(Adw.Application):
         self.add_action(quit_action)
         self.set_accels_for_action("app.quit", ["<Control>q"])
 
+        # The status icon's "give me my app back", as an action, so anything
+        # that isn't the icon — the first-hide notification, today — can offer
+        # the same full restore rather than presenting a single window.
+        show_windows = Gio.SimpleAction.new("show-windows", None)
+        show_windows.connect("activate", lambda *_: self._present_main_window())
+        self.add_action(show_windows)
+
         self._status_icon: statusicon.StatusIcon | None = None
         self._status_icon_source: int | None = None
         self.connect("window-added", lambda *_: self.refresh_status_icon())
