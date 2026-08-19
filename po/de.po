@@ -1097,3 +1097,15 @@ msgstr "diese Datei ist nicht mehr auf der Festplatte: {path}"
 msgid "couldn't download that image: {reason}"
 msgstr "das Bild konnte nicht heruntergeladen werden: {reason}"
 
+msgid "Keep Running hides the window and leaves every session exactly as it is."
+msgstr "Weiterlaufen lassen blendet das Fenster aus und lässt jede Sitzung genau so, wie sie ist."
+
+msgid "Keep Running (Hide Window)"
+msgstr "Weiterlaufen lassen (Fenster ausblenden)"
+
+msgid "Hide Window"
+msgstr "Fenster ausblenden"
+
+msgid "Without a status icon, a hidden window comes back by relaunching Collins or clicking a session notification"
+msgstr "Ohne Statussymbol kommt ein ausgeblendetes Fenster durch einen Neustart von Collins oder einen Klick auf eine Sitzungsbenachrichtigung zurück"
+

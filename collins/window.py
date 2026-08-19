@@ -320,6 +320,9 @@ class MainWindow(Adw.ApplicationWindow):
         # dialog: the user saved (or agreed to lose) the buffers, so the next
         # close-request must not ask about them again.
         self._editor_quit_ok = False
+        # app.quit reached this window: the close it issues must never take
+        # the hide branch — quit means quit, from any state (see request_quit).
+        self._quit_requested = False
         # Active tab's session at the first close request, before the tab
         # drain disturbs the selection ("" = none); persisted when the last
         # window really closes so the next launch can reopen it.
@@ -621,6 +624,9 @@ class MainWindow(Adw.ApplicationWindow):
         for prop in ("default-width", "default-height", "maximized"):
             self.connect(f"notify::{prop}", self._schedule_save_window_geometry)
         self.connect("close-request", self._on_close_request)
+        # Unhiding (any present() — the status icon, a notification, a
+        # relaunch) brings back the editor windows that hid alongside.
+        self.connect("notify::visible", self._on_visible_changed)
         # Coming back to the app re-checks the visible tab's PR statuses.
         self.connect("notify::is-active", self._on_is_active_changed)
 
@@ -667,6 +673,15 @@ class MainWindow(Adw.ApplicationWindow):
             return False  # tabs drained (or the user insisted) — really close
         self._last_active_session = self._active_session_id() or ""
         busy = self._busy_tab_count()
+        if busy and not self._quit_requested and not self._quit_asking and (
+            self.state.get_setting("quit_with_running_sessions") == "hide"
+        ):
+            # Keep everything exactly as it is; only the surface goes. The
+            # window object lives on with every tab, handler and timer, so
+            # nothing about a session changes. An idle window (busy == 0)
+            # still closes for real, as today.
+            self._hide_window()
+            return True
         editor_ok = self._editor_quit_ok  # one-shot: granted by _begin_quit_flow
         self._editor_quit_ok = False
         if busy == 0 and (editor_ok or self._editor_dirty_total() == 0):
@@ -685,17 +700,69 @@ class MainWindow(Adw.ApplicationWindow):
         page = self.tab_view.get_selected_page()
         return self._session_id_of(page) if page is not None else None
 
-    def _persist_last_session(self) -> None:
+    def _persist_last_session(self, among_visible: bool = False) -> None:
         """Remember the active tab's session when the last window closes, so
         the next launch reopens it. A non-session active tab (fork, chat,
         replay, unresolved new session) clears the memory instead — reopening
-        would restore a tab the user wasn't actually looking at."""
+        would restore a tab the user wasn't actually looking at.
+
+        `among_visible` is the hide path's variant of the "another window
+        remains" guard: a hide that leaves nothing on screen records this
+        window's session (crash safety — a hidden window may never get a real
+        close), while other still-visible windows keep the claim exactly as
+        other open windows do for a close."""
         app = self.get_application()
         windows = app.get_windows() if app is not None else []
-        if any(isinstance(w, MainWindow) and w is not self for w in windows):
-            return  # another window remains; its close records the session
+        others = [w for w in windows if isinstance(w, MainWindow) and w is not self]
+        if among_visible:
+            others = [w for w in others if w.get_visible()]
+        if others:
+            return  # another window remains; its close (or hide) records the session
         if self.state.get_setting("last_active_session") != self._last_active_session:
             self.state.set_setting("last_active_session", self._last_active_session)
+
+    def _hide_window(self) -> None:
+        """Hide this window (and its popped-out editors) with every session
+        intact — the third answer to closing with sessions running, beside
+        the graceful exit and /bg.
+
+        Saves what the close path saves first: a crash or power cut while
+        hidden must not lose panel history, panel/editor state, geometry or
+        last_active_session, because a hidden window may never see a real
+        close. The editor windows are hidden, not docked back — docking is a
+        teardown, and hiding tears nothing down; capture_editor_state records
+        a popped-out pane as an open editor, which is what a restore wants."""
+        if self._geometry_save_source is not None:
+            GLib.source_remove(self._geometry_save_source)
+        self._save_window_geometry()
+        self._save_panel_data()
+        self._persist_last_session(among_visible=True)
+        for win in self._editor_windows.values():
+            win.set_visible(False)
+        self.set_visible(False)
+
+    def _on_visible_changed(self, *_args) -> None:
+        """Unhidden by any of the existing present() paths — the status
+        icon's Show Collins, a notification, app.focus-session, a relaunch:
+        the editor windows that hid alongside come back too."""
+        if not self.get_visible():
+            return
+        for win in self._editor_windows.values():
+            if not win.get_visible():
+                win.present()
+
+    def request_quit(self) -> None:
+        """app.quit's way in: a real close, never the hide branch.
+
+        With hiding on, the close button no longer destroys anything, so this
+        is the path that reaches the drain — dialogs and all. The flag only
+        covers the synchronous close-request; the quit flow's later reissued
+        closes come in under _quitting or the nothing-busy fast path."""
+        self._quit_requested = True
+        try:
+            self.close()
+        finally:
+            self._quit_requested = False
 
     def _save_panel_data(self) -> None:
         for i in range(self.tab_view.get_n_pages()):
@@ -800,6 +867,7 @@ class MainWindow(Adw.ApplicationWindow):
         the active-sessions confirm follows only if agents are still busy.
         Cancelling either dialog keeps the window open."""
         self._quit_asking = True
+        explicit_quit = self._quit_requested  # captured: the dialogs are async
         tabs = []
         for i in range(self.tab_view.get_n_pages()):
             tab = self.tab_view.get_nth_page(i).get_child()
@@ -809,7 +877,7 @@ class MainWindow(Adw.ApplicationWindow):
         def after_editor() -> None:
             busy = self._busy_tab_count()
             if busy:
-                self._confirm_quit(busy)
+                self._confirm_quit(busy, explicit_quit)
                 return
             # Nothing running, and the buffers are saved or their loss agreed
             # to: reissue the close, waving it past the editor check once.
@@ -822,7 +890,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._ask_save_editors(tabs, after_editor, cancelled)
 
-    def _confirm_quit(self, busy: int) -> None:
+    def _confirm_quit(self, busy: int, explicit_quit: bool = False) -> None:
         self._quit_asking = True
 
         def do_quit(background: bool = False) -> None:
@@ -843,6 +911,10 @@ class MainWindow(Adw.ApplicationWindow):
             # (immediately, if every close completes synchronously).
             self._close_all_tabs()
 
+        def do_hide() -> None:
+            self._quit_asking = False
+            self._hide_window()
+
         can_background = any(self._quit_backgroundable(self.tab_view.get_nth_page(i))
                              for i in range(self.tab_view.get_n_pages()))
         behavior = self.state.get_setting("quit_with_running_sessions")
@@ -856,6 +928,8 @@ class MainWindow(Adw.ApplicationWindow):
             # exit-all the button would have produced.
             do_quit(background=can_background)
             return
+        # "ask" — or "hide" during an explicit app.quit, which never hides
+        # silently: the dialog offers all the answers instead.
         heading = _("Close window with {n} active session(s)?").format(n=busy)
         body = _("Agents are asked to exit cleanly first; "
                  "other running commands will be terminated.")
@@ -864,6 +938,17 @@ class MainWindow(Adw.ApplicationWindow):
                      "commands will be terminated. Backgrounding instead keeps "
                      "the agents running detached — reopen a session later to "
                      "re-attach.")
+        body += " " + _("Keep Running hides the window and leaves every "
+                        "session exactly as it is.")
+        # The least destructive answer is the default — but only when a
+        # status icon can appear to bring the window back, and never for an
+        # explicit Quit, which would swallow its own meaning. The app's
+        # cached watch answers, not statusicon.available() — a synchronous
+        # bus round trip has no place on the close path.
+        app = self.get_application()
+        hide_default = not explicit_quit and bool(
+            getattr(app, "tray_host_present", False)
+        )
         dialogs.confirm_dialog(
             self,
             heading,
@@ -871,10 +956,12 @@ class MainWindow(Adw.ApplicationWindow):
             _("Exit Sessions"),
             do_quit,
             on_dismiss=lambda: setattr(self, "_quit_asking", False),
-            default_response="confirm",
+            default_response="extra2" if hide_default else "confirm",
             extra_label=_("Background Sessions") if can_background else None,
             on_extra=(lambda: do_quit(background=True)) if can_background else None,
-            keys={"e": "confirm", "b": "extra", "c": "cancel"},
+            extra2_label=_("Keep Running (Hide Window)"),
+            on_extra2=do_hide,
+            keys={"e": "confirm", "b": "extra", "k": "extra2", "c": "cancel"},
         )
 
     # -- quit-time backgrounding ---------------------------------------------

@@ -490,6 +490,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "that image isn't on disk any more: {path}": "ez a kép már nincs a lemezen: {path}",
         "that file isn't on disk any more: {path}": "ez a fájl már nincs a lemezen: {path}",
         "couldn't download that image: {reason}": "nem sikerült letölteni a képet: {reason}",
+        "Keep Running hides the window and leaves every session exactly as it is.":
+            "A Futás folytatása elrejti az ablakot, és minden munkamenetet "
+            "pontosan úgy hagy, ahogy van.",
+        "Keep Running (Hide Window)": "Futás folytatása (ablak elrejtése)",
+        "Hide Window": "Ablak elrejtése",
+        "Without a status icon, a hidden window comes back by relaunching "
+        "Collins or clicking a session notification":
+            "Állapotikon nélkül az elrejtett ablak a Collins újraindításával "
+            "vagy egy munkamenet-értesítésre kattintva tér vissza",
     },
     "de": {
         "── restored panel history ──": "── wiederhergestellter Panel-Verlauf ──",
@@ -968,6 +977,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "that image isn't on disk any more: {path}": "dieses Bild ist nicht mehr auf der Festplatte: {path}",
         "that file isn't on disk any more: {path}": "diese Datei ist nicht mehr auf der Festplatte: {path}",
         "couldn't download that image: {reason}": "das Bild konnte nicht heruntergeladen werden: {reason}",
+        "Keep Running hides the window and leaves every session exactly as it is.":
+            "Weiterlaufen lassen blendet das Fenster aus und lässt jede "
+            "Sitzung genau so, wie sie ist.",
+        "Keep Running (Hide Window)": "Weiterlaufen lassen (Fenster ausblenden)",
+        "Hide Window": "Fenster ausblenden",
+        "Without a status icon, a hidden window comes back by relaunching "
+        "Collins or clicking a session notification":
+            "Ohne Statussymbol kommt ein ausgeblendetes Fenster durch einen "
+            "Neustart von Collins oder einen Klick auf eine "
+            "Sitzungsbenachrichtigung zurück",
     },
     "es": {
         "── restored panel history ──": "── historial del panel restaurado ──",
@@ -1445,6 +1464,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "that image isn't on disk any more: {path}": "esa imagen ya no está en el disco: {path}",
         "that file isn't on disk any more: {path}": "ese archivo ya no está en el disco: {path}",
         "couldn't download that image: {reason}": "no se pudo descargar esa imagen: {reason}",
+        "Keep Running hides the window and leaves every session exactly as it is.":
+            "Seguir en ejecución oculta la ventana y deja cada sesión "
+            "exactamente como está.",
+        "Keep Running (Hide Window)": "Seguir en ejecución (ocultar ventana)",
+        "Hide Window": "Ocultar ventana",
+        "Without a status icon, a hidden window comes back by relaunching "
+        "Collins or clicking a session notification":
+            "Sin icono de estado, una ventana oculta vuelve al reiniciar "
+            "Collins o al pulsar una notificación de sesión",
     },
     "fr": {
         "── restored panel history ──": "── historique du panneau restauré ──",
@@ -1923,6 +1951,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "that image isn't on disk any more: {path}": "cette image n'est plus sur le disque : {path}",
         "that file isn't on disk any more: {path}": "ce fichier n'est plus sur le disque : {path}",
         "couldn't download that image: {reason}": "impossible de télécharger cette image : {reason}",
+        "Keep Running hides the window and leaves every session exactly as it is.":
+            "Continuer l'exécution masque la fenêtre et laisse chaque session "
+            "exactement telle quelle.",
+        "Keep Running (Hide Window)": "Continuer l'exécution (masquer la fenêtre)",
+        "Hide Window": "Masquer la fenêtre",
+        "Without a status icon, a hidden window comes back by relaunching "
+        "Collins or clicking a session notification":
+            "Sans icône d'état, une fenêtre masquée revient en relançant "
+            "Collins ou en cliquant sur une notification de session",
     },
 }
 
