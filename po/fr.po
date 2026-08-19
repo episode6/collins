@@ -689,6 +689,18 @@ msgstr "Quitter"
 msgid "Show Collins"
 msgstr "Afficher Collins"
 
+msgid "Show Collins (Hidden)"
+msgstr "Afficher Collins (masqué)"
+
+msgid "Collins is still running"
+msgstr "Collins est toujours en cours d’exécution"
+
+msgid "Find it in the top bar."
+msgstr "Retrouvez-le dans la barre supérieure."
+
+msgid "Reopen it by relaunching Collins, or from a session's notification."
+msgstr "Rouvrez-le en relançant Collins ou depuis la notification d’une session."
+
 msgid "no sessions open"
 msgstr "aucune session ouverte"
 

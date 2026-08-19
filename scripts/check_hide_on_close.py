@@ -16,6 +16,12 @@ no GTK-free unit test can make:
   hidden must not lose state, so the moment the window hides, a *fresh*
   AppState (what a relaunch would read from disk) must already see
   last_active_session, the panel layout, and the window geometry.
+- **The icon catches up.** The tray aggregate keeps a hidden window's tabs
+  (App.tray_view walks get_windows(), which includes hidden ones — asserted,
+  not assumed), its first menu row names the hidden state, the one-per-install
+  first-hide notice flag is recorded on the first hide, and the icon's
+  "Show Collins" path (App._present_main_window) unhides *every* hidden main
+  window, not just one.
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \
         python3 scripts/check_hide_on_close.py
@@ -232,6 +238,26 @@ def hide() -> bool:
         "window_maximized" in fresh.settings,
         sorted(k for k in fresh.settings if k.startswith("window_")),
     )
+
+    # -- the icon's readout while hidden ------------------------------------
+    view = app.tray_view()
+    check(
+        "hidden window's tabs stay in the tray aggregate",
+        any(entry.target == state["sid"] for entry in view.menu),
+        [entry.target for entry in view.menu],
+    )
+    check("tray stays Active with nothing on screen", view.status == "Active", view.status)
+    check(
+        "the menu's first row names the hidden state",
+        view.menu[0].label == "Show Collins (Hidden)",
+        view.menu[0].label,
+    )
+    # Once per install, recorded the moment the notice went out: a relaunch
+    # right now must already know not to send it again.
+    check(
+        "first-hide notice flag persisted on hide",
+        AppState().get_setting("hide_notice_shown") is True,
+    )
     GLib.timeout_add(2000, verify_hidden)
     return GLib.SOURCE_REMOVE
 
@@ -259,15 +285,30 @@ def verify_hidden() -> bool:
         (state["tick_before"], tick_now),
     )
     state["tick_hidden"] = tick_now
-    win.present()
+    # Restore through the status icon's own path, with a second hidden window
+    # in play: Show Collins must bring back *every* hidden main window, not
+    # present just one. The second window is hidden via _hide_window directly
+    # — the busy gate lives in close-request, and this window's job is only
+    # to be a second thing to unhide.
+    win2 = app.open_new_window()
+    win2._hide_window()
+    state["win2"] = win2
+    check("second window hidden alongside", not win2.get_visible())
+    check("first window still hidden", not win.get_visible())
+    # Through the action rather than the method: app.show-windows is what
+    # the first-hide notification's click dispatches, so this covers its
+    # wiring and the unhide-all in one go.
+    app.activate_action("show-windows", None)
     GLib.timeout_add(1000, verify_presented)
     return GLib.SOURCE_REMOVE
 
 
 def verify_presented() -> bool:
-    """present() is the whole restore path: mapped, same tab, still ticking."""
+    """Show Collins is the whole restore path: every hidden window back,
+    the session's terminal mapped, same tab, still ticking."""
     win, tab = state["win"], state["tab"]
     check("window is visible again", win.get_visible())
+    check("Show Collins unhid every hidden window", state["win2"].get_visible())
     check("terminal is mapped again", tab.terminal.get_mapped())
     check("same tab is still selected", win.tab_view.get_selected_page().get_child() is tab)
     check(
@@ -275,6 +316,13 @@ def verify_presented() -> bool:
         last_tick(tab) >= state["tick_hidden"],
         (state["tick_hidden"], last_tick(tab)),
     )
+    view = app.tray_view()
+    check(
+        "menu's first row is a plain raise again",
+        view.menu[0].label == "Show Collins",
+        view.menu[0].label,
+    )
+    state["win2"].destroy()
     cleanup(win)
     app.quit()
     return GLib.SOURCE_REMOVE

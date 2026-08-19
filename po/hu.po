@@ -689,6 +689,18 @@ msgstr "Kilépés"
 msgid "Show Collins"
 msgstr "Collins megjelenítése"
 
+msgid "Show Collins (Hidden)"
+msgstr "Collins megjelenítése (rejtett)"
+
+msgid "Collins is still running"
+msgstr "A Collins továbbra is fut"
+
+msgid "Find it in the top bar."
+msgstr "A felső sávban találod."
+
+msgid "Reopen it by relaunching Collins, or from a session's notification."
+msgstr "Nyisd meg újra a Collins elindításával vagy egy munkamenet értesítéséből."
+
 msgid "no sessions open"
 msgstr "nincs nyitott munkamenet"
 

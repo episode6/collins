@@ -106,6 +106,12 @@ DEFAULT_SETTINGS = {
     # MainWindow._hide_window.
     "archive_running_session": "ask",  # archiving a session whose tab is busy
     "quit_with_running_sessions": "ask",  # closing a window while sessions run
+    # Whether the one-time first-hide notice has gone out: the desktop
+    # notification saying "Collins is still running" the first time a window
+    # hides instead of closing, so nobody mistakes the hide for a quit. Set
+    # when the notice is sent — once per install, like gh_welcome_dismissed
+    # (see MainWindow._maybe_show_hide_notice).
+    "hide_notice_shown": False,
     # Mirror the archive toggle to claude.ai: a session that has a page there
     # (it was remote-controlled, so its transcript names a remote session id)
     # is archived and restored there too, best-effort on a background thread —

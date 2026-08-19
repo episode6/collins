@@ -289,6 +289,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "New window": "Új ablak",
         "Quit": "Kilépés",
         "Show Collins": "Collins megjelenítése",
+        "Show Collins (Hidden)": "Collins megjelenítése (rejtett)",
+        "Collins is still running": "A Collins továbbra is fut",
+        "Find it in the top bar.": "A felső sávban találod.",
+        "Reopen it by relaunching Collins, or from a session's notification.":
+            "Nyisd meg újra a Collins elindításával vagy egy munkamenet értesítéséből.",
         "no sessions open": "nincs nyitott munkamenet",
         "1 session": "1 munkamenet",
         "{n} sessions": "{n} munkamenet",
@@ -774,6 +779,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "New window": "Neues Fenster",
         "Quit": "Beenden",
         "Show Collins": "Collins anzeigen",
+        "Show Collins (Hidden)": "Collins anzeigen (verborgen)",
+        "Collins is still running": "Collins läuft weiterhin",
+        "Find it in the top bar.": "Du findest Collins in der oberen Leiste.",
+        "Reopen it by relaunching Collins, or from a session's notification.":
+            "Öffne Collins erneut, indem du es neu startest oder über die "
+            "Benachrichtigung einer Sitzung.",
         "no sessions open": "keine Sitzungen geöffnet",
         "1 session": "1 Sitzung",
         "{n} sessions": "{n} Sitzungen",
@@ -1263,6 +1274,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "New window": "Nueva ventana",
         "Quit": "Salir",
         "Show Collins": "Mostrar Collins",
+        "Show Collins (Hidden)": "Mostrar Collins (oculto)",
+        "Collins is still running": "Collins sigue en ejecución",
+        "Find it in the top bar.": "Encuéntralo en la barra superior.",
+        "Reopen it by relaunching Collins, or from a session's notification.":
+            "Vuelve a abrirlo iniciando Collins de nuevo o desde la "
+            "notificación de una sesión.",
         "no sessions open": "no hay sesiones abiertas",
         "1 session": "1 sesión",
         "{n} sessions": "{n} sesiones",
@@ -1751,6 +1768,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "New window": "Nouvelle fenêtre",
         "Quit": "Quitter",
         "Show Collins": "Afficher Collins",
+        "Show Collins (Hidden)": "Afficher Collins (masqué)",
+        "Collins is still running": "Collins est toujours en cours d’exécution",
+        "Find it in the top bar.": "Retrouvez-le dans la barre supérieure.",
+        "Reopen it by relaunching Collins, or from a session's notification.":
+            "Rouvrez-le en relançant Collins ou depuis la notification d’une session.",
         "no sessions open": "aucune session ouverte",
         "1 session": "1 session",
         "{n} sessions": "{n} sessions",

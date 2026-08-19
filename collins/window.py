@@ -740,16 +740,50 @@ class MainWindow(Adw.ApplicationWindow):
         for win in self._editor_windows.values():
             win.set_visible(False)
         self.set_visible(False)
+        self._maybe_show_hide_notice()
 
     def _on_visible_changed(self, *_args) -> None:
         """Unhidden by any of the existing present() paths — the status
         icon's Show Collins, a notification, app.focus-session, a relaunch:
         the editor windows that hid alongside come back too."""
+        # Both directions matter to the status icon: its first menu row and
+        # its Status read whether any window is hidden (see App.tray_view).
+        self._notify_tray()
         if not self.get_visible():
             return
         for win in self._editor_windows.values():
             if not win.get_visible():
                 win.present()
+
+    def _maybe_show_hide_notice(self) -> None:
+        """Once per install, the first time a window actually hides: say
+        where Collins went. A user who has never hidden a window before just
+        watched it vanish with their sessions in it, and the difference
+        between "went to the top bar" and "quit and took everything with it"
+        is exactly what this feature must never leave to guesswork.
+
+        A desktop notification rather than a dialog — a modal would interrupt
+        the flow the user chose for being non-interruptive — sent through the
+        app like notify_session's. Clicking it is the icon's own restore
+        (app.show-windows): every hidden window comes back, not just one —
+        the notice and the tray menu's Show Collins are the same promise. On
+        a desktop with no tray host there is no top bar to point at, so the
+        wording says how to get back without one. The flag is recorded when
+        the notice is sent: once per install means once, whichever desktop
+        the first hide happened on.
+        """
+        app = self.get_application()
+        if app is None or self.state.get_setting("hide_notice_shown"):
+            return
+        self.state.set_setting("hide_notice_shown", True)
+        if getattr(app, "tray_host_present", False):
+            body = _("Find it in the top bar.")
+        else:
+            body = _("Reopen it by relaunching Collins, or from a session's notification.")
+        notification = Gio.Notification.new(_("Collins is still running"))
+        notification.set_body(body)
+        notification.set_default_action("app.show-windows")
+        app.send_notification("collins-hidden", notification)
 
     def request_quit(self) -> None:
         """app.quit's way in: a real close, never the hide branch.
