@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-17. Full change history: git log for this file.
+# fork. Last modified: 2026-08-19. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -95,6 +95,11 @@ class SessionStore(GObject.Object):
         # Emitted from set_unread itself so no caller has to remember to
         # announce it — the status icon's badge repaints off this edge.
         "unread-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, bool)),
+        # A session was archived (session id) — one emission per session, from
+        # every path that puts one away. Archiving is the user saying they are
+        # done with it, so anything still asking for their attention on its
+        # behalf goes with it (see _put_away).
+        "archived": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(self, state: AppState) -> None:
@@ -590,6 +595,8 @@ class SessionStore(GObject.Object):
 
     def set_archived(self, session_id: str, archived: bool) -> None:
         self.state.set_archived(session_id, archived)
+        if archived:
+            self._put_away([session_id])
         self._apply()
         self._sync_remote_archive([session_id], archived)
 
@@ -602,6 +609,7 @@ class SessionStore(GObject.Object):
     def archive_many(self, session_ids: list[str]) -> None:
         for session_id in session_ids:
             self.state.set_archived(session_id, True)
+        self._put_away(session_ids)
         self._apply()
         self._sync_remote_archive(session_ids, True)
 
@@ -610,6 +618,32 @@ class SessionStore(GObject.Object):
             self.state.set_archived(session_id, False)
         self._apply()
         self._sync_remote_archive(session_ids, False)
+
+    def _put_away(self, session_ids: list[str]) -> None:
+        """Everything a session is still asking of the user goes out of sight
+        with it — called by every archive, just before the rows leave.
+
+        The unread flag lives on a SessionItem, and `_apply` drops that item
+        the moment its row leaves the list, so a flag still set when an
+        archive lands can never be taken off again: no row shows it, and
+        nothing can clear a flag on an item that no longer exists. The status
+        icon goes on counting it for as long as the session's *tab* outlives
+        its row — which archiving arranges routinely, since a session that is
+        still running gets a graceful exit that can take seconds, and the row
+        ghosts out the moment the archive is certain (see the window's
+        `_archive_confirmed`). That badge is then stuck: it counts a session
+        with nowhere left to click.
+
+        So the flag comes off here, while the item is still there to take it
+        off — the flip announces itself through `unread-changed` like any
+        other, and the badge falls with the row. The `archived` signal carries
+        the same fact out to the desktop notification the session may have
+        raised (see App), which is as stale as the badge once its session is
+        put away.
+        """
+        for session_id in session_ids:
+            self.set_unread(session_id, False)
+            self.emit("archived", session_id)
 
     def _sync_remote_archive(self, session_ids: list[str], archived: bool) -> None:
         """Carry a user archive/restore over to claude.ai (see remotearchive).
@@ -736,6 +770,13 @@ class SessionStore(GObject.Object):
 
     def set_project_archived(self, project_name: str, archived: bool) -> None:
         self.state.set_project_archived(project_name, archived)
+        if archived:
+            # Archiving a project takes every row it has out of sight, so each
+            # of them is put away exactly as an individually archived session
+            # is (see _put_away).
+            self._put_away(
+                [s.session_id for s in self._last_sessions if s.project_name == project_name]
+            )
         self._apply()
 
     def record_forward(self, old_id: str, new_id: str) -> None:
