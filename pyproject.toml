@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-19. Full change history: git log for this file.
 
 [project]
 # PyPI distribution name (suffixed to stay unambiguous on PyPI). The
@@ -42,9 +42,27 @@ build-backend = "setuptools.build_meta"
 include = ["collins*"]
 
 [tool.setuptools.package-data]
-# The notices ship inside the package (the wheel is all the .deb installs), so
-# the About dialog can always read them; the repo root symlinks to the file.
-collins = ["locale/*/LC_MESSAGES/*.mo", "THIRD_PARTY_LICENSES.md"]
+# Everything the app needs at runtime ships *inside* the package, because a
+# wheel is the only thing `pip install collins` unpacks: no post-install hook
+# runs, and data_files only lands correctly for `pip install --user` (pipx and
+# venvs miss it entirely). So the notices the About dialog reads, the action
+# icons app.py puts on the icon search path, and the launcher/metainfo
+# `collins --install-desktop` writes out are all package data. The paths below
+# are symlinks into data/ (and the repo root symlinks back to the notices), so
+# each file still has exactly one copy in the tree.
+#
+# The Debug-variant icons are listed out deliberately: like the .deb, the wheel
+# leaves them behind — they are a source-checkout thing (start-debug).
+# scripts/verify_wheel_data.py is the CI guard that all of this really landed.
+collins = [
+    "locale/*/LC_MESSAGES/*.mo",
+    "THIRD_PARTY_LICENSES.md",
+    "icons/com.episode6.Collins.svg",
+    "icons/com.episode6.Collins-panel.svg",
+    "icons/hicolor/scalable/actions/*.svg",
+    "com.episode6.Collins.desktop",
+    "com.episode6.Collins.metainfo.xml",
+]
 
 [tool.ruff]
 line-length = 110

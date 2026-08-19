@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-19. Full change history: git log for this file.
 
 # Maintainer: episode6 <support@episode6.com>
 # Contributor: Máté Molnár <molnar.mate@zengo.eu> (original agent-session-manager)
@@ -36,10 +36,11 @@ package() {
 
   install -Dm644 "data/icons/$appid.svg" \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/$appid.svg"
-  for action_icon in data/icons/hicolor/scalable/actions/*.svg; do
-    install -Dm644 "$action_icon" \
-      "$pkgdir/usr/share/icons/hicolor/scalable/actions/$(basename "$action_icon")"
-  done
+  # The action icons need no install step: they ride inside the wheel, which
+  # python-installer has already unpacked. They must not go in the shared
+  # hicolor theme anyway -- app-private artwork on generic names
+  # (tab-close-symbolic, archive-symbolic, ...) put there outranks the
+  # system's own for every application on the machine.
   install -Dm644 "data/$appid.metainfo.xml" \
     "$pkgdir/usr/share/metainfo/$appid.metainfo.xml"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
