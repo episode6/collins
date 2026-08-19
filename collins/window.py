@@ -4993,13 +4993,12 @@ class MainWindow(Adw.ApplicationWindow):
         Two things follow from that, and both belong to this moment rather
         than to the close: the row starts sliding out (see _archive_session
         and the sidebar's begin_archiving), and the session's unread flag
-        comes off. The flag can't wait for the archive, because the row can't:
-        a running session gets a graceful exit first, which takes seconds — or
-        longer, for an agent that won't drain — and for all of it the row is
-        already ghosted out of the list while the status icon goes on counting
-        the session behind it. The user has no way to clear a badge for a row
-        they can no longer see. Cleared here it falls with the row, and the
-        archive's own _put_away is what covers every other path.
+        comes off with it (why that matters is SessionStore._put_away's
+        docstring; this is the one path that can't wait for it). The flag
+        can't wait for the archive because the row doesn't: a running session
+        gets a graceful exit first, which takes seconds — longer for an agent
+        that won't drain — and for all of it the row is ghosted out of the
+        list while the badge still counts the session behind it.
 
         Idempotent — the close flow re-enters _on_close_page while a graceful
         exit drains, and both the row and the flag ignore a second ask.
