@@ -34,7 +34,6 @@ from . import (
     openwith,
     paneldnd,
     panelhistory,
-    statusicon,
     trust,
 )
 from .activity import (
@@ -943,8 +942,13 @@ class MainWindow(Adw.ApplicationWindow):
                         "session exactly as it is.")
         # The least destructive answer is the default — but only when a
         # status icon can appear to bring the window back, and never for an
-        # explicit Quit, which would swallow its own meaning.
-        hide_default = not explicit_quit and statusicon.available()
+        # explicit Quit, which would swallow its own meaning. The app's
+        # cached watch answers, not statusicon.available() — a synchronous
+        # bus round trip has no place on the close path.
+        app = self.get_application()
+        hide_default = not explicit_quit and bool(
+            getattr(app, "tray_host_present", False)
+        )
         dialogs.confirm_dialog(
             self,
             heading,

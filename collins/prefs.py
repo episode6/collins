@@ -752,9 +752,9 @@ class PreferencesDialog(Adw.Dialog):
         )
         # Hide Window works without a status icon (relaunching or clicking a
         # notification brings the window back), but the row should say what
-        # the desktop can't show. Seeded now, kept live by the same
-        # availability watch the status-icon group runs.
-        self._sync_quit_behavior_subtitle(statusicon.available())
+        # the desktop can't show. Seeded from the status-icon group's answer,
+        # kept live by the same availability watch that group runs.
+        self._sync_quit_behavior_subtitle(self._status_icon_host_seed)
         page.add(running_group)
 
         archive_group = _SearchableGroup(title=_("Archiving"))
@@ -930,7 +930,10 @@ class PreferencesDialog(Adw.Dialog):
         # followed live: availability moves under a running app — extensions
         # get switched on and off, and an X11 shell restart takes the watcher
         # with it — and the watch's own first answer is a main-loop turn away.
-        self._on_status_icon_host(statusicon.available())
+        # The seed is kept for the quit-behavior row, built after this group,
+        # so the dialog makes one synchronous bus round trip, not two.
+        self._status_icon_host_seed = statusicon.available()
+        self._on_status_icon_host(self._status_icon_host_seed)
         self._status_icon_watch = statusicon.watch_availability(self._on_status_icon_host)
         self.connect("closed", lambda *_: statusicon.unwatch(self._status_icon_watch))
         return group
@@ -1286,8 +1289,9 @@ class PreferencesDialog(Adw.Dialog):
         title: str,
         subtitle: str,
         key: str,
-        behaviors: list[tuple[str, str]] = _RUNNING_BEHAVIORS,
+        behaviors: list[tuple[str, str]] | None = None,
     ) -> Adw.ComboRow:
+        behaviors = behaviors if behaviors is not None else _RUNNING_BEHAVIORS
         row = Adw.ComboRow(title=title, subtitle=subtitle)
         labels = [_(label) for _v, label in behaviors]
         row.set_model(Gtk.StringList.new(labels))

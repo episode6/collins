@@ -1373,7 +1373,29 @@ class App(Adw.Application):
         # placeholder half still arrives through MainWindow._notify_tray —
         # those flags live in a sidebar, not the store.
         self.store.connect("unread-changed", lambda *_: self.refresh_status_icon())
+        # Whether a tray host is on the bus, followed live from launch so the
+        # close confirmation can pick its default response without a
+        # synchronous bus round trip on the close path (see _confirm_quit).
+        # Watched here rather than read off the StatusIcon: the icon only
+        # exists when its setting is on and the app id is a real one.
+        self._tray_host_present = False
+        self._tray_host_watch = statusicon.watch_availability(
+            self._on_tray_host_changed
+        )
         self.apply_status_icon_setting()
+
+    def _on_tray_host_changed(self, present: bool) -> None:
+        self._tray_host_present = present
+
+    @property
+    def tray_host_present(self) -> bool:
+        """The cached answer to "can a status icon appear right now?".
+
+        False until the watch's first callback lands (a main-loop turn after
+        launch) — the safe direction: the close dialog then defaults to Exit
+        Sessions rather than to hiding behind an icon that may not exist.
+        """
+        return self._tray_host_present
 
     # -- quitting ------------------------------------------------------------
 
@@ -1544,6 +1566,8 @@ class App(Adw.Application):
         if self._status_icon is not None:
             self._status_icon.stop()
             self._status_icon = None
+        statusicon.unwatch(self._tray_host_watch)
+        self._tray_host_watch = 0
         Adw.Application.do_shutdown(self)
 
     def _mcp_tool_enabled(self, name: str) -> bool:
