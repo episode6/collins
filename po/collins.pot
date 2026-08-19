@@ -2750,3 +2750,22 @@ msgstr ""
 #: collins/prefs.py:883
 msgid "Nothing on this desktop can show a status icon"
 msgstr ""
+
+#: collins/window.py:942
+msgid ""
+"Keep Running hides the window and leaves every session exactly as it is."
+msgstr ""
+
+#: collins/window.py:958
+msgid "Keep Running (Hide Window)"
+msgstr ""
+
+#: collins/prefs.py:107
+msgid "Hide Window"
+msgstr ""
+
+#: collins/prefs.py:964
+msgid ""
+"Without a status icon, a hidden window comes back by relaunching Collins or "
+"clicking a session notification"
+msgstr ""

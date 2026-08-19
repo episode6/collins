@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-17. Full change history: git log for this file.
+# fork. Last modified: 2026-08-18. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -99,6 +99,12 @@ _RUNNING_BEHAVIORS = [
     ("exit", N_("Exit Session")),
     ("background", N_("Background Session")),
 ]
+
+# Closing a whole window has a fourth answer the tab close doesn't: keep
+# every session exactly as it is and just hide the window (the dialog's
+# "Keep Running (Hide Window)"). Shortened here because a ComboRow's value
+# label ellipsizes past ~130px.
+_QUIT_BEHAVIORS = _RUNNING_BEHAVIORS + [("hide", N_("Hide Window"))]
 
 # User-facing names for the tools Collins offers the sessions it starts, by
 # tool name (see mcptools.TOOLS). The table's own descriptions are written
@@ -737,12 +743,18 @@ class PreferencesDialog(Adw.Dialog):
             _("Archiving a session that is still running also closes its tab"),
             "archive_running_session",
         )
-        self._add_running_behavior_row(
+        self._quit_behavior_row = self._add_running_behavior_row(
             running_group,
             _("When quitting with running sessions"),
             _("Closing a window while agent sessions are still running"),
             "quit_with_running_sessions",
+            behaviors=_QUIT_BEHAVIORS,
         )
+        # Hide Window works without a status icon (relaunching or clicking a
+        # notification brings the window back), but the row should say what
+        # the desktop can't show. Seeded now, kept live by the same
+        # availability watch the status-icon group runs.
+        self._sync_quit_behavior_subtitle(statusicon.available())
         page.add(running_group)
 
         archive_group = _SearchableGroup(title=_("Archiving"))
@@ -939,6 +951,20 @@ class PreferencesDialog(Adw.Dialog):
         self._status_icon_row.set_tooltip_text(
             None if present else _("Nothing on this desktop can show a status icon")
         )
+        # The quit row's Hide Window choice leans on the icon to bring a
+        # hidden window back; built after this group, so the first seed lands
+        # before the row exists and the row seeds itself instead.
+        if getattr(self, "_quit_behavior_row", None) is not None:
+            self._sync_quit_behavior_subtitle(present)
+
+    def _sync_quit_behavior_subtitle(self, host_present: bool) -> None:
+        subtitle = _("Closing a window while agent sessions are still running")
+        if not host_present:
+            subtitle += ". " + _(
+                "Without a status icon, a hidden window comes back by "
+                "relaunching Collins or clicking a session notification"
+            )
+        self._quit_behavior_row.set_subtitle(subtitle)
 
     def _on_status_icon_changed(self, switch: Gtk.Switch, _pspec) -> None:
         self._state.set_setting("status_icon", switch.get_active())
@@ -1255,19 +1281,27 @@ class PreferencesDialog(Adw.Dialog):
         self._on_change()
 
     def _add_running_behavior_row(
-        self, group: _SearchableGroup, title: str, subtitle: str, key: str
-    ) -> None:
+        self,
+        group: _SearchableGroup,
+        title: str,
+        subtitle: str,
+        key: str,
+        behaviors: list[tuple[str, str]] = _RUNNING_BEHAVIORS,
+    ) -> Adw.ComboRow:
         row = Adw.ComboRow(title=title, subtitle=subtitle)
-        labels = [_(label) for _v, label in _RUNNING_BEHAVIORS]
+        labels = [_(label) for _v, label in behaviors]
         row.set_model(Gtk.StringList.new(labels))
-        values = [value for value, _l in _RUNNING_BEHAVIORS]
+        values = [value for value, _l in behaviors]
         current = self._state.get_setting(key)
         row.set_selected(values.index(current) if current in values else 0)
-        row.connect("notify::selected", self._on_running_behavior_changed, key)
+        row.connect("notify::selected", self._on_running_behavior_changed, key, values)
         group.add(_searchable(row, *labels))
+        return row
 
-    def _on_running_behavior_changed(self, row: Adw.ComboRow, _pspec, key: str) -> None:
-        self._state.set_setting(key, _RUNNING_BEHAVIORS[row.get_selected()][0])
+    def _on_running_behavior_changed(
+        self, row: Adw.ComboRow, _pspec, key: str, values: list[str]
+    ) -> None:
+        self._state.set_setting(key, values[row.get_selected()])
         self._on_change()
 
     def _on_remote_archive_changed(self, row: Adw.SwitchRow, _pspec) -> None:

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-16. Full change history: git log for this file.
+# fork. Last modified: 2026-08-18. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -28,6 +28,21 @@ from .sessions import (
     read_mcp_config,
 )
 from .svgtexture import svg_texture
+
+
+def _present(dialog: Adw.Dialog, parent: Gtk.Widget) -> None:
+    """Present *dialog* on *parent*, unhiding a hidden toplevel first.
+
+    A window that hid instead of closing (quit_with_running_sessions =
+    "hide") can still be asked questions — an MCP-triggered close
+    confirmation, the quit flow, a CLI notice — and a modal parented on an
+    invisible window is a hang with no UI. Every dialog in this module
+    presents through here so the rule holds for all of them.
+    """
+    root = parent.get_root() if parent is not None else None
+    if isinstance(root, Gtk.Window) and not root.get_visible():
+        root.present()
+    dialog.present(parent)
 
 
 def rename_dialog(parent: Gtk.Widget, body: str, current: str, on_save: Callable[[str], None]) -> None:
@@ -61,7 +76,7 @@ def rename_dialog(parent: Gtk.Widget, body: str, current: str, on_save: Callable
         "response",
         lambda _d, response: on_save(entry.get_text()) if response == "save" else None,
     )
-    dialog.present(parent)
+    _present(dialog, parent)
 
 
 def rename_path_dialog(
@@ -101,7 +116,7 @@ def rename_path_dialog(
         "response",
         lambda _d, response: on_rename(entry.get_text()) if response == "rename" else None,
     )
-    dialog.present(parent)
+    _present(dialog, parent)
 
 
 def follow_working_dir_dialog(
@@ -220,7 +235,7 @@ def follow_working_dir_dialog(
             on_done()
 
     dialog.connect("response", respond)
-    dialog.present(parent)
+    _present(dialog, parent)
 
 
 def emoji_dialog(parent: Gtk.Widget, current: str, on_save: Callable[[str], None]) -> None:
@@ -241,7 +256,7 @@ def emoji_dialog(parent: Gtk.Widget, current: str, on_save: Callable[[str], None
         "response",
         lambda _d, response: on_save(entry.get_text()) if response == "save" else None,
     )
-    dialog.present(parent)
+    _present(dialog, parent)
 
 
 def confirm_dialog(
@@ -254,6 +269,8 @@ def confirm_dialog(
     default_response: str = "cancel",
     extra_label: str | None = None,
     on_extra: Callable[[], None] | None = None,
+    extra2_label: str | None = None,
+    on_extra2: Callable[[], None] | None = None,
     extra_child: Gtk.Widget | None = None,
     keys: dict[str, str] | None = None,
     destructive: bool = True,
@@ -261,6 +278,8 @@ def confirm_dialog(
 ) -> None:
     """Two-button confirmation (Cancel + a destructive `confirm_label`).
     `extra_label`/`on_extra` add a third, non-destructive choice between them;
+    `extra2_label`/`on_extra2` a fourth, sitting right after Cancel — the
+    least destructive answer of all (the quit dialog's Keep Running);
     `extra_child` puts a widget (a check button, say) above the buttons.
     `keys` maps bare key names (e.g. "e") to response ids so the dialog can be
     answered without reaching for the mouse.
@@ -279,6 +298,8 @@ def confirm_dialog(
     if extra_child is not None:
         dialog.set_extra_child(extra_child)
     dialog.add_response("cancel", _("Cancel"))
+    if extra2_label is not None:
+        dialog.add_response("extra2", extra2_label)
     if extra_label is not None:
         dialog.add_response("extra", extra_label)
     dialog.add_response("confirm", confirm_label)
@@ -294,7 +315,9 @@ def confirm_dialog(
             if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK):
                 return Gdk.EVENT_PROPAGATE
             response = keys.get(Gdk.keyval_name(Gdk.keyval_to_lower(keyval)) or "")
-            if response is None or (response == "extra" and extra_label is None):
+            if response is None or (response == "extra" and extra_label is None) or (
+                response == "extra2" and extra2_label is None
+            ):
                 return Gdk.EVENT_PROPAGATE
             # Route through close() with the chosen response as the close
             # response: the "response" signal then fires exactly once, through
@@ -317,6 +340,8 @@ def confirm_dialog(
         label_for = {"cancel": _("Cancel"), "confirm": confirm_label}
         if extra_label is not None:
             label_for["extra"] = extra_label
+        if extra2_label is not None:
+            label_for["extra2"] = extra2_label
         wanted: dict[str, int] = {}
         for key, response in keys.items():
             text = label_for.get(response, "")
@@ -346,11 +371,13 @@ def confirm_dialog(
             on_confirm()
         elif response == "extra" and on_extra is not None:
             on_extra()
+        elif response == "extra2" and on_extra2 is not None:
+            on_extra2()
         elif on_dismiss is not None:
             on_dismiss()
 
     dialog.connect("response", respond)
-    dialog.present(parent)
+    _present(dialog, parent)
 
 
 def save_changes_dialog(
@@ -383,7 +410,7 @@ def save_changes_dialog(
             on_cancel()
 
     dialog.connect("response", respond)
-    dialog.present(parent)
+    _present(dialog, parent)
 
 
 def progress_dialog(
@@ -402,7 +429,7 @@ def progress_dialog(
     dialog.set_default_response("dismiss")
     dialog.set_close_response("dismiss")
     dialog.connect("response", lambda _dialog, _response: on_dismiss())
-    dialog.present(parent)
+    _present(dialog, parent)
     return dialog
 
 
@@ -412,7 +439,7 @@ def info_dialog(parent: Gtk.Widget, heading: str, body: str) -> None:
     purely so call sites say what they mean."""
     dialog = Adw.AlertDialog(heading=heading, body=body)
     dialog.add_response("ok", _("OK"))
-    dialog.present(parent)
+    _present(dialog, parent)
 
 
 def error_dialog(parent: Gtk.Widget, heading: str, body: str) -> None:
@@ -521,7 +548,7 @@ def new_session_options_dialog(
         )
 
     dialog.connect("response", on_response)
-    dialog.present(parent)
+    _present(dialog, parent)
 
 
 # -- MCP servers browser -------------------------------------------------------
@@ -565,7 +592,7 @@ def mcp_browser_dialog(parent: Gtk.Widget) -> None:
     dialog.set_content_width(540)
     dialog.set_content_height(600)
     dialog.set_child(view)
-    dialog.present(parent)
+    _present(dialog, parent)
 
 
 # -- session details ----------------------------------------------------------
@@ -597,7 +624,7 @@ def details_dialog(parent: Gtk.Widget, session: Session, title: str) -> None:
     dialog.set_content_width(480)
     dialog.set_content_height(560)
     dialog.set_child(view)
-    dialog.present(parent)
+    _present(dialog, parent)
 
     def populate(details: SessionDetails, mcp_servers: list[str]) -> bool:
         page.remove(group)
@@ -837,6 +864,6 @@ def generate_icon_dialog(
     # run is a no-op.
     dialog.connect("closed", lambda *_a: state["run"] and state["run"].cancel())
 
-    dialog.present(parent)
+    _present(dialog, parent)
     dialog.set_focus(entry)
     start()

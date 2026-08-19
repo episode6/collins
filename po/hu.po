@@ -1097,3 +1097,15 @@ msgstr "ez a fájl már nincs a lemezen: {path}"
 msgid "couldn't download that image: {reason}"
 msgstr "nem sikerült letölteni a képet: {reason}"
 
+msgid "Keep Running hides the window and leaves every session exactly as it is."
+msgstr "A Futás folytatása elrejti az ablakot, és minden munkamenetet pontosan úgy hagy, ahogy van."
+
+msgid "Keep Running (Hide Window)"
+msgstr "Futás folytatása (ablak elrejtése)"
+
+msgid "Hide Window"
+msgstr "Ablak elrejtése"
+
+msgid "Without a status icon, a hidden window comes back by relaunching Collins or clicking a session notification"
+msgstr "Állapotikon nélkül az elrejtett ablak a Collins újraindításával vagy egy munkamenet-értesítésre kattintva tér vissza"
+

@@ -1386,10 +1386,15 @@ class App(Adw.Application):
         down with running agents and unsaved buffers still in it: each window
         gets its usual close request, so the Save Changes? and active-sessions
         dialogs still appear, and cancelling one leaves that window open.
+
+        Through request_quit rather than close(): with hiding on
+        (quit_with_running_sessions = "hide") a plain close would hide the
+        window instead of quitting — and a window already hidden gets its
+        questions too, presented first (dialogs._present unhides it).
         """
         for window in list(self.get_windows()):
             if isinstance(window, MainWindow):
-                window.close()
+                window.request_quit()
 
     # -- the status icon -----------------------------------------------------
 

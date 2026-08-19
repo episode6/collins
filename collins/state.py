@@ -101,6 +101,9 @@ DEFAULT_SETTINGS = {
     "gh_welcome_dismissed": False,
     # What to do instead of the confirmation dialog when a running session's
     # tab has to close: ask (the dialog, as before) | exit | background.
+    # quit_with_running_sessions takes a fourth value, hide: the window (not
+    # its sessions) goes away, recoverable from the status icon — see
+    # MainWindow._hide_window.
     "archive_running_session": "ask",  # archiving a session whose tab is busy
     "quit_with_running_sessions": "ask",  # closing a window while sessions run
     # Mirror the archive toggle to claude.ai: a session that has a page there
