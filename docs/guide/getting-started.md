@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-19. Full change history: git log for this file.
+fork. Last modified: 2026-08-20. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -117,6 +117,25 @@ To add a desktop launcher and icon for your user:
 ```bash
 ./data/install.sh
 ```
+
+## Updating
+
+Each channel updates its own way; none of them touches your sessions or
+your `~/.config/collins/` state, so an update is always safe mid-stream.
+
+| Installed via | To update |
+| --- | --- |
+| **Ubuntu PPA** | Nothing special — `sudo apt update && sudo apt upgrade` (or your desktop's software updater) picks Collins up with everything else. |
+| **Debian `.deb`** | Download the new `.deb` from the [releases page](https://github.com/episode6/collins/releases/latest) and install it over the old one the same way: `sudo apt install ./collins_*_all.deb`. apt treats it as an upgrade; settings stay put. |
+| **pipx** | `pipx upgrade collins` — the `--system-site-packages` flag you installed with is remembered by the venv, so it needn't be repeated. |
+| **pip** | `pip install --user --upgrade collins` |
+| **From source** | `git pull` in the checkout. The launcher from `./data/install.sh` points at the checkout, so it needs no re-run. |
+
+Restart Collins afterwards — a running instance keeps the old code until it
+is relaunched. If any sessions are still working, close the window with
+**Keep Running (Hide Window)** and relaunch: the hidden window comes back,
+but on the old code; use the menu's **Quit** (sessions can be backgrounded
+first) for a real restart.
 
 ## First run
 

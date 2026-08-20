@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-19. Full change history: git log for this file.
+fork. Last modified: 2026-08-20. Full change history: git log for this file.
 -->
 
 # Collins
@@ -140,6 +140,8 @@ sudo apt install ./collins_*_all.deb
 ```
 
 Dependencies are pulled in automatically and the app appears in your app grid as "Collins". Note that a `.deb` installed this way **does not update itself** — it adds no apt source, deliberately, so nothing is subscribed to a third-party archive behind your back. Watch the releases page, or use the PPA if you are on Ubuntu.
+
+**Updating.** PPA: `sudo apt upgrade` picks it up with everything else. `.deb`: install the new one over the old with the same `sudo apt install ./collins_*_all.deb`. pipx: `pipx upgrade collins` (the `--system-site-packages` flag is remembered). pip: `pip install --user --upgrade collins`. Source: `git pull`. Relaunch Collins afterwards — a running instance keeps the old code, including one hidden with *Keep Running*; use **Quit** for a real restart.
 
 Debian 13 (trixie) and newer have everything Collins needs. Debian 12 (bookworm) does not — libadwaita 1.2 against the 1.5 APIs.
 
