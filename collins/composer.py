@@ -98,6 +98,7 @@ class ComposerView(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("composer-panel")
         self._enter_sends = True
+        self._spell_click = True
         self._font_provider: Gtk.CssProvider | None = None
         self._file_reference = file_reference
         self._notify = notify
@@ -431,6 +432,13 @@ class ComposerView(Gtk.Box):
     def set_enter_sends(self, enter_sends: bool) -> None:
         self._enter_sends = bool(enter_sends)
 
+    def set_spell_click(self, spell_click: bool) -> None:
+        """Whether a right-click aims the spell-check menu at the word under
+        it (the composer_spell_click setting). Read on the click rather than
+        wired into the gesture, so flipping it in Preferences takes hold in
+        an open composer instead of the next one."""
+        self._spell_click = bool(spell_click)
+
     def set_docked(self, docked: bool) -> None:
         """Dress the widget for its host: docked (a panel page below the
         terminal) drops the floating card's rounded top and grows the text
@@ -500,7 +508,7 @@ class ComposerView(Gtk.Box):
         would change more than spelling; gated on the misspelling tag, a
         click anywhere else behaves exactly as it did before this existed.
         """
-        if n_press != 1 or self._adapter is None:
+        if n_press != 1 or not self._spell_click or self._adapter is None:
             return
         bx, by = self._view.window_to_buffer_coords(
             Gtk.TextWindowType.WIDGET, int(x), int(y)

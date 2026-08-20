@@ -340,6 +340,18 @@ class PreferencesDialog(Adw.Dialog):
         self._composer_typing_row.connect("notify::active", self._on_composer_typing_changed)
         terminal_group.add(self._composer_typing_row)
 
+        self._spell_click_row = Adw.SwitchRow(
+            title=_("Right-click aims spell-check"),
+            subtitle=_(
+                "Right-clicking a misspelled word in the composer offers "
+                "corrections for that word. Off: corrections follow the "
+                "text cursor instead, and a right-click never moves it"
+            ),
+        )
+        self._spell_click_row.set_active(bool(state.get_setting("composer_spell_click")))
+        self._spell_click_row.connect("notify::active", self._on_spell_click_changed)
+        terminal_group.add(self._spell_click_row)
+
         self._composer_enter_row = Adw.SwitchRow(
             title=_("Enter sends composer text"),
             subtitle=_(
@@ -1285,6 +1297,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_composer_typing_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("composer_on_typing", row.get_active())
+        self._on_change()
+
+    def _on_spell_click_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("composer_spell_click", row.get_active())
         self._on_change()
 
     def _on_composer_enter_changed(self, row: Adw.SwitchRow, _pspec) -> None:

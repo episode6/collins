@@ -234,6 +234,27 @@ def main() -> int:
     right_click(view, misspelled + 2)
     check("outside one, the click takes it", not view._buffer.get_selection_bounds())
 
+    # Switched off (the composer_spell_click setting), a right-click is
+    # inert again: the caret stays, the menu keeps whatever the caret's own
+    # word gave it. This is the opt-out, so it has to be the *whole* of the
+    # behaviour that goes away.
+    view.set_spell_click(False)
+    view._buffer.place_cursor(tail_iter)
+    pump(600)
+    parked = view._buffer.get_property("cursor-position")
+    right_click(view, misspelled + 2)
+    check(
+        "switched off, clicking a misspelling moves nothing",
+        view._buffer.get_property("cursor-position") == parked,
+    )
+    check("…and offers nothing", corrections(view) == [])
+
+    # And back on again without rebuilding the view — the setting is read on
+    # the click, so Preferences takes hold in a composer that is already open.
+    view.set_spell_click(True)
+    right_click(view, misspelled + 2)
+    check("switched back on, it aims again", corrections(view)[:1] == ["receive"])
+
     print(f"\n{PASSED} passed, {FAILED} failed")
     return 1 if FAILED else 0
 

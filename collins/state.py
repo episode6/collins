@@ -150,6 +150,15 @@ DEFAULT_SETTINGS = {
     # — see composerkeys.typing_opens_composer and
     # TerminalTab._typing_opens_composer.
     "composer_on_typing": True,
+    # Whether right-clicking a misspelled word in the composer offers
+    # corrections for *that* word. libspelling reads them from the text
+    # cursor, which a right-click doesn't move, so left alone the menu
+    # answers about wherever the caret sat -- usually nothing. On by
+    # default; off restores that, for anyone who would rather the caret
+    # never moved under a right-click. Ignored where libspelling is older
+    # than 0.4 and can't rebuild the menu in time -- see
+    # ComposerView.__init__.
+    "composer_spell_click": True,
     "show_folder_path": False,  # show each session's project folder path in the sidebar
     "project_icon_size": 16,  # px size of the sidebar's project/folder (and group) icons
     "show_usage_panel": True,  # Claude subscription usage bars under the session list
