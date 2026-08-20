@@ -89,26 +89,42 @@ only production-grade embeddable terminal on Linux, which is why the app is
 Linux-native. The data layer (session discovery, parsing, state, titles,
 usage, git info) is GTK-free and unit-tested.
 
-## Built on undocumented corners of Claude Code
+## Undocumented APIs and CLI internals
 
 Collins has no SDK to lean on: it reads what the `claude` CLI reads and calls
-what the CLI calls. Some of that is public (the `claude` command line, `/mcp`,
-`--resume`, `-p`); the rest is internal to the CLI and can change or disappear
-with any release. Here is what rests on what, and what happens when it moves:
+what the CLI calls. Some of that is public — the `claude` command line,
+`--resume`, `-p`, `/mcp` and `--mcp-config` — and everything built on those
+(terminals, the editor, panels, the MCP session tools) is on solid ground, as
+are the pull request features, which go through `gh`. The rest is the CLI's
+private surface, in two kinds. Anthropic can change either without notice;
+when something moves, the feature built on it stops working until Collins
+catches up, and the app is written so that's a blank panel or a skipped step,
+never a crash.
+
+### Undocumented APIs
+
+Three features call Anthropic directly, on the OAuth token the CLI stores in
+`~/.claude/.credentials.json` (read, never refreshed or written) and the
+same beta header the CLI sends:
+
+| Feature | Endpoint | When it breaks |
+| --- | --- | --- |
+| Usage panel | `/api/oauth/usage` — what feeds the CLI's `/usage` screen | The panel reports an error and stays empty |
+| Model pickers (footer, composer, Preferences, Generate Icon) | the Models API, which answers to the CLI's token only with its beta header | Falls back to the CLI's built-in aliases (`opus`, `sonnet`, `haiku`) |
+| Archive on claude.ai | `POST /v1/code/sessions/<id>/archive` and `/unarchive` | The local archive still happens; the remote one silently doesn't |
+
+### CLI internals
+
+The larger dependency is on files and commands the CLI keeps for itself —
+formats nobody promised would stay put:
 
 | Feature | Leans on | When it breaks |
 | --- | --- | --- |
-| Session list, titles, status, footer, PR detection, attachments scan, inherited model & permission mode | The JSONL transcript format under `~/.claude/projects/` and its fields (`cwd`, `permissionMode`, `message.model`, `bridge-session`, …) | Rows go blank or misreport; nothing is written, so nothing is lost |
-| Usage panel | `~/.claude/.credentials.json` and the `/api/oauth/usage` endpoint behind the CLI's `/usage` screen | The panel reports an error and stays empty |
-| Model pickers (footer, composer, Preferences, Generate Icon) | The Models API, called with the CLI's OAuth token and beta header | Falls back to the CLI's built-in aliases (`opus`, `sonnet`, `haiku`) |
-| Archive on claude.ai | The `bridge-session` transcript record and `POST /v1/code/sessions/<id>/archive` | The local archive still happens; the remote one silently doesn't |
+| Session list, titles, status, the footer's model, PR detection, the attachments scan, a spawned sibling's inherited model and permission mode | The JSONL transcript format under `~/.claude/projects/` and its fields (`cwd`, `permissionMode`, `message.model`, `bridge-session`, …) | Rows go blank or misreport; nothing is written, so nothing is lost |
 | Re-attaching to backgrounded sessions | `claude agents --json` and `claude attach` | Opening a detached session resumes a copy instead of reconnecting |
 | Folder trust asked up front | The trust entries the CLI keeps in `~/.claude.json` | The CLI asks its own question at launch, as it would without Collins |
-| Busy / idle detection | The CLI's OSC 9;4 progress reports and its prompt's on-screen shape | The sidebar's working indicator and the composer's "empty prompt" gate misjudge |
-
-Everything else — terminals, the editor, panels, PR features (via `gh`), the
-MCP session tools (a standard MCP server the CLI is pointed at with
-`--mcp-config`) — uses public interfaces.
+| Busy / idle detection | The CLI's OSC 9;4 progress reports and the on-screen shape of its prompt | The sidebar's working indicator and the composer's "empty prompt" gate misjudge |
+| Model switching, prompts sent from PR chips | The CLI's `/model` command and the layout of its input box | A switch or a sent prompt lands as typed text instead of taking effect |
 
 ## Architecture
 

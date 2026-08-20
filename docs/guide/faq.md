@@ -51,7 +51,7 @@ endpoints, its `agents --json` listing, and its trust records. Anthropic can
 change any of these without notice, and when one moves the feature built on
 it stops working until Collins catches up; the app is written so that's a
 blank panel or a skipped step, not a crash. The list is kept in
-[How It Works](/guide/how-it-works#built-on-undocumented-corners-of-claude-code).
+[How It Works](/guide/how-it-works#undocumented-apis-and-cli-internals).
 
 ## Do I need an API key?
 

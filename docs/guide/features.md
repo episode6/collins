@@ -6,12 +6,13 @@ fork. Last modified: 2026-08-20. Full change history: git log for this file.
 
 # Features
 
-::: warning Some of this leans on undocumented Claude Code internals
-The usage panel, the model pickers, the claude.ai archive mirror, and a few
-smaller things read endpoints and files the `claude` CLI uses for itself and
-doesn't document. They can change or break with any CLI release; Collins is
-built to degrade quietly when they do. The full list is in
-[How It Works](/guide/how-it-works#built-on-undocumented-corners-of-claude-code).
+::: warning Three features use undocumented Anthropic APIs
+The **usage panel**, the **model pickers**, and **archiving on claude.ai**
+call endpoints the `claude` CLI uses for itself and doesn't document, on the
+CLI's own login. They can change or break with any CLI release; each is built
+to fail quietly when that happens. Details, and the CLI internals the rest of
+the app reads, are in
+[How It Works](/guide/how-it-works#undocumented-apis-and-cli-internals).
 :::
 
 ## Sidebar
