@@ -25,22 +25,9 @@ fork. Last modified: 2026-08-20. Full change history: git log for this file.
   running (**●**), everything passed (**✓**). **Clicking jumps to the
   session's tab** and opens its newest PR's page; **right-clicking** lists
   every PR with its actions.
-- **Refresh** (the header's ↻) re-reads the session list *and* every listed
-  session's pull requests — checks, conflicts, unanswered comments, plus a
-  branch lookup that picks up PRs opened by hand. Collins runs the same
-  sweep by itself a few seconds after launch (toggle in Preferences), and
-  **a finished run re-asks GitHub about its own PRs** the moment its agent
-  stops — that is when the answer changes, so fresh checks and review
-  replies land on the mark without a click.
-- **Right-click a project header** for *New session here*, *Archive
-  project*, **opening the folder in another app** (each app you added under
-  Preferences → *Footer apps*, plus *Open in File Manager* and *Open in
-  Terminal* for whatever your desktop nominates), **Open on GitHub** (read
-  from the checkout's own remotes), and **Git pull** — labeled with the
-  checked-out branch, so it's clear which branch the click acts on; success
-  lands as a toast carrying git's own summary line.
-- **Generate Icon**, in that same menu, asks Claude to design the project a
-  sidebar icon from what's in the folder. The result is previewed at full
+- **Generate Icon**, in a project header's right-click menu, asks Claude to
+  design the project a sidebar icon from what's in the folder. The result is
+  previewed at full
   size and at the 16px the sidebar actually uses; type an adjustment ("make
   it blue") and *Regenerate* until it's right. *Save* writes a
   `project-icon.svg` to the project root — the same file a project can ship
