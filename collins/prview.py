@@ -206,6 +206,11 @@ class PrViewPage(Adw.Bin):
     """
 
     page_kind = "pr"
+    # The width the dock doubles when the terminal's gutter can pay for it:
+    # the page opens at up to 2x this without the terminal giving up a pixel,
+    # decided before the first fetch lands so the column never resizes under
+    # its own data (see PanelDock._column_floor).
+    column_floor = _MIN_PAGE_WIDTH
 
     __gsignals__ = {
         # The tab's title/icon inputs changed (a fetch landed a new state);

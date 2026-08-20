@@ -844,13 +844,18 @@ class PanelDock(Adw.Bin):
         root = None if focus else self.get_root()
         keep = root.get_focus() if root is not None else None
         strip = self._strip_past_terminal("h" if side == "right" else "v")
-        if strip is not None and side == "right" and self._split_is_free():
+        minimum = int(getattr(widget, "column_floor", 0) or 0)
+        if strip is not None and side == "right" and self._split_is_free(minimum=minimum):
             strip = None
         if strip is None:
             strip = self._new_strip()
             split = self._split_leaf(self._terminal, strip, side)
+            # The page goes in before the sizer is asked: its floor is read
+            # off the strip's pages when the apply lands.
+            strip.add_page(widget, focus=focus)
             self._panes[split].sizer.apply()
-        strip.add_page(widget, focus=focus)
+        else:
+            strip.add_page(widget, focus=focus)
         self._reveal_strip(strip)
         if focus:
             GLib.idle_add(widget.grab_page_focus)
@@ -1717,6 +1722,7 @@ class PanelDock(Adw.Bin):
             end_child=managed_slot == "b",
         )
         sizer.set_lookup(lambda axis, s=sizer: self._lookup_size(s, axis))
+        sizer.set_floor(lambda axis, total, s=sizer: self._column_floor(s, axis, total))
         sizer.connect("size-changed", self._on_strip_size_changed)
         rec = _PaneRec(paned, sizer, managed)
         self._panes[split] = rec
@@ -1777,7 +1783,7 @@ class PanelDock(Adw.Bin):
             return None  # the strip left the tree (a collapse in flight)
         return self._panes.get(split)
 
-    def _split_is_free(self, scope: str = "page") -> bool:
+    def _split_is_free(self, scope: str = "page", minimum: int = 0) -> bool:
         """Whether a new column beside the terminal would cost the terminal
         nothing — the reason `open_page` and Ctrl+J will split an axis that
         already has a strip on it instead of joining.
@@ -1798,14 +1804,48 @@ class PanelDock(Adw.Bin):
         to re-place it under the new paned, and an unparented widget
         measures 0 until the next layout pass, so the second page joins.
         Nothing the user can do by hand opens two pages without a frame in
-        between."""
+        between.
+
+        *minimum* is the opening page's `column_floor`, when it has one:
+        the column is then measured at the floor the gutter raises it to
+        (see `panelsizing.spare_floor`), the very width `_column_floor`
+        hands the new sizer."""
+        wanted = int(self._size_lookup(scope, "right") or 0) if self._size_lookup else 0
+        return panelsizing.room_for_a_split(
+            self._terminal.get_width(), self._terminal_keep(), wanted, minimum
+        )
+
+    def _terminal_keep(self) -> int:
+        """The "terminal_max_width" setting as the width the terminal is
+        owed — 0 (no maximum, so no free gutter) when unset or unreadable."""
         settings = self._settings or {}
         try:
-            keep = int(settings.get("terminal_max_width") or 0)
+            return int(settings.get("terminal_max_width") or 0)
         except (TypeError, ValueError):
-            keep = 0  # untrusted setting; treat it as "no maximum"
-        wanted = int(self._size_lookup(scope, "right") or 0) if self._size_lookup else 0
-        return panelsizing.room_for_a_split(self._terminal.get_width(), keep, wanted)
+            return 0  # untrusted setting; treat it as "no maximum"
+
+    def _column_floor(self, sizer, axis: str, total: int) -> int:
+        """The least a docked-page column opens at, for the sizer of a split
+        *total* px across: the spare-gutter floor of the widest
+        `column_floor` among the pages in the strip it manages (a PR page's
+        320px, doubled when the terminal's gutter can pay for it, else as
+        much of the gutter as covers it at all — see
+        `panelsizing.spare_floor`). 0 for the home strip, for a column below
+        the terminal, and for a strip of pages that declare no floor, which
+        leaves the ordinary seed in charge.
+
+        Read at apply time, once the page is in the strip, so a page whose
+        first fetch is still in flight opens at its full width and never
+        grows under its own data; and only for the split *separating* the
+        strip from the terminal, whose total is what the terminal had."""
+        if axis != "right" or self._scope_of(sizer, axis) != "page":
+            return 0
+        rec = next((r for r in self._panes.values() if r.sizer is sizer), None)
+        if rec is None or rec.managed is self._home_strip:
+            return 0
+        pages = getattr(rec.managed, "panel_pages", lambda: [])()
+        minimum = max((int(getattr(p, "column_floor", 0) or 0) for p in pages), default=0)
+        return panelsizing.spare_floor(total, self._terminal_keep(), minimum)
 
     def _scope_of(self, sizer, axis: str) -> str:
         """Which app-wide seed a divider speaks for: "home" for the shells'

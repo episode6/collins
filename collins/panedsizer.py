@@ -58,6 +58,7 @@ class PanedSizer(GObject.Object):
         self._occupied = occupied
         self._end_child = end_child
         self._lookup: Callable[[str], int] | None = None
+        self._floor: Callable[[str, int], int] | None = None
         self._memory = SizeMemory()
         self._apply_pending = False  # a programmatic divider set is queued
         self._apply_seq = 0  # invalidates superseded apply/settle chains
@@ -77,6 +78,14 @@ class PanedSizer(GObject.Object):
         """`lookup(key) -> px` supplies the app-wide last-set size, used
         for keys this paned hasn't sized itself yet."""
         self._lookup = lookup
+
+    def set_floor(self, floor: Callable[[str, int], int] | None) -> None:
+        """`floor(key, total) -> px` supplies the least the managed child
+        opens at in a paned *total* px across, raised over the app-wide
+        size when larger — the dock's spare-gutter floor for a page column
+        (see `panelsizing.spare_floor`). Only ever a seed: a size this
+        paned has recorded itself wins over both."""
+        self._floor = floor
 
     def remembered(self, key: str) -> int:
         """This paned's remembered size for *key*, 0 when none yet."""
@@ -195,8 +204,11 @@ class PanedSizer(GObject.Object):
                 GLib.timeout_add(50, position)
                 return GLib.SOURCE_REMOVE
             key = self._key()
+            total = self._total()
             fallback = (self._lookup(key) or 0) if self._lookup is not None else 0
-            target = self._memory.target(key, self._total(), fallback)
+            if self._floor is not None:
+                fallback = max(fallback, self._floor(key, total) or 0)
+            target = self._memory.target(key, total, fallback)
             if target is None:
                 self._apply_pending = False
                 return GLib.SOURCE_REMOVE

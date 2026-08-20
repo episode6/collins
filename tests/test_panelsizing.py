@@ -7,7 +7,9 @@ from collins.panelsizing import (
     HANDLE_SIZE,
     MIN_SPLIT_SIZE,
     SizeMemory,
+    opening_size,
     room_for_a_split,
+    spare_floor,
     split_size,
 )
 
@@ -165,3 +167,51 @@ def test_unsized_split_is_measured_at_its_fraction_not_a_minimum():
 def test_narrow_wanted_is_refused_however_much_room_there_is():
     assert not room_for_a_split(4000, 1200, MIN_SPLIT_SIZE - 1)
     assert room_for_a_split(4000, 1200, MIN_SPLIT_SIZE)
+
+
+# --- spare_floor / opening_size: a page column paid out of the gutter ------
+
+
+def test_spare_floor_doubles_the_minimum_when_the_gutter_covers_it():
+    # 2400 wide, terminal owed 1200: 1192 px spare, well over 2 * 320.
+    assert spare_floor(2400, 1200, 320) == 640
+
+
+def test_spare_floor_is_the_whole_gutter_between_one_and_two_minimums():
+    # 1200 + 8 + 500 = 1708: 500 px spare, between 320 and 640.
+    assert spare_floor(1708, 1200, 320) == 500
+    assert spare_floor(1200 + HANDLE_SIZE + 320, 1200, 320) == 320
+    assert spare_floor(1200 + HANDLE_SIZE + 640, 1200, 320) == 640
+
+
+def test_spare_floor_is_nothing_when_the_gutter_is_too_thin():
+    # Under one minimum the ordinary seed takes over: the floor does not
+    # fall to the minimum, it disappears.
+    assert spare_floor(1200 + HANDLE_SIZE + 319, 1200, 320) == 0
+    assert spare_floor(1300, 1200, 320) == 0
+
+
+def test_spare_floor_needs_a_maximum_width_and_a_minimum():
+    assert spare_floor(4000, 0, 320) == 0
+    assert spare_floor(4000, 1200, 0) == 0
+    assert spare_floor(0, 1200, 320) == 0
+
+
+def test_opening_size_raises_the_seed_to_the_floor_and_never_lowers_it():
+    assert opening_size(2400, 1200, 400, 320) == 640  # seed under the floor
+    assert opening_size(2400, 1200, 800, 320) == 800  # seed over it stays
+    assert opening_size(2400, 1200, 0, 320) == 640  # no seed at all
+    assert opening_size(2400, 1200, 400) == 400  # no floor declared
+    assert opening_size(1300, 1200, 400, 320) == 400  # gutter too thin
+
+
+def test_split_is_free_measures_the_floored_column():
+    # With the floor the column opens at 640, which this total pays for...
+    assert room_for_a_split(1200 + HANDLE_SIZE + 640, 1200, 400, 320)
+    # ...and with no seed, the floor replaces the 38% fraction that would
+    # otherwise have been refused.
+    total = 1200 + HANDLE_SIZE + 640
+    assert not room_for_a_split(total, 1200)
+    assert room_for_a_split(total, 1200, 0, 320)
+    # A seed wider than the gutter is still refused, floor or not.
+    assert not room_for_a_split(total, 1200, 700, 320)
