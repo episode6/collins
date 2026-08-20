@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-20. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1971,8 +1971,22 @@ class App(Adw.Application):
             # capped, junk is dropped; see inherited_permission_mode.
             mode = mcptools.inherited_permission_mode(tab.current_permission_mode())
 
+        model = args.get("model")
+        if model:
+            if not mcptools.valid_model(model):
+                return False, (
+                    "model must be a CLI alias (opus, sonnet, haiku) or a full "
+                    "model id."
+                )
+        else:
+            # No explicit choice: the sibling runs on what its spawner runs on
+            # *now* — the model of the caller's last reply, read off its
+            # transcript — not whatever flag this tab launched with, and not
+            # the CLI's configured default, which /model may have left behind.
+            model = mcptools.inherited_model(tab.current_model())
+
         worktree = args.get("worktree")  # bool, or None to use the project default
-        options = SessionOptions(permission_mode=mode or "")
+        options = SessionOptions(model=model or "", permission_mode=mode or "")
         # A missing CLI drops the new tab to a plain shell the takes_prompt poll
         # could never say yes to — a leaked shell, not a session. Refuse before
         # anything is spawned.

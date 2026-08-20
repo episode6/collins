@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-20. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -4941,6 +4941,17 @@ class TerminalTab(Gtk.Box):
         if mode:
             return mode
         return self._options.permission_mode if self._options else ""
+
+    def current_model(self) -> str:
+        """Best-effort model of the agent in this tab right now: the one its
+        transcript recorded on the last reply (a full id; ``/model`` and
+        fast-mode switches included), else the --model the tab was launched
+        with, else "" — the CLI's configured default. What start_session
+        inherits into a spawned sibling."""
+        model = self._transcript.model()
+        if model:
+            return model
+        return self._options.model if self._options else ""
 
     def _agent_is_running(self) -> bool:
         """Whether the provider's CLI is alive in this terminal right now —

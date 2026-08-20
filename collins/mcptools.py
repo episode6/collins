@@ -260,6 +260,17 @@ TOOLS: list[dict] = [
                         "refused (and never inherited)."
                     ),
                 },
+                "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "description": (
+                        "Model for the new session — anything the CLI's "
+                        "--model takes: an alias ('opus', 'sonnet', 'haiku') "
+                        "or a full model id. Omit to run it on the same model "
+                        "your own session is on right now."
+                    ),
+                },
             },
             "required": ["prompt"],
             "additionalProperties": False,
@@ -491,6 +502,33 @@ def inherited_permission_mode(mode: str | None) -> str:
     if mode == "bypassPermissions":
         return "acceptEdits"
     return mode
+
+
+# What a model may look like before it is trusted onto a command line: the
+# CLI's aliases and ids (claude-opus-4-1-20250805, us.anthropic.…:0), and
+# nothing with a shell's punctuation in it. Shared by the explicit argument
+# and the inherited transcript value — shlex.quote would keep either safe,
+# but a model name that needs quoting is no model name.
+_MODEL_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}")
+
+
+def valid_model(model: str | None) -> bool:
+    """Whether *model* is shaped like something --model would accept."""
+    return bool(model) and _MODEL_TOKEN_RE.fullmatch(model) is not None
+
+
+def inherited_model(model: str | None) -> str:
+    """The model a start_session spawn inherits when its caller didn't pick
+    one: the calling session's own current model, as its transcript recorded
+    it on the last reply — so a mid-run ``/model`` carries over too.
+
+    Passed through verbatim — the CLI wrote it, the CLI will accept it —
+    unless it doesn't look like a model token, which drops to "" (no
+    --model; the CLI's configured default) rather than being spliced into
+    a command line: the transcript is app data, but a file on disk all the
+    same.
+    """
+    return model if valid_model(model) else ""
 
 
 # The room a read_terminal reply's text leaves inside one MAX_LINE frame for
