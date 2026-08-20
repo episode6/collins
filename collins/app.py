@@ -1986,7 +1986,7 @@ class App(Adw.Application):
             model = mcptools.inherited_model(tab.current_model())
 
         worktree = args.get("worktree")  # bool, or None to use the project default
-        options = SessionOptions(model=model or "", permission_mode=mode or "")
+        options = SessionOptions(model=model, permission_mode=mode or "")
         # A missing CLI drops the new tab to a plain shell the takes_prompt poll
         # could never say yes to — a leaked shell, not a session. Refuse before
         # anything is spawned.
