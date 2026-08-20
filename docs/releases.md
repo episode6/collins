@@ -92,7 +92,9 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   back into the agent's input box, but when the agent has left the terminal
   there is nowhere safe to put it — that draft is now kept for the session
   and comes back the next time you open its composer, as long as the box is
-  empty.
+  empty. Drafts are saved to disk with the rest of the session's state, so
+  closing the tab or quitting Collins keeps them too — including the one
+  still in an open composer when the window goes away.
 - **Fixes** — archiving a session clears its notification and unread count;
   the status icon's menu no longer draws a stray "Quit" on a separator.
 

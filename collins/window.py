@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-20. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -806,6 +806,7 @@ class MainWindow(Adw.ApplicationWindow):
                 tab.save_panel_history()
                 self._save_panel_layout(tab)
                 self._save_editor_state(tab)
+                self._save_composer_draft(tab)
 
     def _save_panel_layout(self, tab: TerminalTab) -> None:
         """Persist the tab's dock layout for its session. A tab that never
@@ -824,6 +825,19 @@ class MainWindow(Adw.ApplicationWindow):
         state = tab.capture_editor_state()
         if state is not None:
             self.state.set_editor_state(tab.session_id, state)
+
+    def _save_composer_draft(self, tab: TerminalTab) -> None:
+        """Persist the tab's unsent prompt for its session — the draft in an
+        open composer included, which is the one nothing else would catch:
+        the window going away doesn't close the panel, so that text has
+        never been through a stash.
+
+        Unlike the layout and editor saves above, an empty answer is written
+        (as a deletion): a draft that has been sent, or taken back into the
+        agent's own input box, must not be waiting on the next launch."""
+        if tab.fork or not tab.session_id:
+            return
+        self.state.set_session_draft(tab.session_id, tab.capture_composer_draft())
 
     def _busy_tab_count(self) -> int:
         """Tabs the quit confirmation should count as active sessions. An
@@ -1566,6 +1580,9 @@ class MainWindow(Adw.ApplicationWindow):
             # And the images it was shown, which nothing else would recover:
             # the terminal's scrollback starts empty on a resume.
             tab.restore_attachments(self.state.get_session_attachments(bound_id))
+            # And the prompt it was in the middle of writing, waiting for the
+            # next composer this session opens (see restore_composer_draft).
+            tab.restore_composer_draft(self.state.get_session_draft(bound_id))
 
     def _tab_title(self, session: Session) -> str:
         """Tab title with the session's saved emoji prefix (tabs only)."""
@@ -1984,6 +2001,7 @@ class MainWindow(Adw.ApplicationWindow):
         watch(tab, "editor-pop-out-requested", self._pop_out_editor)
         watch(tab, "bell", self._on_bell)
         watch(tab, "attachments-changed", self._on_tab_attachments_changed)
+        watch(tab, "draft-changed", self._on_tab_draft_changed)
         # The PR hub: the tab writes its footer list through it and follows
         # everyone else's writes and fetches from it (see prstore).
         tab.set_pr_store(self.store.pr_store)
@@ -2183,6 +2201,9 @@ class MainWindow(Adw.ApplicationWindow):
         # down anything the tab was shown while it still had no id to file it
         # under (see TerminalTab.restore_attachments).
         tab.restore_attachments(self.state.get_session_attachments(session_id))
+        # And its unsent draft, with the same double duty: a tab that stashed
+        # one before it knew its id gets it written down now.
+        tab.restore_composer_draft(self.state.get_session_draft(session_id))
         self._pending_resolved[page] = (session_id, page.get_title())
         self._sync_status(session_id)
         self._update_active_row()  # the resolved tab may be the selected one
@@ -2203,6 +2224,19 @@ class MainWindow(Adw.ApplicationWindow):
         if tab.fork or not tab.session_id:
             return
         self.state.set_session_attachments(tab.session_id, list(records or []))
+
+    def _on_tab_draft_changed(self, tab: TerminalTab, draft: str) -> None:
+        """A tab stashed (or gave back) an unsent composer draft: save it
+        against that tab's session, where a "" is a deletion.
+
+        Skipped for the same two tabs as the images above — a fork would
+        overwrite the original's draft, and an unresolved tab has nowhere to
+        write, handing it over again the moment it has one (see
+        TerminalTab.restore_composer_draft).
+        """
+        if tab.fork or not tab.session_id:
+            return
+        self.state.set_session_draft(tab.session_id, draft)
 
     def _panel_size_seed(self, scope: str, mode: str) -> int:
         """The app-wide px a dock strip opens at before the tab has sized it
@@ -4677,6 +4711,7 @@ class MainWindow(Adw.ApplicationWindow):
             tab.save_panel_history()  # before the widget (and its VTE buffer) is destroyed
             self._save_panel_layout(tab)
             self._save_editor_state(tab)
+            self._save_composer_draft(tab)
         session_id = self._session_id_of(page)
         if session_id:
             # Only if this page is the one actually bound to the session.
@@ -5291,13 +5326,15 @@ class MainWindow(Adw.ApplicationWindow):
     def _forget_transcript(self, session_id: str) -> None:
         """Drop everything the app kept for a session whose transcript just
         went away: its tab, its panel scrollback, its panel and editor
-        layout, its PRs, the images it was shown."""
+        layout, its PRs, the images it was shown, the prompt it was in the
+        middle of writing."""
         page = self._pages.get(session_id)
         if page is not None:
             self.tab_view.close_page(page)
         panelhistory.delete(session_id)
         self.state.set_panel_layout(session_id, None)
         self.state.set_editor_state(session_id, None)
+        self.state.set_session_draft(session_id, "")
         self.store.pr_store.set_records(session_id, [])
         self.state.set_session_attachments(session_id, [])
 

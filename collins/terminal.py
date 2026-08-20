@@ -1123,6 +1123,10 @@ class TerminalTab(Gtk.Box):
         # an image already on the list that changes nothing about it says
         # nothing.
         "attachments-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
+        # Emitted when this tab's stashed composer draft changes (str = the
+        # draft, "" when it has been taken back or emptied), so the window
+        # can save it against the session. See _stash_draft.
+        "draft-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         # Emitted (debounced) when the editor panel's divider is moved: the
         # new panel px size, so the window can persist it as the app-wide
         # default. Mirrors panel-size-changed, minus the mode — the editor
@@ -1284,8 +1288,9 @@ class TerminalTab(Gtk.Box):
         self._composer_opening = False
         # A draft a close couldn't hand back to the CLI's input box (the
         # agent had left the terminal, where typing it back would have run
-        # it as commands): kept here for the tab's life and re-seeded into
-        # the next composer this tab opens (see _stash_draft).
+        # it as commands): re-seeded into the next composer this tab opens
+        # (see _stash_draft), and saved against the session by the window,
+        # so it outlives the tab and the app too.
         self._composer_stash = ""
         # Counts up only while a new session set to open floating waits for
         # its agent (see autoshow_composer).
@@ -3545,14 +3550,22 @@ class TerminalTab(Gtk.Box):
     def _stash_draft(self, text: str) -> None:
         """Keep a draft the terminal wouldn't take, for the next composer.
 
-        Held in memory for the tab's life only — a draft is a half-written
-        thought about this session, not state worth writing to disk — and
-        the stash is whatever the *last* undeliverable close held, never a
+        The stash is whatever the *last* undeliverable close held, never a
         queue of them: the one that just came off the screen is the one the
         user was writing, and a box they emptied before closing it leaves
         nothing behind to come back later.
+
+        Announced to the window on every change, which files it under this
+        tab's session (`AppState.set_session_draft`) — so the draft survives
+        the tab being closed and the app being quit, and an emptying is a
+        deletion there too. A tab with no session id yet keeps it in memory
+        until one arrives (see `restore_composer_draft`).
         """
-        self._composer_stash = composerkeys.stashable_draft(text)
+        stashed = composerkeys.stashable_draft(text)
+        if stashed == self._composer_stash:
+            return
+        self._composer_stash = stashed
+        self.emit("draft-changed", stashed)
 
     def _restore_stashed_draft(self, composer: ComposerView) -> None:
         """Seed an opening composer with the draft an earlier close stashed.
@@ -3569,7 +3582,35 @@ class TerminalTab(Gtk.Box):
         if not draft:
             return
         self._composer_stash = ""
+        self.emit("draft-changed", "")
         composer.set_text(draft)
+
+    def restore_composer_draft(self, draft: str) -> None:
+        """Adopt the draft a previous run saved for this session.
+
+        Called by the window when the tab opens, and again for a fresh tab
+        the moment its session id resolves — which is why a stash already in
+        hand wins and is handed straight back instead: it was written this
+        run, after whatever is on disk, and until the id landed the window
+        had nowhere to file it (the attachments list has the same two jobs,
+        for the same reason).
+        """
+        if self._composer_stash:
+            self.emit("draft-changed", self._composer_stash)
+            return
+        self._composer_stash = composerkeys.stashable_draft(draft)
+
+    def capture_composer_draft(self) -> str:
+        """This tab's unsent prompt, for the window's close-time save.
+
+        An open composer is the live one — quitting with a box full of text
+        is exactly the case a stash never sees, because nothing closes the
+        panel on the way out — and the stash answers for every other tab.
+        The two are never both filled: an open consumes the stash into the
+        box it is seeding.
+        """
+        live = self._composer.peek_text() if self._composer is not None else ""
+        return composerkeys.stashable_draft(live) or self._composer_stash
 
     def _on_composer_send(self, _view, text: str) -> None:
         """Send closes first, then submits — the panel is a stand-in for

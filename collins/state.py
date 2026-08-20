@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-20. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -333,6 +333,14 @@ class AppState:
         # origin? — see to_record). A log of what the session showed, not a
         # claim the files are still there.
         self.session_attachments: dict[str, list] = {}
+        # session id -> the prompt draft that session's composer was holding
+        # when nothing could be done with it — a close the agent had already
+        # left, or the window going away with the box still full (see
+        # TerminalTab._stash_draft). Persisted because a draft is the user's
+        # own writing: it outlives the tab, the app, and the machine going
+        # to sleep, and comes back the next time that session's composer
+        # opens on an empty box.
+        self.session_drafts: dict[str, str] = {}
         # session id -> cmdlines of the processes the CLI had spawned under
         # itself before anything was ever submitted to it — its MCP servers,
         # plumbing that must not read as "the agent left something running".
@@ -407,6 +415,9 @@ class AppState:
         self.session_attachments = {
             k: v for k, v in (data.get("session_attachments") or {}).items() if isinstance(v, list)
         }
+        self.session_drafts = {
+            k: v for k, v in (data.get("session_drafts") or {}).items() if isinstance(v, str) and v
+        }
         self.process_baselines = {
             k: v for k, v in (data.get("process_baselines") or {}).items() if isinstance(v, list)
         }
@@ -436,6 +447,7 @@ class AppState:
             "editor_states": self.editor_states,
             "session_prs": self.session_prs,  # order is the payload — never sort
             "session_attachments": self.session_attachments,  # newest first; never sort
+            "session_drafts": self.session_drafts,
             "process_baselines": self.process_baselines,
             "session_forwards": self.session_forwards,
             "pending_detaches": self.pending_detaches,
@@ -657,6 +669,11 @@ class AppState:
             # own — and its transcript, which starts at the fork, won't
             # mention them again.
             self.session_attachments[new_id] = list(self.session_attachments[old_id])
+        if old_id in self.session_drafts and new_id not in self.session_drafts:
+            # The fork is the same conversation under a new id, and the draft
+            # was written *to that conversation* — it belongs to whichever id
+            # the user reaches it by now.
+            self.session_drafts[new_id] = self.session_drafts[old_id]
         if old_id in self.process_baselines and new_id not in self.process_baselines:
             # A fork is a fresh CLI process with no pristine capture window of
             # its own (it resumes a conversation already underway), so the
@@ -822,6 +839,33 @@ class AppState:
             if session_id not in self.session_attachments:
                 return
             del self.session_attachments[session_id]
+        self.save()
+
+    # -- per-session composer draft ------------------------------------------
+
+    def get_session_draft(self, session_id: str) -> str:
+        """The unsent prompt saved for a session, "" when there is none."""
+        return self.session_drafts.get(session_id) or ""
+
+    def set_session_draft(self, session_id: str, draft: str) -> None:
+        """Persist a session's unsent composer draft; "" drops the entry.
+
+        Dropping is as much the point as keeping: a draft that has made it
+        back into a composer, or been sent, must not come back a second time
+        (see TerminalTab._restore_stashed_draft). Tabs hand their draft over
+        on every stash and again when the window closes, so the unchanged
+        case is deliberately not rewritten to disk.
+        """
+        if not session_id:
+            return
+        if draft:
+            if self.session_drafts.get(session_id) == draft:
+                return
+            self.session_drafts[session_id] = draft
+        else:
+            if session_id not in self.session_drafts:
+                return
+            del self.session_drafts[session_id]
         self.save()
 
     # -- settings ------------------------------------------------------------
