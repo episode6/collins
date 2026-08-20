@@ -67,6 +67,29 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   a machine without them and then exit on launch asking you to install them by
   hand. Both packages now also require libadwaita 1.5 and GTK 4.10, turning a
   crash on a too-old distribution into an apt refusal that says why.
+- **`pip install collins`** — the PyPI name is now plain `collins` (it was
+  `collins-gtk`), and the wheel finally ships the app's icons, `.desktop`
+  launcher, and metainfo; `collins --install-desktop` puts the launcher in
+  the app grid.
+- **Close hides the window; sessions keep running.** The close dialog's
+  third answer, *Keep Running (Hide Window)*, leaves every session exactly
+  as it is with no window on screen; the status icon's *Show Collins
+  (Hidden)*, a notification, or relaunching brings it back, and the *When
+  quitting with running sessions* preference can make hiding the default.
+  A first-time notice says where Collins went.
+- **Session tools grow up** — `start_session` takes a `model`, and a spawned
+  sibling inherits the caller's current **model and permission mode** by
+  default (bypass mode never inherits — it caps to acceptEdits).
+- **Generate Icon picks its model per run** — a drop-down in the dialog, so
+  a more capable model can be tried for one project without changing the
+  Preferences default.
+- **Git pull from the project row** — a project's right-click menu pulls its
+  checked-out branch, named on the item; git's summary lands as a toast.
+- **The composer opens on typing by default** (still an opt-out), and
+  **libspelling is optional** — without it the composer is a plain text box,
+  everything else intact.
+- **Fixes** — archiving a session clears its notification and unread count;
+  the status icon's menu no longer draws a stray "Quit" on a separator.
 
 ### v0.1.0 — Collins
 
