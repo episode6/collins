@@ -85,6 +85,8 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   Preferences default.
 - **Git pull from the project row** — a project's right-click menu pulls its
   checked-out branch, named on the item; git's summary lands as a toast.
+- **`Ctrl+K` is the quick switcher** and `Ctrl+Shift+K` clears the terminal
+  panel — the two swapped, so the jump-anywhere key is the easier chord.
 - **The composer opens on typing by default** (still an opt-out), and
   **libspelling is optional** — without it the composer is a plain text box,
   everything else intact.

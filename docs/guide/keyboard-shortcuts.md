@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-19. Full change history: git log for this file.
+fork. Last modified: 2026-08-20. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -16,13 +16,13 @@ fork. Last modified: 2026-08-19. Full change history: git log for this file.
 | `Ctrl+C` / `Ctrl+V` | Copy selection / paste (easy copy & paste, on by default) |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in the terminal (always available) |
 | `Ctrl+Shift+G` | Find in the terminal |
-| `Ctrl+Shift+K` | Quick switcher — jump to any session |
+| `Ctrl+K` | Quick switcher — jump to any session |
 | `Ctrl+Shift+A` | Archive the current session (closes its tab) |
 | `Ctrl+Shift+Z` | Undo the last archive (until another session is archived) |
 | `Ctrl+Shift+E` | Toggle a 😊 marker on the current tab |
 | `Shift+Enter` | Insert a newline in the agent's prompt |
 | `Ctrl+J` | Show/hide the terminal panel |
-| `Ctrl+K` | Clear the terminal panel (screen and saved history) |
+| `Ctrl+Shift+K` | Clear the terminal panel (screen and saved history) |
 | `Ctrl+;` | Move the current panel tab to the panel's other side (bottom ↔ right) — the same thing as its tab row's rotate button |
 | `Esc` | Bring a panel tab that's overlaying the whole session back to its place in the panel (a shell with a program running in it keeps the key) |
 | `Ctrl+.` | Show/hide the composer — raised, the cursor lands in it; pressed again while composing it closes and puts the draft back in the agent's own input box |
@@ -51,5 +51,5 @@ when text is selected — otherwise it interrupts as usual — and `Ctrl+V`
 pastes.
 :::
 
-Note that `Ctrl+K` clears the *panel* terminal app-wide, so it takes priority
+Note that `Ctrl+K` opens the quick switcher app-wide, so it takes priority
 over the shell's own kill-line binding inside terminals.

@@ -44,7 +44,7 @@ Features:
 - **Tools the session itself can call**: every session Collins starts is offered a small MCP server of Collins' own (`collins` in its `/mcp` list), so the agent can drive the window it runs in — `notify_user` (a **desktop notification** titled with the session; it flashes the session's tab and row, flags the row until you come back, and clicking it raises that tab), `set_session_title` (the session names itself in the tab and sidebar), `open_in_editor` (put a file on your screen at a line, in the session's editor pane), `show_image` (a screenshot or render in the in-app lightbox — a file, or an `http(s)` URL Collins fetches for it), `attach_pr` (put a pull request on the session's footer and sidebar row — for one Collins can't spot on its own, like a PR opened by a subagent), `start_session` (spawn a **sibling session** in a background tab, handed a prompt and inheriting the caller's permission mode — it never steals your focus), `read_terminal` (read the terminal panel's tabs, scrollback and all), and `run_in_terminal` (type a command into an idle panel shell and run it where you can watch). Each asks permission on first use, like any MCP tool, and each has its own on/off switch in Preferences → *Session tools* (all on by default).
 - **Select mode** (menu → *Select multiple sessions*) for bulk actions: open, star, archive, or trash many sessions at once.
 - **New session** (tab icon in the header) starts a fresh agent session (`claude`) in the **visible session's project** — no dialog needed; with no session visible it asks for a folder. Every project header also has a **`+` button** to start a session right there, and a just-started session shows a **"New Thread"** placeholder row until the agent writes its transcript.
-- **Quick switcher** (`Ctrl+Shift+K`) jumps to any session by type-ahead; the sidebar is **resizable** and its width is remembered.
+- **Quick switcher** (`Ctrl+K`) jumps to any session by type-ahead; the sidebar is **resizable** and its width is remembered.
 - **MCP servers browser** (menu → MCP servers): a read-only view of every MCP server configured in `~/.claude.json`, global and per-project.
 - **Preferences** (menu → Preferences, or `Ctrl+,`): terminal font, scrollback, **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin, Tokyo Night, Monokai, One Dark…), color scheme, **language** (English, Magyar, Deutsch, Español, Français), **easy copy & paste**, plus **Show folder path**, **Show Claude usage**, and **Auto-generate session titles** toggles for the sidebar, and a switch per **session tool**.
 - A sidebar status footer shows session, project, transcript-size, and open-tab counts.
@@ -64,10 +64,10 @@ Features:
 | `Ctrl+C` / `Ctrl+V` | Copy selection / paste (easy copy & paste, on by default) |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in terminal (always available) |
 | `Ctrl+Shift+G` | Find in terminal |
-| `Ctrl+Shift+K` | Quick switcher (jump to any session) |
+| `Ctrl+K` | Quick switcher (jump to any session) |
 | `Ctrl+Shift+E` | Toggle 😊 marker on the current tab |
 | `Ctrl+J` | Show/hide the terminal panel |
-| `Ctrl+K` | Clear the terminal panel (screen and saved history) |
+| `Ctrl+Shift+K` | Clear the terminal panel (screen and saved history) |
 | `Ctrl+;` | Move the current panel tab to the panel's other side (bottom ↔ right) |
 | `Ctrl+.` | Show/hide the composer (pressed while composing, it closes and puts the draft back in the agent's box) |
 | `Ctrl+'` | Show/hide the attachments gallery (docked as a panel tab, it comes to the front instead) |
