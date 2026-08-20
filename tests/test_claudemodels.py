@@ -311,9 +311,9 @@ def test_failed_query_keeps_the_cached_results(monkeypatch):
     claudemodels._cached_at = time.time() - claudemodels._CACHE_TTL_S - 1
 
     monkeypatch.setattr(claudemodels, "fetch_models", _fetches([]))  # offline now
-    models, ok = claudemodels.refresh_models()
+    models = claudemodels.refresh_models()
     assert [m.id for m in models] == ["claude-opus-5"]  # the stale list still serves
-    assert ok is False
+    assert claudemodels.cache_failed() is True
     assert claudemodels.cache_path().exists()  # and the file is not cleared either
 
 
@@ -345,9 +345,10 @@ def test_refresh_ignores_the_ttl_and_the_backoff(monkeypatch):
     claudemodels.available_models()
     assert len(calls) == 1  # cache is fresh
 
-    models, ok = claudemodels.refresh_models()
+    models = claudemodels.refresh_models()
     assert len(calls) == 2  # asked anyway
-    assert ok is True and [m.id for m in models] == ["claude-opus-5"]
+    assert [m.id for m in models] == ["claude-opus-5"]
+    assert claudemodels.cache_failed() is False
 
     claudemodels._failed_at = time.time()  # a failure moments ago
     claudemodels.refresh_models()
@@ -390,6 +391,57 @@ def test_a_cache_that_cannot_be_written_is_not_fatal(monkeypatch, tmp_path, capl
         readonly.chmod(0o700)
     if os.getuid() != 0:  # root writes anywhere, so there is nothing to warn about
         assert "cannot save the list" in caplog.text
+
+
+def test_cache_failed_tracks_the_last_attempt(monkeypatch):
+    assert claudemodels.cache_failed() is False  # nothing has been tried yet
+
+    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([]))
+    claudemodels.available_models()
+    assert claudemodels.cache_failed() is True
+
+    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
+    claudemodels.available_models()
+    assert claudemodels.cache_failed() is False  # a success clears it again
+
+    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([]))
+    claudemodels.refresh_models()
+    assert claudemodels.cache_failed() is True
+
+
+def test_cache_failed_survives_the_backoff(monkeypatch):
+    # The case a per-call flag can't see: inside the backoff the stale list is
+    # served with no query made at all, so the call has nothing to report
+    # while the list on screen is exactly as wrong as it was a minute ago.
+    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
+    claudemodels.available_models()
+    claudemodels._cached_at = time.time() - claudemodels._CACHE_TTL_S - 1
+
+    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([], calls := []))
+    claudemodels.available_models()
+    assert len(calls) == 1 and claudemodels.cache_failed() is True
+
+    claudemodels.available_models()  # served out of the backoff, no query
+    assert len(calls) == 1
+    assert claudemodels.cache_failed() is True  # still broken, and still says so
+
+
+def test_a_fresh_cache_hit_is_not_a_failure(monkeypatch):
+    # "No query happened" must not read as "the query failed" — the pickers
+    # would cry wolf on every page open with a perfectly good day-old list.
+    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")], calls := []))
+    claudemodels.available_models()
+    claudemodels.available_models()
+    assert len(calls) == 1  # the second was a cache hit
+    assert claudemodels.cache_failed() is False
+
+
+def test_cache_failed_is_false_on_a_saved_list(monkeypatch):
+    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
+    claudemodels.available_models()
+    _restart()
+    assert claudemodels.cached_models() is not None
+    assert claudemodels.cache_failed() is False  # last run's success carries no failure
 
 
 # -- the logs ------------------------------------------------------------------

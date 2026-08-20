@@ -1376,7 +1376,9 @@ class PreferencesDialog(Adw.Dialog):
         cached = claudemodels.cached_models()
         if cached:
             self._apply_model_rows(cached)
-            self._apply_model_status(len(cached), claudemodels.cache_fetched_at(), failed=False)
+            self._apply_model_status(
+                len(cached), claudemodels.cache_fetched_at(), claudemodels.cache_failed()
+            )
 
         def work() -> None:
             models = claudemodels.available_models()
@@ -1384,12 +1386,15 @@ class PreferencesDialog(Adw.Dialog):
                 apply_models,
                 models,
                 claudemodels.cache_fetched_at(),
+                claudemodels.cache_failed(),
                 priority=GLib.PRIORITY_DEFAULT,
             )
 
-        def apply_models(models: list[claudemodels.ClaudeModel], fetched_at: float) -> bool:
+        def apply_models(
+            models: list[claudemodels.ClaudeModel], fetched_at: float, failed: bool
+        ) -> bool:
             self._apply_model_rows(models or list(claudemodels.FALLBACK_MODELS))
-            self._apply_model_status(len(models), fetched_at, failed=False)
+            self._apply_model_status(len(models), fetched_at, failed)
             return GLib.SOURCE_REMOVE
 
         threading.Thread(target=work, name="prefs-models", daemon=True).start()
@@ -1428,9 +1433,14 @@ class PreferencesDialog(Adw.Dialog):
     def _apply_model_status(self, count: int, fetched_at: float, failed: bool) -> None:
         """Date the list under the Refresh button, and say when it's a fallback.
 
-        The whole point of the button is that a refresh either worked or
-        didn't, so the row never just goes quiet: a failed one keeps naming
-        the list it fell back to and how old that is.
+        The row never just goes quiet: whenever the list on screen is the
+        product of a query that didn't answer, it says so and keeps naming the
+        list it fell back to and how old that is.
+
+        *failed* is `claudemodels.cache_failed()` at both call sites, not a
+        flag off whichever call got here. Opening the page onto a lapsed TTL
+        with the network down is the same broken as pressing Refresh with the
+        network down, and the row should read the same either way.
         """
         if fetched_at <= 0:
             self._model_status_row.set_subtitle(
@@ -1455,18 +1465,20 @@ class PreferencesDialog(Adw.Dialog):
         self._model_status_row.set_subtitle(_("Checking…"))
 
         def work() -> None:
-            models, ok = claudemodels.refresh_models()
+            models = claudemodels.refresh_models()
             GLib.idle_add(
                 done,
                 models,
-                ok,
                 claudemodels.cache_fetched_at(),
+                claudemodels.cache_failed(),
                 priority=GLib.PRIORITY_DEFAULT,
             )
 
-        def done(models: list[claudemodels.ClaudeModel], ok: bool, fetched_at: float) -> bool:
+        def done(
+            models: list[claudemodels.ClaudeModel], fetched_at: float, failed: bool
+        ) -> bool:
             self._apply_model_rows(models or list(claudemodels.FALLBACK_MODELS))
-            self._apply_model_status(len(models), fetched_at, failed=not ok)
+            self._apply_model_status(len(models), fetched_at, failed)
             self._model_refresh_btn.set_sensitive(True)
             return GLib.SOURCE_REMOVE
 

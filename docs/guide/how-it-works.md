@@ -63,9 +63,15 @@ again.
 The cost of caching that hard is a model released this morning not appearing
 until tomorrow, so **Preferences → Claude models → Model list** dates the list
 ("12 models, updated 3h ago") and its **Refresh** button asks Anthropic
-outright, ignoring both the day and the backoff. The row says which way it
-went, and a refresh that fails keeps naming the list it fell back to rather
-than going quiet.
+outright, ignoring both the day and the backoff.
+
+That row never goes quiet about a failure, whoever caused it. Whenever the
+list on screen is one Collins fell back to — a Refresh that couldn't reach
+Anthropic, or simply opening the page after a background query failed — it
+says so and keeps naming how old the list it's showing is ("Couldn't reach
+Anthropic — still showing the list fetched 2d ago"). Opening Preferences onto
+a lapsed day with the network down reads exactly the same as pressing Refresh
+with the network down, because it is exactly as broken.
 
 Every query is logged too: run Collins with `COLLINS_LOG=INFO` to see what
 came back, and anything that failed — an unreachable API, a missing token —

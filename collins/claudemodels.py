@@ -374,15 +374,15 @@ def available_models() -> list[ClaudeModel]:
     return _query(force=False)[0]
 
 
-def refresh_models() -> tuple[list[ClaudeModel], bool]:
+def refresh_models() -> list[ClaudeModel]:
     """Query the API now, TTL and backoff ignored — Preferences' Refresh.
 
-    Returns the list and whether this call is what filled it. False means the
-    API didn't answer and the list is the cached one (or empty), which is what
-    lets the button report the difference instead of always looking like it
-    worked. Blocking — call from a worker thread.
+    Same return as `available_models`: the list, cached one and all if the
+    query failed. Whether it failed is `cache_failed`, so that one question
+    has one answer however the caller got here. Blocking — call from a worker
+    thread.
     """
-    return _query(force=True)
+    return _query(force=True)[0]
 
 
 def cached_models() -> list[ClaudeModel] | None:
@@ -406,6 +406,24 @@ def cache_fetched_at() -> float:
     _load_disk_once()
     with _lock:
         return _cached_at if _cached is not None else 0.0
+
+
+def cache_failed() -> bool:
+    """Whether the last query attempt failed, with none succeeding since.
+
+    Every picker asks this rather than each reading a flag off its own call,
+    so "is the list I'm showing the product of something being broken?" has
+    one answer no matter how the caller got here — a page opening on the saved
+    list, a background query that just failed, or a Refresh.
+
+    A per-call flag couldn't answer it anyway. Inside the failure backoff a
+    stale list is served with no query made at all, so the *call* has nothing
+    to report while the list on screen is exactly as wrong as it was a minute
+    ago; and on a plain cache hit "no query happened" and "the query failed"
+    would be the same False.
+    """
+    with _lock:
+        return _failed_at > 0
 
 
 _DATE_LEN = 8  # a YYYYMMDD stamp in an id (claude-haiku-4-5-20251001)
