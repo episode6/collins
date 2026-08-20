@@ -263,11 +263,45 @@ def main():
     check("layout has a child per model entry", len(children) == len(expected),
           f"{len(children)} vs {len(expected)}")
     labels = [c[1].get("label") for c in children]
-    model_labels = [statusicon.menu_label(e) if not e.separator else None for e in expected]
+    model_labels = [statusicon.menu_label(e) if not e.separator else "" for e in expected]
     check("labels match the model", labels == model_labels, f"{labels}")
     types = [c[1].get("type") for c in children]
-    check("separators are typed", types == [
-        "separator" if e.separator else None for e in expected], f"{types}")
+    # Every row states both properties, defaults included: the client merges
+    # what it is handed onto the item it already has under that id, so a
+    # property left out is a property left stale (see StatusIcon._properties).
+    check("every row states its type", types == [
+        "separator" if e.separator else "standard" for e in expected], f"{types}")
+
+    # Which matters because ids are positional: opening a session pushes every
+    # row below it down one, and an id that named a row comes back a
+    # separator. It has to arrive typed as one, with the label it used to
+    # carry emptied — a separator that keeps "Quit" draws it, greyed, beside
+    # the dividing line.
+    was = {c[0]: (c[1].get("type"), c[1].get("label")) for c in children}
+    state["sessions"] = [*sessions, traymodel.TraySession(
+        "s-gamma", "collins", "third tab", last_active=50.0)]
+    icon.refresh()
+    _grown_rev, grown = menu_call("GetLayout", GLib.Variant("(iias)", (0, -1, [])),
+                                  "(u(ia{sv}av))")
+    now = {c[0]: (c[1].get("type"), c[1].get("label")) for c in grown[2]}
+    flipped = [i for i in was if i in now and was[i][0] != now[i][0]]
+    check("a row that becomes a separator is retyped", flipped, str(now))
+    check("and drops the label it carried",
+          all(now[i][1] == "" for i in flipped if now[i][0] == "separator"), str(now))
+    # And the same trade the other way: the id that was a separator is a row
+    # now, and has to arrive with the row's label rather than the blank a
+    # separator left behind.
+    check("a separator that becomes a row is retyped",
+          any(now[i][0] == "standard" for i in flipped), str(now))
+    check("and picks up the label it now carries",
+          all(now[i][1] for i in flipped if now[i][0] == "standard"), str(now))
+    grown_expected = view().menu
+    check("every grown row matches the model", [
+        ("separator", "") if e.separator else ("standard", statusicon.menu_label(e))
+        for e in grown_expected] == [(c[1].get("type"), c[1].get("label"))
+                                     for c in grown[2]], str(grown[2]))
+    state["sessions"] = sessions
+    icon.refresh()
 
     # -- the dock's quicklist ----------------------------------------------
 
