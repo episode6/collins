@@ -35,8 +35,10 @@ fork. Last modified: 2026-08-20. Full change history: git log for this file.
   around. A just-started session shows a **"New Thread"** placeholder row
   until the agent writes its transcript.
 - A **Claude usage panel** under the session list: your subscription
-  limits as progress bars with reset countdowns, read from the `claude`
-  CLI's own login — see [Claude usage panel](#claude-usage-panel).
+  limits — the 5-hour session window, weekly limits, extra-usage credits —
+  as progress bars with reset countdowns, read from the `claude` CLI's own
+  login and refreshed every 5 minutes. Toggle it in Preferences (*Show
+  Claude usage*).
 
 ![The sidebar: each project wearing its own icon, sessions carrying pull request marks](/img/sidebar.png)
 
@@ -256,15 +258,6 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   own on a second monitor, then dock back with one click.
 
 ![The editor panel beside an agent session](/img/editor-panel.png)
-
-## Claude usage panel
-
-Below the session list, a **Claude usage** panel shows your subscription
-limits — the 5-hour session window, weekly limits, and any extra-usage
-credits — as progress bars with "resets in…" countdowns. It reads the OAuth
-token the `claude` CLI already stores (never modifying it), refreshes every 5
-minutes, and pauses while the window is minimized or the screen is locked.
-Toggle it in Preferences (*Show Claude usage*).
 
 ## Knowing what's happening
 
