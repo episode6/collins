@@ -49,7 +49,7 @@ from .sessions import worktree_project_root
 from .state import AppState
 from .store import SessionStore
 from .terminal import TerminalTab
-from .window import MainWindow, session_window
+from .window import HIDE_NOTICE_ID, MainWindow, session_window
 
 # Bundled icons (e.g. tab-close-symbolic); found by name when installed.
 # collins/icons is a symlink to data/icons, so this is the checkout's own
@@ -1408,7 +1408,7 @@ class App(Adw.Application):
         # repaint no longer leans on each caller remembering to notify. The
         # placeholder half still arrives through MainWindow._notify_tray —
         # those flags live in a sidebar, not the store.
-        self.store.connect("unread-changed", lambda *_: self.refresh_status_icon())
+        self.store.connect("unread-changed", self._on_unread_changed)
         self.store.connect("archived", self._on_session_archived)
         # Whether a tray host is on the bus, followed live from launch so the
         # close confirmation can pick its default response without a
@@ -1421,18 +1421,44 @@ class App(Adw.Application):
         )
         self.apply_status_icon_setting()
 
+    def _on_unread_changed(self, _store, session_id: str, unread: bool) -> None:
+        """A row's unread flag moved: repaint the badge, and when the flag
+        goes *off*, take down the desktop notification that raised it.
+
+        The two are one request seen twice. `notify_user` posts a banner under
+        the session's own id and flags its rows in the same breath (see
+        MainWindow.notify_session), so the flag coming off says the request
+        has been answered — the user is at the tab, or the tab is gone
+        (_sync_status), or the session has been put away (the store's
+        _put_away). None of those leave the banner anything to say.
+
+        Leaving it standing is not free, which is why this is not the
+        desktop's business to tidy: a desktop that counts an app's standing
+        notifications badges the launcher icon with the total (Ubuntu Dock
+        does), so a banner nobody dismissed by hand reads as a number Collins
+        is claiming — one that answers to nothing in the app, survives the
+        session it spoke for, and can only climb.
+
+        Withdrawing a notification that was never posted, or that the desktop
+        has already dismissed, is a no-op — so this needs no memory of which
+        sessions have banners up.
+        """
+        self.refresh_status_icon()
+        if session_id and not unread:
+            self.withdraw_notification(session_id)
+
     def _on_session_archived(self, _store, session_id: str) -> None:
         """A session was put away: take down the desktop notification it left
         standing, if it left one.
 
-        A `notify_user` banner is posted under the session's own id (see
-        MainWindow.notify_user), so this withdraws that session's and no other
-        — and withdrawing one that was never posted, or that the desktop has
-        already dismissed, is a no-op. The in-app half of the same request is
-        the unread flag, which the archive clears (see the store's _put_away):
-        neither should outlive the session it speaks for, and a banner whose
-        click would land on a row that is no longer in the list is exactly the
-        dead end the flag was."""
+        Mostly _on_unread_changed's work — an archive clears the flag first
+        (see the store's _put_away) and the withdrawal rides along with it.
+        This is the case the flag can't cover: `notify_user` flags whatever
+        rows the store is holding for the session, and a session it hasn't
+        discovered yet has none, so the banner goes out with no flag beside
+        it and no flip to come down on. A banner whose click would land on a
+        row that is no longer in the list is exactly the dead end the flag
+        was."""
         if session_id:
             self.withdraw_notification(session_id)
 
@@ -1586,6 +1612,7 @@ class App(Adw.Application):
         already on screen are left where they are — this shows what was
         hidden and raises the front, it doesn't reshuffle the desktop.
         """
+        self._dismiss_hide_notice()
         windows = [w for w in self.get_windows() if isinstance(w, MainWindow)]
         if not windows:
             self.activate()
@@ -1594,6 +1621,26 @@ class App(Adw.Application):
             if not window.get_visible():
                 window.present()
         windows[0].present()
+
+    def _dismiss_hide_notice(self) -> None:
+        """Take down the first-hide notice, if one is still standing.
+
+        "Collins is still running, find it in the top bar" (see
+        MainWindow._maybe_show_hide_notice) is answered by Collins being on
+        screen, so every way back calls this: the icon's Activate and its Show
+        Collins through _present_main_window, and a relaunch through
+        do_activate — which is the way back the notice itself names on a
+        desktop with no tray host.
+
+        Nothing else ever withdrew it. Clicking the notice was its only
+        dismissal, so a user who came back by any other route left it standing
+        for good — a notification that has been wrong since the moment the
+        window returned, and on a desktop that counts an app's standing
+        notifications (Ubuntu Dock, on the launcher icon) a badge that never
+        clears. Withdrawing one that was never sent is a no-op, so this needs
+        no flag of its own.
+        """
+        self.withdraw_notification(HIDE_NOTICE_ID)
 
     # -- session MCP tools ---------------------------------------------------
     #
@@ -2260,6 +2307,9 @@ class App(Adw.Application):
             window.focus_session(session_id)
 
     def do_activate(self) -> None:
+        # A relaunch is a way back for a hidden window, and the way the notice
+        # names where there is no tray host to point at.
+        self._dismiss_hide_notice()
         window = self._main_window()
         if window is None:
             window = self._new_window()
