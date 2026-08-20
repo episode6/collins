@@ -124,6 +124,7 @@ class ComposerView(Gtk.Box):
         self._view.set_right_margin(8)
         self._view.set_accepts_tab(False)
 
+        self._adapter = None
         if Spelling is not None:
             try:
                 adapter = Spelling.TextBufferAdapter.new(
@@ -140,6 +141,15 @@ class ComposerView(Gtk.Box):
                 self._view.set_extra_menu(adapter.get_menu_model())
                 self._view.insert_action_group("spelling", adapter)
                 adapter.set_enabled(True)
+                # The corrections menu follows the insertion cursor, which a
+                # right-click doesn't move -- so aim it by hand, in the
+                # CAPTURE phase, before the text view claims the press and
+                # pops the menu it has already built.
+                secondary = Gtk.GestureClick()
+                secondary.set_button(Gdk.BUTTON_SECONDARY)
+                secondary.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+                secondary.connect("pressed", self._on_secondary_press)
+                self._view.add_controller(secondary)
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key)
@@ -462,6 +472,35 @@ class ComposerView(Gtk.Box):
         root = self.get_root()
         focus = root.get_focus() if root else None
         return focus is not None and (focus is self or focus.is_ancestor(self))
+
+    def _on_secondary_press(self, _gesture, n_press: int, x: float, y: float) -> None:
+        """Point the spell-check menu at the word that was right-clicked.
+
+        GTK4's text view pops its context menu without moving the insertion
+        cursor, and libspelling builds its corrections from that cursor and
+        nothing else -- so left alone the menu answers about wherever the
+        caret happened to sit. Move the caret here first, then rebuild the
+        corrections synchronously: the adapter's own refresh is a 100ms
+        timeout off "cursor-moved", which lands well after the menu is on
+        screen. The press is deliberately not claimed -- the view still
+        pops the menu, now holding the right words.
+        """
+        if n_press != 1 or self._adapter is None:
+            return
+        bx, by = self._view.window_to_buffer_coords(
+            Gtk.TextWindowType.WIDGET, int(x), int(y)
+        )
+        found, pos = self._view.get_iter_at_location(bx, by)
+        if not found:
+            return
+        # Empty tuple when nothing is selected, (start, end) when something is.
+        bounds = self._buffer.get_selection_bounds()
+        selection = (
+            (bounds[0].get_offset(), bounds[1].get_offset()) if bounds else None
+        )
+        if composerkeys.spell_click_moves_caret(pos.get_offset(), selection):
+            self._buffer.place_cursor(pos)
+        self._adapter.update_corrections()
 
     def _on_key(self, _controller, keyval: int, _keycode: int, state) -> bool:
         if keyval == _ESCAPE_KEYVAL:
