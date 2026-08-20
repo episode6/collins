@@ -225,6 +225,8 @@ handle at the terminal's right edge.
 - The list **persists per session** — reopen a session weeks later and its
   gallery is exactly as you left it. Forked sessions inherit the original's.
 
+![The attachments panel docked beside a session: three cat photos with their captions, two files between them](/img/attachments-panel.png)
+
 ## Editor panel
 
 A syntax-highlighted code editor lives beside the agent terminal — the
