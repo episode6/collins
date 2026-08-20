@@ -681,6 +681,39 @@ msgstr ""
 msgid "Default (latest Sonnet)"
 msgstr ""
 
+#: collins/prefs.py:667
+msgid "Model list"
+msgstr ""
+
+#: collins/prefs.py:667
+msgid "Checking…"
+msgstr ""
+
+#: collins/prefs.py:669
+msgid "Refresh"
+msgstr ""
+
+#: collins/prefs.py:672
+msgid ""
+"Ask Anthropic for the model list now, rather than waiting for the saved one "
+"to age out"
+msgstr ""
+
+#: collins/prefs.py:1437
+msgid ""
+"Couldn't reach Anthropic — offering the CLI's aliases (opus, sonnet, haiku)"
+msgstr ""
+
+#: collins/prefs.py:1445
+#, python-brace-format
+msgid "Couldn't reach Anthropic — still showing the list fetched {when}"
+msgstr ""
+
+#: collins/prefs.py:1449
+#, python-brace-format
+msgid "{count} models, updated {when}"
+msgstr ""
+
 #: collins/prefs.py:424
 msgid "Attach pull requests named in prompts"
 msgstr ""

@@ -5,9 +5,22 @@
 The model pickers in Preferences (session titles, icon generation) offer
 live choices, queried from the Models API with the OAuth token the claude
 CLI keeps in ``~/.claude/.credentials.json`` — the same login the whole app
-is built on, so no separate API key is needed. The query is read-only and
-cached for an hour; when it can't be made (logged out, offline), the CLI's
-own version-agnostic aliases keep the pickers and the settings usable.
+is built on, so no separate API key is needed. When the query can't be made
+(logged out, offline), the CLI's own version-agnostic aliases keep the
+pickers and the settings usable.
+
+The catalog barely moves — a handful of models, changing a few times a
+year — so the query is read-only and cached hard: for a day, and to disk
+(``$XDG_CACHE_HOME/collins/models.json``) so a restart doesn't pay for it
+again. A failed query never evicts; the last good list keeps serving however
+stale it is, and a run of failures backs off rather than making every picker
+open wait out the network timeout. Preferences' Refresh button
+(`refresh_models`) ignores all of that and asks the API outright, for when a
+model ships and the cached day hasn't turned over yet.
+
+Every query says how it went through the module logger: what came back at
+INFO (`COLLINS_LOG=INFO`), and anything that failed at WARNING, which the
+default level already shows.
 
 Both settings default to "" — automatic — which resolve_model() turns into
 the newest model of that setting's preferred tier (Haiku for titles, Sonnet
@@ -24,17 +37,26 @@ naming logic is unit-testable headless.
 from __future__ import annotations
 
 import json
+import logging
+import os
 import threading
 import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+log = logging.getLogger(__name__)
+
 CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
 _MODELS_URL = "https://api.anthropic.com/v1/models"
 _TIMEOUT_S = 10
-_CACHE_TTL_S = 3600
+_CACHE_TTL_S = 86_400  # a day: the catalog changes a few times a year
+# After a failed query, serve the cache for this long before asking the
+# network again — offline, the alternative is every picker open blocking for
+# the full timeout. A forced refresh ignores it.
+_RETRY_AFTER_FAILURE_S = 300
 _MAX_PAGES = 5  # the catalog is ~a dozen models; more pages means something is wrong
+_CACHE_VERSION = 1  # bumped if the file's shape changes; a file from another version is ignored
 
 # Weakest tier first. An id that names none of these is treated as beyond
 # the strongest tier, so an unrecognized future model is never picked as
@@ -89,13 +111,22 @@ def parse_models(payload) -> list[ClaudeModel]:
 
 
 def fetch_models(timeout: float = _TIMEOUT_S) -> list[ClaudeModel]:
-    """One live Models API query; [] when the token, network, or API says no."""
+    """One live Models API query; [] when the token, network, or API says no.
+
+    Every way of coming back empty says so in the log first — a missing token
+    and a refused request are the same [] to the caller but very different
+    things to fix, and the pickers quietly falling back to the aliases is
+    exactly the symptom that needs a reason attached to it.
+    """
     token = _oauth_token()
     if token is None:
+        log.warning(
+            "models: no OAuth token in %s — is the claude CLI logged in?", CREDENTIALS_PATH
+        )
         return []
     models: list[ClaudeModel] = []
     after = None
-    for _ in range(_MAX_PAGES):
+    for page in range(_MAX_PAGES):
         url = _MODELS_URL + (f"?after_id={after}" if after else "")
         request = urllib.request.Request(
             url,
@@ -108,7 +139,8 @@ def fetch_models(timeout: float = _TIMEOUT_S) -> list[ClaudeModel]:
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 payload = json.load(response)
-        except Exception:  # URLError, HTTPError, timeout, bad JSON, ...
+        except Exception as err:  # URLError, HTTPError, timeout, bad JSON, ...
+            log.warning("models: GET %s failed on page %d: %r", url, page + 1, err)
             return []
         models.extend(parse_models(payload))
         if not (isinstance(payload, dict) and payload.get("has_more")):
@@ -119,46 +151,279 @@ def fetch_models(timeout: float = _TIMEOUT_S) -> list[ClaudeModel]:
     return models
 
 
+# -- the cache ----------------------------------------------------------------
+
 _lock = threading.Lock()
 _fetch_lock = threading.Lock()  # single-flight: one live query at a time
+_disk_lock = threading.Lock()  # the once-per-run read of the saved list
 _cached: list[ClaudeModel] | None = None
-_cached_at = 0.0
+_cached_at = 0.0  # wall clock, not monotonic: it has to mean something to the next run
+_failed_at = 0.0  # when the last query failed, for the retry backoff
+_disk_read = False
+
+
+def cache_path() -> Path:
+    """Where the saved list lives.
+
+    Under the app's cache directory (honoring ``XDG_CACHE_HOME`` the way
+    `dropimages.cache_directory` does, so tests and the screenshot harness
+    relocate it along with the rest of the app's state) because that is
+    exactly what it is: losing the file costs one query, never a setting.
+    """
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "collins" / "models.json"
+
+
+def _read_disk() -> tuple[list[ClaudeModel], float] | None:
+    """The list the last run saved, with the wall-clock time it was fetched.
+
+    None for every way of not having one — no file yet, a file written by
+    another version of this format, unreadable, or holding nothing usable.
+    All of those are ordinary (a first run is the common case), so none of
+    them are louder than debug.
+    """
+    path = cache_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        log.debug("models: no saved list at %s yet", path)
+        return None
+    except (OSError, ValueError) as err:
+        log.debug("models: cannot read %s: %r", path, err)
+        return None
+    if not isinstance(payload, dict) or payload.get("version") != _CACHE_VERSION:
+        log.debug("models: ignoring %s — not a v%d cache", path, _CACHE_VERSION)
+        return None
+    models = parse_models(payload)
+    fetched_at = payload.get("fetched_at")
+    if not models or not isinstance(fetched_at, (int, float)) or isinstance(fetched_at, bool):
+        log.debug("models: ignoring %s — no usable models in it", path)
+        return None
+    return models, float(fetched_at)
+
+
+def _write_disk(models: list[ClaudeModel], fetched_at: float) -> None:
+    """Save *models* for the next run. Best effort: a cache that can't be
+    written costs a query next launch, not anything anyone need act on."""
+    path = cache_path()
+    payload = {
+        "version": _CACHE_VERSION,
+        "fetched_at": fetched_at,
+        # The API's own field names, so _read_disk hands the file straight to
+        # parse_models and there is only one shape to keep in step.
+        "data": [
+            {"id": m.id, "display_name": m.display_name, "created_at": m.created_at}
+            for m in models
+        ],
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(path)  # atomic: a half-written file would poison every later run
+    except OSError as err:
+        log.warning("models: cannot save the list to %s: %r", path, err)
+        return
+    log.debug("models: saved %d model(s) to %s", len(models), path)
+
+
+def _age(seconds: float) -> str:
+    """A cache age for a log line: "40s", "3m", "2h", "6d"."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    if seconds < 86_400:
+        return f"{int(seconds // 3600)}h"
+    return f"{int(seconds // 86_400)}d"
+
+
+def _fresh(fetched_at: float, now: float) -> bool:
+    """Is a list fetched at *fetched_at* still inside the TTL?
+
+    A negative age — a saved list claiming to come from the future, which a
+    clock change or a copied home directory can produce — counts as stale.
+    Re-querying costs one request and a failure keeps the list anyway, so
+    erring toward the network is the cheap mistake here.
+    """
+    return 0 <= now - fetched_at < _CACHE_TTL_S
+
+
+def _load_disk_once() -> None:
+    """Seed the in-memory cache from the file, once per process.
+
+    The first picker of the run gets the last run's list immediately rather
+    than the aliases plus a wait. Only ever fills an empty cache: a list this
+    run fetched itself is newer than anything on disk by definition.
+    """
+    global _cached, _cached_at, _disk_read
+    with _disk_lock:
+        if _disk_read:
+            return
+        entry = _read_disk()
+        _disk_read = True
+        if entry is None:
+            return
+        models, fetched_at = entry
+        with _lock:
+            if _cached is not None:
+                return
+            _cached, _cached_at = models, fetched_at
+    log.info(
+        "models: %d loaded from %s, fetched %s ago",
+        len(models),
+        cache_path(),
+        _age(max(0.0, time.time() - fetched_at)),
+    )
+
+
+def _serve_cache() -> list[ClaudeModel] | None:
+    """The cache, when it is still good enough to answer with as it stands:
+    inside the TTL, or stale but with a query having just failed."""
+    now = time.time()
+    with _lock:
+        if _cached is None:
+            return None
+        if _fresh(_cached_at, now):
+            log.debug(
+                "models: %d served from cache, fetched %s ago",
+                len(_cached),
+                _age(max(0.0, now - _cached_at)),
+            )
+            return list(_cached)
+        if 0 <= now - _failed_at < _RETRY_AFTER_FAILURE_S:
+            # Stale, but a query failed moments ago: don't make this caller
+            # wait out the same timeout to be told the same thing.
+            log.debug(
+                "models: cache is stale but a query failed %s ago; serving the %d cached model(s)",
+                _age(max(0.0, now - _failed_at)),
+                len(_cached),
+            )
+            return list(_cached)
+    return None
+
+
+def _query(force: bool) -> tuple[list[ClaudeModel], bool]:
+    """The list, and whether the API answered on this call.
+
+    Where the TTL, the saved list, the failure backoff and the single-flight
+    lock all meet; `available_models` and `refresh_models` are the two ways in.
+    """
+    global _cached, _cached_at, _failed_at
+    _load_disk_once()
+    if not force:
+        served = _serve_cache()
+        if served is not None:
+            return served, False
+    with _fetch_lock:
+        if not force:
+            served = _serve_cache()  # filled while queued here
+            if served is not None:
+                return served, False
+        log.info("models: querying %s%s", _MODELS_URL, " (forced refresh)" if force else "")
+        started = time.monotonic()
+        models = fetch_models()
+        elapsed = time.monotonic() - started
+        now = time.time()
+        cached_age = ""
+        with _lock:
+            if models:
+                _cached, _cached_at, _failed_at = models, now, 0.0
+                result, ok = list(models), True
+            else:
+                _failed_at = now
+                result, ok = (list(_cached) if _cached is not None else []), False
+                if result:
+                    cached_age = _age(max(0.0, now - _cached_at))
+    if ok:
+        log.info(
+            "models: %d received in %.2fs — %s",
+            len(result),
+            elapsed,
+            ", ".join(m.id for m in result),
+        )
+        _write_disk(result, now)
+    elif result:
+        log.warning(
+            "models: query failed after %.2fs; keeping the %d cached model(s) fetched %s ago",
+            elapsed,
+            len(result),
+            cached_age,
+        )
+    else:
+        log.warning(
+            "models: query failed after %.2fs and nothing is cached — "
+            "the pickers fall back to the CLI's aliases",
+            elapsed,
+        )
+    return result, ok
 
 
 def available_models() -> list[ClaudeModel]:
-    """The model list, from cache or a fresh query when stale.
+    """The model list, from cache or a fresh query once the cache is stale.
 
-    Blocking (up to the network timeout) — call from a worker thread. A
-    failed refresh falls back to whatever was cached before, and [] means
-    the API has never answered this run.
+    Blocking (up to the network timeout) — call from a worker thread. A failed
+    query falls back to whatever was cached before, from this run or the last
+    one, and [] means no query has ever succeeded.
 
-    Concurrent callers on a stale cache queue on one fetch rather than
-    fanning out into duplicate queries (a menu reopened before its first
-    fetch lands, say): whoever holds the fetch lock asks the API, and the
-    queued callers re-read the cache it just filled.
+    Concurrent callers on a stale cache queue on one fetch rather than fanning
+    out into duplicate queries (a menu reopened before its first fetch lands,
+    say): whoever holds the fetch lock asks the API, and the queued callers
+    re-read the cache it just filled.
     """
-    global _cached, _cached_at
-    with _lock:
-        if _cached is not None and time.monotonic() - _cached_at < _CACHE_TTL_S:
-            return list(_cached)
-    with _fetch_lock:
-        with _lock:
-            if _cached is not None and time.monotonic() - _cached_at < _CACHE_TTL_S:
-                return list(_cached)  # filled while queued here
-        models = fetch_models()
-        with _lock:
-            if models:
-                _cached = models
-                _cached_at = time.monotonic()
-            return list(models or _cached or [])
+    return _query(force=False)[0]
+
+
+def refresh_models() -> list[ClaudeModel]:
+    """Query the API now, TTL and backoff ignored — Preferences' Refresh.
+
+    Same return as `available_models`: the list, cached one and all if the
+    query failed. Whether it failed is `cache_failed`, so that one question
+    has one answer however the caller got here. Blocking — call from a worker
+    thread.
+    """
+    return _query(force=True)[0]
 
 
 def cached_models() -> list[ClaudeModel] | None:
-    """Whatever the cache holds, however stale — never the network, so safe
-    on the main loop. None means the API hasn't answered this run; the
-    caller shows its own stand-in and asks available_models() off-thread."""
+    """Whatever the cache holds, however stale — never the network, so safe on
+    the main loop. None means no query has ever succeeded, in this run or an
+    earlier one; the caller shows its own stand-in and asks available_models()
+    off-thread.
+
+    Does read the saved list on its first call of the run (one small local
+    file), so a picker opening before any worker thread lands still starts on
+    real models rather than the aliases.
+    """
+    _load_disk_once()
     with _lock:
         return list(_cached) if _cached is not None else None
+
+
+def cache_fetched_at() -> float:
+    """When the cached list was fetched (unix time), or 0.0 with no cache at
+    all. What Preferences dates its "12 models, updated 3h ago" line from."""
+    _load_disk_once()
+    with _lock:
+        return _cached_at if _cached is not None else 0.0
+
+
+def cache_failed() -> bool:
+    """Whether the last query attempt failed, with none succeeding since.
+
+    Every picker asks this rather than each reading a flag off its own call,
+    so "is the list I'm showing the product of something being broken?" has
+    one answer no matter how the caller got here — a page opening on the saved
+    list, a background query that just failed, or a Refresh.
+
+    A per-call flag couldn't answer it anyway. Inside the failure backoff a
+    stale list is served with no query made at all, so the *call* has nothing
+    to report while the list on screen is exactly as wrong as it was a minute
+    ago; and on a plain cache hit "no query happened" and "the query failed"
+    would be the same False.
+    """
+    with _lock:
+        return _failed_at > 0
 
 
 _DATE_LEN = 8  # a YYYYMMDD stamp in an id (claude-haiku-4-5-20251001)
