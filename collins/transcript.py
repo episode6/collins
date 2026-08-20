@@ -1,14 +1,15 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-19. Full change history: git log for this file.
 
 """Read what a session is doing by tailing its JSONL transcript.
 
-Four things come out of the same pass, which is what makes it cheap: the files
+Five things come out of the same pass, which is what makes it cheap: the files
 the agent has written (see ``_TOUCH_TOOLS``), the ``pr-link`` records Claude
 Code writes when a session opens or touches a pull request (see prstatus), the
-model that answered the last turn (see ``model``), and the images the
-conversation named (see ``attachments``).
+model that answered the last turn (see ``model``), the session's current
+permission mode (see ``permission_mode``), and the images the conversation
+named (see ``attachments``).
 Every distinct PR is kept, not just the last one — a session that opens three of
 them has three to show — in the order they first appear, which is the order they
 were opened.
@@ -57,6 +58,7 @@ class TranscriptModel:
         self._prs: dict[str, PullRequest] = {}  # url -> PR, first-seen order
         self._touched: list[str] = []  # files written by the agent, newest first
         self._model: str | None = None  # model id of the most recent reply
+        self._permission_mode: str | None = None  # last mode the CLI recorded
         self._images: dict[str, Attachment] = {}  # images named in the messages
         self._offset = 0
         self._buf = b""
@@ -67,6 +69,7 @@ class TranscriptModel:
         self._prs = {}
         self._touched = []
         self._model = None
+        self._permission_mode = None
         self._images = {}
         self._offset = 0
         self._buf = b""
@@ -98,6 +101,7 @@ class TranscriptModel:
             self._prs = {}
             self._touched = []
             self._model = None
+            self._permission_mode = None
             self._images = {}
             self._offset, self._buf = 0, b""
         if size <= self._offset:
@@ -126,6 +130,14 @@ class TranscriptModel:
         return changed
 
     def _ingest(self, entry: dict) -> bool:
+        # The CLI stamps the session's permission mode onto every user turn
+        # and writes a bare `permission-mode` record each time it changes
+        # (shift+tab), so the last one seen is the mode right now. Sidechain
+        # lines never carry the field (verified 2026-08-19), so no filter is
+        # needed. Not "changed": nothing drawn reads it — start_session does.
+        mode = entry.get("permissionMode")
+        if isinstance(mode, str) and mode:
+            self._permission_mode = mode
         if entry.get("type") == "pr-link":  # bare metadata record, no message
             pr = parse_pr_link(entry)
             if pr is None or pr.url in self._prs:
@@ -249,6 +261,13 @@ class TranscriptModel:
         with now is the only interesting answer.
         """
         return self._model
+
+    def permission_mode(self) -> str | None:
+        """The session's permission mode as of its last transcript line —
+        the CLI's own value ("default", "acceptEdits", "plan", "auto", …) —
+        or None until one has been recorded (an empty transcript, or a CLI
+        old enough not to stamp it)."""
+        return self._permission_mode
 
     def attachments(self) -> list[Attachment]:
         """Every image the conversation has named — plus every file it

@@ -265,6 +265,26 @@ def test_start_session_rejects_unexpected_arguments():
     )
 
 
+def test_inherited_mode_passes_the_callers_mode_through():
+    """A spawn with no explicit mode works the way its spawner does — every
+    mode the CLI records comes through as-is, the curated dialog list
+    notwithstanding."""
+    for mode in ("plan", "acceptEdits", "auto", "default", "manual", "dontAsk"):
+        assert mcptools.inherited_permission_mode(mode) == mode
+
+
+def test_inherited_mode_caps_bypass_at_accept_edits():
+    """A bypass-mode caller has no permission prompt gating the call, so
+    inheritance grants at most what the tool grants explicitly."""
+    assert mcptools.inherited_permission_mode("bypassPermissions") == "acceptEdits"
+
+
+def test_inherited_mode_drops_junk_to_the_default():
+    """Whatever isn't a plain mode token never reaches a command line."""
+    for junk in (None, "", "rm -rf /", "a b", "mode-1", "x" * 33, "café"):
+        assert mcptools.inherited_permission_mode(junk) == ""
+
+
 def test_read_terminal_args_all_default():
     """Both arguments are optional: the bare call reads every panel tab."""
     assert mcptools.validate_args("read_terminal", {}) is None
