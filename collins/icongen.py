@@ -210,13 +210,15 @@ class IconRun:
             except OSError:
                 pass
 
-    def run(self, prompt: str) -> bytes:
+    def run(self, prompt: str, model: str | None = None) -> bytes:
+        """Generate with *model* — the dialog's own pick for this run — or,
+        with none given, the icon_model preference (resolved per run, like
+        titles, so a just-changed preference applies to the next generation
+        without a restart)."""
         cli = shutil.which("claude")
         if cli is None:
             raise IconGenError("claude CLI not found on PATH")
-        # Resolved per run (like titles), so a just-changed preference
-        # applies to the next generation without a restart.
-        model = pick_model(AppState().get_setting("icon_model"))
+        model = pick_model(model or AppState().get_setting("icon_model"))
         with scratch_workdir() as workdir:
             with self._lock:
                 if self._cancelled:

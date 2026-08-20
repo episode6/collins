@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-20. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -16,7 +16,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from . import editorfiles, icongen
+from . import claudemodels, composerkeys, editorfiles, icongen
 from .chats import is_chat_cwd
 from .formatting import display_path, format_size, format_timestamp, format_tokens
 from .i18n import _, ngettext
@@ -27,6 +27,7 @@ from .sessions import (
     configured_mcp_servers,
     read_mcp_config,
 )
+from .state import AppState
 from .svgtexture import svg_texture
 
 
@@ -699,6 +700,9 @@ def details_dialog(parent: Gtk.Widget, session: Session, title: str) -> None:
 
 # -- project icon generation --------------------------------------------------
 
+# The adjustments box grows with its text up to this many lines, then scrolls.
+_FEEDBACK_MAX_LINES = 5
+
 
 def generate_icon_dialog(
     parent: Gtk.Widget, cwd: str, project_name: str, on_saved: Callable[[], None]
@@ -709,9 +713,12 @@ def generate_icon_dialog(
     opens. The result is previewed at dialog size and at the 16px the
     sidebar actually renders; the entry takes adjustment requests, and
     Regenerate re-runs the model with the previous attempt and that feedback
-    in the prompt. Nothing is written until Save — Cancel (or closing the
-    dialog any other way) aborts whatever run is in flight. *on_saved* fires
-    after a successful save, so the caller can refresh the sidebar.
+    in the prompt. A model drop-down starts on the Preferences choice
+    (icon_model) and changes only this dialog's runs — a stronger model for
+    one stubborn project, without re-pointing every future generation.
+    Nothing is written until Save — Cancel (or closing the dialog any other
+    way) aborts whatever run is in flight. *on_saved* fires after a
+    successful save, so the caller can refresh the sidebar.
     """
     # svg: the latest accepted attempt (what Save writes, what a revision
     # builds on). run: the in-flight generation, if any. gen: a counter so a
@@ -743,11 +750,99 @@ def generate_icon_dialog(
     stack.add_named(preview_box, "preview")
     stack.add_named(failure, "failure")
 
-    entry = Gtk.Entry(hexpand=True, placeholder_text=_("Optional adjustments, e.g. “make it blue”"))
-    regen = Gtk.Button(label=_("Regenerate"), sensitive=False)
-    entry_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-    entry_row.append(entry)
-    entry_row.append(regen)
+    # Adjustments go in a text view that grows with what's typed, up to
+    # _FEEDBACK_MAX_LINES, then scrolls: "make it blue" is one line, but a
+    # real brief for a stubborn icon often isn't. Enter regenerates and
+    # Shift+Enter breaks a line, as in the composer.
+    entry = Gtk.TextView(
+        wrap_mode=Gtk.WrapMode.WORD_CHAR,
+        accepts_tab=False,
+        top_margin=8,
+        bottom_margin=8,
+        left_margin=8,
+        right_margin=8,
+    )
+    entry_buffer = entry.get_buffer()
+    placeholder = Gtk.Label(
+        label=_("Optional adjustments, e.g. “make it blue”"),
+        xalign=0,
+        halign=Gtk.Align.START,
+        valign=Gtk.Align.START,
+        margin_top=8,
+        margin_start=8,
+        can_target=False,
+    )
+    placeholder.add_css_class("dim-label")
+    entry_buffer.connect(
+        "changed", lambda buf: placeholder.set_visible(buf.get_char_count() == 0)
+    )
+    # The view sits directly in its scroller: as a GtkScrollable it reports
+    # its wrapped layout height as its natural height, which is what grows
+    # the box; a Viewport between them (an Overlay, say) would measure it
+    # unwrapped instead. So the placeholder rides over the scroller.
+    entry_scroller = Gtk.ScrolledWindow(child=entry, has_frame=True)
+    # EXTERNAL, not AUTOMATIC: a scrollbar's own minimum size would prop
+    # the empty box up to three lines. Text past the cap still scrolls by
+    # wheel and with the caret, there's just no bar drawn for it.
+    entry_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.EXTERNAL)
+    entry_scroller.set_propagate_natural_height(True)
+    entry_overlay = Gtk.Overlay(child=entry_scroller)
+    entry_overlay.add_overlay(placeholder)
+
+    def cap_entry_height(*_a) -> None:
+        # The cap is in lines, so it's derived from the view's real font
+        # once the view has a Pango context to measure with.
+        line_h = entry.create_pango_layout("Xg").get_pixel_size()[1]
+        entry_scroller.set_max_content_height(
+            line_h * _FEEDBACK_MAX_LINES + entry.get_top_margin() + entry.get_bottom_margin()
+        )
+
+    entry.connect("realize", cap_entry_height)
+
+    regen = Gtk.Button(label=_("Regenerate"), sensitive=False, halign=Gtk.Align.END, hexpand=True)
+
+    # Which model the next run asks for. Item 0 is the Preferences setting
+    # (whatever it resolves to at run time), the rest the live catalog, so
+    # the first run — started before any list has landed — already honours
+    # the preference, and a pick here never writes it back.
+    model_ids: list[str] = [""]
+    models = Gtk.DropDown.new_from_strings([_("Default model")])
+    models.set_tooltip_text(_("Model for this dialog's runs; Preferences sets the default"))
+    action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    action_row.append(models)
+    action_row.append(regen)
+
+    def fill_models(catalog: list[claudemodels.ClaudeModel]) -> bool:
+        preferred = (AppState().get_setting("icon_model") or "").strip()
+        chosen = model_ids[models.get_selected()]
+        ids = [""] + [m.id for m in catalog]
+        labels = [_("Default model")] + [m.display_name for m in catalog]
+        for extra in (preferred, chosen):
+            if extra and extra not in ids:
+                # A saved or picked id the API no longer lists stays
+                # offered rather than silently snapping to the default.
+                ids.append(extra)
+                labels.append(extra)
+        # Name what the default resolves to — the saved preference, or with
+        # none the same automatic pick icongen makes (the newest Sonnet).
+        resolved = claudemodels.resolve_model(preferred, catalog)
+        if resolved in ids:
+            labels[0] = _("Default ({model})").format(model=labels[ids.index(resolved)])
+        model_ids[:] = ids
+        models.set_model(Gtk.StringList.new(labels))
+        models.set_selected(ids.index(chosen))
+        return GLib.SOURCE_REMOVE
+
+    def load_models() -> None:
+        catalog = claudemodels.available_models() or list(claudemodels.FALLBACK_MODELS)
+        GLib.idle_add(fill_models, catalog)
+
+    # The cached catalog fills the list at once; the worker heals a stale or
+    # alias-only list to the live one without blocking the dialog.
+    cached = claudemodels.cached_models()
+    if cached:
+        fill_models(cached)
+    threading.Thread(target=load_models, name="icon-models", daemon=True).start()
 
     # A regenerate that fails after a good attempt keeps the preview (and
     # Save) and reports here instead of on the failure page.
@@ -763,7 +858,8 @@ def generate_icon_dialog(
         margin_end=18,
     )
     content.append(stack)
-    content.append(entry_row)
+    content.append(entry_overlay)
+    content.append(action_row)
     content.append(status)
 
     cancel = Gtk.Button(label=_("Cancel"))
@@ -779,7 +875,11 @@ def generate_icon_dialog(
     view.set_content(content)
 
     dialog = Adw.Dialog(title=_("Generate Icon"))
-    dialog.set_content_width(420)
+    # The adjustments box grows as it's typed into, and the dialog has to
+    # grow with it — which a dialog only does when it follows its content's
+    # natural size; the width is then the content's to pin.
+    dialog.set_follows_content_size(True)
+    content.set_size_request(384, -1)  # 420 with the margins
     dialog.set_child(view)
 
     def start() -> None:
@@ -793,15 +893,18 @@ def generate_icon_dialog(
         save.set_sensitive(False)
         status.set_visible(False)
         stack.set_visible_child_name("loading")
-        feedback = entry.get_text()
+        feedback = entry_buffer.get_text(
+            entry_buffer.get_start_iter(), entry_buffer.get_end_iter(), False
+        )
         previous = state["svg"]
+        model = model_ids[models.get_selected()] or None
 
         def work() -> None:
             try:
                 prompt = icongen.build_prompt(
                     cwd, project_name, feedback=feedback, previous_svg=previous
                 )
-                svg = run.run(prompt)
+                svg = run.run(prompt, model=model)
             except icongen.IconGenCancelled:
                 return
             except Exception as err:  # IconGenError, OSError, ...
@@ -858,7 +961,22 @@ def generate_icon_dialog(
     cancel.connect("clicked", lambda *_a: dialog.close())
     save.connect("clicked", on_save)
     regen.connect("clicked", lambda *_a: start())
-    entry.connect("activate", lambda *_a: start() if regen.get_sensitive() else None)
+
+    def on_entry_key(_ctrl, keyval: int, _keycode: int, modifiers) -> bool:
+        action = composerkeys.enter_action(int(keyval), int(modifiers), True)
+        if action == composerkeys.SEND:
+            if regen.get_sensitive():
+                start()
+            return Gdk.EVENT_STOP
+        if action == composerkeys.NEWLINE:
+            entry_buffer.insert_at_cursor("\n")
+            entry.scroll_to_mark(entry_buffer.get_insert(), 0.0, False, 0.0, 0.0)
+            return Gdk.EVENT_STOP
+        return Gdk.EVENT_PROPAGATE
+
+    entry_keys = Gtk.EventControllerKey()
+    entry_keys.connect("key-pressed", on_entry_key)
+    entry.add_controller(entry_keys)
     # Closing by any route (Cancel, Esc, the close after a save) kills
     # whatever run is still burning tokens; cancelling a finished or absent
     # run is a no-op.

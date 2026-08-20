@@ -147,3 +147,40 @@ def test_save_icon_overwrites_existing(tmp_path):
     (tmp_path / projecticons.PROJECT_ICON_FILENAME).write_text("old")
     icongen.save_icon(tmp_path, _SVG.encode())
     assert projecticons.project_icon_data(tmp_path) == _SVG.encode()
+
+
+# -- IconRun model selection ----------------------------------------------------
+
+
+class _FakeProc:
+    returncode = 0
+
+    def communicate(self, _prompt=None, timeout=None):
+        return _SVG, ""
+
+
+def _capture_popen(monkeypatch):
+    calls: list[list[str]] = []
+
+    def popen(argv, **_kw):
+        calls.append(argv)
+        return _FakeProc()
+
+    monkeypatch.setattr(icongen.subprocess, "Popen", popen)
+    monkeypatch.setattr(icongen.shutil, "which", lambda _name: "/usr/bin/claude")
+    monkeypatch.setattr(icongen.AppState, "get_setting", lambda _self, _key: "claude-sonnet-5")
+    return calls
+
+
+def test_run_asks_for_the_preference_by_default(monkeypatch):
+    calls = _capture_popen(monkeypatch)
+    assert icongen.IconRun().run("brief") == _SVG.encode()
+    assert calls[0][calls[0].index("--model") + 1] == "claude-sonnet-5"
+
+
+def test_run_honours_the_dialogs_own_pick(monkeypatch):
+    # The dialog's drop-down overrides the preference for one run only: the
+    # setting is read, not written, and an explicit id needs no catalog.
+    calls = _capture_popen(monkeypatch)
+    icongen.IconRun().run("brief", model="claude-opus-5")
+    assert calls[0][calls[0].index("--model") + 1] == "claude-opus-5"
