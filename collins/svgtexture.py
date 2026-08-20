@@ -63,6 +63,16 @@ def svg_texture_fit(
     a repository's bytes, and content sniffing would let a file named .svg
     pick any codec on the machine. None when the SVG loader isn't installed
     or the document won't parse.
+
+    The box is enforced twice: once through ``size-prepared`` (the cheap
+    way — librsvg then rasterizes straight to the size we want) and once on
+    what actually came back. The second pass is for the loader that reports
+    no intrinsic size at all: this librsvg answers with the viewBox for a
+    document that carries no width/height, and with 300x300 for one that
+    carries neither, but that is a version's behavior rather than a promise,
+    and a preview must not be able to decode a document's own idea of how
+    big it is. Only the *cap* is re-applied there — a raster scaled up after
+    the fact is just blurry, which is not what the minimum is for.
     """
     if not svg:
         return None
@@ -90,7 +100,24 @@ def svg_texture_fit(
         except GLib.Error:
             pass
         return None
-    pixbuf = loader.get_pixbuf()
+    pixbuf = _within(loader.get_pixbuf(), max_width, max_height)
+    return Gdk.Texture.new_for_pixbuf(pixbuf) if pixbuf is not None else None
+
+
+def _within(
+    pixbuf: GdkPixbuf.Pixbuf | None, max_width: int, max_height: int
+) -> GdkPixbuf.Pixbuf | None:
+    """*pixbuf* if it is already inside the box, a scaled copy if it isn't."""
     if pixbuf is None:
         return None
-    return Gdk.Texture.new_for_pixbuf(pixbuf)
+    width, height = pixbuf.get_width(), pixbuf.get_height()
+    if width <= 0 or height <= 0:
+        return None
+    if width <= max_width and height <= max_height:
+        return pixbuf
+    fit = min(max_width / width, max_height / height)
+    return pixbuf.scale_simple(
+        max(1, round(width * fit)),
+        max(1, round(height * fit)),
+        GdkPixbuf.InterpType.BILINEAR,
+    )
