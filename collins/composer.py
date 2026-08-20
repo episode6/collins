@@ -479,11 +479,17 @@ class ComposerView(Gtk.Box):
         GTK4's text view pops its context menu without moving the insertion
         cursor, and libspelling builds its corrections from that cursor and
         nothing else -- so left alone the menu answers about wherever the
-        caret happened to sit. Move the caret here first, then rebuild the
-        corrections synchronously: the adapter's own refresh is a 100ms
-        timeout off "cursor-moved", which lands well after the menu is on
-        screen. The press is deliberately not claimed -- the view still
-        pops the menu, now holding the right words.
+        caret happened to sit. gspell, the GTK3 checker this one replaced,
+        aimed the menu the same way we do here, down to leaving the press
+        unclaimed; its GTK4 rewrite dropped the machinery, not the need.
+        Move the caret first, then rebuild the corrections synchronously:
+        the adapter's own refresh is a 100ms timeout off "cursor-moved",
+        which lands well after the menu is on screen.
+
+        Only a squiggle earns the move. The caret is also where a Paste
+        from this same menu lands, so shifting it on every right-click
+        would change more than spelling; gated on the misspelling tag, a
+        click anywhere else behaves exactly as it did before this existed.
         """
         if n_press != 1 or self._adapter is None:
             return
@@ -492,6 +498,14 @@ class ComposerView(Gtk.Box):
         )
         found, pos = self._view.get_iter_at_location(bx, by)
         if not found:
+            return
+        # libspelling's own notion of "misspelled", rather than our guess at
+        # where a word starts and ends. Untagged means there is nothing to
+        # offer and nothing to move for: correct, not checked yet, or the
+        # word the caret already sits in -- libspelling lifts the squiggle
+        # off that one so you aren't underlined mid-word, and corrections
+        # for it are right already, being read from that same caret.
+        if not pos.has_tag(self._adapter.get_tag()):
             return
         # Empty tuple when nothing is selected, (start, end) when something is.
         bounds = self._buffer.get_selection_bounds()
