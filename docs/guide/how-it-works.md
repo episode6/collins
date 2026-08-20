@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-08. Full change history: git log for this file.
+fork. Last modified: 2026-08-20. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -51,6 +51,18 @@ stores in `~/.claude/.credentials.json` (read-only — Collins never refreshes
 or writes it) and queries Anthropic's usage endpoint every 5 minutes, pausing
 while the window is minimized or the screen is locked.
 
+## Archiving on claude.ai
+
+A session that was remote-controlled from claude.ai, or teleported into from
+there, has a counterpart on the web's session list, and the transcript
+records which: a `bridge-session` line naming the remote id. When you archive
+or restore such a session, Collins mirrors the toggle with the CLI's own
+session API — `POST /v1/code/sessions/<id>/archive` (or `/unarchive`) on the
+same stored OAuth token — from a background thread, after the local archive
+has already landed. Every failure (no counterpart, no token, no network, an
+HTTP error) is logged and swallowed; nothing blocks or reverts the local
+toggle. *Archive on claude.ai too* in Preferences turns it off.
+
 ## App state
 
 Custom names, generated titles, emoji, favorites, archived sessions, project
@@ -77,7 +89,46 @@ only production-grade embeddable terminal on Linux, which is why the app is
 Linux-native. The data layer (session discovery, parsing, state, titles,
 usage, git info) is GTK-free and unit-tested.
 
+## Undocumented APIs and CLI internals
+
+Collins has no SDK to lean on: it reads what the `claude` CLI reads and calls
+what the CLI calls. Some of that is public — the `claude` command line,
+`--resume`, `-p`, `/mcp` and `--mcp-config` — and everything built on those
+(terminals, the editor, panels, the MCP session tools) is on solid ground, as
+are the pull request features, which go through `gh`. The rest is the CLI's
+private surface, in two kinds. Anthropic can change either without notice;
+when something moves, the feature built on it stops working until Collins
+catches up, and the app is written so that's a blank panel or a skipped step,
+never a crash.
+
+### Undocumented APIs
+
+Three features call Anthropic directly, on the OAuth token the CLI stores in
+`~/.claude/.credentials.json` (read, never refreshed or written) and the
+same beta header the CLI sends:
+
+| Feature | Endpoint | When it breaks |
+| --- | --- | --- |
+| Usage panel | `/api/oauth/usage` — what feeds the CLI's `/usage` screen | The panel reports an error and stays empty |
+| Model pickers (footer, composer, Preferences, Generate Icon) | the Models API, which answers to the CLI's token only with its beta header | Falls back to the CLI's built-in aliases (`opus`, `sonnet`, `haiku`) |
+| Archive on claude.ai | `POST /v1/code/sessions/<id>/archive` and `/unarchive` | The local archive still happens; the remote one silently doesn't |
+
+### CLI internals
+
+The larger dependency is on files and commands the CLI keeps for itself —
+formats nobody promised would stay put:
+
+| Feature | Leans on | When it breaks |
+| --- | --- | --- |
+| Session list, titles, status, the footer's model, PR detection, the attachments scan, a spawned sibling's inherited model and permission mode | The JSONL transcript format under `~/.claude/projects/` and its fields (`cwd`, `permissionMode`, `message.model`, `bridge-session`, …) | Rows go blank or misreport; nothing is written, so nothing is lost |
+| Re-attaching to backgrounded sessions | `claude agents --json` and `claude attach` | Opening a detached session resumes a copy instead of reconnecting |
+| Folder trust asked up front | The trust entries the CLI keeps in `~/.claude.json` | The CLI asks its own question at launch, as it would without Collins |
+| Busy / idle detection | The CLI's OSC 9;4 progress reports and the on-screen shape of its prompt | The sidebar's working indicator and the composer's "empty prompt" gate misjudge |
+| Model switching, prompts sent from PR chips | The CLI's `/model` command and the layout of its input box | A switch or a sent prompt lands as typed text instead of taking effect |
+
 ## Architecture
+
+The package is some 100 modules by now; these are the load-bearing ones:
 
 ```
 collins/
@@ -89,23 +140,25 @@ collins/
 ├── sessions.py       # transcript discovery & parsing (pure Python)
 ├── providers.py      # agent CLI abstraction (currently Claude Code)
 ├── state.py          # app-side persistence
-├── terminal.py       # VTE terminal tab + secondary shell panel
+├── terminal.py       # VTE terminal tab + its panels' wiring
+├── composer.py       # the prompt composer text box
+├── editor.py         # the editor panel (GtkSourceView)
+├── docktree.py       # the panel docking tree: strips, splits, moves
+├── mcpserver.py      # the in-app MCP server sessions can call
+├── mcptools.py       # the tools it offers (notify, spawn, show_image, …)
+├── prstore.py        # single source of truth for pull request state (gh)
+├── prview.py         # the in-app pull request page
+├── practions.py      # what a PR offers (merge, review, …) and the gh calls
+├── statusicon.py     # the status icon: a StatusNotifierItem over D-Bus
+├── traymodel.py      # what the icon shows (badge, menu) — toolkit-free
+├── caffeine.py       # Caffeine Mode: inhibit sleep while agents work
 ├── titles.py         # auto-generated session titles (local + claude)
 ├── usage.py          # Claude subscription usage fetch/parse
-├── usagepanel.py     # the sidebar usage panel widget
 ├── gitinfo.py        # git branch for the tab footer; is the tree dirty?
-├── prstatus.py       # a session's pull requests and their CI status (gh)
-├── prmenu.py         # the PR list popover and its per-PR actions submenu
-├── practions.py      # what a PR offers (merge, review, …) and the gh calls
-├── panelhistory.py   # persisted panel scrollback
 ├── transcript.py     # tail transcripts for touched files and PR links
-├── switcher.py       # quick-switcher dialog
 ├── dialogs.py        # rename / emoji / confirm / details / MCP dialogs
 ├── prefs.py          # preferences dialog
-├── themes.py         # terminal color palettes
-├── i18n.py           # gettext setup + languages
-├── copylabel.py      # click-to-copy footer labels
-└── formatting.py     # size / timestamp / token / path formatting
+└── …                 # panels, docking, theming, i18n, and the rest
 ```
 
 The source lives on

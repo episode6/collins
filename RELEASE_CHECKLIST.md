@@ -64,9 +64,9 @@ Create 2 PRs (as drafts, per repo convention):
     - Add a new top `debian/changelog` entry:
       `dch -v <NEXT_VERSION> -D UNRELEASED` (or by hand, matching the existing
       entries).
-    - `docs/releases.md`: add a new `### v<NEXT_VERSION> — Unreleased` section
-      atop the changelog, and give the outgoing `v<VERSION>` section its real
-      title and complete notes (this section becomes the GitHub release
+    - `docs/releases.md`: add a new `### v<NEXT_VERSION> — UNRELEASED` section
+      atop the changelog, and give the outgoing `v<VERSION>` section its ship
+      date (`### v<VERSION> — YYYY-MM-DD`) and complete notes (this section becomes the GitHub release
       notes).
     - Mirror the outgoing release into the released-version files so main's
       copies stay current once it ships: add the `<release
@@ -76,8 +76,8 @@ Create 2 PRs (as drafts, per repo convention):
       see `packaging/aur/README.md`).
 - `[VERSION] Release v<VERSION>` points at the new release branch
     - Make the same outgoing-release edits as above: finalize the
-      `docs/releases.md` section (real title, all changes since the last
-      release documented), metainfo `<release>` entry, AUR `pkgver`.
+      `docs/releases.md` section (ship date in the heading, all changes since
+      the last release documented), metainfo `<release>` entry, AUR `pkgver`.
     - Verify `pyproject.toml` / `__init__.py` / `debian/changelog` already
       agree on `<VERSION>` — no version change expected; main carried the
       right version at cut time.
@@ -98,7 +98,7 @@ Create 2 PRs (as drafts, per repo convention):
 1. From the up-to-date release branch:
    `./scripts/ship-release.py --output /tmp/release-result.json`
    (`--dry-run` first to eyeball the notes). It verifies the version copies
-   agree, refuses a still-`Unreleased` changelog section, and creates the
+   agree, refuses a still-`UNRELEASED` changelog section, and creates the
    GitHub release + tag `v<VERSION>` pointing at the release branch, with
    notes extracted from `docs/releases.md`.
 2. The tag push triggers `.github/workflows/release.yml`:

@@ -32,13 +32,26 @@ and *Delete permanently* actions, both behind a confirmation. See
 
 ## Does anything leave my machine?
 
-Collins makes no network calls of its own and talks to no third parties.
-Everything goes through the `claude` CLI and login you already have: resuming
-sessions runs `claude` in a terminal, auto-titling summarizes a new session's
-first prompt via a headless `claude -p` run (pre-existing sessions are titled
-locally, and the toggle is in Preferences), and the usage panel queries
-Anthropic's usage endpoint with the CLI's own stored token — read-only, never
-refreshed or written.
+Collins talks to no third parties. Everything goes through the `claude` CLI
+and the login you already have: resuming sessions runs `claude` in a
+terminal; auto-titling and icon generation run headless `claude -p` jobs
+(pre-existing sessions are titled locally, and both have toggles in
+Preferences); and three things call Anthropic directly with the CLI's own
+stored token — read-only, never refreshed or written: the **usage panel**,
+the **model pickers** (which list the models your login can use), and the
+**archive mirror**, which archives a session's claude.ai sibling when you
+archive it here (*Archive on claude.ai too*, on by default). Pull request
+features go through the GitHub CLI (`gh`) and your login there.
+
+## What can break when Claude Code updates?
+
+The parts of Collins that read the CLI's undocumented internals — its
+transcript format, its credentials file, the usage and session-archive
+endpoints, its `agents --json` listing, and its trust records. Anthropic can
+change any of these without notice, and when one moves the feature built on
+it stops working until Collins catches up; the app is written so that's a
+blank panel or a skipped step, not a crash. The list is kept in
+[How It Works](/guide/how-it-works#undocumented-apis-and-cli-internals).
 
 ## Do I need an API key?
 

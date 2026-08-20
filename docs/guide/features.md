@@ -1,160 +1,74 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-17. Full change history: git log for this file.
+fork. Last modified: 2026-08-20. Full change history: git log for this file.
 -->
 
 # Features
 
+::: warning Three features use undocumented Anthropic APIs
+The **usage panel**, the **model pickers**, and **archiving on claude.ai**
+call endpoints the `claude` CLI uses for itself and doesn't document, on the
+CLI's own login. They can change or break with any CLI release; each is built
+to fail quietly when that happens. Details, and the CLI internals the rest of
+the app reads, are in
+[How It Works](/guide/how-it-works#undocumented-apis-and-cli-internals).
+:::
+
 ## Sidebar
 
 - **Every session** under `~/.claude/projects/`, **grouped by project** with
-  collapsible headers (and one header-bar toggle that collapses every group, or
-  opens them all again). Which projects are expanded is remembered across
-  restarts.
-- **Drag a project header** up or down to rearrange projects; the order is
-  yours and persists (new projects join the list alphabetically).
+  collapsible headers (plus a collapse-all/expand-all toggle). Which projects
+  are expanded is remembered across restarts, and **dragging a project
+  header** reorders the projects — the order is yours and persists.
 - A **Favorites** section pinned on top — star any session to move it there.
-- **Compact single-line rows**: name, relative time, status — with an optional
-  second line showing the project folder path (Preferences → *Show folder
-  path*). Within a project, sessions sort by creation time, newest first, so
-  rows don't jump around as sessions produce output.
-- **Row actions on hover** — pointing at a row swaps its timestamp for its
-  buttons, so a row shows either when it last ran or what you can do with it:
-  **archive** on every row, preceded by **stop** (exit the agent and close its
-  tab) and **background** (detach with `/bg`, leaving it running) on the
-  sessions that have a tab open.
-- **A pull request mark ahead of the title**, on every session that has opened
-  one: GitHub's own iconography, with everything that session's PRs amount to
-  read into a single mark. The base says the least settled state among them
-  (grey **draft**, green **open**, purple once they have all **merged**, red
-  once they have all been **closed**) and
-  the badge on its corner says the loudest thing left to do — a red **✗** for a
-  failed check or a conflicting branch, an amber **⚠** for comments waiting on
-  a reply, an amber **●** for checks still running, and a green **✓** only when
-  every live PR has passed everything. Hovering names each PR.
-  **Right-clicking the mark** always opens the same list (and the same per-PR
-  actions) the tab footer's caret shows — or, when the session has just the one
-  pull request, that PR's actions directly, since a list of one only ever leads
-  to the same place.
-  **A plain click on the mark jumps to the session's tab** — raising the window
-  it is in, if that is another one — and opens its most recently opened PR's
-  page there, beside the terminal. Only a session with no tab open answers a
-  plain click with the list instead: there is nowhere to jump to yet, so the
-  click falls back to what a right-click does. The tooltip says which of the
-  two you are about to get.
-- **Refresh** (the header's ↻) re-reads the session list *and* every listed
-  session's pull requests: each one's checks, conflicts and unanswered
-  comments, plus a **branch lookup** that picks up PRs opened by hand, which no
-  transcript would ever mention. Archived sessions are left out of it. The
-  button turns into a spinner while it works, since that part is `gh` over the
-  whole panel. **Collins runs that sweep once by itself, a few seconds after
-  launch**, so the marks start the day current instead of as the last run left
-  them — turn it off with *Refresh pull requests at launch* in Preferences.
-  Marks are restored from the last run either way, so the panel reads
-  immediately and then settles.
-- **A finished run re-reads its own pull requests**, without anybody pressing
-  anything: the moment a session's agent stops — the same moment its row starts
-  breathing green for output you haven't read — Collins re-asks GitHub about
-  the PRs that session has open, and re-reads any PR page showing beside its
-  tab. That is when the answer changes: the turn that just ended is the one
-  that pushed the branch, opened the PR or replied to the review, so the checks
-  it kicked off and the comments it left show up on the mark instead of waiting
-  for a click. Only the session that finished, and only its status (finding a
-  PR nobody mentioned stays with the refresh buttons); a session that goes
-  quiet twice in a few seconds is only asked once.
-- A **`+` button on every project header** starts a new session in that
-  project; right-click a header for *New session here* and *Archive project*.
-  Projects whose sessions are all archived or favorited still show their header,
-  so the folder stays reachable.
-- **Open a project's folder anywhere else** from that same right-click menu:
-  one row per app you added under Preferences → *Footer apps*, each with its
-  own icon, plus *Open in File Manager* and *Open in Terminal* for whichever
-  apps your desktop nominates for those jobs (`$TERMINAL`,
-  `xdg-terminals.list`, and the system's own `x-terminal-emulator` are
-  honoured, in that order). The Chats group has no folder of its own, so its
-  menu stays as it was.
-- **Open on GitHub**, in that same menu, opens the project's repository page in
-  your browser. It appears only where there is somewhere to go: Collins reads
-  the remotes out of the checkout's own `.git/config` (a worktree's config is
-  the main checkout's), prefers `origin`, and offers nothing at all for a
-  folder that isn't a repository or whose remotes live somewhere other than
-  github.com.
-- **Generate Icon**, in that menu too, asks Claude to design the project a
-  sidebar icon from what's in the folder — its name, top-level files and
-  README. The result is previewed at full size and at the 16px the sidebar
-  actually uses; type an adjustment ("make it blue") and *Regenerate* until
-  it's right. Nothing is written until *Save*, which puts a
-  `project-icon.svg` in the project root — the same file a project can ship
-  by hand to replace the generic folder icon, so commit it and everyone gets
-  it. The *Icon generation model* preference picks which Claude model designs
-  it (default: the newest Sonnet), from a list queried live when Preferences
-  opens.
-- A **search button** that opens a search box across the sidebar header,
-  filtering by name, project, message preview, or session ID, plus a footer
-  showing session, project, transcript-size, and open-tab counts.
-- **Live updates** — sessions appear and reorder as they're created or written
-  to, via a filesystem watch. A just-started session shows a **"New Thread"**
-  placeholder row until the agent writes its transcript.
-- **Quick switcher** (`Ctrl+Shift+K`) — a type-ahead dialog to jump to any
-  session by name, project, preview, or ID.
-- **Running sessions are filled in**: a session with a tab open gets a fill, so
-  live work stands out from the archive of past sessions — read or unread, the
-  fill is the same. The session shown in the selected tab takes the peach
-  highlight.
-- **A yellow guide line** marks a session **running detached** in the
-  background (`/bg`) — no fill, because there is no tab to return to; reopen
-  the row to re-attach.
-- **A moving barber pole** marks a session in a tab whose agent is **working
-  right now**: the row's guide line turns into blue stripes climbing while
-  output is flowing, and goes still a couple of seconds after the agent stops —
-  so a glance down the sidebar says which sessions are thinking and which are
-  waiting on you. Collins reads the tab's terminal for this, so only sessions
-  with a tab pole; a detached session's yellow line stays put whatever its
-  agent is doing. The pole follows the desktop's animation setting: with
-  animations off, the line simply stays put.
-- **A red guide line** marks a session you **stopped mid-task**, and it keeps
-  the red whether or not a tab is open — until the session gets going again.
+- **Compact single-line rows**: name, relative time, status — with an
+  optional second line for the project folder path. Within a project,
+  sessions sort by creation time, newest first, so rows don't jump around.
+  Pointing at a row swaps its timestamp for its actions: **archive** on
+  every row, plus **stop** and **background** on sessions with a tab open.
+- **Aggregated pull request status on every session**: a mark ahead of the
+  title reads a session's PRs into one glyph — their state, plus whatever
+  needs attention most (failed checks, conflicts, unanswered comments,
+  all green). Clicking jumps to the session's tab and its newest PR's page;
+  right-clicking lists every PR with its actions.
+- **Custom project icons**: a project that ships a `project-icon.svg` in its
+  root directory wears it in the sidebar in place of the generic folder
+  icon — commit one and everyone who opens the project in Collins gets it.
+  **Generate Icon**, in a project header's right-click menu, has Claude
+  design one from what's in the folder — previewed at full size and at the
+  16px the sidebar actually uses, regenerable with an adjustment ("make it
+  blue") until it's right; *Save* writes the file to the project root.
+- **Live updates** — new sessions appear the moment they're created, via a
+  filesystem watch, and existing rows update in place without jumping
+  around. A just-started session shows a **"New Thread"** placeholder row
+  until the agent writes its transcript.
+- A **Claude usage panel** under the session list: your subscription
+  limits — the 5-hour session window, weekly limits, extra-usage credits —
+  as progress bars with reset countdowns, read from the `claude` CLI's own
+  login and refreshed every 5 minutes. Toggle it in Preferences (*Show
+  Claude usage*).
 
-![Sidebar with the Favorites section expanded](/img/sidebar-favorites.png)
-
-The search button (or `Ctrl+Shift+F`) opens the search box across the sidebar
-header, and it filters the whole list as you type — the **X** closes it again
-and restores the unfiltered list:
-
-![Filtering sessions with the search box](/img/sidebar-search.png)
+![The sidebar: each project wearing its own icon, sessions carrying pull request marks](/img/sidebar.png)
 
 ### Auto-generated titles
 
-Unnamed sessions get a **title generated for them**:
-
-- Sessions that already existed when the app launched are titled **locally**
-  (the first 10 words of the initial prompt) — the model never sees your
-  backlog.
-- Sessions created while the app is running have their first prompt summarized
-  to **five words or fewer** by a headless `claude -p` run — the same CLI and
-  login the whole app is based on, no extra credentials needed. The model it
-  asks for is the *Session title model* preference; the default follows the
-  newest Haiku.
-
-A prompt that only points at a pull request ("review PR 183") would summarize
-to a number nobody can read at a glance, so that PR's **title is fetched with
-`gh`** and handed to the model as context — quoted, and flagged as untrusted
-data with any instruction inside it to be ignored. A bare number is looked up
-in the session's own repository; a URL or an `owner/repo#183` reference names
-its own. If the lookup comes back empty (no `gh`, not logged in, a number that
-belongs to an issue), the prompt is summarized without it.
+Unnamed sessions get a **title generated for them**: sessions that already
+existed when the app launched are titled **locally** (the first words of the
+initial prompt — the model never sees your backlog), while sessions created
+while the app runs have their first prompt summarized to **five words or
+fewer** by a headless `claude -p` run — the same CLI and login the whole app
+is based on, no extra credentials needed. A prompt that only points at a
+pull request ("review PR 183") gets that PR's title fetched with `gh` and
+handed to the model as quoted, untrusted context, so the title reads as
+words instead of a number.
 
 Titles are persisted so each is generated only once; right-click →
 **Regenerate name** re-runs the model for one session, and a Preferences
-toggle turns auto-titling off. A manual rename always wins.
-
-Claude names sessions for itself too — automatically, and on an explicit
-`/rename`. The **Follow Claude's own session names** preference (off by
-default) makes the sidebar adopt those names as they land in the transcript,
-whether the session runs in a Collins tab or in a plain terminal. Claude's
-name takes precedence over the generated title; a session renamed by hand in
-Collins still keeps its manual name.
+toggle turns auto-titling off. A manual rename always wins. Claude names
+sessions for itself too — the **Follow Claude's own session names**
+preference (off by default) makes the sidebar adopt those names as they
+land in the transcript.
 
 ### Quick switcher
 
@@ -163,307 +77,248 @@ Enter opens, Esc closes.
 
 ![Quick switcher](/img/quick-switcher.png)
 
-## Custom names, favorites & emoji
+## Sessions & terminals
 
-- Give any session a **custom name** (right-click → *Rename…*, or rename its
-  tab — the name syncs everywhere). The box opens on the name the session goes
-  by now, selected: type to replace it, or click in to fix a single word.
-- **Star** sessions to pin them to Favorites.
-- Add an **emoji** prefix to a tab (right-click a tab → *Set emoji…*, or
-  `Ctrl+Shift+E` for a quick 😊 marker).
+- Clicking a session opens it in an embedded **VTE terminal** running your
+  `$SHELL` with the agent's resume command (`claude --resume <id>`) — in
+  the directory the session **last worked in** (worktree-aware), not just
+  where it started. A session still **running detached** is **re-attached**
+  (`claude attach`) instead of resumed as a copy. Open sessions stay open
+  as you switch between them; the sidebar marks the ones with unread
+  output.
+- A slim **session footer** shows the **model** the session last answered
+  with, the agent's live working directory (click to copy), and the current
+  **git branch** (⎇), plus the terminal-panel buttons.
+- **The model is one click from switching.** The footer's model name is a
+  menu: every model your login can use, fetched live from the Models API
+  with the CLI's own token, the current one marked. Pick another and the
+  session gets the CLI's `/model` command — the footer follows once the
+  agent answers with it. The same menu sits in the composer's chrome, so
+  you can change model halfway through writing a prompt without losing the
+  draft. (Copying the full model id lives in the menu too.)
+- **Pull request chips** trail the branch: one per PR the session has
+  opened, each with its CI or merge mark, and each opening that PR's **page
+  beside the session** on click — a native view of the description, checks,
+  timeline, and diff. The caret beside them lists every PR with its title,
+  `F7` opens the newest one's page, and *Open new pull requests
+  automatically* (Preferences) opens the page by itself — once per PR — the
+  moment a session picks one up.
+- **Right-click a chip** for what to *do* with it: mark a draft **ready for
+  review**, **merge** it — or arm **auto-merge** while its checks are still
+  running (merging asks first, until you turn *Confirm before merging*
+  off) — **ask Claude for a review**, or open it on GitHub. Four items are
+  **sent to the session as a prompt** instead: *address the CI errors* when
+  its CI is red, *resolve conflicts* when the branch no longer merges,
+  *address unresolved comments* when someone else has had the last word, and
+  *open a pull request* when a merged PR leaves uncommitted work in the
+  tree. Those need the session sitting at an empty prompt; where one can't
+  be sent it's greyed out, saying why.
+- All of it runs on the [**GitHub CLI**](https://cli.github.com/) (`gh`) —
+  every question asked with it, every action carried out by it. Without it
+  the chips still appear (the numbers come off the transcript) but stay
+  blank, and a launch that finds `gh` missing or signed out says so —
+  pointing at the install, or at the one login command that fixes it — until
+  you set it up or tick *Don't show this again*.
 
-![Setting a tab emoji, with two sessions open as tabs](/img/tab-emoji.png)
+![A pull request page open beside its session](/img/pr-page.png)
 
-All of this is stored in `~/.config/collins/state.json`. Your
-agents' own session files are never modified.
-
-## Tabs & terminals
-
-- Clicking a session opens a tab with an embedded **VTE terminal** running your
-  `$SHELL` with the agent's resume command (`claude --resume <id>` for Claude
-  Code) — in the directory the session **last worked in** (worktree-aware),
-  not just where it started.
-- If the session is still **running detached** (e.g. after backgrounding it),
-  Collins **re-attaches** to the live process (`claude attach`) instead of
-  resuming a copy.
-- A tab with **unread output** is marked by the tab bar itself; tabs carry no
-  status dot of their own.
-- **Tabs sit in the sidebar's order** — left to right is exactly the session
-  list read top to bottom, whatever order you opened them in, and they
-  re-arrange when the list does (a project dragged to a new spot takes its
-  tabs with it). Chats and replays, which have no row in the list, collect at
-  the right-hand end. The tab bar can't be dragged into a different order for
-  that reason: reorder the projects in the sidebar instead.
-- A slim **tab footer** shows the **model** the session last answered with
-  (Opus 5, Haiku 4.5 — click to copy the full id; it follows a `/model` switch
-  mid-session), the agent's live working directory (click to copy) and the
-  current **git branch** (⎇), plus the terminal-panel buttons.
-- **Pull request chips** trail the branch: one per PR the session has opened,
-  each with its **CI mark** (✓ / ✗ / ●) or GitHub's merge mark, and each
-  **opening that PR's page beside the session on click** — the same view the
-  menu's *View in Collins* reaches. The caret beside them lists every one with
-  its title — the same list a sidebar row's pull request mark opens.
-- That page can also open **by itself**, the moment a session picks a pull
-  request up — turn on *Open new pull requests automatically* in Preferences.
-  It happens **once per pull request per session**, whichever way the PR
-  arrived (the agent opened it, `attach_pr` named it, the first prompt
-  mentioned it), so a page you close again stays closed, and reopening the
-  session later opens nothing.
-- **Right-click a chip** (or left-click a PR in either list) for what to *do*
-  with it: mark a draft **ready for review**, **merge** it — or turn on
-  **auto-merge** while its checks are still running — or **ask Claude for a
-  review** (a `@claude review` comment, for repositories running the Claude
-  Code GitHub action). Every one of those menus starts with the two ways to
-  read the PR — its page in Collins, and **Open on GitHub** — so a PR with
-  nothing left to do still opens onto something rather than onto a gap.
-- **Merging asks first** — the immediate merge, auto-merge and the PR page's
-  **Merge and archive** alike — since it is the one thing here that everybody
-  watching the repository sees and nobody can take back. Once that stops being
-  news, turn **Confirm before merging** off in Preferences and the click
-  merges. **Closing** a pull request unmerged keeps asking either way: it is
-  the one action that ends a PR by throwing its work away.
-- Four of those items are **sent to the session as a prompt** instead of run
-  against GitHub: **address the CI errors** when that PR's CI is red,
-  **rebase / resolve conflicts** when GitHub says the branch no longer merges,
-  **address unresolved comments** when somebody else has had the last word on
-  it, and **open a pull request** once it has **merged** and the terminal's
-  working directory has **uncommitted changes** again — your work landed, and
-  what is in the tree now wants a PR of its own.
-- Those four need the session **open in a tab and sitting at an empty
-  prompt**, so a half-written line of yours is never sent along with one (and
-  a permission dialog, which takes Enter too, is never answered by one). Where
-  it can't be sent, the item is still in the menu — **greyed out, saying
-  why** — because what a pull request offers is a question about the pull
-  request, not about what its terminal happens to be showing.
-- All of that runs on the [**GitHub CLI**](https://cli.github.com/) (`gh`):
-  it is what every question about a pull request is asked with, and what every
-  action here is carried out by. Without it the chips still appear — the
-  numbers come off the session's own transcript — and stay blank, with nothing
-  to do about them. So **a launch that finds `gh` missing or signed out says
-  so**, showing the marks and the actions it is holding back, and pointing at
-  the install (or, when it is only the login that's missing, at the one
-  command that fixes it). It comes back on the next such launch — installing
-  something is a thing to do later, not while a dialog is up — until you tick
-  **Don't show this again**, which is the only thing that retires it. Setting
-  `gh` up retires it too, by leaving nothing to say.
-- **Rename** tabs, **copy the session ID**, or **fork** a session
-  (`--fork-session`) from the right-click menu.
-- **Shift+Enter** inserts a newline in the agent's prompt.
-- **In-terminal search** (`Ctrl+Shift+G`) over the scrollback.
+- **Rename** a session, **copy its ID**, or **fork** it (`--fork-session`)
+  from the right-click menu. **Shift+Enter** inserts a newline in the
+  agent's prompt, and **in-terminal search** (`Ctrl+Shift+G`) covers the
+  scrollback.
 - **Easy copy & paste** (on by default): plain `Ctrl+C` **copies whenever
   text is selected** — otherwise it interrupts the agent as usual — plain
   `Ctrl+V` pastes, and right-click opens a Copy / Paste / Select All menu.
   No `Ctrl+Shift` finger-twisting just because it's a terminal; the classic
-  `Ctrl+Shift+C` / `Ctrl+Shift+V` always work, and the mode can be toggled
-  in Preferences.
-- Closing a tab asks the agent to **exit cleanly** (Claude Code's
-  `Ctrl+C` `Ctrl+C`) in the background first, rather than terminating it.
-  The quit keystroke rather than a typed `/exit`, because it works from
-  whatever the agent happens to be showing — a permission prompt, the trust
-  dialog, its session list — and not just from an empty prompt. For agents that support
-  it, the close dialog also offers to **background the session** instead
-  (Claude Code's `/bg`) — the agent keeps running detached, and reopening the
-  session re-attaches to it. The same option appears when closing the whole
-  window with active sessions, which hands the sessions over **one at a time**
-  so each is correctly paired with the background agent it becomes.
-- While a session tab is focused, two header buttons act on it directly,
-  skipping the confirmation dialog: one **exits** the session and closes the
-  tab, the other **backgrounds** it (shown only for agents that support
-  detaching) and closes the tab.
-- Backgrounding is **greyed out until it is safe**: a brand-new thread can't be
-  backgrounded until Collins knows its session id, and no session can be
-  backgrounded while another handoff is still waiting for the id its agent
-  moved to. Both windows last a second or two; the tooltip says which one you
-  are in. Backgrounding before then would detach an agent that nothing could
-  find its way back to.
-- The **tab bar can be hidden** with a header toggle — tabs and sessions keep
-  running. While it is hidden the **window title becomes the active tab's
-  title**, so the header (and alt-tab, and the dock) still names the session
-  you are looking at; showing the tab bar again restores "Collins".
-- On the next launch the app **reopens the session you had focused** when you
-  closed the window, and the window comes back at its last size.
-- The sidebar is **resizable** (drag the divider) and its width is remembered.
+  `Ctrl+Shift+C` / `Ctrl+Shift+V` always work.
+- Closing a session asks the agent to **exit cleanly** (Claude Code's
+  `Ctrl+C` `Ctrl+C`, which works from whatever the agent happens to be
+  showing) in the background first — or the dialog offers to **background
+  the session** instead (`/bg`), leaving it running detached to re-attach
+  to later. While a session is focused, two header buttons do the same
+  directly, skipping the dialog. Backgrounding is greyed out for the second
+  or two before a brand-new session's id is known — the tooltip says so.
+- **Closing the window doesn't have to end anything.** The close-window
+  dialog's third answer, **Keep Running (Hide Window)**, hides the window
+  and leaves every session exactly as it is — panels, scrollback and all.
+  The status icon's *Show Collins*, a session's notification, or simply
+  launching Collins again brings it back. Where a status icon is present
+  it's the dialog's default answer; the **When quitting with running
+  sessions** preference can skip the dialog entirely (always ask, exit,
+  background, or hide), and the menu's explicit Quit always really quits.
+- The window title names the focused session, and the sidebar is
+  **resizable**, its width remembered. On the next launch the app opens
+  with no session — or, with **Reopen the last session** on (Preferences →
+  Startup), with the one you had focused — and the window comes back at
+  its last size.
+
+## Prompt composer
+
+A real text box for writing prompts — multi-line, spell-checked, floating
+over the agent's terminal — for every prompt that outgrows the CLI's
+one-line input:
+
+- **Start typing and it's there** (on by default): type at an agent's empty
+  prompt and the composer opens with what you typed already in it. The CLI's
+  own `/`, `!`, `#` and `@` keep their keys, and so do dialogs and menus.
+  `Ctrl+.` opens it deliberately; pressed again it closes the composer and
+  puts the draft back in the agent's own input box, so nothing you wrote is
+  ever stranded. A semi-transparent **composer button** on the corner of
+  each agent terminal opens it by mouse.
+- **Send on Enter** — or flip *Enter sends composer text* off to make Enter
+  a newline and `Ctrl+Enter` the send. `Shift+Enter` is always a newline.
+  The box is drawn in the terminal's own font on purpose: the text is about
+  to *be* terminal text.
+- **Drop images and files straight in.** Files land in the prompt as
+  mentions; images get a strip of preview thumbnails above the text (click
+  one to inspect it full-size) and go to the agent with the prompt.
+- **Floating or docked.** The composer floats translucent over the
+  terminal; its dock button turns it into a panel below the terminal
+  instead, where it stays for that session's later visits. The *Composer in
+  new sessions* preference can open it by itself the moment a session
+  starts.
+- **Model button**: the composer names the model the session is answering
+  with, and clicking it opens the same switch menu as the footer's — pick a
+  different model mid-draft and carry on writing.
+
+![The composer floating over an agent terminal](/img/composer.png)
 
 ## Terminal panel
 
-Every tab has a second, plain-shell terminal area — no agent auto-launched —
-that lives below or beside the agent terminal, with **tabs of its own**:
+Every session has a second, plain-shell terminal area — no agent
+auto-launched — below or beside the agent terminal, with **tabs of its own**:
 
-- Toggle it with `Ctrl+J` or the buttons in the tab footer; `Ctrl+K` clears it
-  (screen and saved history). **`Ctrl+;`** sends the tab you're working in to
-  the panel's other side — bottom ↔ right — and pressing it again brings the
-  tab back; it's the keyboard's way to the rotate button in the tab row, and
-  works on a panel tab of any kind, not just shells.
-- Opening and swapping both **join what's already there**: if a strip of tabs
-  already sits on the side the panel is headed for — a PR docked to the right,
-  with the panel set to open right — the shell opens as another tab in it, and
-  that strip becomes the panel. Only an empty side gets a new strip of its own.
-- The panel's tab row has a **+ button** that opens another shell tab and
-  switches to it; each tab's **✕** closes it (and deletes its saved history),
-  asking first if a command is still running in it. Closing the last tab
-  hides the panel — the footer's terminal button brings it back with a
-  fresh tab.
-- Shells open in the agent's **current working directory** (worktree-aware),
-  and none of the moves below restart them.
-- The tab row's **rotate button** (or `Ctrl+;`) sends the tab you're looking
-  at to the panel's other side — below the terminal to beside it, and back.
-  Any kind of tab rotates, not just shells, and only that one tab moves: its
-  neighbours stay where they are. If a strip already sits on the side it's
-  headed for, the tab joins it rather than carving out another one.
-- The tab row's **overlay button** (between + and rotate) gives the tab
-  you're looking at the *whole* tab: it floats over the agent terminal,
-  every other strip and the editor pane, with a **restore button in its
-  top-left** — or `Esc` — that drops it back into the tab row it came from,
-  at the same position and size. Any kind of tab overlays — a shell to read
-  a long build log, a PR page to read a diff — and nothing about it moves:
-  the page keeps running where it is, its neighbours keep their places, and
-  the strip it came out of waits for it even if that was its only tab.
-  While it's up it owns the keyboard: nothing hidden under it can take
-  focus, so nothing you type lands in the agent's terminal by mistake. The
-  one exception to `Esc` is a shell with a program running in it — `vim`, a
-  pager, anything full-screen gets the key, since it needs it; use the
-  restore button there, or press `Esc` back at the prompt.
-- **Right-click a panel tab to split** — Split Left / Right / Up / Down carves
-  a second strip of tabs on that side and moves the tab into it, so you can
-  keep shells below the terminal *and* beside it at once. The same menu's
-  **Move to** sends a tab to another strip, closing tabs included; a strip
-  whose last tab leaves disappears. Shells keep running through every move.
-- **Right-click the footer's terminal button** to open that same directory —
-  the agent's live one, not the project root — in your desktop's own terminal
-  instead, for the times a window of its own beats a panel. The terminal is
-  whatever `$TERMINAL`, `xdg-terminals.list` or the system's
-  `x-terminal-emulator` nominate (the same pick the sidebar's *Open in
-  Terminal* uses), and the directory is handed to it on its own command line,
-  so an already-running terminal opens where you asked rather than wherever it
-  last was.
+- Toggle it with `Ctrl+J` or the buttons in the session footer; `Ctrl+K`
+  clears it (screen and saved history). Shells open in the agent's **current
+  working directory** (worktree-aware).
+- The tab row's **+** opens another shell tab; each tab's **✕** closes it,
+  asking first if a command is still running. Typing `exit` closes a tab
+  too, and closing the last one hides the panel.
+- The **rotate button** (or `Ctrl+;`) sends the tab you're looking at to
+  the panel's other side — below the terminal to beside it, and back.
+  **Right-click a panel tab to split** (Left / Right / Up / Down) or **move
+  it** to another strip, so you can keep shells below the terminal *and*
+  beside it at once. Shells keep running through every move.
+- The **overlay button** gives the tab you're looking at the *whole* tab: it
+  floats over the agent terminal, the other strips and the editor — a shell
+  to read a long build log, a PR page to read a diff — with a restore
+  button (or `Esc`) that drops it back where it came from. While it's up it
+  owns the keyboard, so nothing you type lands in the agent's terminal by
+  mistake.
 - Scrollback **persists across restarts, per panel tab** — reopen a session
-  and the panel picks up where it left off, every tab in place, with a
-  "restored panel history" marker.
-- Each session remembers its panel's open state, position, and size; the
-  last-used position and size also become the default for new panels.
-- The strip that **pages** dock into — a PR view, the attachments list, a
-  docked composer — remembers its own size the same way, kept apart from the
-  shells' panel: drag a PR page wider and the next PR you open (in any
-  session) is that wide, while `Ctrl+J`'s panel stays where you left it.
-  Those pages share a strip, so they share one size per side.
-- The **attachments panel** — the gallery of pictures a session has been
-  shown, which `Ctrl+'` and the handle on the terminal's right edge raise —
-  docks itself there the first time a session shows a picture, on a screen
-  wide enough to spare the column: past the terminal's *Max width* the
-  terminal has stopped growing, so the room is gutter it was never going to
-  use. It happens **once per session tab**, so a panel you close again stays
-  closed, and it never takes the keyboard from the agent. Turn it off with
-  *Show the attachments panel automatically* in Preferences → Panels.
-- Typing `exit` in a panel tab closes that tab (closing the last one hides
-  the panel).
-- Closing a session tab while a command is running in any of its panel's
-  shells — even a hidden panel's — asks for confirmation before the command
-  is killed.
+  and the panel picks up where it left off. Each session remembers its
+  panel's open state, position, and size; the strip that **pages** dock
+  into (a PR view, the attachments gallery, a docked composer) remembers a
+  size of its own, kept apart from the shells'.
+- **Right-click the footer's terminal button** to open the agent's live
+  directory in your desktop's own terminal instead, for the times a window
+  of its own beats a panel.
 
 ![The terminal panel below an agent session](/img/terminal-panel.png)
+
+## Attachments panel
+
+Pictures flow through a session constantly — screenshots the agent takes,
+images it shows you, files you drag in — and the moment they scroll off the
+terminal they're gone. The **attachments panel** keeps them: a per-session
+gallery of everything the session has shared, on `Ctrl+'` or the slim
+handle at the terminal's right edge.
+
+- **Every picture, from every source**: images the agent shows with
+  `show_image`, the ones it mentions by path or URL in its replies, and the
+  files it hands over with its "send file" tool — those can be any kind of
+  file, shown as a typed icon with the filename. Captions ride along where
+  there was one; a picture found in prose carries a snippet of the text
+  around it instead.
+- **Reads like a chat**: oldest at the top, newest at the bottom. The handle
+  wears a badge when something new has arrived that you haven't looked at.
+- **Click a picture** to open it full-size in the lightbox, where the arrow
+  keys walk the gallery; a file opens in your desktop's default app.
+  **Right-click** a row for *Open With…*, *Show in Folder*, *Copy Path*,
+  and *Remove From List*. A file that's no longer on disk stays listed, and
+  says so.
+- **Floating or docked.** The panel slides in over the terminal; its dock
+  button makes it a panel tab beside the terminal instead, where it can be
+  split and moved like any other. It **docks itself** the first time a
+  session shows a picture, when the window is wide enough to spare the
+  column (*Show the attachments panel automatically*, in Preferences).
+- The list **persists per session** — reopen a session weeks later and its
+  gallery is exactly as you left it. Forked sessions inherit the original's.
+
+![The attachments panel docked beside a session: three cat photos with their captions, two files between them](/img/attachments-panel.png)
 
 ## Editor panel
 
 A syntax-highlighted code editor lives beside the agent terminal — the
 "read and fix what the agent just did" surface, not a general-purpose IDE:
 
-- Toggle it with `F8` or the footer icon (a page with a folded corner,
-  between the footer apps and the terminal-panel button) — one editor per
-  tab, full-height in a right-hand column.
-- A **project file tree** rooted at the directory the session is working in
-  (the tab's, to begin with); click a file to open it in a tab strip of its
-  own, with a dot marking unsaved changes.
-- **It follows the session.** When the agent steps into a worktree — or
-  anywhere else inside the same repository — the editor moves with it: the
-  tree, quick open and the open tabs all land on the same files in the new
-  directory. Clean buffers follow silently. Anything with unsaved changes
-  asks first, per file: keep editing where you are, take your edits across to
-  the new copy, or open that copy and drop them. Declining leaves everything
-  where it is and puts the move one click away in a banner. A session that
-  moves somewhere *outside* the project only ever offers — that would swap
-  out every open file, so it is never done for you.
-- **Quick open** (`Ctrl+Shift+O`): fuzzy-find any file in the project by
-  typing a few letters of its name or path — no digging through the tree.
-- **Rename** a file or folder from its right-click menu in the tree, with the
-  extension left out of the selection so typing replaces the name and keeps
-  the suffix. A renamed file that is open keeps its tab, its cursor and its
-  unsaved changes — the buffer follows the file rather than being reopened —
-  and so does everything open inside a renamed folder. Renaming only ever
-  renames in place: a name with a path in it is refused, as is one already
-  taken.
-- **Copy, cut and paste** files and folders from the same menu — into a
-  folder, or into the empty space below the tree for the project root. It is
-  the system clipboard, so a copy taken here pastes into Files (and one taken
-  there pastes in here, cut included). Nothing is ever overwritten: a name
-  already taken lands as *name (copy)* beside it, and a folder can't be pasted
-  into itself. A cut file that is open keeps its tab, exactly as a renamed one
-  does.
-- **Right-click a tab** for the bulk closes: *close other tabs*, *close tabs
-  to the right*, *close all tabs*. Anything with unsaved changes still asks
-  before it goes, one file at a time, and keeping one doesn't keep the rest.
+- Toggle it with `F8` or the footer icon — one editor per session, full-height
+  in a right-hand column, with a **project file tree** rooted where the
+  session is working and **quick open** (`Ctrl+Shift+O`) to fuzzy-find any
+  file in the project.
 - An **Agent files** list pinned above the tree: the files this session's
-  agent has most recently written or edited, newest first, one click from
-  the change it just made. It appears the moment the agent first writes a
-  file.
-- In a **chat tab**, a tool chip that names a file (an edit, a write, a
-  read) becomes a link once the call's details arrive — click it to open
-  that file in the matching session tab's editor.
-- Real editing: line numbers, current-line highlight, bracket matching,
-  undo/redo, and **180 languages'** worth of syntax highlighting via
-  GtkSourceView, the same engine behind GNOME Text Editor and Builder.
-- **Save** with `Ctrl+S` or the status row's save button; **find** in the
-  current file with `Ctrl+F`.
-- **External changes are the normal case**, not the edge case — the agent is
-  rewriting these files while you look at them. A clean buffer reloads
-  silently, cursor and scroll preserved; a buffer with your own edits gets a
-  banner instead, so nothing is overwritten without asking.
-- The color scheme **follows the app's light/dark setting** by default, or
-  pick one of GtkSourceView's bundled schemes in Preferences, along with the
-  editor's font and whether the file tree shows hidden files.
+  agent has most recently written or edited, newest first — one click from
+  the change it just made.
+- **It follows the session.** When the agent steps into a worktree, the
+  tree, quick open and the open tabs all move with it — clean buffers
+  silently, anything with unsaved changes only after asking, per file.
+- Real editing: line numbers, bracket matching, undo/redo, find in file
+  (`Ctrl+F`), save (`Ctrl+S`), and **180 languages'** worth of syntax
+  highlighting via GtkSourceView — the engine behind GNOME Text Editor. The
+  tree's right-click menu covers rename, copy, cut and paste, through the
+  system clipboard, so files round-trip with your file manager.
+- **External changes are the normal case** — the agent is rewriting these
+  files while you look at them. A clean buffer reloads silently, cursor and
+  scroll preserved; a buffer with your own edits gets a banner instead, so
+  nothing is overwritten without asking.
 - Each session remembers which files were open, the cursor in each, and the
-  panel's width — restored the next time you reopen it.
-- **Pop it out** to a second monitor with the status row's detach button
-  (rightmost): the whole editor — open files, cursors, unsaved changes —
-  moves into a window of its own, and the in-tab panel disappears until it
-  comes back. Dock it back with the window's headerbar button or the tab's
-  footer icon (while the editor is popped out, one click means "bring it
-  back"). Closing the window instead just puts the editor away — the files
-  stay open, but the panel doesn't reappear in the window behind it until
-  you ask for it. One editor per tab, in one place at a time; the popped-out
-  window remembers its own size.
+  panel's width — and the whole editor can **pop out** into a window of its
+  own on a second monitor, then dock back with one click.
 
-## Claude usage panel
-
-Below the session list, a **Claude usage** panel shows your subscription
-limits — the 5-hour session window, weekly limits, and any extra-usage
-credits — as progress bars with "resets in…" countdowns. It reads the OAuth
-token the `claude` CLI already stores (never modifying it), refreshes every 5
-minutes, and pauses while the window is minimized or the screen is locked.
-Toggle it in Preferences (*Show Claude usage*).
+![The editor panel beside an agent session](/img/editor-panel.png)
 
 ## Knowing what's happening
 
 - **Desktop notifications the session raises itself** — the agent calls
-  Collins' `notify_user` tool when it wants you back (see [Tools a session can
-  call](#tools-a-session-can-call)), and the notification is titled with the
-  session, so clicking it jumps straight to that tab. It wears the project's
-  own `project-icon.svg` where the project ships one (the same icon its
-  sidebar header shows), so a stack of notifications reads apart by project at
-  a glance. It also flags that session's sidebar row, so the ask outlives the
-  notification: miss the popup and the row is still holding it. Nothing is
-  guessed from a quiet terminal: a notification means the agent asked for you.
-- **Session details** (right-click → *Details…*): message and tool-call counts,
-  models used, token totals, timestamps, transcript size — plus a **recent
-  activity** peek of the last messages, so you can identify a session without
-  resuming it. It also lists the **MCP servers** available to the project and
-  which ones the session actually used.
+  Collins' `notify_user` tool when it wants you back (see [Tools a session
+  can call](#tools-a-session-can-call)), and the notification is titled with
+  the session, so clicking it jumps straight to that tab. It wears the
+  project's own `project-icon.svg` where the project ships one, and it flags
+  the session's sidebar row too, so a popup you miss is still waiting in the
+  list. Nothing is guessed from a quiet terminal: a notification means the
+  agent asked for you.
+- **Session details** (right-click → *Details…*): message and tool-call
+  counts, models used, token totals, timestamps, transcript size — plus a
+  **recent activity** peek of the last messages, so you can identify a
+  session without resuming it, and the MCP servers it used.
 
 ![Session details dialog](/img/session-details.png)
 
-- **MCP servers browser** (menu → *MCP servers*): a read-only view of every MCP
-  server configured in `~/.claude.json`, global and per-project.
+- **MCP servers browser** (menu → *MCP servers*): a read-only view of every
+  MCP server configured in `~/.claude.json`, global and per-project.
 
 ![MCP servers browser](/img/mcp-servers.png)
+
+### Status icon
+
+Collins puts a **status icon** in the top bar, so the sessions can be
+watched — and reached — without the window:
+
+- Its menu **jumps to any open session** by name, brings a hidden window
+  back (*Show Collins*), opens a new window, or quits — and Quit from here
+  really quits, hidden windows and all.
+- The icon **wears an unread badge**: the number of sessions that finished a
+  run nobody has looked at yet — the sidebar's green pulse, counted. A
+  flagged session that goes back to work drops out of the count while the
+  run lasts (it isn't waiting on you) and comes back the moment the turn
+  ends. Sessions that are merely *working* never light the badge, but the
+  tooltip carries both counts for the curious.
+- With no session tabs open anywhere the icon goes passive, and the desktop
+  may hide it entirely.
+- It's a StatusNotifierItem — the modern tray protocol — so on GNOME it
+  needs an AppIndicator extension (Ubuntu ships one enabled). Preferences →
+  *Show status icon* is the switch, and it says so when nothing on the
+  desktop can show one.
 
 ## Tools a session can call
 
@@ -471,184 +326,141 @@ Every session Collins starts is offered a small MCP server of Collins' own —
 `collins` in the session's `/mcp` list — so the agent can drive the window it
 is running in:
 
-- **`notify_user(message)`** — a desktop notification titled with the session,
-  which flashes the session's tab and sidebar row on the way out and raises
-  that tab when clicked. The row is left flagged too — its guide line breathes
-  green once the agent stops — so a notification you missed is still waiting
-  in the sidebar when you get back.
+- **`notify_user(message)`** — a desktop notification titled with the
+  session; clicking it raises the tab, and the sidebar row stays flagged so
+  a notification you missed is still waiting when you get back.
 - **`set_session_title(title)`** — the session names itself, in the tab and
   the sidebar, and renames itself again when the work pivots.
 - **`open_in_editor(path, line?)`** — put a file on your screen in the
   session's own editor pane, instead of hoping you click a path in the
   terminal.
 - **`show_image(path)`** — show a screenshot, plot, or render in the in-app
-  lightbox. The argument can also be an **`http(s)` URL**: Collins downloads
-  it (into your cache directory, cleared a day later) and shows the copy, so
-  the agent doesn't have to spend a `curl` and a temp file on a picture that
-  is already on the web.
+  lightbox. An `http(s)` URL works too: Collins downloads it and shows the
+  copy.
 - **`attach_pr(url)`** — put a pull request on the session's footer and
-  sidebar row, live CI status and all. Collins links the PRs that show up in
-  a session's own output by itself; this is for one it can't see — a PR
-  opened by a subagent, opened outside the session, or one the session is
-  reviewing rather than authoring.
-- **`read_terminal(terminal?, lines?)`** — read the terminal panel's tabs:
-  each shell's text and scrollback, exactly as you see it, so "the error
-  over there" is something the agent can just look at instead of asking you
-  to paste it. Reading is all it does — and it reads your side of the shell
-  too, everything you typed included.
-- **`run_in_terminal(command, terminal?)`** — type a command into one of the
-  panel's shells and run it, visibly, where you can watch it, interact with
-  it, and keep the shell afterwards — a dev server, a REPL, a build you asked
-  to have running in your terminal. It picks an idle tab and never types into
-  one with a command still running; when there's nothing idle (or no panel at
-  all) it opens a new tab, and it brings the shell on screen without moving
-  your keyboard focus.
+  sidebar row, live status and all — for a PR Collins can't spot on its
+  own, like one opened by a subagent, or one the session is reviewing
+  rather than authoring.
+- **`start_session(prompt, …)`** — spawn a **sibling session**: a new agent
+  in a background tab, handed a prompt to begin on, working in parallel
+  while the caller keeps going. It never takes your tab selection or
+  keyboard — it turns up as a new row in the sidebar, rings and flashes if
+  it needs you, and unless told otherwise runs on the **model and
+  permission mode its caller is using right now** (one exception: a
+  bypass-permissions caller's siblings come up in acceptEdits, so an
+  unattended session can't mint more of itself). Spawned sessions get
+  these same tools, so they can spawn siblings of their own.
+- **`read_terminal(terminal?, lines?)`** — read the terminal panel's tabs,
+  text and scrollback, exactly as you see it — so "the error over there" is
+  something the agent can just look at instead of asking you to paste it.
+- **`run_in_terminal(command, terminal?)`** — type a command into an idle
+  panel shell and run it, visibly, where you can watch it, interact with
+  it, and keep the shell afterwards — a dev server, a REPL, a long build.
 
 Each tool asks for permission the first time a session calls it, like any
-other MCP tool. They only ever touch Collins' own windows: nothing is
-written to your repo, and the only thing ever read back to the agent is
-what `read_terminal` is for — the terminal panel's own text. Two reach past
-the window, and only when a session hands them something to reach for:
-`attach_pr` asks `gh` how the named PR is doing — the same fetch the
-footer's refresh button runs — and `show_image` given a URL fetches it, a
-plain GET with none of your cookies or credentials, capped at 25 MB and ten
-seconds. Switching either tool off stops its half.
-
-**Each one has its own switch** in Preferences → *Session tools*, all on by
-default. A tool switched off isn't offered to the sessions Collins starts
-from then on — it simply isn't in their `/mcp` list — and a session that was
-already running when you flipped the switch is refused if it calls it anyway.
-Switching one back on reaches a session the next time it starts, since the
-tool list is handed over once at startup.
+other MCP tool, and **each has its own switch** in Preferences → *Session
+tools* (all on by default): a tool switched off isn't offered to the
+sessions Collins starts from then on, and a session already running when you
+flipped the switch is refused if it calls it anyway.
 
 ## Starting sessions
 
-- **New session** (tab icon in the header, or `Ctrl+Shift+T`) starts a fresh
-  agent session in the **visible session's project** — no dialog needed. With
-  no session visible, it asks for a folder.
-- **Advanced new session** (New Session menu): choose a **model**, a
-  **permission mode**, or an **extra directory** (`--add-dir`).
-- **Continue** the most recent session in a folder (`claude --continue`).
-- **Worktree launches fall back to the project itself.** With *Start new
-  sessions in a git worktree* on, a launch the agent can't cut a worktree for
-  — a repository with nothing committed yet, say — used to leave the tab at a
-  bare shell prompt. Now the tab says so and starts the session in the project
-  directory instead, so a new session always ends up being a session.
-- **Folder trust is asked once, up front**: the first launch in a project the
-  agent doesn't trust yet asks *Do you trust this folder?* before anything
-  starts. Decline and nothing happens at all — no tab, no project in the
-  sidebar. Accept and the answer is recorded where the agent reads it, so the
+- **New session** (tab icon in the header, or `Ctrl+Shift+T`) starts a
+  fresh agent session in the **visible session's project** — no dialog
+  needed; with no session visible, it asks for a folder. The **Advanced**
+  entry picks a model, a permission mode, or an extra directory
+  (`--add-dir`), and **Continue** resumes the most recent session in a
+  folder (`claude --continue`).
+- With *Start new sessions in a git worktree* on, each new session works in
+  a fresh worktree of its project, so it won't see uncommitted local
+  changes; a launch that can't cut one (a repository with nothing committed
+  yet, say) says so and starts in the project directory instead.
+- **Folder trust is asked once, up front**: the first launch in a project
+  the agent doesn't trust yet asks *Do you trust this folder?* before
+  anything starts, and records the answer where the agent reads it, so the
   question isn't asked a second time inside the terminal. Trust covers
-  everything under the folder, including the worktrees the agent creates
-  there, and folders the agent already trusts (or that sit inside one) start
-  as they always have, without a dialog.
+  everything under the folder, worktrees included.
 
 ## Bulk actions & housekeeping
 
 - **Select mode** (sidebar menu → *Select multiple sessions*) to open, star,
   archive, or trash many sessions at once.
-- **Archive** sessions you're done with (kept on disk, toggle "Show archived"
-  to see them and restore any of them); archiving a session with an open tab
-  closes the tab too. Whole **projects** can be archived from their header's
-  right-click menu.
-- **Delete archived sessions…** (sidebar menu) clears the lot in one go: every
-  session the sidebar keeps out of sight — archived by hand, archived with its
-  whole project, or replaced by a backgrounded fork — has its transcript moved
-  to the trash. Archiving is cheap and the pile grows quietly,
-  so the confirmation spells out the damage first: how many transcripts, in
-  which projects, and how many of those projects lose *every* session they
-  have. Greyed out when nothing is archived.
-- **Keeping a project after its sessions go**: any dialog that would empty a
-  project out offers *"Keep the N emptied project(s) in the sidebar"* (checked
-  by default). Kept projects stay as empty headers with their folder, so
-  **New session here** still works — they're remembered across restarts, and
-  the header's right-click menu can **Remove project from sidebar** again. A
-  project that gets real sessions back simply keeps its place.
+- **Archive** sessions you're done with (kept on disk; toggle "Show
+  archived" to see and restore them). Archiving a session with an open tab
+  closes the tab too, and whole **projects** can be archived from their
+  header's right-click menu.
+- **Archiving reaches claude.ai too** (on by default — Preferences →
+  *Archive on claude.ai too*): a session you've remote-controlled from
+  claude.ai, or teleported in from it, has a sibling on the web's session
+  list, and archiving (or restoring) it here archives (or restores) that
+  sibling as well, so the two lists stay in step. Best-effort: archiving
+  locally never waits on the network, and a failure over there is logged,
+  not surfaced. (Uses an undocumented CLI endpoint — see
+  [How It Works](/guide/how-it-works#archiving-on-claude-ai).)
+- **Delete archived sessions…** (sidebar menu) clears the lot in one go,
+  and the confirmation spells out the damage first: how many transcripts,
+  in which projects. Any dialog that would empty a project out offers to
+  keep it in the sidebar as an empty header, so *New session here* still
+  works.
 - **Export as Markdown** (right-click) writes a session transcript to a
-  readable Markdown file.
-- **Move a transcript to trash** (recoverable) or **delete it permanently** —
-  the only actions that touch a transcript file, and always behind a
-  confirmation.
-- **Open in [Ghostty](https://ghostty.org)** to resume a session in an external
-  Ghostty window instead of an embedded tab (shown when `ghostty` is on your
-  `PATH`).
+  readable Markdown file. **Move to trash** (recoverable) and **delete
+  permanently** are the only actions that touch a transcript file, and
+  always sit behind a confirmation.
+- **Open in [Ghostty](https://ghostty.org)** resumes a session in an
+  external Ghostty window instead of an embedded tab (shown when `ghostty`
+  is on your `PATH`).
 
 ## Caffeine Mode
 
 The coffee cup at the right of the header keeps the computer awake and the
-screen on while an agent works unattended — click it to toggle, and the cup
-fills while it's on. A plain click turns it on in *Until idle* mode, described
-below.
+screen on while an agent works unattended — click it to toggle; the cup
+fills while it's on.
 
-- **Right-click it for a timer**: *Until idle*, *1 hour*, *2 hours*, *3 hours*,
-  *6 hours*, *12 hours* or *Indefinitely*. Picking a duration turns
-  Caffeine Mode on for that long and turns it off again when the time runs out —
-  so a long build can't leave the machine awake all week because you forgot.
-  *Until idle* carries a tick while it's the mode that's running, so the menu
-  says what a plain click armed; clicking the tick off turns Caffeine Mode off.
-- **Until idle**, the default, hands the deadline to the sessions instead of
-  the clock: as long as at least one open tab is working — the same barber
-  pole the session list shows — the machine stays awake. Five minutes after
-  the last one stops, Caffeine Mode dozes: the machine is free to blank and
-  sleep as usual, but the mode stays armed, and a session picking work back
-  up — tomorrow morning included — takes hold of the machine again. Only
-  clicking the cup off — or its tick in the menu — ends it. Whatever keeps a
-  pole up holds Caffeine Mode
-  with it, including a background process a session left running — a dev
-  server, a long build — but not the servers the agent runs for itself, which
-  are plumbing rather than work. Backgrounded (`/bg`) sessions don't count
-  either: they run with no tab to watch, exactly as their still guide line
-  says.
-- The **time left counts down** just left of the cup while a timer is running.
-  Picking another duration restarts the clock, *Indefinitely* clears it, and
-  turning Caffeine Mode off cancels it. Following the sessions, the countdown
-  appears only once they have all stopped — it's the five minutes left before
-  Caffeine Mode dozes off.
-- **Keep screen on** decides how far "awake" goes. On (the default) holds the
-  screen on as well; off lets the screen blank as usual while the computer
-  still can't sleep — handy for an overnight agent run you don't want lighting
-  up the room. It's in the same right-click menu as the timers, and in
-  Preferences, and flipping it lands on a Caffeine Mode that's already running.
-- Preferences → *Turn on at launch* starts every launch with Caffeine Mode on,
-  and *Turn off after* arms one of the same durations at startup (*Until idle*
-  unless you pick another).
+- **Right-click it for a timer**: *Until idle*, a duration from 1 to 12
+  hours, or *Indefinitely* — so a long build can't leave the machine awake
+  all week because you forgot. The time left counts down beside the cup.
+- **Until idle**, the default, hands the deadline to the sessions instead
+  of the clock: as long as at least one open tab is working — the same
+  barber pole the session list shows — the machine stays awake. Five
+  minutes after the last one stops, Caffeine Mode dozes but stays armed: a
+  session picking work back up — tomorrow morning included — takes hold of
+  the machine again, until you click the cup off.
+- **Keep screen on** decides how far "awake" goes: on (the default) holds
+  the screen too; off lets the screen blank while the computer still can't
+  sleep — for an overnight run you don't want lighting up the room.
+  Preferences can also arm Caffeine Mode at every launch, with a duration
+  of your choice.
 
 ## Multiple windows
 
 Open additional windows from the New Session button's menu or with
-`Ctrl+Shift+N`. Windows share one session list and state, so favorites, names,
-and live updates stay consistent across them.
+`Ctrl+Shift+N`. Windows share one session list and state, and a session
+only ever runs in one tab: clicking a session another window already has
+open raises that window instead of resuming a copy.
 
-A session only ever runs in one tab. Clicking a session that another window
-already has open — or clicking a notification it raised — raises that window and
-selects its tab instead of resuming the conversation a second time.
-
-**Move a running session to a window of its own**: right-click its sidebar row
-→ *Move to new window*. The tab is lifted out and dropped into a fresh window
-live — the agent keeps running, its scrollback, panel, and editor come along,
-and nothing is resumed or restarted. It replaces *Open in new window* on rows
-that already have a tab (and stays away when that tab is its window's last one,
-where the move would only swap one window for another).
+**Move a running session to a window of its own** from its sidebar row's
+right-click menu: the tab is lifted out and dropped into a fresh window
+live — the agent keeps running, and its scrollback, panel, and editor come
+along.
 
 ## Preferences
 
 Terminal **font**, **scrollback** size, **easy copy & paste** (on by default),
 a **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin,
-Tokyo Night, Monokai, One Dark…), the editor's **color scheme**, **font**,
-and **line numbers**/**hidden files** toggles, the app's **color scheme**
-(system / light / dark), the **language** (English, Magyar, Deutsch,
-Español, Français), the sidebar's **Show folder path**, **Show Claude
-usage**, and **Auto-generate session titles** toggles, and a switch for each
-of the **session tools** the agent can call — reachable from the sidebar menu
-or `Ctrl+,`.
+Tokyo Night, Monokai, One Dark…), the **composer's** switches (the typing
+trigger, Enter behavior, the floating button, auto-open in new sessions),
+the editor's **color scheme**, **font**, and **line numbers**/**hidden
+files** toggles, the app's **color scheme** (system / light / dark), the
+**language** (English, Magyar, Deutsch, Español, Français), the sidebar's
+**Show folder path**, **Show Claude usage**, and **Auto-generate session
+titles** toggles, the **status icon**, **Reopen the last session**, what to
+do **when quitting with running sessions** (ask / exit / background / hide),
+**Archive on claude.ai too**, and a switch for each of the **session tools**
+the agent can call — reachable from the sidebar menu or `Ctrl+,`.
 
 A **search bar across the top** filters the whole screen as you type, and it
-has the focus the moment preferences opens, so the way to a setting is to type
-a word from it. Every word of the query has to turn up somewhere, in any order,
-and it looks well past the setting's own name: a section heading (*terminal*
-brings back the whole Terminal section), a word from the description
-(*Ctrl+C*), or one of the options folded away inside a row (*Dracula*,
-*Magyar*). `Esc` empties the box, and empties the dialog off the screen once
-there's nothing left to clear.
+has the focus the moment preferences opens, so the way to a setting is to
+type a word from it — a section heading, a word from a description
+(*Ctrl+C*), or an option folded away inside a row (*Dracula*, *Magyar*).
 
 ![Preferences dialog](/img/preferences.png)

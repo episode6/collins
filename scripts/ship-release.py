@@ -119,7 +119,8 @@ def get_changelog_notes(version):
     if "unreleased" in header_line.lower():
         fail(
             f"the v{version} section of {CHANGELOG} is still titled "
-            "'Unreleased' — finalize it (real title, complete notes) before "
+            "'UNRELEASED' — finalize it (ship date in the heading, complete notes) "
+            "before "
             "shipping."
         )
 

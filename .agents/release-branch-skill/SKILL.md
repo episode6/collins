@@ -55,9 +55,9 @@ Create two separate Pull Requests (as drafts, per repo convention).
       by hand matching the existing entries — author line
       `Geoff Hackett <ghackett@episode6.com>`).
     - **(VITAL)** In `docs/releases.md`: add a new
-      `### v<NEXT_VERSION> — Unreleased` section atop the Changelog, and give
-      the outgoing `v<VERSION>` section its real title (replacing
-      `Unreleased`) and complete notes — that section becomes the GitHub
+      `### v<NEXT_VERSION> — UNRELEASED` section atop the Changelog, and give
+      the outgoing `v<VERSION>` section its ship date (`### v<VERSION> —
+      YYYY-MM-DD`, replacing `UNRELEASED`) and complete notes — that section becomes the GitHub
       release notes verbatim.
     - Mirror the outgoing release into the released-version files: add a
       `<release version="<VERSION>" date="<planned ship date>">` entry atop
@@ -71,8 +71,8 @@ Create two separate Pull Requests (as drafts, per repo convention).
 - **PR Title:** `[VERSION] Release v<VERSION>`
 - **Changes:**
     - **(VITAL)** Make the same outgoing-release edits as PR 1: finalize the
-      `docs/releases.md` `v<VERSION>` section (real title; ensure all changes
-      since the last release are documented), the metainfo `<release>` entry,
+      `docs/releases.md` `v<VERSION>` section (ship date in the heading;
+      ensure all changes since the last release are documented), the metainfo `<release>` entry,
       and the AUR `pkgver`.
     - Verify `pyproject.toml`, `collins/__init__.py`, and the top
       `debian/changelog` entry already agree on `<VERSION>` (no version change

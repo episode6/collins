@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-19. Full change history: git log for this file.
+fork. Last modified: 2026-08-20. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -45,22 +45,47 @@ Collins runs fine without it.
 
 ## Install
 
-### Debian / Ubuntu — `.deb`
+### Ubuntu — the episode6 PPA
 
-Build the package with `./scripts/build_deb.sh`, or grab the latest `.deb`
-from the
-[releases page](https://github.com/episode6/collins/releases/latest)
-if one is published, then install it — dependencies are pulled in
-automatically:
+The maintained channel on Ubuntu — Collins upgrades with the rest of your
+system from here:
+
+```bash
+sudo add-apt-repository ppa:episode6/stable
+sudo apt install collins
+```
+
+The PPA covers **Ubuntu 24.04 (noble)** and **26.04 (resolute)**, and the
+derivatives that share them — Linux Mint, Pop!_OS, elementary OS, Zorin.
+Ubuntu 22.04 (jammy) is out of scope: it ships libadwaita 1.1 and GTK 4.6,
+and Collins uses APIs from libadwaita 1.5 and GTK 4.10.
+
+It appears in your app grid as **Collins**, and the installed command is
+`collins`.
+
+### Debian — `.deb`
+
+A Launchpad PPA can only ever serve Ubuntu, so on Debian — and the
+Debian-family distros that don't build on Ubuntu — the `.deb` is the way in.
+(On distros outside the Debian family entirely, use PyPI below.) Grab the
+latest from the
+[releases page](https://github.com/episode6/collins/releases/latest), or
+build it with `./scripts/build_deb.sh`, then install it — dependencies are
+pulled in automatically:
 
 ```bash
 sudo apt install ./collins_*_all.deb
 ```
 
-It appears in your app grid as **Collins**, and the installed command is
-`collins`.
+A `.deb` installed this way adds no apt source, so it does not update
+itself — watch the releases page. Debian 13 (trixie) and newer have
+everything Collins needs; Debian 12 (bookworm) does not (libadwaita 1.2
+against the 1.5 APIs).
 
 ### PyPI — pipx or pip
+
+Available everywhere, and the way in on a distro with no package of its
+own — Arch, Fedora, and anything else outside the Debian family:
 
 ```bash
 pipx install --system-site-packages collins   # or: pip install --user collins
@@ -93,6 +118,25 @@ To add a desktop launcher and icon for your user:
 ./data/install.sh
 ```
 
+## Updating
+
+Each channel updates its own way; none of them touches your sessions or
+your `~/.config/collins/` state, so an update is always safe mid-stream.
+
+| Installed via | To update |
+| --- | --- |
+| **Ubuntu PPA** | Nothing special — `sudo apt update && sudo apt upgrade` (or your desktop's software updater) picks Collins up with everything else. |
+| **Debian `.deb`** | Download the new `.deb` from the [releases page](https://github.com/episode6/collins/releases/latest) and install it over the old one the same way: `sudo apt install ./collins_*_all.deb`. apt treats it as an upgrade; settings stay put. |
+| **pipx** | `pipx upgrade collins` — the `--system-site-packages` flag you installed with is remembered by the venv, so it needn't be repeated. |
+| **pip** | `pip install --user --upgrade collins` |
+| **From source** | `git pull` in the checkout. The launcher from `./data/install.sh` points at the checkout, so it needs no re-run. |
+
+Restart Collins afterwards — a running instance keeps the old code until it
+is relaunched. If any sessions are still working, close the window with
+**Keep Running (Hide Window)** and relaunch: the hidden window comes back,
+but on the old code; use the menu's **Quit** (sessions can be backgrounded
+first) for a real restart.
+
 ## First run
 
 On first launch the sidebar lists every session found under
@@ -104,7 +148,8 @@ a session right from the app — the **New Session** button (`Ctrl+Shift+T`)
 asks for a project folder and launches `claude` there — or run `claude` in a
 project yourself and the session will show up automatically.
 
-On later launches the app reopens the session you had focused when you closed
-the window.
+Later launches start with no session open by default. Turn on **Reopen the
+last session** (Preferences → Startup) and the app instead reopens the
+session you had focused when you closed the window.
 
 ![The main window on first run](/img/main-window.png)

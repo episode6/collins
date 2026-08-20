@@ -22,7 +22,7 @@ The `./scripts/ship-release.py` script keeps it consistent:
    entry (which must target `UNRELEASED` — the PPA series is stamped at build
    time), and the metainfo's top `<release>` entry.
 2. Extracts release notes from the matching `### v<VERSION>` section of
-   `docs/releases.md`, refusing a section still titled `Unreleased`.
+   `docs/releases.md`, refusing a section still marked `UNRELEASED`.
 3. Publishes the GitHub release via `gh release create` with tag and title
    `v<VERSION>`, `--target` the release branch.
 4. The tag push triggers `.github/workflows/release.yml`: it builds the
@@ -80,7 +80,7 @@ Ship the current release branch:
    fully first. The `debian/changelog` check matters doubly: the PPA version
    derives from it, and Launchpad burns version strings permanently.
 3. **Unfinalized changelog**: the `docs/releases.md` section still says
-   `Unreleased` — merge the release-finalization PR first.
+   `UNRELEASED` — merge the release-finalization PR first.
 4. **Hand-typed release notes**: always let the script extract them from
    `docs/releases.md` so the release, the docs site, and the metainfo tell the
    same story.
