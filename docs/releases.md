@@ -37,7 +37,7 @@ downloads of each version, see the
 
 ## Changelog
 
-### v0.1.1 — Ubuntu PPA
+### v0.1.1 — UNRELEASED
 
 Collins is now installable from an apt repository:
 
@@ -91,7 +91,7 @@ apt source, so it does not update itself; watch the releases page. Debian 13
 - **Fixes** — archiving a session clears its notification and unread count;
   the status icon's menu no longer draws a stray "Quit" on a separator.
 
-### v0.1.0 — Collins
+### v0.1.0 — Collins (2026-08-17)
 
 The first release under the **Collins** name, and the fork's version reset —
 Collins forked from
