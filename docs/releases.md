@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-19. Full change history: git log for this file.
+fork. Last modified: 2026-08-20. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -82,24 +82,66 @@ and restarted its version numbering at 0.1.0.
   `~/.config/claude-session-manager/`) location on first run.
 - **Claude Code only** — the upstream Cursor provider was removed; this fork
   focuses on Claude Code.
-- **Terminal panel** — a second plain-shell terminal per tab (`Ctrl+J`),
-  bottom or right, with persisted per-session layout and scrollback history.
+- **Session tools** — an in-app MCP server offered to every session Collins
+  starts, so the agent can drive the window it runs in: `notify_user`,
+  `set_session_title`, `open_in_editor`, `show_image` (local or URL, with a
+  caption), `attach_pr`, `start_session` (spawn a sibling session in the
+  background), and `read_terminal` / `run_in_terminal` for the terminal
+  panel. Each tool has its own switch in Preferences.
+- **Pull requests** — every PR a session opens is tracked through `gh`:
+  checks, conflicts, and unanswered comments roll up into one mark on the
+  sidebar row and chips on the footer, and a native **PR page** beside the
+  session shows the description, checks, timeline, threads and diff. Merge,
+  auto-merge, ready-for-review, ask-Claude-for-a-review, comment, approve,
+  and reply/resolve from the app; red CI, conflicts, and unanswered comments
+  can be sent back to the agent as prompts. `attach_pr` and PRs named in a
+  first prompt attach to the session too.
+- **Editor panel** — a GtkSourceView editor beside the terminal (`F8`): file
+  tree, quick open, an agent-files list of what the session just wrote,
+  clickable file references in the terminal that open at the line, "Add to
+  chat" for a selection, and pop-out to its own window on small screens.
+- **Prompt composer** — a spell-checked, multi-line prompt box over the
+  terminal that opens the moment you type at an empty prompt (`Ctrl+.`),
+  floating or docked, with drag-and-drop files and image previews.
+- **Attachments panel** — a per-session gallery of every image and file the
+  session has shown or handed over (`Ctrl+'`), with a lightbox whose arrows
+  walk the gallery; it docks itself beside the terminal when there's room.
+- **Terminal panel** — a second plain-shell terminal per session (`Ctrl+J`),
+  grown into a **dock of splittable strips**: tabs of its own, split and move
+  by drag or right-click, rotate (`Ctrl+;`), take the whole session tab as an
+  overlay, with layout and scrollback persisted per session.
+- **Status icon** — Collins in the top bar with an unread-count badge, and
+  notifications wearing each project's own icon.
+- **Model switcher** — the footer names the model a session is answering
+  with; click it (or the composer's model button) to switch, from a live
+  list of the models your login can use.
 - **Claude usage panel** — subscription limits with reset countdowns under the
   session list, polled every 5 minutes (paused while minimized/locked).
 - **Session backgrounding & re-attach** — close dialogs and header buttons can
   background a session (`/bg`) instead of exiting it; opening a
   still-running session attaches to the live process instead of resuming a
-  copy.
+  copy. Closing asks the agent to exit cleanly (`Ctrl+C` `Ctrl+C`).
 - **Auto-generated session titles** — pre-existing sessions titled locally,
-  new ones summarized by a headless `claude -p --model haiku` run.
-- **Sidebar upgrades** — compact single-line rows, drag-to-reorder projects,
-  per-project `+` buttons, empty projects with hide/unhide, a "New Thread"
-  placeholder for just-started sessions, active-tab highlight, and
-  creation-time sorting.
-- **Per-tab footer** — the agent's live working directory (click to copy) and
-  the current git branch.
-- **Quality of life** — reopen the last active session on launch, remembered
-  window size, tab-bar hide toggle, `Ctrl+W` to close a tab, and retuned
+  new ones summarized by a headless `claude -p` run; a session can also take
+  its name from its pull request, or follow Claude's own session names.
+- **Sidebar upgrades** — compact single-line rows with a guide line for every
+  status (working, unread, detached, interrupted, waiting on you), per-project
+  icons from `project-icon.svg` (or one Claude designs for you), drag-to-reorder
+  projects, per-project `+` buttons, a virtual Chats project, archive with
+  undo, Open In… submenus, a "New Thread" placeholder for just-started
+  sessions, and creation-time sorting.
+- **Starting sessions** — new sessions in a git worktree (`claude -w`,
+  opt-in), folder trust asked once up front, a setting for where the `claude`
+  CLI lives, and advanced launch options (model, permission mode, extra
+  directories, continue).
+- **Caffeine Mode** — keep the machine awake while sessions work ("Until
+  idle"), for a set time, or until turned off; screen may still go dark.
+- **Per-session footer** — the agent's live working directory (click to copy),
+  the current git branch, and configurable app-launcher buttons.
+- **Quality of life** — reopen the last active session on launch (opt-in),
+  remembered window size, a searchable Preferences window, `Ctrl+W` to close
+  a tab, terminal font zoom and smooth scrolling, drop images and files into
+  the chat as `@`-mentions, move a session to its own window, and retuned
   defaults (easy copy & paste on, idle notifications off).
 
 ---
