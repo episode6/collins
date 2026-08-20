@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-20. Full change history: git log for this file.
 
 # SOME DESCRIPTIVE TITLE.
 # Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
@@ -955,7 +955,7 @@ msgid ""
 "automatically."
 msgstr ""
 
-#: collins/sidebar.py:479
+#: collins/sidebar.py:479 collins/traymodel.py:132
 #, python-brace-format
 msgid "{n} sessions"
 msgstr ""
@@ -2700,11 +2700,6 @@ msgstr ""
 
 #: collins/traymodel.py:132
 msgid "1 session"
-msgstr ""
-
-#: collins/traymodel.py:132
-#, python-brace-format
-msgid "{n} sessions"
 msgstr ""
 
 #: collins/traymodel.py:132
