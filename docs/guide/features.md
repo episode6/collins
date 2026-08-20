@@ -35,9 +35,10 @@ fork. Last modified: 2026-08-20. Full change history: git log for this file.
 - A **search button** (or `Ctrl+Shift+F`) filters the whole list by name,
   project, message preview, or session ID, plus a footer showing session,
   project, transcript-size, and open-tab counts.
-- **Live updates** — sessions appear and reorder as they're created or
-  written to, via a filesystem watch. A just-started session shows a **"New
-  Thread"** placeholder row until the agent writes its transcript.
+- **Live updates** — new sessions appear the moment they're created, via a
+  filesystem watch, and existing rows update in place without jumping
+  around. A just-started session shows a **"New Thread"** placeholder row
+  until the agent writes its transcript.
 - **Guide lines say what each session is doing**: a session with a tab open
   gets a fill (the selected tab's session takes the peach highlight); a
   **yellow line** marks a session running detached in the background
