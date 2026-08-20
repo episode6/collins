@@ -133,7 +133,7 @@ sudo apt install collins
 
 Ubuntu 22.04 (jammy) is not supported — it ships libadwaita 1.1 and GTK 4.6, and Collins uses APIs from libadwaita 1.5 and GTK 4.10.
 
-**Debian and everything else — .deb package.** A Launchpad PPA can only serve Ubuntu, so on Debian this is the way in. Grab one from [the releases page](https://github.com/episode6/collins/releases), or build it with `./scripts/build_deb.sh`:
+**Debian — .deb package.** A Launchpad PPA can only serve Ubuntu, so on Debian — and the Debian-family distros that don't build on Ubuntu — this is the way in (outside the Debian family, PyPI above is). Grab one from [the releases page](https://github.com/episode6/collins/releases), or build it with `./scripts/build_deb.sh`:
 
 ```bash
 sudo apt install ./collins_*_all.deb

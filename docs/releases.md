@@ -52,7 +52,7 @@ Zorin. Ubuntu 22.04 (jammy) is out of scope: it ships libadwaita 1.1 and GTK
 
 **On Debian, keep using the `.deb`** from the releases page. A Launchpad PPA
 can only ever serve Ubuntu, so the `.deb` is not a lesser fallback — it is the
-channel for Debian and everything that isn't Ubuntu, and it stays. It adds no
+channel for Debian and the rest of its family, and it stays. It adds no
 apt source, so it does not update itself; watch the releases page. Debian 13
 (trixie) and newer have everything Collins needs.
 

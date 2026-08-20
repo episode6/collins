@@ -63,10 +63,12 @@ and Collins uses APIs from libadwaita 1.5 and GTK 4.10.
 It appears in your app grid as **Collins**, and the installed command is
 `collins`.
 
-### Debian and everything else — `.deb`
+### Debian — `.deb`
 
-A Launchpad PPA can only ever serve Ubuntu, so on Debian the `.deb` is the
-way in. Grab the latest from the
+A Launchpad PPA can only ever serve Ubuntu, so on Debian — and the
+Debian-family distros that don't build on Ubuntu — the `.deb` is the way in.
+(On distros outside the Debian family entirely, use PyPI below.) Grab the
+latest from the
 [releases page](https://github.com/episode6/collins/releases/latest), or
 build it with `./scripts/build_deb.sh`, then install it — dependencies are
 pulled in automatically:
@@ -81,6 +83,9 @@ everything Collins needs; Debian 12 (bookworm) does not (libadwaita 1.2
 against the 1.5 APIs).
 
 ### PyPI — pipx or pip
+
+Available everywhere, and the way in on a distro with no package of its
+own — Arch, Fedora, and anything else outside the Debian family:
 
 ```bash
 pipx install --system-site-packages collins   # or: pip install --user collins

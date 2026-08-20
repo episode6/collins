@@ -95,8 +95,8 @@ python3 -m collins
 
 The PPA is the channel that updates itself, on Ubuntu 24.04+ and its
 derivatives (Mint, Pop!_OS, elementary, Zorin); the `.deb` covers Debian and
-everything else; PyPI works anywhere the system GTK libraries are installed
-(`--system-site-packages` is required — Collins gets GTK from your distro,
-not from PyPI). See [Getting Started](/guide/getting-started) for system
+the rest of its family; and PyPI is the way in everywhere else — it works
+anywhere the system GTK libraries are installed (`--system-site-packages` is
+required — Collins gets GTK from your distro, not from PyPI). See [Getting Started](/guide/getting-started) for system
 requirements and the details of each channel. The installed command is
 `collins`.
