@@ -33,6 +33,7 @@ downloads of each version, see the
 - 🔭 **Flathub** distribution
 - 🔭 **AUR** package
 - 🔭 **Fedora COPR** repository
+- 🔭 **A better native chat** — a first-class chat experience for an agent session, beyond the terminal
 
 ## Changelog
 
