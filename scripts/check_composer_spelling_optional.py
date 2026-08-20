@@ -101,6 +101,11 @@ def main() -> int:
         # The view keeps GtkSource.View's stock extra menu; what must be
         # missing is the spelling adapter's model from the wired path above.
         assert bare._view.get_extra_menu() is not view._adapter.get_menu_model()
+        # No adapter to aim, so no gesture either: the wiring lives inside
+        # the same branch, and a stray one would be reaching for a None.
+        assert not _has_secondary_capture_click(bare._view), (
+            "fallback must not install the spell-click gesture"
+        )
         _check_text_roundtrip(bare)
     finally:
         composer_mod.Spelling = real_spelling
@@ -128,6 +133,9 @@ def main() -> int:
     try:
         broken = _build_view()
         assert broken._adapter is None, "broken lib must leave _adapter None"
+        assert not _has_secondary_capture_click(broken._view), (
+            "broken lib must not install the spell-click gesture"
+        )
         _check_text_roundtrip(broken)
     finally:
         composer_mod.Spelling = real_spelling
