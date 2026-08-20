@@ -9,8 +9,10 @@ from collins.composerkeys import (
     PASS,
     SEND,
     autoshow_mode,
+    draft_to_restore,
     enter_action,
     restore_text,
+    stashable_draft,
     typing_opens_composer,
 )
 
@@ -134,3 +136,31 @@ def test_autoshow_mode_falls_back_to_off(setting):
     # missing setting, a hand-edited word, an older Collins's boolean —
     # must land on off rather than conjure one.
     assert autoshow_mode(setting) == OFF
+
+
+def test_stashable_draft_keeps_real_text():
+    assert stashable_draft("hello") == "hello"
+    # Kept verbatim: the box's own spacing is the user's draft, not ours to
+    # tidy — only the paste-back (restore_text) has a submit hazard to dodge.
+    assert stashable_draft("  hello\n\n") == "  hello\n\n"
+
+
+@pytest.mark.parametrize("text", ["", " ", "\n", "\n \t\n"])
+def test_stashable_draft_drops_an_emptied_box(text):
+    assert stashable_draft(text) == ""
+
+
+def test_draft_to_restore_seeds_an_empty_box():
+    assert draft_to_restore("draft", "") == "draft"
+    assert draft_to_restore("draft", " \n") == "draft"
+
+
+def test_draft_to_restore_leaves_a_written_box_alone():
+    # Whatever is in there was written after the draft was set aside — a cut
+    # CLI prompt, the keystroke that raised the composer — and outranks it.
+    assert draft_to_restore("draft", "typed") == ""
+
+
+def test_draft_to_restore_with_nothing_stashed():
+    assert draft_to_restore("", "") == ""
+    assert draft_to_restore("", "typed") == ""

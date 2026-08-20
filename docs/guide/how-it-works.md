@@ -99,8 +99,8 @@ toggle. *Archive on claude.ai too* in Preferences turns it off.
 ## App state
 
 Custom names, generated titles, emoji, favorites, archived sessions, project
-order, panel layouts, window geometry, and preferences are stored separately
-in `~/.config/collins/state.json`. The terminal panel's per-session scrollback
+order, panel layouts, unsent composer drafts, window geometry, and preferences
+are stored separately in `~/.config/collins/state.json`. The terminal panel's per-session scrollback
 lives in `~/.local/state/collins/panel_history/` (one file per panel tab).
 This keeps the app's data fully decoupled from the agents' own — you can
 delete both at any time without affecting a single session.

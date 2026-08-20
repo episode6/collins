@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-17. Full change history: git log for this file.
+# fork. Last modified: 2026-08-20. Full change history: git log for this file.
 
 import json
 
@@ -520,6 +520,65 @@ def test_forwarding_does_not_clobber_the_forks_own_attachments(app_state):
     state.set_session_attachments("new", [_shot("b")])
     state.forward_session("old", "new")
     assert app_state.AppState().get_session_attachments("new") == [_shot("b")]
+
+
+def test_session_draft_roundtrip(app_state):
+    state = app_state.AppState()
+    state.set_session_draft("sid", "half a prompt\nand a second line")
+    fresh = app_state.AppState()
+    assert fresh.get_session_draft("sid") == "half a prompt\nand a second line"
+    assert fresh.get_session_draft("other") == ""
+
+
+def test_session_draft_empty_removes_entry(app_state):
+    """A draft that went back into a composer, or was sent, must not wait
+    on disk for the next launch."""
+    state = app_state.AppState()
+    state.set_session_draft("sid", "a draft")
+    state.set_session_draft("sid", "")
+    assert app_state.AppState().get_session_draft("sid") == ""
+    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
+    assert data["session_drafts"] == {}
+
+
+def test_session_draft_unchanged_is_not_rewritten(app_state):
+    state = app_state.AppState()
+    state.set_session_draft("sid", "a draft")
+    app_state._STATE_FILE.unlink()  # a redundant save would recreate the file
+    state.set_session_draft("sid", "a draft")  # the same draft again
+    state.set_session_draft("absent", "")  # clearing a session that has none
+    state.set_session_draft("", "orphan")  # a tab with no session id yet
+    assert not app_state._STATE_FILE.exists()
+
+
+def test_session_draft_ignores_corrupt_entries(app_state):
+    state = app_state.AppState()
+    state.set_session_draft("good", "a draft")
+    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
+    data["session_drafts"]["bad"] = ["not", "a", "string"]
+    data["session_drafts"]["blank"] = ""
+    app_state._STATE_FILE.write_text(json.dumps(data), encoding="utf-8")
+    fresh = app_state.AppState()
+    assert fresh.get_session_draft("good") == "a draft"
+    assert fresh.get_session_draft("bad") == ""
+    assert "blank" not in fresh.session_drafts
+
+
+def test_forwarding_a_session_carries_its_draft(app_state):
+    """The draft was written to the conversation, not to the id: a fork
+    reaches the same one."""
+    state = app_state.AppState()
+    state.set_session_draft("old", "a draft")
+    state.forward_session("old", "new")
+    assert app_state.AppState().get_session_draft("new") == "a draft"
+
+
+def test_forwarding_does_not_clobber_the_forks_own_draft(app_state):
+    state = app_state.AppState()
+    state.set_session_draft("old", "a draft")
+    state.set_session_draft("new", "the fork's own")
+    state.forward_session("old", "new")
+    assert app_state.AppState().get_session_draft("new") == "the fork's own"
 
 
 def test_forwarding_a_session_carries_its_prs(app_state):

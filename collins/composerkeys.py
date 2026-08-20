@@ -15,7 +15,9 @@ and GDK's ModifierType, not values that drift).
 
 The composer_new_sessions setting is here for the same reason: its three
 words are shared by the preference row that writes them and the tab that
-acts on them, and reading one back is likewise pure.
+acts on them, and reading one back is likewise pure. So are the two rules
+for the draft stash -- what a close keeps when it can't type the text back
+into the CLI's box, and when a reopening composer is seeded with it.
 """
 
 from __future__ import annotations
@@ -119,3 +121,28 @@ def restore_text(text: str) -> str:
     back rather than send.
     """
     return text.rstrip("\n")
+
+
+def stashable_draft(text: str) -> str:
+    """The composer text worth keeping when a close can't type it back.
+
+    A close whose paste-back is refused -- the agent has left the terminal,
+    where a pasted draft would be commands rather than a prompt -- hands the
+    text here instead of dropping it (TerminalTab._stash_draft). Only text
+    with something in it is kept: a box holding nothing but whitespace is a
+    box the user emptied, and re-seeding that into the next composer would
+    just be a stray space to delete.
+    """
+    return text if text.strip() else ""
+
+
+def draft_to_restore(stashed: str, current: str) -> str:
+    """The stashed draft a reopening composer should be seeded with, or "".
+
+    A draft is only ever put back into a box with nothing in it: whatever is
+    there now was written after the draft was set aside -- the CLI prompt an
+    open cut out of the input box, the keystroke that raised the composer --
+    and it must not be typed over. Whitespace alone counts as empty, the
+    same way `stashable_draft` reads it.
+    """
+    return stashed if stashed and not current.strip() else ""
