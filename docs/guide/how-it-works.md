@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-19. Full change history: git log for this file.
+fork. Last modified: 2026-08-20. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -51,6 +51,18 @@ stores in `~/.claude/.credentials.json` (read-only — Collins never refreshes
 or writes it) and queries Anthropic's usage endpoint every 5 minutes, pausing
 while the window is minimized or the screen is locked.
 
+## Archiving on claude.ai
+
+A session that was remote-controlled from claude.ai, or teleported into from
+there, has a counterpart on the web's session list, and the transcript
+records which: a `bridge-session` line naming the remote id. When you archive
+or restore such a session, Collins mirrors the toggle with the CLI's own
+session API — `POST /v1/code/sessions/<id>/archive` (or `/unarchive`) on the
+same stored OAuth token — from a background thread, after the local archive
+has already landed. Every failure (no counterpart, no token, no network, an
+HTTP error) is logged and swallowed; nothing blocks or reverts the local
+toggle. *Archive on claude.ai too* in Preferences turns it off.
+
 ## App state
 
 Custom names, generated titles, emoji, favorites, archived sessions, project
@@ -76,6 +88,27 @@ Collins is built with **GTK4**, **libadwaita**, **VTE**, and
 only production-grade embeddable terminal on Linux, which is why the app is
 Linux-native. The data layer (session discovery, parsing, state, titles,
 usage, git info) is GTK-free and unit-tested.
+
+## Built on undocumented corners of Claude Code
+
+Collins has no SDK to lean on: it reads what the `claude` CLI reads and calls
+what the CLI calls. Some of that is public (the `claude` command line, `/mcp`,
+`--resume`, `-p`); the rest is internal to the CLI and can change or disappear
+with any release. Here is what rests on what, and what happens when it moves:
+
+| Feature | Leans on | When it breaks |
+| --- | --- | --- |
+| Session list, titles, status, footer, PR detection, attachments scan, inherited model & permission mode | The JSONL transcript format under `~/.claude/projects/` and its fields (`cwd`, `permissionMode`, `message.model`, `bridge-session`, …) | Rows go blank or misreport; nothing is written, so nothing is lost |
+| Usage panel | `~/.claude/.credentials.json` and the `/api/oauth/usage` endpoint behind the CLI's `/usage` screen | The panel reports an error and stays empty |
+| Model pickers (footer, composer, Preferences, Generate Icon) | The Models API, called with the CLI's OAuth token and beta header | Falls back to the CLI's built-in aliases (`opus`, `sonnet`, `haiku`) |
+| Archive on claude.ai | The `bridge-session` transcript record and `POST /v1/code/sessions/<id>/archive` | The local archive still happens; the remote one silently doesn't |
+| Re-attaching to backgrounded sessions | `claude agents --json` and `claude attach` | Opening a detached session resumes a copy instead of reconnecting |
+| Folder trust asked up front | The trust entries the CLI keeps in `~/.claude.json` | The CLI asks its own question at launch, as it would without Collins |
+| Busy / idle detection | The CLI's OSC 9;4 progress reports and its prompt's on-screen shape | The sidebar's working indicator and the composer's "empty prompt" gate misjudge |
+
+Everything else — terminals, the editor, panels, PR features (via `gh`), the
+MCP session tools (a standard MCP server the CLI is pointed at with
+`--mcp-config`) — uses public interfaces.
 
 ## Architecture
 

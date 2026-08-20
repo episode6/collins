@@ -6,6 +6,14 @@ fork. Last modified: 2026-08-20. Full change history: git log for this file.
 
 # Features
 
+::: warning Some of this leans on undocumented Claude Code internals
+The usage panel, the model pickers, the claude.ai archive mirror, and a few
+smaller things read endpoints and files the `claude` CLI uses for itself and
+doesn't document. They can change or break with any CLI release; Collins is
+built to degrade quietly when they do. The full list is in
+[How It Works](/guide/how-it-works#built-on-undocumented-corners-of-claude-code).
+:::
+
 ## Sidebar
 
 - **Every session** under `~/.claude/projects/`, **grouped by project** with
@@ -381,9 +389,13 @@ flipped the switch is refused if it calls it anyway.
   closes the tab too, and whole **projects** can be archived from their
   header's right-click menu.
 - **Archiving reaches claude.ai too** (on by default — Preferences →
-  *Archive on claude.ai too*): a session that also appears on claude.ai is
-  archived and restored there along with the toggle here. Best-effort:
-  archiving locally never waits on the network.
+  *Archive on claude.ai too*): a session you've remote-controlled from
+  claude.ai, or teleported in from it, has a sibling on the web's session
+  list, and archiving (or restoring) it here archives (or restores) that
+  sibling as well, so the two lists stay in step. Best-effort: archiving
+  locally never waits on the network, and a failure over there is logged,
+  not surfaced. (Uses an undocumented CLI endpoint — see
+  [How It Works](/guide/how-it-works#archiving-on-claude-ai).)
 - **Delete archived sessions…** (sidebar menu) clears the lot in one go,
   and the confirmation spells out the damage first: how many transcripts,
   in which projects. Any dialog that would empty a project out offers to
