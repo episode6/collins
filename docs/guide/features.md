@@ -30,29 +30,10 @@ fork. Last modified: 2026-08-20. Full change history: git log for this file.
   design one from what's in the folder — previewed at full size and at the
   16px the sidebar actually uses, regenerable with an adjustment ("make it
   blue") until it's right; *Save* writes the file to the project root.
-- A **search button** (or `Ctrl+Shift+F`) filters the whole list by name,
-  project, message preview, or session ID, plus a footer showing session,
-  project, transcript-size, and open-tab counts.
 - **Live updates** — new sessions appear the moment they're created, via a
   filesystem watch, and existing rows update in place without jumping
   around. A just-started session shows a **"New Thread"** placeholder row
   until the agent writes its transcript.
-- **Guide lines say what each session is doing**: a session with a tab open
-  gets a fill (the selected tab's session takes the peach highlight); a
-  **yellow line** marks a session running detached in the background
-  (`/bg`); a **moving blue barber pole** marks a tab whose agent is working
-  right now, going still a couple of seconds after it stops; a **red line**
-  marks a session you stopped mid-task. The sidebar header runs the same
-  pole while *any* session in the window is working, so the panel says so
-  even when the busy row is scrolled away, collapsed, or filtered out.
-
-![Sidebar with the Favorites section expanded](/img/sidebar-favorites.png)
-
-The search button (or `Ctrl+Shift+F`) opens the search box across the sidebar
-header, and it filters the whole list as you type:
-
-![Filtering sessions with the search box](/img/sidebar-search.png)
-
 ### Auto-generated titles
 
 Unnamed sessions get a **title generated for them**: sessions that already
