@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-17. Full change history: git log for this file.
+fork. Last modified: 2026-08-19. Full change history: git log for this file.
 -->
 
 # Features
@@ -80,6 +80,12 @@ fork. Last modified: 2026-08-17. Full change history: git log for this file.
   the main checkout's), prefers `origin`, and offers nothing at all for a
   folder that isn't a repository or whose remotes live somewhere other than
   github.com.
+- **Git pull, from the header menu too**: a project whose folder is a git
+  repository gets a *Git pull* item labeled with the checked-out branch —
+  *Git pull (main)* — so it's clear up front which branch the click acts on.
+  The pull runs in the project root; success lands as a toast carrying git's
+  own summary line, and any failure (no upstream, a conflict, a detached
+  HEAD) surfaces git's words instead of a shrug.
 - **Generate Icon**, in that menu too, asks Claude to design the project a
   sidebar icon from what's in the folder — its name, top-level files and
   README. The result is previewed at full size and at the 16px the sidebar
@@ -115,6 +121,10 @@ fork. Last modified: 2026-08-17. Full change history: git log for this file.
   animations off, the line simply stays put.
 - **A red guide line** marks a session you **stopped mid-task**, and it keeps
   the red whether or not a tab is open — until the session gets going again.
+- **The sidebar header runs the same pole** — a slim barber-pole indicator
+  beside the header buttons — while *any* session in the window is working,
+  so even with the busy row scrolled away, its project collapsed, or a search
+  filtering it out, the panel still says whether anything is working at all.
 
 ![Sidebar with the Favorites section expanded](/img/sidebar-favorites.png)
 
@@ -266,6 +276,20 @@ agents' own session files are never modified.
   session re-attaches to it. The same option appears when closing the whole
   window with active sessions, which hands the sessions over **one at a time**
   so each is correctly paired with the background agent it becomes.
+- **Closing the window doesn't have to end anything.** The close-window
+  dialog's third answer, **Keep Running (Hide Window)**, hides the window and
+  leaves every session exactly as it is — tabs, panels, scrollback and all.
+  The status icon's *Show Collins*, a session's notification, or simply
+  launching Collins again brings it back, and everything the close path saves
+  is saved on the way out, so even a crash while hidden loses nothing. Where
+  a status icon is present it's the dialog's default answer — it is the least
+  destructive of the three. The **When quitting with running sessions**
+  preference can skip the dialog entirely (always ask, exit, background, or
+  hide), and the menu's explicit Quit always really quits.
+- On the next launch the app opens with **no session** — or, with **Reopen
+  the last session** on (Preferences → Startup), with the session you had
+  focused when you closed the window. The window comes back at its last size
+  either way.
 - While a session tab is focused, two header buttons act on it directly,
   skipping the confirmation dialog: one **exits** the session and closes the
   tab, the other **backgrounds** it (shown only for agents that support
@@ -280,9 +304,38 @@ agents' own session files are never modified.
   running. While it is hidden the **window title becomes the active tab's
   title**, so the header (and alt-tab, and the dock) still names the session
   you are looking at; showing the tab bar again restores "Collins".
-- On the next launch the app **reopens the session you had focused** when you
-  closed the window, and the window comes back at its last size.
 - The sidebar is **resizable** (drag the divider) and its width is remembered.
+
+## Prompt composer
+
+A real text box for writing prompts — multi-line, spell-checked, floating
+over the agent's terminal — for every prompt that outgrows the CLI's
+one-line input:
+
+- **Start typing and it's there** (on by default): type at an agent's empty
+  prompt and the composer opens with what you typed already in it. The CLI's
+  own `/`, `!`, `#` and `@` keep their keys, and so do dialogs and menus —
+  only plain prose summons it. `Ctrl+.` opens it deliberately; pressed again
+  it closes the composer and puts the draft back in the agent's own input
+  box, so nothing you wrote is ever stranded. A semi-transparent **composer
+  button** on the corner of each agent terminal opens it by mouse.
+- **Send on Enter** — or flip *Enter sends composer text* off to make Enter a
+  newline and `Ctrl+Enter` the send. `Shift+Enter` is always a newline. The
+  box is drawn in the terminal's own font on purpose: the text is about to
+  *be* terminal text, and a composer in the UI font would read as a different
+  place rather than a better view of the same one.
+- **Drop images and files straight in.** Files land in the prompt as
+  mentions; images get a strip of preview thumbnails above the text (click
+  one to inspect it full-size) and go to the agent with the prompt.
+- **Floating or docked.** The composer floats translucent over the terminal;
+  its dock button turns it into a panel below the terminal instead, where it
+  stays for that session's later visits. The *Composer in new sessions*
+  preference can open it by itself — floating or docked — the moment a new
+  session starts.
+
+Everything above has its switch under Preferences → Terminal — the typing
+trigger, the Enter behavior, the floating button, and the new-session
+auto-open.
 
 ## Terminal panel
 
@@ -465,6 +518,28 @@ Toggle it in Preferences (*Show Claude usage*).
 
 ![MCP servers browser](/img/mcp-servers.png)
 
+### Status icon
+
+Collins puts a **status icon** in the top bar, so the sessions can be watched —
+and reached — without the window:
+
+- Its menu **jumps to any open session** by name, brings a hidden window back
+  (*Show Collins*), opens a new window, or quits — and Quit from here really
+  quits, hidden windows and all.
+- The icon **wears an unread badge**: the number of sessions that finished a
+  run nobody has looked at yet — the sidebar's green pulse, counted. A
+  flagged session that goes back to work drops out of the count for as long
+  as the run lasts (it isn't waiting on you) and comes back the moment the
+  turn ends. Sessions that are merely *working* never light the badge — a
+  number that climbs because an agent started is a number you can't act on —
+  but the tooltip carries both counts for the curious.
+- With no session tabs open anywhere the icon goes passive, and the desktop
+  may hide it entirely.
+- It's a StatusNotifierItem — the modern tray protocol — so on GNOME it needs
+  an AppIndicator extension (Ubuntu ships one enabled). Preferences → *Show
+  status icon* is the switch, and it says so when nothing on the desktop can
+  show one.
+
 ## Tools a session can call
 
 Every session Collins starts is offered a small MCP server of Collins' own —
@@ -491,6 +566,13 @@ is running in:
   a session's own output by itself; this is for one it can't see — a PR
   opened by a subagent, opened outside the session, or one the session is
   reviewing rather than authoring.
+- **`start_session(prompt, …)`** — spawn a **sibling session**: a new agent
+  in a background tab, handed a prompt to begin on, working in parallel while
+  the caller keeps going. It never takes your tab selection or keyboard — it
+  turns up as a new row in the sidebar like any session, rings and flashes if
+  it needs you, and inherits the permission mode its caller was started with
+  (it can also name its own directory, or ask for a worktree). Spawned
+  sessions get these same tools, so they can spawn siblings of their own.
 - **`read_terminal(terminal?, lines?)`** — read the terminal panel's tabs:
   each shell's text and scrollback, exactly as you see it, so "the error
   over there" is something the agent can just look at instead of asking you
@@ -512,7 +594,9 @@ the window, and only when a session hands them something to reach for:
 `attach_pr` asks `gh` how the named PR is doing — the same fetch the
 footer's refresh button runs — and `show_image` given a URL fetches it, a
 plain GET with none of your cookies or credentials, capped at 25 MB and ten
-seconds. Switching either tool off stops its half.
+seconds. Switching either tool off stops its half. And `start_session` is
+the biggest ask of the set — it starts a whole new agent — which is exactly
+why it sits behind the same first-call permission gate as everything else.
 
 **Each one has its own switch** in Preferences → *Session tools*, all on by
 default. A tool switched off isn't offered to the sessions Collins starts
@@ -551,6 +635,11 @@ tool list is handed over once at startup.
   to see them and restore any of them); archiving a session with an open tab
   closes the tab too. Whole **projects** can be archived from their header's
   right-click menu.
+- **Archiving reaches claude.ai too** (on by default — Preferences →
+  *Archive on claude.ai too*): a session that also appears on claude.ai is
+  archived there when you archive it here, and restored there when you bring
+  it back. Best-effort, and never in the way: archiving locally doesn't wait
+  on the network.
 - **Delete archived sessions…** (sidebar menu) clears the lot in one go: every
   session the sidebar keeps out of sight — archived by hand, archived with its
   whole project, or replaced by a backgrounded fork — has its transcript moved
@@ -634,13 +723,16 @@ where the move would only swap one window for another).
 
 Terminal **font**, **scrollback** size, **easy copy & paste** (on by default),
 a **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin,
-Tokyo Night, Monokai, One Dark…), the editor's **color scheme**, **font**,
-and **line numbers**/**hidden files** toggles, the app's **color scheme**
-(system / light / dark), the **language** (English, Magyar, Deutsch,
-Español, Français), the sidebar's **Show folder path**, **Show Claude
-usage**, and **Auto-generate session titles** toggles, and a switch for each
-of the **session tools** the agent can call — reachable from the sidebar menu
-or `Ctrl+,`.
+Tokyo Night, Monokai, One Dark…), the **composer's** switches (the typing
+trigger, Enter behavior, the floating button, auto-open in new sessions),
+the editor's **color scheme**, **font**, and **line numbers**/**hidden
+files** toggles, the app's **color scheme** (system / light / dark), the
+**language** (English, Magyar, Deutsch, Español, Français), the sidebar's
+**Show folder path**, **Show Claude usage**, and **Auto-generate session
+titles** toggles, the **status icon**, **Reopen the last session**, what to
+do **when quitting with running sessions** (ask / exit / background / hide),
+**Archive on claude.ai too**, and a switch for each of the **session tools**
+the agent can call — reachable from the sidebar menu or `Ctrl+,`.
 
 A **search bar across the top** filters the whole screen as you type, and it
 has the focus the moment preferences opens, so the way to a setting is to type

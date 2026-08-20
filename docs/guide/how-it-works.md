@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-08. Full change history: git log for this file.
+fork. Last modified: 2026-08-19. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -79,6 +79,8 @@ usage, git info) is GTK-free and unit-tested.
 
 ## Architecture
 
+The package is some 100 modules by now; these are the load-bearing ones:
+
 ```
 collins/
 ├── app.py            # Adw.Application entry point + CSS
@@ -89,23 +91,25 @@ collins/
 ├── sessions.py       # transcript discovery & parsing (pure Python)
 ├── providers.py      # agent CLI abstraction (currently Claude Code)
 ├── state.py          # app-side persistence
-├── terminal.py       # VTE terminal tab + secondary shell panel
+├── terminal.py       # VTE terminal tab + its panels' wiring
+├── composer.py       # the prompt composer text box
+├── editor.py         # the editor panel (GtkSourceView)
+├── docktree.py       # the panel docking tree: strips, splits, moves
+├── mcpserver.py      # the in-app MCP server sessions can call
+├── mcptools.py       # the tools it offers (notify, spawn, show_image, …)
+├── prstore.py        # single source of truth for pull request state (gh)
+├── prview.py         # the in-app pull request page
+├── practions.py      # what a PR offers (merge, review, …) and the gh calls
+├── statusicon.py     # the status icon: a StatusNotifierItem over D-Bus
+├── traymodel.py      # what the icon shows (badge, menu) — toolkit-free
+├── caffeine.py       # Caffeine Mode: inhibit sleep while agents work
 ├── titles.py         # auto-generated session titles (local + claude)
 ├── usage.py          # Claude subscription usage fetch/parse
-├── usagepanel.py     # the sidebar usage panel widget
 ├── gitinfo.py        # git branch for the tab footer; is the tree dirty?
-├── prstatus.py       # a session's pull requests and their CI status (gh)
-├── prmenu.py         # the PR list popover and its per-PR actions submenu
-├── practions.py      # what a PR offers (merge, review, …) and the gh calls
-├── panelhistory.py   # persisted panel scrollback
 ├── transcript.py     # tail transcripts for touched files and PR links
-├── switcher.py       # quick-switcher dialog
 ├── dialogs.py        # rename / emoji / confirm / details / MCP dialogs
 ├── prefs.py          # preferences dialog
-├── themes.py         # terminal color palettes
-├── i18n.py           # gettext setup + languages
-├── copylabel.py      # click-to-copy footer labels
-└── formatting.py     # size / timestamp / token / path formatting
+└── …                 # panels, docking, theming, i18n, and the rest
 ```
 
 The source lives on

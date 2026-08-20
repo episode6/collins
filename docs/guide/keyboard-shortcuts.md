@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-16. Full change history: git log for this file.
+fork. Last modified: 2026-08-19. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -42,6 +42,7 @@ is still active), a single keypress answers the dialog:
 | --- | --- |
 | `E` | Exit the session(s) |
 | `B` | Background the session(s) (when available) |
+| `K` | Keep running — hide the window, sessions untouched (close-window dialog) |
 | `C` (or `Esc`) | Cancel |
 
 ::: tip Easy copy & paste

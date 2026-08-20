@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-08. Full change history: git log for this file.
+fork. Last modified: 2026-08-19. Full change history: git log for this file.
 -->
 
 # What is Collins?
@@ -50,9 +50,15 @@ with respect to your agents' data — names, favorites, and all app state live i
   `a3b2152e…` to “JWT auth” yourself, star your daily drivers, add an emoji to
   a tab.
 - **Work in parallel.** Open several sessions as tabs, each with its own
-  secondary shell panel. Sidebar guide lines show what each one is doing, and
-  a session can raise a desktop notification when it wants you back — or
-  background a session (`/bg`) and re-attach later.
+  shell panel, code editor, and prompt composer. Sidebar guide lines show
+  what each one is doing, a session can raise a desktop notification when it
+  wants you back — and you can close the window entirely and let the
+  sessions keep running behind a status icon that counts what's waiting for
+  you.
+- **Follow the work to the PR.** Every pull request a session opens is
+  tracked on its row and tab — CI, conflicts, unanswered comments — with the
+  actions attached: read the diff beside the terminal, merge, ask for a
+  review, or send the failure back to the agent as a prompt.
 - **Stay oriented.** Search the sidebar, search a terminal's scrollback, peek
   at a session's recent messages before resuming it, and keep an eye on your
   Claude subscription usage under the session list.
@@ -70,6 +76,7 @@ launches and organizes it:
 | Multiple sessions side by side | Manual terminals | ✅ Tabs |
 | "Which session was this?" | Read the UUID | ✅ Preview, details, peek |
 | Finished-in-the-background alerts | ❌ | ✅ Notifications |
+| Pull request status & actions | `gh` by hand | ✅ On every session's row |
 
 ## What's next?
 
