@@ -78,9 +78,15 @@ Enter opens, Esc closes.
   as you switch between them; the sidebar marks the ones with unread
   output.
 - A slim **session footer** shows the **model** the session last answered
-  with (click to copy the full id — it follows a `/model` switch
-  mid-session), the agent's live working directory (click to copy), and the
-  current **git branch** (⎇), plus the terminal-panel buttons.
+  with, the agent's live working directory (click to copy), and the current
+  **git branch** (⎇), plus the terminal-panel buttons.
+- **The model is one click from switching.** The footer's model name is a
+  menu: every model your login can use, fetched live from the Models API
+  with the CLI's own token, the current one marked. Pick another and the
+  session gets the CLI's `/model` command — the footer follows once the
+  agent answers with it. The same menu sits in the composer's chrome, so
+  you can change model halfway through writing a prompt without losing the
+  draft. (Copying the full model id lives in the menu too.)
 - **Pull request chips** trail the branch: one per PR the session has
   opened, each with its CI or merge mark, and each opening that PR's **page
   beside the session** on click — a native view of the description, checks,
@@ -162,6 +168,9 @@ one-line input:
   instead, where it stays for that session's later visits. The *Composer in
   new sessions* preference can open it by itself the moment a session
   starts.
+- **Model button**: the composer names the model the session is answering
+  with, and clicking it opens the same switch menu as the footer's — pick a
+  different model mid-draft and carry on writing.
 
 ![The composer floating over an agent terminal](/img/composer.png)
 
