@@ -823,8 +823,11 @@ def generate_icon_dialog(
                 # offered rather than silently snapping to the default.
                 ids.append(extra)
                 labels.append(extra)
-        if preferred:
-            labels[0] = _("Default ({model})").format(model=labels[ids.index(preferred)])
+        # Name what the default resolves to — the saved preference, or with
+        # none the same automatic pick icongen makes (the newest Sonnet).
+        resolved = claudemodels.resolve_model(preferred, catalog)
+        if resolved in ids:
+            labels[0] = _("Default ({model})").format(model=labels[ids.index(resolved)])
         model_ids[:] = ids
         models.set_model(Gtk.StringList.new(labels))
         models.set_selected(ids.index(chosen))
