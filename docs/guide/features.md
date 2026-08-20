@@ -102,7 +102,11 @@ Enter opens, Esc closes.
   timeline, and diff. The caret beside them lists every PR with its title,
   `F7` opens the newest one's page, and *Open new pull requests
   automatically* (Preferences) opens the page by itself — once per PR — the
-  moment a session picks one up.
+  moment a session picks one up. On a screen where the terminal has already
+  hit its *maximum width* (Preferences), the page opens in a column of its
+  own, twice as wide as it can be squeezed when the spare room covers that —
+  paid out of the gutter the terminal wasn't using, never out of the
+  terminal itself.
 - **A changed image is shown, not diffed.** In the PR page's *Files* view, a
   file whose name says image — `.png`, `.svg`, `.gif`, `.jpg`, `.webp`… —
   renders as the picture itself, on a transparency checkerboard: **before

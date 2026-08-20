@@ -359,6 +359,66 @@ def check_open_page_splits() -> None:
     )
 
 
+class FlooredPage(FakePage):
+    """A page that declares a column floor, as the PR view does: the dock
+    opens it at up to twice this when the terminal's gutter can pay for it."""
+
+    column_floor = 320
+
+
+def check_column_floor() -> None:
+    """A page with a column floor opens at twice it when the gutter covers
+    the double, at the whole gutter when that covers the floor but not the
+    double, and falls back to the ordinary seed (and so the join-don't-split
+    rule) when the gutter is thinner than the floor."""
+    print("column floor:")
+
+    def floored_dock(width: int):
+        dock = open_page_dock(width, 1200, seed=0)
+        dock.open_page(FakePage(1))
+        drain()
+        page = FlooredPage(2)
+        dock.open_page(page)
+        drain()
+        return dock, page
+
+    def floor_of(dock, page) -> int:
+        strip = dock._strip_of(page)
+        rec = next(r for r in dock._panes.values() if r.managed is strip)
+        return rec.sizer._floor("right", dock._terminal.get_width())
+
+    # 1900 px: the 38% fraction (722) would squeeze the terminal, but the
+    # doubled floor (640) leaves it exactly its 1200 and more.
+    dock, page = floored_dock(1900)
+    check("the double fits, so the page gets a column", len(dock.strips()) == 2, dock.strips())
+    check("...seeded at twice the floor", floor_of(dock, page) == 640, floor_of(dock, page))
+
+    # 1700 px: 492 spare — between one floor and two: the whole gutter.
+    dock, page = floored_dock(1700)
+    check("a gutter between 1x and 2x still earns a column", len(dock.strips()) == 2, dock.strips())
+    check("...seeded at the whole gutter", floor_of(dock, page) == 492, floor_of(dock, page))
+
+    # 1500 px: 292 spare, under one floor — no floor, the fraction, no room.
+    dock, page = floored_dock(1500)
+    check(
+        "a gutter under the floor falls back to joining",
+        len(dock.strips()) == 1 and dock.strips()[0].page_count == 2,
+        dock.strips(),
+    )
+
+    # A page without a floor in the same column adds nothing to it.
+    dock, page = floored_dock(1900)
+    plain = FakePage(3)
+    dock._strip_of(page).add_page(plain)
+    check("a plain page beside it leaves the floor alone", floor_of(dock, page) == 640)
+    dock2 = open_page_dock(1900, 1200, seed=0)
+    dock2.open_page(FakePage(1))
+    drain()
+    strip = dock2._strip_of(dock2.pages()[0])
+    rec = next(r for r in dock2._panes.values() if r.managed is strip)
+    check("a column of floorless pages has no floor", rec.sizer._floor("right", 1900) == 0)
+
+
 def check_panel_terminal() -> None:
     """Ctrl+J is bound to one terminal, not to a strip: it opens its own
     rather than moving into somebody else's panel, and takes only that page
@@ -662,6 +722,7 @@ def main() -> int:
     check("restore refuses a dock already split", len(dock5.strips()) == before)
 
     check_open_page_splits()
+    check_column_floor()
     check_quiet_open()
     check_panel_terminal()
     check_close_recent()

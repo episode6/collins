@@ -37,7 +37,38 @@ def split_size(total: int, wanted: int = 0) -> int:
     return max(total - int(total * DEFAULT_FRACTION), 0)
 
 
-def room_for_a_split(total: int, keep: int, wanted: int = 0) -> bool:
+def spare_floor(total: int, keep: int, minimum: int) -> int:
+    """The least a column with a *minimum* width opens at when the gutter
+    can pay for it: twice that minimum when the spare width past *keep*
+    (handle included) covers the double, every spare pixel when it covers
+    the minimum but not the double, and 0 — no floor at all — when it can't
+    even cover the minimum, or there is no maximum width to measure the
+    gutter against.
+
+    A pull request reads better at twice the width its page can be
+    squeezed to, and on a wide screen the terminal has stopped growing, so
+    the extra room is there to be spent; but never at the terminal's
+    expense — a floor is only ever paid out of the gutter, which is why
+    the answer falls to 0 rather than to *minimum* when the gutter is too
+    thin: the ordinary seed takes over there, as it always did.
+    """
+    if total <= 0 or keep <= 0 or minimum <= 0:
+        return 0
+    free = total - keep - HANDLE_SIZE
+    if free < minimum:
+        return 0
+    return min(free, 2 * minimum)
+
+
+def opening_size(total: int, keep: int, wanted: int, minimum: int = 0) -> int:
+    """The app-wide seed a new column is handed: *wanted*, raised to the
+    `spare_floor` for a page that declares a *minimum* width. The one
+    figure both `room_for_a_split` and the sizer's apply must read, so the
+    column measured for room is the column that opens."""
+    return max(wanted, spare_floor(total, keep, minimum))
+
+
+def room_for_a_split(total: int, keep: int, wanted: int = 0, minimum: int = 0) -> bool:
     """Whether a new column can be split off a *total*-px terminal without
     taking the terminal itself below *keep* px.
 
@@ -49,13 +80,14 @@ def room_for_a_split(total: int, keep: int, wanted: int = 0) -> bool:
     using.
 
     The column is measured at the width it will really open at (see
-    `split_size`), handle included, and one narrower than MIN_SPLIT_SIZE
+    `split_size`, fed the `opening_size` a page with a *minimum* width is
+    seeded with), handle included, and one narrower than MIN_SPLIT_SIZE
     is refused however much room there is for it: a column too thin to
     read a pull request in is not a column worth opening one in.
     """
     if total <= 0 or keep <= 0:
         return False
-    size = split_size(total, wanted)
+    size = split_size(total, opening_size(total, keep, wanted, minimum))
     if size < MIN_SPLIT_SIZE:
         return False
     return total - size - HANDLE_SIZE >= keep

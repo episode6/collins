@@ -97,6 +97,11 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   empty. Drafts are saved to disk with the rest of the session's state, so
   closing the tab or quitting Collins keeps them too — including the one
   still in an open composer when the window goes away.
+- **A PR page opens wider when the room is free** — twice as wide as it
+  can be squeezed (640px) whenever the terminal is already past its maximum
+  width and the spare gutter covers it, or as much of that gutter as covers
+  the page at all; never a pixel out of the terminal, and decided before the
+  page's first fetch lands, so it doesn't resize under its own data.
 - **Fixes** — archiving a session clears its notification and unread count;
   the status icon's menu no longer draws a stray "Quit" on a separator.
 
