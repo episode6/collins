@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-19. Full change history: git log for this file.
 
 name: Release
 
@@ -69,6 +69,19 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    # The OIDC token carries an `environment` claim only when the job names an
+    # environment, and PyPI's trusted publisher matches it exactly: this name
+    # and the publisher's "GitHub Actions environment name" field must be
+    # identical, or both empty. A mismatch is rejected at upload time -- on the
+    # release tag, after the .deb is attached and the PPA upload has gone out.
+    # Change one side without the other and you ship half a release.
+    #
+    # The environment itself must also allow the ref: its deployment policy
+    # needs a *tag* pattern of v*, configured separately from branch patterns.
+    # Left on the default policy it matches no tag at all and this job waits
+    # forever, looking like a permissions failure.
+    # See ~/specs/collins/github-environments.md.
+    environment: pypi
     permissions:
       id-token: write
     steps:
