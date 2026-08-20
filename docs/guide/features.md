@@ -18,13 +18,11 @@ fork. Last modified: 2026-08-20. Full change history: git log for this file.
   sessions sort by creation time, newest first, so rows don't jump around.
   Pointing at a row swaps its timestamp for its actions: **archive** on
   every row, plus **stop** and **background** on sessions with a tab open.
-- **A pull request mark ahead of the title** on every session that has
-  opened one: the base says the PRs' state (draft, open, merged, closed),
-  and its corner badge the loudest thing left to do — failed checks or
-  conflicts (**✗**), comments waiting on a reply (**⚠**), checks still
-  running (**●**), everything passed (**✓**). **Clicking jumps to the
-  session's tab** and opens its newest PR's page; **right-clicking** lists
-  every PR with its actions.
+- **Aggregated pull request status on every session**: a mark ahead of the
+  title reads a session's PRs into one glyph — their state, plus whatever
+  needs attention most (failed checks, conflicts, unanswered comments,
+  all green). Clicking jumps to the session's tab and its newest PR's page;
+  right-clicking lists every PR with its actions.
 - **Custom project icons**: a project that ships a `project-icon.svg` in its
   root directory wears it in the sidebar in place of the generic folder
   icon — commit one and everyone who opens the project in Collins gets it.
