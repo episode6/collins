@@ -336,9 +336,11 @@ is running in:
   in a background tab, handed a prompt to begin on, working in parallel
   while the caller keeps going. It never takes your tab selection or
   keyboard — it turns up as a new row in the sidebar, rings and flashes if
-  it needs you, and inherits the permission mode its caller was started
-  with. Spawned sessions get these same tools, so they can spawn siblings
-  of their own.
+  it needs you, and unless told otherwise runs on the **model and
+  permission mode its caller is using right now** (one exception: a
+  bypass-permissions caller's siblings come up in acceptEdits, so an
+  unattended session can't mint more of itself). Spawned sessions get
+  these same tools, so they can spawn siblings of their own.
 - **`read_terminal(terminal?, lines?)`** — read the terminal panel's tabs,
   text and scrollback, exactly as you see it — so "the error over there" is
   something the agent can just look at instead of asking you to paste it.
