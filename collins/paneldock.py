@@ -847,15 +847,15 @@ class PanelDock(Adw.Bin):
         minimum = int(getattr(widget, "column_floor", 0) or 0)
         if strip is not None and side == "right" and self._split_is_free(minimum=minimum):
             strip = None
+        split = None
         if strip is None:
             strip = self._new_strip()
             split = self._split_leaf(self._terminal, strip, side)
-            # The page goes in before the sizer is asked: its floor is read
-            # off the strip's pages when the apply lands.
-            strip.add_page(widget, focus=focus)
+        strip.add_page(widget, focus=focus)
+        if split is not None:
+            # Sized only once the page is in: its floor is read off the
+            # strip's pages when the apply lands (see `_column_floor`).
             self._panes[split].sizer.apply()
-        else:
-            strip.add_page(widget, focus=focus)
         self._reveal_strip(strip)
         if focus:
             GLib.idle_add(widget.grab_page_focus)
