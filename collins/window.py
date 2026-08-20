@@ -1380,15 +1380,16 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Control>comma", "win.preferences"),
             ("<Control><Shift>a", "win.archive-current-session"),
             ("<Control><Shift>z", "win.undo-archive"),
-            ("<Control><Shift>k", "win.quick-switch"),
+            ("<Control>k", "win.quick-switch"),
             ("<Control><Shift>e", "win.toggle-tab-emoji"),
             ("<Control>j", "win.toggle-panel"),
-            ("<Control>k", "win.clear-panel"),
+            ("<Control><Shift>k", "win.clear-panel"),
             # Punctuation on purpose: every Ctrl+letter this controller
             # claims is one the agent's own input box never sees again, and
             # none of these sends a byte a terminal app would have wanted.
-            # Ctrl+L is the input box's clear-screen, so the J-K run of panel
-            # chords carries on at the next free key along instead. Period
+            # Ctrl+L is the input box's clear-screen, so the run of panel
+            # chords (J toggles, Shift+K clears) carries on at the next free
+            # key along instead; plain Ctrl+K is the quick switcher. Period
             # and apostrophe are neighbours because what they raise is: the
             # composer and the gallery of what this session has been shown
             # are the same gesture, the tab's two overlays over the terminal.

@@ -72,7 +72,7 @@ land in the transcript.
 
 ### Quick switcher
 
-Press `Ctrl+Shift+K` anywhere to fuzzy-jump to a session — arrow keys move,
+Press `Ctrl+K` anywhere to fuzzy-jump to a session — arrow keys move,
 Enter opens, Esc closes.
 
 ![Quick switcher](/img/quick-switcher.png)
@@ -188,7 +188,7 @@ one-line input:
 Every session has a second, plain-shell terminal area — no agent
 auto-launched — below or beside the agent terminal, with **tabs of its own**:
 
-- Toggle it with `Ctrl+J` or the buttons in the session footer; `Ctrl+K`
+- Toggle it with `Ctrl+J` or the buttons in the session footer; `Ctrl+Shift+K`
   clears it (screen and saved history). Shells open in the agent's **current
   working directory** (worktree-aware).
 - The tab row's **+** opens another shell tab; each tab's **✕** closes it,
