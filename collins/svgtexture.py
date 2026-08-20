@@ -5,7 +5,9 @@
 Shared by the sidebar (project icons on group rows) and the Generate Icon
 dialog (previewing a generated icon before it is saved), which sit on
 opposite sides of an import cycle (sidebar → prmenu → dialogs) and so can't
-lend the helper to each other.
+lend the helper to each other — and by the PR view's file previews
+(prfileimages), which rasterize a repository's own SVG rather than an
+icon of ours, and want it fitted to a box instead of squared off.
 """
 
 from __future__ import annotations
@@ -31,6 +33,54 @@ def svg_texture(svg: bytes | None, size: int) -> Gdk.Texture | None:
     except GLib.Error:  # SVG loader not installed
         return None
     loader.set_size(size, size)
+    try:
+        loader.write(svg)
+        loader.close()
+    except GLib.Error:
+        try:
+            loader.close()
+        except GLib.Error:
+            pass
+        return None
+    pixbuf = loader.get_pixbuf()
+    if pixbuf is None:
+        return None
+    return Gdk.Texture.new_for_pixbuf(pixbuf)
+
+
+def svg_texture_fit(
+    svg: bytes | None, max_width: int, max_height: int, min_long_edge: int = 0
+) -> Gdk.Texture | None:
+    """`svg_texture`'s sibling for artwork that isn't square: rasterize *svg*
+    at its own proportions, inside a *max_width* x *max_height* box.
+
+    A document smaller than *min_long_edge* is scaled *up* to it — an SVG is
+    vector, so there is nothing to lose, and a 22-pixel panel icon rendered
+    at 22 pixels is a preview nobody can review. The box still wins: a
+    document that would exceed it after that comes back fitted to it.
+
+    Same forced loader type as `svg_texture`, for the same reason: these are
+    a repository's bytes, and content sniffing would let a file named .svg
+    pick any codec on the machine. None when the SVG loader isn't installed
+    or the document won't parse.
+    """
+    if not svg:
+        return None
+    try:
+        loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
+    except GLib.Error:  # SVG loader not installed
+        return None
+
+    def prepared(_loader, width: int, height: int) -> None:
+        if width <= 0 or height <= 0:
+            return
+        long_edge = max(width, height)
+        up = max(1.0, min_long_edge / long_edge) if min_long_edge else 1.0
+        fit = min(max_width / width, max_height / height)
+        scale = min(up, fit)
+        loader.set_size(max(1, round(width * scale)), max(1, round(height * scale)))
+
+    loader.connect("size-prepared", prepared)
     try:
         loader.write(svg)
         loader.close()

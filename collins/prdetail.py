@@ -49,6 +49,10 @@ log = logging.getLogger(__name__)
 _GH_DETAIL_FIELDS = (
     "number,url,title,state,isDraft,body,author,createdAt,baseRefName,"
     "headRefName,additions,deletions,changedFiles,labels,comments,reviews,"
+    # The two commits the diff runs between, and (a fork's PR) the repository
+    # the head one lives in: what names a blob when the Files view wants to
+    # render an image rather than a patch — see prblobs.
+    "baseRefOid,headRefOid,headRepository,headRepositoryOwner,"
     # Nothing on the page renders this one: it is here for `absorb`, which
     # reads the reply as a status fetch — and the page's own merge button is
     # what follows it (practions.header_actions). A field the summary layer
@@ -79,6 +83,10 @@ _HTTP_URL = re.compile(r"^https?://", re.IGNORECASE)
 # gate against injection (ids only ever travel inside a ``key=value`` argv
 # entry) but against carrying anything that isn't plausibly an id at all.
 THREAD_ID = re.compile(r"^[A-Za-z0-9+/=_-]{1,200}$")
+
+# A commit sha, as gh spells one back. The gate a ref passes before it can
+# name a blob in a fetch (see `_oid`): full-length, hex, nothing else.
+_SHA = re.compile(r"[0-9a-fA-F]{40}")
 
 # The review-thread fetch: the ceiling past which pagination stops (a PR with
 # more threads has outgrown a side panel; the cut is logged), and how long a
@@ -182,12 +190,19 @@ class PrFile:
 
     A None patch is a binary file, a diff over the cap, or a diff call that
     failed — all rendered as a stat-only row with a placeholder.
+
+    *change_type* is gh's own word for what happened to the file — ADDED,
+    REMOVED, MODIFIED, RENAMED, COPIED, CHANGED — or "" when the reply
+    didn't say. What the Files view reads to know which sides of an image
+    exist: an added file has no before, a removed one no after, and a
+    rename's before is under a name gh's file list doesn't carry.
     """
 
     path: str
     additions: int
     deletions: int
     patch: str | None
+    change_type: str = ""
 
 
 @dataclass(frozen=True)
@@ -208,6 +223,15 @@ class PullRequestDetail:
     created_at: str
     base_ref: str
     head_ref: str
+    # The commits those two branch names pointed at when the reply was made,
+    # and the repository the head one is in ("" for a PR from a branch of the
+    # base repository, an ``owner/name`` for one from a fork). A blob is only
+    # ever asked for by commit, never by branch name: a branch moves under a
+    # page that has been open a while, and a preview must show the diff the
+    # page is showing rather than whatever the branch has become since.
+    base_oid: str
+    head_oid: str
+    head_repository: str
     additions: int
     deletions: int
     changed_files: int
@@ -334,6 +358,9 @@ def parse_detail(
         created_at=_line(data.get("createdAt")),
         base_ref=_line(data.get("baseRefName")),
         head_ref=_line(data.get("headRefName")),
+        base_oid=_oid(data.get("baseRefOid")),
+        head_oid=_oid(data.get("headRefOid")),
+        head_repository=_head_repository(data),
         additions=_int(data.get("additions")),
         deletions=_int(data.get("deletions")),
         changed_files=_int(data.get("changedFiles")),
@@ -567,6 +594,7 @@ def _files(value: object, patches: dict[str, str]) -> tuple[PrFile, ...]:
                 additions=_int(entry.get("additions")),
                 deletions=_int(entry.get("deletions")),
                 patch=patches.get(path),
+                change_type=_line(entry.get("changeType")).upper(),
             )
         )
     return tuple(files)
@@ -583,6 +611,33 @@ def _labels(value: object) -> tuple[str, ...]:
 def _author(value: object) -> str:
     """The login behind gh's author object — '' when there isn't one."""
     return _line(value.get("login")) if isinstance(value, dict) else ""
+
+
+def _oid(value: object) -> str:
+    """A commit sha, lowercased — '' for anything that isn't one.
+
+    Held to the shape git mints rather than merely bounded: an oid parsed
+    here later becomes a query argument in a blob fetch (see prblobs), and
+    the one thing that must never travel there is a repository's idea of a
+    "ref".
+    """
+    return _line(value).lower() if _SHA.fullmatch(_line(value)) else ""
+
+
+def _head_repository(data: dict) -> str:
+    """``owner/name`` for the repository the head branch is in, or "".
+
+    "" whenever the reply doesn't name both halves — the caller falls back
+    to the PR's own repository, which is where a same-repo branch (every PR
+    Collins opens) has its blobs anyway.
+    """
+    owner = data.get("headRepositoryOwner")
+    repo = data.get("headRepository")
+    if not isinstance(owner, dict) or not isinstance(repo, dict):
+        return ""
+    login = _line(owner.get("login"))
+    name = _line(repo.get("name"))
+    return f"{login}/{name}" if login and name else ""
 
 
 def _line(value: object) -> str:

@@ -71,6 +71,14 @@ rendering it as the word "screenshot" underlined threw that away. The
 anyone who would rather a repository's bodies didn't make their machine
 fetch anything: off, an image renders as the alt-text link it always did.
 
+The Files view renders a *changed* image the same way, and for the same
+reason: `prfileimages.preview` puts before and after pictures at the top of
+the file's section (fetched by commit through `prblobs`) where a patch could
+only ever have said that two binary files differ. A file with a real diff as
+well — an SVG — keeps it under the pictures, behind its own line-count
+expander when it is a long one, so the section can lead with the artwork
+without eagerly building a buffer. The same setting gates it.
+
 Everything shown is repository content and therefore untrusted: bodies go
 through `formatting.md_to_pango`'s escaping (with the plain-text fallback on
 malformed markup), only http(s) URLs ever reach a browser or a fetch
@@ -92,7 +100,15 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
-from . import avatars, bodyimages, dialogs, practions, prdetail, prmenu  # noqa: E402
+from . import (  # noqa: E402
+    avatars,
+    bodyimages,
+    dialogs,
+    practions,
+    prdetail,
+    prfileimages,
+    prmenu,
+)
 from .copylabel import (  # noqa: E402
     copy_hint,
     enable_copy_on_secondary_click,
@@ -904,7 +920,7 @@ class PrViewPage(Adw.Bin):
             return
         scheme = style_scheme(self._scheme_setting, self._dark)
         for file in detail.files:
-            section = _FileSection(file, scheme)
+            section = _FileSection(file, scheme, detail, self._inline_images)
             # The file's threads hang under its diff, top of the file first —
             # visible even while a large patch stays collapsed.
             for thread in prdetail.file_threads(detail.threads, file.path):
@@ -2044,21 +2060,46 @@ class _ThreadCard(Gtk.Box):
 
 class _FileSection(Gtk.Box):
     """One file of the diff: a header row (path, +/− counts), then the patch
-    in a GtkSource diff buffer.
+    in a GtkSource diff buffer — or, for an image, the picture itself.
 
     A patch past `_LARGE_PATCH_LINES` starts collapsed showing its line count
     and only builds its buffer on first expand; a file with no patch at all —
     binary, an over-cap diff, or a failed diff call — is the header alone
     with a stat-only note (see prdetail.PrFile).
+
+    A changed image is the one file a patch can't render, so it renders as
+    before-and-after pictures instead (`prfileimages.preview`, which fetches
+    the blobs the header names). Where those pictures are the whole story —
+    a binary file, whose stanza says only that the two differ — they stand in
+    place of the diff; where there is a real patch to read as well (an SVG),
+    it sits under them, behind its own line-count expander when it is a long
+    one, so the section can lead with the picture without eagerly building a
+    buffer nobody asked for.
     """
 
-    def __init__(self, file: prdetail.PrFile, scheme: GtkSource.StyleScheme | None) -> None:
+    def __init__(
+        self,
+        file: prdetail.PrFile,
+        scheme: GtkSource.StyleScheme | None,
+        detail: prdetail.PullRequestDetail | None = None,
+        images: bool = False,
+    ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.add_css_class("pr-file-section")
         self._file = file
         self._scheme = scheme
         self._buffer: GtkSource.Buffer | None = None
         self._expander: Gtk.Expander | None = None
+        self._diff_expander: Gtk.Expander | None = None
+        # Built here rather than on expand: it is a slot plus a fetch, and
+        # it is what the section leads with. None whenever this file isn't
+        # an image, the setting is off, or the reply didn't name the commits
+        # to fetch its blobs from — all of which leave the patch as it was.
+        self._preview = (
+            prfileimages.preview(file, detail)
+            if images and detail is not None
+            else None
+        )
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
         path = Gtk.Label(label=file.path, xalign=0.0, hexpand=True)
@@ -2074,31 +2115,44 @@ class _FileSection(Gtk.Box):
             note.add_css_class("caption")
             note.add_css_class("dim-label")
             header.append(note)
-            self.append(header)
+
+        # A patch with no hunk in it is git's "Binary files … differ" — the
+        # picture above says all of it, and better.
+        self._lines = file.patch.count("\n") if file.patch is not None else 0
+        self._large = self._lines > _LARGE_PATCH_LINES
+        self._show_diff = file.patch is not None and (
+            self._preview is None or _has_hunks(file.patch)
+        )
+        if self._preview is None and not self._show_diff:
+            self.append(header)  # stat-only: the header is the whole section
             return
 
-        lines = file.patch.count("\n")
-        large = lines > _LARGE_PATCH_LINES
-        if large:
-            count = Gtk.Label(
-                label=ngettext("{n} line", "{n} lines", lines).format(n=lines)
-            )
-            count.add_css_class("caption")
-            count.add_css_class("dim-label")
-            header.append(count)
+        # The count rides the header only when the header is what stays
+        # visible; with a picture below it, it belongs on the diff's own
+        # expander instead.
+        if self._large and self._show_diff and self._preview is None:
+            header.append(self._count_widget())
         expander = Gtk.Expander(label_widget=header)
-        expander.set_expanded(not large)
+        # A section with a picture in it always opens: the preview is the
+        # point of it, and the long half — the buffer — has its own gate.
+        expander.set_expanded(self._preview is not None or not self._large)
         self._expander = expander
         self.append(expander)
-        if large:
-            expander.connect("notify::expanded", self._on_expanded)
+        if expander.get_expanded():
+            expander.set_child(self._content_widget())
         else:
-            expander.set_child(self._diff_widget())
+            expander.connect("notify::expanded", self._on_expanded)
 
     def reveal(self) -> None:
-        """Expand (building the buffer if this is the first time)."""
+        """Expand (building the buffer if this is the first time).
+
+        The nested diff of an image goes with it: the file list's row was
+        clicked to read this file, not to look at it.
+        """
         if self._expander is not None:
             self._expander.set_expanded(True)
+        if self._diff_expander is not None:
+            self._diff_expander.set_expanded(True)
 
     def set_scheme(self, scheme: GtkSource.StyleScheme | None) -> None:
         """Restyle a built buffer now; a lazy one picks *scheme* up on build."""
@@ -2107,6 +2161,40 @@ class _FileSection(Gtk.Box):
             self._buffer.set_style_scheme(scheme)
 
     def _on_expanded(self, expander: Gtk.Expander, _pspec) -> None:
+        if expander.get_expanded() and expander.get_child() is None:
+            expander.set_child(self._content_widget())
+
+    def _count_widget(self) -> Gtk.Widget:
+        """The patch's line count, dimmed — what a collapsed diff says of
+        itself, wherever it is collapsed."""
+        count = Gtk.Label(
+            label=ngettext("{n} line", "{n} lines", self._lines).format(n=self._lines)
+        )
+        count.add_css_class("caption")
+        count.add_css_class("dim-label")
+        return count
+
+    def _content_widget(self) -> Gtk.Widget:
+        """Everything under the header: the picture, the patch, or both."""
+        if self._preview is None:
+            return self._diff_widget()
+        if not self._show_diff:
+            return self._preview
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        body.append(self._preview)
+        if self._large:
+            # The image's patch, still lazy: a generated SVG can run to tens
+            # of thousands of lines of path data, and building that buffer to
+            # show a picture would be the very hitch the cap exists to avoid.
+            diff = Gtk.Expander(label_widget=self._count_widget())
+            diff.connect("notify::expanded", self._on_diff_expanded)
+            self._diff_expander = diff
+            body.append(diff)
+        else:
+            body.append(self._diff_widget())
+        return body
+
+    def _on_diff_expanded(self, expander: Gtk.Expander, _pspec) -> None:
         if expander.get_expanded() and expander.get_child() is None:
             expander.set_child(self._diff_widget())
 
@@ -2357,6 +2445,14 @@ def _image_row(row: tuple) -> Gtk.Widget:
     for entry in row:
         box.append(bodyimages.image(entry))
     return box
+
+
+def _has_hunks(patch: str) -> bool:
+    """Whether *patch* has any hunk in it — i.e. whether there is a diff to
+    read at all. A binary file's stanza is headers and git's "Binary files …
+    differ", which is a sentence, not a diff: the picture beside it
+    (prfileimages) says everything that line was standing in for."""
+    return patch.startswith("@@") or "\n@@" in patch
 
 
 def _count_label(text: str, css_class: str) -> Gtk.Label:

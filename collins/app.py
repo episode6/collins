@@ -1020,6 +1020,26 @@ popover.menu button.open-with-row:hover {
 .pr-file-path {
   font-weight: bold;
 }
+/* a changed image, drawn instead of its patch (prfileimages.py). The frame
+   is a body image's; the checkerboard under it is what an icon needs to be
+   seen at all: most of what a PR changes here is a transparent PNG or SVG,
+   and a white glyph on nothing is invisible on a dark panel (a black one on
+   a light panel). Fixed greys rather than theme colors, for the same
+   reason - the point is a ground that neither theme can swallow. */
+.pr-file-image {
+  border: 1px solid alpha(currentColor, 0.15);
+  border-radius: 6px;
+  padding: 4px;
+  background-color: #f0f0f0;
+  background-image:
+    linear-gradient(45deg, #cfcfcf 25%, transparent 25%, transparent 75%, #cfcfcf 75%),
+    linear-gradient(45deg, #cfcfcf 25%, transparent 25%, transparent 75%, #cfcfcf 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+.pr-file-image-standin {
+  padding: 6px 10px;
+}
 """
 
 

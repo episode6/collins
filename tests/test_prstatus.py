@@ -783,6 +783,47 @@ def test_gh_text_drops_an_oversized_reply(monkeypatch):
     assert prstatus.gh_text(["pr", "diff", URL], max_bytes=100) == "x" * 100
 
 
+def test_gh_bytes_never_decodes_the_reply(monkeypatch):
+    """An image blob is not text: decoding it with replacement would hand back
+    something that is no longer the file (see prblobs)."""
+    seen = []
+    png = b"\x89PNG\r\n\x1a\n\xff\xfe\x00"
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(
+        prstatus.subprocess, "run",
+        lambda argv, **kw: seen.append((argv, kw))
+        or subprocess.CompletedProcess([], 0, stdout=png, stderr=b""),
+    )
+    assert prstatus.gh_bytes(["api", "repos/o/n/contents/x.png"]) == png
+    argv, kwargs = seen[0]
+    assert argv[1:] == ["api", "repos/o/n/contents/x.png"]
+    assert "text" not in kwargs and "errors" not in kwargs
+    assert kwargs["timeout"] == prstatus._GH_ACTION_TIMEOUT_S
+
+
+def test_gh_bytes_degrades_on_failure(monkeypatch):
+    """Including the failure with a bytes stderr — a 404 for a blob that isn't
+    at that commit is the everyday case, and must never raise."""
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(
+        prstatus.subprocess, "run",
+        lambda *a, **kw: subprocess.CompletedProcess(
+            [], 1, stdout=b"", stderr=b"gh: Not Found (HTTP 404)"),
+    )
+    assert prstatus.gh_bytes(["api", "repos/o/n/contents/x.png"]) is None
+
+
+def test_gh_bytes_drops_an_oversized_blob(monkeypatch):
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(
+        prstatus.subprocess, "run",
+        lambda *a, **kw: subprocess.CompletedProcess(
+            [], 0, stdout=b"x" * 100, stderr=b""),
+    )
+    assert prstatus.gh_bytes(["api", "x"], max_bytes=99) is None
+    assert prstatus.gh_bytes(["api", "x"], max_bytes=100) == b"x" * 100
+
+
 def test_gh_run_feeds_stdin_rather_than_argv(monkeypatch):
     """A comment body must never be an argv entry; it travels as gh's input."""
     seen = []
