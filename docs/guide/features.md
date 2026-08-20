@@ -66,20 +66,19 @@ Enter opens, Esc closes.
 
 ![Quick switcher](/img/quick-switcher.png)
 
-## Tabs & terminals
+## Sessions & terminals
 
-- Clicking a session opens a tab with an embedded **VTE terminal** running
-  your `$SHELL` with the agent's resume command (`claude --resume <id>`) —
-  in the directory the session **last worked in** (worktree-aware), not just
+- Clicking a session opens it in an embedded **VTE terminal** running your
+  `$SHELL` with the agent's resume command (`claude --resume <id>`) — in
+  the directory the session **last worked in** (worktree-aware), not just
   where it started. A session still **running detached** is **re-attached**
-  (`claude attach`) instead of resumed as a copy.
-- **Tabs sit in the sidebar's order** — left to right is the session list
-  read top to bottom, and they re-arrange when the list does. A tab with
-  unread output is marked by the tab bar itself.
-- A slim **tab footer** shows the **model** the session last answered with
-  (click to copy the full id — it follows a `/model` switch mid-session),
-  the agent's live working directory (click to copy), and the current **git
-  branch** (⎇), plus the terminal-panel buttons.
+  (`claude attach`) instead of resumed as a copy. Open sessions stay open
+  as you switch between them; the sidebar marks the ones with unread
+  output.
+- A slim **session footer** shows the **model** the session last answered
+  with (click to copy the full id — it follows a `/model` switch
+  mid-session), the agent's live working directory (click to copy), and the
+  current **git branch** (⎇), plus the terminal-panel buttons.
 - **Pull request chips** trail the branch: one per PR the session has
   opened, each with its CI or merge mark, and each opening that PR's **page
   beside the session** on click — a native view of the description, checks,
@@ -106,36 +105,35 @@ Enter opens, Esc closes.
 
 ![A pull request page open beside its session](/img/pr-page.png)
 
-- **Rename** tabs, **copy the session ID**, or **fork** a session
-  (`--fork-session`) from the right-click menu. **Shift+Enter** inserts a
-  newline in the agent's prompt, and **in-terminal search**
-  (`Ctrl+Shift+G`) covers the scrollback.
+- **Rename** a session, **copy its ID**, or **fork** it (`--fork-session`)
+  from the right-click menu. **Shift+Enter** inserts a newline in the
+  agent's prompt, and **in-terminal search** (`Ctrl+Shift+G`) covers the
+  scrollback.
 - **Easy copy & paste** (on by default): plain `Ctrl+C` **copies whenever
   text is selected** — otherwise it interrupts the agent as usual — plain
   `Ctrl+V` pastes, and right-click opens a Copy / Paste / Select All menu.
   No `Ctrl+Shift` finger-twisting just because it's a terminal; the classic
   `Ctrl+Shift+C` / `Ctrl+Shift+V` always work.
-- Closing a tab asks the agent to **exit cleanly** (Claude Code's
+- Closing a session asks the agent to **exit cleanly** (Claude Code's
   `Ctrl+C` `Ctrl+C`, which works from whatever the agent happens to be
   showing) in the background first — or the dialog offers to **background
   the session** instead (`/bg`), leaving it running detached to re-attach
-  to later. While a session tab is focused, two header buttons do the same
+  to later. While a session is focused, two header buttons do the same
   directly, skipping the dialog. Backgrounding is greyed out for the second
   or two before a brand-new session's id is known — the tooltip says so.
 - **Closing the window doesn't have to end anything.** The close-window
   dialog's third answer, **Keep Running (Hide Window)**, hides the window
-  and leaves every session exactly as it is — tabs, panels, scrollback and
-  all. The status icon's *Show Collins*, a session's notification, or
-  simply launching Collins again brings it back. Where a status icon is
-  present it's the dialog's default answer; the **When quitting with
-  running sessions** preference can skip the dialog entirely (always ask,
-  exit, background, or hide), and the menu's explicit Quit always really
-  quits.
-- The **tab bar can be hidden** with a header toggle — the window title then
-  names the active tab — and the sidebar is **resizable**, its width
-  remembered. On the next launch the app opens with no session — or, with
-  **Reopen the last session** on (Preferences → Startup), with the one you
-  had focused — and the window comes back at its last size.
+  and leaves every session exactly as it is — panels, scrollback and all.
+  The status icon's *Show Collins*, a session's notification, or simply
+  launching Collins again brings it back. Where a status icon is present
+  it's the dialog's default answer; the **When quitting with running
+  sessions** preference can skip the dialog entirely (always ask, exit,
+  background, or hide), and the menu's explicit Quit always really quits.
+- The window title names the focused session, and the sidebar is
+  **resizable**, its width remembered. On the next launch the app opens
+  with no session — or, with **Reopen the last session** on (Preferences →
+  Startup), with the one you had focused — and the window comes back at
+  its last size.
 
 ## Prompt composer
 
@@ -167,11 +165,11 @@ one-line input:
 
 ## Terminal panel
 
-Every tab has a second, plain-shell terminal area — no agent auto-launched —
-below or beside the agent terminal, with **tabs of its own**:
+Every session has a second, plain-shell terminal area — no agent
+auto-launched — below or beside the agent terminal, with **tabs of its own**:
 
-- Toggle it with `Ctrl+J` or the buttons in the tab footer; `Ctrl+K` clears
-  it (screen and saved history). Shells open in the agent's **current
+- Toggle it with `Ctrl+J` or the buttons in the session footer; `Ctrl+K`
+  clears it (screen and saved history). Shells open in the agent's **current
   working directory** (worktree-aware).
 - The tab row's **+** opens another shell tab; each tab's **✕** closes it,
   asking first if a command is still running. Typing `exit` closes a tab
@@ -208,7 +206,7 @@ below or beside the agent terminal, with **tabs of its own**:
 A syntax-highlighted code editor lives beside the agent terminal — the
 "read and fix what the agent just did" surface, not a general-purpose IDE:
 
-- Toggle it with `F8` or the footer icon — one editor per tab, full-height
+- Toggle it with `F8` or the footer icon — one editor per session, full-height
   in a right-hand column, with a **project file tree** rooted where the
   session is working and **quick open** (`Ctrl+Shift+O`) to fuzzy-find any
   file in the project.
