@@ -285,6 +285,37 @@ def test_inherited_mode_drops_junk_to_the_default():
         assert mcptools.inherited_permission_mode(junk) == ""
 
 
+def test_start_session_model_is_a_bounded_string():
+    assert (
+        mcptools.validate_args("start_session", {"prompt": "go", "model": "opus"})
+        is None
+    )
+    assert "empty" in mcptools.validate_args(
+        "start_session", {"prompt": "go", "model": ""}
+    )
+    assert "at most" in mcptools.validate_args(
+        "start_session", {"prompt": "go", "model": "m" * 81}
+    )
+
+
+def test_valid_model_takes_aliases_and_full_ids():
+    for model in (
+        "opus",
+        "sonnet",
+        "claude-opus-4-1-20250805",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    ):
+        assert mcptools.valid_model(model), model
+        assert mcptools.inherited_model(model) == model
+
+
+def test_inherited_model_drops_junk_to_the_default():
+    """Whatever isn't a plain model token never reaches a command line."""
+    for junk in (None, "", "-opus", "opus; rm -rf /", "a b", "o" * 81, "café", "[1m]"):
+        assert not mcptools.valid_model(junk)
+        assert mcptools.inherited_model(junk) == ""
+
+
 def test_read_terminal_args_all_default():
     """Both arguments are optional: the bare call reads every panel tab."""
     assert mcptools.validate_args("read_terminal", {}) is None
