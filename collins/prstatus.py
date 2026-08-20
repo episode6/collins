@@ -695,6 +695,7 @@ def _gh(
     cwd: str | None = None,
     timeout: float = _GH_TIMEOUT_S,
     stdin: str | None = None,
+    binary: bool = False,
 ) -> subprocess.CompletedProcess | None:
     """One `gh` call, run to completion. None when it couldn't be run at all.
 
@@ -703,7 +704,10 @@ def _gh(
     is fed to gh as its standard input — how a comment body travels without
     ever being an argument. Output is decoded with replacement rather than
     strictly: a diff can carry any bytes a repository does, and one stray
-    non-UTF-8 line must not turn a reply into an exception.
+    non-UTF-8 line must not turn a reply into an exception. *binary* turns
+    that decoding off altogether and hands the reply back as bytes, which is
+    the only way a reply that isn't text at all — a PNG blob (see prblobs) —
+    survives the trip: replacement decoding would quietly corrupt it.
     """
     global _gh_missing
     gh = shutil.which("gh")
@@ -711,15 +715,15 @@ def _gh(
         _gh_missing = True
         log.info("prstatus: gh not on PATH; PR chips will show the number only")
         return None
+    text_args = {} if binary else {"text": True, "errors": "replace"}
     try:
         return subprocess.run(
             [gh, *args],
             capture_output=True,
-            text=True,
-            errors="replace",
             timeout=timeout,
             cwd=cwd,
             input=stdin,
+            **text_args,
         )
     except (OSError, subprocess.SubprocessError) as err:
         log.debug("prstatus: gh %s failed: %s", " ".join(args), err)
@@ -821,6 +825,31 @@ def gh_text(args: list[str], max_bytes: int | None = None) -> str | None:
         )
         return None
     if max_bytes is not None and len(result.stdout.encode("utf-8", "replace")) > max_bytes:
+        log.info("prstatus: gh %s reply over %s bytes; dropped", " ".join(args), max_bytes)
+        return None
+    return result.stdout
+
+
+def gh_bytes(args: list[str], max_bytes: int | None = None) -> bytes | None:
+    """`gh_text`'s sibling for a reply that isn't text: raw stdout, undecoded.
+
+    What fetches a file's bytes out of a repository (`prblobs`): an image
+    blob is not UTF-8, and the replacement decoding every other call here
+    relies on would hand back something that no longer is the file. Same
+    action timeout, same optional *max_bytes* cap over which the reply is
+    dropped rather than returned, same "None on any failure" contract —
+    stderr is still text, and is logged as the reason. Never call on the
+    main thread.
+    """
+    result = _gh(args, timeout=_GH_ACTION_TIMEOUT_S, binary=True)
+    if result is None:
+        return None
+    if result.returncode != 0:
+        stderr = (result.stderr or b"").decode("utf-8", "replace")
+        log.debug("prstatus: gh %s exited %s: %s", " ".join(args),
+                  result.returncode, stderr.strip()[:200])
+        return None
+    if max_bytes is not None and len(result.stdout) > max_bytes:
         log.info("prstatus: gh %s reply over %s bytes; dropped", " ".join(args), max_bytes)
         return None
     return result.stdout

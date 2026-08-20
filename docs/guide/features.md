@@ -103,6 +103,16 @@ Enter opens, Esc closes.
   `F7` opens the newest one's page, and *Open new pull requests
   automatically* (Preferences) opens the page by itself — once per PR — the
   moment a session picks one up.
+- **A changed image is shown, not diffed.** In the PR page's *Files* view, a
+  file whose name says image — `.png`, `.svg`, `.gif`, `.jpg`, `.webp`… —
+  renders as the picture itself, on a transparency checkerboard: **before
+  beside after** for one the PR changed, a single picture for one it adds or
+  deletes, and a click opens either full size. An SVG keeps its patch under
+  the preview (a small one is drawn scaled up, since vector artwork loses
+  nothing by it); a binary image, whose diff only ever said the two files
+  differ, shows the picture alone. The blobs come through `gh`, so private
+  repositories and Enterprise hosts work — and *Show embedded images*
+  (Preferences) turns the whole thing off.
 - **Right-click a chip** for what to *do* with it: mark a draft **ready for
   review**, **merge** it — or arm **auto-merge** while its checks are still
   running (merging asks first, until you turn *Confirm before merging*

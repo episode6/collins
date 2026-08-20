@@ -51,6 +51,10 @@ def _reply(**overrides):
         "createdAt": "2026-08-09T22:11:04Z",
         "baseRefName": "main",
         "headRefName": "collins/tab-drag-handles",
+        "baseRefOid": "5f2397053bd8c9661eed7b5928c753a91dd20a94",
+        "headRefOid": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        "headRepository": {"name": "collins"},
+        "headRepositoryOwner": {"login": "episode6"},
         "additions": 581,
         "deletions": 32,
         "changedFiles": 2,
@@ -346,6 +350,39 @@ def test_files_join_their_patches_by_path():
     assert files[1].patch is None  # not in the diff (binary)
 
 
+def test_files_carry_ghs_word_for_what_happened_to_them():
+    """What the Files view reads to know which sides of an image exist."""
+    files = parse_detail(URL, _reply(), DIFF).files
+    assert [f.change_type for f in files] == ["MODIFIED", "ADDED"]
+
+
+def test_the_commits_the_diff_runs_between_arrive_with_it():
+    """A blob is only ever fetched by commit: a branch moves under an open
+    page, and a preview must show the diff the page is showing."""
+    detail = parse_detail(URL, _reply(), DIFF)
+    assert detail.base_oid == "5f2397053bd8c9661eed7b5928c753a91dd20a94"
+    assert detail.head_oid == "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    assert detail.head_repository == "episode6/collins"
+
+
+def test_a_ref_that_isnt_a_commit_is_no_ref_at_all():
+    """The one thing that must never reach a blob fetch is a repository's own
+    idea of a "ref"."""
+    reply = _reply(baseRefOid="main", headRefOid=";rm -rf /", headRepository=7)
+    detail = parse_detail(URL, reply, DIFF)
+    assert (detail.base_oid, detail.head_oid, detail.head_repository) == ("", "", "")
+
+
+def test_an_oid_is_kept_lowercase():
+    detail = parse_detail(URL, _reply(headRefOid="A" * 40), DIFF)
+    assert detail.head_oid == "a" * 40
+
+
+def test_a_fork_names_its_own_repository():
+    reply = _reply(headRepositoryOwner={"login": "contributor"})
+    assert parse_detail(URL, reply, DIFF).head_repository == "contributor/collins"
+
+
 def test_no_diff_still_loads_stat_only_files():
     files = parse_detail(URL, _reply(), None).files
     assert [f.patch for f in files] == [None, None]
@@ -356,12 +393,14 @@ def test_junk_fields_degrade_to_empty_not_fatal():
     reply = _reply(body=7, author="not-a-dict", createdAt=None, labels="nope",
                    comments={"a": 1}, reviews=None, statusCheckRollup="x",
                    files=None, additions="many", deletions=-3, changedFiles=True,
-                   baseRefName=[], headRefName=9)
+                   baseRefName=[], headRefName=9, baseRefOid=None, headRefOid=[],
+                   headRepository=None, headRepositoryOwner="nope")
     detail = parse_detail(URL, reply, DIFF)
     assert detail.body == ""
     assert detail.author == ""
     assert detail.created_at == ""
     assert (detail.base_ref, detail.head_ref) == ("", "")
+    assert (detail.base_oid, detail.head_oid, detail.head_repository) == ("", "", "")
     assert (detail.additions, detail.deletions, detail.changed_files) == (0, 0, 0)
     assert detail.labels == ()
     assert detail.checks == ()

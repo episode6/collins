@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-20. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -448,9 +448,10 @@ class PreferencesDialog(Adw.Dialog):
         self._pr_images_row = Adw.SwitchRow(
             title=_("Show embedded images"),
             subtitle=_(
-                "Render the images a description or comment embeds, in "
-                "place; click one to open it full size. Off, they stay "
-                "links and opening a pull request downloads nothing"
+                "Render the images a description or comment embeds, and the "
+                "changed image files, as pictures; click one to open it full "
+                "size. Off, they stay links and patches, and opening a pull "
+                "request downloads nothing"
             ),
         )
         self._pr_images_row.set_active(bool(state.get_setting("pr_inline_images")))
