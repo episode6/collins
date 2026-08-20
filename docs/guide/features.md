@@ -18,16 +18,13 @@ fork. Last modified: 2026-08-20. Full change history: git log for this file.
   sessions sort by creation time, newest first, so rows don't jump around.
   Pointing at a row swaps its timestamp for its actions: **archive** on
   every row, plus **stop** and **background** on sessions with a tab open.
-- **A pull request mark ahead of the title**, on every session that has
-  opened one: GitHub's own iconography, with everything the session's PRs
-  amount to read into a single mark. The base says the least settled state
-  among them (draft, open, merged, closed); the badge on its corner says the
-  loudest thing left to do — a red **✗** for a failed check or a conflicting
-  branch, an amber **⚠** for comments waiting on a reply, an amber **●** for
-  checks still running, a green **✓** when every live PR has passed
-  everything. Hovering names each PR, **clicking jumps to the session's tab**
-  and opens its newest PR's page there, and **right-clicking** lists every
-  PR with its actions.
+- **A pull request mark ahead of the title** on every session that has
+  opened one: the base says the PRs' state (draft, open, merged, closed),
+  and its corner badge the loudest thing left to do — failed checks or
+  conflicts (**✗**), comments waiting on a reply (**⚠**), checks still
+  running (**●**), everything passed (**✓**). **Clicking jumps to the
+  session's tab** and opens its newest PR's page; **right-clicking** lists
+  every PR with its actions.
 - **Refresh** (the header's ↻) re-reads the session list *and* every listed
   session's pull requests — checks, conflicts, unanswered comments, plus a
   branch lookup that picks up PRs opened by hand. Collins runs the same
