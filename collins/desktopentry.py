@@ -31,15 +31,20 @@ def data_home() -> Path:
     return Path.home() / ".local" / "share"
 
 
-def _quote_exec(command: str) -> str:
-    """A path as a desktop-entry Exec argument.
+# The Exec key's reserved characters, verbatim from the Desktop Entry Spec:
+# an argument containing any of them must be quoted. A home directory with a
+# space in it is the everyday way to meet one.
+_RESERVED = set(" \t\n\"'\\><~|&;$*?#()`")
+# Inside the double quotes, this shorter set must additionally be
+# backslash-escaped -- quoting alone does not neutralize them.
+_ESCAPED = '`$"\\'
 
-    Spaces, quotes and backslashes are reserved by the spec; a home directory
-    with a space in it is the everyday way to meet one.
-    """
-    if not any(c in command for c in ' \t"\'\\$`'):
+
+def _quote_exec(command: str) -> str:
+    """A path as a desktop-entry Exec argument."""
+    if not _RESERVED.intersection(command):
         return command
-    escaped = command.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = "".join("\\" + c if c in _ESCAPED else c for c in command)
     return f'"{escaped}"'
 
 

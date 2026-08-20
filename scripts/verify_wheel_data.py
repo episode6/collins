@@ -51,8 +51,14 @@ def expected() -> set[str]:
 def check(label: str, names: set[str], wanted: set[str]) -> list[str]:
     problems = [f"{label}: missing {name}" for name in sorted(wanted - names)]
     # The Debug artwork is a source-checkout thing (start-debug), left out of
-    # the packages for the same reason the .deb leaves it out.
-    problems += [f"{label}: ships the debug-only {n}" for n in sorted(names) if "Debug" in n]
+    # the packages for the same reason the .deb leaves it out. Scoped to the
+    # icon paths: "Debug" is a plausible thing to find in a module name one
+    # day, and a data check has no business failing over that.
+    problems += [
+        f"{label}: ships the debug-only {n}"
+        for n in sorted(names)
+        if n.startswith("collins/icons/") and "Debug" in n
+    ]
     return problems
 
 

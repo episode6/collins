@@ -46,10 +46,29 @@ def test_desktop_entry_rewrites_exec_and_drops_path():
         ("/usr/bin/collins", "/usr/bin/collins"),
         ("/home/a b/.local/bin/collins", '"/home/a b/.local/bin/collins"'),
         ('/tmp/we"ird/collins', '"/tmp/we\\"ird/collins"'),
+        # Quoted *and* backslash-escaped: quoting alone does not neutralize
+        # these three inside the double quotes.
+        ("/tmp/a$b/collins", '"/tmp/a\\$b/collins"'),
+        ("/tmp/a`b/collins", '"/tmp/a\\`b/collins"'),
+        ("/tmp/a\\b/collins", '"/tmp/a\\\\b/collins"'),
+        # Reserved, so quoted -- but not escaped inside the quotes.
+        ("/tmp/a&b/collins", '"/tmp/a&b/collins"'),
+        ("/tmp/a;b/collins", '"/tmp/a;b/collins"'),
+        ("/tmp/~b/collins", '"/tmp/~b/collins"'),
+        ("/tmp/a#b/collins", '"/tmp/a#b/collins"'),
+        ("/tmp/a(b)/collins", '"/tmp/a(b)/collins"'),
     ],
 )
 def test_exec_quoting(command, expected):
     assert desktopentry._quote_exec(command) == expected
+
+
+def test_every_reserved_character_triggers_quoting():
+    # The spec's list, verbatim: an argument holding any of these must be
+    # quoted, so none may slip through unquoted.
+    for char in " \t\n\"'\\><~|&;$*?#()`":
+        quoted = desktopentry._quote_exec(f"/tmp/a{char}b/collins")
+        assert quoted.startswith('"') and quoted.endswith('"'), char
 
 
 def test_exec_command_prefers_the_running_script(monkeypatch, tmp_path):
