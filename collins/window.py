@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-20. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -105,6 +105,11 @@ _GHOSTTY = shutil.which("ghostty")
 
 # Window (and content header) title while the tab bar is showing the tab names.
 _APP_TITLE = "Collins"
+
+# The desktop notification id the first hide posts its notice under (see
+# _maybe_show_hide_notice). Named rather than spelled twice: the app withdraws
+# it from the other side, when the windows come back (App._dismiss_hide_notice).
+HIDE_NOTICE_ID = "collins-hidden"
 
 # How long after the store's first scan the launch PR sweep waits before going
 # out to gh (see _schedule_launch_sweep). Long enough for the restored tabs to
@@ -772,6 +777,11 @@ class MainWindow(Adw.ApplicationWindow):
         wording says how to get back without one. The flag is recorded when
         the notice is sent: once per install means once, whichever desktop
         the first hide happened on.
+
+        It comes down again the moment the windows do, by whichever route
+        (see App._dismiss_hide_notice): a notice saying where Collins
+        went is answered by Collins being back, and left standing it is a
+        badge on the launcher icon that never clears.
         """
         app = self.get_application()
         if app is None or self.state.get_setting("hide_notice_shown"):
@@ -784,7 +794,7 @@ class MainWindow(Adw.ApplicationWindow):
         notification = Gio.Notification.new(_("Collins is still running"))
         notification.set_body(body)
         notification.set_default_action("app.show-windows")
-        app.send_notification("collins-hidden", notification)
+        app.send_notification(HIDE_NOTICE_ID, notification)
 
     def request_quit(self) -> None:
         """app.quit's way in: a real close, never the hide branch.
@@ -3463,10 +3473,12 @@ class MainWindow(Adw.ApplicationWindow):
         doing right now.
 
         The forced counterpart of _clear_unread, and the `notify_user` tool's
-        lasting in-app trace: the desktop notification is the desktop's to keep
-        or drop, and the bell-flash is over in a second, so without this a user
-        who comes back to the app a few minutes later has nothing in the window
-        telling them which session called for them.
+        lasting in-app trace: the bell-flash is over in a second, so without
+        this a user who comes back to the app a few minutes later has nothing
+        in the window telling them which session called for them. The flag now
+        speaks for the desktop notification too — the banner is withdrawn when
+        the flag comes off (see App._on_unread_changed), so the two halves
+        of one request end together.
 
         Unlike the finish edge (_on_session_finished) this skips nothing. An
         agent that notifies mid-turn is still running by definition — waiting
@@ -4236,7 +4248,13 @@ class MainWindow(Adw.ApplicationWindow):
         the same action the sidebar's cross-window handoff uses. The
         notification id is the session id, so a session that notifies twice
         replaces its own notification instead of stacking a queue nobody
-        reads. The bell-flash rides along for the user who is looking: it
+        reads — and so the app can take it down again when the unread flag it
+        posted alongside comes off (see App._on_unread_changed): a banner
+        the user has already answered in-app is one a desktop that counts
+        standing notifications would otherwise badge us for forever. The
+        exception is a tab whose session id hasn't resolved yet, below: keyed
+        by a title that can change under it, it is the desktop's to dismiss.
+        The bell-flash rides along for the user who is looking: it
         marks the ringing tab and row in-app, where a desktop notification
         says nothing. It wears the project's icon where the project ships one
         (see _notification_icon), so a glance at the banner says which project
