@@ -28,9 +28,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import gi
 
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 import collins.composer as composer_mod  # noqa: E402
 
@@ -91,6 +92,20 @@ def corrections(view) -> list:
     return found
 
 
+def composer_has_spell_click(view) -> bool:
+    """Whether the view carries the right-click spell-targeting gesture."""
+    controllers = view._view.observe_controllers()
+    for i in range(controllers.get_n_items()):
+        controller = controllers.get_item(i)
+        if (
+            isinstance(controller, Gtk.GestureClick)
+            and controller.get_button() == Gdk.BUTTON_SECONDARY
+            and controller.get_propagation_phase() == Gtk.PropagationPhase.CAPTURE
+        ):
+            return True
+    return False
+
+
 def widget_xy(view, offset: int):
     """Widget coordinates of the character at *offset*, for a fake click."""
     location = view._view.get_iter_location(view._buffer.get_iter_at_offset(offset))
@@ -124,6 +139,21 @@ def main() -> int:
 
     view.set_text(TEXT)
     pump(700)
+
+    # libspelling 0.2 (Ubuntu 24.04, and so the runners) has no
+    # update_corrections(), and without a synchronous rebuild moving the
+    # caret would leave the menu stale rather than mis-aimed. ComposerView
+    # installs no gesture there; check that degrade and stop.
+    if not hasattr(view._adapter, "update_corrections"):
+        check("libspelling 0.2: no gesture installed", not composer_has_spell_click(view))
+        check(
+            "…so a misspelling is still tagged, just not aimed at",
+            view._buffer.get_iter_at_offset(TEXT.index("recieve") + 1).has_tag(
+                view._adapter.get_tag()
+            ),
+        )
+        print(f"\n{PASSED} passed, {FAILED} failed (libspelling 0.2 degrade path)")
+        return 1 if FAILED else 0
 
     tail = len(TEXT)  # after "end", spelled correctly: no corrections there
 

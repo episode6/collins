@@ -145,11 +145,20 @@ class ComposerView(Gtk.Box):
                 # right-click doesn't move -- so aim it by hand, in the
                 # CAPTURE phase, before the text view claims the press and
                 # pops the menu it has already built.
-                secondary = Gtk.GestureClick()
-                secondary.set_button(Gdk.BUTTON_SECONDARY)
-                secondary.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-                secondary.connect("pressed", self._on_secondary_press)
-                self._view.add_controller(secondary)
+                #
+                # Only where the adapter can be told to rebuild on the spot,
+                # though. update_corrections() arrived in libspelling 0.4;
+                # 0.2 (Ubuntu 24.04, which the PPA builds for) has only the
+                # 100ms timeout off "cursor-moved", which lands after the
+                # menu is already up. Moving the caret there would leave the
+                # menu stale rather than merely mis-aimed -- worse than the
+                # bug -- so those installs keep the behavior they have.
+                if hasattr(adapter, "update_corrections"):
+                    secondary = Gtk.GestureClick()
+                    secondary.set_button(Gdk.BUTTON_SECONDARY)
+                    secondary.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+                    secondary.connect("pressed", self._on_secondary_press)
+                    self._view.add_controller(secondary)
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key)

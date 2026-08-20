@@ -78,7 +78,15 @@ def main() -> int:
     # CAPTURE-phase secondary click (see ComposerView._on_secondary_press).
     # Without that gesture the menu still opens, just about the wrong word —
     # a silent failure no other check would catch.
-    assert _has_secondary_capture_click(view._view), "spell-click gesture missing"
+    # Gated on libspelling 0.4's update_corrections(): without a synchronous
+    # rebuild the composer deliberately installs no gesture (see
+    # ComposerView.__init__), so 0.2 must show the opposite.
+    if hasattr(view._adapter, "update_corrections"):
+        assert _has_secondary_capture_click(view._view), "spell-click gesture missing"
+    else:
+        assert not _has_secondary_capture_click(view._view), (
+            "libspelling 0.2 cannot refresh the menu in time; no gesture belongs here"
+        )
     _check_text_roundtrip(view)
     print("with libspelling OK: adapter wired, its menu installed, text moves")
 
