@@ -190,16 +190,40 @@ auto-launched — below or beside the agent terminal, with **tabs of its own**:
   panel's open state, position, and size; the strip that **pages** dock
   into (a PR view, the attachments gallery, a docked composer) remembers a
   size of its own, kept apart from the shells'.
-- The **attachments panel** — the gallery of pictures a session has been
-  shown, on `Ctrl+'` or the handle at the terminal's right edge — docks
-  itself beside the terminal the first time a session shows a picture, when
-  the window is wide enough to spare the column (toggle in Preferences →
-  Panels).
 - **Right-click the footer's terminal button** to open the agent's live
   directory in your desktop's own terminal instead, for the times a window
   of its own beats a panel.
 
 ![The terminal panel below an agent session](/img/terminal-panel.png)
+
+## Attachments panel
+
+Pictures flow through a session constantly — screenshots the agent takes,
+images it shows you, files you drag in — and the moment they scroll off the
+terminal they're gone. The **attachments panel** keeps them: a per-session
+gallery of everything the session has shared, on `Ctrl+'` or the slim
+handle at the terminal's right edge.
+
+- **Every picture, from every source**: images the agent shows with
+  `show_image`, the ones it mentions by path or URL in its replies, and the
+  files it hands over with its "send file" tool — those can be any kind of
+  file, shown as a typed icon with the filename. Captions ride along where
+  there was one; a picture found in prose carries a snippet of the text
+  around it instead.
+- **Reads like a chat**: oldest at the top, newest at the bottom. The handle
+  wears a badge when something new has arrived that you haven't looked at.
+- **Click a picture** to open it full-size in the lightbox, where the arrow
+  keys walk the gallery; a file opens in your desktop's default app.
+  **Right-click** a row for *Open With…*, *Show in Folder*, *Copy Path*,
+  and *Remove From List*. A file that's no longer on disk stays listed, and
+  says so.
+- **Floating or docked.** The panel slides in over the terminal; its dock
+  button makes it a panel tab beside the terminal instead, where it can be
+  split and moved like any other. It **docks itself** the first time a
+  session shows a picture, when the window is wide enough to spare the
+  column (*Show the attachments panel automatically*, in Preferences).
+- The list **persists per session** — reopen a session weeks later and its
+  gallery is exactly as you left it. Forked sessions inherit the original's.
 
 ## Editor panel
 
