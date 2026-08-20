@@ -34,6 +34,9 @@ fork. Last modified: 2026-08-20. Full change history: git log for this file.
   filesystem watch, and existing rows update in place without jumping
   around. A just-started session shows a **"New Thread"** placeholder row
   until the agent writes its transcript.
+- A **Claude usage panel** under the session list: your subscription
+  limits as progress bars with reset countdowns, read from the `claude`
+  CLI's own login — see [Claude usage panel](#claude-usage-panel).
 
 ![The sidebar: each project wearing its own icon, sessions carrying pull request marks](/img/sidebar.png)
 
