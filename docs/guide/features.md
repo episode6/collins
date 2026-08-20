@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-19. Full change history: git log for this file.
+fork. Last modified: 2026-08-20. Full change history: git log for this file.
 -->
 
 # Features
@@ -35,8 +35,7 @@ fork. Last modified: 2026-08-19. Full change history: git log for this file.
   **a finished run re-asks GitHub about its own PRs** the moment its agent
   stops — that is when the answer changes, so fresh checks and review
   replies land on the mark without a click.
-- A **`+` button on every project header** starts a new session in that
-  project. **Right-click a header** for *New session here*, *Archive
+- **Right-click a project header** for *New session here*, *Archive
   project*, **opening the folder in another app** (each app you added under
   Preferences → *Footer apps*, plus *Open in File Manager* and *Open in
   Terminal* for whatever your desktop nominates), **Open on GitHub** (read
