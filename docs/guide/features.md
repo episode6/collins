@@ -34,6 +34,9 @@ fork. Last modified: 2026-08-20. Full change history: git log for this file.
   filesystem watch, and existing rows update in place without jumping
   around. A just-started session shows a **"New Thread"** placeholder row
   until the agent writes its transcript.
+
+![The sidebar: each project wearing its own icon, sessions carrying pull request marks](/img/sidebar.png)
+
 ### Auto-generated titles
 
 Unnamed sessions get a **title generated for them**: sessions that already
@@ -59,19 +62,6 @@ Press `Ctrl+Shift+K` anywhere to fuzzy-jump to a session — arrow keys move,
 Enter opens, Esc closes.
 
 ![Quick switcher](/img/quick-switcher.png)
-
-## Custom names, favorites & emoji
-
-- Give any session a **custom name** (right-click → *Rename…*, or rename its
-  tab — the name syncs everywhere).
-- **Star** sessions to pin them to Favorites.
-- Add an **emoji** prefix to a tab (right-click a tab → *Set emoji…*, or
-  `Ctrl+Shift+E` for a quick 😊 marker).
-
-![Setting a tab emoji, with two sessions open as tabs](/img/tab-emoji.png)
-
-All of this is stored in `~/.config/collins/state.json`. Your
-agents' own session files are never modified.
 
 ## Tabs & terminals
 
