@@ -59,19 +59,36 @@ def pump(ms: int = 600) -> None:
         time.sleep(0.002)
 
 
+# What libspelling names every correction item, with the replacement word
+# as both label and target (spelling-menu.c).
+CORRECT_ACTION = "spelling.correct"
+
+
 def corrections(view) -> list:
-    """The labels in the adapter menu's corrections section."""
-    menu = view._adapter.get_menu_model()
-    outer = menu.iterate_item_links(0)
-    outer.next()
-    section = outer.get_value().iterate_item_links(0)
-    section.next()
-    model = section.get_value()
-    out = []
-    for i in range(model.get_n_items()):
-        label = model.get_item_attribute_value(i, "label", None)
-        out.append(label.get_string() if label else None)
-    return out
+    """Every correction the adapter's menu is currently offering.
+
+    Found by action name rather than by walking to a known position: the
+    menu's shape differs between libspelling releases — its corrections
+    section doesn't even implement iterate_item_links — while the action
+    and the label-is-the-word convention are stable. Descends through both
+    link kinds because which one holds the corrections has moved too.
+    """
+    found = []
+
+    def walk(model) -> None:
+        for i in range(model.get_n_items()):
+            action = model.get_item_attribute_value(i, "action", None)
+            if action is not None and action.get_string() == CORRECT_ACTION:
+                label = model.get_item_attribute_value(i, "label", None)
+                if label is not None:
+                    found.append(label.get_string())
+            for link in ("section", "submenu"):
+                child = model.get_item_link(i, link)
+                if child is not None:
+                    walk(child)
+
+    walk(view._adapter.get_menu_model())
+    return found
 
 
 def widget_xy(view, offset: int):
