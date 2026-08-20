@@ -25,13 +25,13 @@ fork. Last modified: 2026-08-20. Full change history: git log for this file.
   running (**●**), everything passed (**✓**). **Clicking jumps to the
   session's tab** and opens its newest PR's page; **right-clicking** lists
   every PR with its actions.
-- **Generate Icon**, in a project header's right-click menu, asks Claude to
-  design the project a sidebar icon from what's in the folder. The result is
-  previewed at full
-  size and at the 16px the sidebar actually uses; type an adjustment ("make
-  it blue") and *Regenerate* until it's right. *Save* writes a
-  `project-icon.svg` to the project root — the same file a project can ship
-  by hand — so commit it and everyone gets it.
+- **Custom project icons**: a project that ships a `project-icon.svg` in its
+  root directory wears it in the sidebar in place of the generic folder
+  icon — commit one and everyone who opens the project in Collins gets it.
+  **Generate Icon**, in a project header's right-click menu, has Claude
+  design one from what's in the folder — previewed at full size and at the
+  16px the sidebar actually uses, regenerable with an adjustment ("make it
+  blue") until it's right; *Save* writes the file to the project root.
 - A **search button** (or `Ctrl+Shift+F`) filters the whole list by name,
   project, message preview, or session ID, plus a footer showing session,
   project, transcript-size, and open-tab counts.
