@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-20. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -16,7 +16,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from . import editorfiles, icongen
+from . import claudemodels, editorfiles, icongen
 from .chats import is_chat_cwd
 from .formatting import display_path, format_size, format_timestamp, format_tokens
 from .i18n import _, ngettext
@@ -27,6 +27,7 @@ from .sessions import (
     configured_mcp_servers,
     read_mcp_config,
 )
+from .state import AppState
 from .svgtexture import svg_texture
 
 
@@ -709,9 +710,12 @@ def generate_icon_dialog(
     opens. The result is previewed at dialog size and at the 16px the
     sidebar actually renders; the entry takes adjustment requests, and
     Regenerate re-runs the model with the previous attempt and that feedback
-    in the prompt. Nothing is written until Save — Cancel (or closing the
-    dialog any other way) aborts whatever run is in flight. *on_saved* fires
-    after a successful save, so the caller can refresh the sidebar.
+    in the prompt. A model drop-down starts on the Preferences choice
+    (icon_model) and changes only this dialog's runs — a stronger model for
+    one stubborn project, without re-pointing every future generation.
+    Nothing is written until Save — Cancel (or closing the dialog any other
+    way) aborts whatever run is in flight. *on_saved* fires after a
+    successful save, so the caller can refresh the sidebar.
     """
     # svg: the latest accepted attempt (what Save writes, what a revision
     # builds on). run: the in-flight generation, if any. gen: a counter so a
@@ -749,6 +753,47 @@ def generate_icon_dialog(
     entry_row.append(entry)
     entry_row.append(regen)
 
+    # Which model the next run asks for. Item 0 is the Preferences setting
+    # (whatever it resolves to at run time), the rest the live catalog, so
+    # the first run — started before any list has landed — already honours
+    # the preference, and a pick here never writes it back.
+    model_ids: list[str] = [""]
+    models = Gtk.DropDown.new_from_strings([_("Default model")])
+    models.set_tooltip_text(_("Model for this dialog's runs; Preferences sets the default"))
+    model_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    model_label = Gtk.Label(label=_("Model"), xalign=0, hexpand=True)
+    model_row.append(model_label)
+    model_row.append(models)
+
+    def fill_models(catalog: list[claudemodels.ClaudeModel]) -> bool:
+        preferred = (AppState().get_setting("icon_model") or "").strip()
+        chosen = model_ids[models.get_selected()]
+        ids = [""] + [m.id for m in catalog]
+        labels = [_("Default model")] + [m.display_name for m in catalog]
+        for extra in (preferred, chosen):
+            if extra and extra not in ids:
+                # A saved or picked id the API no longer lists stays
+                # offered rather than silently snapping to the default.
+                ids.append(extra)
+                labels.append(extra)
+        if preferred:
+            labels[0] = _("Default ({model})").format(model=labels[ids.index(preferred)])
+        model_ids[:] = ids
+        models.set_model(Gtk.StringList.new(labels))
+        models.set_selected(ids.index(chosen))
+        return GLib.SOURCE_REMOVE
+
+    def load_models() -> None:
+        catalog = claudemodels.available_models() or list(claudemodels.FALLBACK_MODELS)
+        GLib.idle_add(fill_models, catalog)
+
+    # The cached catalog fills the list at once; the worker heals a stale or
+    # alias-only list to the live one without blocking the dialog.
+    cached = claudemodels.cached_models()
+    if cached:
+        fill_models(cached)
+    threading.Thread(target=load_models, name="icon-models", daemon=True).start()
+
     # A regenerate that fails after a good attempt keeps the preview (and
     # Save) and reports here instead of on the failure page.
     status = Gtk.Label(wrap=True, xalign=0, visible=False)
@@ -763,6 +808,7 @@ def generate_icon_dialog(
         margin_end=18,
     )
     content.append(stack)
+    content.append(model_row)
     content.append(entry_row)
     content.append(status)
 
@@ -795,13 +841,14 @@ def generate_icon_dialog(
         stack.set_visible_child_name("loading")
         feedback = entry.get_text()
         previous = state["svg"]
+        model = model_ids[models.get_selected()] or None
 
         def work() -> None:
             try:
                 prompt = icongen.build_prompt(
                     cwd, project_name, feedback=feedback, previous_svg=previous
                 )
-                svg = run.run(prompt)
+                svg = run.run(prompt, model=model)
             except icongen.IconGenCancelled:
                 return
             except Exception as err:  # IconGenError, OSError, ...
