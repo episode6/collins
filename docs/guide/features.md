@@ -165,8 +165,8 @@ one-line input:
   puts the draft back in the agent's own input box, so nothing you wrote is
   ever stranded. If the agent has since left the terminal — a bare shell,
   where pasting a draft would run it — the draft is kept instead, and comes
-  back the next time you open that session's composer. A semi-transparent **composer button** on the corner of
-  each agent terminal opens it by mouse.
+  back the next time you open that session's composer. A semi-transparent
+  **composer button** on the corner of each agent terminal opens it by mouse.
 - **Send on Enter** — or flip *Enter sends composer text* off to make Enter
   a newline and `Ctrl+Enter` the send. `Shift+Enter` is always a newline.
   The box is drawn in the terminal's own font on purpose: the text is about

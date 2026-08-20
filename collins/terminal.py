@@ -3547,12 +3547,12 @@ class TerminalTab(Gtk.Box):
 
         Held in memory for the tab's life only — a draft is a half-written
         thought about this session, not state worth writing to disk — and
-        overwritten by the next undeliverable close rather than queued: the
-        one that just came off the screen is the one the user was writing.
+        the stash is whatever the *last* undeliverable close held, never a
+        queue of them: the one that just came off the screen is the one the
+        user was writing, and a box they emptied before closing it leaves
+        nothing behind to come back later.
         """
-        stashed = composerkeys.stashable_draft(text)
-        if stashed:
-            self._composer_stash = stashed
+        self._composer_stash = composerkeys.stashable_draft(text)
 
     def _restore_stashed_draft(self, composer: ComposerView) -> None:
         """Seed an opening composer with the draft an earlier close stashed.
