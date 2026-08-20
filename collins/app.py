@@ -27,6 +27,7 @@ from . import (
     buildinfo,
     clisetup,
     cliwelcome,
+    desktopentry,
     editorfiles,
     ghwelcome,
     mcpserver,
@@ -51,7 +52,11 @@ from .terminal import TerminalTab
 from .window import MainWindow, session_window
 
 # Bundled icons (e.g. tab-close-symbolic); found by name when installed.
-_BUNDLED_ICONS = Path(__file__).resolve().parent.parent / "data" / "icons"
+# collins/icons is a symlink to data/icons, so this is the checkout's own
+# artwork when running from source and the wheel's copy of it otherwise —
+# `pip install collins` unpacks nothing but the package, so anything the app
+# needs at runtime has to live in here (see pyproject.toml's package-data).
+_PACKAGE_ICONS = Path(__file__).resolve().parent / "icons"
 
 # Icon-theme search-path roots, most specific first; the first that exists wins.
 #
@@ -65,7 +70,7 @@ _BUNDLED_ICONS = Path(__file__).resolve().parent.parent / "data" / "icons"
 # hicolor/scalable/apps: it is namespaced by app id, and the shell has to find
 # it without asking us.
 _ICON_ROOTS = (
-    _BUNDLED_ICONS,                                # running from a checkout
+    _PACKAGE_ICONS,                                # the checkout, or the wheel
     Path.home() / ".local/share/collins/icons",    # data/install.sh
     Path("/usr/share/collins/icons"),              # the .deb
 )
@@ -1276,6 +1281,29 @@ class App(Adw.Application):
     def __init__(self) -> None:
         # COLLINS_APP_ID lets a demo instance run alongside the real one (for screenshots).
         super().__init__(application_id=os.environ.get("COLLINS_APP_ID") or APP_ID)
+        # A pip/pipx install runs no post-install script, so there is nothing
+        # to put Collins in the app grid the way data/install.sh and the
+        # packages do. Registering the flag here (rather than reading sys.argv)
+        # is what gets it into `collins --help` alongside GApplication's own.
+        self.add_main_option(
+            "install-desktop",
+            0,
+            GLib.OptionFlags.NONE,
+            GLib.OptionArg.NONE,
+            _("Install the desktop entry, app icon and metainfo for the current user"),
+            None,
+        )
+
+    def do_handle_local_options(self, options: GLib.VariantDict) -> int:
+        """Handle --install-desktop here in the local process, and exit.
+
+        Returning a non-negative value is how a GApplication says "done, exit
+        with this code" before anything registers or activates — no display is
+        touched, so this works over ssh and on a machine with no session.
+        """
+        if options.contains("install-desktop"):
+            return desktopentry.install_cli()
+        return -1
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
@@ -1295,12 +1323,13 @@ class App(Adw.Application):
             # add_search_path can do): a machine that ran data/install.sh
             # months ago has copies of these icons under ~/.local/share and
             # /usr/share, and those directories are searched first, so the
-            # checkout would render whatever artwork was current back then.
+            # running copy would render whatever artwork was current back
+            # then.
             # Silently, and often not as a missing icon: an old stroked
             # symbolic still resolves, and GTK's recolor — fill:!important on
             # every rect/circle/path, stroke untouched — turns it into a
-            # silhouette or into nothing at all. Running from source means
-            # running this checkout's icons.
+            # silhouette or into nothing at all. The icons that ship with the
+            # code being run — this checkout's, or this wheel's — win.
             theme = Gtk.IconTheme.get_for_display(display)
             theme.set_search_path([str(icon_root), *theme.get_search_path()])
 

@@ -28,6 +28,7 @@ from . import (
     __version__,
     buildinfo,
     chats,
+    desktopentry,
     dialogs,
     footerapps,
     mcptools,
@@ -1200,6 +1201,7 @@ class MainWindow(Adw.ApplicationWindow):
                 not self.sidebar.get_visible()
             ),
             "trash-archived": lambda *_: self._trash_archived(),
+            "install-desktop": lambda *_: self._install_desktop_entry(),
             "archive-current-session": lambda *_: self._archive_current_session(),
             # Never disabled, even with nothing to undo: its shortcut must
             # always land here and be swallowed — a shortcut whose action is
@@ -4921,6 +4923,45 @@ class MainWindow(Adw.ApplicationWindow):
                 GLib.idle_add(dialogs.error_dialog, self, _("Git pull failed"), detail)
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _install_desktop_entry(self) -> None:
+        """The sidebar menu's "Install desktop icon".
+
+        Writes the launcher, app icon and metainfo under XDG_DATA_HOME — what
+        `collins --install-desktop` does, and what data/install.sh does for a
+        checkout. The item is only in the menu when nothing has put Collins in
+        the app grid yet (see desktopentry.can_offer_install), which in
+        practice means a pip or pipx install: those run no post-install script.
+
+        On a worker thread, because refreshing the desktop database and the
+        icon cache means two subprocesses that walk directories, and this is
+        the main loop. The offer comes out of *every* window's menu on the way
+        back, not just this one's: it was never about this window, and a second
+        window still advertising it would install the same three files again.
+        """
+
+        def work() -> None:
+            try:
+                desktopentry.install()
+            except OSError as err:
+                GLib.idle_add(
+                    dialogs.error_dialog,
+                    self,
+                    _("Couldn't install the desktop icon"),
+                    str(err),
+                )
+                return
+            GLib.idle_add(self._install_desktop_done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _install_desktop_done(self) -> None:
+        for window in self.get_application().get_windows():
+            if isinstance(window, MainWindow):
+                window.sidebar.drop_install_desktop_item()
+        self.sidebar.toast_overlay.add_toast(
+            Adw.Toast(title=_("Collins is in your applications now"))
+        )
 
     def _git_pull_done(self, project: str, summary: str) -> None:
         title = (

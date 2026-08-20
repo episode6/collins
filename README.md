@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-18. Full change history: git log for this file.
+fork. Last modified: 2026-08-19. Full change history: git log for this file.
 -->
 
 # Collins
@@ -108,6 +108,17 @@ Or install the desktop launcher + icon (shows up in the app grid as "Collins"):
 ./data/install.sh
 ```
 
+**PyPI — pipx or pip.** Available everywhere, and the way in on a distro with no package of its own.
+
+```bash
+pipx install --system-site-packages collins   # or: pip install --user collins
+collins --install-desktop                     # optional: add it to the app grid
+```
+
+`--system-site-packages` is not optional: Collins' `dependencies` list is deliberately empty because PyGObject, GTK, VTE and GtkSourceView come from your distro's packages (see [Requirements](#requirements)), not from PyPI. A plain `pipx install collins` or a venv without that flag builds an environment that cannot see them, and the app exits on `import gi` the first time you run it.
+
+`collins --install-desktop` is what `data/install.sh` is for a checkout and what the packages do system-wide: it writes the launcher, app icon and metainfo under `~/.local/share` for your user only. The app offers the same thing from its sidebar menu — **Install desktop icon**, shown only when nothing has put Collins in your app grid yet. Nothing else needs installing — the toolbar and sidebar artwork ships inside the wheel.
+
 **Ubuntu — the episode6 PPA.** The maintained channel on Ubuntu 24.04 (noble) and 26.04 (resolute), and on the derivatives that share them: Linux Mint, Pop!_OS, elementary OS, Zorin. Collins upgrades with the rest of your system from here.
 
 ```bash
@@ -149,16 +160,18 @@ collins/
 ├── dialogs.py        # rename / emoji / confirm / details / MCP dialogs
 ├── prefs.py          # preferences dialog
 └── themes.py, i18n.py, switcher.py, panelhistory.py, copylabel.py, …
-data/
-├── com.episode6.Collins.desktop   # launcher template
-├── icons/com.episode6.Collins.svg # app icon
+data/                                    # symlinked into collins/, so it ships in the wheel
+├── com.episode6.Collins.desktop         # launcher template
+├── com.episode6.Collins.metainfo.xml    # AppStream metadata
+├── icons/                               # app icon + the app-private action icons
 └── install.sh                           # install launcher + icon for current user
 scripts/
 ├── build_deb.sh                         # build the .deb package into dist/
 ├── install-debug-launcher.sh            # app-grid entry: pull this checkout, run debug
 ├── make_demo_data.py                    # fake sessions for screenshots/demos
 ├── ship-release.py                      # publish a release branch as a GitHub release
-└── verify_versions.py                   # CI check: all version copies agree
+├── verify_versions.py                   # CI check: all version copies agree
+└── verify_wheel_data.py                 # CI check: the wheel carries icons + launcher
 ```
 
 ## Publishing (maintainers)

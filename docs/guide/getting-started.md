@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-18. Full change history: git log for this file.
+fork. Last modified: 2026-08-19. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -59,6 +59,25 @@ sudo apt install ./collins_*_all.deb
 
 It appears in your app grid as **Collins**, and the installed command is
 `collins`.
+
+### PyPI — pipx or pip
+
+```bash
+pipx install --system-site-packages collins   # or: pip install --user collins
+collins --install-desktop                     # optional: add it to the app grid
+```
+
+`--system-site-packages` is not optional: Collins declares no PyPI
+dependencies on purpose, because PyGObject, GTK, VTE and GtkSourceView come
+from your distro's packages (above). An environment that cannot see them
+exits on `import gi` the first time you run the app.
+
+`collins --install-desktop` writes the launcher, app icon and metainfo under
+`~/.local/share` for your user — the same three files the `.deb` installs
+system-wide. The sidebar menu offers the same thing as **Install desktop
+icon**, shown only when nothing has put Collins in your app grid yet. It is
+the only extra step: the toolbar and sidebar artwork ships inside the
+package.
 
 ### From source
 

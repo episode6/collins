@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-19. Full change history: git log for this file.
 
 name: CI
 
@@ -33,6 +33,22 @@ jobs:
       # blocklist to match if you make it.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-gi python3-pytest
       - run: python3 -m pytest tests/ -q
+
+  # The wheel is the whole of `pip install collins` -- no post-install script
+  # runs -- so the icons, launcher template and metainfo have to be inside it.
+  # They get there through package-data globs over symlinks into data/, which
+  # setuptools has not always followed; a silent miss ships an app with no
+  # icons. Build both artifacts the way release.yml does, then check them.
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet build
+      - run: python -m build
+      - run: python3 scripts/verify_wheel_data.py
 
   # Every committed copy of the version must agree (see RELEASE_CHECKLIST.md);
   # scripts/ship-release.py re-checks the same invariants at ship time.
