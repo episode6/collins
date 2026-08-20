@@ -67,10 +67,11 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   a machine without them and then exit on launch asking you to install them by
   hand. Both packages now also require libadwaita 1.5 and GTK 4.10, turning a
   crash on a too-old distribution into an apt refusal that says why.
-- **`pip install collins`** — the PyPI name is now plain `collins` (it was
-  `collins-gtk`), and the wheel finally ships the app's icons, `.desktop`
-  launcher, and metainfo; `collins --install-desktop` puts the launcher in
-  the app grid.
+- **Collins comes to PyPI** — the first Collins release published there, as
+  plain `collins` (`pipx install collins`). The upstream project's packaging
+  was inherited but never exercised under the Collins name; the wheel now
+  carries the app's icons, `.desktop` launcher, and metainfo, and
+  `collins --install-desktop` puts the launcher in the app grid.
 - **Close hides the window; sessions keep running.** The close dialog's
   third answer, *Keep Running (Hide Window)*, leaves every session exactly
   as it is with no window on screen; the status icon's *Show Collins
