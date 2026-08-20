@@ -1124,3 +1124,12 @@ msgstr "Állapotikon nélkül az elrejtett ablak a Collins újraindításával v
 msgid "Install the desktop entry, app icon and metainfo for the current user"
 msgstr "Az asztali indító, az alkalmazásikon és a metaadatok telepítése a jelenlegi felhasználónak"
 
+msgid "Install desktop icon"
+msgstr "Asztali ikon telepítése"
+
+msgid "Couldn't install the desktop icon"
+msgstr "Nem sikerült telepíteni az asztali ikont"
+
+msgid "Collins is in your applications now"
+msgstr "A Collins mostantól megtalálható az alkalmazások között"
+

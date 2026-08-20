@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-19. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -30,7 +30,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import footerapps, openwith, prmenu
+from . import desktopentry, footerapps, openwith, prmenu
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
 from .formatting import format_size
@@ -1404,6 +1404,15 @@ class SessionSidebar(Gtk.Box):
         menu.append(_("Delete archived sessions…"), "win.trash-archived")
         menu.append(_("MCP servers"), "win.mcp-servers")
         menu.append(_("Preferences"), "win.preferences")
+        # Only when nothing has put Collins in the app grid yet: a pip or pipx
+        # install runs no post-install script, so it is the one way in that
+        # arrives without a launcher (`collins --install-desktop` is the same
+        # thing from a terminal). Decided once, at launch — the answer only
+        # changes when someone installs one, and the window that does drops
+        # the item from every menu itself (see drop_install_desktop_item).
+        self._menu = menu
+        if desktopentry.can_offer_install():
+            menu.append(_("Install desktop icon"), "win.install-desktop")
         menu.append(_("About Collins"), "win.about")
         # Last, and app-scoped: it closes every window, not this one. The
         # status icon's menu offers the same item, and this is where someone
@@ -1808,6 +1817,21 @@ class SessionSidebar(Gtk.Box):
             self._refresh_btn.set_icon_name("view-refresh-symbolic")
             self._refresh_btn.set_tooltip_text(_("Refresh session list and pull requests"))
         self._refresh_btn.set_sensitive(not busy)
+
+    def drop_install_desktop_item(self) -> None:
+        """Take "Install desktop icon" back out of the menu.
+
+        Called on every window once one of them has installed a launcher, so
+        the offer disappears everywhere rather than only where it was taken.
+        Matched by action rather than position: the item is optional to begin
+        with, so its index is not a constant, and a menu that never carried it
+        must not lose the item that happens to sit where it would have been.
+        """
+        for i in range(self._menu.get_n_items()):
+            action = self._menu.get_item_attribute_value(i, Gio.MENU_ATTRIBUTE_ACTION, None)
+            if action is not None and action.get_string() == "win.install-desktop":
+                self._menu.remove(i)
+                return
 
     def set_sessions_working(self, working: bool) -> None:
         """Run the header's barber pole while any session in this window is

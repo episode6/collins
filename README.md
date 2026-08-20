@@ -117,7 +117,7 @@ collins --install-desktop                     # optional: add it to the app grid
 
 `--system-site-packages` is not optional: Collins' `dependencies` list is deliberately empty because PyGObject, GTK, VTE and GtkSourceView come from your distro's packages (see [Requirements](#requirements)), not from PyPI. A plain `pipx install collins` or a venv without that flag builds an environment that cannot see them, and the app exits on `import gi` the first time you run it.
 
-`collins --install-desktop` is what `data/install.sh` is for a checkout and what the packages do system-wide: it writes the launcher, app icon and metainfo under `~/.local/share` for your user only. Nothing else needs installing — the toolbar and sidebar artwork ships inside the wheel.
+`collins --install-desktop` is what `data/install.sh` is for a checkout and what the packages do system-wide: it writes the launcher, app icon and metainfo under `~/.local/share` for your user only. The app offers the same thing from its sidebar menu — **Install desktop icon**, shown only when nothing has put Collins in your app grid yet. Nothing else needs installing — the toolbar and sidebar artwork ships inside the wheel.
 
 **Ubuntu — the episode6 PPA.** The maintained channel on Ubuntu 24.04 (noble) and 26.04 (resolute), and on the derivatives that share them: Linux Mint, Pop!_OS, elementary OS, Zorin. Collins upgrades with the rest of your system from here.
 

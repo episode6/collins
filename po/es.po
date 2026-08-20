@@ -1124,3 +1124,12 @@ msgstr "Sin icono de estado, una ventana oculta vuelve al reiniciar Collins o al
 msgid "Install the desktop entry, app icon and metainfo for the current user"
 msgstr "Instalar el lanzador de escritorio, el icono y los metadatos para el usuario actual"
 
+msgid "Install desktop icon"
+msgstr "Instalar el icono de escritorio"
+
+msgid "Couldn't install the desktop icon"
+msgstr "No se pudo instalar el icono de escritorio"
+
+msgid "Collins is in your applications now"
+msgstr "Collins ya está en tus aplicaciones"
+

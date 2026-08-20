@@ -1124,3 +1124,12 @@ msgstr "Ohne Statussymbol kommt ein ausgeblendetes Fenster durch einen Neustart 
 msgid "Install the desktop entry, app icon and metainfo for the current user"
 msgstr "Desktop-Eintrag, App-Symbol und Metainfo für den aktuellen Benutzer installieren"
 
+msgid "Install desktop icon"
+msgstr "Desktop-Symbol installieren"
+
+msgid "Couldn't install the desktop icon"
+msgstr "Desktop-Symbol konnte nicht installiert werden"
+
+msgid "Collins is in your applications now"
+msgstr "Collins ist jetzt in deinen Anwendungen"
+

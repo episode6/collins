@@ -48,23 +48,61 @@ def _quote_exec(command: str) -> str:
     return f'"{escaped}"'
 
 
-def exec_command() -> str:
-    """What the launcher should run.
+def launcher_path() -> Path | None:
+    """The installed `collins` command, if we can point at one.
 
     `build_deb.sh` can write a bare `Exec=collins` because the .deb puts the
     command in /usr/bin, which every session has on its PATH. A pip or pipx
     install puts it somewhere like ~/.local/bin or a pipx venv, and a desktop
     session is not guaranteed to have that on the PATH it launches apps with —
-    so point the entry straight at the script we are running as, and fall back
-    to the bare name only when there is nothing to point at (running as
-    `python3 -m collins`, from a checkout).
+    so the entry points straight at the script. That is the one we are running
+    as, or failing that whatever is on this shell's PATH; None when neither
+    exists, i.e. `python3 -m collins` out of a checkout that was never
+    installed.
     """
     launcher = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
     if launcher is not None and launcher.name == "collins" and launcher.is_file():
-        return _quote_exec(str(launcher))
+        return launcher
     if found := shutil.which("collins"):
-        return _quote_exec(str(Path(found).resolve()))
+        return Path(found).resolve()
+    return None
+
+
+def exec_command() -> str:
+    """The Exec= value: an absolute path when there is one to give."""
+    if (launcher := launcher_path()) is not None:
+        return _quote_exec(str(launcher))
     return "collins"
+
+
+def entry_locations() -> list[Path]:
+    """Every applications directory a launcher for us could already sit in.
+
+    XDG search order: the user's data home first, then the system dirs — which
+    is where the .deb, the PPA and the AUR package put theirs, and
+    data/install.sh puts one in the first.
+    """
+    system = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
+    roots = [data_home(), *(Path(p) for p in system.split(":") if p)]
+    return [root / "applications" / f"{APP_ID}.desktop" for root in roots]
+
+
+def is_installed() -> bool:
+    """Whether anything has already put a launcher on this machine."""
+    return any(path.is_file() for path in entry_locations())
+
+
+def can_offer_install() -> bool:
+    """Whether the app should offer to install a launcher for itself.
+
+    Two ways to answer no: one already exists — a package installed it, or
+    data/install.sh did — or we cannot name a command to put in Exec=, which
+    is a checkout being run as `python3 -m collins` with nothing installed.
+    data/install.sh is the tool for that case, and it knows the checkout path;
+    offering a launcher we would have to guess the command for is worse than
+    offering nothing.
+    """
+    return not is_installed() and launcher_path() is not None
 
 
 def desktop_entry(template: str, command: str) -> str:

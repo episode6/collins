@@ -74,8 +74,10 @@ exits on `import gi` the first time you run the app.
 
 `collins --install-desktop` writes the launcher, app icon and metainfo under
 `~/.local/share` for your user — the same three files the `.deb` installs
-system-wide. It is the only extra step: the toolbar and sidebar artwork ships
-inside the package.
+system-wide. The sidebar menu offers the same thing as **Install desktop
+icon**, shown only when nothing has put Collins in your app grid yet. It is
+the only extra step: the toolbar and sidebar artwork ships inside the
+package.
 
 ### From source
 

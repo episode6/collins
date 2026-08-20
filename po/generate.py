@@ -506,6 +506,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "vagy egy munkamenet-értesítésre kattintva tér vissza",
         "Install the desktop entry, app icon and metainfo for the current user":
             "Az asztali indító, az alkalmazásikon és a metaadatok telepítése a jelenlegi felhasználónak",
+        "Install desktop icon":
+            "Asztali ikon telepítése",
+        "Couldn't install the desktop icon":
+            "Nem sikerült telepíteni az asztali ikont",
+        "Collins is in your applications now":
+            "A Collins mostantól megtalálható az alkalmazások között",
     },
     "de": {
         "── restored panel history ──": "── wiederhergestellter Panel-Verlauf ──",
@@ -1002,6 +1008,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Sitzungsbenachrichtigung zurück",
         "Install the desktop entry, app icon and metainfo for the current user":
             "Desktop-Eintrag, App-Symbol und Metainfo für den aktuellen Benutzer installieren",
+        "Install desktop icon":
+            "Desktop-Symbol installieren",
+        "Couldn't install the desktop icon":
+            "Desktop-Symbol konnte nicht installiert werden",
+        "Collins is in your applications now":
+            "Collins ist jetzt in deinen Anwendungen",
     },
     "es": {
         "── restored panel history ──": "── historial del panel restaurado ──",
@@ -1496,6 +1508,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Collins o al pulsar una notificación de sesión",
         "Install the desktop entry, app icon and metainfo for the current user":
             "Instalar el lanzador de escritorio, el icono y los metadatos para el usuario actual",
+        "Install desktop icon":
+            "Instalar el icono de escritorio",
+        "Couldn't install the desktop icon":
+            "No se pudo instalar el icono de escritorio",
+        "Collins is in your applications now":
+            "Collins ya está en tus aplicaciones",
     },
     "fr": {
         "── restored panel history ──": "── historique du panneau restauré ──",
@@ -1990,6 +2008,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Collins ou en cliquant sur une notification de session",
         "Install the desktop entry, app icon and metainfo for the current user":
             "Installer le lanceur de bureau, l'icône et les métadonnées pour l'utilisateur actuel",
+        "Install desktop icon":
+            "Installer l'icône de bureau",
+        "Couldn't install the desktop icon":
+            "Impossible d'installer l'icône de bureau",
+        "Collins is in your applications now":
+            "Collins est maintenant dans vos applications",
     },
 }
 

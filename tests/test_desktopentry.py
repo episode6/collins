@@ -93,6 +93,64 @@ def test_exec_command_last_resort_is_the_bare_name(monkeypatch, tmp_path):
     assert desktopentry.exec_command() == "collins"
 
 
+def _isolate_xdg(monkeypatch, tmp_path):
+    """Point both XDG data roots at empty scratch dirs.
+
+    Without this the defaults leak in — /usr/share/applications holds a real
+    entry on any machine with the .deb installed, so the test would pass or
+    fail depending on the developer's box.
+    """
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_DATA_DIRS", f"{tmp_path / 'sys1'}:{tmp_path / 'sys2'}")
+
+
+def _write_entry(root):
+    entry = root / "applications" / f"{APP_ID}.desktop"
+    entry.parent.mkdir(parents=True, exist_ok=True)
+    entry.write_text("[Desktop Entry]\n")
+    return entry
+
+
+def test_entry_locations_cover_data_home_then_system(monkeypatch, tmp_path):
+    _isolate_xdg(monkeypatch, tmp_path)
+    assert desktopentry.entry_locations() == [
+        tmp_path / "home" / "applications" / f"{APP_ID}.desktop",
+        tmp_path / "sys1" / "applications" / f"{APP_ID}.desktop",
+        tmp_path / "sys2" / "applications" / f"{APP_ID}.desktop",
+    ]
+
+
+def test_is_installed_sees_a_user_entry(monkeypatch, tmp_path):
+    _isolate_xdg(monkeypatch, tmp_path)
+    assert not desktopentry.is_installed()
+    _write_entry(tmp_path / "home")
+    assert desktopentry.is_installed()
+
+
+def test_is_installed_sees_a_system_entry(monkeypatch, tmp_path):
+    # What the .deb, the PPA and the AUR package install.
+    _isolate_xdg(monkeypatch, tmp_path)
+    _write_entry(tmp_path / "sys2")
+    assert desktopentry.is_installed()
+
+
+def test_can_offer_install_only_when_missing_and_launchable(monkeypatch, tmp_path):
+    _isolate_xdg(monkeypatch, tmp_path)
+    monkeypatch.setattr(desktopentry.sys, "argv", [str(tmp_path / "__main__.py")])
+    monkeypatch.setattr(desktopentry.shutil, "which", lambda name: "/usr/bin/collins")
+    assert desktopentry.can_offer_install()
+
+    # An entry already on the machine: nothing to offer.
+    entry = _write_entry(tmp_path / "home")
+    assert not desktopentry.can_offer_install()
+    entry.unlink()
+
+    # No installed command to point Exec= at: `python3 -m collins` from a
+    # checkout, where data/install.sh is the right tool.
+    monkeypatch.setattr(desktopentry.shutil, "which", lambda name: None)
+    assert not desktopentry.can_offer_install()
+
+
 def test_install_writes_the_three_files(monkeypatch, tmp_path):
     monkeypatch.setattr(desktopentry, "_refresh", lambda *a: None)
     monkeypatch.setattr(desktopentry, "exec_command", lambda: "collins")

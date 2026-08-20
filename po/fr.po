@@ -1124,3 +1124,12 @@ msgstr "Sans icône d'état, une fenêtre masquée revient en relançant Collins
 msgid "Install the desktop entry, app icon and metainfo for the current user"
 msgstr "Installer le lanceur de bureau, l'icône et les métadonnées pour l'utilisateur actuel"
 
+msgid "Install desktop icon"
+msgstr "Installer l'icône de bureau"
+
+msgid "Couldn't install the desktop icon"
+msgstr "Impossible d'installer l'icône de bureau"
+
+msgid "Collins is in your applications now"
+msgstr "Collins est maintenant dans vos applications"
+
