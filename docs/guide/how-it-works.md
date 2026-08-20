@@ -44,6 +44,33 @@ sessions created while the app runs get a headless `claude -p` summarization
 Haiku), executed in a scratch directory so the title runs don't appear as
 sessions themselves.
 
+## Model list
+
+Every model picker — the session footer, the composer, Preferences, Generate
+Icon — offers what your login can actually use, which Collins asks the Models
+API for once and then leans on hard. The list is **cached for a day**, and
+saved to `~/.cache/collins/models.json` so a restart doesn't ask again: the
+catalog changes a few times a year, and the pickers should not cost a network
+round trip every time one opens.
+
+A failed query never clears that cache. Offline, logged out, or with the API
+refusing, the pickers keep offering the last list Collins got, however old,
+and only fall back to the CLI's aliases (`opus`, `sonnet`, `haiku`) if no
+query has ever succeeded on this machine. A run of failures also backs off
+for five minutes rather than making every picker wait out the network timeout
+again.
+
+The cost of caching that hard is a model released this morning not appearing
+until tomorrow, so **Preferences → Claude models → Model list** dates the list
+("12 models, updated 3h ago") and its **Refresh** button asks Anthropic
+outright, ignoring both the day and the backoff. The row says which way it
+went, and a refresh that fails keeps naming the list it fell back to rather
+than going quiet.
+
+Every query is logged too: run Collins with `COLLINS_LOG=INFO` to see what
+came back, and anything that failed — an unreachable API, a missing token —
+is logged at `WARNING`, which the default level already prints.
+
 ## Claude usage
 
 The sidebar's usage panel reads the OAuth token the `claude` CLI already
@@ -110,7 +137,7 @@ same beta header the CLI sends:
 | Feature | Endpoint | When it breaks |
 | --- | --- | --- |
 | Usage panel | `/api/oauth/usage` — what feeds the CLI's `/usage` screen | The panel reports an error and stays empty |
-| Model pickers (footer, composer, Preferences, Generate Icon) | the Models API, which answers to the CLI's token only with its beta header | Falls back to the CLI's built-in aliases (`opus`, `sonnet`, `haiku`) |
+| Model pickers (footer, composer, Preferences, Generate Icon) | the Models API, which answers to the CLI's token only with its beta header | Keeps serving the last list it got (see [Model list](#model-list)); with none ever fetched, falls back to the CLI's built-in aliases (`opus`, `sonnet`, `haiku`) |
 | Archive on claude.ai | `POST /v1/code/sessions/<id>/archive` and `/unarchive` | The local archive still happens; the remote one silently doesn't |
 
 ### CLI internals

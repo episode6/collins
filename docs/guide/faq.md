@@ -38,7 +38,8 @@ terminal; auto-titling and icon generation run headless `claude -p` jobs
 (pre-existing sessions are titled locally, and both have toggles in
 Preferences); and three things call Anthropic directly with the CLI's own
 stored token — read-only, never refreshed or written: the **usage panel**,
-the **model pickers** (which list the models your login can use), and the
+the **model pickers** (which list the models your login can use, asked for
+about once a day and cached in `~/.cache/collins` in between), and the
 **archive mirror**, which archives a session's claude.ai sibling when you
 archive it here (*Archive on claude.ai too*, on by default). Pull request
 features go through the GitHub CLI (`gh`) and your login there.

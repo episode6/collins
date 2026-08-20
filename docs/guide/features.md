@@ -90,8 +90,8 @@ Enter opens, Esc closes.
   with, the agent's live working directory (click to copy), and the current
   **git branch** (⎇), plus the terminal-panel buttons.
 - **The model is one click from switching.** The footer's model name is a
-  menu: every model your login can use, fetched live from the Models API
-  with the CLI's own token, the current one marked. Pick another and the
+  menu: every model your login can use, fetched from the Models API with
+  the CLI's own token, the current one marked. Pick another and the
   session gets the CLI's `/model` command — the footer follows once the
   agent answers with it. The same menu sits in the composer's chrome, so
   you can change model halfway through writing a prompt without losing the
