@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-18. Full change history: git log for this file.
+fork. Last modified: 2026-08-19. Full change history: git log for this file.
 -->
 # AUR packaging
 
@@ -38,6 +38,6 @@ git commit -m "Update to v<VER>"
 git push
 ```
 
-> If the package name `collins` is already taken on the AUR,
-> rename `pkgname`/`pkgbase` to `collins-gtk` to match the PyPI
-> distribution and re-clone the matching AUR repo.
+> If the package name `collins` is already taken on the AUR, rename
+> `pkgname`/`pkgbase` to `collins-gtk` and re-clone the matching AUR repo.
+> Every other channel -- PyPI, the PPA, the `.deb` -- is plain `collins`.
