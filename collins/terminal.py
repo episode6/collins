@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-20. Full change history: git log for this file.
+# fork. Last modified: 2026-08-21. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -4625,7 +4625,7 @@ class TerminalTab(Gtk.Box):
         return None
 
     def _make_pr_page(self, pr: PullRequest) -> PrViewPage:
-        return PrViewPage(pr, host_factory=self._pr_action_host)
+        return PrViewPage(pr, host_factory=self._pr_action_host, pr_store=self._pr_store)
 
     def _make_panel_page(self, page: dict):
         """The dock's non-shell factory for layout restore (see

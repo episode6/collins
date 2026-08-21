@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-20. Full change history: git log for this file.
+fork. Last modified: 2026-08-21. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -107,6 +107,14 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   width and the spare gutter covers it, or as much of that gutter as covers
   the page at all; never a pixel out of the terminal, and decided before the
   page's first fetch lands, so it doesn't resize under its own data.
+- **Running checks are followed, not waited for.** While a PR you're
+  looking at has checks in progress, Collins asks GitHub every ten seconds
+  whether its head commit's check-runs changed — a conditional request that
+  comes back as an empty, rate-limit-free `304` until one does — and fetches
+  the full status the moment they do, instead of at the next minute mark.
+  Marks, chips and the PR page itself all update on the spot (the page
+  re-reads when it's on screen). Merged and closed PRs are now refetched
+  every ten minutes rather than every one.
 - **Fixes** — archiving a session clears its notification and unread count;
   the status icon's menu no longer draws a stray "Quit" on a separator.
 

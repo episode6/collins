@@ -218,7 +218,7 @@ class PrViewPage(Adw.Bin):
         "title-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    def __init__(self, pr: PullRequest, host_factory) -> None:
+    def __init__(self, pr: PullRequest, host_factory, pr_store=None) -> None:
         super().__init__()
         # The text-scale hook: _apply_font_scale's display-wide rules key off
         # this class, which is how a setting reaches every label in the page
@@ -237,6 +237,16 @@ class PrViewPage(Adw.Bin):
         self._refetch = False
         self._fetch_gen = 0
         self._fetched_at = 0  # monotonic µs of the last fetch *attempt*
+        # The app-wide PR hub (see prstore), when the page was given one: a
+        # status fetch anyone makes for this URL re-reads the page, so the
+        # checks list here follows the footer's probes (see prstatus.probe)
+        # instead of waiting for the next map or the refresh button.
+        self._pr_store = pr_store
+        self._hub_status_id = (
+            pr_store.connect("status-changed", self._on_hub_status_changed)
+            if pr_store is not None
+            else None
+        )
         # The Conversation view's thread cards in timeline order — what the
         # unresolved deep link scans — and the reply drafts, keyed by thread
         # id so they survive the rebuilds that replace the cards.
@@ -1000,6 +1010,25 @@ class PrViewPage(Adw.Bin):
         if self._dark_id is not None:
             Adw.StyleManager.get_default().disconnect(self._dark_id)
             self._dark_id = None
+        # So does the hub.
+        if self._hub_status_id is not None:
+            self._pr_store.disconnect(self._hub_status_id)
+            self._hub_status_id = None
+
+    def _on_hub_status_changed(self, _hub, url: str) -> None:
+        """What is known about a PR moved — if it is this one, re-read the page.
+
+        Most often the footer's poll: a probe between fetches saw a check
+        finish and the full fetch that followed landed a new status (see
+        prstatus.probe). A fetch of our own reports through here too — the
+        detail reply is absorbed as status before `_landed` runs — and is
+        told apart by the read still being in flight: re-reading on its
+        account would be asking the same question twice. The page must be on
+        screen to bother; an unmapped one re-reads when it is next shown.
+        """
+        if url != self.pr_url or self._fetching or not self.get_mapped():
+            return
+        self._fetch(force=True)
 
 
 class _WrapLayout(Gtk.LayoutManager):
