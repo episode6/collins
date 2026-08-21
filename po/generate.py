@@ -41,6 +41,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Cancel": "Mégse",
         "Session list": "Munkamenet-lista",
         "Show folder path": "Mappa elérési útjának megjelenítése",
+        "Show folder paths in sidebar": "Mappák elérési útja az oldalsávban",
         "Show each session's project folder path in the sidebar":
             "Az egyes munkamenetek projektmappájának elérési útja az oldalsávon",
         "Startup": "Indítás",
@@ -555,6 +556,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Cancel": "Abbrechen",
         "Session list": "Sitzungsliste",
         "Show folder path": "Ordnerpfad anzeigen",
+        "Show folder paths in sidebar": "Ordnerpfade in der Seitenleiste anzeigen",
         "Show each session's project folder path in the sidebar":
             "Den Projektordnerpfad jeder Sitzung in der Seitenleiste anzeigen",
         "Startup": "Programmstart",
@@ -1077,6 +1079,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Cancel": "Cancelar",
         "Session list": "Lista de sesiones",
         "Show folder path": "Mostrar ruta de carpeta",
+        "Show folder paths in sidebar": "Mostrar rutas de carpeta en la barra lateral",
         "Show each session's project folder path in the sidebar":
             "Mostrar la ruta de la carpeta del proyecto de cada sesión en la barra lateral",
         "Startup": "Inicio",
@@ -1596,6 +1599,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Cancel": "Annuler",
         "Session list": "Liste des sessions",
         "Show folder path": "Afficher le chemin du dossier",
+        "Show folder paths in sidebar": "Afficher les chemins des dossiers dans la barre latérale",
         "Show each session's project folder path in the sidebar":
             "Afficher le chemin du dossier de projet de chaque session dans la barre latérale",
         "Startup": "Démarrage",

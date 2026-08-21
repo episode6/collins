@@ -59,6 +59,9 @@ msgstr "Sitzungsliste"
 msgid "Show folder path"
 msgstr "Ordnerpfad anzeigen"
 
+msgid "Show folder paths in sidebar"
+msgstr "Ordnerpfade in der Seitenleiste anzeigen"
+
 msgid "Show each session's project folder path in the sidebar"
 msgstr "Den Projektordnerpfad jeder Sitzung in der Seitenleiste anzeigen"
 

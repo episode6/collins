@@ -265,11 +265,15 @@ class PreferencesDialog(Adw.Dialog):
         page = _SearchablePage(title=_("Preferences"), icon_name="preferences-system-symbolic")
         self._page = page
 
-        # General: what Collins runs, what it looks like, what the sidebar
-        # shows. The CLI row leads — the answer to "which claude is Collins
-        # running?" shouldn't take scrolling to find.
+        # Above everything, under no heading: the CLI is the tool the app is
+        # about, and the row that answers "which claude is Collins running?"
+        # shouldn't take scrolling — or a category — to find.
+        cli_group = _SearchableGroup()
+        self._build_cli_rows(state, cli_group)
+        page.add(cli_group)
+
+        # General: what Collins looks like and what the sidebar shows.
         general_group = _SearchableGroup(title=_("General"))
-        self._build_cli_rows(state, general_group)
         current_lang = state.get_setting("language") or ""
         self._initial_lang = current_lang
         current_label = next(
@@ -323,8 +327,7 @@ class PreferencesDialog(Adw.Dialog):
         self._tab_drag_row.connect("notify::active", self._on_tab_drag_changed)
         general_group.add(self._tab_drag_row)
         self._folder_path_row = Adw.SwitchRow(
-            title=_("Show folder path"),
-            subtitle=_("Show each session's project folder path in the sidebar"),
+            title=_("Show folder paths in sidebar"),
         )
         self._folder_path_row.set_active(bool(state.get_setting("show_folder_path")))
         self._folder_path_row.connect("notify::active", self._on_folder_path_changed)
@@ -985,8 +988,7 @@ class PreferencesDialog(Adw.Dialog):
         group.add(_searchable(self._cli_row, "claude", "CLI", "PATH", _("Browse…")))
 
         # The verdict's reason, directly under the box like the welcome
-        # dialog's: a title-less row in the same list, so it stays beside
-        # the entry however many rows the group grows. The same search terms
+        # dialog's: a title-less row in the same list. The same search terms
         # as the entry keep the two showing and hiding together.
         self._cli_reason = Adw.ActionRow(activatable=False, selectable=False)
         self._cli_reason.add_css_class("dim-label")

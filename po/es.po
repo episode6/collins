@@ -59,6 +59,9 @@ msgstr "Lista de sesiones"
 msgid "Show folder path"
 msgstr "Mostrar ruta de carpeta"
 
+msgid "Show folder paths in sidebar"
+msgstr "Mostrar rutas de carpeta en la barra lateral"
+
 msgid "Show each session's project folder path in the sidebar"
 msgstr "Mostrar la ruta de la carpeta del proyecto de cada sesión en la barra lateral"
 

@@ -476,7 +476,7 @@ trigger, Enter behavior, the floating button, auto-open in new sessions),
 the editor's **color scheme**, **font**, and **line numbers**/**hidden
 files** toggles, the app's **Dark / Light Mode** (system / light / dark), the
 **language** (English, Magyar, Deutsch, Español, Français), the sidebar's
-**Show folder path**, **Show Claude usage**, and **Auto-generate session
+**Show folder paths in sidebar**, **Show Claude usage**, and **Auto-generate session
 titles** toggles, the **status icon**, **Reopen the last session**, what to
 do **when quitting with running sessions** (ask / exit / background / hide),
 **Archive on claude.ai too**, and a switch for each of the **built-in MCP tools**

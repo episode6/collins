@@ -59,6 +59,9 @@ msgstr "Munkamenet-lista"
 msgid "Show folder path"
 msgstr "Mappa elérési útjának megjelenítése"
 
+msgid "Show folder paths in sidebar"
+msgstr "Mappák elérési útja az oldalsávban"
+
 msgid "Show each session's project folder path in the sidebar"
 msgstr "Az egyes munkamenetek projektmappájának elérési útja az oldalsávon"
 
