@@ -63,6 +63,11 @@ and Collins uses APIs from libadwaita 1.5 and GTK 4.10.
 It appears in your app grid as **Collins**, and the installed command is
 `collins`.
 
+Already running Collins on Ubuntu from the `.deb`, PyPI or a checkout? The
+sidebar's ☰ menu offers **Add the Ubuntu PPA…** until the PPA is configured:
+it shows the commands above and runs them in a terminal of the current
+session, where `sudo` can ask for your password.
+
 ### Debian — `.deb`
 
 A Launchpad PPA can only ever serve Ubuntu, so on Debian — and the

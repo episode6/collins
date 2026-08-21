@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-20. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -30,7 +30,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import desktopentry, footerapps, openwith, prmenu
+from . import desktopentry, footerapps, openwith, pkgrepos, prmenu
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
 from .formatting import format_size
@@ -54,6 +54,19 @@ from .state import merge_project_order
 from .store import SessionStore
 from .svgtexture import svg_texture
 from .usagepanel import UsagePanel
+
+
+def package_repo_label(channel: pkgrepos.Channel) -> str:
+    """The hamburger-menu item for a package channel this machine isn't on.
+
+    One label per channel id, translated here rather than in pkgrepos so that
+    module stays free of the UI's gettext; an id without a label (a channel
+    added there and not here) falls back to the generic wording instead of
+    failing the menu build.
+    """
+    return {
+        "ubuntu-ppa": _("Add the Ubuntu PPA…"),
+    }.get(channel.id, _("Add the package repository…"))
 
 log = logging.getLogger(__name__)
 
@@ -1413,6 +1426,13 @@ class SessionSidebar(Gtk.Box):
         self._menu = menu
         if desktopentry.can_offer_install():
             menu.append(_("Install desktop icon"), "win.install-desktop")
+        # Same shape, for the package channel: on a distro Collins has a
+        # repository for, and only while this machine isn't on it. Decided at
+        # launch too, and dropped from every menu by the window that adds the
+        # repository (drop_menu_item, via MainWindow). pkgrepos names the
+        # channel; only the Ubuntu PPA exists so far.
+        if (channel := pkgrepos.offer()) is not None:
+            menu.append(package_repo_label(channel), "win.add-package-repo")
         menu.append(_("About Collins"), "win.about")
         # Last, and app-scoped: it closes every window, not this one. The
         # status icon's menu offers the same item, and this is where someone
@@ -1823,13 +1843,20 @@ class SessionSidebar(Gtk.Box):
 
         Called on every window once one of them has installed a launcher, so
         the offer disappears everywhere rather than only where it was taken.
-        Matched by action rather than position: the item is optional to begin
-        with, so its index is not a constant, and a menu that never carried it
-        must not lose the item that happens to sit where it would have been.
+        """
+        self.drop_menu_item("win.install-desktop")
+
+    def drop_menu_item(self, action_name: str) -> None:
+        """Take the item bound to *action_name* out of the hamburger menu.
+
+        Matched by action rather than position: the optional items (the
+        desktop icon, the package repository) have no constant index, and a
+        menu that never carried one must not lose the item that happens to
+        sit where it would have been.
         """
         for i in range(self._menu.get_n_items()):
             action = self._menu.get_item_attribute_value(i, Gio.MENU_ATTRIBUTE_ACTION, None)
-            if action is not None and action.get_string() == "win.install-desktop":
+            if action is not None and action.get_string() == action_name:
                 self._menu.remove(i)
                 return
 

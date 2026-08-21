@@ -342,11 +342,11 @@ def _fix(missing: bool) -> Gtk.Widget:
         )
     )
     if not missing:
-        box.append(_command_row(ghsetup.LOGIN_COMMAND))
+        box.append(command_row(ghsetup.LOGIN_COMMAND))
     return box
 
 
-def _command_row(command: str) -> Gtk.Widget:
+def command_row(command: str) -> Gtk.Widget:
     """A command to run elsewhere, shown as one and copied by a click on it.
 
     Click-to-copy rather than a copy button beside it: the label is the thing
