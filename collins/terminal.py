@@ -321,10 +321,9 @@ def _setup_links(terminal: Vte.Terminal) -> None:
                 path, line, col = resolved
                 _open_file_reference(terminal, path, line, col)
                 return
-            if from_transcript(None):
-                return
             stitched = _resolve_wrapped_url_at(terminal, None, x, y)
             if stitched is None:
+                from_transcript(None)
                 return
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
             _launch_uri(terminal, stitched)

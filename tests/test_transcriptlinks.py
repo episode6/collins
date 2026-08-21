@@ -168,3 +168,17 @@ def test_context_reach_is_bounded():
     assert completions("https://h.test/a", rows, 6, 2, [far]) == []
     near = "https://h.test/a" + "bbb" * 4
     assert completions("https://h.test/a", rows, 6, 2, [near]) == [("url", near)]
+
+
+def test_spaces_within_a_row_are_not_removed():
+    # Two whole tokens with a space between them never glue into a link the
+    # transcript happens to hold; only row-edge whitespace is a wrap.
+    rows = _screen("see a/b c/d here")
+    assert completions("a/b", rows, 0, 4, ["a/bc/d"]) == []
+    rows = _screen("see https://h.test/a b/c", "d")
+    assert completions("https://h.test/a", rows, 0, 6, ["https://h.test/ab/cd"]) == []
+
+
+def test_only_row_edge_whitespace_joins_rows():
+    rows = _screen("  text https://h.test/a   ", "    b/c and more")
+    assert completions("https://h.test/a", rows, 0, 9, ["https://h.test/ab/c"]) == [("url", "https://h.test/ab/c")]

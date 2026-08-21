@@ -44,7 +44,6 @@ CONTEXT_ROWS = 4
 
 _URL_RX = re.compile(URL_PATTERN)
 _FILE_RX = re.compile(FILE_PATTERN)
-_WS = re.compile(r"\s+")
 
 # One parse per transcript version: the (size, mtime) the links came from.
 _cache: dict[str, tuple[tuple[int, float], list[str]]] = {}
@@ -128,8 +127,8 @@ def completions(
     ``"url"`` or ``"file"``; the caller opens the first that it can.
 
     The corroboration is positional: the rows CONTEXT_ROWS either side of
-    the click, whitespace removed, must contain the candidate at a span
-    covering where the fragment sits. That a candidate merely *contains* the
+    the click, joined with their edge whitespace removed, must contain the
+    candidate at a span covering where the fragment sits. That a candidate merely *contains* the
     fragment is not enough — ``…/pull/3`` is the head of ``…/pull/303`` and
     ``…/pull/31`` alike, and the characters on the next row decide which.
     """
@@ -139,9 +138,15 @@ def completions(
     start = _fragment_start(row_txt, fragment, col)
     if start is None:
         return []
+    # Only the whitespace at row edges goes — the newline the renderer
+    # wrapped at and the indent it continued with. A space *inside* a row
+    # stays: it separates two tokens that are both whole, and removing it
+    # would let `a/b c/d` corroborate a transcript link `a/bc/d`.
     lo = max(0, row - CONTEXT_ROWS)
-    before = _WS.sub("", "".join(rows[lo:row]) + row_txt[:start])
-    after = _WS.sub("", row_txt[start + len(fragment) :] + "".join(rows[row + 1 : row + 1 + CONTEXT_ROWS]))
+    before = "".join(r.strip() for r in rows[lo:row]) + row_txt[:start].lstrip()
+    after = row_txt[start + len(fragment) :].rstrip() + "".join(
+        r.strip() for r in rows[row + 1 : row + 1 + CONTEXT_ROWS]
+    )
     context = before + fragment + after
     off, end = len(before), len(before) + len(fragment)
     found: list[tuple[str, str]] = []
