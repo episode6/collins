@@ -676,6 +676,23 @@ def test_sort_orders_within_a_family_by_version_newest_first():
     ]
 
 
+def test_sort_handles_mixed_length_versions_in_a_family():
+    # A bare-major snapshot (version tuple (4,), a date but no minor) and a
+    # later point release (4, 5) live in the catalog at once. Newest-first must
+    # put 4.5 above bare 4 — not the reverse, which Python's tuple prefix rule
+    # would give a naive negate of unequal-length tuples.
+    models = [
+        ClaudeModel("us.anthropic.claude-sonnet-4-20250514-v1:0", "Sonnet 4"),
+        ClaudeModel("claude-sonnet-4-5", "Sonnet 4.5"),
+        ClaudeModel("claude-sonnet-5", "Sonnet 5"),
+    ]
+    assert [m.display_name for m in claudemodels.sort_models(models)] == [
+        "Sonnet 5",
+        "Sonnet 4.5",
+        "Sonnet 4",
+    ]
+
+
 def test_sort_puts_unknown_families_on_top_clustered():
     # A family named nowhere in _DISPLAY_ORDER sorts above every named one —
     # above Mythos too — and its models stay together rather than scattering.

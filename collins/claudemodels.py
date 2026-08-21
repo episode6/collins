@@ -518,12 +518,20 @@ def sort_models(models: list[ClaudeModel]) -> list[ClaudeModel]:
     families first, then Mythos, Fable, Opus, Sonnet, Haiku; each family
     ordered by version, newest first — so Opus 5 leads its family, above 4.8.
 
-    The version key is negated component-by-component to sort a family
-    descending while the family order itself stays ascending; the versions are
-    non-negative, so this is just "reverse that one part of the key"."""
+    Within a family the version tuples are padded to a common width (a missing
+    minor version reads as ``.0``) and then negated component-by-component to
+    sort newest first while the family order itself stays ascending. The
+    padding matters: without it Python's prefix rule makes a shorter tuple
+    compare *smaller*, so a bare ``sonnet-4`` snapshot would wrongly sort above
+    the newer ``sonnet-4-5`` point release. Versions are non-negative, so the
+    negation is just "reverse that one part of the key"."""
+    versions = {model.id: _version_key(model.id) for model in models}
+    width = max((len(v) for v in versions.values()), default=0)
+
     def key(model: ClaudeModel):
         group = _model_group(model.id)
-        newest_first = tuple(-n for n in _version_key(model.id))
+        padded = versions[model.id] + (0,) * (width - len(versions[model.id]))
+        newest_first = tuple(-n for n in padded)
         return (_group_rank(group), group, newest_first, model.id)
 
     return sorted(models, key=key)
