@@ -12,6 +12,7 @@ from collins.composerkeys import (
     draft_to_restore,
     enter_action,
     restore_text,
+    spell_click_moves_caret,
     stashable_draft,
     typing_opens_composer,
 )
@@ -164,3 +165,29 @@ def test_draft_to_restore_leaves_a_written_box_alone():
 def test_draft_to_restore_with_nothing_stashed():
     assert draft_to_restore("", "") == ""
     assert draft_to_restore("", "typed") == ""
+
+
+def test_spell_click_moves_caret_without_a_selection():
+    assert spell_click_moves_caret(0, None)
+    assert spell_click_moves_caret(42, None)
+
+
+def test_spell_click_keeps_a_selection_it_lands_in():
+    assert not spell_click_moves_caret(5, (3, 8))
+    # Boundaries count as inside: an edge click must not cost the selection.
+    assert not spell_click_moves_caret(3, (3, 8))
+    assert not spell_click_moves_caret(8, (3, 8))
+
+
+def test_spell_click_moves_caret_outside_a_selection():
+    assert spell_click_moves_caret(2, (3, 8))
+    assert spell_click_moves_caret(9, (3, 8))
+
+
+def test_spell_click_takes_selection_bounds_in_either_order():
+    assert not spell_click_moves_caret(5, (8, 3))
+    assert spell_click_moves_caret(9, (8, 3))
+
+
+def test_spell_click_treats_an_empty_selection_as_none():
+    assert spell_click_moves_caret(4, (4, 4))

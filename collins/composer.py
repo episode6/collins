@@ -98,6 +98,7 @@ class ComposerView(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("composer-panel")
         self._enter_sends = True
+        self._spell_click = True
         self._font_provider: Gtk.CssProvider | None = None
         self._file_reference = file_reference
         self._notify = notify
@@ -124,6 +125,7 @@ class ComposerView(Gtk.Box):
         self._view.set_right_margin(8)
         self._view.set_accepts_tab(False)
 
+        self._adapter = None
         if Spelling is not None:
             try:
                 adapter = Spelling.TextBufferAdapter.new(
@@ -140,6 +142,24 @@ class ComposerView(Gtk.Box):
                 self._view.set_extra_menu(adapter.get_menu_model())
                 self._view.insert_action_group("spelling", adapter)
                 adapter.set_enabled(True)
+                # The corrections menu follows the insertion cursor, which a
+                # right-click doesn't move -- so aim it by hand, in the
+                # CAPTURE phase, before the text view claims the press and
+                # pops the menu it has already built.
+                #
+                # Only where the adapter can be told to rebuild on the spot,
+                # though. update_corrections() arrived in libspelling 0.4;
+                # 0.2 (Ubuntu 24.04, which the PPA builds for) has only the
+                # 100ms timeout off "cursor-moved", which lands after the
+                # menu is already up. Moving the caret there would leave the
+                # menu stale rather than merely mis-aimed -- worse than the
+                # bug -- so those installs keep the behavior they have.
+                if hasattr(adapter, "update_corrections"):
+                    secondary = Gtk.GestureClick()
+                    secondary.set_button(Gdk.BUTTON_SECONDARY)
+                    secondary.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+                    secondary.connect("pressed", self._on_secondary_press)
+                    self._view.add_controller(secondary)
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key)
@@ -412,6 +432,13 @@ class ComposerView(Gtk.Box):
     def set_enter_sends(self, enter_sends: bool) -> None:
         self._enter_sends = bool(enter_sends)
 
+    def set_spell_click(self, spell_click: bool) -> None:
+        """Whether a right-click aims the spell-check menu at the word under
+        it (the composer_spell_click setting). Read on the click rather than
+        wired into the gesture, so flipping it in Preferences takes hold in
+        an open composer instead of the next one."""
+        self._spell_click = bool(spell_click)
+
     def set_docked(self, docked: bool) -> None:
         """Dress the widget for its host: docked (a panel page below the
         terminal) drops the floating card's rounded top and grows the text
@@ -462,6 +489,49 @@ class ComposerView(Gtk.Box):
         root = self.get_root()
         focus = root.get_focus() if root else None
         return focus is not None and (focus is self or focus.is_ancestor(self))
+
+    def _on_secondary_press(self, _gesture, n_press: int, x: float, y: float) -> None:
+        """Point the spell-check menu at the word that was right-clicked.
+
+        GTK4's text view pops its context menu without moving the insertion
+        cursor, and libspelling builds its corrections from that cursor and
+        nothing else -- so left alone the menu answers about wherever the
+        caret happened to sit. gspell, the GTK3 checker this one replaced,
+        aimed the menu the same way we do here, down to leaving the press
+        unclaimed; its GTK4 rewrite dropped the machinery, not the need.
+        Move the caret first, then rebuild the corrections synchronously:
+        the adapter's own refresh is a 100ms timeout off "cursor-moved",
+        which lands well after the menu is on screen.
+
+        Only a squiggle earns the move. The caret is also where a Paste
+        from this same menu lands, so shifting it on every right-click
+        would change more than spelling; gated on the misspelling tag, a
+        click anywhere else behaves exactly as it did before this existed.
+        """
+        if n_press != 1 or not self._spell_click or self._adapter is None:
+            return
+        bx, by = self._view.window_to_buffer_coords(
+            Gtk.TextWindowType.WIDGET, int(x), int(y)
+        )
+        found, pos = self._view.get_iter_at_location(bx, by)
+        if not found:
+            return
+        # libspelling's own notion of "misspelled", rather than our guess at
+        # where a word starts and ends. Untagged means there is nothing to
+        # offer and nothing to move for: correct, not checked yet, or the
+        # word the caret already sits in -- libspelling lifts the squiggle
+        # off that one so you aren't underlined mid-word, and corrections
+        # for it are right already, being read from that same caret.
+        if not pos.has_tag(self._adapter.get_tag()):
+            return
+        # Empty tuple when nothing is selected, (start, end) when something is.
+        bounds = self._buffer.get_selection_bounds()
+        selection = (
+            (bounds[0].get_offset(), bounds[1].get_offset()) if bounds else None
+        )
+        if composerkeys.spell_click_moves_caret(pos.get_offset(), selection):
+            self._buffer.place_cursor(pos)
+        self._adapter.update_corrections()
 
     def _on_key(self, _controller, keyval: int, _keycode: int, state) -> bool:
         if keyval == _ESCAPE_KEYVAL:

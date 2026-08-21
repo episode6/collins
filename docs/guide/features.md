@@ -187,6 +187,12 @@ one-line input:
   a newline and `Ctrl+Enter` the send. `Shift+Enter` is always a newline.
   The box is drawn in the terminal's own font on purpose: the text is about
   to *be* terminal text.
+- **Right-click a misspelling for corrections.** The menu offers
+  alternatives for the word you clicked, not for wherever the cursor
+  happens to be — turn *Right-click aims spell-check* off to leave the
+  cursor untouched by a right-click. Spell-check needs libspelling
+  installed (see [Getting started](/guide/getting-started)); without it the
+  composer is a plain text box.
 - **Drop images and files straight in.** Files land in the prompt as
   mentions; images get a strip of preview thumbnails above the text (click
   one to inspect it full-size) and go to the agent with the prompt.

@@ -146,3 +146,31 @@ def draft_to_restore(stashed: str, current: str) -> str:
     same way `stashable_draft` reads it.
     """
     return stashed if stashed and not current.strip() else ""
+
+
+def spell_click_moves_caret(offset: int, selection: tuple[int, int] | None) -> bool:
+    """Whether a right-click at *offset* should move the insertion cursor.
+
+    libspelling offers corrections for the word under the *insertion
+    cursor* and nowhere else -- its menu is rebuilt from
+    ``gtk_text_buffer_get_insert()``, with no way to aim it at a position --
+    while GTK4's text view pops its context menu without moving that cursor
+    at all. Right-clicking a squiggle therefore lists corrections for
+    wherever the caret was parked, which is usually the end of a
+    correctly-spelled line, which is usually nothing. The composer moves
+    the caret itself so the menu is about the word that was clicked (see
+    ComposerView._on_secondary_press).
+
+    *selection* is the current selection as buffer offsets, or None when
+    there is none. A click inside a selection leaves the caret alone: every
+    other editor keeps a selection you right-click on, and taking it away
+    to spell-check one word would be a poor trade. Offsets on the boundary
+    count as inside, so a click at the edge of a selection can't destroy
+    it by a pixel.
+    """
+    if selection is None:
+        return True
+    start, end = sorted(selection)
+    if start == end:
+        return True
+    return not start <= offset <= end

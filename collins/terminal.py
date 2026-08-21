@@ -1276,6 +1276,7 @@ class TerminalTab(Gtk.Box):
         # held send (see switch_model).
         self._model_after_settle: str | None = None
         self._composer_enter_sends = True
+        self._composer_spell_click = True
         self._composer_font = ""
         self._composer_on_typing = False
         # The confirm_merges setting, at its shipped default until the first
@@ -3295,6 +3296,7 @@ class TerminalTab(Gtk.Box):
             ),
         )
         self._composer.set_enter_sends(self._composer_enter_sends)
+        self._composer.set_spell_click(self._composer_spell_click)
         self._composer.set_font(self._composer_font)
         self._composer.set_model_name(
             short_name(self._footer_model) if self._footer_model else None
@@ -5123,9 +5125,11 @@ class TerminalTab(Gtk.Box):
         self._sync_composer_overlay_btn()
         self._composer_enter_sends = bool(settings.get("composer_enter_sends", True))
         self._composer_on_typing = bool(settings.get("composer_on_typing"))
+        self._composer_spell_click = bool(settings.get("composer_spell_click", True))
         self._composer_font = font
         if self._composer is not None:
             self._composer.set_enter_sends(self._composer_enter_sends)
+            self._composer.set_spell_click(self._composer_spell_click)
             self._composer.set_font(self._composer_font)
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
         self._auto_open_prs = bool(settings.get("open_pr_panel_on_attach"))
