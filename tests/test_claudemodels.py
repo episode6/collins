@@ -633,18 +633,28 @@ def test_short_name_hands_back_what_it_cannot_read():
 
 
 def test_sort_groups_families_in_display_order():
-    # Fable, then Opus, then Sonnet, then Haiku — regardless of how they arrive.
+    # Mythos, then Fable, Opus, Sonnet, Haiku — regardless of how they arrive.
     models = [
         _m("claude-haiku-4-5"),
         _m("claude-sonnet-5"),
         _m("claude-opus-5"),
         _m("claude-fable-5"),
+        _m("claude-mythos-5"),
     ]
     assert [m.id for m in claudemodels.sort_models(models)] == [
+        "claude-mythos-5",
         "claude-fable-5",
         "claude-opus-5",
         "claude-sonnet-5",
         "claude-haiku-4-5",
+    ]
+
+
+def test_sort_puts_mythos_above_fable():
+    models = [_m("claude-fable-5"), _m("claude-mythos-5")]
+    assert [m.id for m in claudemodels.sort_models(models)] == [
+        "claude-mythos-5",
+        "claude-fable-5",
     ]
 
 
@@ -662,19 +672,19 @@ def test_sort_orders_within_a_family_alphabetically():
 
 
 def test_sort_puts_unknown_families_on_top_clustered():
-    # A family the build doesn't list in _DISPLAY_ORDER sorts above the named
-    # four, and its models stay together rather than scattering. `mythos` is
-    # deliberate: it's a known-but-unreleased tier in _TIERS yet absent from
-    # _DISPLAY_ORDER, so for display it's treated as a new family, on top.
+    # A family named nowhere in _DISPLAY_ORDER sorts above every named one —
+    # above Mythos too — and its models stay together rather than scattering.
     models = [
         _m("claude-opus-5"),
-        _m("claude-mythos-6"),
-        _m("claude-haiku-4-5"),
+        _m("claude-zephyr-6"),
         _m("claude-mythos-5"),
+        _m("claude-haiku-4-5"),
+        _m("claude-zephyr-5"),
     ]
     assert [m.id for m in claudemodels.sort_models(models)] == [
+        "claude-zephyr-5",
+        "claude-zephyr-6",
         "claude-mythos-5",
-        "claude-mythos-6",
         "claude-opus-5",
         "claude-haiku-4-5",
     ]

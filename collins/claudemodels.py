@@ -73,16 +73,14 @@ _CACHE_VERSION = 1  # bumped if the file's shape changes; a file from another ve
 _TIERS = ("haiku", "sonnet", "opus", "fable", "mythos")
 
 # The order the pickers list the tier families in: newest generation first,
-# down to the smallest. A model whose id names none of these is an
-# unrecognized (so, newer) family — it sorts above them all, clustered with
-# its own kind. Distinct from `_TIERS`, which ranks by strength to pick a
-# default; this is only presentation, and the two are deliberately not kept
-# in step: `mythos` is a known-but-unreleased tier in `_TIERS`, and leaving it
-# out here is what lands it (and any genuinely new family) at the top as
-# "newer than anything we list" — the right place for it — via `_model_group`'s
-# unrecognized branch. Add a family here only once it should slot in *between*
-# the named four, not above them.
-_DISPLAY_ORDER = ("fable", "opus", "sonnet", "haiku")
+# down to the smallest. A model whose id names none of these is a family we
+# don't know at all (so, newer still) — it sorts above them all, clustered
+# with its own kind, via `_model_group`'s unrecognized branch. Distinct from
+# `_TIERS`, which ranks by strength to pick a default; this is only
+# presentation. Order here, not strength: `mythos` leads because it's the
+# newest-generation family, above `fable`, even though a genuinely unknown
+# family still outranks it as newer-than-anything-we-name.
+_DISPLAY_ORDER = ("mythos", "fable", "opus", "sonnet", "haiku")
 
 
 @dataclass(frozen=True)
