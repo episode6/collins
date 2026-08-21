@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-20. Full change history: git log for this file.
+fork. Last modified: 2026-08-21. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -57,6 +57,11 @@ channel for Debian and the rest of its family, and it stays. It adds no
 apt source, so it does not update itself; watch the releases page. Debian 13
 (trixie) and newer have everything Collins needs.
 
+- **`Ctrl+Shift+F` no longer opens the sidebar search.** `Ctrl+K` (the
+  quick switcher) is the keyboard way to reach a session; the sidebar's
+  search button still works, and the chord is held back for a future
+  session-content search. The `win.focus-search` action remains for custom
+  keybindings.
 - **Installs alongside agent-session-manager.** Collins' action icons are
   app-private artwork on generic names, and they were being written into the
   shared `hicolor` icon theme, where they collided with the copies upstream's
