@@ -344,6 +344,9 @@ msgstr "Erscheinungsbild"
 msgid "Color scheme"
 msgstr "Farbschema"
 
+msgid "Dark / Light Mode"
+msgstr "Dunkel- / Hellmodus"
+
 msgid "Language"
 msgstr "Sprache"
 

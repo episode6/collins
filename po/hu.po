@@ -344,6 +344,9 @@ msgstr "Megjelenés"
 msgid "Color scheme"
 msgstr "Színséma"
 
+msgid "Dark / Light Mode"
+msgstr "Sötét / világos mód"
+
 msgid "Language"
 msgstr "Nyelv"
 

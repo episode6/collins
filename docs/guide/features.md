@@ -474,7 +474,7 @@ a **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin,
 Tokyo Night, Monokai, One Dark…), the **composer's** switches (the typing
 trigger, Enter behavior, the floating button, auto-open in new sessions),
 the editor's **color scheme**, **font**, and **line numbers**/**hidden
-files** toggles, the app's **color scheme** (system / light / dark), the
+files** toggles, the app's **Dark / Light Mode** (system / light / dark), the
 **language** (English, Magyar, Deutsch, Español, Français), the sidebar's
 **Show folder path**, **Show Claude usage**, and **Auto-generate session
 titles** toggles, the **status icon**, **Reopen the last session**, what to

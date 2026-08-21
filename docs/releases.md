@@ -126,7 +126,8 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   switches leave Terminal for a **Composer** group of their own; the three
   pull-request switches that lived under Session list join **Pull
   requests**; and **Session tools** is now **Built-in MCP tools**. Row
-  names and settings are unchanged, so search finds everything where it was.
+  names and settings are unchanged (except the app's **Color scheme**, now
+  **Dark / Light Mode**), so search finds everything where it was.
 - **Fixes** — archiving a session clears its notification and unread count;
   the status icon's menu no longer draws a stray "Quit" on a separator; a
   click in the empty gutter beside a width-limited terminal clears the

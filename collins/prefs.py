@@ -301,7 +301,7 @@ class PreferencesDialog(Adw.Dialog):
                 self._lang_expander, _("Restart now"), *(label for _c, label in LANGUAGES)
             )
         )
-        scheme_row = Adw.ComboRow(title=_("Color scheme"))
+        scheme_row = Adw.ComboRow(title=_("Dark / Light Mode"))
         scheme_labels = [_(label) for _k, label, _s in _SCHEMES]
         scheme_row.set_model(Gtk.StringList.new(scheme_labels))
         current_scheme = state.get_setting("color_scheme") or "system"

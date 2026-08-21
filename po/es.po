@@ -344,6 +344,9 @@ msgstr "Apariencia"
 msgid "Color scheme"
 msgstr "Esquema de color"
 
+msgid "Dark / Light Mode"
+msgstr "Modo oscuro / claro"
+
 msgid "Language"
 msgstr "Idioma"
 
