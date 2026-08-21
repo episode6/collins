@@ -658,20 +658,21 @@ def test_sort_puts_mythos_above_fable():
     ]
 
 
-def test_sort_orders_within_a_family_by_version():
-    # Numeric, not lexicographic: 4.1 < 4.8 < 4.10 < 5. An alphabetical sort of
-    # the shown names would wrongly wedge "4.10" between "4.1" and "4.8".
+def test_sort_orders_within_a_family_by_version_newest_first():
+    # Numeric and newest-first: 5 > 4.10 > 4.8 > 4.1, so 5 leads the family.
+    # An alphabetical sort of the shown names would wrongly wedge "4.10"
+    # between "4.1" and "4.8".
     models = [
-        ClaudeModel("claude-opus-5", "Claude Opus 5"),
-        ClaudeModel("claude-opus-4-10", "Claude Opus 4.10"),
-        ClaudeModel("claude-opus-4-1", "Claude Opus 4.1"),
         ClaudeModel("claude-opus-4-8", "Claude Opus 4.8"),
+        ClaudeModel("claude-opus-5", "Claude Opus 5"),
+        ClaudeModel("claude-opus-4-1", "Claude Opus 4.1"),
+        ClaudeModel("claude-opus-4-10", "Claude Opus 4.10"),
     ]
     assert [m.id for m in claudemodels.sort_models(models)] == [
-        "claude-opus-4-1",
-        "claude-opus-4-8",
-        "claude-opus-4-10",
         "claude-opus-5",
+        "claude-opus-4-10",
+        "claude-opus-4-8",
+        "claude-opus-4-1",
     ]
 
 
@@ -686,8 +687,8 @@ def test_sort_puts_unknown_families_on_top_clustered():
         _m("claude-zephyr-5"),
     ]
     assert [m.id for m in claudemodels.sort_models(models)] == [
-        "claude-zephyr-5",
         "claude-zephyr-6",
+        "claude-zephyr-5",
         "claude-mythos-5",
         "claude-opus-5",
         "claude-haiku-4-5",
@@ -724,7 +725,7 @@ def test_grouped_models_splits_sorted_catalog_by_family():
     groups = claudemodels.grouped_models(models)
     assert [[m.id for m in g] for g in groups] == [
         ["claude-fable-5"],
-        ["claude-opus-4-8", "claude-opus-5"],
+        ["claude-opus-5", "claude-opus-4-8"],
         ["claude-haiku-4-5"],
     ]
 

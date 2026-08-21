@@ -516,10 +516,15 @@ def _version_key(model_id: str) -> tuple[int, ...]:
 def sort_models(models: list[ClaudeModel]) -> list[ClaudeModel]:
     """The catalog grouped by tier family for display: unrecognized (newer)
     families first, then Mythos, Fable, Opus, Sonnet, Haiku; each family
-    ordered by version (numeric, oldest first)."""
+    ordered by version, newest first — so Opus 5 leads its family, above 4.8.
+
+    The version key is negated component-by-component to sort a family
+    descending while the family order itself stays ascending; the versions are
+    non-negative, so this is just "reverse that one part of the key"."""
     def key(model: ClaudeModel):
         group = _model_group(model.id)
-        return (_group_rank(group), group, _version_key(model.id), model.id)
+        newest_first = tuple(-n for n in _version_key(model.id))
+        return (_group_rank(group), group, newest_first, model.id)
 
     return sorted(models, key=key)
 
