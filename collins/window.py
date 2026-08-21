@@ -72,6 +72,7 @@ from .copylabel import open_uri
 from .editorwindow import EditorWindow
 from .flash import flash
 from .formatting import blast_radius_body
+from .ghwelcome import command_row
 from .gitinfo import github_url, has_changes
 from .i18n import _
 from .licenses import legal_sections
@@ -92,7 +93,6 @@ from .sessions import (
     worktree_project_root,
 )
 from .shellinput import shell_command
-from .ghwelcome import command_row
 from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar, package_repo_label
 from .state import AppState, clamp_window_size, editor_pops_out, panel_size_key
 from .store import SessionStore, emptied_projects

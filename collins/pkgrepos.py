@@ -21,9 +21,9 @@ Nothing here imports gi, so it is testable where GTK isn't.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 # The Launchpad PPA, as apt's source files name it. `add-apt-repository`
 # writes a deb822 `.sources` file on 23.10+ and a one-line `.list` before;
