@@ -72,6 +72,13 @@ _CACHE_VERSION = 1  # bumped if the file's shape changes; a file from another ve
 # "the weakest model" by accident.
 _TIERS = ("haiku", "sonnet", "opus", "fable", "mythos")
 
+# The order the pickers list the tier families in: newest generation first,
+# down to the smallest. A model whose id names none of these is an
+# unrecognized (so, newer) family — it sorts above them all, clustered with
+# its own kind. Distinct from `_TIERS`, which ranks by strength to pick a
+# default; this is only presentation.
+_DISPLAY_ORDER = ("fable", "opus", "sonnet", "haiku")
+
 
 @dataclass(frozen=True)
 class ClaudeModel:
@@ -81,11 +88,12 @@ class ClaudeModel:
 
 
 # What the pickers fall back to when the API can't be asked: the CLI's
-# stable aliases, each resolving to the latest model of its tier.
+# stable aliases, each resolving to the latest model of its tier. In display
+# order (see `_DISPLAY_ORDER`) so the fallback reads like the live list.
 FALLBACK_MODELS = (
-    ClaudeModel("haiku", "Haiku (latest)"),
-    ClaudeModel("sonnet", "Sonnet (latest)"),
     ClaudeModel("opus", "Opus (latest)"),
+    ClaudeModel("sonnet", "Sonnet (latest)"),
+    ClaudeModel("haiku", "Haiku (latest)"),
 )
 
 
@@ -397,7 +405,7 @@ def available_models() -> list[ClaudeModel]:
     say): whoever holds the fetch lock asks the API, and the queued callers
     re-read the cache it just filled.
     """
-    return _query(force=False)[0]
+    return sort_models(_query(force=False)[0])
 
 
 def refresh_models() -> list[ClaudeModel]:
@@ -408,7 +416,7 @@ def refresh_models() -> list[ClaudeModel]:
     has one answer however the caller got here. Blocking — call from a worker
     thread.
     """
-    return _query(force=True)[0]
+    return sort_models(_query(force=True)[0])
 
 
 def cached_models() -> list[ClaudeModel] | None:
@@ -423,7 +431,7 @@ def cached_models() -> list[ClaudeModel] | None:
     """
     _load_disk_once()
     with _lock:
-        return list(_cached) if _cached is not None else None
+        return sort_models(_cached) if _cached is not None else None
 
 
 def cache_fetched_at() -> float:
@@ -455,6 +463,53 @@ def cache_failed() -> bool:
 _DATE_LEN = 8  # a YYYYMMDD stamp in an id (claude-haiku-4-5-20251001)
 
 
+def _id_parts(model_id: str) -> list[str]:
+    """A model id broken into its meaningful tokens, packaging stripped:
+    the cloud providers' ``us.anthropic.`` / ``-v1:0`` wrappers and a
+    ``[1m]`` context-window suffix. ``claude-opus-5`` -> ``[claude, opus, 5]``."""
+    ident = (model_id or "").strip()
+    base = ident.split(":", 1)[0]  # -v1:0 (Bedrock/Vertex)
+    base = base.rsplit(".", 1)[-1]  # us.anthropic.
+    base = base.split("[", 1)[0]  # claude-opus-5[1m] (a context-window variant)
+    return [part for part in base.replace("_", "-").split("-") if part]
+
+
+def _model_group(model_id: str) -> str:
+    """The tier family a model belongs to, for grouping the picker list.
+
+    One of `_DISPLAY_ORDER` when the id names it; otherwise a best-effort
+    token pulled from the id (the tier slot: the first part that isn't the
+    ``claude`` prefix or a number) so an unrecognized family still clusters
+    with its own kind rather than scattering through the list.
+    """
+    parts = _id_parts(model_id)
+    known = next((part for part in parts if part in _DISPLAY_ORDER), None)
+    if known is not None:
+        return known
+    unknown = next((p for p in parts if p != "claude" and not p.isdigit()), None)
+    return unknown if unknown is not None else (model_id or "").strip()
+
+
+def _group_rank(group: str) -> int:
+    """Where a family sits in the list: 1..N for the known families in
+    `_DISPLAY_ORDER`, and 0 — above them all — for any unrecognized one."""
+    try:
+        return _DISPLAY_ORDER.index(group) + 1
+    except ValueError:
+        return 0
+
+
+def sort_models(models: list[ClaudeModel]) -> list[ClaudeModel]:
+    """The catalog grouped by tier family for display: unrecognized (newer)
+    families first, then Fable, Opus, Sonnet, Haiku; each family ordered
+    alphabetically by the name the picker shows."""
+    def key(model: ClaudeModel):
+        group = _model_group(model.id)
+        return (_group_rank(group), group, (model.display_name or model.id).lower(), model.id)
+
+    return sorted(models, key=key)
+
+
 def short_name(model_id: str) -> str:
     """A model id written the way a person says it: "Opus 5", "Haiku 4.5".
 
@@ -470,14 +525,10 @@ def short_name(model_id: str) -> str:
     `us.anthropic.` and `-v1:0` wrappers — is packaging. An id that names no
     known tier is handed back whole; better a long name than a wrong one.
     """
-    ident = (model_id or "").strip()
-    base = ident.split(":", 1)[0]  # -v1:0 (Bedrock/Vertex)
-    base = base.rsplit(".", 1)[-1]  # us.anthropic.
-    base = base.split("[", 1)[0]  # claude-opus-5[1m] (a context-window variant)
-    parts = [part for part in base.replace("_", "-").split("-") if part]
+    parts = _id_parts(model_id)
     tier = next((part for part in parts if part in _TIERS), None)
     if tier is None:
-        return ident
+        return (model_id or "").strip()
     version = [p for p in parts if p.isdigit() and len(p) != _DATE_LEN]
     return " ".join(filter(None, (tier.capitalize(), ".".join(version))))
 

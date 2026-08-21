@@ -627,3 +627,67 @@ def test_short_name_hands_back_what_it_cannot_read():
     shown as it came."""
     assert short_name("some-future-model-9") == "some-future-model-9"
     assert short_name("") == ""
+
+
+# -- sort_models --------------------------------------------------------------
+
+
+def test_sort_groups_families_in_display_order():
+    # Fable, then Opus, then Sonnet, then Haiku — regardless of how they arrive.
+    models = [
+        _m("claude-haiku-4-5"),
+        _m("claude-sonnet-5"),
+        _m("claude-opus-5"),
+        _m("claude-fable-5"),
+    ]
+    assert [m.id for m in claudemodels.sort_models(models)] == [
+        "claude-fable-5",
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-haiku-4-5",
+    ]
+
+
+def test_sort_orders_within_a_family_alphabetically():
+    models = [
+        ClaudeModel("claude-opus-5", "Claude Opus 5"),
+        ClaudeModel("claude-opus-4-1", "Claude Opus 4.1"),
+        ClaudeModel("claude-opus-4-8", "Claude Opus 4.8"),
+    ]
+    assert [m.id for m in claudemodels.sort_models(models)] == [
+        "claude-opus-4-1",
+        "claude-opus-4-8",
+        "claude-opus-5",
+    ]
+
+
+def test_sort_puts_unknown_families_on_top_clustered():
+    # A family the build doesn't know sorts above the known ones, and its
+    # models stay together rather than scattering.
+    models = [
+        _m("claude-opus-5"),
+        _m("claude-mythos-6"),
+        _m("claude-haiku-4-5"),
+        _m("claude-mythos-5"),
+    ]
+    assert [m.id for m in claudemodels.sort_models(models)] == [
+        "claude-mythos-5",
+        "claude-mythos-6",
+        "claude-opus-5",
+        "claude-haiku-4-5",
+    ]
+
+
+def test_available_models_comes_out_grouped(monkeypatch):
+    jumbled = _catalog("claude-haiku-4-5", "claude-fable-5", "claude-sonnet-5", "claude-opus-5")
+    monkeypatch.setattr(claudemodels, "fetch_models", _fetches(jumbled))
+    assert [m.id for m in claudemodels.available_models()] == [
+        "claude-fable-5",
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-haiku-4-5",
+    ]
+
+
+def test_fallback_models_are_in_display_order():
+    assert [m.id for m in FALLBACK_MODELS] == ["opus", "sonnet", "haiku"]
