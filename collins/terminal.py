@@ -37,6 +37,7 @@ from . import (  # noqa: E402
     prmenu,
     proctree,
     themes,
+    transcriptlinks,
     vtehtml,
 )
 from .claudemodels import short_name  # noqa: E402
@@ -255,7 +256,9 @@ def _setup_links(terminal: Vte.Terminal) -> None:
     No regex can see past a newline the CLI itself wrote, so a reference too
     long for one row matches only in halves — each half underlining on its
     own. The click stitches them back together (_resolve_wrapped_at for
-    paths, _resolve_wrapped_url_at for URLs) before deciding what it opens.
+    paths, _resolve_wrapped_url_at for URLs) before deciding what it opens;
+    when the geometry can't say, the session's transcript — which has the
+    link unwrapped — is asked next (_resolve_from_transcript_at).
     """
     terminal.set_allow_hyperlink(True)
     tag_kinds: dict[int, str] = {}
@@ -286,6 +289,24 @@ def _setup_links(terminal: Vte.Terminal) -> None:
                 kind = tag_kinds.get(tag, "url")
             uri = match
         roots = _reference_roots(terminal)
+
+        def from_transcript(cand: str | None) -> bool:
+            # The fallback behind both screen stitchers: the transcript's
+            # unwrapped text, corroborated against the screen. Nothing for a
+            # shell tab, or a link still streaming in — the stitchers' and
+            # the direct readings keep their say then.
+            hit = _resolve_from_transcript_at(terminal, cand, x, y, roots)
+            if hit is None:
+                return False
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            kind, value = hit
+            if kind == "file":
+                path, line, col = value
+                _open_file_reference(terminal, path, line, col)
+            else:
+                _launch_uri(terminal, value)
+            return True
+
         if not uri:
             # A wrapped reference's continuation fragment often contains no
             # slash (`o.py:7)`) and so matches nothing — the half holding
@@ -302,6 +323,7 @@ def _setup_links(terminal: Vte.Terminal) -> None:
                 return
             stitched = _resolve_wrapped_url_at(terminal, None, x, y)
             if stitched is None:
+                from_transcript(None)
                 return
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
             _launch_uri(terminal, stitched)
@@ -316,6 +338,11 @@ def _setup_links(terminal: Vte.Terminal) -> None:
             # gates immediately; a reference alone on its row does probe
             # its neighbours before the direct fallback wins.
             resolved = _resolve_wrapped_at(terminal, uri, x, y, roots)
+            if resolved is None and from_transcript(uri):
+                # Before the direct reading, for the same reason the stitcher
+                # runs first: the head of a wrapped path can be an existing
+                # directory, and the transcript knows it was only the head.
+                return
             if resolved is None:
                 resolved = resolve_file_reference(uri, roots)
             if resolved is not None:
@@ -337,7 +364,10 @@ def _setup_links(terminal: Vte.Terminal) -> None:
             # row; the rest is on the next one, past a newline no regex over
             # screen text can see. A stitch that isn't clearly a wrap comes
             # back None and the match opens as it stands.
-            uri = _resolve_wrapped_url_at(terminal, uri, x, y) or uri
+            stitched = _resolve_wrapped_url_at(terminal, uri, x, y)
+            if stitched is None and from_transcript(uri):
+                return
+            uri = stitched or uri
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         _launch_uri(terminal, uri)
 
@@ -506,6 +536,48 @@ def _resolve_wrapped_url_at(
             # clicked, and a neighbour row's token is then not the user's
             # click at all — prose one row under a wrapped link would
             # otherwise open the link.
+            break
+    return None
+
+
+def _resolve_from_transcript_at(
+    terminal: Vte.Terminal,
+    candidate: str | None,
+    x: float,
+    y: float,
+    roots: list[str | None],
+) -> tuple[str, object] | None:
+    """Finish the clicked fragment off the tab's transcript (see
+    transcriptlinks): ``("url", uri)`` or ``("file", (path, line, col))``,
+    or None when the tab has no transcript, the transcript has no link the
+    fragment is part of, or the screen around the click doesn't spell that
+    link out. File completions are existence-checked like any other path
+    reference; a longer candidate that resolves nowhere yields to a shorter
+    one that does. Same row slop and same token-settles-the-row rule as the
+    URL stitcher."""
+    tab = terminal.get_ancestor(TerminalTab)
+    transcript = tab.transcript_path if tab is not None else None
+    if not transcript:
+        return None
+    screen = _screen_at(terminal, x, y)
+    if screen is None:
+        return None
+    rows, row, col, _cols = screen
+    links = transcriptlinks.transcript_links(transcript)
+    if not links:
+        return None
+    row_text = _row_reader(rows)
+    for r in (row + slop for slop in _ROW_SLOP):
+        cand = candidate if candidate is not None else token_at_column(row_text(r), col)
+        if not cand:
+            continue
+        for kind, text in transcriptlinks.completions(cand, rows, r, col, links):
+            if kind == "url":
+                return "url", text
+            resolved = resolve_file_reference(text, roots)
+            if resolved is not None:
+                return "file", resolved
+        if candidate is None:
             break
     return None
 
