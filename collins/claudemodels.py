@@ -502,15 +502,42 @@ def _group_rank(group: str) -> int:
         return 0
 
 
+def _version_key(model_id: str) -> tuple[int, ...]:
+    """The version in an id as a tuple of ints, for ordering within a family:
+    ``(4, 8)`` for ``claude-opus-4-8``, ``()`` for a bare alias. Compared
+    number-by-number, so Opus 4.8 sorts before Opus 4.10 and Opus 9 before
+    Opus 10 — orderings a lexicographic compare of the shown name gets wrong.
+    The date stamp some ids carry (``…-20251001``) is not a version part."""
+    return tuple(
+        int(p) for p in _id_parts(model_id) if p.isdigit() and len(p) != _DATE_LEN
+    )
+
+
 def sort_models(models: list[ClaudeModel]) -> list[ClaudeModel]:
     """The catalog grouped by tier family for display: unrecognized (newer)
-    families first, then Fable, Opus, Sonnet, Haiku; each family ordered
-    alphabetically by the name the picker shows."""
+    families first, then Mythos, Fable, Opus, Sonnet, Haiku; each family
+    ordered by version (numeric, oldest first)."""
     def key(model: ClaudeModel):
         group = _model_group(model.id)
-        return (_group_rank(group), group, (model.display_name or model.id).lower(), model.id)
+        return (_group_rank(group), group, _version_key(model.id), model.id)
 
     return sorted(models, key=key)
+
+
+def grouped_models(models: list[ClaudeModel]) -> list[list[ClaudeModel]]:
+    """The sorted catalog split into runs of one tier family each, in display
+    order — what a picker draws a divider between. Each inner list is one
+    family's models, already version-ordered; the family label itself isn't
+    returned because the pickers show the models, not the group name."""
+    families: list[list[ClaudeModel]] = []
+    last_group = None
+    for model in sort_models(models):
+        group = _model_group(model.id)
+        if group != last_group:
+            families.append([])
+            last_group = group
+        families[-1].append(model)
+    return families
 
 
 def short_name(model_id: str) -> str:

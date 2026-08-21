@@ -658,15 +658,19 @@ def test_sort_puts_mythos_above_fable():
     ]
 
 
-def test_sort_orders_within_a_family_alphabetically():
+def test_sort_orders_within_a_family_by_version():
+    # Numeric, not lexicographic: 4.1 < 4.8 < 4.10 < 5. An alphabetical sort of
+    # the shown names would wrongly wedge "4.10" between "4.1" and "4.8".
     models = [
         ClaudeModel("claude-opus-5", "Claude Opus 5"),
+        ClaudeModel("claude-opus-4-10", "Claude Opus 4.10"),
         ClaudeModel("claude-opus-4-1", "Claude Opus 4.1"),
         ClaudeModel("claude-opus-4-8", "Claude Opus 4.8"),
     ]
     assert [m.id for m in claudemodels.sort_models(models)] == [
         "claude-opus-4-1",
         "claude-opus-4-8",
+        "claude-opus-4-10",
         "claude-opus-5",
     ]
 
@@ -703,3 +707,41 @@ def test_available_models_comes_out_grouped(monkeypatch):
 
 def test_fallback_models_are_in_display_order():
     assert [m.id for m in FALLBACK_MODELS] == ["opus", "sonnet", "haiku"]
+
+
+# -- grouped_models -----------------------------------------------------------
+
+
+def test_grouped_models_splits_sorted_catalog_by_family():
+    # One inner list per family, in display order, each version-ordered — the
+    # runs a picker draws a divider between.
+    models = [
+        _m("claude-haiku-4-5"),
+        _m("claude-opus-4-8"),
+        _m("claude-opus-5"),
+        _m("claude-fable-5"),
+    ]
+    groups = claudemodels.grouped_models(models)
+    assert [[m.id for m in g] for g in groups] == [
+        ["claude-fable-5"],
+        ["claude-opus-4-8", "claude-opus-5"],
+        ["claude-haiku-4-5"],
+    ]
+
+
+def test_grouped_models_clusters_each_unknown_family_on_its_own():
+    models = [
+        _m("claude-opus-5"),
+        _m("claude-zephyr-5"),
+        _m("claude-mythos-5"),
+    ]
+    groups = claudemodels.grouped_models(models)
+    assert [[m.id for m in g] for g in groups] == [
+        ["claude-zephyr-5"],
+        ["claude-mythos-5"],
+        ["claude-opus-5"],
+    ]
+
+
+def test_grouped_models_of_nothing_is_empty():
+    assert claudemodels.grouped_models([]) == []

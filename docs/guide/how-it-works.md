@@ -55,7 +55,8 @@ round trip every time one opens.
 
 The list is grouped by tier family so like sits with like: any unrecognized
 (so, newer) family first, then Fable, Opus, Sonnet, Haiku, each family ordered
-alphabetically.
+by version number. In the footer and composer model menus a divider separates
+one family from the next.
 
 One answer is trusted less than that: a query that comes back with a single
 model is not a catalog you can pick from — a page cut short, or a login that
