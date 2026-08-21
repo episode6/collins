@@ -5025,24 +5025,18 @@ class MainWindow(Adw.ApplicationWindow):
         the next thing it wants is their password.
 
         Without a session tab to hold a shell there is nothing to type into,
-        so the dialog offers only the copyable commands. Either way the item
-        leaves every window's menu: re-checked at the next launch, like the
-        desktop-icon offer, which also covers the case of a sudo prompt
-        cancelled halfway.
+        so the dialog offers only the copyable commands. Nothing here takes
+        the item out of the menu: this window can't see the commands finish
+        (a sudo prompt may be cancelled, apt may fail), so the sidebar asks
+        pkgrepos again each time its menu opens and the item goes when the
+        repository is really there (SessionSidebar._refresh_package_repo_item).
         """
         channel = pkgrepos.offer()
         if channel is None:
-            # Added since launch, outside Collins. Nothing to do but tidy up.
-            self._package_repo_done()
+            # Added between the menu opening and the click. The next open
+            # drops the item; there is nothing to run.
             return
-        tab = self._current_terminal_tab() or next(
-            (
-                page.get_child()
-                for page in self.tab_view.get_pages()
-                if isinstance(page.get_child(), TerminalTab)
-            ),
-            None,
-        )
+        shell, tab = self._idle_panel_shell()
         heading, body = self._package_repo_text(channel, tab is not None)
         dialog = Adw.AlertDialog(heading=heading, body=body)
         dialog.set_extra_child(command_row(channel.commands))
@@ -5056,10 +5050,30 @@ class MainWindow(Adw.ApplicationWindow):
         def respond(_dialog, response: str) -> None:
             if response != "run" or tab is None:
                 return
-            self._run_package_repo_commands(tab, channel)
+            self._run_package_repo_commands(tab, shell, channel)
 
         dialog.connect("response", respond)
         dialog.present(self)
+
+    def _idle_panel_shell(self):
+        """A panel shell with nothing running, and the tab it belongs to —
+        the current session's first, then any other session tab's — or
+        (None, tab) when every shell is busy and a new one must be opened in
+        *tab*, or (None, None) with no session tab to open one in."""
+        tabs = [
+            tab
+            for i in range(self.tab_view.get_n_pages())
+            if isinstance(tab := self.tab_view.get_nth_page(i).get_child(), TerminalTab)
+        ]
+        current = self._current_terminal_tab()
+        if current is not None:
+            tabs.remove(current)
+            tabs.insert(0, current)
+        for tab in tabs:
+            for shell in tab.panel_shells():
+                if not shell.has_running_command():
+                    return shell, tab
+        return None, (tabs[0] if tabs else None)
 
     @staticmethod
     def _package_repo_text(channel: pkgrepos.Channel, can_run: bool) -> tuple[str, str]:
@@ -5080,11 +5094,16 @@ class MainWindow(Adw.ApplicationWindow):
         )
         return heading, body
 
-    def _run_package_repo_commands(self, tab: TerminalTab, channel: pkgrepos.Channel) -> None:
+    def _run_package_repo_commands(
+        self, tab: TerminalTab, shell, channel: pkgrepos.Channel
+    ) -> None:
         page = self.tab_view.get_page(tab)
         if self.tab_view.get_selected_page() is not page:
             self.tab_view.set_selected_page(page)
-        shell = next((s for s in tab.panel_shells() if not s.has_running_command()), None)
+        # The shell found when the dialog opened may have gone busy (or away)
+        # while it was up; re-pick on the same rule before typing into it.
+        if shell is None or shell.has_running_command() or shell not in tab.panel_shells():
+            shell = next((s for s in tab.panel_shells() if not s.has_running_command()), None)
         if shell is None:
             shell = tab.open_panel_shell()
         if shell is None:
@@ -5097,12 +5116,6 @@ class MainWindow(Adw.ApplicationWindow):
         tab.reveal_panel_shell(shell)
         shell.run_command(channel.commands)
         GLib.idle_add(shell.grab_page_focus)
-        self._package_repo_done()
-
-    def _package_repo_done(self) -> None:
-        for window in self.get_application().get_windows():
-            if isinstance(window, MainWindow):
-                window.sidebar.drop_menu_item("win.add-package-repo")
 
     def _install_desktop_done(self) -> None:
         for window in self.get_application().get_windows():

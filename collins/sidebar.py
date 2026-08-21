@@ -1427,12 +1427,11 @@ class SessionSidebar(Gtk.Box):
         if desktopentry.can_offer_install():
             menu.append(_("Install desktop icon"), "win.install-desktop")
         # Same shape, for the package channel: on a distro Collins has a
-        # repository for, and only while this machine isn't on it. Decided at
-        # launch too, and dropped from every menu by the window that adds the
-        # repository (drop_menu_item, via MainWindow). pkgrepos names the
-        # channel; only the Ubuntu PPA exists so far.
-        if (channel := pkgrepos.offer()) is not None:
-            menu.append(package_repo_label(channel), "win.add-package-repo")
+        # repository for, and only while this machine isn't on it. Not
+        # decided at launch, though — re-asked every time the menu opens
+        # (see _refresh_package_repo_item). pkgrepos names the channel; only
+        # the Ubuntu PPA exists so far.
+        self._refresh_package_repo_item()
         menu.append(_("About Collins"), "win.about")
         # Last, and app-scoped: it closes every window, not this one. The
         # status icon's menu offers the same item, and this is where someone
@@ -1441,6 +1440,7 @@ class SessionSidebar(Gtk.Box):
         # Menu and search hold the left end; the title carries two buttons on
         # its left and three on its right.
         self._menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
+        self._menu_btn.connect("notify::active", self._on_menu_toggled)
         header.pack_start(self._menu_btn)
 
         self.search_btn = Gtk.ToggleButton(icon_name="system-search-symbolic")
@@ -1838,6 +1838,46 @@ class SessionSidebar(Gtk.Box):
             self._refresh_btn.set_tooltip_text(_("Refresh session list and pull requests"))
         self._refresh_btn.set_sensitive(not busy)
 
+    def _on_menu_toggled(self, button: Gtk.MenuButton, _pspec) -> None:
+        if button.get_active():
+            self._refresh_package_repo_item()
+
+    def _refresh_package_repo_item(self) -> None:
+        """Put "Add the Ubuntu PPA…" in the menu exactly while it applies.
+
+        Asked again on every open of the menu rather than once at launch,
+        unlike the desktop-icon item above it: the window that runs the
+        commands can't see them finish (they run in a shell, behind a sudo
+        prompt the user may cancel), so it can't be the one to drop the item.
+        Reading two small apt directories per menu open is the whole cost,
+        and it buys the right answer either way — the item is gone the next
+        time the menu opens after apt succeeds, and still there after a
+        cancelled prompt, a mistyped password, or a repository added outside
+        Collins. The item sits just before "About Collins", in the slot the
+        desktop-icon item also precedes.
+        """
+        channel = pkgrepos.offer()
+        present = self._menu_index("win.add-package-repo")
+        if channel is None:
+            if present is not None:
+                self._menu.remove(present)
+            return
+        if present is not None:
+            return
+        about = self._menu_index("win.about")
+        item = Gio.MenuItem.new(package_repo_label(channel), "win.add-package-repo")
+        if about is None:
+            self._menu.append_item(item)
+        else:
+            self._menu.insert_item(about, item)
+
+    def _menu_index(self, action_name: str) -> int | None:
+        for i in range(self._menu.get_n_items()):
+            action = self._menu.get_item_attribute_value(i, Gio.MENU_ATTRIBUTE_ACTION, None)
+            if action is not None and action.get_string() == action_name:
+                return i
+        return None
+
     def drop_install_desktop_item(self) -> None:
         """Take "Install desktop icon" back out of the menu.
 
@@ -1854,11 +1894,8 @@ class SessionSidebar(Gtk.Box):
         menu that never carried one must not lose the item that happens to
         sit where it would have been.
         """
-        for i in range(self._menu.get_n_items()):
-            action = self._menu.get_item_attribute_value(i, Gio.MENU_ATTRIBUTE_ACTION, None)
-            if action is not None and action.get_string() == action_name:
-                self._menu.remove(i)
-                return
+        if (index := self._menu_index(action_name)) is not None:
+            self._menu.remove(index)
 
     def set_sessions_working(self, working: bool) -> None:
         """Run the header's barber pole while any session in this window is
