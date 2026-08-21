@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-20. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -20,6 +20,21 @@ DOMAIN = "collins"
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "hu": {
+        'Add the Ubuntu PPA…': 'Az Ubuntu PPA hozzáadása…',
+        'Add the package repository…': 'A csomagtároló hozzáadása…',
+        'Add the Ubuntu PPA?': 'Hozzáadja az Ubuntu PPA-t?',
+        "Collins isn't installed from ppa:episode6/stable yet. The PPA keeps it updated with the rest of the system: apt upgrade and the software updater both pick up new releases.":
+            'A Collins még nincs a ppa:episode6/stable tárolóból telepítve. A PPA a rendszer többi részével együtt tartja naprakészen: az apt upgrade és a szoftverfrissítő is felveszi az új kiadásokat.',
+        "Collins isn't installed from its package repository yet.":
+            'A Collins még nincs a csomagtárolójából telepítve.',
+        'These commands ask for your password; they run in a terminal in this session.':
+            'Ezek a parancsok a jelszavát kérik; ebben a munkamenetben, egy terminálban futnak.',
+        'Run these in a terminal — they ask for your password.':
+            'Futtassa ezeket egy terminálban — a jelszavát kérik.',
+        'Run in Terminal': 'Futtatás terminálban',
+        "Couldn't open a terminal": 'Nem sikerült terminált nyitni',
+        'Run the commands in a terminal of your own instead.':
+            'Futtassa a parancsokat inkább egy saját terminálban.',
         "── restored panel history ──": "── visszaállított panelelőzmények ──",
         "Rename session": "Munkamenet átnevezése",
         "Custom name": "Egyéni név",
@@ -514,6 +529,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "A Collins mostantól megtalálható az alkalmazások között",
     },
     "de": {
+        'Add the Ubuntu PPA…': 'Ubuntu-PPA hinzufügen…',
+        'Add the package repository…': 'Paketquelle hinzufügen…',
+        'Add the Ubuntu PPA?': 'Ubuntu-PPA hinzufügen?',
+        "Collins isn't installed from ppa:episode6/stable yet. The PPA keeps it updated with the rest of the system: apt upgrade and the software updater both pick up new releases.":
+            'Collins ist noch nicht aus ppa:episode6/stable installiert. Das PPA hält es zusammen mit dem restlichen System aktuell: apt upgrade und die Softwareaktualisierung holen neue Versionen automatisch.',
+        "Collins isn't installed from its package repository yet.":
+            'Collins ist noch nicht aus seiner Paketquelle installiert.',
+        'These commands ask for your password; they run in a terminal in this session.':
+            'Diese Befehle fragen nach Ihrem Passwort; sie laufen in einem Terminal dieser Sitzung.',
+        'Run these in a terminal — they ask for your password.':
+            'Führen Sie diese Befehle in einem Terminal aus — sie fragen nach Ihrem Passwort.',
+        'Run in Terminal': 'Im Terminal ausführen',
+        "Couldn't open a terminal":
+            'Terminal konnte nicht geöffnet werden',
+        'Run the commands in a terminal of your own instead.':
+            'Führen Sie die Befehle stattdessen in einem eigenen Terminal aus.',
         "── restored panel history ──": "── wiederhergestellter Panel-Verlauf ──",
         "Rename session": "Sitzung umbenennen",
         "Custom name": "Eigener Name",
@@ -1016,6 +1047,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Collins ist jetzt in deinen Anwendungen",
     },
     "es": {
+        'Add the Ubuntu PPA…': 'Añadir el PPA de Ubuntu…',
+        'Add the package repository…':
+            'Añadir el repositorio de paquetes…',
+        'Add the Ubuntu PPA?': '¿Añadir el PPA de Ubuntu?',
+        "Collins isn't installed from ppa:episode6/stable yet. The PPA keeps it updated with the rest of the system: apt upgrade and the software updater both pick up new releases.":
+            'Collins aún no está instalado desde ppa:episode6/stable. El PPA lo mantiene actualizado con el resto del sistema: tanto apt upgrade como el actualizador de software recogen las nuevas versiones.',
+        "Collins isn't installed from its package repository yet.":
+            'Collins aún no está instalado desde su repositorio de paquetes.',
+        'These commands ask for your password; they run in a terminal in this session.':
+            'Estos comandos piden tu contraseña; se ejecutan en una terminal de esta sesión.',
+        'Run these in a terminal — they ask for your password.':
+            'Ejecútalos en una terminal — piden tu contraseña.',
+        'Run in Terminal': 'Ejecutar en la terminal',
+        "Couldn't open a terminal": 'No se pudo abrir una terminal',
+        'Run the commands in a terminal of your own instead.':
+            'Ejecuta los comandos en una terminal propia en su lugar.',
         "── restored panel history ──": "── historial del panel restaurado ──",
         "Rename session": "Renombrar sesión",
         "Custom name": "Nombre personalizado",
@@ -1516,6 +1563,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Collins ya está en tus aplicaciones",
     },
     "fr": {
+        'Add the Ubuntu PPA…': 'Ajouter le PPA Ubuntu…',
+        'Add the package repository…': 'Ajouter le dépôt de paquets…',
+        'Add the Ubuntu PPA?': 'Ajouter le PPA Ubuntu ?',
+        "Collins isn't installed from ppa:episode6/stable yet. The PPA keeps it updated with the rest of the system: apt upgrade and the software updater both pick up new releases.":
+            "Collins n'est pas encore installé depuis ppa:episode6/stable. Le PPA le maintient à jour avec le reste du système : apt upgrade et le gestionnaire de mises à jour récupèrent tous deux les nouvelles versions.",
+        "Collins isn't installed from its package repository yet.":
+            "Collins n'est pas encore installé depuis son dépôt de paquets.",
+        'These commands ask for your password; they run in a terminal in this session.':
+            "Ces commandes demandent votre mot de passe ; elles s'exécutent dans un terminal de cette session.",
+        'Run these in a terminal — they ask for your password.':
+            'Exécutez-les dans un terminal — elles demandent votre mot de passe.',
+        'Run in Terminal': 'Exécuter dans le terminal',
+        "Couldn't open a terminal": "Impossible d'ouvrir un terminal",
+        'Run the commands in a terminal of your own instead.':
+            'Exécutez plutôt les commandes dans un terminal à vous.',
         "── restored panel history ──": "── historique du panneau restauré ──",
         "Rename session": "Renommer la session",
         "Custom name": "Nom personnalisé",
@@ -2020,7 +2082,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 _HEADER = (
     "# Modified from the original agent-session-manager\n"
     "# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett\n"
-    "# fork. Last modified: 2026-08-19. Full change history: git log for this file.\n"
+    "# fork. Last modified: 2026-08-20. Full change history: git log for this file.\n"
     "# Generated by po/generate.py — do not edit by hand.\n"
     'msgid ""\n'
     'msgstr ""\n'

@@ -35,6 +35,7 @@ from . import (
     openwith,
     paneldnd,
     panelhistory,
+    pkgrepos,
     trust,
 )
 from .activity import (
@@ -71,6 +72,7 @@ from .copylabel import open_uri
 from .editorwindow import EditorWindow
 from .flash import flash
 from .formatting import blast_radius_body
+from .ghwelcome import command_row
 from .gitinfo import github_url, has_changes
 from .i18n import _
 from .licenses import legal_sections
@@ -91,7 +93,7 @@ from .sessions import (
     worktree_project_root,
 )
 from .shellinput import shell_command
-from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar
+from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar, package_repo_label
 from .state import AppState, clamp_window_size, editor_pops_out, panel_size_key
 from .store import SessionStore, emptied_projects
 from .switcher import QuickSwitcher
@@ -1226,6 +1228,7 @@ class MainWindow(Adw.ApplicationWindow):
             ),
             "trash-archived": lambda *_: self._trash_archived(),
             "install-desktop": lambda *_: self._install_desktop_entry(),
+            "add-package-repo": lambda *_: self._add_package_repo(),
             "archive-current-session": lambda *_: self._archive_current_session(),
             # Never disabled, even with nothing to undo: its shortcut must
             # always land here and be swallowed — a shortcut whose action is
@@ -5008,6 +5011,111 @@ class MainWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._install_desktop_done)
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _add_package_repo(self) -> None:
+        """The sidebar menu's "Add the Ubuntu PPA…" (pkgrepos names the channel).
+
+        A confirmation first, because what follows asks for a sudo password:
+        the dialog shows the exact commands (click-to-copy, for anyone who
+        would rather run them in a terminal of their own) and "Run in
+        Terminal" types them into an idle panel shell of the current session
+        — a new one when none is idle — where sudo can prompt and the user
+        can watch apt work. The same path the run_in_terminal MCP tool takes,
+        except the shell is focused: this is the user's own keystroke, and
+        the next thing it wants is their password.
+
+        Without a session tab to hold a shell there is nothing to type into,
+        so the dialog offers only the copyable commands. Nothing here takes
+        the item out of the menu: this window can't see the commands finish
+        (a sudo prompt may be cancelled, apt may fail), so the sidebar asks
+        pkgrepos again each time its menu opens and the item goes when the
+        repository is really there (SessionSidebar._refresh_package_repo_item).
+        """
+        channel = pkgrepos.offer()
+        if channel is None:
+            # Added between the menu opening and the click. The next open
+            # drops the item; there is nothing to run.
+            return
+        shell, tab = self._idle_panel_shell()
+        heading, body = self._package_repo_text(channel, tab is not None)
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        dialog.set_extra_child(command_row(channel.commands))
+        dialog.add_response("cancel", _("Cancel"))
+        if tab is not None:
+            dialog.add_response("run", _("Run in Terminal"))
+            dialog.set_response_appearance("run", Adw.ResponseAppearance.SUGGESTED)
+            dialog.set_default_response("run")
+        dialog.set_close_response("cancel")
+
+        def respond(_dialog, response: str) -> None:
+            if response != "run" or tab is None:
+                return
+            self._run_package_repo_commands(tab, shell, channel)
+
+        dialog.connect("response", respond)
+        dialog.present(self)
+
+    def _idle_panel_shell(self):
+        """A panel shell with nothing running, and the tab it belongs to —
+        the current session's first, then any other session tab's — or
+        (None, tab) when every shell is busy and a new one must be opened in
+        *tab*, or (None, None) with no session tab to open one in."""
+        tabs = [
+            tab
+            for i in range(self.tab_view.get_n_pages())
+            if isinstance(tab := self.tab_view.get_nth_page(i).get_child(), TerminalTab)
+        ]
+        current = self._current_terminal_tab()
+        if current is not None:
+            tabs.remove(current)
+            tabs.insert(0, current)
+        for tab in tabs:
+            for shell in tab.panel_shells():
+                if not shell.has_running_command():
+                    return shell, tab
+        return None, (tabs[0] if tabs else None)
+
+    @staticmethod
+    def _package_repo_text(channel: pkgrepos.Channel, can_run: bool) -> tuple[str, str]:
+        if channel.id == "ubuntu-ppa":
+            heading = _("Add the Ubuntu PPA?")
+            body = _(
+                "Collins isn't installed from ppa:episode6/stable yet. The PPA "
+                "keeps it updated with the rest of the system: apt upgrade "
+                "and the software updater both pick up new releases."
+            )
+        else:
+            heading = package_repo_label(channel).rstrip("…")
+            body = _("Collins isn't installed from its package repository yet.")
+        body += "\n\n" + (
+            _("These commands ask for your password; they run in a terminal in this session.")
+            if can_run
+            else _("Run these in a terminal — they ask for your password.")
+        )
+        return heading, body
+
+    def _run_package_repo_commands(
+        self, tab: TerminalTab, shell, channel: pkgrepos.Channel
+    ) -> None:
+        page = self.tab_view.get_page(tab)
+        if self.tab_view.get_selected_page() is not page:
+            self.tab_view.set_selected_page(page)
+        # The shell found when the dialog opened may have gone busy (or away)
+        # while it was up; re-pick on the same rule before typing into it.
+        if shell is None or shell.has_running_command() or shell not in tab.panel_shells():
+            shell = next((s for s in tab.panel_shells() if not s.has_running_command()), None)
+        if shell is None:
+            shell = tab.open_panel_shell()
+        if shell is None:
+            dialogs.error_dialog(
+                self,
+                _("Couldn't open a terminal"),
+                _("Run the commands in a terminal of your own instead."),
+            )
+            return
+        tab.reveal_panel_shell(shell)
+        shell.run_command(channel.commands)
+        GLib.idle_add(shell.grab_page_focus)
 
     def _install_desktop_done(self) -> None:
         for window in self.get_application().get_windows():

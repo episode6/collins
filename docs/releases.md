@@ -71,6 +71,11 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   --system-site-packages collins`). The wheel carries the app's icons,
   `.desktop` launcher, and metainfo, and `collins --install-desktop` puts the
   launcher in the app grid.
+- **The sidebar menu offers the PPA.** On Ubuntu (and its derivatives), a
+  Collins that didn't come from `ppa:episode6/stable` — the GitHub `.deb`,
+  PyPI, a checkout — shows *Add the Ubuntu PPA…* in the ☰ menu until the
+  repository is configured. It shows the commands and runs them in a
+  terminal of the current session, where `sudo` can ask for a password.
 - **Close hides the window; sessions keep running.** The close dialog's
   third answer, *Keep Running (Hide Window)*, leaves every session exactly
   as it is with no window on screen; the status icon's *Show Collins
