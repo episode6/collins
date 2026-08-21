@@ -12,11 +12,14 @@ pickers and the settings usable.
 The catalog barely moves — a handful of models, changing a few times a
 year — so the query is read-only and cached hard: for a day, and to disk
 (``$XDG_CACHE_HOME/collins/models.json``) so a restart doesn't pay for it
-again. A failed query never evicts; the last good list keeps serving however
-stale it is, and a run of failures backs off rather than making every picker
-open wait out the network timeout. Preferences' Refresh button
-(`refresh_models`) ignores all of that and asks the API outright, for when a
-model ships and the cached day hasn't turned over yet.
+again — unless what came back was a single model, which is not a catalog
+anyone can pick from: that serves, but with no lifetime at all, so the next
+picker open and the next launch both ask again. A failed query never evicts;
+the last good list keeps serving however stale it is, and a run of failures
+backs off rather than making every picker open wait out the network timeout.
+Preferences' Refresh button (`refresh_models`) ignores all of that and asks
+the API outright, for when a model ships and the cached day hasn't turned
+over yet.
 
 Every query says how it went through the module logger: what came back at
 INFO (`COLLINS_LOG=INFO`), and anything that failed at WARNING, which the
@@ -51,6 +54,12 @@ CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
 _MODELS_URL = "https://api.anthropic.com/v1/models"
 _TIMEOUT_S = 10
 _CACHE_TTL_S = 86_400  # a day: the catalog changes a few times a year
+# A one-model answer is not this account's catalog — the API replied, but with
+# something no picker can offer a choice from (a truncated page, a login that
+# briefly sees one model). It is still better than the aliases, so it is kept
+# and saved; it just never counts as fresh, so the next ask — the next picker
+# open, or the next launch reading the saved file — queries again.
+_MIN_TRUSTED_MODELS = 2
 # After a failed query, serve the cache for this long before asking the
 # network again — offline, the alternative is every picker open blocking for
 # the full timeout. A forced refresh ignores it.
@@ -238,15 +247,25 @@ def _age(seconds: float) -> str:
     return f"{int(seconds // 86_400)}d"
 
 
-def _fresh(fetched_at: float, now: float) -> bool:
-    """Is a list fetched at *fetched_at* still inside the TTL?
+def _ttl(models: list[ClaudeModel]) -> float:
+    """How long *models* may serve before being asked about again.
+
+    The full day for a real catalog; nothing at all for a list too short to
+    be one (see `_MIN_TRUSTED_MODELS`), which still serves but is re-queried
+    at the first opportunity.
+    """
+    return _CACHE_TTL_S if len(models) >= _MIN_TRUSTED_MODELS else 0.0
+
+
+def _fresh(fetched_at: float, now: float, models: list[ClaudeModel]) -> bool:
+    """Is *models*, fetched at *fetched_at*, still inside its TTL?
 
     A negative age — a saved list claiming to come from the future, which a
     clock change or a copied home directory can produce — counts as stale.
     Re-querying costs one request and a failure keeps the list anyway, so
     erring toward the network is the cheap mistake here.
     """
-    return 0 <= now - fetched_at < _CACHE_TTL_S
+    return 0 <= now - fetched_at < _ttl(models)
 
 
 def _load_disk_once() -> None:
@@ -279,12 +298,13 @@ def _load_disk_once() -> None:
 
 def _serve_cache() -> list[ClaudeModel] | None:
     """The cache, when it is still good enough to answer with as it stands:
-    inside the TTL, or stale but with a query having just failed."""
+    inside its TTL (which a too-short list has none of), or stale but with a
+    query having just failed."""
     now = time.time()
     with _lock:
         if _cached is None:
             return None
-        if _fresh(_cached_at, now):
+        if _fresh(_cached_at, now, _cached):
             log.debug(
                 "models: %d served from cache, fetched %s ago",
                 len(_cached),
@@ -343,6 +363,12 @@ def _query(force: bool) -> tuple[list[ClaudeModel], bool]:
             ", ".join(m.id for m in result),
         )
         _write_disk(result, now)
+        if len(result) < _MIN_TRUSTED_MODELS:
+            log.warning(
+                "models: only %d model(s) came back — serving it, but it expires "
+                "immediately; the next ask queries again",
+                len(result),
+            )
     elif result:
         log.warning(
             "models: query failed after %.2fs; keeping the %d cached model(s) fetched %s ago",
