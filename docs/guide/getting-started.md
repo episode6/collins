@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-20. Full change history: git log for this file.
+fork. Last modified: 2026-08-21. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -154,7 +154,7 @@ asks for a project folder and launches `claude` there — or run `claude` in a
 project yourself and the session will show up automatically.
 
 Later launches start with no session open by default. Turn on **Reopen the
-last session** (Preferences → Startup) and the app instead reopens the
+last session** (Preferences → Session behavior) and the app instead reopens the
 session you had focused when you closed the window.
 
 ![The main window on first run](/img/main-window.png)

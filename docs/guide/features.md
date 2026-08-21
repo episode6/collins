@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-20. Full change history: git log for this file.
+fork. Last modified: 2026-08-21. Full change history: git log for this file.
 -->
 
 # Features
@@ -163,7 +163,7 @@ Enter opens, Esc closes.
 - The window title names the focused session, and the sidebar is
   **resizable**, its width remembered. On the next launch the app opens
   with no session — or, with **Reopen the last session** on (Preferences →
-  Startup), with the one you had focused — and the window comes back at
+  Session behavior), with the one you had focused — and the window comes back at
   its last size.
 
 ## Prompt composer
@@ -382,8 +382,8 @@ is running in:
   it, and keep the shell afterwards — a dev server, a REPL, a long build.
 
 Each tool asks for permission the first time a session calls it, like any
-other MCP tool, and **each has its own switch** in Preferences → *Session
-tools* (all on by default): a tool switched off isn't offered to the
+other MCP tool, and **each has its own switch** in Preferences → *Built-in
+MCP tools* (all on by default): a tool switched off isn't offered to the
 sessions Collins starts from then on, and a session already running when you
 flipped the switch is refused if it calls it anyway.
 
@@ -479,7 +479,7 @@ files** toggles, the app's **color scheme** (system / light / dark), the
 **Show folder path**, **Show Claude usage**, and **Auto-generate session
 titles** toggles, the **status icon**, **Reopen the last session**, what to
 do **when quitting with running sessions** (ask / exit / background / hide),
-**Archive on claude.ai too**, and a switch for each of the **session tools**
+**Archive on claude.ai too**, and a switch for each of the **built-in MCP tools**
 the agent can call — reachable from the sidebar menu or `Ctrl+,`.
 
 A **search bar across the top** filters the whole screen as you type, and it

@@ -117,6 +117,16 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   Marks, chips and the PR page itself all update on the spot (the page
   re-reads when it's on screen). Merged and closed PRs are now refetched
   every ten minutes rather than every one.
+- **Preferences regrouped** — eighteen groups become nine. **General**
+  opens the page with the CLI path, language, color scheme, status icon,
+  tab drag handles, the sidebar's switches and the icon model; **Session
+  behavior** gathers everything about how sessions start, get named, are
+  archived and quit (with the title model beside the auto-title switch, and
+  the polling and busy-tracking fallbacks at its tail); the **composer's**
+  switches leave Terminal for a **Composer** group of their own; the three
+  pull-request switches that lived under Session list join **Pull
+  requests**; and **Session tools** is now **Built-in MCP tools**. Row
+  names and settings are unchanged, so search finds everything where it was.
 - **Fixes** — archiving a session clears its notification and unread count;
   the status icon's menu no longer draws a stray "Quit" on a separator; a
   click in the empty gutter beside a width-limited terminal clears the
