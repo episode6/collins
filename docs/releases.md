@@ -135,6 +135,13 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   names and settings are unchanged (two renames: the app's **Color scheme**
   is **Dark / Light Mode**, and **Show folder path** is **Show folder paths
   in sidebar**), so search finds everything where it was.
+- **Ctrl+click finishes a wrapped link off the transcript.** A URL or file
+  path the CLI broke across rows is stitched back together from the screen
+  when the geometry is unambiguous; when it isn't — the CLI wrapped narrower
+  than the terminal, or a link fills a row exactly — the click now asks the
+  session's transcript, which has the link unwrapped, and opens it when the
+  rows around the click spell that link out. Finished turns only; a link
+  still streaming in keeps the screen-only behaviour.
 - **Fixes** — archiving a session clears its notification and unread count;
   the status icon's menu no longer draws a stray "Quit" on a separator; a
   click in the empty gutter beside a width-limited terminal clears the
