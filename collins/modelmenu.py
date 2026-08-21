@@ -110,18 +110,23 @@ def _fill(
     have_current: bool,
 ) -> None:
     menu.remove_all()
-    section = Gio.Menu()
     if not models:
         # An actionless item draws insensitive: a placeholder the worker
         # thread replaces, not a choice.
+        section = Gio.Menu()
         section.append(_("Loading models…"), None)
-    for model in models or []:
-        item = Gio.MenuItem.new(model.display_name, None)
-        item.set_action_and_target_value(
-            f"{_GROUP}.pick", GLib.Variant.new_string(model.id)
-        )
-        section.append_item(item)
-    menu.append_section(None, section)
+        menu.append_section(None, section)
+    # One section per tier family, so the PopoverMenu draws a divider between
+    # families (Fable | Opus | Sonnet | Haiku) without any label on the rule.
+    for family in claudemodels.grouped_models(models or []):
+        section = Gio.Menu()
+        for model in family:
+            item = Gio.MenuItem.new(model.display_name, None)
+            item.set_action_and_target_value(
+                f"{_GROUP}.pick", GLib.Variant.new_string(model.id)
+            )
+            section.append_item(item)
+        menu.append_section(None, section)
     if have_current:
         extra = Gio.Menu()
         extra.append(_("Copy model id"), f"{_GROUP}.copy-id")

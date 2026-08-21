@@ -627,3 +627,139 @@ def test_short_name_hands_back_what_it_cannot_read():
     shown as it came."""
     assert short_name("some-future-model-9") == "some-future-model-9"
     assert short_name("") == ""
+
+
+# -- sort_models --------------------------------------------------------------
+
+
+def test_sort_groups_families_in_display_order():
+    # Mythos, then Fable, Opus, Sonnet, Haiku — regardless of how they arrive.
+    models = [
+        _m("claude-haiku-4-5"),
+        _m("claude-sonnet-5"),
+        _m("claude-opus-5"),
+        _m("claude-fable-5"),
+        _m("claude-mythos-5"),
+    ]
+    assert [m.id for m in claudemodels.sort_models(models)] == [
+        "claude-mythos-5",
+        "claude-fable-5",
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-haiku-4-5",
+    ]
+
+
+def test_sort_puts_mythos_above_fable():
+    models = [_m("claude-fable-5"), _m("claude-mythos-5")]
+    assert [m.id for m in claudemodels.sort_models(models)] == [
+        "claude-mythos-5",
+        "claude-fable-5",
+    ]
+
+
+def test_sort_orders_within_a_family_by_version_newest_first():
+    # Numeric and newest-first: 5 > 4.10 > 4.8 > 4.1, so 5 leads the family.
+    # An alphabetical sort of the shown names would wrongly wedge "4.10"
+    # between "4.1" and "4.8".
+    models = [
+        ClaudeModel("claude-opus-4-8", "Claude Opus 4.8"),
+        ClaudeModel("claude-opus-5", "Claude Opus 5"),
+        ClaudeModel("claude-opus-4-1", "Claude Opus 4.1"),
+        ClaudeModel("claude-opus-4-10", "Claude Opus 4.10"),
+    ]
+    assert [m.id for m in claudemodels.sort_models(models)] == [
+        "claude-opus-5",
+        "claude-opus-4-10",
+        "claude-opus-4-8",
+        "claude-opus-4-1",
+    ]
+
+
+def test_sort_handles_mixed_length_versions_in_a_family():
+    # A bare-major snapshot (version tuple (4,), a date but no minor) and a
+    # later point release (4, 5) live in the catalog at once. Newest-first must
+    # put 4.5 above bare 4 — not the reverse, which Python's tuple prefix rule
+    # would give a naive negate of unequal-length tuples.
+    models = [
+        ClaudeModel("us.anthropic.claude-sonnet-4-20250514-v1:0", "Sonnet 4"),
+        ClaudeModel("claude-sonnet-4-5", "Sonnet 4.5"),
+        ClaudeModel("claude-sonnet-5", "Sonnet 5"),
+    ]
+    assert [m.display_name for m in claudemodels.sort_models(models)] == [
+        "Sonnet 5",
+        "Sonnet 4.5",
+        "Sonnet 4",
+    ]
+
+
+def test_sort_puts_unknown_families_on_top_clustered():
+    # A family named nowhere in _DISPLAY_ORDER sorts above every named one —
+    # above Mythos too — and its models stay together rather than scattering.
+    models = [
+        _m("claude-opus-5"),
+        _m("claude-zephyr-6"),
+        _m("claude-mythos-5"),
+        _m("claude-haiku-4-5"),
+        _m("claude-zephyr-5"),
+    ]
+    assert [m.id for m in claudemodels.sort_models(models)] == [
+        "claude-zephyr-6",
+        "claude-zephyr-5",
+        "claude-mythos-5",
+        "claude-opus-5",
+        "claude-haiku-4-5",
+    ]
+
+
+def test_available_models_comes_out_grouped(monkeypatch):
+    jumbled = _catalog("claude-haiku-4-5", "claude-fable-5", "claude-sonnet-5", "claude-opus-5")
+    monkeypatch.setattr(claudemodels, "fetch_models", _fetches(jumbled))
+    assert [m.id for m in claudemodels.available_models()] == [
+        "claude-fable-5",
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-haiku-4-5",
+    ]
+
+
+def test_fallback_models_are_in_display_order():
+    assert [m.id for m in FALLBACK_MODELS] == ["opus", "sonnet", "haiku"]
+
+
+# -- grouped_models -----------------------------------------------------------
+
+
+def test_grouped_models_splits_sorted_catalog_by_family():
+    # One inner list per family, in display order, each version-ordered — the
+    # runs a picker draws a divider between.
+    models = [
+        _m("claude-haiku-4-5"),
+        _m("claude-opus-4-8"),
+        _m("claude-opus-5"),
+        _m("claude-fable-5"),
+    ]
+    groups = claudemodels.grouped_models(models)
+    assert [[m.id for m in g] for g in groups] == [
+        ["claude-fable-5"],
+        ["claude-opus-5", "claude-opus-4-8"],
+        ["claude-haiku-4-5"],
+    ]
+
+
+def test_grouped_models_clusters_each_unknown_family_on_its_own():
+    models = [
+        _m("claude-opus-5"),
+        _m("claude-zephyr-5"),
+        _m("claude-mythos-5"),
+    ]
+    groups = claudemodels.grouped_models(models)
+    assert [[m.id for m in g] for g in groups] == [
+        ["claude-zephyr-5"],
+        ["claude-mythos-5"],
+        ["claude-opus-5"],
+    ]
+
+
+def test_grouped_models_of_nothing_is_empty():
+    assert claudemodels.grouped_models([]) == []

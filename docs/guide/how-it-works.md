@@ -53,6 +53,11 @@ saved to `~/.cache/collins/models.json` so a restart doesn't ask again: the
 catalog changes a few times a year, and the pickers should not cost a network
 round trip every time one opens.
 
+The list is grouped by tier family so like sits with like: any unrecognized
+(so, newer) family first, then Mythos, Fable, Opus, Sonnet, Haiku, each family
+ordered by version number with the newest at the top. In the footer and
+composer model menus a divider separates one family from the next.
+
 One answer is trusted less than that: a query that comes back with a single
 model is not a catalog you can pick from — a page cut short, or a login that
 momentarily sees one model — so Collins shows it (it still beats the aliases)
