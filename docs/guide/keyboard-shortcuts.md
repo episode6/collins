@@ -1,14 +1,13 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-20. Full change history: git log for this file.
+fork. Last modified: 2026-08-21. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl+Shift+F` | Open the sidebar search (`Esc` closes it) |
 | `Ctrl+Shift+T` | New session |
 | `Ctrl+Shift+N` | New window |
 | `Ctrl+W` | Close the panel tab you were last in — and once no panel is left open, the session tab itself |

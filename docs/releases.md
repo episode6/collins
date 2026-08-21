@@ -57,6 +57,11 @@ channel for Debian and the rest of its family, and it stays. It adds no
 apt source, so it does not update itself; watch the releases page. Debian 13
 (trixie) and newer have everything Collins needs.
 
+- **`Ctrl+Shift+F` no longer opens the sidebar search.** `Ctrl+K` (the
+  quick switcher) is the keyboard way to reach a session; the sidebar's
+  search button still works, and the chord is held back for a future
+  session-content search. The `win.focus-search` action remains for custom
+  keybindings.
 - **Installs alongside agent-session-manager.** Collins' action icons are
   app-private artwork on generic names, and they were being written into the
   shared `hicolor` icon theme, where they collided with the copies upstream's

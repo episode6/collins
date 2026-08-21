@@ -1193,6 +1193,10 @@ class MainWindow(Adw.ApplicationWindow):
             "new-session-in-chats": lambda *_: self._new_session_in_chats(),
             "preferences": lambda *_: self._show_preferences(),
             "mcp-servers": lambda *_: dialogs.mcp_browser_dialog(self),
+            # No default accelerator: Ctrl+K is the keyboard way to a session
+            # and Ctrl+Shift+F is held back for a future session-content
+            # search. The sidebar's search button remains; the action stays
+            # for custom keybindings.
             "focus-search": lambda *_: self.sidebar.focus_search(),
             "close-tab": lambda *_: self._close_panel_page_or_tab(),
             "next-tab": lambda *_: self.tab_view.select_next_page(),
@@ -1389,7 +1393,6 @@ class MainWindow(Adw.ApplicationWindow):
         controller = Gtk.ShortcutController()
         controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         for trigger, action in (
-            ("<Control><Shift>f", "win.focus-search"),
             ("<Control><Shift>t", "win.new-session"),
             ("<Control>w", "win.close-tab"),
             ("<Control>Page_Down", "win.next-tab"),
