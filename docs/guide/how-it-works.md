@@ -53,6 +53,12 @@ saved to `~/.cache/collins/models.json` so a restart doesn't ask again: the
 catalog changes a few times a year, and the pickers should not cost a network
 round trip every time one opens.
 
+One answer is trusted less than that: a query that comes back with a single
+model is not a catalog you can pick from — a page cut short, or a login that
+momentarily sees one model — so Collins shows it (it still beats the aliases)
+but gives it no lifetime at all. The next picker you open, and the next launch
+of the app, ask again instead of sitting on it for the day.
+
 A failed query never clears that cache. Offline, logged out, or with the API
 refusing, the pickers keep offering the last list Collins got, however old,
 and only fall back to the CLI's aliases (`opus`, `sonnet`, `haiku`) if no
