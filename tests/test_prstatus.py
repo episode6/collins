@@ -44,6 +44,10 @@ from collins.prstatus import (
 URL = "https://github.com/episode6/collins/pull/55"
 _TTL_S = prstatus._TTL_S
 _ERROR_TTL_S = prstatus._ERROR_TTL_S
+_SETTLED_TTL_S = prstatus._SETTLED_TTL_S
+_PROBE_S = prstatus._PROBE_S
+_BARE_WATCH_S = prstatus._BARE_WATCH_S
+HEAD = "271949c0f3b7a8d0e2c4b6a1f9e8d7c6b5a4f3e2"
 
 
 def _link(**overrides):
@@ -94,13 +98,26 @@ def scheduled(monkeypatch):
     for, and clears the module's status cache around every test."""
     urls: list[str] = []
     monkeypatch.setattr(prstatus, "_schedule", urls.append)
+    monkeypatch.setattr(prstatus, "_schedule_probe", lambda url: None)
     monkeypatch.setattr(prstatus, "_gh_missing", False)
     monkeypatch.setattr(prstatus, "_viewer", "")  # the run's remembered login
     prstatus._statuses.clear()
     prstatus._inflight.clear()
+    prstatus._probes.clear()
+    prstatus._bare.clear()
     yield urls
     prstatus._statuses.clear()
     prstatus._inflight.clear()
+    prstatus._probes.clear()
+    prstatus._bare.clear()
+
+
+@pytest.fixture
+def probed(monkeypatch):
+    """Collects the URLs probes were scheduled for (see prstatus.probe)."""
+    urls: list[str] = []
+    monkeypatch.setattr(prstatus, "_schedule_probe", urls.append)
+    return urls
 
 
 @pytest.fixture
@@ -370,6 +387,338 @@ def test_invalidating_leaves_other_prs_alone(scheduled, clock, gh):
 def test_invalidating_an_unknown_pr_is_harmless(scheduled):
     invalidate("https://github.com/episode6/collins/pull/999")
     assert scheduled == []
+
+
+# -- the TTL follows the PR's state; running checks get probed --------------
+
+
+def _running(**overrides):
+    """A stored status for a live PR whose checks are still running."""
+    entry = {"state": "OPEN", "checks": {"passed": 1, "failed": 0, "pending": 1}, "head": HEAD}
+    entry.update(overrides)
+    return entry
+
+
+def test_a_settled_pr_is_refetched_far_less_often(scheduled, clock, gh):
+    """Nothing about a merged PR changes short of a reopen, so a poll that
+    refetched it every minute would be spending gh on history."""
+    gh({"state": "MERGED", "checks": {"passed": 3, "failed": 0, "pending": 0}})
+    refresh(URL)
+    scheduled.clear()
+    clock.advance(_TTL_S * 3)
+    enrich(parse_pr_link(_link()))
+    assert scheduled == []
+    clock.advance(_SETTLED_TTL_S)
+    enrich(parse_pr_link(_link()))
+    assert scheduled == [URL]
+
+
+def test_a_pr_with_running_checks_is_probed_between_fetches(scheduled, probed, clock, gh):
+    """The minute between fetches is filled with cheap probes: the first one
+    right after the fetch (it only learns the ETag), then one per interval."""
+    gh(_running())
+    refresh(URL)
+    enrich(parse_pr_link(_link()))
+    assert scheduled == [] and probed == [URL]
+    prstatus._probes[URL] = (clock(), HEAD, 'W/"a"')
+    prstatus._inflight.clear()  # the probe landed
+    clock.advance(_PROBE_S - 1)
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL]  # not yet
+    clock.advance(1)
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL, URL]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        _running(checks={"passed": 2, "failed": 0, "pending": 0}),  # nothing running
+        _running(state="MERGED"),  # settled, whatever its checks say
+        _running(state="MERGED", checks={"passed": 0, "failed": 0, "pending": 0}),
+        _running(state="CLOSED"),
+        _running(head=None),  # a warm start: nothing to ask about
+        None,  # a failed fetch
+    ],
+)
+def test_only_a_live_pr_with_running_checks_is_probed(scheduled, probed, clock, gh, entry):
+    gh(entry)
+    refresh(URL)
+    enrich(parse_pr_link(_link()))
+    assert probed == []
+
+
+def _bare(**overrides):
+    """A stored status for a live PR no check has registered on yet."""
+    return _running(checks={"passed": 0, "failed": 0, "pending": 0}, **overrides)
+
+
+def test_a_pr_with_no_checks_yet_is_probed_for_a_while(scheduled, probed, clock, gh):
+    """The page is usually opened right after a push, before any run has
+    registered — "no checks" means "not yet", and the probe is what sees
+    them arrive. A PR still bare a minute later is left to the full fetch."""
+    gh(_bare())
+    refresh(URL)
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL]
+    prstatus._inflight.clear()
+    prstatus._probes[URL] = (clock(), HEAD, 'W/"a"')
+    clock.advance(_BARE_WATCH_S - 1)
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL, URL]
+    prstatus._inflight.clear()
+    prstatus._probes[URL] = (clock(), HEAD, 'W/"a"')
+    clock.advance(_PROBE_S)  # past the watch now
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL, URL]
+
+
+def test_the_bare_watch_counts_from_the_first_bare_fetch(scheduled, probed, clock, gh):
+    """A refetch at the minute mark that still finds no checks doesn't start
+    the watch over — it has been bare since the first time."""
+    gh(_bare())
+    refresh(URL)
+    clock.advance(_BARE_WATCH_S - 5)
+    refresh(URL)  # still bare: the window is not re-armed
+    assert prstatus._bare[URL] == clock() - (_BARE_WATCH_S - 5)
+    clock.advance(5)
+    enrich(parse_pr_link(_link()))
+    assert probed == []
+
+
+def test_a_new_head_re_arms_the_bare_watch(scheduled, probed, clock, gh):
+    """A push is a fresh "not yet": its runs haven't registered either."""
+    gh(_bare())
+    refresh(URL)
+    clock.advance(_BARE_WATCH_S * 2)
+    gh(_bare(head="f" * 40))
+    refresh(URL)
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL]
+
+
+def test_checks_arriving_end_the_bare_watch(scheduled, clock, gh):
+    gh(_bare())
+    refresh(URL)
+    gh(_running())
+    refresh(URL)
+    assert URL not in prstatus._bare
+
+
+def test_the_refresh_button_re_arms_the_bare_watch(scheduled, probed, clock, gh):
+    gh(_bare())
+    refresh(URL)
+    clock.advance(_BARE_WATCH_S * 2)
+    invalidate(URL)
+    refresh(URL)  # what the poll after the click does
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL]
+
+
+def test_a_due_fetch_outranks_a_probe(scheduled, probed, clock, gh):
+    """At the minute mark the full fetch goes out, not another probe."""
+    gh(_running())
+    refresh(URL)
+    clock.advance(_TTL_S)
+    enrich(parse_pr_link(_link()))
+    assert scheduled == [URL] and probed == []
+
+
+def test_one_probe_in_flight_per_pr(scheduled, probed, clock, gh):
+    gh(_running())
+    refresh(URL)
+    enrich(parse_pr_link(_link()))
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL]
+
+
+@pytest.fixture
+def check_runs(monkeypatch):
+    """Stub the conditional check-runs call; returns (setter, calls)."""
+    calls: list[tuple] = []
+    answer = {"value": (None, False)}
+
+    def fake(host, repository, head, etag):
+        calls.append((host, repository, head, etag))
+        return answer["value"]
+
+    monkeypatch.setattr(prstatus, "_check_runs", fake)
+
+    def serve(etag, changed):
+        answer["value"] = (etag, changed)
+
+    return serve, calls
+
+
+def test_a_probe_that_finds_nothing_new_fetches_nothing(
+    scheduled, clock, gh, check_runs, monkeypatch
+):
+    serve, calls = check_runs
+    gh(_running())
+    refresh(URL)
+    fetches = []
+    monkeypatch.setattr(prstatus, "_run_gh", lambda url: fetches.append(url) or _running())
+    serve('W/"a"', False)
+    prstatus._inflight.add(URL)
+    prstatus.probe(URL)
+    assert fetches == []
+    assert URL not in prstatus._inflight
+    assert prstatus._probes[URL] == (clock(), HEAD, 'W/"a"')
+    assert calls == [("github.com", "episode6/collins", HEAD, None)]
+
+
+def test_a_probe_that_finds_a_change_fetches_in_full(scheduled, clock, gh, check_runs):
+    """A changed ETag is the whole point: the full status is fetched right
+    then, and what it says reaches the listeners like any other fetch."""
+    serve, calls = check_runs
+    gh(_running())
+    refresh(URL)
+    prstatus._probes[URL] = (clock(), HEAD, 'W/"a"')
+    gh(_running(checks={"passed": 2, "failed": 0, "pending": 0}))
+    heard = []
+    prstatus.add_listener(heard.append)
+    try:
+        serve('W/"b"', True)
+        prstatus._inflight.add(URL)
+        prstatus.probe(URL)
+    finally:
+        prstatus.remove_listener(heard.append)
+    assert heard == [URL]
+    assert enrich(parse_pr_link(_link())).pending == 0
+    assert URL not in prstatus._inflight
+    assert calls == [("github.com", "episode6/collins", HEAD, 'W/"a"')]
+
+
+def test_a_probe_sends_the_etag_only_for_the_same_head(scheduled, clock, gh, check_runs):
+    """An ETag describes one commit's check-runs. After a push the head is a
+    different commit, and comparing against the old tag would read as a
+    change that the fetch reporting the push already covered."""
+    serve, calls = check_runs
+    gh(_running())
+    refresh(URL)
+    serve('W/"a"', False)
+    prstatus.probe(URL)
+    prstatus.probe(URL)
+    pushed = "f" * 40
+    gh(_running(head=pushed))
+    refresh(URL)
+    serve('W/"z"', False)
+    prstatus.probe(URL)
+    assert [call[3] for call in calls] == [None, 'W/"a"', None]
+    assert prstatus._probes[URL][1:] == (pushed, 'W/"z"')
+
+
+def test_a_probe_keeps_its_etag_through_an_unanswered_ask(scheduled, clock, gh, check_runs):
+    serve, calls = check_runs
+    gh(_running())
+    refresh(URL)
+    prstatus._probes[URL] = (clock(), HEAD, 'W/"a"')
+    serve(None, False)  # offline, say
+    prstatus.probe(URL)
+    assert prstatus._probes[URL] == (clock(), HEAD, 'W/"a"')
+
+
+def test_a_probe_that_blows_up_lets_go_of_the_pr(scheduled, monkeypatch):
+    def boom(url):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(prstatus, "_run_probe", boom)
+    prstatus._inflight.add(URL)
+    prstatus.probe(URL)
+    assert URL not in prstatus._inflight
+
+
+def test_a_probe_of_an_unknown_pr_asks_nothing(scheduled, check_runs):
+    serve, calls = check_runs
+    prstatus.probe(URL)
+    assert calls == [] and URL not in prstatus._probes
+
+
+def _done(stdout="", returncode=0):
+    return subprocess.CompletedProcess([], returncode, stdout=stdout, stderr="")
+
+
+def _api_reply(status, etag=None, body="{}"):
+    lines = [f"HTTP/2.0 {status}", "Access-Control-Allow-Origin: *"]
+    if etag is not None:
+        lines.append(f"Etag: {etag}")
+    lines += ["X-Ratelimit-Remaining: 4976", "", body]
+    return "\r\n".join(lines)
+
+
+@pytest.mark.parametrize(
+    "sent,reply,expected",
+    [
+        # nothing changed: gh exits 1 for the 304, and the tag is kept
+        ('W/"a"', _done(_api_reply("304 Not Modified", '"a"'), 1), ('"a"', False)),
+        # changed: a 200 with a different tag
+        ('W/"a"', _done(_api_reply("200 OK", 'W/"b"')), ('W/"b"', True)),
+        # the first ask has nothing to compare to
+        (None, _done(_api_reply("200 OK", 'W/"b"')), ('W/"b"', False)),
+        # a 200 that somehow lost its tag can't be compared either
+        ('W/"a"', _done(_api_reply("200 OK")), (None, False)),
+        # failures of every shape are "no"
+        ('W/"a"', _done(_api_reply("404 Not Found", 'W/"x"'), 1), (None, False)),
+        ('W/"a"', _done("", 1), (None, False)),
+        ('W/"a"', _done("not http at all"), (None, False)),
+        ('W/"a"', subprocess.TimeoutExpired("gh", 10), (None, False)),
+        ('W/"a"', OSError("boom"), (None, False)),
+    ],
+)
+def test_check_runs_reads_the_reply_headers(monkeypatch, sent, reply, expected):
+    def run(*_args, **_kwargs):
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(prstatus.subprocess, "run", run)
+    assert prstatus._check_runs("github.com", "episode6/collins", HEAD, sent) == expected
+
+
+def test_check_runs_asks_conditionally_on_the_right_host(monkeypatch):
+    seen = []
+
+    def run(argv, **_kwargs):
+        seen.append(argv[1:])
+        return _done(_api_reply("304 Not Modified", '"a"'), 1)
+
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(prstatus.subprocess, "run", run)
+    prstatus._check_runs("ghe.example.com", "org/repo", HEAD, 'W/"a"')
+    assert seen == [[
+        "api", "-i", "--hostname", "ghe.example.com",
+        f"repos/org/repo/commits/{HEAD}/check-runs?per_page={prstatus._GH_PAGE}",
+        "-H", 'If-None-Match: W/"a"',
+    ]]
+
+
+def test_check_runs_sends_no_condition_on_the_first_ask(monkeypatch):
+    seen = []
+
+    def run(argv, **_kwargs):
+        seen.append(argv[1:])
+        return _done(_api_reply("200 OK", 'W/"a"'))
+
+    monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(prstatus.subprocess, "run", run)
+    prstatus._check_runs("github.com", "org/repo", HEAD, None)
+    assert "-H" not in seen[0]
+
+
+@pytest.mark.parametrize(
+    "value,head",
+    [
+        (HEAD, HEAD),
+        ("271949c", None),  # abbreviated: not what gh reports
+        ("x" * 40, None),
+        ("", None),
+        (None, None),
+        (7, None),
+    ],
+)
+def test_only_a_full_commit_id_is_kept_as_the_head(value, head):
+    assert prstatus._sha(value) == head
 
 
 # -- discover_pr: finding a PR by its branch --------------------------------
@@ -688,6 +1037,7 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
             {"oid": "271949c", "committedDate": "2026-08-13T09:30:00Z"},
         ],
         "autoMergeRequest": None,
+        "headRefOid": HEAD,
     })
     monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
     monkeypatch.setattr(prstatus.subprocess, "run", lambda *a, **kw: _completed(reply))
@@ -700,6 +1050,7 @@ def test_run_gh_shapes_a_real_reply(monkeypatch):
         "claude_replied": True,
         "pushed_since": False,
         "auto_merge": False,
+        "head": HEAD,
     }
 
 

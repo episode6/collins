@@ -4643,7 +4643,7 @@ class TerminalTab(Gtk.Box):
         return None
 
     def _make_pr_page(self, pr: PullRequest) -> PrViewPage:
-        return PrViewPage(pr, host_factory=self._pr_action_host)
+        return PrViewPage(pr, host_factory=self._pr_action_host, pr_store=self._pr_store)
 
     def _make_panel_page(self, page: dict):
         """The dock's non-shell factory for layout restore (see

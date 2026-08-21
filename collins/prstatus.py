@@ -19,7 +19,18 @@ sit untouched for days while its entries rot. Trusting it wholesale means
 badging a PR as failed when it has long since gone green. So the cache is used
 only while the file itself is recent (a free warm start for the first seconds
 after launch), and Collins otherwise refreshes status itself with a short
-``gh pr view`` per linked PR, at most once a minute.
+``gh pr view`` per linked PR, at most once a minute — and more seldom once
+the PR is merged or closed.
+
+A PR with checks still running is the one being watched, and a minute is a
+long time to stare at a yellow mark that turned green forty seconds ago. So
+while a live PR has pending checks, the run between two full fetches is
+filled with cheap *probes* (`probe`): a conditional ``gh api`` for its head
+commit's check-runs, sent with the ETag of the previous answer, which GitHub
+answers with an empty ``304 Not Modified`` — free of the rate limit — until
+something about those runs changes, at which point the full fetch happens at
+once instead of when the minute is up. There is no push channel to subscribe
+to; this is as close as polling gets.
 
 A transcript is not the only way a session gets a PR, though: one opened by
 hand never shows up in it. So the footer's refresh button can also ask gh which
@@ -88,6 +99,20 @@ CACHE_MAX_AGE_S = 300
 # second, so both intervals are what keeps `gh` off the CPU.
 _TTL_S = 60
 _ERROR_TTL_S = 300
+# A merged or closed PR stays fresh far longer: nothing about one changes
+# short of someone reopening it, and the marks don't show its checks anyway.
+_SETTLED_TTL_S = 600
+# How often a live PR with checks still running is *probed* between full
+# fetches (see `probe`). Each probe is a conditional request, and the ``304``
+# it almost always gets back is a few hundred bytes of headers that GitHub
+# doesn't count against the rate limit — so this can be much shorter than
+# `_TTL_S` without `gh` becoming a load.
+_PROBE_S = 10
+# How long a live PR with *no* checks at all is probed the same way. The page
+# is usually opened on the heels of a push, before any run has registered,
+# and "no checks" then means "not yet" — for a while. A PR that still has
+# none after this long most likely never will, and is left to the full fetch.
+_BARE_WATCH_S = 60
 _GH_TIMEOUT_S = 10
 # A status fetch is one of many and nobody is waiting on any single one; an
 # action the user picked from a menu is one call they are waiting for, and
@@ -110,8 +135,11 @@ _DUE = float("-inf")
 # ``autoMergeRequest`` rides along for one bit: whether GitHub has already been
 # told to land this PR on its own. It answers with the request (who asked, and
 # with which merge method) or with null, so only its presence is kept.
+# ``headRefOid`` is the commit the checks ran on — what the probe between
+# fetches asks GitHub about (see `probe`).
 _GH_FIELDS = (
-    "title,state,isDraft,statusCheckRollup,mergeable,comments,commits,autoMergeRequest"
+    "title,state,isDraft,statusCheckRollup,mergeable,comments,commits,"
+    "autoMergeRequest,headRefOid"
 )
 # How deep gh reads a PR's list fields. It asks GitHub for one page of each and
 # doesn't page further, so a list exactly this long is a truncated one — and
@@ -170,6 +198,12 @@ _MAX_LOGIN = 50
 # repository and the PR number.
 _FETCHABLE = re.compile(r"https://[\w.-]+/([\w.-]+/[\w.-]+)/pull/(\d+)$")
 
+# A commit id as gh reports it: forty hex digits, and nothing else. The head
+# goes into an argv too (see `_check_runs`), so it is held to that shape.
+_SHA = re.compile(r"^[0-9a-f]{40}$")
+# The host a PR URL lives on — `gh api` needs telling when it isn't github.com.
+_HOST = re.compile(r"^https://([\w.-]+)/")
+
 # Branch names reach argv the same way, from a `git branch --show-current` in a
 # directory we didn't choose. git forbids a leading "-", but this is the code
 # that hands the name to a subprocess, so it says so itself.
@@ -184,6 +218,12 @@ _lock = threading.Lock()
 # url -> (fetched-at, cache-shaped entry or None for a failed fetch)
 _statuses: dict[str, tuple[float, dict | None]] = {}
 _inflight: set[str] = set()
+# url -> (probed-at, head commit, ETag of that head's check-runs or None):
+# what the last probe learned, so the next one can ask "anything new?"
+_probes: dict[str, tuple[float, str, str | None]] = {}
+# url -> when a fetch first found the PR live with no checks on its current
+# head (see `_BARE_WATCH_S`); dropped once it has some, or moves its head.
+_bare: dict[str, float] = {}
 _gh_missing = False  # gh isn't on PATH; nothing to retry against this run
 _viewer = ""  # the signed-in login, once asked for; "" until then (viewer_login)
 # Told which URL whenever what `_statuses` holds for it changes (see
@@ -907,7 +947,13 @@ def _entry(data: dict) -> dict:
         # when it isn't; only that much is kept — who asked for it and by which
         # method is GitHub's business, not the app's.
         "auto_merge": isinstance(data.get("autoMergeRequest"), dict),
+        "head": _sha(data.get("headRefOid")),
     }
+
+
+def _sha(value: object) -> str | None:
+    """A commit id worth putting in an argv, or None for anything else."""
+    return value if isinstance(value, str) and _SHA.match(value) else None
 
 
 def _last_comment(comments: object) -> dict | None:
@@ -1072,8 +1118,21 @@ def _put(url: str, entry: dict | None) -> bool:
     included.
     """
     stamped = _statuses.get(url)
+    before = stamped[1] if stamped else None
     _statuses[url] = (_now(), entry)
-    return (stamped[1] if stamped else None) != entry
+    if not _is_bare(entry):
+        _bare.pop(url, None)
+    elif url not in _bare or (before or {}).get("head") != entry.get("head"):
+        _bare[url] = _now()  # first seen bare, or bare again on a new head
+    return before != entry
+
+
+def _is_bare(entry: dict | None) -> bool:
+    """Whether *entry* is a live PR with no checks at all — probably not yet."""
+    if not isinstance(entry, dict) or entry.get("state") not in ("OPEN", "DRAFT"):
+        return False
+    checks = entry.get("checks")
+    return all(_count(checks, key) == 0 for key in ("passed", "failed", "pending"))
 
 
 def refresh(url: str) -> None:
@@ -1098,6 +1157,104 @@ def _schedule(url: str) -> None:
     threading.Thread(target=refresh, args=(url,), name="pr-status", daemon=True).start()
 
 
+def probe(url: str) -> None:
+    """Ask whether *url*'s running checks moved, and fetch in full if they did.
+
+    The between-fetches path for a PR with pending checks, or none yet (see
+    `_watched`):
+    one conditional request for its head commit's check-runs, carrying the
+    ETag the last probe was answered with. GitHub answers a ``304`` while
+    nothing changed — a reply that costs no rate limit and carries no body —
+    and a ``200`` with a new ETag once a run started, finished or was added,
+    which is when the full `refresh` happens instead of at the minute mark.
+
+    The first probe after a fetch has no ETag to send and only learns one: the
+    fetch that just landed already said what those runs look like. A probe
+    that can't be answered (offline, a host gh isn't signed in to, a reply
+    missing its ETag) changes nothing and is simply tried again in `_PROBE_S`;
+    the full fetch at the TTL stands whatever the probes say, so nothing
+    they miss — a commit *status* rather than a check-run, say, which this
+    endpoint doesn't list — stays missed for longer than it would have anyway.
+    Never call on the main thread.
+    """
+    try:
+        changed = _run_probe(url)
+    except Exception:  # never leave a PR wedged as in-flight
+        log.debug("prstatus: probing %s failed", url, exc_info=True)
+        changed = False
+    if changed:
+        refresh(url)  # lets go of the in-flight mark itself
+        return
+    with _lock:
+        _inflight.discard(url)
+
+
+def _run_probe(url: str) -> bool:
+    """One probe of *url*, remembered; whether its check-runs changed."""
+    match = _FETCHABLE.match(url)
+    host = _HOST.match(url)
+    with _lock:
+        stamped = _statuses.get(url)
+        probed = _probes.get(url)
+    entry = stamped[1] if stamped else None
+    head = entry.get("head") if isinstance(entry, dict) else None
+    if match is None or host is None or not isinstance(head, str):
+        return False
+    # An ETag is for one head's check-runs: a push moved the head, and the
+    # old tag would read as "changed" against runs that merely belong to a
+    # different commit — right after the fetch that reported the push.
+    known = probed[2] if probed is not None and probed[1] == head else None
+    etag, changed = _check_runs(host.group(1), match.group(1), head, known)
+    with _lock:
+        _probes[url] = (_now(), head, etag or known)
+    return changed
+
+
+def _check_runs(
+    host: str, repository: str, head: str, etag: str | None
+) -> tuple[str | None, bool]:
+    """Conditionally GET *head*'s check-runs: ``(ETag answered, changed)``.
+
+    *changed* is only ever True against an *etag* that was sent and answered
+    with a different one on a ``200``. A ``304`` is "no"; so is any failure,
+    and so is the first ask, which has nothing to compare to. ``gh api -i``
+    puts the status line and headers ahead of the body on stdout, and exits
+    non-zero for the ``304`` — which is why the exit code isn't consulted.
+    """
+    args = [
+        "api", "-i", "--hostname", host,
+        f"repos/{repository}/commits/{head}/check-runs?per_page={_GH_PAGE}",
+    ]
+    if etag:
+        args += ["-H", f"If-None-Match: {etag}"]
+    result = _gh(args)
+    if result is None or not result.stdout:
+        return None, False
+    status, _, headers = result.stdout.partition("\n")
+    code = status.split()[1] if len(status.split()) > 1 else ""
+    answered = _header(headers, "etag")
+    if code == "304":
+        return answered, False
+    if code != "200":
+        return None, False
+    return answered, bool(etag and answered and answered != etag)
+
+
+def _header(text: str, name: str) -> str | None:
+    """The value of the first *name* header in a ``gh api -i`` reply, or None."""
+    for line in text.split("\n"):
+        if not line.strip():
+            break  # the blank line: headers are over, the body follows
+        key, sep, value = line.partition(":")
+        if sep and key.strip().lower() == name:
+            return value.strip() or None
+    return None
+
+
+def _schedule_probe(url: str) -> None:
+    threading.Thread(target=probe, args=(url,), name="pr-probe", daemon=True).start()
+
+
 def _own_status(url: str) -> dict | None:
     """Our last fetched status for *url*, kicking off a refresh when it's due.
 
@@ -1109,14 +1266,52 @@ def _own_status(url: str) -> dict | None:
     with _lock:
         stamped = _statuses.get(url)
         entry = stamped[1] if stamped else None
-        ttl = _TTL_S if entry else _ERROR_TTL_S
-        due = stamped is None or _now() - stamped[0] >= ttl
-        fetch = due and not _gh_missing and url not in _inflight
-        if fetch:
+        due = stamped is None or _now() - stamped[0] >= _ttl(entry)
+        free = not _gh_missing and url not in _inflight
+        fetch = due and free
+        probe = free and not due and _probe_due(url, entry)
+        if fetch or probe:
             _inflight.add(url)
     if fetch:
         _schedule(url)
+    elif probe:
+        _schedule_probe(url)
     return entry
+
+
+def _ttl(entry: dict | None) -> float:
+    """How long *entry* — a stored status, or None for a failed fetch — stays fresh."""
+    if entry is None:
+        return _ERROR_TTL_S
+    return _SETTLED_TTL_S if entry.get("state") in ("MERGED", "CLOSED") else _TTL_S
+
+
+def _watched(url: str, entry: dict | None) -> bool:
+    """Whether *entry* is a live PR whose checks are worth probing (caller holds `_lock`).
+
+    Checks still running, or — for `_BARE_WATCH_S` after a fetch first found
+    it so — no checks yet: a page opened right after a push sees an empty
+    rollup for the first seconds, and the probe is what notices the runs
+    arriving. Needs a head to ask about, too: a warm start from the CLI's
+    cache has none, and is left to the full fetch that replaces it within the
+    minute.
+    """
+    if not isinstance(entry, dict) or entry.get("state") not in ("OPEN", "DRAFT"):
+        return False
+    if not isinstance(entry.get("head"), str):
+        return False
+    if _count(entry.get("checks"), "pending"):
+        return True
+    since = _bare.get(url)
+    return since is not None and _now() - since < _BARE_WATCH_S
+
+
+def _probe_due(url: str, entry: dict | None) -> bool:
+    """Whether *url* is worth a probe now (caller holds `_lock`)."""
+    if not _watched(url, entry):
+        return False
+    probed = _probes.get(url)
+    return probed is None or _now() - probed[0] >= _PROBE_S
 
 
 def invalidate(url: str) -> None:
@@ -1132,6 +1327,9 @@ def invalidate(url: str) -> None:
         stamped = _statuses.get(url)
         if stamped is not None:
             _statuses[url] = (_DUE, stamped[1])
+        # And the no-checks-yet watch starts over with the fetch that follows:
+        # the click says "look again", which is what that watch is.
+        _bare.pop(url, None)
 
 
 def _newest(entries: object) -> dict | None:
