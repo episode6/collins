@@ -108,7 +108,10 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   the page at all; never a pixel out of the terminal, and decided before the
   page's first fetch lands, so it doesn't resize under its own data.
 - **Fixes** — archiving a session clears its notification and unread count;
-  the status icon's menu no longer draws a stray "Quit" on a separator.
+  the status icon's menu no longer draws a stray "Quit" on a separator; a
+  click in the empty gutter beside a width-limited terminal clears the
+  session's unread flag and focuses the terminal, as a click into the
+  terminal does.
 
 ### v0.1.0 — Collins (2026-08-17)
 

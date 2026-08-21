@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-20. Full change history: git log for this file.
+# fork. Last modified: 2026-08-21. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -1378,6 +1378,18 @@ class TerminalTab(Gtk.Box):
         self._overlay.set_vexpand(True)
         self._overlay.add_css_class("terminal-gutter")
         self._overlay.set_child(self._width_clamp)
+        # The terminal *and* its gutters, as one widget: where the window
+        # hangs the "user is at this tab" click gesture (see
+        # MainWindow._wire_tab), so a click beside a width-limited terminal
+        # counts as presence the same as a click into it.
+        self.terminal_area: Gtk.Widget = self._overlay
+        # A click that lands on the gutter itself — not the terminal, nor a
+        # panel raised over it — puts the keyboard in the terminal, as the
+        # click would have if it had been a few pixels further in. Bubble
+        # phase, so a click the composer's text view took stays there.
+        gutter_click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
+        gutter_click.connect("pressed", self._on_gutter_click)
+        self._overlay.add_controller(gutter_click)
 
         # The panel dock — strips of panel pages (shells, for now) split
         # around the agent terminal in a tree of fixed-axis paneds. Pages
@@ -1704,6 +1716,12 @@ class TerminalTab(Gtk.Box):
         right_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         right_click.connect("pressed", self._on_right_click)
         self.terminal.add_controller(right_click)
+
+    def _on_gutter_click(self, _gesture, _n_press: int, x: float, y: float) -> None:
+        target = self._overlay.pick(x, y, Gtk.PickFlags.DEFAULT)
+        if target is not None and target.is_ancestor(self._content_overlay):
+            return  # the terminal, or something riding it, has the click
+        self.grab_terminal_focus()
 
     def _on_right_click(self, gesture: Gtk.GestureClick, _n_press, x: float, y: float) -> None:
         if not self._easy_copy_paste:  # leave the click to VTE / the running app

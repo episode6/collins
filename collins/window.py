@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-20. Full change history: git log for this file.
+# fork. Last modified: 2026-08-21. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -2041,11 +2041,13 @@ class MainWindow(Adw.ApplicationWindow):
         controllers.append((tab.terminal, keys))
         # Any button, capture phase, never claimed: the click still reaches
         # VTE untouched, this only wants to know the user is at the terminal.
+        # Hung on the terminal's area rather than the terminal, so the empty
+        # gutter beside a width-limited terminal counts too.
         clicks = Gtk.GestureClick(button=0)
         clicks.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         clicks.connect("pressed", self._on_terminal_click, page)
-        tab.terminal.add_controller(clicks)
-        controllers.append((tab.terminal, clicks))
+        tab.terminal_area.add_controller(clicks)
+        controllers.append((tab.terminal_area, clicks))
         self._tab_wiring[page] = _TabWiring(handlers, controllers)
 
     def _unwire_tab(self, page: Adw.TabPage) -> None:
@@ -3833,10 +3835,11 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_terminal_click(
         self, _gesture, _n_press: int, _x: float, _y: float, page: Adw.TabPage
     ) -> None:
-        """A click into the terminal is presence, same as a keystroke: whatever
-        finished in this tab has been seen (see _on_terminal_key_pressed).
-        Only the selected tab's terminal is on screen to be clicked, so this
-        can only ever clear the flag the user is looking at."""
+        """A click into the terminal — or the empty gutter beside it — is
+        presence, same as a keystroke: whatever finished in this tab has been
+        seen (see _on_terminal_key_pressed). Only the selected tab's terminal
+        is on screen to be clicked, so this can only ever clear the flag the
+        user is looking at."""
         self._clear_unread(page)
 
     def _startup_held(self, page: Adw.TabPage) -> bool:
