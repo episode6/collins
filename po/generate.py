@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-20. Full change history: git log for this file.
+# fork. Last modified: 2026-08-21. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -41,6 +41,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Cancel": "Mégse",
         "Session list": "Munkamenet-lista",
         "Show folder path": "Mappa elérési útjának megjelenítése",
+        "Show folder paths in sidebar": "Mappák elérési útja az oldalsávban",
         "Show each session's project folder path in the sidebar":
             "Az egyes munkamenetek projektmappájának elérési útja az oldalsávon",
         "Startup": "Indítás",
@@ -147,6 +148,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Color theme": "Színtéma",
         "Appearance": "Megjelenés",
         "Color scheme": "Színséma",
+        "Dark / Light Mode": "Sötét / világos mód",
         "Language": "Nyelv",
         "Restart to apply": "Újraindítás szükséges",
         "Running sessions": "Futó munkamenetek",
@@ -405,6 +407,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Agent files": "Ügynökfájlok",
         "Open {name} in the editor": "A(z) {name} megnyitása a szerkesztőben",
         "Session tools": "Munkamenet-eszközök",
+        "Session behavior": "Munkamenetek viselkedése",
+        "Composer": "Szerkesztő",
+        "Built-in MCP tools": "Beépített MCP-eszközök",
         "Tools a session can call to drive Collins. Turning one off takes "
         "effect immediately; sessions already running are only offered the "
         "tool again once they restart":
@@ -551,6 +556,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Cancel": "Abbrechen",
         "Session list": "Sitzungsliste",
         "Show folder path": "Ordnerpfad anzeigen",
+        "Show folder paths in sidebar": "Ordnerpfade in der Seitenleiste anzeigen",
         "Show each session's project folder path in the sidebar":
             "Den Projektordnerpfad jeder Sitzung in der Seitenleiste anzeigen",
         "Startup": "Programmstart",
@@ -658,6 +664,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Color theme": "Farbthema",
         "Appearance": "Erscheinungsbild",
         "Color scheme": "Farbschema",
+        "Dark / Light Mode": "Dunkel- / Hellmodus",
         "Language": "Sprache",
         "Restart to apply": "Neustart erforderlich",
         "Running sessions": "Laufende Sitzungen",
@@ -922,6 +929,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Agent files": "Agent-Dateien",
         "Open {name} in the editor": "{name} im Editor öffnen",
         "Session tools": "Sitzungswerkzeuge",
+        "Session behavior": "Sitzungsverhalten",
+        "Composer": "Composer",
+        "Built-in MCP tools": "Eingebaute MCP-Werkzeuge",
         "Tools a session can call to drive Collins. Turning one off takes "
         "effect immediately; sessions already running are only offered the "
         "tool again once they restart":
@@ -1069,6 +1079,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Cancel": "Cancelar",
         "Session list": "Lista de sesiones",
         "Show folder path": "Mostrar ruta de carpeta",
+        "Show folder paths in sidebar": "Mostrar rutas de carpeta en la barra lateral",
         "Show each session's project folder path in the sidebar":
             "Mostrar la ruta de la carpeta del proyecto de cada sesión en la barra lateral",
         "Startup": "Inicio",
@@ -1177,6 +1188,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Color theme": "Tema de color",
         "Appearance": "Apariencia",
         "Color scheme": "Esquema de color",
+        "Dark / Light Mode": "Modo oscuro / claro",
         "Language": "Idioma",
         "Restart to apply": "Reinicia para aplicar",
         "Running sessions": "Sesiones en ejecución",
@@ -1439,6 +1451,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Agent files": "Archivos del agente",
         "Open {name} in the editor": "Abrir {name} en el editor",
         "Session tools": "Herramientas de sesión",
+        "Session behavior": "Comportamiento de las sesiones",
+        "Composer": "Compositor",
+        "Built-in MCP tools": "Herramientas MCP integradas",
         "Tools a session can call to drive Collins. Turning one off takes "
         "effect immediately; sessions already running are only offered the "
         "tool again once they restart":
@@ -1584,6 +1599,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Cancel": "Annuler",
         "Session list": "Liste des sessions",
         "Show folder path": "Afficher le chemin du dossier",
+        "Show folder paths in sidebar": "Afficher les chemins des dossiers dans la barre latérale",
         "Show each session's project folder path in the sidebar":
             "Afficher le chemin du dossier de projet de chaque session dans la barre latérale",
         "Startup": "Démarrage",
@@ -1692,6 +1708,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Color theme": "Thème de couleurs",
         "Appearance": "Apparence",
         "Color scheme": "Schéma de couleurs",
+        "Dark / Light Mode": "Mode sombre / clair",
         "Language": "Langue",
         "Restart to apply": "Redémarrer pour appliquer",
         "Running sessions": "Sessions en cours",
@@ -1955,6 +1972,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Agent files": "Fichiers de l’agent",
         "Open {name} in the editor": "Ouvrir {name} dans l’éditeur",
         "Session tools": "Outils de session",
+        "Session behavior": "Comportement des sessions",
+        "Composer": "Compositeur",
+        "Built-in MCP tools": "Outils MCP intégrés",
         "Tools a session can call to drive Collins. Turning one off takes "
         "effect immediately; sessions already running are only offered the "
         "tool again once they restart":

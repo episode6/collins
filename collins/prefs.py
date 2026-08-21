@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-20. Full change history: git log for this file.
+# fork. Last modified: 2026-08-21. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -262,15 +262,340 @@ class PreferencesDialog(Adw.Dialog):
         self._search_entry.connect("search-changed", self._on_search_changed)
         self._search_entry.connect("stop-search", self._on_search_stopped)
 
-        page = _SearchablePage(title=_("General"), icon_name="preferences-system-symbolic")
+        page = _SearchablePage(title=_("Preferences"), icon_name="preferences-system-symbolic")
         self._page = page
 
-        # First, above everything: the CLI is the tool the app is about,
-        # and the row that answers "which claude is Collins running?"
-        # shouldn't take scrolling to find.
-        self._build_cli_group(state, page)
+        # Above everything, under no heading: the CLI is the tool the app is
+        # about, and the row that answers "which claude is Collins running?"
+        # shouldn't take scrolling — or a category — to find.
+        cli_group = _SearchableGroup()
+        self._build_cli_rows(state, cli_group)
+        page.add(cli_group)
+
+        # General: what Collins looks like and what the sidebar shows.
+        general_group = _SearchableGroup(title=_("General"))
+        current_lang = state.get_setting("language") or ""
+        self._initial_lang = current_lang
+        current_label = next(
+            (label for code, label in LANGUAGES if code == current_lang), LANGUAGES[0][1]
+        )
+        # Restart now rides the row as a suffix, shown once the choice
+        # differs from the language this run started in.
+        self._restart_btn = Gtk.Button(label=_("Restart now"), valign=Gtk.Align.CENTER)
+        self._restart_btn.add_css_class("suggested-action")
+        self._restart_btn.set_visible(False)
+        self._restart_btn.connect("clicked", self._on_restart)
+        self._lang_expander = Adw.ExpanderRow(title=_("Language"), subtitle=current_label)
+        self._lang_expander.add_suffix(self._restart_btn)
+        lang_radio_group = None
+        for code, label in LANGUAGES:
+            row = Adw.ActionRow(title=label)
+            radio = Gtk.CheckButton()
+            if lang_radio_group is None:
+                lang_radio_group = radio
+            else:
+                radio.set_group(lang_radio_group)
+            radio.set_active(code == current_lang)
+            radio.connect("toggled", self._on_language_radio, code, label)
+            row.add_prefix(radio)
+            row.set_activatable_widget(radio)
+            self._lang_expander.add_row(row)
+        general_group.add(
+            _searchable(
+                self._lang_expander, _("Restart now"), *(label for _c, label in LANGUAGES)
+            )
+        )
+        scheme_row = Adw.ComboRow(title=_("Dark / Light Mode"))
+        scheme_labels = [_(label) for _k, label, _s in _SCHEMES]
+        scheme_row.set_model(Gtk.StringList.new(scheme_labels))
+        current_scheme = state.get_setting("color_scheme") or "system"
+        scheme_row.set_selected(
+            next((i for i, (k, _l, _s) in enumerate(_SCHEMES) if k == current_scheme), 0)
+        )
+        scheme_row.connect("notify::selected", self._on_scheme_changed)
+        general_group.add(_searchable(scheme_row, *scheme_labels))
+        self._build_status_icon_row(state, general_group)
+        self._tab_drag_row = Adw.SwitchRow(
+            title=_("Tab drag handles"),
+            subtitle=_(
+                "Drag any panel tab by its handle to move, reorder, or "
+                "split it. Relies on GTK internals — turn off to fall back "
+                "to plain tab dragging plus a drag grip on each panel"
+            ),
+        )
+        self._tab_drag_row.set_active(bool(state.get_setting("panel_tab_drag_handles")))
+        self._tab_drag_row.connect("notify::active", self._on_tab_drag_changed)
+        general_group.add(self._tab_drag_row)
+        self._folder_path_row = Adw.SwitchRow(
+            title=_("Show folder paths in sidebar"),
+        )
+        self._folder_path_row.set_active(bool(state.get_setting("show_folder_path")))
+        self._folder_path_row.connect("notify::active", self._on_folder_path_changed)
+        general_group.add(self._folder_path_row)
+        icon_size_row = Adw.SpinRow.new_with_range(16, 32, 2)
+        icon_size_row.set_title(_("Project icon size"))
+        icon_size_row.set_subtitle(_("Size of the project and folder icons in the sidebar"))
+        icon_size_row.set_value(int(state.get_setting("project_icon_size") or 16))
+        icon_size_row.connect("notify::value", self._on_icon_size_changed)
+        general_group.add(icon_size_row)
+        self._usage_panel_row = Adw.SwitchRow(
+            title=_("Show Claude usage"),
+            subtitle=_("Show subscription usage limits below the session list"),
+        )
+        self._usage_panel_row.set_active(bool(state.get_setting("show_usage_panel")))
+        self._usage_panel_row.connect("notify::active", self._on_usage_panel_changed)
+        general_group.add(self._usage_panel_row)
+        self._model_rows: dict[str, Adw.ComboRow] = {}
+        self._model_default_labels: dict[str, str] = {}
+        # Per key rather than bound into each row's handler: the list is
+        # applied more than once (saved, queried, refreshed) and a handler
+        # holding an older one would save the wrong id (see _apply_model_rows).
+        self._model_ids: dict[str, list[str]] = {}
+        self._model_handlers: dict[str, int] = {}
+        for key, title, subtitle, default_label in (
+            (
+                "title_model",
+                _("Session title model"),
+                _("Model that summarizes each new session's first prompt into its name"),
+                _("Default (latest Haiku)"),
+            ),
+            (
+                "icon_model",
+                _("Icon generation model"),
+                _("Model that designs project icons in the sidebar's Generate Icon dialog"),
+                _("Default (latest Sonnet)"),
+            ),
+        ):
+            row = Adw.ComboRow(title=title, subtitle=subtitle)
+            # A placeholder until the live list lands (see _populate_model_rows).
+            row.set_model(Gtk.StringList.new([default_label]))
+            self._model_rows[key] = row
+            self._model_default_labels[key] = default_label
+            _searchable(row, "haiku", "sonnet", "opus")
+        # The list is cached for a day and across restarts (claudemodels), so
+        # a model released this morning would otherwise not be offered until
+        # tomorrow. This row says how old the list is and asks for a new one.
+        self._model_status_row = Adw.ActionRow(
+            title=_("Model list"), subtitle=_("Checking…")
+        )
+        self._model_refresh_btn = Gtk.Button(label=_("Refresh"), valign=Gtk.Align.CENTER)
+        self._model_refresh_btn.add_css_class("flat")
+        self._model_refresh_btn.set_tooltip_text(
+            _("Ask Anthropic for the model list now, rather than waiting for the saved one to age out")
+        )
+        self._model_refresh_btn.connect("clicked", self._on_refresh_models)
+        self._model_status_row.add_suffix(self._model_refresh_btn)
+        _searchable(self._model_status_row, _("Refresh"), "models api")
+        self._populate_model_rows()
+        general_group.add(self._model_rows["icon_model"])
+        general_group.add(self._model_status_row)
+        page.add(general_group)
+
+        sessions_group = _SearchableGroup(title=_("Session behavior"))
+        self._restore_session_row = Adw.SwitchRow(
+            title=_("Reopen the last session"),
+            subtitle=_(
+                "Open the session that was active when the app was last "
+                "closed. Off, the app launches with no session open"
+            ),
+        )
+        self._restore_session_row.set_active(bool(state.get_setting("restore_last_session")))
+        self._restore_session_row.connect("notify::active", self._on_restore_session_changed)
+        sessions_group.add(
+            _searchable(self._restore_session_row, "launch", "restore", "resume", "startup")
+        )
+        self._worktree_row = Adw.SwitchRow(
+            title=_("Start new sessions in a git worktree"),
+            subtitle=_(
+                "Git projects only; each new session works in its own fresh "
+                "worktree, so it won't see uncommitted local changes. "
+                "Right-click a project header to override per project"
+            ),
+        )
+        self._worktree_row.set_active(bool(state.get_setting("worktree_new_sessions")))
+        self._worktree_row.connect("notify::active", self._on_worktree_changed)
+        sessions_group.add(self._worktree_row)
+        self._auto_title_row = Adw.SwitchRow(
+            title=_("Auto-generate session titles"),
+            subtitle=_(
+                "Summarize each new session's first prompt into a short title "
+                "using the claude CLI; pre-existing sessions are titled "
+                "locally from their prompt"
+            ),
+        )
+        self._auto_title_row.set_active(bool(state.get_setting("auto_title_sessions")))
+        self._auto_title_row.connect("notify::active", self._on_auto_title_changed)
+        sessions_group.add(self._auto_title_row)
+        sessions_group.add(self._model_rows["title_model"])
+        self._cli_title_row = Adw.SwitchRow(
+            title=_("Follow Claude's own session names"),
+            subtitle=_(
+                "Rename sessions whenever Claude names or renames them — "
+                "/rename and its automatic titles; manually renamed "
+                "sessions keep their name"
+            ),
+        )
+        self._cli_title_row.set_active(bool(state.get_setting("cli_title_sessions")))
+        self._cli_title_row.connect("notify::active", self._on_cli_title_changed)
+        sessions_group.add(_searchable(self._cli_title_row, "rename", "cli", "title"))
+        self._add_running_behavior_row(
+            sessions_group,
+            _("When archiving a running session"),
+            _("Archiving a session that is still running also closes its tab"),
+            "archive_running_session",
+        )
+        self._quit_behavior_row = self._add_running_behavior_row(
+            sessions_group,
+            _("When quitting with running sessions"),
+            _("Closing a window while agent sessions are still running"),
+            "quit_with_running_sessions",
+            behaviors=_QUIT_BEHAVIORS,
+        )
+        # Hide Window works without a status icon (relaunching or clicking a
+        # notification brings the window back), but the row should say what
+        # the desktop can't show. Seeded from the status-icon row's answer,
+        # kept live by the same availability watch that row runs.
+        self._sync_quit_behavior_subtitle(self._status_icon_host_seed)
+        self._remote_archive_row = Adw.SwitchRow(
+            title=_("Archive on claude.ai too"),
+            subtitle=_(
+                "A session that also appears on claude.ai is archived and "
+                "restored there along with the toggle here; best-effort, "
+                "archiving locally never waits on it"
+            ),
+        )
+        self._remote_archive_row.set_active(bool(state.get_setting("archive_on_claude_ai")))
+        self._remote_archive_row.connect("notify::active", self._on_remote_archive_changed)
+        sessions_group.add(
+            _searchable(self._remote_archive_row, "claude.ai", "remote", "web", "sync")
+        )
+        self._attach_autodock_row = Adw.SwitchRow(
+            title=_("Show the attachments panel automatically"),
+            subtitle=_(
+                "Dock a session's attachments panel beside it the first "
+                "time it shows an image — only in a tab wide enough to "
+                "spare the column, past the terminal's maximum width. Once "
+                "per session tab, so one you close again stays closed"
+            ),
+        )
+        self._attach_autodock_row.set_active(
+            bool(state.get_setting("dock_attachments_when_room"))
+        )
+        self._attach_autodock_row.connect("notify::active", self._on_attach_autodock_changed)
+        sessions_group.add(
+            _searchable(self._attach_autodock_row, "images", "gallery", "dock")
+        )
+        self._progress_termprop_row = Adw.SwitchRow(
+            title=_("Exact busy tracking from the agent"),
+            subtitle=_(
+                "Read Claude Code's own progress announcements for the "
+                "sidebar's working indicator, instead of only inferring from "
+                "terminal output (fully applies to newly opened tabs)"
+            ),
+        )
+        self._progress_termprop_row.set_active(bool(state.get_setting("progress_termprop")))
+        self._progress_termprop_row.connect("notify::active", self._on_progress_termprop_changed)
+        sessions_group.add(self._progress_termprop_row)
+        self._bg_poll_row = Adw.SwitchRow(
+            title=_("Poll for background sessions"),
+            subtitle=_(
+                "Fallback: check the agent CLI every 20 seconds in case the "
+                "yellow guide lines stop updating on their own"
+            ),
+        )
+        self._bg_poll_row.set_active(bool(state.get_setting("background_status_poll")))
+        self._bg_poll_row.connect("notify::active", self._on_bg_poll_changed)
+        sessions_group.add(self._bg_poll_row)
+        page.add(sessions_group)
+
+        composer_group = _SearchableGroup(title=_("Composer"))
+        self._composer_autoshow_row = Adw.ComboRow(
+            title=_("Composer in new sessions"),
+            subtitle=_(
+                "Open the composer as soon as a new session starts — floating "
+                "over the agent terminal, or docked as a panel below it, where "
+                "it stays for the session's later visits"
+            ),
+        )
+        autoshow_labels = [_(label) for _v, label in _COMPOSER_AUTOSHOW]
+        self._composer_autoshow_row.set_model(Gtk.StringList.new(autoshow_labels))
+        autoshow_values = [value for value, _l in _COMPOSER_AUTOSHOW]
+        self._composer_autoshow_row.set_selected(
+            autoshow_values.index(
+                composerkeys.autoshow_mode(state.get_setting("composer_new_sessions"))
+            )
+        )
+        self._composer_autoshow_row.connect(
+            "notify::selected", self._on_composer_autoshow_changed
+        )
+        composer_group.add(_searchable(self._composer_autoshow_row, *autoshow_labels))
+        self._composer_typing_row = Adw.SwitchRow(
+            title=_("Typing opens the composer"),
+            subtitle=_(
+                "Start typing at an agent's empty prompt and the composer "
+                "opens with what you typed. A dialog, a menu and the CLI's "
+                "own /, !, # and @ keep their keys"
+            ),
+        )
+        self._composer_typing_row.set_active(bool(state.get_setting("composer_on_typing")))
+        self._composer_typing_row.connect("notify::active", self._on_composer_typing_changed)
+        composer_group.add(self._composer_typing_row)
+        self._attach_overlay_row = Adw.SwitchRow(
+            title=_("Floating composer button"),
+            subtitle=_(
+                "Overlay a semi-transparent button on the corner of each "
+                "agent terminal that opens the composer, a spell-checked "
+                "prompt box"
+            ),
+        )
+        self._attach_overlay_row.set_active(bool(state.get_setting("attach_overlay_button")))
+        self._attach_overlay_row.connect("notify::active", self._on_attach_overlay_changed)
+        composer_group.add(self._attach_overlay_row)
+        self._composer_enter_row = Adw.SwitchRow(
+            title=_("Enter sends composer text"),
+            subtitle=_(
+                "Off: Enter inserts a newline and Ctrl+Enter sends. "
+                "Shift+Enter always inserts a newline"
+            ),
+        )
+        self._composer_enter_row.set_active(
+            bool(state.get_setting("composer_enter_sends"))
+        )
+        self._composer_enter_row.connect("notify::active", self._on_composer_enter_changed)
+        composer_group.add(self._composer_enter_row)
+        self._spell_click_row = Adw.SwitchRow(
+            title=_("Right-click aims spell-check"),
+            subtitle=_(
+                "Right-clicking a misspelled word in the composer offers "
+                "corrections for that word. Off: corrections follow the "
+                "text cursor instead, and a right-click never moves it"
+            ),
+        )
+        self._spell_click_row.set_active(bool(state.get_setting("composer_spell_click")))
+        self._spell_click_row.connect("notify::active", self._on_spell_click_changed)
+        composer_group.add(self._spell_click_row)
+        page.add(composer_group)
 
         terminal_group = _SearchableGroup(title=_("Terminal"))
+        current_theme = state.get_setting("terminal_theme") or DEFAULT_THEME
+        if current_theme not in THEME_NAMES:
+            current_theme = DEFAULT_THEME
+        self._theme_expander = Adw.ExpanderRow(title=_("Color theme"), subtitle=current_theme)
+        radio_group = None
+        for name in THEME_NAMES:
+            row = Adw.ActionRow(title=name)
+            radio = Gtk.CheckButton()
+            if radio_group is None:
+                radio_group = radio
+            else:
+                radio.set_group(radio_group)
+            radio.set_active(name == current_theme)
+            radio.connect("toggled", self._on_theme_radio, name)
+            row.add_prefix(radio)
+            row.set_activatable_widget(radio)
+            row.add_suffix(_theme_swatch(name))
+            self._theme_expander.add_row(row)
+        terminal_group.add(_searchable(self._theme_expander, *THEME_NAMES))
 
         font_row = Adw.ActionRow(title=_("Font"), subtitle=_("Applies to all terminal tabs"))
         self._font_button = Gtk.FontDialogButton(dialog=Gtk.FontDialog(), valign=Gtk.Align.CENTER)
@@ -315,136 +640,25 @@ class PreferencesDialog(Adw.Dialog):
         self._easy_copy_row.set_active(bool(state.get_setting("easy_copy_paste")))
         self._easy_copy_row.connect("notify::active", self._on_easy_copy_changed)
         terminal_group.add(self._easy_copy_row)
-
-        self._attach_overlay_row = Adw.SwitchRow(
-            title=_("Floating composer button"),
-            subtitle=_(
-                "Overlay a semi-transparent button on the corner of each "
-                "agent terminal that opens the composer, a spell-checked "
-                "prompt box"
-            ),
-        )
-        self._attach_overlay_row.set_active(bool(state.get_setting("attach_overlay_button")))
-        self._attach_overlay_row.connect("notify::active", self._on_attach_overlay_changed)
-        terminal_group.add(self._attach_overlay_row)
-
-        self._composer_typing_row = Adw.SwitchRow(
-            title=_("Typing opens the composer"),
-            subtitle=_(
-                "Start typing at an agent's empty prompt and the composer "
-                "opens with what you typed. A dialog, a menu and the CLI's "
-                "own /, !, # and @ keep their keys"
-            ),
-        )
-        self._composer_typing_row.set_active(bool(state.get_setting("composer_on_typing")))
-        self._composer_typing_row.connect("notify::active", self._on_composer_typing_changed)
-        terminal_group.add(self._composer_typing_row)
-
-        self._spell_click_row = Adw.SwitchRow(
-            title=_("Right-click aims spell-check"),
-            subtitle=_(
-                "Right-clicking a misspelled word in the composer offers "
-                "corrections for that word. Off: corrections follow the "
-                "text cursor instead, and a right-click never moves it"
-            ),
-        )
-        self._spell_click_row.set_active(bool(state.get_setting("composer_spell_click")))
-        self._spell_click_row.connect("notify::active", self._on_spell_click_changed)
-        terminal_group.add(self._spell_click_row)
-
-        self._composer_enter_row = Adw.SwitchRow(
-            title=_("Enter sends composer text"),
-            subtitle=_(
-                "Off: Enter inserts a newline and Ctrl+Enter sends. "
-                "Shift+Enter always inserts a newline"
-            ),
-        )
-        self._composer_enter_row.set_active(
-            bool(state.get_setting("composer_enter_sends"))
-        )
-        self._composer_enter_row.connect("notify::active", self._on_composer_enter_changed)
-        terminal_group.add(self._composer_enter_row)
-
-        self._composer_autoshow_row = Adw.ComboRow(
-            title=_("Composer in new sessions"),
-            subtitle=_(
-                "Open the composer as soon as a new session starts — floating "
-                "over the agent terminal, or docked as a panel below it, where "
-                "it stays for the session's later visits"
-            ),
-        )
-        autoshow_labels = [_(label) for _v, label in _COMPOSER_AUTOSHOW]
-        self._composer_autoshow_row.set_model(Gtk.StringList.new(autoshow_labels))
-        autoshow_values = [value for value, _l in _COMPOSER_AUTOSHOW]
-        self._composer_autoshow_row.set_selected(
-            autoshow_values.index(
-                composerkeys.autoshow_mode(state.get_setting("composer_new_sessions"))
-            )
-        )
-        self._composer_autoshow_row.connect(
-            "notify::selected", self._on_composer_autoshow_changed
-        )
-        terminal_group.add(_searchable(self._composer_autoshow_row, *autoshow_labels))
-
-        current_theme = state.get_setting("terminal_theme") or DEFAULT_THEME
-        if current_theme not in THEME_NAMES:
-            current_theme = DEFAULT_THEME
-        self._theme_expander = Adw.ExpanderRow(title=_("Color theme"), subtitle=current_theme)
-        radio_group = None
-        for name in THEME_NAMES:
-            row = Adw.ActionRow(title=name)
-            radio = Gtk.CheckButton()
-            if radio_group is None:
-                radio_group = radio
-            else:
-                radio.set_group(radio_group)
-            radio.set_active(name == current_theme)
-            radio.connect("toggled", self._on_theme_radio, name)
-            row.add_prefix(radio)
-            row.set_activatable_widget(radio)
-            row.add_suffix(_theme_swatch(name))
-            self._theme_expander.add_row(row)
-        terminal_group.add(_searchable(self._theme_expander, *THEME_NAMES))
         page.add(terminal_group)
 
-        # Its own group, not Terminal's: panels are growing page kinds
-        # beyond shells, and the tab-drag behavior applies to all of them.
-        panels_group = _SearchableGroup(title=_("Panels"))
-        self._tab_drag_row = Adw.SwitchRow(
-            title=_("Tab drag handles"),
-            subtitle=_(
-                "Drag any panel tab by its handle to move, reorder, or "
-                "split it. Relies on GTK internals — turn off to fall back "
-                "to plain tab dragging plus a drag grip on each panel"
-            ),
+        self._footer_apps_group = _SearchableGroup(
+            title=_("Footer apps"),
+            description=_("Buttons in each tab's footer that open the tab's directory"),
         )
-        self._tab_drag_row.set_active(bool(state.get_setting("panel_tab_drag_handles")))
-        self._tab_drag_row.connect("notify::active", self._on_tab_drag_changed)
-        panels_group.add(self._tab_drag_row)
-        self._attach_autodock_row = Adw.SwitchRow(
-            title=_("Show the attachments panel automatically"),
-            subtitle=_(
-                "Dock a session's attachments panel beside it the first "
-                "time it shows an image — only in a tab wide enough to "
-                "spare the column, past the terminal's maximum width. Once "
-                "per session tab, so one you close again stays closed"
-            ),
-        )
-        self._attach_autodock_row.set_active(
-            bool(state.get_setting("dock_attachments_when_room"))
-        )
-        self._attach_autodock_row.connect("notify::active", self._on_attach_autodock_changed)
-        panels_group.add(
-            _searchable(self._attach_autodock_row, "images", "gallery", "dock")
-        )
-        page.add(panels_group)
+        add_app_btn = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
+        add_app_btn.add_css_class("flat")
+        add_app_btn.set_tooltip_text(_("Add application…"))
+        add_app_btn.connect("clicked", self._on_add_footer_app)
+        self._footer_apps_group.set_header_suffix(add_app_btn)
+        _searchable(self._footer_apps_group, _("Add application…"))
+        self._footer_app_rows: list[Adw.PreferencesRow] = []
+        self._rebuild_footer_apps()
+        page.add(self._footer_apps_group)
 
         self._build_editor_group(state, page)
 
-        # "Pull requests", not "Pull request view": the confirmation switch
-        # below reaches every surface a PR's actions are offered on — the
-        # page's button, a chip's menu, a sidebar row's — and not just the page.
-        pr_view_group = _SearchableGroup(title=_("Pull requests"))
+        pr_group = _SearchableGroup(title=_("Pull requests"))
         pr_scale_row = Adw.SpinRow.new_with_range(50, 300, 5)
         pr_scale_row.set_title(_("Text size"))
         pr_scale_row.set_subtitle(
@@ -455,8 +669,8 @@ class PreferencesDialog(Adw.Dialog):
         )
         pr_scale_row.set_value(int(state.get_setting("pr_font_scale") or 100))
         pr_scale_row.connect("notify::value", self._on_pr_font_scale_changed)
-        pr_view_group.add(pr_scale_row)
-        # Not "Show images": the session-tools group already has a row by
+        pr_group.add(pr_scale_row)
+        # Not "Show images": the MCP-tools group already has a row by
         # that name (the show_image tool), and one Preferences window can't
         # carry two of them.
         self._pr_images_row = Adw.SwitchRow(
@@ -470,7 +684,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._pr_images_row.set_active(bool(state.get_setting("pr_inline_images")))
         self._pr_images_row.connect("notify::active", self._on_pr_images_changed)
-        pr_view_group.add(self._pr_images_row)
+        pr_group.add(self._pr_images_row)
         self._pr_autoshow_row = Adw.SwitchRow(
             title=_("Open new pull requests automatically"),
             subtitle=_(
@@ -481,7 +695,7 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._pr_autoshow_row.set_active(bool(state.get_setting("open_pr_panel_on_attach")))
         self._pr_autoshow_row.connect("notify::active", self._on_pr_autoshow_changed)
-        pr_view_group.add(_searchable(self._pr_autoshow_row, "attach", "dock"))
+        pr_group.add(_searchable(self._pr_autoshow_row, "attach", "dock"))
         self._confirm_merges_row = Adw.SwitchRow(
             title=_("Confirm before merging"),
             subtitle=_(
@@ -492,22 +706,40 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._confirm_merges_row.set_active(bool(state.get_setting("confirm_merges")))
         self._confirm_merges_row.connect("notify::active", self._on_confirm_merges_changed)
-        pr_view_group.add(_searchable(self._confirm_merges_row, "merge", "archive", "dialog"))
-        page.add(pr_view_group)
-
-        appearance_group = _SearchableGroup(title=_("Appearance"))
-        scheme_row = Adw.ComboRow(title=_("Color scheme"))
-        scheme_labels = [_(label) for _k, label, _s in _SCHEMES]
-        scheme_row.set_model(Gtk.StringList.new(scheme_labels))
-        current_scheme = state.get_setting("color_scheme") or "system"
-        scheme_row.set_selected(
-            next((i for i, (k, _l, _s) in enumerate(_SCHEMES) if k == current_scheme), 0)
+        pr_group.add(_searchable(self._confirm_merges_row, "merge", "archive", "dialog"))
+        self._attach_prompt_prs_row = Adw.SwitchRow(
+            title=_("Attach pull requests named in prompts"),
+            subtitle=_(
+                "Put every pull request a new session's first prompt "
+                "mentions on that session's row, without waiting for the "
+                "agent to touch it"
+            ),
         )
-        scheme_row.connect("notify::selected", self._on_scheme_changed)
-        appearance_group.add(_searchable(scheme_row, *scheme_labels))
-        page.add(appearance_group)
-
-        page.add(self._build_status_icon_group(state))
+        self._attach_prompt_prs_row.set_active(bool(state.get_setting("attach_prompt_prs")))
+        self._attach_prompt_prs_row.connect("notify::active", self._on_attach_prompt_prs_changed)
+        pr_group.add(self._attach_prompt_prs_row)
+        self._pr_title_row = Adw.SwitchRow(
+            title=_("Rename sessions after their pull requests"),
+            subtitle=_(
+                "Retitle a session to match the newest pull request opened "
+                "in it; manually renamed sessions keep their name"
+            ),
+        )
+        self._pr_title_row.set_active(bool(state.get_setting("pr_title_sessions")))
+        self._pr_title_row.connect("notify::active", self._on_pr_title_changed)
+        pr_group.add(self._pr_title_row)
+        self._pr_launch_row = Adw.SwitchRow(
+            title=_("Refresh pull requests at launch"),
+            subtitle=_(
+                "Ask GitHub about every listed session's pull requests once on "
+                "startup, so the marks in the sidebar start out current rather "
+                "than as they were left"
+            ),
+        )
+        self._pr_launch_row.set_active(bool(state.get_setting("refresh_prs_on_launch")))
+        self._pr_launch_row.connect("notify::active", self._on_pr_launch_changed)
+        pr_group.add(self._pr_launch_row)
+        page.add(pr_group)
 
         caffeine_group = _SearchableGroup(title=_("Caffeine Mode"))
         self._caffeine_screen_row = Adw.SwitchRow(
@@ -565,274 +797,7 @@ class PreferencesDialog(Adw.Dialog):
         caffeine_group.add(_searchable(self._caffeine_timer_row, *duration_labels))
         page.add(caffeine_group)
 
-        sidebar_group = _SearchableGroup(title=_("Session list"))
-        self._folder_path_row = Adw.SwitchRow(
-            title=_("Show folder path"),
-            subtitle=_("Show each session's project folder path in the sidebar"),
-        )
-        self._folder_path_row.set_active(bool(state.get_setting("show_folder_path")))
-        self._folder_path_row.connect("notify::active", self._on_folder_path_changed)
-        sidebar_group.add(self._folder_path_row)
-        icon_size_row = Adw.SpinRow.new_with_range(16, 32, 2)
-        icon_size_row.set_title(_("Project icon size"))
-        icon_size_row.set_subtitle(_("Size of the project and folder icons in the sidebar"))
-        icon_size_row.set_value(int(state.get_setting("project_icon_size") or 16))
-        icon_size_row.connect("notify::value", self._on_icon_size_changed)
-        sidebar_group.add(icon_size_row)
-        self._usage_panel_row = Adw.SwitchRow(
-            title=_("Show Claude usage"),
-            subtitle=_("Show subscription usage limits below the session list"),
-        )
-        self._usage_panel_row.set_active(bool(state.get_setting("show_usage_panel")))
-        self._usage_panel_row.connect("notify::active", self._on_usage_panel_changed)
-        sidebar_group.add(self._usage_panel_row)
-        self._auto_title_row = Adw.SwitchRow(
-            title=_("Auto-generate session titles"),
-            subtitle=_(
-                "Summarize each new session's first prompt into a short title "
-                "using the claude CLI; pre-existing sessions are titled "
-                "locally from their prompt"
-            ),
-        )
-        self._auto_title_row.set_active(bool(state.get_setting("auto_title_sessions")))
-        self._auto_title_row.connect("notify::active", self._on_auto_title_changed)
-        sidebar_group.add(self._auto_title_row)
-        self._cli_title_row = Adw.SwitchRow(
-            title=_("Follow Claude's own session names"),
-            subtitle=_(
-                "Rename sessions whenever Claude names or renames them — "
-                "/rename and its automatic titles; manually renamed "
-                "sessions keep their name"
-            ),
-        )
-        self._cli_title_row.set_active(bool(state.get_setting("cli_title_sessions")))
-        self._cli_title_row.connect("notify::active", self._on_cli_title_changed)
-        sidebar_group.add(_searchable(self._cli_title_row, "rename", "cli", "title"))
-        self._attach_prompt_prs_row = Adw.SwitchRow(
-            title=_("Attach pull requests named in prompts"),
-            subtitle=_(
-                "Put every pull request a new session's first prompt "
-                "mentions on that session's row, without waiting for the "
-                "agent to touch it"
-            ),
-        )
-        self._attach_prompt_prs_row.set_active(bool(state.get_setting("attach_prompt_prs")))
-        self._attach_prompt_prs_row.connect("notify::active", self._on_attach_prompt_prs_changed)
-        sidebar_group.add(self._attach_prompt_prs_row)
-        self._pr_title_row = Adw.SwitchRow(
-            title=_("Rename sessions after their pull requests"),
-            subtitle=_(
-                "Retitle a session to match the newest pull request opened "
-                "in it; manually renamed sessions keep their name"
-            ),
-        )
-        self._pr_title_row.set_active(bool(state.get_setting("pr_title_sessions")))
-        self._pr_title_row.connect("notify::active", self._on_pr_title_changed)
-        sidebar_group.add(self._pr_title_row)
-        self._pr_launch_row = Adw.SwitchRow(
-            title=_("Refresh pull requests at launch"),
-            subtitle=_(
-                "Ask GitHub about every listed session's pull requests once on "
-                "startup, so the marks in the sidebar start out current rather "
-                "than as they were left"
-            ),
-        )
-        self._pr_launch_row.set_active(bool(state.get_setting("refresh_prs_on_launch")))
-        self._pr_launch_row.connect("notify::active", self._on_pr_launch_changed)
-        sidebar_group.add(self._pr_launch_row)
-        page.add(sidebar_group)
-
-        models_group = _SearchableGroup(
-            title=_("Claude models"),
-            description=_("Models the app's own headless claude runs ask for"),
-        )
-        self._model_rows: dict[str, Adw.ComboRow] = {}
-        self._model_default_labels: dict[str, str] = {}
-        # Per key rather than bound into each row's handler: the list is
-        # applied more than once (saved, queried, refreshed) and a handler
-        # holding an older one would save the wrong id (see _apply_model_rows).
-        self._model_ids: dict[str, list[str]] = {}
-        self._model_handlers: dict[str, int] = {}
-        for key, title, subtitle, default_label in (
-            (
-                "title_model",
-                _("Session title model"),
-                _("Model that summarizes each new session's first prompt into its name"),
-                _("Default (latest Haiku)"),
-            ),
-            (
-                "icon_model",
-                _("Icon generation model"),
-                _("Model that designs project icons in the sidebar's Generate Icon dialog"),
-                _("Default (latest Sonnet)"),
-            ),
-        ):
-            row = Adw.ComboRow(title=title, subtitle=subtitle)
-            # A placeholder until the live list lands (see _populate_model_rows).
-            row.set_model(Gtk.StringList.new([default_label]))
-            self._model_rows[key] = row
-            self._model_default_labels[key] = default_label
-            models_group.add(_searchable(row, "haiku", "sonnet", "opus"))
-        # The list is cached for a day and across restarts (claudemodels), so
-        # a model released this morning would otherwise not be offered until
-        # tomorrow. This row says how old the list is and asks for a new one.
-        self._model_status_row = Adw.ActionRow(
-            title=_("Model list"), subtitle=_("Checking…")
-        )
-        self._model_refresh_btn = Gtk.Button(label=_("Refresh"), valign=Gtk.Align.CENTER)
-        self._model_refresh_btn.add_css_class("flat")
-        self._model_refresh_btn.set_tooltip_text(
-            _("Ask Anthropic for the model list now, rather than waiting for the saved one to age out")
-        )
-        self._model_refresh_btn.connect("clicked", self._on_refresh_models)
-        self._model_status_row.add_suffix(self._model_refresh_btn)
-        models_group.add(_searchable(self._model_status_row, _("Refresh"), "models api"))
-        page.add(models_group)
-        self._populate_model_rows()
-
-        self._footer_apps_group = _SearchableGroup(
-            title=_("Footer apps"),
-            description=_("Buttons in each tab's footer that open the tab's directory"),
-        )
-        add_app_btn = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
-        add_app_btn.add_css_class("flat")
-        add_app_btn.set_tooltip_text(_("Add application…"))
-        add_app_btn.connect("clicked", self._on_add_footer_app)
-        self._footer_apps_group.set_header_suffix(add_app_btn)
-        _searchable(self._footer_apps_group, _("Add application…"))
-        self._footer_app_rows: list[Adw.PreferencesRow] = []
-        self._rebuild_footer_apps()
-        page.add(self._footer_apps_group)
-
-        current_lang = state.get_setting("language") or ""
-        self._initial_lang = current_lang
-        current_label = next(
-            (label for code, label in LANGUAGES if code == current_lang), LANGUAGES[0][1]
-        )
-        lang_group = _SearchableGroup(title=_("Language"), description=_("Restart to apply"))
-        self._restart_btn = Gtk.Button(label=_("Restart now"), valign=Gtk.Align.CENTER)
-        self._restart_btn.add_css_class("suggested-action")
-        self._restart_btn.set_visible(False)
-        self._restart_btn.connect("clicked", self._on_restart)
-        lang_group.set_header_suffix(self._restart_btn)
-        _searchable(lang_group, _("Restart now"))
-        self._lang_expander = Adw.ExpanderRow(title=_("Language"), subtitle=current_label)
-        lang_radio_group = None
-        for code, label in LANGUAGES:
-            row = Adw.ActionRow(title=label)
-            radio = Gtk.CheckButton()
-            if lang_radio_group is None:
-                lang_radio_group = radio
-            else:
-                radio.set_group(lang_radio_group)
-            radio.set_active(code == current_lang)
-            radio.connect("toggled", self._on_language_radio, code, label)
-            row.add_prefix(radio)
-            row.set_activatable_widget(radio)
-            self._lang_expander.add_row(row)
-        lang_group.add(_searchable(self._lang_expander, *(label for _c, label in LANGUAGES)))
-        page.add(lang_group)
-
-        startup_group = _SearchableGroup(title=_("Startup"))
-        self._restore_session_row = Adw.SwitchRow(
-            title=_("Reopen the last session"),
-            subtitle=_(
-                "Open the session that was active when the app was last "
-                "closed. Off, the app launches with no session open"
-            ),
-        )
-        self._restore_session_row.set_active(bool(state.get_setting("restore_last_session")))
-        self._restore_session_row.connect("notify::active", self._on_restore_session_changed)
-        startup_group.add(
-            _searchable(self._restore_session_row, "launch", "restore", "resume", "startup")
-        )
-        page.add(startup_group)
-
-        new_sessions_group = _SearchableGroup(title=_("New sessions"))
-        self._worktree_row = Adw.SwitchRow(
-            title=_("Start new sessions in a git worktree"),
-            subtitle=_(
-                "Git projects only; each new session works in its own fresh "
-                "worktree, so it won't see uncommitted local changes. "
-                "Right-click a project header to override per project"
-            ),
-        )
-        self._worktree_row.set_active(bool(state.get_setting("worktree_new_sessions")))
-        self._worktree_row.connect("notify::active", self._on_worktree_changed)
-        new_sessions_group.add(self._worktree_row)
-        page.add(new_sessions_group)
-
-        self._build_session_tools_group(state, page)
-
-        running_group = _SearchableGroup(
-            title=_("Running sessions"),
-            description=_(
-                "Ask keeps the confirmation dialog; the other choices skip it "
-                "and exit the session(s) cleanly or keep them running detached"
-            ),
-        )
-        self._add_running_behavior_row(
-            running_group,
-            _("When archiving a running session"),
-            _("Archiving a session that is still running also closes its tab"),
-            "archive_running_session",
-        )
-        self._quit_behavior_row = self._add_running_behavior_row(
-            running_group,
-            _("When quitting with running sessions"),
-            _("Closing a window while agent sessions are still running"),
-            "quit_with_running_sessions",
-            behaviors=_QUIT_BEHAVIORS,
-        )
-        # Hide Window works without a status icon (relaunching or clicking a
-        # notification brings the window back), but the row should say what
-        # the desktop can't show. Seeded from the status-icon group's answer,
-        # kept live by the same availability watch that group runs.
-        self._sync_quit_behavior_subtitle(self._status_icon_host_seed)
-        page.add(running_group)
-
-        archive_group = _SearchableGroup(title=_("Archiving"))
-        self._remote_archive_row = Adw.SwitchRow(
-            title=_("Archive on claude.ai too"),
-            subtitle=_(
-                "A session that also appears on claude.ai is archived and "
-                "restored there along with the toggle here; best-effort, "
-                "archiving locally never waits on it"
-            ),
-        )
-        self._remote_archive_row.set_active(bool(state.get_setting("archive_on_claude_ai")))
-        self._remote_archive_row.connect("notify::active", self._on_remote_archive_changed)
-        archive_group.add(
-            _searchable(self._remote_archive_row, "claude.ai", "remote", "web", "sync")
-        )
-        page.add(archive_group)
-
-        bg_group = _SearchableGroup(title=_("Background sessions"))
-        self._bg_poll_row = Adw.SwitchRow(
-            title=_("Poll for background sessions"),
-            subtitle=_(
-                "Fallback: check the agent CLI every 20 seconds in case the "
-                "yellow guide lines stop updating on their own"
-            ),
-        )
-        self._bg_poll_row.set_active(bool(state.get_setting("background_status_poll")))
-        self._bg_poll_row.connect("notify::active", self._on_bg_poll_changed)
-        bg_group.add(self._bg_poll_row)
-        page.add(bg_group)
-
-        experimental_group = _SearchableGroup(title=_("Experimental"))
-        self._progress_termprop_row = Adw.SwitchRow(
-            title=_("Exact busy tracking from the agent"),
-            subtitle=_(
-                "Read Claude Code's own progress announcements for the "
-                "sidebar's working indicator, instead of only inferring from "
-                "terminal output (fully applies to newly opened tabs)"
-            ),
-        )
-        self._progress_termprop_row.set_active(bool(state.get_setting("progress_termprop")))
-        self._progress_termprop_row.connect("notify::active", self._on_progress_termprop_changed)
-        experimental_group.add(self._progress_termprop_row)
-        page.add(experimental_group)
+        self._build_mcp_tools_group(state, page)
 
         self._no_results = Adw.StatusPage(
             icon_name="system-search-symbolic",
@@ -941,7 +906,7 @@ class PreferencesDialog(Adw.Dialog):
 
         page.add(editor_group)
 
-    def _build_status_icon_group(self, state: AppState) -> _SearchableGroup:
+    def _build_status_icon_row(self, state: AppState, group: _SearchableGroup) -> None:
         """The status icon's switch, and the truth about whether this desktop
         can show one.
 
@@ -952,7 +917,6 @@ class PreferencesDialog(Adw.Dialog):
         The row stays sensitive and keeps the tooltip; only the switch inside
         it stops responding.
         """
-        group = _SearchableGroup(title=_("Status icon"))
         self._status_icon_row = Adw.ActionRow(title=_("Show status icon"))
         self._status_icon_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
         self._status_icon_switch.set_active(bool(state.get_setting("status_icon")))
@@ -964,13 +928,12 @@ class PreferencesDialog(Adw.Dialog):
         # followed live: availability moves under a running app — extensions
         # get switched on and off, and an X11 shell restart takes the watcher
         # with it — and the watch's own first answer is a main-loop turn away.
-        # The seed is kept for the quit-behavior row, built after this group,
+        # The seed is kept for the quit-behavior row, built after this row,
         # so the dialog makes one synchronous bus round trip, not two.
         self._status_icon_host_seed = statusicon.available()
         self._on_status_icon_host(self._status_icon_host_seed)
         self._status_icon_watch = statusicon.watch_availability(self._on_status_icon_host)
         self.connect("closed", lambda *_: statusicon.unwatch(self._status_icon_watch))
-        return group
 
     def _on_status_icon_host(self, present: bool) -> None:
         # The subtitle describes what the item does *today*: the unread count
@@ -1007,19 +970,12 @@ class PreferencesDialog(Adw.Dialog):
         self._state.set_setting("status_icon", switch.get_active())
         self._on_change()
 
-    def _build_cli_group(self, state: AppState, page: _SearchablePage) -> None:
+    def _build_cli_rows(self, state: AppState, group: _SearchableGroup) -> None:
         """Where the Claude Code CLI is — the same question the welcome
         dialog asks a launch that can't find it (cliwelcome), now answerable
         after the fact: point at a different install, or clear the box to
-        fall back to whatever PATH offers."""
-        group = _SearchableGroup(
-            title=_("Claude Code CLI"),
-            description=_(
-                "The claude command every session runs through. Leave empty "
-                "to use the one on PATH. Tabs already open keep the CLI they "
-                "started with"
-            ),
-        )
+        fall back to whatever PATH offers. Tabs already open keep the CLI
+        they started with."""
         self._cli_row = Adw.EntryRow(title=_("Path to the claude executable"))
         self._cli_verdict = Gtk.Image(valign=Gtk.Align.CENTER)
         browse = Gtk.Button(label=_("Browse…"), valign=Gtk.Align.CENTER)
@@ -1031,18 +987,12 @@ class PreferencesDialog(Adw.Dialog):
         self._cli_row.connect("changed", self._on_cli_path_changed)
         group.add(_searchable(self._cli_row, "claude", "CLI", "PATH", _("Browse…")))
 
-        # The verdict's reason, under the box like the welcome dialog's. A
-        # non-row child of a PreferencesGroup lands below the boxed list;
-        # added via the base class so the search filter never reads it as a
-        # row — it shows and hides with the group instead.
-        self._cli_reason = Gtk.Label(xalign=0.0, wrap=True)
-        self._cli_reason.add_css_class("caption")
+        # The verdict's reason, directly under the box like the welcome
+        # dialog's: a title-less row in the same list. The same search terms
+        # as the entry keep the two showing and hiding together.
+        self._cli_reason = Adw.ActionRow(activatable=False, selectable=False)
         self._cli_reason.add_css_class("dim-label")
-        self._cli_reason.set_margin_top(6)
-        self._cli_reason.set_margin_start(12)
-        self._cli_reason.set_margin_end(12)
-        Adw.PreferencesGroup.add(group, self._cli_reason)
-        page.add(group)
+        group.add(_searchable(self._cli_reason, "claude", "CLI", "PATH", _("Browse…")))
         self._refresh_cli_row(save=False)
 
     def _on_cli_path_changed(self, _row: Adw.EntryRow) -> None:
@@ -1087,7 +1037,7 @@ class PreferencesDialog(Adw.Dialog):
                 self._cli_verdict.add_css_class(name)
             else:
                 self._cli_verdict.remove_css_class(name)
-        self._cli_reason.set_label(reason)
+        self._cli_reason.set_subtitle(reason)
 
     def _on_cli_browse(self, _button: Gtk.Button) -> None:
         picker = Gtk.FileDialog(title=_("Choose the claude executable"))
@@ -1104,7 +1054,7 @@ class PreferencesDialog(Adw.Dialog):
 
         picker.open(self.get_root(), None, picked)
 
-    def _build_session_tools_group(self, state: AppState, page: _SearchablePage) -> None:
+    def _build_mcp_tools_group(self, state: AppState, page: _SearchablePage) -> None:
         """The on/off switch for each tool Collins offers a session (the
         `collins` MCP server in the session's /mcp list).
 
@@ -1114,11 +1064,10 @@ class PreferencesDialog(Adw.Dialog):
         going unlisted.
         """
         group = _SearchableGroup(
-            title=_("Session tools"),
+            title=_("Built-in MCP tools"),
             description=_(
-                "Tools a session can call to drive Collins. Turning one off "
-                "takes effect immediately; sessions already running are only "
-                "offered the tool again once they restart"
+                "Turning one off takes effect immediately; sessions already "
+                "running are only offered the tool again once they restart"
             ),
         )
         self._mcp_tool_rows: dict[str, Adw.SwitchRow] = {}
@@ -1129,10 +1078,9 @@ class PreferencesDialog(Adw.Dialog):
             row.set_active(bool(state.get_setting(mcptools.tool_setting_key(name))))
             row.connect("notify::active", self._on_mcp_tool_changed, name)
             self._mcp_tool_rows[name] = row
-            # The tool's name is in the subtitle already; "MCP" is the word a
-            # user is likeliest to search these by, and it appears nowhere in
-            # the group.
-            group.add(_searchable(row, "MCP", name))
+            # The tool's name is in the subtitle already; "session tools" is
+            # what the group used to be called.
+            group.add(_searchable(row, "session tools", name))
         page.add(group)
 
     def _on_mcp_tool_changed(self, row: Adw.SwitchRow, _pspec, name: str) -> None:

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-20. Full change history: git log for this file.
+fork. Last modified: 2026-08-21. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -67,7 +67,7 @@ for five minutes rather than making every picker wait out the network timeout
 again.
 
 The cost of caching that hard is a model released this morning not appearing
-until tomorrow, so **Preferences → Claude models → Model list** dates the list
+until tomorrow, so **Preferences → General → Model list** dates the list
 ("12 models, updated 3h ago") and its **Refresh** button asks Anthropic
 outright, ignoring both the day and the backoff.
 

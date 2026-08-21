@@ -59,6 +59,9 @@ msgstr "Liste des sessions"
 msgid "Show folder path"
 msgstr "Afficher le chemin du dossier"
 
+msgid "Show folder paths in sidebar"
+msgstr "Afficher les chemins des dossiers dans la barre latérale"
+
 msgid "Show each session's project folder path in the sidebar"
 msgstr "Afficher le chemin du dossier de projet de chaque session dans la barre latérale"
 
@@ -343,6 +346,9 @@ msgstr "Apparence"
 
 msgid "Color scheme"
 msgstr "Schéma de couleurs"
+
+msgid "Dark / Light Mode"
+msgstr "Mode sombre / clair"
 
 msgid "Language"
 msgstr "Langue"
@@ -974,6 +980,15 @@ msgstr "Ouvrir {name} dans l’éditeur"
 msgid "Session tools"
 msgstr "Outils de session"
 
+msgid "Session behavior"
+msgstr "Comportement des sessions"
+
+msgid "Composer"
+msgstr "Rédacteur"
+
+msgid "Built-in MCP tools"
+msgstr "Outils MCP intégrés"
+
 msgid "Tools a session can call to drive Collins. Turning one off takes effect immediately; sessions already running are only offered the tool again once they restart"
 msgstr "Outils qu’une session peut appeler pour piloter Collins. La désactivation prend effet immédiatement ; les sessions déjà lancées ne retrouvent l’outil qu’à leur prochain démarrage"
 
@@ -1048,9 +1063,6 @@ msgstr "Chargement des modèles…"
 
 msgid "Copy model id"
 msgstr "Copier l'id du modèle"
-
-msgid "Composer"
-msgstr "Rédacteur"
 
 msgid "Dock the composer below the terminal"
 msgstr "Ancrer le rédacteur sous le terminal"

@@ -59,6 +59,9 @@ msgstr "Munkamenet-lista"
 msgid "Show folder path"
 msgstr "Mappa elérési útjának megjelenítése"
 
+msgid "Show folder paths in sidebar"
+msgstr "Mappák elérési útja az oldalsávban"
+
 msgid "Show each session's project folder path in the sidebar"
 msgstr "Az egyes munkamenetek projektmappájának elérési útja az oldalsávon"
 
@@ -343,6 +346,9 @@ msgstr "Megjelenés"
 
 msgid "Color scheme"
 msgstr "Színséma"
+
+msgid "Dark / Light Mode"
+msgstr "Sötét / világos mód"
 
 msgid "Language"
 msgstr "Nyelv"
@@ -974,6 +980,15 @@ msgstr "A(z) {name} megnyitása a szerkesztőben"
 msgid "Session tools"
 msgstr "Munkamenet-eszközök"
 
+msgid "Session behavior"
+msgstr "Munkamenetek viselkedése"
+
+msgid "Composer"
+msgstr "Üzenetszerkesztő"
+
+msgid "Built-in MCP tools"
+msgstr "Beépített MCP-eszközök"
+
 msgid "Tools a session can call to drive Collins. Turning one off takes effect immediately; sessions already running are only offered the tool again once they restart"
 msgstr "Eszközök, amelyeket egy munkamenet meghívhat a Collins vezérléséhez. A kikapcsolás azonnal érvénybe lép; a már futó munkamenetek csak újraindításuk után kapják vissza az eszközt"
 
@@ -1048,9 +1063,6 @@ msgstr "Modellek betöltése…"
 
 msgid "Copy model id"
 msgstr "Modellazonosító másolása"
-
-msgid "Composer"
-msgstr "Üzenetszerkesztő"
 
 msgid "Dock the composer below the terminal"
 msgstr "Üzenetszerkesztő dokkolása a terminál alá"
