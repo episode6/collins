@@ -11,7 +11,6 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable
-from datetime import datetime, timezone
 
 import gi
 
@@ -27,7 +26,6 @@ from . import (  # noqa: E402
     composerkeys,
     editor,
     footerapps,
-    formatting,
     mcptools,
     prefssearch,
     statusicon,
@@ -648,11 +646,6 @@ class PreferencesDialog(Adw.Dialog):
         )
         self._model_rows: dict[str, Adw.ComboRow] = {}
         self._model_default_labels: dict[str, str] = {}
-        # Per key rather than bound into each row's handler: the list is
-        # applied more than once (saved, queried, refreshed) and a handler
-        # holding an older one would save the wrong id (see _apply_model_rows).
-        self._model_ids: dict[str, list[str]] = {}
-        self._model_handlers: dict[str, int] = {}
         for key, title, subtitle, default_label in (
             (
                 "title_model",
@@ -673,22 +666,8 @@ class PreferencesDialog(Adw.Dialog):
             self._model_rows[key] = row
             self._model_default_labels[key] = default_label
             models_group.add(_searchable(row, "haiku", "sonnet", "opus"))
-        # The list is cached for a day and across restarts (claudemodels), so
-        # a model released this morning would otherwise not be offered until
-        # tomorrow. This row says how old the list is and asks for a new one.
-        self._model_status_row = Adw.ActionRow(
-            title=_("Model list"), subtitle=_("Checking…")
-        )
-        self._model_refresh_btn = Gtk.Button(label=_("Refresh"), valign=Gtk.Align.CENTER)
-        self._model_refresh_btn.add_css_class("flat")
-        self._model_refresh_btn.set_tooltip_text(
-            _("Ask Anthropic for the model list now, rather than waiting for the saved one to age out")
-        )
-        self._model_refresh_btn.connect("clicked", self._on_refresh_models)
-        self._model_status_row.add_suffix(self._model_refresh_btn)
-        models_group.add(_searchable(self._model_status_row, _("Refresh"), "models api"))
         page.add(models_group)
-        self._populate_model_rows()
+        self._populate_model_rows(state)
 
         self._footer_apps_group = _SearchableGroup(
             title=_("Footer apps"),
@@ -1381,132 +1360,35 @@ class PreferencesDialog(Adw.Dialog):
     def _on_attach_prompt_prs_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("attach_prompt_prs", row.get_active())
 
-    def _populate_model_rows(self) -> None:
-        """Fill the model pickers, off the main loop.
-
-        The saved list (claudemodels keeps one across restarts) fills the rows
-        at once when there is one, so the page opens on real models instead of
-        a placeholder; the worker behind it re-queries only if that list has
-        aged out, and the CLI's own aliases stand in when the API can't be
-        asked and nothing was ever saved.
-        """
-        cached = claudemodels.cached_models()
-        if cached:
-            self._apply_model_rows(cached)
-            self._apply_model_status(
-                len(cached), claudemodels.cache_fetched_at(), claudemodels.cache_failed()
-            )
+    def _populate_model_rows(self, state: AppState) -> None:
+        """Fill the model pickers from a live Models API query, off the main
+        loop; the CLI's own aliases stand in when the API can't be asked."""
 
         def work() -> None:
-            models = claudemodels.available_models()
-            GLib.idle_add(
-                apply_models,
-                models,
-                claudemodels.cache_fetched_at(),
-                claudemodels.cache_failed(),
-                priority=GLib.PRIORITY_DEFAULT,
-            )
+            models = claudemodels.available_models() or list(claudemodels.FALLBACK_MODELS)
+            GLib.idle_add(apply_models, models)
 
-        def apply_models(
-            models: list[claudemodels.ClaudeModel], fetched_at: float, failed: bool
-        ) -> bool:
-            self._apply_model_rows(models or list(claudemodels.FALLBACK_MODELS))
-            self._apply_model_status(len(models), fetched_at, failed)
+        def apply_models(models: list[claudemodels.ClaudeModel]) -> bool:
+            for key, row in self._model_rows.items():
+                current = (state.get_setting(key) or "").strip()
+                ids = [""] + [m.id for m in models]
+                labels = [self._model_default_labels[key]] + [m.display_name for m in models]
+                if current and current not in ids:
+                    # A saved model the API no longer lists stays visible and
+                    # selected rather than silently snapping to the default.
+                    ids.append(current)
+                    labels.append(current)
+                row.set_model(Gtk.StringList.new(labels))
+                row.set_selected(ids.index(current))
+                row.connect("notify::selected", self._on_model_row_changed, key, ids)
             return GLib.SOURCE_REMOVE
 
         threading.Thread(target=work, name="prefs-models", daemon=True).start()
 
-    def _apply_model_rows(self, models: list[claudemodels.ClaudeModel]) -> None:
-        """Offer *models* in every picker, keeping each row's saved choice.
-
-        Runs more than once — the saved list, the query behind it, and every
-        Refresh — so each pass has to leave exactly one "notify::selected"
-        handler per row, and to stop set_model/set_selected from firing it:
-        an unblocked repopulate would write the settings back as though the
-        user had just picked something.
-        """
-        for key, row in self._model_rows.items():
-            current = (self._state.get_setting(key) or "").strip()
-            ids = [""] + [m.id for m in models]
-            labels = [self._model_default_labels[key]] + [m.display_name for m in models]
-            if current and current not in ids:
-                # A saved model the API no longer lists stays visible and
-                # selected rather than silently snapping to the default.
-                ids.append(current)
-                labels.append(current)
-            handler = self._model_handlers.get(key)
-            if handler is not None:
-                row.handler_block(handler)
-            row.set_model(Gtk.StringList.new(labels))
-            row.set_selected(ids.index(current))
-            if handler is not None:
-                row.handler_unblock(handler)
-            self._model_ids[key] = ids
-            if handler is None:
-                self._model_handlers[key] = row.connect(
-                    "notify::selected", self._on_model_row_changed, key
-                )
-
-    def _apply_model_status(self, count: int, fetched_at: float, failed: bool) -> None:
-        """Date the list under the Refresh button, and say when it's a fallback.
-
-        The row never just goes quiet: whenever the list on screen is the
-        product of a query that didn't answer, it says so and keeps naming the
-        list it fell back to and how old that is.
-
-        *failed* is `claudemodels.cache_failed()` at both call sites, not a
-        flag off whichever call got here. Opening the page onto a lapsed TTL
-        with the network down is the same broken as pressing Refresh with the
-        network down, and the row should read the same either way.
-        """
-        if fetched_at <= 0:
-            self._model_status_row.set_subtitle(
-                _("Couldn't reach Anthropic — offering the CLI's aliases (opus, sonnet, haiku)")
-            )
-            return
-        when = formatting.format_relative(
-            datetime.fromtimestamp(fetched_at, timezone.utc).isoformat()
-        )
-        if failed:
-            self._model_status_row.set_subtitle(
-                _("Couldn't reach Anthropic — still showing the list fetched {when}").format(when=when)
-            )
-        else:
-            self._model_status_row.set_subtitle(
-                _("{count} models, updated {when}").format(count=count, when=when)
-            )
-
-    def _on_refresh_models(self, _button: Gtk.Button) -> None:
-        """Query the API outright, cache and backoff ignored."""
-        self._model_refresh_btn.set_sensitive(False)
-        self._model_status_row.set_subtitle(_("Checking…"))
-
-        def work() -> None:
-            models = claudemodels.refresh_models()
-            GLib.idle_add(
-                done,
-                models,
-                claudemodels.cache_fetched_at(),
-                claudemodels.cache_failed(),
-                priority=GLib.PRIORITY_DEFAULT,
-            )
-
-        def done(
-            models: list[claudemodels.ClaudeModel], fetched_at: float, failed: bool
-        ) -> bool:
-            self._apply_model_rows(models or list(claudemodels.FALLBACK_MODELS))
-            self._apply_model_status(len(models), fetched_at, failed)
-            self._model_refresh_btn.set_sensitive(True)
-            return GLib.SOURCE_REMOVE
-
-        threading.Thread(target=work, name="prefs-models-refresh", daemon=True).start()
-
-    def _on_model_row_changed(self, row: Adw.ComboRow, _pspec, key: str) -> None:
-        ids = self._model_ids.get(key) or [""]
-        selected = row.get_selected()
-        if not 0 <= selected < len(ids):
-            return  # mid-repopulate; the pass that set it will restore the choice
-        self._state.set_setting(key, ids[selected])
+    def _on_model_row_changed(
+        self, row: Adw.ComboRow, _pspec, key: str, ids: list[str]
+    ) -> None:
+        self._state.set_setting(key, ids[row.get_selected()])
         self._on_change()
 
     def _on_pr_title_changed(self, row: Adw.SwitchRow, _pspec) -> None:

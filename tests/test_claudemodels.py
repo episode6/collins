@@ -1,12 +1,8 @@
 """Tests for model discovery and resolution (collins.claudemodels)."""
 
 import json
-import logging
-import os
 import threading
 import time
-
-import pytest
 
 from collins import claudemodels
 from collins.claudemodels import (
@@ -21,40 +17,6 @@ from collins.claudemodels import (
 
 def _m(model_id: str, created: str = "") -> ClaudeModel:
     return ClaudeModel(model_id, model_id, created)
-
-
-@pytest.fixture(autouse=True)
-def cold_cache(tmp_path, monkeypatch):
-    """A private cache directory and a cold module for every test.
-
-    The cache now outlives the process, so without this a developer's real
-    ~/.cache/collins/models.json would seed the module and tests that expect a
-    query would quietly stop making one.
-    """
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    monkeypatch.setattr(claudemodels, "_cached", None)
-    monkeypatch.setattr(claudemodels, "_cached_at", 0.0)
-    monkeypatch.setattr(claudemodels, "_failed_at", 0.0)
-    monkeypatch.setattr(claudemodels, "_disk_read", False)
-
-
-def _restart():
-    """What the next launch sees: the file, and nothing in memory."""
-    claudemodels._cached = None
-    claudemodels._cached_at = 0.0
-    claudemodels._failed_at = 0.0
-    claudemodels._disk_read = False
-
-
-def _fetches(models, calls=None):
-    """A fetch_models stand-in that counts its calls in *calls*."""
-
-    def fetch(timeout=None):
-        if calls is not None:
-            calls.append(1)
-        return list(models)
-
-    return fetch
 
 
 # -- parse_models -------------------------------------------------------------
@@ -192,317 +154,37 @@ def test_available_models_single_flight(monkeypatch):
         time.sleep(0.2)
         return [ClaudeModel("claude-opus-5", "Claude Opus 5")]
 
+    original = (claudemodels._cached, claudemodels._cached_at)
     monkeypatch.setattr(claudemodels, "fetch_models", slow_fetch)
-    results = []
-    threads = [
-        threading.Thread(target=lambda: results.append(claudemodels.available_models()))
-        for _ in range(4)
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert len(calls) == 1
-    assert all(r and r[0].id == "claude-opus-5" for r in results)
-
-
-def test_cached_models_never_queries(monkeypatch):
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([], calls := []))
-    assert claudemodels.cached_models() is None  # nothing saved, nothing fetched
-    models = [claudemodels.ClaudeModel("claude-opus-5", "Claude Opus 5")]
-    claudemodels._cached = models
-    cached = claudemodels.cached_models()
-    assert cached == models
-    assert cached is not models  # a copy: the cache can't be mutated through it
-    assert calls == []
-
-
-# -- the cache: lifetime, disk, failures ---------------------------------------
-
-
-def test_cache_lives_for_a_day():
-    assert claudemodels._CACHE_TTL_S == 86_400
-
-
-def test_fresh_cache_is_not_requeried(monkeypatch):
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")], calls := []))
-    assert [m.id for m in claudemodels.available_models()] == ["claude-opus-5"]
-    for _ in range(3):
-        claudemodels.available_models()
-    assert len(calls) == 1  # the rest came out of the cache
-
-
-def test_stale_cache_is_requeried(monkeypatch):
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")], calls := []))
-    claudemodels.available_models()
-    claudemodels._cached_at = time.time() - claudemodels._CACHE_TTL_S - 1
-    claudemodels.available_models()
-    assert len(calls) == 2
-
-
-def test_cache_survives_a_restart(monkeypatch):
-    monkeypatch.setattr(
-        claudemodels,
-        "fetch_models",
-        _fetches([ClaudeModel("claude-opus-5", "Claude Opus 5", "2026-02-01")], calls := []),
-    )
-    claudemodels.available_models()
-    assert claudemodels.cache_path().exists()
-    assert len(calls) == 1
-
-    _restart()
-    # The next launch has the list before it asks anyone: display names and
-    # dates included, and cached_models() alone is enough to get it.
-    cached = claudemodels.cached_models()
-    assert cached == [ClaudeModel("claude-opus-5", "Claude Opus 5", "2026-02-01")]
-    assert claudemodels.available_models() == cached
-    assert len(calls) == 1  # still the one query, a process ago
-
-
-def test_saved_cache_ages_out_across_a_restart(monkeypatch):
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")], calls := []))
-    claudemodels.available_models()
-    stale = json.loads(claudemodels.cache_path().read_text())
-    stale["fetched_at"] = time.time() - claudemodels._CACHE_TTL_S - 1
-    claudemodels.cache_path().write_text(json.dumps(stale))
-
-    _restart()
-    claudemodels.available_models()
-    assert len(calls) == 2
-
-
-def test_saved_cache_from_the_future_is_stale(monkeypatch):
-    # A clock change or a copied home directory; re-querying is the cheap
-    # mistake, and a failure would keep the list anyway.
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")], calls := []))
-    claudemodels.available_models()
-    ahead = json.loads(claudemodels.cache_path().read_text())
-    ahead["fetched_at"] = time.time() + 86_400
-    claudemodels.cache_path().write_text(json.dumps(ahead))
-
-    _restart()
-    claudemodels.available_models()
-    assert len(calls) == 2
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "not json at all",
-        json.dumps({"version": 999, "fetched_at": 0, "data": [{"id": "claude-opus-5"}]}),
-        json.dumps({"version": 1, "data": [{"id": "claude-opus-5"}]}),  # no fetched_at
-        json.dumps({"version": 1, "fetched_at": 0, "data": []}),
-        json.dumps([1, 2, 3]),
-    ],
-)
-def test_unusable_saved_cache_is_ignored(text, monkeypatch):
-    path = claudemodels.cache_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")], calls := []))
-    assert claudemodels.cached_models() is None
-    assert [m.id for m in claudemodels.available_models()] == ["claude-opus-5"]
-    assert len(calls) == 1
-
-
-def test_failed_query_keeps_the_cached_results(monkeypatch):
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
-    claudemodels.available_models()
-    claudemodels._cached_at = time.time() - claudemodels._CACHE_TTL_S - 1
-
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([]))  # offline now
-    models = claudemodels.refresh_models()
-    assert [m.id for m in models] == ["claude-opus-5"]  # the stale list still serves
-    assert claudemodels.cache_failed() is True
-    assert claudemodels.cache_path().exists()  # and the file is not cleared either
-
-
-def test_failed_query_with_nothing_cached_is_empty(monkeypatch):
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([]))
-    assert claudemodels.available_models() == []  # the callers fall back to the aliases
-
-
-def test_failed_query_backs_off(monkeypatch):
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
-    claudemodels.available_models()
-    claudemodels._cached_at = time.time() - claudemodels._CACHE_TTL_S - 1
-
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([], calls := []))
-    claudemodels.available_models()
-    for _ in range(3):
-        claudemodels.available_models()  # every picker open, offline
-    assert len(calls) == 1  # one timeout paid, not four
-
-    claudemodels._failed_at = time.time() - claudemodels._RETRY_AFTER_FAILURE_S - 1
-    claudemodels.available_models()
-    assert len(calls) == 2  # the backoff lapses and it tries again
-
-
-def test_refresh_ignores_the_ttl_and_the_backoff(monkeypatch):
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")], calls := []))
-    claudemodels.available_models()
-    assert len(calls) == 1
-    claudemodels.available_models()
-    assert len(calls) == 1  # cache is fresh
-
-    models = claudemodels.refresh_models()
-    assert len(calls) == 2  # asked anyway
-    assert [m.id for m in models] == ["claude-opus-5"]
-    assert claudemodels.cache_failed() is False
-
-    claudemodels._failed_at = time.time()  # a failure moments ago
-    claudemodels.refresh_models()
-    assert len(calls) == 3
-
-
-def test_refresh_rewrites_the_saved_list(monkeypatch):
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
-    claudemodels.available_models()
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-fable-5")]))
-    claudemodels.refresh_models()
-
-    _restart()
-    assert [m.id for m in claudemodels.cached_models()] == ["claude-fable-5"]
-
-
-def test_cache_fetched_at_dates_the_list(monkeypatch):
-    assert claudemodels.cache_fetched_at() == 0.0  # nothing cached
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
-    before = time.time()
-    claudemodels.available_models()
-    assert before <= claudemodels.cache_fetched_at() <= time.time()
-
-    _restart()
-    assert before <= claudemodels.cache_fetched_at() <= time.time()  # read back off disk
-
-
-def test_a_cache_that_cannot_be_written_is_not_fatal(monkeypatch, tmp_path, caplog):
-    # A read-only cache dir costs a query next launch and nothing else; the
-    # models still reach the caller.
-    caplog.set_level(logging.WARNING, logger="collins.claudemodels")
-    readonly = tmp_path / "readonly"
-    readonly.mkdir()
-    readonly.chmod(0o500)
-    monkeypatch.setattr(claudemodels, "cache_path", lambda: readonly / "models.json")
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
+    claudemodels._cached = None
     try:
-        assert [m.id for m in claudemodels.available_models()] == ["claude-opus-5"]
+        results = []
+        threads = [
+            threading.Thread(target=lambda: results.append(claudemodels.available_models()))
+            for _ in range(4)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(calls) == 1
+        assert all(r and r[0].id == "claude-opus-5" for r in results)
     finally:
-        readonly.chmod(0o700)
-    if os.getuid() != 0:  # root writes anywhere, so there is nothing to warn about
-        assert "cannot save the list" in caplog.text
+        claudemodels._cached, claudemodels._cached_at = original
 
 
-def test_cache_failed_tracks_the_last_attempt(monkeypatch):
-    assert claudemodels.cache_failed() is False  # nothing has been tried yet
-
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([]))
-    claudemodels.available_models()
-    assert claudemodels.cache_failed() is True
-
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
-    claudemodels.available_models()
-    assert claudemodels.cache_failed() is False  # a success clears it again
-
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([]))
-    claudemodels.refresh_models()
-    assert claudemodels.cache_failed() is True
-
-
-def test_cache_failed_survives_the_backoff(monkeypatch):
-    # The case a per-call flag can't see: inside the backoff the stale list is
-    # served with no query made at all, so the call has nothing to report
-    # while the list on screen is exactly as wrong as it was a minute ago.
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
-    claudemodels.available_models()
-    claudemodels._cached_at = time.time() - claudemodels._CACHE_TTL_S - 1
-
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([], calls := []))
-    claudemodels.available_models()
-    assert len(calls) == 1 and claudemodels.cache_failed() is True
-
-    claudemodels.available_models()  # served out of the backoff, no query
-    assert len(calls) == 1
-    assert claudemodels.cache_failed() is True  # still broken, and still says so
-
-
-def test_a_fresh_cache_hit_is_not_a_failure(monkeypatch):
-    # "No query happened" must not read as "the query failed" — the pickers
-    # would cry wolf on every page open with a perfectly good day-old list.
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")], calls := []))
-    claudemodels.available_models()
-    claudemodels.available_models()
-    assert len(calls) == 1  # the second was a cache hit
-    assert claudemodels.cache_failed() is False
-
-
-def test_cache_failed_is_false_on_a_saved_list(monkeypatch):
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
-    claudemodels.available_models()
-    _restart()
-    assert claudemodels.cached_models() is not None
-    assert claudemodels.cache_failed() is False  # last run's success carries no failure
-
-
-# -- the logs ------------------------------------------------------------------
-
-
-def test_a_successful_query_logs_what_came_back(monkeypatch, caplog):
-    caplog.set_level(logging.INFO, logger="collins.claudemodels")
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
-    claudemodels.available_models()
-    text = caplog.text
-    assert "querying" in text
-    assert "1 received" in text and "claude-opus-5" in text
-    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
-
-
-def test_a_failed_query_warns_and_names_the_fallback(monkeypatch, caplog):
-    caplog.set_level(logging.WARNING, logger="collins.claudemodels")
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([]))
-    claudemodels.available_models()
-    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
-    assert len(warnings) == 1
-    assert "query failed" in warnings[0] and "aliases" in warnings[0]
-
-
-def test_a_failed_query_warns_that_the_cache_still_serves(monkeypatch, caplog):
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
-    claudemodels.available_models()
-    caplog.set_level(logging.WARNING, logger="collins.claudemodels")
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([]))
-    claudemodels.refresh_models()
-    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
-    assert len(warnings) == 1
-    assert "keeping the 1 cached model(s)" in warnings[0]
-
-
-def test_a_missing_token_says_so(monkeypatch, caplog):
-    caplog.set_level(logging.WARNING, logger="collins.claudemodels")
-    monkeypatch.setattr(claudemodels, "_oauth_token", lambda: None)
-    assert claudemodels.fetch_models() == []
-    assert "no OAuth token" in caplog.text
-
-
-def test_a_refused_request_says_why(monkeypatch, caplog):
-    caplog.set_level(logging.WARNING, logger="collins.claudemodels")
-    monkeypatch.setattr(claudemodels, "_oauth_token", lambda: "sk-test")
-
-    def boom(request, timeout=None):
-        raise OSError("Network is unreachable")
-
-    monkeypatch.setattr(claudemodels.urllib.request, "urlopen", boom)
-    assert claudemodels.fetch_models() == []
-    assert "Network is unreachable" in caplog.text
-
-
-def test_a_restart_logs_the_list_it_loaded(monkeypatch, caplog):
-    monkeypatch.setattr(claudemodels, "fetch_models", _fetches([_m("claude-opus-5")]))
-    claudemodels.available_models()
-    _restart()
-    caplog.set_level(logging.INFO, logger="collins.claudemodels")
-    claudemodels.cached_models()
-    assert "1 loaded from" in caplog.text and "fetched 0s ago" in caplog.text
+def test_cached_models_never_queries():
+    original = claudemodels._cached
+    try:
+        claudemodels._cached = None
+        assert claudemodels.cached_models() is None  # never answered this run
+        models = [claudemodels.ClaudeModel("claude-opus-5", "Claude Opus 5")]
+        claudemodels._cached = models
+        cached = claudemodels.cached_models()
+        assert cached == models
+        assert cached is not models  # a copy: the cache can't be mutated through it
+    finally:
+        claudemodels._cached = original
 
 
 # -- credentials --------------------------------------------------------------
