@@ -482,16 +482,6 @@ class PreferencesDialog(Adw.Dialog):
         sessions_group.add(
             _searchable(self._attach_autodock_row, "images", "gallery", "dock")
         )
-        self._bg_poll_row = Adw.SwitchRow(
-            title=_("Poll for background sessions"),
-            subtitle=_(
-                "Fallback: check the agent CLI every 20 seconds in case the "
-                "yellow guide lines stop updating on their own"
-            ),
-        )
-        self._bg_poll_row.set_active(bool(state.get_setting("background_status_poll")))
-        self._bg_poll_row.connect("notify::active", self._on_bg_poll_changed)
-        sessions_group.add(self._bg_poll_row)
         self._progress_termprop_row = Adw.SwitchRow(
             title=_("Exact busy tracking from the agent"),
             subtitle=_(
@@ -503,6 +493,16 @@ class PreferencesDialog(Adw.Dialog):
         self._progress_termprop_row.set_active(bool(state.get_setting("progress_termprop")))
         self._progress_termprop_row.connect("notify::active", self._on_progress_termprop_changed)
         sessions_group.add(self._progress_termprop_row)
+        self._bg_poll_row = Adw.SwitchRow(
+            title=_("Poll for background sessions"),
+            subtitle=_(
+                "Fallback: check the agent CLI every 20 seconds in case the "
+                "yellow guide lines stop updating on their own"
+            ),
+        )
+        self._bg_poll_row.set_active(bool(state.get_setting("background_status_poll")))
+        self._bg_poll_row.connect("notify::active", self._on_bg_poll_changed)
+        sessions_group.add(self._bg_poll_row)
         page.add(sessions_group)
 
         composer_group = _SearchableGroup(title=_("Composer"))
