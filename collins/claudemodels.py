@@ -76,7 +76,12 @@ _TIERS = ("haiku", "sonnet", "opus", "fable", "mythos")
 # down to the smallest. A model whose id names none of these is an
 # unrecognized (so, newer) family — it sorts above them all, clustered with
 # its own kind. Distinct from `_TIERS`, which ranks by strength to pick a
-# default; this is only presentation.
+# default; this is only presentation, and the two are deliberately not kept
+# in step: `mythos` is a known-but-unreleased tier in `_TIERS`, and leaving it
+# out here is what lands it (and any genuinely new family) at the top as
+# "newer than anything we list" — the right place for it — via `_model_group`'s
+# unrecognized branch. Add a family here only once it should slot in *between*
+# the named four, not above them.
 _DISPLAY_ORDER = ("fable", "opus", "sonnet", "haiku")
 
 

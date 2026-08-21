@@ -662,8 +662,10 @@ def test_sort_orders_within_a_family_alphabetically():
 
 
 def test_sort_puts_unknown_families_on_top_clustered():
-    # A family the build doesn't know sorts above the known ones, and its
-    # models stay together rather than scattering.
+    # A family the build doesn't list in _DISPLAY_ORDER sorts above the named
+    # four, and its models stay together rather than scattering. `mythos` is
+    # deliberate: it's a known-but-unreleased tier in _TIERS yet absent from
+    # _DISPLAY_ORDER, so for display it's treated as a new family, on top.
     models = [
         _m("claude-opus-5"),
         _m("claude-mythos-6"),
