@@ -46,6 +46,7 @@ _TTL_S = prstatus._TTL_S
 _ERROR_TTL_S = prstatus._ERROR_TTL_S
 _SETTLED_TTL_S = prstatus._SETTLED_TTL_S
 _PROBE_S = prstatus._PROBE_S
+_BARE_WATCH_S = prstatus._BARE_WATCH_S
 HEAD = "271949c0f3b7a8d0e2c4b6a1f9e8d7c6b5a4f3e2"
 
 
@@ -103,10 +104,12 @@ def scheduled(monkeypatch):
     prstatus._statuses.clear()
     prstatus._inflight.clear()
     prstatus._probes.clear()
+    prstatus._bare.clear()
     yield urls
     prstatus._statuses.clear()
     prstatus._inflight.clear()
     prstatus._probes.clear()
+    prstatus._bare.clear()
 
 
 @pytest.fixture
@@ -432,6 +435,7 @@ def test_a_pr_with_running_checks_is_probed_between_fetches(scheduled, probed, c
     [
         _running(checks={"passed": 2, "failed": 0, "pending": 0}),  # nothing running
         _running(state="MERGED"),  # settled, whatever its checks say
+        _running(state="MERGED", checks={"passed": 0, "failed": 0, "pending": 0}),
         _running(state="CLOSED"),
         _running(head=None),  # a warm start: nothing to ask about
         None,  # a failed fetch
@@ -442,6 +446,73 @@ def test_only_a_live_pr_with_running_checks_is_probed(scheduled, probed, clock, 
     refresh(URL)
     enrich(parse_pr_link(_link()))
     assert probed == []
+
+
+def _bare(**overrides):
+    """A stored status for a live PR no check has registered on yet."""
+    return _running(checks={"passed": 0, "failed": 0, "pending": 0}, **overrides)
+
+
+def test_a_pr_with_no_checks_yet_is_probed_for_a_while(scheduled, probed, clock, gh):
+    """The page is usually opened right after a push, before any run has
+    registered — "no checks" means "not yet", and the probe is what sees
+    them arrive. A PR still bare a minute later is left to the full fetch."""
+    gh(_bare())
+    refresh(URL)
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL]
+    prstatus._inflight.clear()
+    prstatus._probes[URL] = (clock(), HEAD, 'W/"a"')
+    clock.advance(_BARE_WATCH_S - 1)
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL, URL]
+    prstatus._inflight.clear()
+    prstatus._probes[URL] = (clock(), HEAD, 'W/"a"')
+    clock.advance(_PROBE_S)  # past the watch now
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL, URL]
+
+
+def test_the_bare_watch_counts_from_the_first_bare_fetch(scheduled, probed, clock, gh):
+    """A refetch at the minute mark that still finds no checks doesn't start
+    the watch over — it has been bare since the first time."""
+    gh(_bare())
+    refresh(URL)
+    clock.advance(_BARE_WATCH_S - 5)
+    refresh(URL)  # still bare: the window is not re-armed
+    assert prstatus._bare[URL] == clock() - (_BARE_WATCH_S - 5)
+    clock.advance(5)
+    enrich(parse_pr_link(_link()))
+    assert probed == []
+
+
+def test_a_new_head_re_arms_the_bare_watch(scheduled, probed, clock, gh):
+    """A push is a fresh "not yet": its runs haven't registered either."""
+    gh(_bare())
+    refresh(URL)
+    clock.advance(_BARE_WATCH_S * 2)
+    gh(_bare(head="f" * 40))
+    refresh(URL)
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL]
+
+
+def test_checks_arriving_end_the_bare_watch(scheduled, clock, gh):
+    gh(_bare())
+    refresh(URL)
+    gh(_running())
+    refresh(URL)
+    assert URL not in prstatus._bare
+
+
+def test_the_refresh_button_re_arms_the_bare_watch(scheduled, probed, clock, gh):
+    gh(_bare())
+    refresh(URL)
+    clock.advance(_BARE_WATCH_S * 2)
+    invalidate(URL)
+    refresh(URL)  # what the poll after the click does
+    enrich(parse_pr_link(_link()))
+    assert probed == [URL]
 
 
 def test_a_due_fetch_outranks_a_probe(scheduled, probed, clock, gh):

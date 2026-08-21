@@ -108,10 +108,12 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   the page at all; never a pixel out of the terminal, and decided before the
   page's first fetch lands, so it doesn't resize under its own data.
 - **Running checks are followed, not waited for.** While a PR you're
-  looking at has checks in progress, Collins asks GitHub every ten seconds
-  whether its head commit's check-runs changed — a conditional request that
-  comes back as an empty, rate-limit-free `304` until one does — and fetches
-  the full status the moment they do, instead of at the next minute mark.
+  looking at has checks in progress — or none yet, for the first minute
+  after it was opened fresh off a push — Collins asks GitHub every ten
+  seconds whether its head commit's check-runs changed — a conditional
+  request that comes back as an empty, rate-limit-free `304` until one does
+  — and fetches the full status the moment they do, instead of at the next
+  minute mark.
   Marks, chips and the PR page itself all update on the spot (the page
   re-reads when it's on screen). Merged and closed PRs are now refetched
   every ten minutes rather than every one.

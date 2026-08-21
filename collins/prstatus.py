@@ -108,6 +108,11 @@ _SETTLED_TTL_S = 600
 # doesn't count against the rate limit — so this can be much shorter than
 # `_TTL_S` without `gh` becoming a load.
 _PROBE_S = 10
+# How long a live PR with *no* checks at all is probed the same way. The page
+# is usually opened on the heels of a push, before any run has registered,
+# and "no checks" then means "not yet" — for a while. A PR that still has
+# none after this long most likely never will, and is left to the full fetch.
+_BARE_WATCH_S = 60
 _GH_TIMEOUT_S = 10
 # A status fetch is one of many and nobody is waiting on any single one; an
 # action the user picked from a menu is one call they are waiting for, and
@@ -216,6 +221,9 @@ _inflight: set[str] = set()
 # url -> (probed-at, head commit, ETag of that head's check-runs or None):
 # what the last probe learned, so the next one can ask "anything new?"
 _probes: dict[str, tuple[float, str, str | None]] = {}
+# url -> when a fetch first found the PR live with no checks on its current
+# head (see `_BARE_WATCH_S`); dropped once it has some, or moves its head.
+_bare: dict[str, float] = {}
 _gh_missing = False  # gh isn't on PATH; nothing to retry against this run
 _viewer = ""  # the signed-in login, once asked for; "" until then (viewer_login)
 # Told which URL whenever what `_statuses` holds for it changes (see
@@ -1110,8 +1118,21 @@ def _put(url: str, entry: dict | None) -> bool:
     included.
     """
     stamped = _statuses.get(url)
+    before = stamped[1] if stamped else None
     _statuses[url] = (_now(), entry)
-    return (stamped[1] if stamped else None) != entry
+    if not _is_bare(entry):
+        _bare.pop(url, None)
+    elif url not in _bare or (before or {}).get("head") != entry.get("head"):
+        _bare[url] = _now()  # first seen bare, or bare again on a new head
+    return before != entry
+
+
+def _is_bare(entry: dict | None) -> bool:
+    """Whether *entry* is a live PR with no checks at all — probably not yet."""
+    if not isinstance(entry, dict) or entry.get("state") not in ("OPEN", "DRAFT"):
+        return False
+    checks = entry.get("checks")
+    return all(_count(checks, key) == 0 for key in ("passed", "failed", "pending"))
 
 
 def refresh(url: str) -> None:
@@ -1139,7 +1160,8 @@ def _schedule(url: str) -> None:
 def probe(url: str) -> None:
     """Ask whether *url*'s running checks moved, and fetch in full if they did.
 
-    The between-fetches path for a PR with pending checks (see `_watched`):
+    The between-fetches path for a PR with pending checks, or none yet (see
+    `_watched`):
     one conditional request for its head commit's check-runs, carrying the
     ETag the last probe was answered with. GitHub answers a ``304`` while
     nothing changed — a reply that costs no rate limit and carries no body —
@@ -1264,23 +1286,29 @@ def _ttl(entry: dict | None) -> float:
     return _SETTLED_TTL_S if entry.get("state") in ("MERGED", "CLOSED") else _TTL_S
 
 
-def _watched(entry: dict | None) -> bool:
-    """Whether *entry* is a live PR with checks still running — one worth probing.
+def _watched(url: str, entry: dict | None) -> bool:
+    """Whether *entry* is a live PR whose checks are worth probing (caller holds `_lock`).
 
-    Needs a head to ask about, too: a warm start from the CLI's cache has
-    none, and is left to the full fetch that replaces it within the minute.
+    Checks still running, or — for `_BARE_WATCH_S` after a fetch first found
+    it so — no checks yet: a page opened right after a push sees an empty
+    rollup for the first seconds, and the probe is what notices the runs
+    arriving. Needs a head to ask about, too: a warm start from the CLI's
+    cache has none, and is left to the full fetch that replaces it within the
+    minute.
     """
-    return (
-        isinstance(entry, dict)
-        and entry.get("state") in ("OPEN", "DRAFT")
-        and bool(_count(entry.get("checks"), "pending"))
-        and isinstance(entry.get("head"), str)
-    )
+    if not isinstance(entry, dict) or entry.get("state") not in ("OPEN", "DRAFT"):
+        return False
+    if not isinstance(entry.get("head"), str):
+        return False
+    if _count(entry.get("checks"), "pending"):
+        return True
+    since = _bare.get(url)
+    return since is not None and _now() - since < _BARE_WATCH_S
 
 
 def _probe_due(url: str, entry: dict | None) -> bool:
     """Whether *url* is worth a probe now (caller holds `_lock`)."""
-    if not _watched(entry):
+    if not _watched(url, entry):
         return False
     probed = _probes.get(url)
     return probed is None or _now() - probed[0] >= _PROBE_S
@@ -1299,6 +1327,9 @@ def invalidate(url: str) -> None:
         stamped = _statuses.get(url)
         if stamped is not None:
             _statuses[url] = (_DUE, stamped[1])
+        # And the no-checks-yet watch starts over with the fetch that follows:
+        # the click says "look again", which is what that watch is.
+        _bare.pop(url, None)
 
 
 def _newest(entries: object) -> dict | None:
