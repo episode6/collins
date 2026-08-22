@@ -43,6 +43,24 @@ upload per Ubuntu series to `ppa:episode6/stable`. Agent skills in
   version the archive already has — but treat every version number as
   single-use anyway.
 
+## Changelogs
+
+Collins keeps **three** changelogs, each read by a different audience, and a
+release is not finalized until all three describe it. (Consolidating them
+into one source is a future project; until then, every step below that says
+"the changelogs" means all of these.)
+
+| File | Who reads it | What goes in it |
+| --- | --- | --- |
+| `docs/releases.md` | The GitHub release page (the `### v<VERSION>` section becomes the release notes verbatim) and the docs site | Full notes: every user-visible change since the last release, in prose |
+| `debian/changelog` | `apt changelog collins`, the Launchpad PPA page, and the `.deb`'s `changelog.gz` | One `*` bullet per headline change, condensed — packaging changes first, then features and fixes |
+| `data/com.episode6.Collins.metainfo.xml` | GNOME Software and other AppStream software centers, via the `<release>` entry's `<description>` | A one-paragraph summary and a short `<ul>` of the headline changes |
+
+Mismatched versions are caught by CI (`scripts/verify_versions.py`), but
+nothing checks that the notes themselves are complete — before finalizing,
+list the PRs merged since the last release (`gh pr list --state merged
+--search "merged:>YYYY-MM-DD"`) and check each one is reflected in all three.
+
 ## Cut new Release Branch
 
 1. Ensure the `main` branch is green (CI + e2e).
@@ -65,19 +83,23 @@ Create 2 PRs (as drafts, per repo convention):
       `dch -v <NEXT_VERSION> -D UNRELEASED` (or by hand, matching the existing
       entries).
     - `docs/releases.md`: add a new `### v<NEXT_VERSION> — UNRELEASED` section
-      atop the changelog, and give the outgoing `v<VERSION>` section its ship
-      date (`### v<VERSION> — YYYY-MM-DD`) and complete notes (this section becomes the GitHub release
-      notes).
-    - Mirror the outgoing release into the released-version files so main's
-      copies stay current once it ships: add the `<release
-      version="<VERSION>" date="...">` entry to the metainfo (date = the
-      planned ship date), and set the AUR `pkgver` to `<VERSION>` in
-      `PKGBUILD` + `.SRCINFO` (sha256 gets refreshed after the tag exists —
-      see `packaging/aur/README.md`).
+      atop the changelog.
+    - Finalize the outgoing `v<VERSION>` in **all three changelogs** (see
+      Changelogs above): the `docs/releases.md` section gets its ship date
+      (`### v<VERSION> — YYYY-MM-DD`) and complete notes; the `debian/changelog`
+      `<VERSION>` entry gets a bullet per headline change, not just the
+      packaging ones; and the metainfo gets a `<release version="<VERSION>"
+      date="...">` entry (date = the planned ship date) with a `<description>`
+      summarizing the release.
+    - Mirror the outgoing release into the AUR files so main's copies stay
+      current once it ships: set `pkgver` to `<VERSION>` in `PKGBUILD` +
+      `.SRCINFO` (sha256 gets refreshed after the tag exists — see
+      `packaging/aur/README.md`).
 - `[VERSION] Release v<VERSION>` points at the new release branch
-    - Make the same outgoing-release edits as above: finalize the
-      `docs/releases.md` section (ship date in the heading, all changes since
-      the last release documented), metainfo `<release>` entry, AUR `pkgver`.
+    - Make the same outgoing-release edits as above: finalize all three
+      changelogs for `v<VERSION>` (ship date in the `docs/releases.md`
+      heading, every change since the last release in each), and the AUR
+      `pkgver`.
     - Verify `pyproject.toml` / `__init__.py` / `debian/changelog` already
       agree on `<VERSION>` — no version change expected; main carried the
       right version at cut time.
@@ -121,9 +143,10 @@ Create 2 PRs (as drafts, per repo convention):
 - All fixes (including hotfixes) land on `main` first whenever possible and
   are cherry-picked onto the release branch (via PR).
 - A hotfix needs its own version bump PR on the release branch: append or
-  increment the fourth version segment (`0.1.1` → `0.1.1.1` → `0.1.1.2`), add
-  the `debian/changelog` entry, and give `docs/releases.md` a
-  `### v<HOTFIX_VERSION>` section plus the metainfo/AUR updates. No
+  increment the fourth version segment (`0.1.1` → `0.1.1.1` → `0.1.1.2`) and
+  describe the hotfix in all three changelogs — a `debian/changelog` entry, a
+  `### v<HOTFIX_VERSION>` section in `docs/releases.md`, and a metainfo
+  `<release>` entry with a description — plus the AUR `pkgver`. No
   coordination with `main` is needed — its next-release version already
   outranks any hotfix of the previous release — but cherry-pick the docs
   updates back so main's history stays complete.
