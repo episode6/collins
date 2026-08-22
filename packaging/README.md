@@ -98,9 +98,8 @@ series:
    explicitly; `--series` accepts only the supported series above, so a typo
    fails immediately rather than after an upload round trip.
 
-   (Requires `build-essential debhelper dh-python pybuild-plugin-pyproject devscripts
-   dput` and
-   the signing key in the keyring.)
+   (Requires `build-essential devscripts dput debhelper dh-python
+   pybuild-plugin-pyproject python3-all` and the signing key in the keyring.)
 
 Launchpad emails an acceptance notice, then builds and publishes the `.deb`.
 Expect minutes to hours in the build queue, plus ~20 minutes for the publisher.
