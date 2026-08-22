@@ -129,6 +129,13 @@ Create 2 PRs (as drafts, per repo convention):
    - uploads a signed source package per Ubuntu series (noble, resolute) to
      `ppa:episode6/stable` — Launchpad then builds and publishes the binaries
      (minutes to hours in the queue, plus ~20 minutes for the publisher).
+   CI's `ppa-source` job rehearses the source build unsigned on every PR, so
+   a runner-side failure should already have surfaced before the tag.
+   If a `ppa` job fails for a reason fixed in the workflow itself, the tag's
+   run cannot pick the fix up (it is frozen on the file as of the tag): land
+   the fix on the release branch and dispatch it for the tag —
+   `gh workflow run release.yml --ref release/v<X> -f tag=v<VERSION>`. The
+   already-in-the-PPA guard makes this safe to repeat.
 3. Verify: the `.deb` is attached and carries the right version; Launchpad
    sends an acceptance email per series and the builds go green; `apt install
    collins` from the PPA on a covered series picks up the new version.

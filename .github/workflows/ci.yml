@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-22. Full change history: git log for this file.
 
 name: CI
 
@@ -46,9 +46,41 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: pip install --quiet build
+      - run: pip install --quiet build twine
       - run: python -m build
+      # What PyPI would reject at upload time (metadata, long_description).
+      - run: twine check --strict dist/*
       - run: python3 scripts/verify_wheel_data.py
+      - run: ./scripts/build_deb.sh
+
+  # Everything release.yml's ppa job does short of signing and uploading, on
+  # the same runner image with the same apt list -- so a build-dep the runner
+  # lacks fails a PR here, not the release. v0.1.1's upload died in
+  # dpkg-checkbuilddeps (no build-essential) with the tag already published.
+  # Keep the package list in step with release.yml.
+  ppa-source:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        series: [noble, resolute]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential devscripts dput debhelper dh-python \
+            pybuild-plugin-pyproject python3-all
+      - name: Build the source package, unsigned
+        run: packaging/build-ppa-source.sh --series '${{ matrix.series }}' -- -us -uc
+      - name: The upload set is complete
+        run: |
+          cd "/tmp/collins-ppa/${{ matrix.series }}"
+          ls -l
+          test -f collins_*~${{ matrix.series }}1_source.changes
+          test -f collins_*~${{ matrix.series }}1.dsc
+          test -f collins_*~${{ matrix.series }}1.tar.xz
 
   # Every committed copy of the version must agree (see RELEASE_CHECKLIST.md);
   # scripts/ship-release.py re-checks the same invariants at ship time.
