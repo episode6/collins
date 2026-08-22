@@ -54,6 +54,8 @@ Features:
 
 ### Keyboard shortcuts
 
+All rebindable from the sidebar menu → *Keyboard Bindings*. The defaults:
+
 | Shortcut | Action |
 |---|---|
 | `Ctrl+Shift+T` | New session |

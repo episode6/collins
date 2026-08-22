@@ -29,7 +29,15 @@ except (ValueError, ImportError):
         "and relaunch."
     ) from None
 
-from . import animatedimage, dialogs, editorfiles, fileclipboard, paneldnd  # noqa: E402
+from . import (  # noqa: E402
+    animatedimage,
+    dialogs,
+    editorfiles,
+    fileclipboard,
+    keybindings,
+    keymap,
+    paneldnd,
+)
 from .filetree import FileTree  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 
@@ -225,15 +233,20 @@ class EditorPane(Gtk.Box):
         self._view_extra_menu = Gio.Menu()
         self._view_extra_menu.append(_("Add to chat"), "editor.add-to-chat")
 
-        controller = Gtk.ShortcutController()
-        controller.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
-        for trigger, action in (("<Control>s", "editor.save"), ("<Control>f", "editor.find")):
-            controller.add_shortcut(
-                Gtk.Shortcut.new(
-                    Gtk.ShortcutTrigger.parse_string(trigger), Gtk.NamedAction.new(action)
-                )
-            )
-        self.add_controller(controller)
+        # The `editor.*` chords; rebuilt by apply_keybindings when the
+        # Keyboard Bindings dialog changes them.
+        self._shortcut_controller: Gtk.ShortcutController | None = None
+        self.apply_keybindings(keybindings.current())
+
+    def apply_keybindings(self, custom) -> None:
+        """Bind the editor's chords from the keybindings catalogue with
+        *custom* (the "keybindings" setting) applied."""
+        if self._shortcut_controller is not None:
+            self.remove_controller(self._shortcut_controller)
+        self._shortcut_controller = keymap.shortcut_controller(
+            custom, "editor", Gtk.PropagationPhase.BUBBLE
+        )
+        self.add_controller(self._shortcut_controller)
 
     # -- tab-bar double-click ------------------------------------------------
 
@@ -1328,6 +1341,7 @@ class EditorPane(Gtk.Box):
         opened.font_provider = provider
 
     def apply_settings(self, settings: dict) -> None:
+        self.apply_keybindings(settings.get(keybindings.SETTING))
         self._style_scheme_setting = settings.get("editor_style_scheme") or ""
         self._show_line_numbers = bool(settings.get("editor_show_line_numbers", True))
         self._font = settings.get("editor_font") or ""

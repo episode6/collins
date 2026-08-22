@@ -31,6 +31,8 @@ from . import (
     desktopentry,
     dialogs,
     footerapps,
+    keybindings,
+    keymap,
     mcptools,
     openwith,
     paneldnd,
@@ -75,6 +77,7 @@ from .formatting import blast_radius_body
 from .ghwelcome import command_row
 from .gitinfo import github_url, has_changes
 from .i18n import _
+from .keybindingsdialog import KeyboardBindingsDialog
 from .licenses import legal_sections
 from .models import SessionItem
 from .prefs import PreferencesDialog
@@ -1192,6 +1195,7 @@ class MainWindow(Adw.ApplicationWindow):
             "new-session": lambda *_: self._new_session(),
             "new-session-in-chats": lambda *_: self._new_session_in_chats(),
             "preferences": lambda *_: self._show_preferences(),
+            "keyboard-bindings": lambda *_: self._show_keyboard_bindings(),
             "mcp-servers": lambda *_: dialogs.mcp_browser_dialog(self),
             # No default accelerator: Ctrl+K is the keyboard way to a session
             # and Ctrl+Shift+F is held back for a future session-content
@@ -1390,45 +1394,57 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.refresh_pull_requests()
 
     def _install_shortcuts(self) -> None:
-        controller = Gtk.ShortcutController()
-        controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        for trigger, action in (
-            ("<Control><Shift>t", "win.new-session"),
-            ("<Control>w", "win.close-tab"),
-            ("<Control>Page_Down", "win.next-tab"),
-            ("<Control>Page_Up", "win.prev-tab"),
-            ("<Control>comma", "win.preferences"),
-            ("<Control><Shift>a", "win.archive-current-session"),
-            ("<Control><Shift>z", "win.undo-archive"),
-            ("<Control>k", "win.quick-switch"),
-            ("<Control><Shift>e", "win.toggle-tab-emoji"),
-            ("<Control>j", "win.toggle-panel"),
-            ("<Control><Shift>k", "win.clear-panel"),
-            # Punctuation on purpose: every Ctrl+letter this controller
-            # claims is one the agent's own input box never sees again, and
-            # none of these sends a byte a terminal app would have wanted.
-            # Ctrl+L is the input box's clear-screen, so the run of panel
-            # chords (J toggles, Shift+K clears) carries on at the next free
-            # key along instead; plain Ctrl+K is the quick switcher. Period
-            # and apostrophe are neighbours because what they raise is: the
-            # composer and the gallery of what this session has been shown
-            # are the same gesture, the tab's two overlays over the terminal.
-            ("<Control>period", "win.toggle-composer"),
-            ("<Control>apostrophe", "win.toggle-attachments"),
-            ("<Control>semicolon", "win.rotate-panel-page"),
-            # The function keys are the surfaces: what the window can put in
-            # front of you, in the order they sit beside the terminal.
-            ("F9", "win.toggle-sidebar"),
-            ("F8", "win.toggle-editor"),
-            ("F7", "win.open-pr-page"),
-            ("<Control><Shift>o", "win.quick-open"),
-        ):
-            controller.add_shortcut(
-                Gtk.Shortcut.new(
-                    Gtk.ShortcutTrigger.parse_string(trigger), Gtk.NamedAction.new(action)
-                )
-            )
-        self.add_controller(controller)
+        """The window's `win.*` chords, from the keybindings catalogue with
+        the user's overrides applied. Capture phase, so a chord the window
+        claims never reaches a terminal: every Ctrl+letter bound here is one
+        the agent's own input box never sees again. The defaults' reasoning
+        — punctuation for the panel chords because Ctrl+L is the input box's
+        clear-screen, function keys for the surfaces beside the terminal —
+        is in keybindings.BINDINGS, next to the chords themselves.
+        """
+        self._shortcut_controller = keymap.shortcut_controller(
+            self.state.get_setting(keybindings.SETTING), "win", Gtk.PropagationPhase.CAPTURE
+        )
+        self.add_controller(self._shortcut_controller)
+
+    def reinstall_shortcuts(self) -> None:
+        """Rebuild the window's chords after the keybindings setting changed
+        (see CollinsApp.apply_keybindings). The editor and terminal chords
+        live on the tabs and follow through apply_settings."""
+        self.remove_controller(self._shortcut_controller)
+        self._install_shortcuts()
+
+    def _suspend_shortcuts(self, suspended: bool) -> None:
+        """Take every chord off while the Keyboard Bindings dialog records
+        one — the capture dialog sits inside this window, and Ctrl+W has to
+        arrive there as a key, not as close-tab. The application's table
+        goes too: Ctrl+Q should be recordable, not acted on."""
+        app = self.get_application()
+        if suspended:
+            self.remove_controller(self._shortcut_controller)
+            for action in keybindings.BY_ACTION:
+                if action.startswith("app."):
+                    app.set_accels_for_action(action, [])
+        else:
+            self.add_controller(self._shortcut_controller)
+            keymap.apply_app_accels(app, self.state.get_setting(keybindings.SETTING))
+
+    def _show_keyboard_bindings(self) -> None:
+        KeyboardBindingsDialog(
+            self.state, self._apply_keybindings, self._suspend_shortcuts
+        ).present(self)
+
+    def _apply_keybindings(self) -> None:
+        # Through the app, which re-applies to every window; hasattr rather
+        # than isinstance because window.py can't import App (app.py
+        # imports this module) — the same shape as _apply_preferences.
+        app = self.get_application()
+        if hasattr(app, "apply_keybindings"):
+            app.apply_keybindings()
+        else:
+            keybindings.set_current(self.state.get_setting(keybindings.SETTING))
+            self.reinstall_shortcuts()
+        self._apply_settings_to_tabs()
 
     # -- sidebar signal handlers -------------------------------------------------
 

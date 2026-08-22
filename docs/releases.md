@@ -57,6 +57,14 @@ channel for Debian and the rest of its family, and it stays. It adds no
 apt source, so it does not update itself; watch the releases page. Debian 13
 (trixie) and newer have everything Collins needs.
 
+- **Every keyboard shortcut is rebindable.** The sidebar menu's new
+  *Keyboard Bindings* dialog lists each of them, grouped; click a row and
+  press the new chord and it is live in every window and tab at once.
+  Backspace unbinds, a chord another action holds can be moved over, and
+  each changed row — or all of them — resets to its default. The terminal's
+  copy/paste/find/zoom keys and Shift+Enter are included, as are a few
+  actions that ship without a key (search sessions, swap the panel's sides,
+  focus the editor). Stored under `settings.keybindings` in `state.json`.
 - **`Ctrl+Shift+F` no longer opens the sidebar search.** `Ctrl+K` (the
   quick switcher) is the keyboard way to reach a session; the sidebar's
   search button still works, and the chord is held back for a future

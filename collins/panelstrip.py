@@ -44,7 +44,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import dialogs, paneldnd  # noqa: E402
+from . import dialogs, keybindings, paneldnd  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 
 
@@ -145,7 +145,9 @@ class PanelStrip(Gtk.Box):
         max_btn.connect("clicked", lambda *_: self.maximize_selected())
         rotate_btn = Gtk.Button(icon_name="object-rotate-right-symbolic")
         rotate_btn.add_css_class("flat")
-        rotate_btn.set_tooltip_text(_("Move this tab to the other side (Ctrl+;)"))
+        rotate_btn.set_tooltip_text(
+            keybindings.with_hint(_("Move this tab to the other side"), "win.rotate-panel-page")
+        )
         rotate_btn.connect("clicked", lambda *_: self.rotate_selected())
         end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         end_box.append(add_btn)

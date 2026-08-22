@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-20. Full change history: git log for this file.
+# fork. Last modified: 2026-08-21. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -30,6 +30,8 @@ from . import (
     desktopentry,
     editorfiles,
     ghwelcome,
+    keybindings,
+    keymap,
     mcpserver,
     mcptools,
     proctree,
@@ -1405,12 +1407,13 @@ class App(Adw.Application):
         new_window = Gio.SimpleAction.new("new-window", None)
         new_window.connect("activate", lambda *_: self._new_window())
         self.add_action(new_window)
-        self.set_accels_for_action("app.new-window", ["<Control><Shift>n"])
 
         quit_action = Gio.SimpleAction.new("quit", None)
         quit_action.connect("activate", lambda *_: self.quit_all_windows())
         self.add_action(quit_action)
-        self.set_accels_for_action("app.quit", ["<Control>q"])
+        # The accelerators for both, and every window's, come from the
+        # keybindings catalogue with the user's overrides applied.
+        self.apply_keybindings()
 
         # The status icon's "give me my app back", as an action, so anything
         # that isn't the icon — the first-hide notification, today — can offer
@@ -1496,6 +1499,18 @@ class App(Adw.Application):
         return self._tray_host_present
 
     # -- quitting ------------------------------------------------------------
+
+    def apply_keybindings(self) -> None:
+        """Put the "keybindings" setting into force everywhere: the
+        application accelerator table, every window's shortcut controller,
+        and the hint the tooltips quote. Called at launch and after the
+        Keyboard Bindings dialog saves."""
+        custom = self.state.get_setting(keybindings.SETTING)
+        keybindings.set_current(custom)
+        keymap.apply_app_accels(self, custom)
+        for window in self.get_windows():
+            if isinstance(window, MainWindow):  # editor windows have no win.* chords
+                window.reinstall_shortcuts()
 
     def quit_all_windows(self) -> None:
         """app.quit: close every main window the way its own close button

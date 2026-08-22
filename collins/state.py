@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-20. Full change history: git log for this file.
+# fork. Last modified: 2026-08-21. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -48,6 +48,10 @@ def _migrate_old_config() -> None:
 
 DEFAULT_SETTINGS = {
     "font": "",  # empty = VTE default
+    # Rebound shortcuts: action name → list of GTK accelerator strings
+    # (empty = unbound); an action not listed keeps its default. The
+    # catalogue of actions and defaults is keybindings.BINDINGS.
+    "keybindings": {},
     "scrollback": 10_000,
     "color_scheme": "system",  # system | light | dark
     "terminal_theme": "Default",  # VTE color palette (see themes.py)
