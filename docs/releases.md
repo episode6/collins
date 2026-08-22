@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-21. Full change history: git log for this file.
+fork. Last modified: 2026-08-22. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -37,7 +37,11 @@ downloads of each version, see the
 
 ## Changelog
 
-### v0.1.1 — UNRELEASED
+### v0.1.2 — UNRELEASED
+
+_Nothing yet._
+
+### v0.1.1 — 2026-08-22
 
 Collins is now installable from an apt repository:
 
@@ -150,6 +154,32 @@ apt source, so it does not update itself; watch the releases page. Debian 13
   session's transcript, which has the link unwrapped, and opens it when the
   rows around the click spell that link out. Finished turns only; a link
   still streaming in keeps the screen-only behaviour.
+- **The Files view shows a changed image as an image.** A PR page's file
+  list used to say `Binary files differ` for a picture and print path data
+  for an SVG; now `.png`, `.svg`, `.gif`, `.jpg`, `.webp` and friends render
+  on a transparency checkerboard — before beside after for a modified file,
+  a click opening the lightbox at full size — with an SVG's real patch kept
+  under its preview. *Show embedded images* off restores the plain patch
+  and downloads nothing.
+- **The model list is cached for a day, and across restarts** — saved to
+  `~/.cache/collins/models.json`, so the first picker of a run opens on real
+  models instead of the CLI's aliases and a network wait. A failed query
+  never evicts the last good list, and a *Model list* row in Preferences
+  dates it and refreshes it on demand. A one-model answer is served but
+  expires at once, so a cut-short page never sits in the pickers all day.
+  The pickers also **group the catalog by family** — any newer,
+  unrecognized tier first, then Fable, Opus, Sonnet, Haiku — so like sits
+  with like.
+- **The composer's spell-check menu aims at the word you clicked.**
+  libspelling builds its corrections from the insertion cursor and GTK4's
+  right-click never moved it, so the menu offered fixes for wherever the
+  caret was parked — usually the end of what you just typed. The click now
+  moves the cursor first, the way gspell did.
+- **A notification comes down when what it says stops being true.** The
+  first-hide notice is withdrawn when Collins is brought back by any route,
+  and a `notify_user` banner goes away with its session's unread flag —
+  so Ubuntu Dock's notification counter stops badging the launcher with a
+  `1` nobody can find.
 - **Fixes** — archiving a session clears its notification and unread count;
   the status icon's menu no longer draws a stray "Quit" on a separator; a
   click in the empty gutter beside a width-limited terminal clears the

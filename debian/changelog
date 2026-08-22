@@ -1,3 +1,9 @@
+collins (0.1.2) UNRELEASED; urgency=medium
+
+  * Next development version.
+
+ -- Geoff Hackett <ghackett@episode6.com>  Sat, 22 Aug 2026 08:26:06 -0400
+
 collins (0.1.1) UNRELEASED; urgency=medium
 
   * Collins is now published to ppa:episode6/stable, for Ubuntu 24.04 (noble)
@@ -12,6 +18,31 @@ collins (0.1.1) UNRELEASED; urgency=medium
   * libspelling is optional now (Depends -> Recommends): without it the
     prompt composer is a plain text box instead of refusing to launch the
     app.
+  * Every keyboard shortcut is rebindable from a Keyboard Bindings dialog in
+    the sidebar menu; Ctrl+K is the quick switcher, Ctrl+Shift+K clears the
+    terminal panel, and Ctrl+Shift+F no longer opens the sidebar search.
+  * Close can hide the window and keep every session running; the status
+    icon, a notification, or relaunching brings it back.
+  * Collins is on PyPI as plain "collins", and the sidebar menu offers the
+    Ubuntu PPA to an install that didn't come from it.
+  * Session tools: start_session takes a model, and a spawned sibling
+    inherits the caller's model and permission mode.
+  * Generate Icon picks its model per run; the model list is cached for a
+    day and across restarts, with a Refresh row in Preferences, and the
+    pickers group it by family.
+  * The project row's menu pulls its branch; the composer opens on typing by
+    default and never loses a draft; its spell-check menu aims at the word
+    you clicked.
+  * PR pages open wider when the gutter is free, render changed images as
+    images, and follow running checks with free conditional requests instead
+    of waiting for the next minute.
+  * Ctrl+click finishes a wrapped link from the transcript when the screen
+    can't.
+  * Preferences regrouped into ten groups; notifications withdraw themselves
+    when what they say stops being true.
+  * Fixes: archiving clears a session's notification and unread count; the
+    status icon's menu no longer draws "Quit" on a separator; a click in the
+    gutter beside a width-limited terminal focuses it and clears unread.
 
  -- Geoff Hackett <ghackett@episode6.com>  Tue, 18 Aug 2026 07:21:01 -0400
 
