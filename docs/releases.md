@@ -37,6 +37,10 @@ downloads of each version, see the
 
 ## Changelog
 
+### v0.1.2 — UNRELEASED
+
+_Nothing yet._
+
 ### v0.1.1 — 2026-08-22
 
 Collins is now installable from an apt repository:
