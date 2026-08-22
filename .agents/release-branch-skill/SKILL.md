@@ -55,14 +55,24 @@ Create two separate Pull Requests (as drafts, per repo convention).
       by hand matching the existing entries — author line
       `Geoff Hackett <ghackett@episode6.com>`).
     - **(VITAL)** In `docs/releases.md`: add a new
-      `### v<NEXT_VERSION> — UNRELEASED` section atop the Changelog, and give
-      the outgoing `v<VERSION>` section its ship date (`### v<VERSION> —
-      YYYY-MM-DD`, replacing `UNRELEASED`) and complete notes — that section becomes the GitHub
-      release notes verbatim.
-    - Mirror the outgoing release into the released-version files: add a
-      `<release version="<VERSION>" date="<planned ship date>">` entry atop
-      the `<releases>` list in `data/com.episode6.Collins.metainfo.xml`, and
-      set `pkgver=<VERSION>` in `packaging/aur/PKGBUILD` + the matching
+      `### v<NEXT_VERSION> — UNRELEASED` section atop the Changelog.
+    - **(VITAL)** Finalize the outgoing `v<VERSION>` in **all three
+      changelogs** (the checklist's Changelogs section lists them and their
+      audiences). First list the PRs merged since the last release
+      (`gh pr list --state merged --search "merged:>YYYY-MM-DD"`) and check
+      each is reflected in every one:
+        - `docs/releases.md`: the `v<VERSION>` section gets its ship date
+          (`### v<VERSION> — YYYY-MM-DD`, replacing `UNRELEASED`) and complete
+          notes — that section becomes the GitHub release notes verbatim.
+        - `debian/changelog`: the `<VERSION>` entry gets a condensed `*`
+          bullet per headline change (packaging first, then features and
+          fixes) — it is what `apt changelog` and the PPA page show.
+        - `data/com.episode6.Collins.metainfo.xml`: a
+          `<release version="<VERSION>" date="<planned ship date>">` entry
+          atop the `<releases>` list, with a `<description>` (a paragraph
+          and a short `<ul>`) — software centers show it.
+    - Mirror the outgoing release into the AUR files: set
+      `pkgver=<VERSION>` in `packaging/aur/PKGBUILD` + the matching
       `pkgver`/`source` lines in `packaging/aur/.SRCINFO` (the sha256 refresh
       waits until the tag exists — post-ship step in the checklist).
 
@@ -70,10 +80,10 @@ Create two separate Pull Requests (as drafts, per repo convention).
 - **Target Branch:** `release/v<VERSION>`
 - **PR Title:** `[VERSION] Release v<VERSION>`
 - **Changes:**
-    - **(VITAL)** Make the same outgoing-release edits as PR 1: finalize the
-      `docs/releases.md` `v<VERSION>` section (ship date in the heading;
-      ensure all changes since the last release are documented), the metainfo `<release>` entry,
-      and the AUR `pkgver`.
+    - **(VITAL)** Make the same outgoing-release edits as PR 1: finalize all
+      three changelogs for `v<VERSION>` (ship date in the `docs/releases.md`
+      heading; every change since the last release in each), and the AUR
+      `pkgver`.
     - Verify `pyproject.toml`, `collins/__init__.py`, and the top
       `debian/changelog` entry already agree on `<VERSION>` (no version change
       expected — main carried the right version at cut time), e.g. by running
