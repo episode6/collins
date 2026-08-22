@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-22. Full change history: git log for this file.
 
 name: Release
 
@@ -11,7 +11,16 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Manual runs re-drive the ppa job for a tag that already exists -- a
+  # tag's own run is frozen on the workflow as it was at the tag, so a fix to
+  # this file can only reach an already-shipped release this way. Dispatch it
+  # from the branch that carries the fix; the job checks out the tag itself.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v* tag to (re)upload to the PPA
+        required: false
+        type: string
 
 jobs:
   build:
@@ -102,9 +111,11 @@ jobs:
   # skips a series whose version Launchpad already has.
   ppa:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     runs-on: ubuntu-latest
     env:
+      # The tag being uploaded: the pushed one, or the one a manual run names.
+      TAG: ${{ inputs.tag || github.ref_name }}
       # The packaging subkey. Pinned so gpg cannot walk to a different
       # signing-capable key; see ~/specs/collins/signing-key-and-ppa.md 1.4.
       KEYID: 3EBBA2410EE1077E
@@ -116,18 +127,23 @@ jobs:
         series: [noble, resolute]
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
+      # build-essential is not used by a source-only build, but debhelper
+      # build-depends on it implicitly and dpkg-buildpackage -S still runs
+      # dpkg-checkbuilddeps, so its absence aborts before signing.
       - name: Install packaging tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            devscripts dput debhelper dh-python pybuild-plugin-pyproject \
-            python3-all
+            build-essential devscripts dput debhelper dh-python \
+            pybuild-plugin-pyproject python3-all
 
       - name: Check the tag against debian/changelog
         run: |
           base="$(dpkg-parsechangelog --file debian/changelog --show-field Version)"
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${TAG#v}"
           if [ "$base" != "$tag" ]; then
             echo "::error::debian/changelog is at $base but the tag is $tag."
             echo "The PPA version derives from the changelog, not the tag, so"
@@ -139,7 +155,7 @@ jobs:
       - name: Skip if the archive already has this version
         id: dupe
         run: |
-          ver="${GITHUB_REF_NAME#v}~${{ matrix.series }}1"
+          ver="${TAG#v}~${{ matrix.series }}1"
           n="$(curl -sfG \
                 'https://api.launchpad.net/1.0/~episode6/+archive/ubuntu/stable' \
                 --data-urlencode 'ws.op=getPublishedSources' \
