@@ -2,7 +2,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-18. Full change history: git log for this file.
+fork. Last modified: 2026-08-22. Full change history: git log for this file.
 -->
 <component type="desktop-application">
   <id>com.episode6.Collins</id>
@@ -48,12 +48,19 @@ fork. Last modified: 2026-08-18. Full change history: git log for this file.
   <content_rating type="oars-1.1"/>
 
   <releases>
-    <release version="0.1.1" date="2026-08-18">
+    <release version="0.1.1" date="2026-08-22">
       <description>
-        <p>Available from the episode6 Ubuntu PPA.</p>
+        <p>Available from the episode6 Ubuntu PPA and from PyPI, with every keyboard shortcut rebindable.</p>
         <ul>
-          <li>Install with ppa:episode6/stable on Ubuntu 24.04 and 26.04</li>
+          <li>Install with ppa:episode6/stable on Ubuntu 24.04 and 26.04, or pipx install collins</li>
           <li>Installs alongside agent-session-manager instead of clashing with it</li>
+          <li>Keyboard Bindings dialog: every shortcut is rebindable; Ctrl+K is the quick switcher</li>
+          <li>Close can hide the window and keep sessions running; the status icon brings it back</li>
+          <li>Spawned sessions inherit the caller's model and permission mode; Generate Icon picks its model per run</li>
+          <li>The model list is cached for a day and grouped by family</li>
+          <li>PR pages render changed images, open wider when there is room, and follow running checks live</li>
+          <li>The composer opens on typing, never loses a draft, and its spell-check menu aims at the clicked word</li>
+          <li>Ctrl+click finishes a wrapped link from the transcript; preferences regrouped into ten groups</li>
         </ul>
       </description>
     </release>
