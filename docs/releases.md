@@ -39,7 +39,10 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
-_Nothing yet._
+- **The PR page's Checks list folds instead of scrolling.** Past four
+  checks the rest wait behind a "Show more" button, the same step the
+  description takes, with the failing and pending rows kept on top. The
+  little in-place scroller is gone.
 
 ### v0.1.1 — 2026-08-22
 

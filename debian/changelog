@@ -1,6 +1,7 @@
 collins (0.1.2) UNRELEASED; urgency=medium
 
-  * Next development version.
+  * The PR page's Checks list folds past four rows behind "Show more", like
+    the description does, instead of scrolling in place.
 
  -- Geoff Hackett <ghackett@episode6.com>  Sat, 22 Aug 2026 08:26:06 -0400
 
