@@ -1509,7 +1509,7 @@ class App(Adw.Application):
         keybindings.set_current(custom)
         keymap.apply_app_accels(self, custom)
         for window in self.get_windows():
-            if hasattr(window, "reinstall_shortcuts"):
+            if isinstance(window, MainWindow):  # editor windows have no win.* chords
                 window.reinstall_shortcuts()
 
     def quit_all_windows(self) -> None:

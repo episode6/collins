@@ -59,6 +59,15 @@ def test_label(accelerator, text):
     assert kb.label(accelerator) == text
 
 
+def test_newline_covers_every_enter_keysym():
+    # Shift+Enter inserted a newline from the keypad and ISO_Enter too,
+    # before the chords moved into the catalogue.
+    assert kb.resolve({})["terminal.newline"] == (
+        "<Shift>Return", "<Shift>KP_Enter", "<Shift>ISO_Enter"
+    )
+    assert kb.label("<Shift>ISO_Enter") == "Shift+ISO Enter"
+
+
 def test_label_parts_keeps_a_plus_key_whole():
     assert kb.label_parts("<Control>plus") == ["Ctrl", "+"]
     assert kb.label_parts("<Control>KP_Add") == ["Ctrl", "Keypad +"]

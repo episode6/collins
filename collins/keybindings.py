@@ -152,7 +152,9 @@ BINDINGS: tuple[Binding, ...] = (
     Binding(
         "terminal.newline",
         N_("Insert a newline in the prompt"),
-        ("<Shift>Return",),
+        # All three Enter keysyms: the main key, the keypad's, and the
+        # ISO_Enter some non-US layouts send.
+        ("<Shift>Return", "<Shift>KP_Enter", "<Shift>ISO_Enter"),
         GROUP_TERMINAL,
     ),
     Binding(
@@ -238,7 +240,7 @@ _KEY_LABELS = {
     "comma": ",", "period": ".", "apostrophe": "'", "semicolon": ";",
     "slash": "/", "backslash": "\\", "grave": "`", "minus": "-", "plus": "+",
     "equal": "=", "underscore": "_", "bracketleft": "[", "bracketright": "]",
-    "space": "Space", "Return": "Enter", "KP_Enter": "Keypad Enter",
+    "space": "Space", "Return": "Enter", "KP_Enter": "Keypad Enter", "ISO_Enter": "ISO Enter",
     "Escape": "Esc", "BackSpace": "Backspace", "Delete": "Del", "Tab": "Tab",
     "Page_Up": "PgUp", "Page_Down": "PgDn", "Home": "Home", "End": "End",
     "Up": "↑", "Down": "↓", "Left": "←", "Right": "→",

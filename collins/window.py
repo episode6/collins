@@ -1435,6 +1435,9 @@ class MainWindow(Adw.ApplicationWindow):
         ).present(self)
 
     def _apply_keybindings(self) -> None:
+        # Through the app, which re-applies to every window; hasattr rather
+        # than isinstance because window.py can't import App (app.py
+        # imports this module) — the same shape as _apply_preferences.
         app = self.get_application()
         if hasattr(app, "apply_keybindings"):
             app.apply_keybindings()
