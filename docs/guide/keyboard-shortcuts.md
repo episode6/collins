@@ -6,6 +6,9 @@ fork. Last modified: 2026-08-21. Full change history: git log for this file.
 
 # Keyboard Shortcuts
 
+These are the defaults. Every one of them can be changed — see
+[Customizing](#customizing) below.
+
 | Shortcut | Action |
 | --- | --- |
 | `Ctrl+Shift+T` | New session |
@@ -52,3 +55,28 @@ pastes.
 
 Note that `Ctrl+K` opens the quick switcher app-wide, so it takes priority
 over the shell's own kill-line binding inside terminals.
+
+## Customizing
+
+The sidebar's menu (☰) → **Keyboard Bindings** lists every shortcut above,
+grouped by what it acts on. Click a row and press the new key combination:
+it takes effect immediately, in every open window and tab. In the capture
+dialog, `Backspace` on its own removes the binding (the action keeps working
+from its menus and buttons, it just has no key) and `Esc` keeps the current
+one. A chord that another action already holds is offered back: confirm and
+it moves, leaving the other action without it.
+
+Each changed row shows a reset arrow that puts its default back; **Reset All**
+in the dialog's header does the same for all of them. Rows sharing a chord
+carry a warning mark naming the other action — every scope is checked
+against every other, because the window's shortcuts win over the editor's
+and the terminal's.
+
+A few actions ship unbound, for anyone who wants a key for them: search
+sessions (`win.focus-search`), swap the panel's sides, move a panel tab to
+the other strip, focus the editor, and opening the Keyboard Bindings dialog
+itself.
+
+The bindings are stored in `~/.config/collins/state.json` under
+`settings.keybindings`, as a map of action name to a list of GTK accelerator
+strings (`"win.close-tab": ["<Control>F4"]`; an empty list means unbound).

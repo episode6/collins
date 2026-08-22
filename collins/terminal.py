@@ -31,6 +31,8 @@ from . import (  # noqa: E402
     editor,
     editorfiles,
     footerapps,
+    keybindings,
+    keymap,
     modelmenu,
     panelhistory,
     panellayout,
@@ -183,11 +185,9 @@ _SEARCH_FLAGS = _PCRE2_CASELESS | _PCRE2_MULTILINE
 _FONT_SCALE_MIN = 0.25
 _FONT_SCALE_MAX = 4.0
 _FONT_SCALE_STEP = 1.1
-# `plus` is what most layouts produce only with Shift held, so the handlers
-# key off Ctrl alone and let Shift ride along.
-_ZOOM_IN_KEYS = (Gdk.KEY_plus, Gdk.KEY_equal, Gdk.KEY_KP_Add)
-_ZOOM_OUT_KEYS = (Gdk.KEY_minus, Gdk.KEY_underscore, Gdk.KEY_KP_Subtract)
-_ZOOM_RESET_KEYS = (Gdk.KEY_0, Gdk.KEY_KP_0)
+# The chords themselves are keybindings.BINDINGS' terminal.zoom-* entries:
+# `plus` is what most layouts produce only with Shift held, which GDK's own
+# matching folds away (see keymap.KeyMatcher).
 
 # Adw.Clamp's maximum-size when "terminal_max_width" is 0 (no limit): larger
 # than any real window, so the clamp never actually constrains the terminal.
@@ -771,18 +771,16 @@ def _zoom_by(terminal: Vte.Terminal, factor: float | None) -> None:
     terminal.set_font_scale(scale)
 
 
-def _handle_zoom_key(terminal: Vte.Terminal, keyval: int, ctrl: bool) -> bool:
-    """Ctrl+plus / Ctrl+minus / Ctrl+0, the zoom keys every GNOME terminal
-    claims from the shell."""
-    if not ctrl:
-        return False
-    if keyval in _ZOOM_IN_KEYS:
+def _handle_zoom_key(terminal: Vte.Terminal, keys: keymap.KeyMatcher, event: Gdk.KeyEvent) -> bool:
+    """Ctrl+plus / Ctrl+minus / Ctrl+0 by default, the zoom keys every GNOME
+    terminal claims from the shell (see keybindings for the chords)."""
+    if keys.matches("terminal.zoom-in", event):
         _zoom_by(terminal, _FONT_SCALE_STEP)
         return True
-    if keyval in _ZOOM_OUT_KEYS:
+    if keys.matches("terminal.zoom-out", event):
         _zoom_by(terminal, 1 / _FONT_SCALE_STEP)
         return True
-    if keyval in _ZOOM_RESET_KEYS:
+    if keys.matches("terminal.zoom-reset", event):
         _zoom_by(terminal, None)
         return True
     return False
@@ -967,6 +965,7 @@ class PanelTerminal(Gtk.Box):
         self._spawned = False
         self._ever_spawned = False  # panel was used at some point in this tab's life
         self._easy_copy_paste = False
+        self._keys = keymap.KeyMatcher(keybindings.current())
         # Agent input (run_command) that arrived while the shell was still
         # spawning, fed the moment the pty is up. Cleared on spawn failure
         # and on exit — a queued command must never surprise a later shell.
@@ -1116,6 +1115,7 @@ class PanelTerminal(Gtk.Box):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
+        self._keys = keymap.KeyMatcher.from_settings(settings)
 
     # -- PanelPage protocol (see panelstrip) -------------------------------
 
@@ -1145,25 +1145,26 @@ class PanelTerminal(Gtk.Box):
         — the same foreground test the close confirmation asks."""
         return self.has_running_command()
 
-    def _on_key_pressed(self, _ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:
-        ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
-        shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
-        if _handle_zoom_key(self.terminal, keyval, ctrl):
+    def _on_key_pressed(self, ctrl, _keyval: int, _keycode: int, _state: Gdk.ModifierType) -> bool:
+        event = ctrl.get_current_event()
+        if event is None:
+            return False
+        keys = self._keys
+        if _handle_zoom_key(self.terminal, keys, event):
             return True
-        if self._easy_copy_paste and ctrl and not shift:
-            if keyval == Gdk.KEY_c and self.terminal.get_has_selection():
+        if self._easy_copy_paste:
+            if keys.matches("terminal.copy", event) and self.terminal.get_has_selection():
                 self.terminal.copy_clipboard_format(Vte.Format.TEXT)
                 return True
-            if keyval == Gdk.KEY_v:
+            if keys.matches("terminal.paste", event):
                 self.terminal.paste_clipboard()
                 return True
-        if ctrl and shift:
-            if keyval == Gdk.KEY_C:
-                self.terminal.copy_clipboard_format(Vte.Format.TEXT)
-                return True
-            if keyval == Gdk.KEY_V:
-                self.terminal.paste_clipboard()
-                return True
+        if keys.matches("terminal.copy-always", event):
+            self.terminal.copy_clipboard_format(Vte.Format.TEXT)
+            return True
+        if keys.matches("terminal.paste-always", event):
+            self.terminal.paste_clipboard()
+            return True
         return False
 
 
@@ -1290,6 +1291,7 @@ class TerminalTab(Gtk.Box):
         self.terminal.add_controller(dismiss)
 
         self._easy_copy_paste = False
+        self._keys = keymap.KeyMatcher(keybindings.current())
         # The colour plain text is drawn in, once a theme has been applied;
         # None while the terminal is following the system colours. Read when
         # telling an agent's dim ghost text from typing (see _tail_is_dim).
@@ -1319,7 +1321,7 @@ class TerminalTab(Gtk.Box):
             valign=Gtk.Align.END,
             margin_start=5,
             margin_bottom=5,
-            tooltip_text=_("Open composer (Ctrl+.)"),
+            tooltip_text=keybindings.with_hint(_("Open composer"), "win.toggle-composer"),
         )
         self._composer_overlay_btn.add_css_class("attach-overlay")
         self._composer_overlay_btn.connect("clicked", lambda *_: self.open_composer())
@@ -1586,7 +1588,8 @@ class TerminalTab(Gtk.Box):
 
         self._transcript = TranscriptModel(jsonl_path)
 
-        # Ctrl+Shift+C / Ctrl+Shift+V / Ctrl+Shift+G, terminal-style
+        # The terminal.* chords — copy, paste, find, newline, zoom — read
+        # by hand rather than as GTK shortcuts (see keymap.KeyMatcher).
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key_pressed)
         self.terminal.add_controller(keys)
@@ -2006,7 +2009,7 @@ class TerminalTab(Gtk.Box):
         # through the window's actions still targets the right tab.
         toggle_btn = Gtk.Button(icon_name="utilities-terminal-symbolic")
         toggle_btn.set_tooltip_text(
-            _("Show/hide terminal panel (Ctrl+J)")
+            keybindings.with_hint(_("Show/hide terminal panel"), "win.toggle-panel")
             + "\n"
             + _("Right-click to open this folder in your terminal")
         )
@@ -5222,6 +5225,7 @@ class TerminalTab(Gtk.Box):
             self._composer.set_spell_click(self._composer_spell_click)
             self._composer.set_font(self._composer_font)
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
+        self._keys = keymap.KeyMatcher.from_settings(settings)
         self._auto_open_prs = bool(settings.get("open_pr_panel_on_attach"))
         self._attachments_autodock = bool(settings.get("dock_attachments_when_room", True))
         # Read on the click rather than baked into the menus and the PR page's
@@ -5296,44 +5300,42 @@ class TerminalTab(Gtk.Box):
             return
         self.terminal.grab_focus()
 
-    def _on_key_pressed(self, _ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:
-        ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
-        shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
+    def _on_key_pressed(self, ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:
+        event = ctrl.get_current_event()
+        if event is None:
+            return False
+        keys = self._keys
 
-        if _handle_zoom_key(self.terminal, keyval, ctrl):
+        if _handle_zoom_key(self.terminal, keys, event):
             return True
 
         # Shift+Enter → newline. Terminals send the same byte for Enter and
         # Shift+Enter, so we emit Meta+Enter (ESC + CR), which Claude Code
         # interprets as "insert a line break" rather than "submit".
-        if shift and not ctrl and keyval in (
-            Gdk.KEY_Return,
-            Gdk.KEY_KP_Enter,
-            Gdk.KEY_ISO_Enter,
-        ):
+        if keys.matches("terminal.newline", event):
             self.terminal.feed_child(b"\x1b\r")
             return True
 
         # Easy copy & paste (Black Box-style): Ctrl+C copies when text is
         # selected — otherwise it falls through as SIGINT — and Ctrl+V pastes.
-        if self._easy_copy_paste and ctrl and not shift:
-            if keyval == Gdk.KEY_c and self.terminal.get_has_selection():
+        if self._easy_copy_paste:
+            if keys.matches("terminal.copy", event) and self.terminal.get_has_selection():
                 self.terminal.copy_clipboard_format(Vte.Format.TEXT)
                 return True
-            if keyval == Gdk.KEY_v:
+            if keys.matches("terminal.paste", event):
                 self.terminal.paste_clipboard()
                 return True
 
-        if ctrl and shift:
-            if keyval == Gdk.KEY_C:
-                self.terminal.copy_clipboard_format(Vte.Format.TEXT)
-                return True
-            if keyval == Gdk.KEY_V:
-                self.terminal.paste_clipboard()
-                return True
-            if keyval == Gdk.KEY_G:
-                self.toggle_search()
-                return True
+        # Terminal-style copy / paste / find, always on.
+        if keys.matches("terminal.copy-always", event):
+            self.terminal.copy_clipboard_format(Vte.Format.TEXT)
+            return True
+        if keys.matches("terminal.paste-always", event):
+            self.terminal.paste_clipboard()
+            return True
+        if keys.matches("terminal.find", event):
+            self.toggle_search()
+            return True
 
         # Last, once every chord above has passed: a plain character typed
         # at an empty agent prompt can open the composer instead of landing

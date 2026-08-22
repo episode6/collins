@@ -323,6 +323,10 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 
 ![MCP servers browser](/img/mcp-servers.png)
 
+- **Keyboard Bindings** (menu → *Keyboard Bindings*): every shortcut Collins
+  has, rebindable — click a row, press the new chord. See
+  [Keyboard Shortcuts](/guide/keyboard-shortcuts#customizing).
+
 ### Status icon
 
 Collins puts a **status icon** in the top bar, so the sessions can be

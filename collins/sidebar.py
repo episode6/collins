@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-20. Full change history: git log for this file.
+# fork. Last modified: 2026-08-21. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -1416,6 +1416,7 @@ class SessionSidebar(Gtk.Box):
         menu.append(_("Show archived sessions"), "win.show-archived")
         menu.append(_("Delete archived sessions…"), "win.trash-archived")
         menu.append(_("MCP servers"), "win.mcp-servers")
+        menu.append(_("Keyboard Bindings"), "win.keyboard-bindings")
         menu.append(_("Preferences"), "win.preferences")
         # Only when nothing has put Collins in the app grid yet: a pip or pipx
         # install runs no post-install script, so it is the one way in that
