@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-18. Full change history: git log for this file.
+fork. Last modified: 2026-08-22. Full change history: git log for this file.
 -->
 # Packaging
 
@@ -98,8 +98,8 @@ series:
    explicitly; `--series` accepts only the supported series above, so a typo
    fails immediately rather than after an upload round trip.
 
-   (Requires `debhelper dh-python pybuild-plugin-pyproject devscripts dput` and
-   the signing key in the keyring.)
+   (Requires `build-essential devscripts dput debhelper dh-python
+   pybuild-plugin-pyproject python3-all` and the signing key in the keyring.)
 
 Launchpad emails an acceptance notice, then builds and publishes the `.deb`.
 Expect minutes to hours in the build queue, plus ~20 minutes for the publisher.
@@ -128,6 +128,16 @@ rather than guesses:
 - It asks Launchpad whether the version is already published and **skips** that
   series if so, which makes re-running a tag's workflow harmless instead of a
   confusing failure.
+
+CI (`.github/workflows/ci.yml`, job `ppa-source`) runs the same build unsigned
+on every PR and push to `main`/`release/**`, with the same apt list, so a
+runner-side gap shows up there rather than on a published tag.
+
+A tag's run is frozen on the workflow file as it was at that tag, so a fix to
+the job cannot reach an already-shipped release by re-running it. Instead,
+dispatch the workflow manually from the branch carrying the fix and name the
+tag (`gh workflow run release.yml --ref <branch> -f tag=v<VERSION>`); the
+`ppa` job checks out that tag and uploads from it.
 
 Signing is non-interactive without relying on `gpg-agent` caching: the job
 writes a small wrapper that calls `gpg --batch --pinentry-mode loopback
