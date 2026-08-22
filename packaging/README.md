@@ -130,6 +130,10 @@ rather than guesses:
   series if so, which makes re-running a tag's workflow harmless instead of a
   confusing failure.
 
+CI (`.github/workflows/ci.yml`, job `ppa-source`) runs the same build unsigned
+on every PR and push to `main`/`release/**`, with the same apt list, so a
+runner-side gap shows up there rather than on a published tag.
+
 A tag's run is frozen on the workflow file as it was at that tag, so a fix to
 the job cannot reach an already-shipped release by re-running it. Instead,
 dispatch the workflow manually from the branch carrying the fix and name the

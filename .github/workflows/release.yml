@@ -133,6 +133,7 @@ jobs:
       # build-essential is not used by a source-only build, but debhelper
       # build-depends on it implicitly and dpkg-buildpackage -S still runs
       # dpkg-checkbuilddeps, so its absence aborts before signing.
+      # ci.yml's ppa-source job mirrors this list; change both together.
       - name: Install packaging tools
         run: |
           sudo apt-get update
