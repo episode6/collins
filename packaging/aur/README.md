@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-21. Full change history: git log for this file.
+fork. Last modified: 2026-08-22. Full change history: git log for this file.
 -->
 # AUR packaging
 
@@ -43,6 +43,10 @@ release — and with it the tag tarball — before the tag reaches CI). In an
    anything is published;
 5. pushes `PKGBUILD` + `.SRCINFO` to the AUR repo. Re-running the workflow
    for an already-published tag finds nothing to commit and skips.
+
+The job also runs on a manual dispatch naming an existing tag
+(`gh workflow run release.yml --ref <branch> -f tag=v<VER>`), which is how a
+workflow fix reaches a tag whose own run is frozen on the old file.
 
 One required secret:
 
