@@ -68,6 +68,10 @@ Ship the current release branch:
   series and builds/publishes the binaries (minutes to hours in the queue,
   plus ~20 minutes for the publisher). Confirm the builds go green on
   <https://launchpad.net/~episode6/+archive/ubuntu/stable>.
+- A `ppa` job that failed on a workflow bug cannot be fixed by re-running the
+  tag's run (frozen on the file as of the tag): land the fix on the release
+  branch and `gh workflow run release.yml --ref release/v<X> -f tag=v<VERSION>`;
+  the already-in-the-PPA guard makes repeats harmless.
 - If the AUR package is published: refresh `sha256sums` from the now-existing
   tag tarball, regenerate `.SRCINFO`, and push (`packaging/aur/README.md`).
 
