@@ -403,10 +403,10 @@ def by_urgency(checks: Iterable[PrCheck]) -> tuple[PrCheck, ...]:
     gh's own order is the one the list keeps whenever every row fits on the
     page — it is the repository's order, and reshuffling a list somebody can
     read whole buys nothing. This is for the other case: the view shows the
-    first handful of a long list and scrolls the rest (see prview's
-    `_CHECK_ROWS_SHOWN`), and a twenty-context rollup whose two failures sat
-    at positions eleven and nineteen would clip to five green rows over a
-    button offering to fix errors none of them showed.
+    first handful of a long list and folds the rest behind "Show more" (see
+    prview's `_CHECK_ROWS_SHOWN`), and a twenty-context rollup whose two
+    failures sat at positions eleven and nineteen would fold to four green
+    rows over a button offering to fix errors none of them showed.
 
     Stable, so within a rung the repository's order survives — and the
     conflict row, which `_checks` puts first, stays first among the blockers.
