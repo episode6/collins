@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-08-23. Full change history: git log for this file.
 
 import json
 import sys
@@ -8,15 +8,13 @@ import uuid
 
 import pytest
 
-# Namespaces CI does not have. Its test job installs `python3-gi` and nothing
-# else (see .github/workflows/ci.yml), which brings GLib/GObject/Gio but none
-# of the GTK stack — those need separate gir packages, and constructing their
-# widgets would need a display on top.
-#
-# A dev machine running the app *does* have them, so a test importing a
-# GTK-dependent module passes locally and then fails collection on CI with a
-# bare "Namespace Gtk not available". Blocking them here means the local run
-# reproduces CI instead of disagreeing with it.
+# Namespaces the unit-test suite must not reach. The suite runs on
+# `python3-gi` alone — GLib/GObject/Gio, none of the GTK stack — because
+# constructing widgets needs a display on top, and that is the e2e job's
+# business (scripts/run_e2e.py). The CI image (.github/docker/ci.Dockerfile)
+# carries the whole stack for e2e's sake, so absence of packages no longer
+# enforces the rule on CI; this finder does, there and on dev machines alike,
+# so a test importing a GTK-dependent module fails the same way everywhere.
 _CI_MISSING_NAMESPACES = frozenset({"Adw", "Gdk", "Graphene", "Gsk", "Gtk", "Vte"})
 
 
@@ -36,12 +34,12 @@ class _BlockNamespacesMissingOnCI:
             if namespace in _CI_MISSING_NAMESPACES:
                 raise ImportError(
                     f"gi.repository.{namespace} is deliberately unavailable to the test "
-                    f"suite: CI installs python3-gi only, so a test that reaches it fails "
-                    f"there even when it passes on your machine (see tests/conftest.py).\n"
+                    f"suite: unit tests run on python3-gi alone, without the GTK stack or "
+                    f"a display, and this finder enforces that (see tests/conftest.py).\n"
                     f"Move the logic under test into a module that doesn't need the GTK "
                     f"stack — bgstatus, sessions, state, store and providers are all "
-                    f"importable — or, to test widgets for real, add the gir packages and "
-                    f"a headless display to .github/workflows/ci.yml first."
+                    f"importable — or, to test widgets for real, write an e2e check "
+                    f"(scripts/run_e2e.py), which has the full stack and Xvfb."
                 )
         return None
 

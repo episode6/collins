@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-22. Full change history: git log for this file.
+fork. Last modified: 2026-08-23. Full change history: git log for this file.
 -->
 # Packaging
 
@@ -130,8 +130,30 @@ rather than guesses:
   confusing failure.
 
 CI (`.github/workflows/ci.yml`, job `ppa-source`) runs the same build unsigned
-on every PR and push to `main`/`release/**`, with the same apt list, so a
-runner-side gap shows up there rather than on a published tag.
+on every PR and push to `main`/`release/**`, so a missing build-dep shows up
+there rather than on a published tag.
+
+### The CI image
+
+Every CI job runs inside one prebuilt container image,
+`ghcr.io/episode6/collins-ci`, built from `.github/docker/ci.Dockerfile` — the
+**canonical list of build dependencies** for every channel (packaging tools,
+the gir stack for e2e, pinned ruff). Add a build-dep there, not in a workflow.
+The tag is the first 12 hex of the Dockerfile's hash: `.github/workflows/ci-image.yml`
+builds and pushes it only when the tag is missing, so a PR that edits the
+Dockerfile tests on its own image and one that doesn't builds nothing. A tag
+never rebuilds on its own; bump the `refreshed:` date in the Dockerfile to pick
+up package updates.
+
+The same image reproduces the e2e job on any machine with Docker, typelibs
+installed or not:
+
+```sh
+docker run --rm -it -v "$PWD:/src" -w /src ghcr.io/episode6/collins-ci:<tag> \
+  xvfb-run -a -s "-screen 0 1920x1200x24" python3 scripts/run_e2e.py
+```
+
+(`<tag>` is in the image job's step summary of any recent run.)
 
 A tag's run is frozen on the workflow file as it was at that tag, so a fix to
 the job cannot reach an already-shipped release by re-running it. Instead,

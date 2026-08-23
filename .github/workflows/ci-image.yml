@@ -1,0 +1,59 @@
+# New in the ghackett fork of agent-session-manager
+# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0).
+
+# The gate every container job waits on: resolve the content-addressed tag of
+# .github/docker/ci.Dockerfile, and build + push it only if GHCR does not have
+# it yet. A PR that edits the Dockerfile therefore builds and uses its own
+# image; one that leaves it alone finds the tag (~15s of job overhead) and
+# builds nothing. Called from ci.yml and e2e.yml.
+name: CI image
+
+on:
+  workflow_call:
+    outputs:
+      image:
+        description: Fully qualified image reference (ghcr.io/<org>/collins-ci:<tag>)
+        value: ${{ jobs.image.outputs.image }}
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.tag.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: tag
+        run: |
+          h="${{ hashFiles('.github/docker/ci.Dockerfile') }}"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}-ci:${h::12}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: exists
+        run: |
+          if docker manifest inspect "${{ steps.tag.outputs.image }}" > /dev/null 2>&1; then
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+            echo "\`${{ steps.tag.outputs.image }}\` already exists; nothing to build" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "yes=false" >> "$GITHUB_OUTPUT"
+            echo "Building \`${{ steps.tag.outputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - if: steps.exists.outputs.yes == 'false'
+        uses: docker/setup-buildx-action@v3
+      # provenance: false keeps the tag a plain image manifest rather than an
+      # OCI index with an attestation alongside; nothing here needs one.
+      - if: steps.exists.outputs.yes == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/docker/ci.Dockerfile
+          push: true
+          provenance: false
+          tags: ${{ steps.tag.outputs.image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
