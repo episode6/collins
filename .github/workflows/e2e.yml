@@ -18,8 +18,8 @@ jobs:
   # Unlike the unit-test job (which deliberately stays GTK-free to match
   # tests/conftest.py's blocklist), the e2e checks drive real widgets: they
   # need the full gir stack, a display (Xvfb) and a session bus
-  # (dbus-run-session, one per check), all of which the CI image
-  # (.github/docker/ci.Dockerfile) carries.
+  # (dbus-run-session, one per check), all of which the full CI image
+  # (.github/docker/ci.Dockerfile, --target full) carries.
   e2e:
     needs: image
     runs-on: ubuntu-latest

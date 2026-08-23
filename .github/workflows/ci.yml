@@ -9,10 +9,13 @@ on:
     branches: [main, 'release/**']
   pull_request:
 
-# Every job runs inside the prebuilt CI image (.github/docker/ci.Dockerfile is
-# the one canonical list of build dependencies); the image job resolves or
-# builds it. The credentials block is what lets a private package be pulled;
-# harmless once the package is public.
+# Jobs that use image dependencies run inside a prebuilt CI image
+# (.github/docker/ci.Dockerfile is the one canonical list of build
+# dependencies); the image job resolves or builds the two tags. The tiny jobs
+# (lint, verify-versions) stay on the bare runner: they need nothing from the
+# image, and pulling one to run a one-second script would only slow them down.
+# The credentials block is what lets a private package be pulled; harmless
+# once the package is public.
 jobs:
   image:
     uses: ./.github/workflows/ci-image.yml
@@ -21,15 +24,15 @@ jobs:
       packages: write
 
   lint:
-    needs: image
     runs-on: ubuntu-latest
-    container:
-      image: ${{ needs.image.outputs.image }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # Pinned: an unpinned `pip install ruff` changes the rule set under this
+      # job on any given day. Bumping the pin is the deliberate knob.
+      - run: pip install --quiet ruff==0.16.4
       - run: ruff check collins/ tests/
 
   test:
@@ -66,8 +69,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # --no-isolation: build with the image's setuptools instead of fetching
-      # one from PyPI per run. It is the same setuptools Launchpad's pybuild
-      # uses for the PPA build, and the one verify_wheel_data.py vouches for.
+      # one from PyPI per run. It is the same setuptools the resolute PPA
+      # build uses, and the one verify_wheel_data.py vouches for.
       - run: python3 -m build --no-isolation
       # What PyPI would reject at upload time (metadata, long_description).
       - run: twine check --strict dist/*
@@ -75,14 +78,16 @@ jobs:
       - run: ./scripts/build_deb.sh
 
   # Everything release.yml's ppa job does short of signing and uploading, in
-  # the same image -- so a build-dep the image lacks fails a PR here, not the
+  # the same images -- so a build-dep an image lacks fails a PR here, not the
   # release. v0.1.1's upload died in dpkg-checkbuilddeps (no build-essential)
-  # with the tag already published.
+  # with the tag already published. The noble leg runs in the noble
+  # packaging-only image (a source build needs no GTK); the resolute leg uses
+  # the full image rather than growing a third tag.
   ppa-source:
     needs: image
     runs-on: ubuntu-latest
     container:
-      image: ${{ needs.image.outputs.image }}
+      image: ${{ matrix.series == 'noble' && needs.image.outputs.image_noble_pkg || needs.image.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -105,13 +110,7 @@ jobs:
   # Every committed copy of the version must agree (see RELEASE_CHECKLIST.md);
   # scripts/ship-release.py re-checks the same invariants at ship time.
   verify-versions:
-    needs: image
     runs-on: ubuntu-latest
-    container:
-      image: ${{ needs.image.outputs.image }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
       - run: python3 scripts/verify_versions.py
