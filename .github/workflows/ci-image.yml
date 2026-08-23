@@ -6,6 +6,12 @@
 # it yet. A PR that edits the Dockerfile therefore builds and uses its own
 # image; one that leaves it alone finds the tag (~15s of job overhead) and
 # builds nothing. Called from ci.yml and e2e.yml.
+#
+# Known limitation: on a pull_request from a *fork*, GITHUB_TOKEN is read-only
+# no matter what permissions are requested, so a fork PR that edits the
+# Dockerfile fails loudly at the push step. A fork PR that leaves it alone is
+# fine (the tag exists; pulling needs only read). Accepted: this repo has no
+# fork contributors; revisit with pull_request_target if that ever changes.
 name: CI image
 
 on:
