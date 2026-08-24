@@ -467,7 +467,7 @@ def test_manual_refresh_forces_a_rebuild_report(app_state, projects_dir, monkeyp
             self._target()
 
     monkeypatch.setattr(store_mod.threading, "Thread", _InlineThread)
-    monkeypatch.setattr(store_mod.GLib, "idle_add", lambda fn, *a: fn(*a))
+    monkeypatch.setattr(store_mod.GLib, "idle_add", lambda fn, *a, **_kw: fn(*a))
 
     store = store_mod.SessionStore(app_state.AppState())
     changes = []

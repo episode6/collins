@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-23. Full change history: git log for this file.
+fork. Last modified: 2026-08-24. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -49,6 +49,13 @@ downloads of each version, see the
   and clicking it brings the screen back — text, checkbox and terminal panel
   included. When terminals were open beside a worktree launch, Collins
   offers to `cd` them into the worktree once it exists.
+- **A click on a project header starts a session there.** From the title
+  on, a click opens the new-chat screen for that project, the same as its
+  + button; everything before the title — the strip holding the icon, full
+  row height, the caret under the pointer — is what folds and unfolds the
+  group now, and ←/→ on a focused header do the same from the keyboard.
+  Favorites, with nowhere to start a session, still folds on a click
+  anywhere.
 - **The PR page's Checks list folds instead of scrolling.** Past four
   checks the rest wait behind a "Show more" button, the same step the
   description takes, with the failing and pending rows kept on top. The

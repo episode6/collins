@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-23. Full change history: git log for this file.
+fork. Last modified: 2026-08-24. Full change history: git log for this file.
 -->
 
 # Features
@@ -17,10 +17,13 @@ the app reads, are in
 
 ## Sidebar
 
-- **Every session** under `~/.claude/projects/`, **grouped by project** with
-  collapsible headers (plus a collapse-all/expand-all toggle). Which projects
-  are expanded is remembered across restarts, and **dragging a project
-  header** reorders the projects — the order is yours and persists.
+- **Every session** under `~/.claude/projects/`, **grouped by project**.
+  **Click a project header** to start a new session there; the strip left
+  of its title — icon included, shown as a caret under the pointer — folds
+  and unfolds the group, as do ←/→ on a focused header (plus a
+  collapse-all/expand-all toggle). Which projects are expanded is
+  remembered across restarts, and **dragging a project header** reorders
+  the projects — the order is yours and persists.
 - A **Favorites** section pinned on top — star any session to move it there.
 - **Compact single-line rows**: name, relative time, status — with an
   optional second line for the project folder path. Within a project,

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-23. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -171,7 +171,11 @@ class SessionStore(GObject.Object):
 
         def work() -> None:
             sessions = discover_sessions()
-            GLib.idle_add(self._on_scanned, sessions)
+            # PRIORITY_DEFAULT, not idle: this landing resets the _scanning
+            # gate, and an idle-priority callback can be starved for the
+            # life of the process where the frame clock never goes quiet
+            # (CI's Xvfb) — every refresh after it would then be dropped.
+            GLib.idle_add(self._on_scanned, sessions, priority=GLib.PRIORITY_DEFAULT)
 
         threading.Thread(target=work, daemon=True).start()
 
