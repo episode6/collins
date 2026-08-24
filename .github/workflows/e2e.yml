@@ -9,40 +9,32 @@ on:
   pull_request:
 
 jobs:
+  image:
+    uses: ./.github/workflows/ci-image.yml
+    permissions:
+      contents: read
+      packages: write
+
+  # Unlike the unit-test job (which deliberately stays GTK-free to match
+  # tests/conftest.py's blocklist), the e2e checks drive real widgets: they
+  # need the full gir stack, a display (Xvfb) and a session bus
+  # (dbus-run-session, one per check), all of which the full CI image
+  # (.github/docker/ci.Dockerfile, --target full) carries.
   e2e:
+    needs: image
     runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-      # Unlike the unit-test job (which deliberately stays GTK-free to match
-      # tests/conftest.py's blocklist), the e2e checks drive real widgets:
-      # they need the full gir stack, a display (Xvfb), and a session bus
-      # (dbus-run-session, one per check, provided by the runner).
-      - run: >
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends
-          python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1
-          gir1.2-gtksource-5 gir1.2-spelling-1 gir1.2-gdkpixbuf-2.0
-          xvfb xauth dbus fonts-dejavu-core git
-      # The GTK4 VTE gir was renamed between Ubuntu releases: noble ships it
-      # as gir1.2-vte-3.91, newer releases as gir1.2-vte-3.91-gtk4.
-      - run: >
-          sudo apt-get install -y --no-install-recommends gir1.2-vte-3.91-gtk4
-          || sudo apt-get install -y --no-install-recommends gir1.2-vte-3.91
-      # gir1.2-spelling-1 brought only the typelib on the runner, not
-      # libspelling itself — and a typelib without its shared library fails
-      # at the first call, not at import (check_composer_spelling_optional
-      # asserts the wired path, so it caught this). The library package name
-      # tracks the soname across releases, hence the fallback.
-      - run: >
-          sudo apt-get install -y --no-install-recommends libspelling-1-2
-          || sudo apt-get install -y --no-install-recommends libspelling-1-1
       # Worst case, every check hangs on both attempts: checks x 2 x 120s
-      # (40 min at 10 checks) plus the apt-get setup. timeout-minutes must
+      # (40 min at 10 checks) plus the image pull. timeout-minutes must
       # stay comfortably above that — and grow as checks are added — so a
       # pathological run still writes its step-summary table instead of
       # being hard-killed by GitHub mid-suite. The whole suite passes in
       # under two minutes; a check that needs more than 120s is hung.
       - run: xvfb-run -a -s "-screen 0 1920x1200x24" python3 scripts/run_e2e.py --timeout 120
-        env:
-          # No a11y bus exists under Xvfb; stop GTK warning about it.
-          GTK_A11Y: none

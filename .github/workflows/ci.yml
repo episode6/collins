@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-22. Full change history: git log for this file.
+# fork. Last modified: 2026-08-23. Full change history: git log for this file.
 
 name: CI
 
@@ -9,7 +9,20 @@ on:
     branches: [main, 'release/**']
   pull_request:
 
+# Jobs that use image dependencies run inside a prebuilt CI image
+# (.github/docker/ci.Dockerfile is the one canonical list of build
+# dependencies); the image job resolves or builds the two tags. The tiny jobs
+# (lint, verify-versions) stay on the bare runner: they need nothing from the
+# image, and pulling one to run a one-second script would only slow them down.
+# The credentials block is what lets a private package be pulled; harmless
+# once the package is public.
 jobs:
+  image:
+    uses: ./.github/workflows/ci-image.yml
+    permissions:
+      contents: read
+      packages: write
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -17,21 +30,27 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: pip install --quiet ruff
+      # Pinned: an unpinned `pip install ruff` changes the rule set under this
+      # job on any given day. Bumping the pin is the deliberate knob.
+      - run: pip install --quiet ruff==0.16.4
       - run: ruff check collins/ tests/
 
   test:
+    needs: image
     runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
-      # System python + apt PyGObject (prebuilt), matching how the app runs:
-      # some tested modules (e.g. bgstatus) import gi at module level. GLib/
-      # Gio work headless — no display or GTK needed for the test suite.
-      # tests/conftest.py blocks the GTK-stack namespaces this leaves out, so a
-      # test that would only fail here fails on a dev machine too. Installing
-      # the gir packages (and a display) is a deliberate change: widen that
-      # blocklist to match if you make it.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-gi python3-pytest
+      # System python + apt PyGObject, matching how the app runs: some tested
+      # modules (e.g. bgstatus) import gi at module level. The image carries
+      # the whole GTK stack for the e2e job, but the unit suite must not reach
+      # it: tests/conftest.py blocks those namespaces so a test that needs a
+      # widget (and a display) fails on a dev machine the same way it would
+      # here. Widening that blocklist is a deliberate change.
       - run: python3 -m pytest tests/ -q
 
   # The wheel is the whole of `pip install collins` -- no post-install script
@@ -40,38 +59,44 @@ jobs:
   # setuptools has not always followed; a silent miss ships an app with no
   # icons. Build both artifacts the way release.yml does, then check them.
   packaging:
+    needs: image
     runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - run: pip install --quiet build twine
-      - run: python -m build
+      # --no-isolation: build with the image's setuptools instead of fetching
+      # one from PyPI per run. It is the same setuptools the resolute PPA
+      # build uses, and the one verify_wheel_data.py vouches for.
+      - run: python3 -m build --no-isolation
       # What PyPI would reject at upload time (metadata, long_description).
       - run: twine check --strict dist/*
       - run: python3 scripts/verify_wheel_data.py
       - run: ./scripts/build_deb.sh
 
-  # Everything release.yml's ppa job does short of signing and uploading, on
-  # the same runner image with the same apt list -- so a build-dep the runner
-  # lacks fails a PR here, not the release. v0.1.1's upload died in
-  # dpkg-checkbuilddeps (no build-essential) with the tag already published.
-  # Keep the package list in step with release.yml.
+  # Everything release.yml's ppa job does short of signing and uploading, in
+  # the same images -- so a build-dep an image lacks fails a PR here, not the
+  # release. v0.1.1's upload died in dpkg-checkbuilddeps (no build-essential)
+  # with the tag already published. The noble leg runs in the noble
+  # packaging-only image (a source build needs no GTK); the resolute leg uses
+  # the full image rather than growing a third tag.
   ppa-source:
+    needs: image
     runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.series == 'noble' && needs.image.outputs.image_noble_pkg || needs.image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
         series: [noble, resolute]
     steps:
       - uses: actions/checkout@v7
-      - name: Install packaging tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential devscripts dput debhelper dh-python \
-            pybuild-plugin-pyproject python3-all
       - name: Build the source package, unsigned
         run: packaging/build-ppa-source.sh --series '${{ matrix.series }}' -- -us -uc
       - name: The upload set is complete
