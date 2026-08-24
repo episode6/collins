@@ -2128,18 +2128,20 @@ class MainWindow(Adw.ApplicationWindow):
         self._with_folder_trust(cwd, provider, proceed)
 
     def _discard_new_chat_draft(self, draft_id: str, page: Adw.TabPage | None = None) -> None:
-        """The draft row's trash button: forget the draft — after asking,
-        when there is writing on it: that is the user's own, and there is
-        no undo. A draft with nothing written (a screen with only a shell
-        beside it, or one whose text was just emptied) goes without a
-        question.
+        """The draft row's trash button: forget the draft, after asking —
+        it is the user's own writing, or a terminal panel kept for it, and
+        there is no undo.
 
         With *page*, the draft is open on a new-chat screen in this window:
         the screen's text is what is asked about (the state's record trails
         it by a save delay), and the tab closes along with the draft — the
         close does the forgetting (see _save_new_chat_draft), so a close the
         tab's own confirmations decline (a running panel command, an
-        unsaved editor buffer) keeps the draft as well."""
+        unsaved editor buffer) keeps the draft as well. A screen with nothing
+        written on it (only a shell beside it, or text just emptied) closes
+        without a question: the shell is in view, and a running command in
+        it gets the tab's own ask. A kept draft with no screen open always
+        asks — what it holds is out of sight."""
         record = self.state.get_new_chat_draft(draft_id)
         tab = page.get_child() if page is not None else None
         if isinstance(tab, TerminalTab):
@@ -2158,7 +2160,7 @@ class MainWindow(Adw.ApplicationWindow):
             panelhistory.delete(draft_id)
             self._refresh_draft_rows()
 
-        if not text.strip():
+        if page is not None and not text.strip():
             discard()
             return
         dialogs.confirm_dialog(
