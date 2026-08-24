@@ -110,7 +110,8 @@ Expect minutes to hours in the build queue, plus ~20 minutes for the publisher.
 series, that does step 2 above on every `v*` tag (normally pushed by
 `scripts/ship-release.py` from a release branch). It exports git HEAD itself
 rather than consuming the `build` job's artifacts, but gates on that job so a
-broken wheel stops the whole release.
+broken wheel stops the whole release. Both jobs run inside the CI images
+(below), so the release builds in exactly the environment every PR rehearsed.
 
 Two required secrets:
 
@@ -135,19 +136,21 @@ there rather than on a published tag.
 
 ### The CI image
 
-CI jobs that use image dependencies run inside prebuilt container images built
-from `.github/docker/ci.Dockerfile` — the **canonical list of build
-dependencies** for every channel (packaging tools, the gir stack for e2e). Add
-a build-dep there, not in a workflow. One Dockerfile, two stages, two tags
-under `ghcr.io/episode6/collins-ci`, both named by the first 12 hex of the
-Dockerfile's hash:
+CI and release jobs that use image dependencies run inside prebuilt container
+images built from `.github/docker/ci.Dockerfile` — the **canonical list of
+build dependencies** for every channel (packaging tools, the gir stack for
+e2e). Add a build-dep there, not in a workflow. One Dockerfile, two stages,
+two tags under `ghcr.io/episode6/collins-ci`, both named by the first 12 hex
+of the Dockerfile's hash:
 
 - `:<hash>` — the **resolute full** image (~355 MB compressed): the packaging
   toolchain plus the GTK/Xvfb/dbus stack. Runs `test`, `packaging`,
-  `ppa-source (resolute)` and `e2e`.
+  `ppa-source (resolute)` and `e2e`, and the release workflow's `build` and
+  `ppa (resolute)`.
 - `:<hash>-noble-pkg` — the **noble packaging-only** image (~200 MB
   compressed): the same packaging toolchain on `ubuntu:24.04`, no GTK. Runs
-  only `ppa-source (noble)` — a source build compiles nothing.
+  only the noble source builds — `ppa-source (noble)` in CI, `ppa (noble)` at
+  release — since a source build compiles nothing.
 
 `.github/workflows/ci-image.yml` builds and pushes a tag only when it is
 missing, so a PR that edits the Dockerfile tests on its own images and one
@@ -180,7 +183,10 @@ A tag's run is frozen on the workflow file as it was at that tag, so a fix to
 the job cannot reach an already-shipped release by re-running it. Instead,
 dispatch the workflow manually from the branch carrying the fix and name the
 tag (`gh workflow run release.yml --ref <branch> -f tag=v<VERSION>`); the
-`ppa` job checks out that tag and uploads from it.
+`ppa` job checks out that tag and uploads from it. The images come from the
+dispatching branch's Dockerfile, like the workflow file itself — so a fix to
+the image reaches a shipped tag the same way. (With the tag's version already
+in the archive, that dispatch is also a no-upload rehearsal of the whole job.)
 
 Signing is non-interactive without relying on `gpg-agent` caching: the job
 writes a small wrapper that calls `gpg --batch --pinentry-mode loopback

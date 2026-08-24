@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-22. Full change history: git log for this file.
+# fork. Last modified: 2026-08-23. Full change history: git log for this file.
 
 name: Release
 
@@ -22,18 +22,35 @@ on:
         required: false
         type: string
 
+# build and ppa run inside the prebuilt CI images (.github/docker/ci.Dockerfile,
+# resolved or built by the image job) -- the same images ci.yml's packaging and
+# ppa-source jobs use, so a release builds in exactly the environment every PR
+# rehearsed. github-release and pypi stay on the bare runner: they need only gh
+# and the PyPI action, and the pypi job's OIDC environment wiring must not
+# move. A manual dispatch takes its images from the dispatching branch's
+# Dockerfile, not the tag's -- the same way it takes this file.
 jobs:
+  image:
+    uses: ./.github/workflows/ci-image.yml
+    permissions:
+      contents: read
+      packages: write
+
   build:
+    needs: image
     runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
+      # --no-isolation: the image's setuptools builds the wheel -- the one
+      # ci.yml's packaging job checked with verify_wheel_data.py and the one the
+      # resolute PPA build uses -- rather than whatever PyPI has that day.
       - name: Build wheel + sdist
-        run: |
-          pip install --quiet build
-          python -m build
+        run: python3 -m build --no-isolation
       - name: Build .deb
         run: ./scripts/build_deb.sh
       - uses: actions/upload-artifact@v7
@@ -110,9 +127,18 @@ jobs:
   # to refuse rather than guess: it checks the changelog against the tag, and
   # skips a series whose version Launchpad already has.
   ppa:
-    needs: build
+    needs: [image, build]
     if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     runs-on: ubuntu-latest
+    # A source build compiles nothing, so the noble leg runs in the noble
+    # packaging-only image; resolute uses the full image, as ci.yml's
+    # ppa-source does. Everything below (gnupg, dput, curl, the debhelper
+    # toolchain) is in the packaging stage of both.
+    container:
+      image: ${{ matrix.series == 'noble' && needs.image.outputs.image_noble_pkg || needs.image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     env:
       # The tag being uploaded: the pushed one, or the one a manual run names.
       TAG: ${{ inputs.tag || github.ref_name }}
@@ -129,17 +155,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
-
-      # build-essential is not used by a source-only build, but debhelper
-      # build-depends on it implicitly and dpkg-buildpackage -S still runs
-      # dpkg-checkbuilddeps, so its absence aborts before signing.
-      # ci.yml's ppa-source job mirrors this list; change both together.
-      - name: Install packaging tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential devscripts dput debhelper dh-python \
-            pybuild-plugin-pyproject python3-all
 
       - name: Check the tag against debian/changelog
         run: |

@@ -129,8 +129,9 @@ Create 2 PRs (as drafts, per repo convention):
    - uploads a signed source package per Ubuntu series (noble, resolute) to
      `ppa:episode6/stable` — Launchpad then builds and publishes the binaries
      (minutes to hours in the queue, plus ~20 minutes for the publisher).
-   CI's `ppa-source` job rehearses the source build unsigned on every PR, so
-   a runner-side failure should already have surfaced before the tag.
+   CI's `ppa-source` job rehearses the source build unsigned on every PR, in
+   the same container images the `ppa` job uses, so a missing build-dep
+   should already have surfaced before the tag.
    If a `ppa` job fails for a reason fixed in the workflow itself, the tag's
    run cannot pick the fix up (it is frozen on the file as of the tag): land
    the fix on the release branch and dispatch it for the tag —
