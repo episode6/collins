@@ -18,6 +18,9 @@ from collins.practions import (
     NEW_PR,
     NEW_PR_PROMPT,
     READY,
+    READY_AUTO_MERGE,
+    READY_MERGE,
+    READY_MERGE_ARCHIVE,
     REBASE,
     REBASE_PROMPT,
     REVIEW,
@@ -518,6 +521,59 @@ def test_archiving_is_only_offered_where_a_session_is_there_to_archive():
     assert _alternates(_pr(), can_archive=False) == [CLOSE]
 
 
+def test_a_draft_keeps_the_shortcut_to_landed_behind_its_button():
+    """Ready-and-merged as one pick, behind "Ready": the merge itself while
+    the checks are green, auto-merge while they aren't — the same split the
+    open PR's own button makes — and the archive only beside the merge that
+    happens now, as everywhere."""
+    assert _alternates(_pr(state="DRAFT")) == [READY_MERGE, READY_MERGE_ARCHIVE, CLOSE]
+    assert _alternates(_pr(state="DRAFT", passed=1, pending=2)) == [
+        READY_AUTO_MERGE,
+        CLOSE,
+    ]
+    assert _alternates(_pr(state="DRAFT", passed=1, failed=1)) == [
+        READY_AUTO_MERGE,
+        CLOSE,
+    ]
+    assert _alternates(_pr(state="DRAFT"), can_archive=False) == [READY_MERGE, CLOSE]
+
+
+def test_a_conflicting_draft_is_offered_no_shortcut():
+    """GitHub refuses the merge ready or not, and can't hold a conflicting
+    branch either — resolving is what brings the shortcut back."""
+    assert _alternates(_pr(state="DRAFT", mergeable="CONFLICTING")) == [CLOSE]
+
+
+def test_the_ready_merges_ask_like_the_merges_they_are():
+    """The merge is the half that can't be taken back, so all three carry the
+    merges' dialog — and follow the confirm_merges setting with them."""
+    merges = [
+        practions.ready_merge_action(_pr(state="DRAFT"), auto=False),
+        practions.ready_merge_action(_pr(state="DRAFT", pending=1), auto=True),
+        practions.ready_merge_archive_action(_pr(state="DRAFT")),
+    ]
+    assert [a.key for a in merges] == [READY_MERGE, READY_AUTO_MERGE, READY_MERGE_ARCHIVE]
+    assert all(a.key in practions.MERGES for a in merges)
+    assert all(practions.confirmation(a) is a.confirm for a in merges)
+    assert all(practions.confirmation(a, confirm_merges=False) is None for a in merges)
+
+
+def test_the_ready_merges_own_up_to_the_ready_when_they_ask():
+    """The dialog describes both halves in the order perform keeps them."""
+    for action in (
+        practions.ready_merge_action(_pr(state="DRAFT"), auto=False),
+        practions.ready_merge_action(_pr(state="DRAFT", pending=1), auto=True),
+        practions.ready_merge_archive_action(_pr(state="DRAFT")),
+    ):
+        assert "ready for review first" in action.confirm.body
+
+
+def test_every_draft_alternate_names_the_pr_and_wears_a_word():
+    for action in practions.alternate_actions(_pr(state="DRAFT"), True):
+        assert action.label and action.short
+        assert "#55" in action.tooltip
+
+
 def test_both_alternates_ask_first_and_only_one_asks_in_red():
     """Merging is final but isn't a loss; closing unmerged is the one action
     here that throws the work away."""
@@ -705,6 +761,40 @@ def test_a_refused_merge_takes_the_archive_down_with_it(gh):
     _calls, serve = gh
     serve((False, "Pull request is not mergeable"))
     assert perform(MERGE_ARCHIVE, _pr()) == "Pull request is not mergeable"
+
+
+def test_the_ready_merges_ready_first_then_merge(gh):
+    """Two calls in a fixed order: GitHub refuses to merge (or hold) a draft,
+    so it comes out of draft before the landing is asked for."""
+    calls, _serve = gh
+    assert perform(READY_MERGE, _pr(state="DRAFT")) is None
+    assert calls == [["pr", "ready", URL], ["pr", "merge", URL, "--squash"]]
+
+
+def test_ready_auto_merge_adds_the_flag_to_the_merge_half(gh):
+    calls, _serve = gh
+    assert perform(READY_AUTO_MERGE, _pr(state="DRAFT", pending=1)) is None
+    assert calls == [["pr", "ready", URL], ["pr", "merge", URL, "--squash", "--auto"]]
+
+
+def test_ready_merge_archive_is_the_ready_merge_as_far_as_gh_is_concerned(gh):
+    """The archive half never reaches a subprocess here either: it is the
+    app's own, and waits on both calls having worked."""
+    calls, _serve = gh
+    assert perform(READY_MERGE_ARCHIVE, _pr(state="DRAFT")) is None
+    assert calls == [["pr", "ready", URL], ["pr", "merge", URL, "--squash"]]
+
+
+def test_a_refused_ready_stops_the_merge_with_it(gh):
+    """A draft that wouldn't come out of draft is left exactly as it was —
+    the merge is never asked for."""
+    calls, serve = gh
+    serve((False, "could not mark the pull request ready"))
+    assert (
+        perform(READY_MERGE, _pr(state="DRAFT"))
+        == "could not mark the pull request ready"
+    )
+    assert calls == [["pr", "ready", URL]]
 
 
 def test_closing_closes_without_touching_the_branch(gh):

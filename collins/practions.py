@@ -27,13 +27,15 @@ wording, which is all a button has room to say.
 
 `alternate_actions` is the third: what a right-click on that button offers
 *instead* of what it says. The button is the one course Collins recommends,
-and the two things it deliberately doesn't recommend live behind it — closing
-a pull request rather than landing it, and landing one whose session is then
+and the things it deliberately doesn't recommend live behind it — closing
+a pull request rather than landing it, landing one whose session is then
 done with (MERGE_ARCHIVE, the merge plus the archive of the session that
 opened it, which is the app's own business and happens only once the merge
-really lands). Both are one press away from the button that already means
-"finish with this PR", and neither belongs on the row itself: a Close beside a
-Merge is an accident waiting for a stray click.
+really lands), and, on a draft, skipping straight from "Ready" to landed
+(the READY_MERGES, the ready and the merge as one pick). All are one press
+away from the button that already means "finish with this PR", and none
+belongs on the row itself: a Close beside a Merge is an accident waiting for
+a stray click.
 
 Five of them aren't about GitHub at all: FIX_CI, REBASE, FIX_ALL, COMMENTS and
 NEW_PR send a prompt to the session that opened the PR and let the agent do the
@@ -79,6 +81,20 @@ DISABLE_AUTO_MERGE = "disable-auto-merge"
 # opened from the session the page is docked in. `perform` merges and stops
 # there — the archive is the app's, and waits on this having worked.
 MERGE_ARCHIVE = "merge-archive"
+# The draft's shortcuts past its own button: out of draft and landed, as one
+# pick. GitHub refuses to merge (or hold) a draft, so each is two gh calls in
+# a fixed order — ready first, and a ready that failed stops the whole thing
+# there. Alternates only, behind the "Ready" button: the button recommends the
+# one step that is a draft's to take, and skipping straight to the end isn't a
+# recommendation. Which of the two landings is offered follows the checks
+# exactly as an open PR's button does (`_landing_action`): the merge itself
+# when they are green, auto-merge while they aren't in.
+READY_MERGE = "ready-merge"
+READY_AUTO_MERGE = "ready-auto-merge"
+# And the archive behind it, as MERGE_ARCHIVE's draft twin: only ever beside
+# the ready-merge that happens now, and the archive is likewise the app's,
+# waiting on `perform` having worked.
+READY_MERGE_ARCHIVE = "ready-merge-archive"
 # Close without merging. Alternates only, for the same reason: it is the one
 # thing a PR offers that undoes the work rather than landing it.
 CLOSE = "close"
@@ -176,12 +192,25 @@ class Action:
     short: str = ""
 
 
-# The three ways of landing a pull request: now, when GitHub says the checks
-# are done, and now-with-the-session-put-away. What the confirm_merges setting
+# The ways of landing a pull request: now, when GitHub says the checks are
+# done, and now-with-the-session-put-away — plus the draft's three, which are
+# the same landings with the ready in front. What the confirm_merges setting
 # is about — see `confirmation` — and what wears the merge green, both on the
 # button (prview's _ActionBar) and, through the class below, in the dialog it
 # asks through.
-MERGES = (MERGE, AUTO_MERGE, MERGE_ARCHIVE)
+MERGES = (
+    MERGE,
+    AUTO_MERGE,
+    MERGE_ARCHIVE,
+    READY_MERGE,
+    READY_AUTO_MERGE,
+    READY_MERGE_ARCHIVE,
+)
+# The subset that starts with `gh pr ready` — what `perform` dispatches on.
+READY_MERGES = (READY_MERGE, READY_AUTO_MERGE, READY_MERGE_ARCHIVE)
+# The subset the app archives a session after, once the merge has landed
+# (see prview._ActionBar._landed).
+MERGE_ARCHIVES = (MERGE_ARCHIVE, READY_MERGE_ARCHIVE)
 # The CSS class a merge's confirmation dialog wears, which paints its
 # confirming button in the same GitHub green the button that opened it is drawn
 # in (see app.py's _SCHEME_CSS). Named here, beside the keys that ask for it, so
@@ -361,6 +390,12 @@ def alternate_actions(pr: PullRequest, can_archive: bool = False) -> list[Action
     one that was asked for — but "land it now" must stay reachable without
     turning auto-merge off first and pressing merge afterwards.
 
+    A draft gets the shortcut past its own button: its "Ready" recommends the
+    one step that is a draft's to take, and behind it lives ready-and-landed
+    as one pick (READY_MERGES) — the merge when the checks are green,
+    auto-merge while they aren't, and neither on a conflicting branch, whose
+    merge GitHub would refuse ready or not.
+
     "Merge and archive" is only ever offered beside a merge that happens now.
     On auto-merge there is nothing to wait for in the app — GitHub lands the PR
     minutes or hours later, on its own — and a session archived now would be
@@ -383,6 +418,12 @@ def alternate_actions(pr: PullRequest, can_archive: bool = False) -> list[Action
     # the alternate just added when GitHub is holding the PR instead.
     if can_archive and (keys & {MERGE, DISABLE_AUTO_MERGE}):
         actions.append(merge_archive_action(pr))
+    if READY in keys and not pr.conflicting:
+        green = checks_green(pr)
+        actions.append(ready_merge_action(pr, auto=not green))
+        # Same rule as above: only beside the landing that happens now.
+        if can_archive and green:
+            actions.append(ready_merge_archive_action(pr))
     if pr.state in LIVE:
         actions.append(close_action(pr))
     return actions
@@ -571,6 +612,87 @@ def merge_archive_action(pr: PullRequest) -> Action:
     )
 
 
+def ready_merge_action(pr: PullRequest, auto: bool) -> Action:
+    """Take *pr* out of draft and land it, as one pick.
+
+    The draft's shortcut past its own button (see `alternate_actions`): two gh
+    calls in a fixed order, the ready first, because GitHub refuses to merge —
+    or to hold — a draft. Which landing follows is *auto*'s answer, exactly as
+    `merge_action`'s: the merge itself when the caller found the checks green,
+    auto-merge while they aren't in. Both ask first with the merges' own
+    dialog, its body saying the ready comes first — the merge is the half that
+    can't be taken back, and the question must own up to the whole of it.
+    """
+    if auto:
+        return Action(
+            READY_AUTO_MERGE,
+            _("Mark ready & merge when checks pass"),
+            _("Take {slug} out of draft, then turn on auto-merge").format(slug=pr.slug),
+            Confirm(
+                _("Mark {slug} ready and merge it when its checks pass?").format(
+                    slug=pr.slug
+                ),
+                _ready_first_body(
+                    _(
+                        "GitHub merges it as soon as every required check has "
+                        "passed. You can still cancel auto-merge on the pull "
+                        "request page."
+                    )
+                ),
+                _("Ready & auto-merge"),
+            ),
+            short=_("Ready & Auto-Merge"),
+        )
+    return Action(
+        READY_MERGE,
+        _("Mark ready & merge"),
+        _("Take {slug} out of draft, then merge it now").format(slug=pr.slug),
+        Confirm(
+            _("Mark {slug} ready and merge it?").format(slug=pr.slug),
+            _ready_first_body(_merge_body(pr)),
+            _("Ready & merge"),
+        ),
+        short=_("Ready & Merge"),
+    )
+
+
+def ready_merge_archive_action(pr: PullRequest) -> Action:
+    """Take *pr* out of draft, merge it, then archive the session behind it.
+
+    MERGE_ARCHIVE with the ready in front: the whole end of a piece of work
+    from a draft, as one pick. The halves keep their strict order — `perform`
+    readies and merges and stops there, and the archive is the app's own, run
+    once that has come back without an error. A ready or a merge GitHub
+    refused leaves the session exactly where it was.
+    """
+    return Action(
+        READY_MERGE_ARCHIVE,
+        _("Mark ready, merge & archive session"),
+        _("Take {slug} out of draft, merge it now, then archive this session").format(
+            slug=pr.slug
+        ),
+        Confirm(
+            _("Mark {slug} ready, merge it and archive this session?").format(
+                slug=pr.slug
+            ),
+            _ready_first_body(_merge_body(pr))
+            + " "
+            + _(
+                "The session is archived once the merge lands — you can bring it "
+                "back with Undo, or from “Show archived”."
+            ),
+            _("Ready, merge & archive"),
+        ),
+        short=_("Ready, merge & archive"),
+    )
+
+
+def _ready_first_body(merge_body: str) -> str:
+    """What the ready-merges' dialogs say happens: the ready, then whichever
+    landing *merge_body* describes — the order `perform` keeps."""
+    return _("The pull request is marked ready for review first.") + " " + merge_body
+
+
 def close_action(pr: PullRequest) -> Action:
     """Close *pr* without merging it.
 
@@ -609,12 +731,19 @@ def perform(key: str, pr: PullRequest) -> str | None:
         return _("{url} doesn't look like a pull request.").format(url=pr.url)
     if key == READY:
         return _run(["pr", "ready", pr.url])
-    if key in (MERGE, AUTO_MERGE, MERGE_ARCHIVE):
-        # MERGE_ARCHIVE is the plain merge as far as GitHub is concerned; the
-        # archive that follows it is the app's, and only happens if this
-        # returns None (see merge_archive_action).
+    if key in MERGES:
+        # The ready-merges are two calls in a fixed order: GitHub refuses to
+        # merge (or hold) a draft, so it comes out of draft first — and a
+        # ready that failed stops the whole thing there, the draft untouched.
+        if key in READY_MERGES:
+            error = _run(["pr", "ready", pr.url])
+            if error:
+                return error
+        # The archive-merges are the plain merge as far as GitHub is
+        # concerned; the archive that follows is the app's, and only happens
+        # if this returns None (see merge_archive_action).
         args = ["pr", "merge", pr.url, merge_method(repository)]
-        if key == AUTO_MERGE:
+        if key in (AUTO_MERGE, READY_AUTO_MERGE):
             args.append("--auto")
         return _run(args)
     if key == DISABLE_AUTO_MERGE:
