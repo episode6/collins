@@ -8,7 +8,9 @@ description, checks, conversation, and the per-file diff — off the `gh` auth
 Collins already has. Two views under one switcher: **Conversation** (the
 description, checks and timeline column) and **Files** (a navigation list
 beside every file's patch in a GtkSource diff buffer, styled by the editor's
-own scheme setting). The data is `prdetail.fetch`'s reply, fetched on a
+own scheme setting). A right-click on either tab opens that view's github.com
+twin in the browser (`_VIEW_GITHUB_PATHS`) — the escape hatch for whatever
+the native page doesn't render. The data is `prdetail.fetch`'s reply, fetched on a
 worker thread on first show, on the Refresh button, and (throttled) whenever
 the page comes back into view; the widgets here only ever render what that
 GTK-free layer parsed and bounded. Failures keep the last-loaded content
@@ -160,6 +162,10 @@ _FILE_LIST_WIDTH = 170
 # seam between Files and the action button beside it — applied where the two
 # meet, on the switcher row's end widget (see `switcher_row` below).
 _SWITCHER_GAP = 3
+# The github.com page each view stands in for, as a path under the PR's URL —
+# what a right-click on that view's tab opens in the browser. Conversation is
+# the PR page itself; Files is its files-changed view.
+_VIEW_GITHUB_PATHS = {"conversation": "", "files": "/changes"}
 # The one width the page asks for, in every state it is ever in. A page whose
 # minimum grew when its fetch landed would shove the panel divider out from
 # under a panel already squeezed narrow — so nothing built below may ask for
@@ -425,6 +431,7 @@ class PrViewPage(Adw.Bin):
         self._stack.add_titled_with_icon(files_paned, "files", _("Files"), "ft-file-symbolic")
         switcher = Adw.ViewSwitcher(stack=self._stack)
         switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+        self._link_switcher_tabs(switcher)
         # A CenterBox rather than a row with the button packed on the end: it
         # keeps the switcher centered on the *page* whatever button is beside
         # it, which is where it sat when it had the row to itself, and it
@@ -452,6 +459,34 @@ class PrViewPage(Adw.Bin):
         # coming back to the front — exactly the moments a stale page would
         # otherwise be looked at.
         self.connect("map", lambda *_a: self._fetch())
+
+    def _link_switcher_tabs(self, switcher: Adw.ViewSwitcher) -> None:
+        """Each tab opens its github.com twin on a right-click (see
+        _VIEW_GITHUB_PATHS). The switcher's children are one toggle per
+        stack page, in page order — walked and zipped here rather than
+        addressed by name, since libadwaita keeps the toggles internal. A
+        toggle answers the primary button and only that, so this never
+        doubles up with the click that switches views."""
+        pages = self._stack.get_pages()
+        toggle = switcher.get_first_child()
+        for index in range(pages.get_n_items()):
+            if toggle is None:
+                break
+            path = _VIEW_GITHUB_PATHS.get(pages.get_item(index).get_name())
+            if path is not None:
+                gesture = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+                gesture.connect("pressed", self._on_tab_secondary, path)
+                toggle.add_controller(gesture)
+                # A right-click nobody is told about is a right-click nobody
+                # finds — the same hint the page's other link buttons carry.
+                toggle.set_tooltip_text(_("Right-click to open on GitHub"))
+            toggle = toggle.get_next_sibling()
+
+    def _on_tab_secondary(
+        self, gesture: Gtk.GestureClick, _n_press: int, _x: float, _y: float, path: str
+    ) -> None:
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        open_uri(gesture.get_widget(), self.pr_url + path)
 
     # -- identity ------------------------------------------------------------
 

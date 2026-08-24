@@ -67,6 +67,10 @@ downloads of each version, see the
   group now, and ←/→ on a focused header do the same from the keyboard.
   Favorites, with nowhere to start a session, still folds on a click
   anywhere.
+- **The PR page's tabs link back to GitHub.** A right-click on
+  *Conversation* or *Files* opens that view of the pull request on
+  github.com in your browser — the escape hatch for whatever the native
+  page doesn't render.
 - **The PR page's Checks list folds instead of scrolling.** Past four
   checks the rest wait behind a "Show more" button, the same step the
   description takes, with the failing and pending rows kept on top. The

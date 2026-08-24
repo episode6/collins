@@ -102,7 +102,9 @@ Enter opens, Esc closes.
 - **Pull request chips** trail the branch: one per PR the session has
   opened, each with its CI or merge mark, and each opening that PR's **page
   beside the session** on click — a native view of the description, checks,
-  timeline, and diff. The caret beside them lists every PR with its title,
+  timeline, and diff, whose *Conversation* and *Files* tabs each open their
+  github.com counterpart on a right-click. The caret beside them lists every
+  PR with its title,
   `F7` opens the newest one's page, and *Open new pull requests
   automatically* (Preferences) opens the page by itself — once per PR — the
   moment a session picks one up. On a screen where the terminal has already
