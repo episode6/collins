@@ -1736,14 +1736,7 @@ class SessionSidebar(Gtk.Box):
                     pid,
                     key,
                     self,
-                    # A live tab knows its agent; a kept draft's record says
-                    # which one it was opened for.
-                    icon_name=self._placeholder_icons.get(
-                        pid,
-                        get_provider(record["provider"]).icon_name
-                        if record is not None
-                        else default_provider().icon_name,
-                    ),
+                    icon_name=self._placeholder_icon(pid, record),
                     arriving=arriving,
                     label=(
                         newchat.draft_label(record["text"], _("Draft"))
@@ -2124,6 +2117,20 @@ class SessionSidebar(Gtk.Box):
         return GLib.SOURCE_REMOVE
 
     # -- new-session placeholders ---------------------------------------------
+
+    def _placeholder_icon(self, placeholder_id: str, record: dict | None) -> str:
+        """The mark a placeholder row leads with: the agent its live tab
+        runs (recorded by add_placeholder), else the one its kept draft
+        was opened for, else -- a live tab the window hasn't described,
+        which shouldn't happen -- the agent a plain new session starts.
+        Each answer is only computed when the one before it is missing:
+        the last one probes PATH (see default_provider)."""
+        icon_name = self._placeholder_icons.get(placeholder_id)
+        if icon_name:
+            return icon_name
+        if record is not None:
+            return get_provider(record["provider"]).icon_name
+        return default_provider().icon_name
 
     @staticmethod
     def _placeholder_group_key(cwd: str) -> tuple:
