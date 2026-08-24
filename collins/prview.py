@@ -24,7 +24,8 @@ menu runs it with (`_ActionBar`), and no button at all where a PR offers
 none. A right-click on that button opens the alternatives to what it says
 (`practions.alternate_actions`): "Close pull request" while there is still
 one to close, "Merge pull request" where the button has stopped offering it,
-and — beside either merge-now — "Merge and archive session", which lands the
+on a draft the ready-and-merged shortcuts past "Ready" itself,
+and — beside any merge-now — the merge-and-archive, which lands the
 PR and then puts the session that opened it away, in that order and only if
 the merge worked. Everything else the PR offers
 is still a chip's right-click menu away.
@@ -1237,14 +1238,17 @@ class _ActionBar(Gtk.Box):
 
     A right-click on it opens what the button deliberately isn't offering
     (`practions.alternate_actions`): closing the pull request instead of
-    landing it, merging and archiving the session that opened it, and — where
-    the button says "Disable Auto-Merge" — the immediate merge that button has
-    stopped offering. All are the *end* of this pull request, which
+    landing it, merging and archiving the session that opened it, where
+    the button says "Disable Auto-Merge" the immediate merge that button has
+    stopped offering, and where it says "Ready" the shortcut straight to
+    landed — ready-and-merged as one pick, with the archive behind it too.
+    All are the *end* of this pull request, which
     is what makes them belong on this button rather than anywhere else on the
-    page, and neither is one to hand a stray click: they ask first, they open
-    behind a right-click, and the tooltip says the menu is there. "Merge and
-    archive" archives only once gh comes back without an error — the merge is
-    GitHub's half and the archive is the app's, in that order (see `_landed`).
+    page, and none is one to hand a stray click: they ask first, they open
+    behind a right-click, and the tooltip says the menu is there. The
+    archive-merges archive only once gh comes back without an error — the
+    merge is GitHub's half and the archive is the app's, in that order (see
+    `_landed`).
 
     A state can offer alternates and no button to hang them off: an open pull
     request whose branch conflicts is offered no merge at all, and it is the
@@ -1480,7 +1484,7 @@ class _ActionBar(Gtk.Box):
         # bar offers next is that read's answer (see `settled`).
         self._holding = True
         self._on_done()
-        if action.key == practions.MERGE_ARCHIVE:
+        if action.key in practions.MERGE_ARCHIVES:
             # The merge landed, so the session behind it can go — this and no
             # sooner (see practions.merge_archive_action). Last, after the
             # re-read has been asked for: archiving closes the session's tab,

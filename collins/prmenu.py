@@ -126,10 +126,15 @@ _ACTION_ICONS = {
     # Undoing the one above, and dressed as the undo: the same merge glyph
     # without the purple, since nothing about it lands a pull request.
     practions.DISABLE_AUTO_MERGE: ("git-merge-symbolic", None),
-    # The two the PR page keeps behind its button (see practions.alternate_actions).
+    # The ones the PR page keeps behind its button (see practions.alternate_actions).
     # Each wears the half of itself the merge glyph doesn't already say: the
-    # sidebar's own archive mark, and the closed-PR base icon in its red.
+    # sidebar's own archive mark, and the closed-PR base icon in its red. The
+    # draft's ready-merges wear the merge purple — the landing is the half of
+    # them worth a mark, and it is where each one ends.
     practions.MERGE_ARCHIVE: ("archive-symbolic", None),
+    practions.READY_MERGE: ("git-merge-symbolic", "pr-merged"),
+    practions.READY_AUTO_MERGE: ("git-merge-symbolic", "pr-merged"),
+    practions.READY_MERGE_ARCHIVE: ("archive-symbolic", None),
     practions.CLOSE: ("git-pull-request-closed-symbolic", "pr-closed"),
     practions.REBASE: ("agent-claude-symbolic", None),
     practions.REVIEW: ("agent-claude-symbolic", None),
