@@ -62,6 +62,7 @@ class PanedSizer(GObject.Object):
         self._memory = SizeMemory()
         self._apply_pending = False  # a programmatic divider set is queued
         self._apply_seq = 0  # invalidates superseded apply/settle chains
+        self._park_handler = 0  # "map" hook for an apply parked unmapped
         self._emit_source: int | None = None  # debounce for size-changed
         self._emit_key: str | None = None  # key whose size changed last
         # Dragging the divider records the new size for the current key.
@@ -194,14 +195,25 @@ class PanedSizer(GObject.Object):
         # A paned created this very frame (a fresh dock split) has no extent
         # in the first idle; wait out its first allocation instead of giving
         # up, bounded so a never-allocated paned can't hold the gate forever.
+        # A paned that is not even *mapped* once the waits run out — a page
+        # opened into a background tab's dock, whose widgets won't allocate
+        # until the tab is selected — parks the apply on its next map
+        # instead: giving up there would leave the divider wherever GTK's
+        # natural-size layout drops it (the new column squeezed to its
+        # minimum), however much room the layout has to give it.
         waits = [0]
 
         def position() -> bool:
             if seq != self._apply_seq:
                 return GLib.SOURCE_REMOVE  # a newer apply superseded this one
-            if self._total() <= 0 and waits[0] < 10:
-                waits[0] += 1
-                GLib.timeout_add(50, position)
+            if self._total() <= 0:
+                if waits[0] < 10:
+                    waits[0] += 1
+                    GLib.timeout_add(50, position)
+                elif not self._paned.get_mapped():
+                    self._park(position, waits)
+                else:
+                    self._apply_pending = False  # mapped yet 0px: degenerate
                 return GLib.SOURCE_REMOVE
             key = self._key()
             total = self._total()
@@ -240,6 +252,29 @@ class PanedSizer(GObject.Object):
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(position)
+
+    def _park(self, resume, waits: list[int]) -> None:
+        """Hold a pending apply until the paned maps — the moment a
+        background tab's dock is finally shown and its widgets can
+        allocate. The map precedes the first allocation, so *resume* (the
+        apply's own position step) restarts the bounded allocation wait
+        rather than reading the total right away; a stale park — its apply
+        superseded before the map ever came — resumes into the seq check
+        and no-ops. The gate stays up while parked, which is the point:
+        there is no position worth remembering off a paned that has never
+        been laid out. One park per sizer: a newer apply parking again
+        replaces the hook, and a paned that never maps takes the hook down
+        with it."""
+        if self._park_handler:
+            self._paned.disconnect(self._park_handler)
+
+        def on_map(_paned) -> None:
+            self._paned.disconnect(self._park_handler)
+            self._park_handler = 0
+            waits[0] = 0
+            GLib.idle_add(resume)
+
+        self._park_handler = self._paned.connect("map", on_map)
 
     def _drag_active(self) -> bool:
         """Whether the user is dragging this paned's own handle right now.
