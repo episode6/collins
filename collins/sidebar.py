@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-21. Full change history: git log for this file.
+# fork. Last modified: 2026-08-23. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -30,7 +30,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import desktopentry, footerapps, openwith, pkgrepos, prmenu
+from . import desktopentry, footerapps, newchat, openwith, pkgrepos, prmenu
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
 from .formatting import format_size
@@ -413,6 +413,14 @@ class PlaceholderRow(Gtk.ListBoxRow):
     unknown (no transcript on disk yet). Swapped for a real SessionRow once
     the store discovers the session.
 
+    Also the row a *new-chat draft* gets (see newchat): a screen the user
+    typed on, or opened a terminal beside, and hasn't sent yet. `label` is
+    then the draft's first line rather than "New Thread", the row leads
+    with a pencil where a session row's agent mark goes, and `live` says
+    whether a tab is open on it right now — a kept draft with no tab reads
+    like every row without one (dimmed, no outline), and its trailing
+    button discards the draft instead of closing a tab.
+
     `arriving` plays the row in rather than having it appear: see
     _arrive_by_slide.
     """
@@ -423,40 +431,62 @@ class PlaceholderRow(Gtk.ListBoxRow):
         group_key: tuple,
         sidebar: SessionSidebar,
         arriving: bool = False,
+        label: str | None = None,
+        live: bool = True,
+        draft: bool = False,
     ) -> None:
         super().__init__()
         self.placeholder_id = placeholder_id
         self.group_key = group_key
         self.add_css_class("session-child")
-        self.add_css_class(_STATUS_CSS["open"])  # it stands for a live tab
+        if live:
+            self.add_css_class(_STATUS_CSS["open"])  # it stands for a live tab
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         box.set_valign(Gtk.Align.CENTER)  # match SessionRow in a taller row
         box.set_margin_top(4)  # match SessionRow: the flat button fills the row
         box.set_margin_bottom(4)
-        # Stands in for the mark column a SessionRow leads with -- the button's
-        # 4px of left padding plus half the badge overhang the mark centers
-        # itself in (see prmenu._mark) -- so this label starts where the icons
-        # above it do.
-        box.set_margin_start(6)
+        if draft:
+            # The draft's mark, in the slot a SessionRow leads with (the
+            # agent mark's column, see NewThreadRow): a pencil, for a row
+            # that stands for writing rather than a session.
+            mark = Gtk.Image.new_from_icon_name("document-edit-symbolic")
+            mark.set_pixel_size(prmenu.ROW_ICON_PX)
+            mark.set_valign(Gtk.Align.CENTER)
+            mark.add_css_class("agent-mark")
+            mark.add_css_class("dim-label")
+            box.append(mark)
+        else:
+            # Stands in for the mark column a SessionRow leads with -- the
+            # button's 4px of left padding plus half the badge overhang the
+            # mark centers itself in (see prmenu._mark) -- so this label
+            # starts where the icons above it do.
+            box.set_margin_start(6)
 
-        label = Gtk.Label(label=_("New Thread"), xalign=0.0, hexpand=True)
+        title = Gtk.Label(label=label or _("New Thread"), xalign=0.0, hexpand=True)
         # Full strength, like the real rows with a tab open: dimming now means
         # "no tab", and a placeholder is standing in for one that is starting.
-        label.add_css_class("session-title")
-        label.set_ellipsize(_ELLIPSIZE_END)
-        box.append(label)
+        title.add_css_class("session-title")
+        title.set_ellipsize(_ELLIPSIZE_END)
+        box.append(title)
+        if draft and label:
+            self.set_tooltip_text(label)
 
         # There is no session to archive yet, so the slot the archive button
         # occupies closes the tab instead (through the usual busy-tab
-        # confirmation flow).
-        close_btn = Gtk.Button(icon_name="tab-close-symbolic", valign=Gtk.Align.CENTER)
-        close_btn.add_css_class("flat")
-        close_btn.set_tooltip_text(_("Close tab"))
-        close_btn.connect(
+        # confirmation flow) -- or, for a kept draft with no tab open on it,
+        # discards the draft.
+        if live:
+            trailing = Gtk.Button(icon_name="tab-close-symbolic", valign=Gtk.Align.CENTER)
+            trailing.set_tooltip_text(_("Close tab"))
+        else:
+            trailing = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER)
+            trailing.set_tooltip_text(_("Discard draft"))
+        trailing.add_css_class("flat")
+        trailing.connect(
             "clicked", lambda *_: sidebar.emit("close-placeholder", placeholder_id)
         )
-        box.append(close_btn)
+        box.append(trailing)
 
         if arriving:
             _arrive_by_slide(self, box)
@@ -1609,9 +1639,16 @@ class SessionSidebar(Gtk.Box):
         # Transient "New Thread" rows for tabs whose session isn't resolved
         # yet, grouped under the project of their working directory. A project
         # with no sessions on disk still needs a header to hang them from.
+        # Kept new-chat drafts (read straight off the state, so every window's
+        # sidebar lists the same ones) take the same rows: a draft with a tab
+        # open on it is a live placeholder too, and is listed once.
+        drafts = self.store.state.get_new_chat_drafts()
+        placeholder_cwds = {pid: record["cwd"] for pid, record in drafts.items()}
+        placeholder_cwds.update(self._placeholders)
         placeholders_by_group: dict[tuple, list[str]] = {}
-        for pid, cwd in self._placeholders.items():
+        for pid, cwd in placeholder_cwds.items():
             placeholders_by_group.setdefault(self._placeholder_group_key(cwd), []).append(pid)
+        live_groups = {self._placeholder_group_key(cwd) for cwd in self._placeholders.values()}
 
         # Every header in display order: favorites pinned first, then all
         # projects — with or without visible session rows (empty ones keep
@@ -1643,7 +1680,7 @@ class SessionSidebar(Gtk.Box):
             elif key in empty_by_key:
                 headers.append((key, *empty_by_key[key]))
             elif key in placeholders_by_group:
-                ph_cwd = self._placeholders[placeholders_by_group[key][0]]
+                ph_cwd = placeholder_cwds[placeholders_by_group[key][0]]
                 headers.append((key, name, worktree_project_root(ph_cwd) or ph_cwd))
 
         # Expansion is persisted per group; unknown groups start collapsed.
@@ -1653,7 +1690,9 @@ class SessionSidebar(Gtk.Box):
             if not self.store.state.is_group_expanded(_group_state_key(key))
         }
         # Keep just-opened tabs visible: their groups ignore a collapsed state.
-        self._collapsed -= set(placeholders_by_group)
+        # (A kept draft with no tab open is an ordinary row: it folds away
+        # with its group like the sessions do.)
+        self._collapsed -= live_groups
 
         icon_size = self._project_icon_size()
         child_indent = _session_child_indent(icon_size)
@@ -1686,7 +1725,20 @@ class SessionSidebar(Gtk.Box):
             for pid in placeholders_by_group.get(key, ()):
                 arriving = pid in self._arriving_placeholders
                 self._arriving_placeholders.discard(pid)
-                prow = PlaceholderRow(pid, key, self, arriving=arriving)
+                record = drafts.get(pid)
+                prow = PlaceholderRow(
+                    pid,
+                    key,
+                    self,
+                    arriving=arriving,
+                    label=(
+                        newchat.draft_label(record["text"], _("Draft"))
+                        if record is not None
+                        else None
+                    ),
+                    live=pid in self._placeholders,
+                    draft=record is not None,
+                )
                 prow.set_margin_start(child_indent)
                 if pid == self._active_session_id:
                     prow.add_css_class("active-tab")
@@ -2155,11 +2207,21 @@ class SessionSidebar(Gtk.Box):
         return len(self._placeholders), len(waiting)
 
     def remove_placeholder(self, placeholder_id: str) -> None:
+        """Drop a live placeholder. A new-chat draft's row outlives this —
+        the rows for kept drafts are read off the state on every rebuild
+        (see _rebuild_rows), so its tab closing merely leaves the row
+        standing without one."""
         self._busy_placeholders.discard(placeholder_id)
         self._unread_placeholders.discard(placeholder_id)
         self._arriving_placeholders.discard(placeholder_id)
         if self._placeholders.pop(placeholder_id, None) is None:
             return
+        self._rebuild_rows()
+        self._invalidate()
+
+    def refresh_drafts(self) -> None:
+        """The kept new-chat drafts changed (one written, relabelled, sent
+        or discarded): rebuild, so the rows say what the state says."""
         self._rebuild_rows()
         self._invalidate()
 

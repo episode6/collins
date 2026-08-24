@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-21. Full change history: git log for this file.
+# fork. Last modified: 2026-08-23. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -27,6 +27,7 @@ from . import (  # noqa: E402
     attachpanel,
     attachrecords,
     composerkeys,
+    dialogs,
     dropimages,
     editor,
     editorfiles,
@@ -34,6 +35,7 @@ from . import (  # noqa: E402
     keybindings,
     keymap,
     modelmenu,
+    newchat,
     panelhistory,
     panellayout,
     prmenu,
@@ -60,6 +62,7 @@ from .linkpatterns import (  # noqa: E402
     resolve_wrapped_url,
     token_at_column,
 )
+from .newchatview import NewChatView, is_git_checkout  # noqa: E402
 from .panedsizer import PanedSizer  # noqa: E402
 from .paneldock import PanelDock  # noqa: E402
 from .panelstrip import PanelStrip  # noqa: E402
@@ -136,6 +139,16 @@ def _bracketed_paste(text: str) -> str:
 # past that the shell is presumed to be sitting at a prompt with no agent.
 _COMPOSER_AUTOSHOW_POLL_MS = 400
 _COMPOSER_AUTOSHOW_TRIES = 50
+
+# The new-chat screen's Send: how often the tab asks whether the CLI it just
+# spawned is at an empty input box yet, for how long before the prompt is
+# stashed as a composer draft instead (a `-w` launch cuts a worktree first,
+# and a cold start on a slow disk takes a while), and after how many ticks a
+# shell sitting idle at its prompt — the command exited at once — is read as
+# "the agent isn't coming" rather than waited out (see _new_chat_prompt_tick).
+_NEW_CHAT_PROMPT_POLL_MS = 300
+_NEW_CHAT_PROMPT_TICKS = 300  # ~90s
+_NEW_CHAT_IDLE_SHELL_TICKS = 20  # ~6s
 # The composer's open-cut, which is a run of screen reads either side of an
 # erase (see TerminalTab._begin_cut). The read is taken once _CUT_SETTLE_READS
 # of them _CUT_SETTLE_MS apart agree — 150ms of a still input box, measured
@@ -1055,6 +1068,21 @@ class PanelTerminal(Gtk.Box):
         self.terminal.reset(True, True)
         self.emit("shell-exited")
 
+    def follow_cwd(self, cwd: str | None) -> bool:
+        """`cd` this shell to *cwd* if it is sitting idle at its prompt —
+        what the tab offers for the shells that were open beside a new-chat
+        screen when its session started in a worktree (see
+        TerminalTab._offer_shells_follow). False when the shell is busy and
+        was left alone, or already there."""
+        if not cwd or not Path(cwd).is_dir() or self._child_pid is None:
+            return False
+        if self.has_running_command():
+            return False
+        if proctree.process_cwd(self._child_pid) == cwd:
+            return False
+        self._sync_cwd(cwd)
+        return True
+
     def _sync_cwd(self, cwd: str | None) -> None:
         if not cwd or not Path(cwd).is_dir() or self._child_pid is None:
             return
@@ -1200,6 +1228,15 @@ class TerminalTab(Gtk.Box):
         # draft, "" when it has been taken back or emptied), so the window
         # can save it against the session. See _stash_draft.
         "draft-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # The new-chat screen (a tab opened with new_chat=True, before its
+        # first prompt is sent — see begin_session). "new-chat-changed" says
+        # the draft's parts moved: text typed, the worktree box toggled, a
+        # panel page opened or closed — the window debounces it into a
+        # persisted draft. "new-chat-send" is the screen's Send: the prompt
+        # and whether the worktree box is ticked; the window turns it into
+        # launch options (trust, the flag) and calls begin_session.
+        "new-chat-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        "new-chat-send": (GObject.SignalFlags.RUN_FIRST, None, (str, bool)),
         # Emitted (debounced) when the editor panel's divider is moved: the
         # new panel px size, so the window can persist it as the app-wide
         # default. Mirrors panel-size-changed, minus the mode — the editor
@@ -1222,7 +1259,15 @@ class TerminalTab(Gtk.Box):
         options=None,
         command_override: str | None = None,
         initial_size: tuple[int, int] | None = None,
+        new_chat: bool = False,
+        worktree_default: bool = False,
     ) -> None:
+        """*new_chat* opens the tab on the new-chat screen instead of the
+        agent's console: nothing is spawned until `begin_session`, which
+        the screen's Send (the "new-chat-send" signal, via the window)
+        reaches. *worktree_default* is what its worktree checkbox starts
+        on. Only a fresh session (no id, no command override) is ever a
+        new chat."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.session_id = session_id
         self.fork = fork
@@ -1233,6 +1278,22 @@ class TerminalTab(Gtk.Box):
         # a shell that inherited the other choice; new tabs pick up a change.
         self._progress_env = bool((settings or {}).get("progress_termprop", True))
         self._child_pid: int | None = None
+        # The directory the tab was handed, until _finish_spawn settles on
+        # where the shell actually runs: what cwd readers (the dock's shells,
+        # the composer's file picker) answer with while nothing is spawned —
+        # the new-chat screen's whole life.
+        self._cwd: str | None = cwd
+        # The new-chat screen, while the tab is one (None after begin_session
+        # or for a tab that never was); the draft id its panel history is
+        # filed under meanwhile (see _history_id); and the prompt Send handed
+        # over, waiting for the CLI to take it (see _new_chat_prompt_tick).
+        self._new_chat: NewChatView | None = None
+        self._history_key: str | None = None
+        self._new_chat_prompt: str | None = None
+        self._new_chat_ticks = 0
+        # Whether the shells open beside the screen are owed the offer to
+        # follow the session into its worktree (see _maybe_offer_shells_follow).
+        self._shells_follow_armed = False
         self._transcript_monitor: Gio.FileMonitor | None = None
         self._transcript_refresh_source: int | None = None
         self._poll_source: int | None = None
@@ -1465,6 +1526,37 @@ class TerminalTab(Gtk.Box):
         gutter_click.connect("pressed", self._on_gutter_click)
         self._overlay.add_controller(gutter_click)
 
+        # What the dock's fixed leaf holds: the terminal (and its gutters),
+        # or — for a tab opened as a new chat — a stack that shows the
+        # new-chat screen in its place until the first prompt is sent, when
+        # `begin_session` flips it to the terminal. The screen sits *inside*
+        # the dock's leaf on purpose: Ctrl+J's terminal and every other panel
+        # page open beside it exactly as they would beside the console, and
+        # stay put through the flip. A tab that isn't a new chat skips the
+        # stack — the console is the leaf, as it always was.
+        stage: Gtk.Widget = self._overlay
+        if new_chat and session_id is None and command_override is None:
+            self._new_chat = NewChatView(
+                cwd=cwd or str(Path.home()),
+                pick_attach=self._pick_file_for_composer,
+                file_reference=lambda name: self.provider.file_reference(name, cwd),
+                notify=self.feed_message,
+                worktree_default=worktree_default,
+                is_git=bool(cwd) and is_git_checkout(cwd),
+            )
+            self._new_chat.connect("changed", lambda *_a: self.emit("new-chat-changed"))
+            self._new_chat.connect(
+                "send-requested",
+                lambda _v, text, worktree: self.emit("new-chat-send", text, worktree),
+            )
+            self._stage = Gtk.Stack(vexpand=True, hexpand=True)
+            self._stage.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+            self._stage.add_named(self._overlay, "terminal")
+            self._stage.add_named(self._new_chat, "new-chat")
+            self._stage.set_visible_child_name("new-chat")
+            stage = self._stage
+            self.terminal_area = stage
+
         # The panel dock — strips of panel pages (shells, for now) split
         # around the agent terminal in a tree of fixed-axis paneds. Pages
         # move between strips by reparenting, so shells keep running; the
@@ -1474,7 +1566,7 @@ class TerminalTab(Gtk.Box):
         # panel-size-changed so the window can persist app-wide defaults.
         panel_right = bool(settings) and settings.get("panel_position") == "right"
         self._dock = PanelDock(
-            terminal=self._overlay,
+            terminal=stage,
             strip_factory=self._make_panel_strip,
             home_position="right" if panel_right else "bottom",
         )
@@ -1597,9 +1689,146 @@ class TerminalTab(Gtk.Box):
         if settings:
             self.apply_settings(settings)
         self.set_transcript_path(jsonl_path)
+        if self._new_chat is not None:
+            return  # nothing runs until the screen's Send (begin_session)
         self._spawn(cwd, session_id)
         if jsonl_path is None and session_id is None:
             self._start_transcript_resolver(cwd)  # find the new session's transcript
+
+    # -- the new-chat screen -------------------------------------------------
+
+    @property
+    def is_new_chat(self) -> bool:
+        """Whether the tab is still on its new-chat screen: no agent, no
+        shell, a draft. False from `begin_session` on, and for every tab that
+        was opened straight onto a console."""
+        return self._new_chat is not None
+
+    @property
+    def start_cwd(self) -> str | None:
+        """The directory the tab was handed to start in — what a draft is
+        filed against, and what its Send launches in."""
+        return self._cwd
+
+    @property
+    def launch_options(self):
+        """The SessionOptions the tab was opened with (the Advanced dialog's
+        model, permission mode and extra directory), or None."""
+        return self._options
+
+    def new_chat_text(self) -> str:
+        return self._new_chat.text() if self._new_chat is not None else ""
+
+    def seed_new_chat_text(self, text: str) -> None:
+        """Put *text* in the screen's composer, cursor at the end — a
+        screenshot's staged prompt, or anything else that wants the box
+        filled without restoring a whole draft (restore_new_chat)."""
+        if self._new_chat is not None:
+            self._new_chat.set_text(text)
+
+    def new_chat_worktree_choice(self) -> bool | None:
+        """The screen's worktree box as the user left it, None while it still
+        follows the project's default (see NewChatView.worktree_choice)."""
+        return self._new_chat.worktree_choice() if self._new_chat is not None else None
+
+    def new_chat_worthy(self) -> bool:
+        """Whether the screen holds anything worth keeping as a draft: text,
+        or a panel page open beside it (see newchat.draft_worthy)."""
+        if self._new_chat is None:
+            return False
+        return newchat.draft_worthy(self._new_chat.text(), bool(self._dock.pages()))
+
+    def restore_new_chat(
+        self, draft_id: str, text: str, worktree: bool | None, layout: dict | None
+    ) -> None:
+        """Put a kept draft back on the screen: its text, its checkbox, and
+        the dock the way it was left — shells and their scrollback included,
+        which are filed under the draft id until the session starts (see
+        _history_id)."""
+        if self._new_chat is None:
+            return
+        self._history_key = draft_id
+        self._new_chat.set_text(text)
+        self._new_chat.set_worktree_choice(worktree)
+        if layout:
+            self.restore_panel_layout(layout)
+
+    def set_new_chat_history_key(self, draft_id: str) -> None:
+        """File this screen's panel scrollback under *draft_id* from now on —
+        what a fresh new chat gets the moment it becomes a draft."""
+        if self._new_chat is not None:
+            self._history_key = draft_id
+
+    def begin_session(self, options, prompt: str) -> None:
+        """The screen's Send, once the window has settled the launch options
+        (trust written where the CLI reads it, the worktree flag decided):
+        spawn the shell and the agent as a console tab would have at open,
+        show the console, and type *prompt* in the moment the CLI is at its
+        input box (`_new_chat_prompt_tick`) — the background spawn's
+        prompt-poll, done in the foreground. The dock's pages ride along:
+        they hang off the leaf the stack sits in, not off the screen.
+
+        The screen widget stays in the stack, hidden, rather than being torn
+        down: its composer may be mid-drop when Send is clicked, and a
+        destroyed drop target is a crash, not a no-op.
+        """
+        view = self._new_chat
+        if view is None:
+            return
+        self._new_chat = None
+        self._history_key = None
+        self._options = options
+        # Shells open right now, at a launch that will move into a worktree,
+        # get the offer to move with it once the worktree exists.
+        self._shells_follow_armed = bool(options and options.worktree) and bool(
+            self._dock.shell_pages()
+        )
+        self._stage.set_visible_child_name("terminal")
+        self._new_chat_prompt = prompt
+        self._new_chat_ticks = 0
+        self._spawn(self._cwd, None)
+        self._start_transcript_resolver(self._cwd)
+        GLib.timeout_add(_NEW_CHAT_PROMPT_POLL_MS, self._new_chat_prompt_tick)
+        self.grab_terminal_focus()
+
+    def _new_chat_prompt_tick(self) -> bool:
+        """Wait out the agent's start, then send the screen's prompt.
+
+        Three ways to stop, and only the first sends: the CLI is at an
+        empty input box (`takes_prompt`); the shell has been sitting idle at
+        its own prompt for a while — the agent command exited at once (not
+        installed, refused to start) and no worktree relaunch is still being
+        watched for (`_check_worktree_launch` retypes it in the same shell);
+        or the wait ran out. The two failures stash the prompt as this tab's
+        composer draft (`_stash_draft`), where the next composer to open
+        here — or the next visit to this session — gets it back: the text
+        was the user's, and the screen it was typed on is gone.
+        """
+        prompt = self._new_chat_prompt
+        if prompt is None or self.get_root() is None:
+            return GLib.SOURCE_REMOVE
+        self._new_chat_ticks += 1
+        if self.takes_prompt():
+            self._new_chat_prompt = None
+            self.inject_prompt(prompt)
+            return GLib.SOURCE_REMOVE
+        idle_shell = (
+            self._new_chat_ticks >= _NEW_CHAT_IDLE_SHELL_TICKS
+            and self._child_pid is not None
+            and not self._worktree_launch
+            and not self.has_running_command()
+        )
+        if not idle_shell and self._new_chat_ticks < _NEW_CHAT_PROMPT_TICKS:
+            return GLib.SOURCE_CONTINUE
+        self._new_chat_prompt = None
+        self.feed_message(_("the agent didn't start — your prompt is kept in the composer"))
+        self._stash_draft(prompt)
+        return GLib.SOURCE_REMOVE
+
+    def _note_new_chat_change(self) -> None:
+        """A dock change that may make (or unmake) the screen a draft."""
+        if self._new_chat is not None:
+            self.emit("new-chat-changed")
 
     # -- spawning ----------------------------------------------------------
 
@@ -1754,6 +1983,7 @@ class TerminalTab(Gtk.Box):
         The tab's own options lose the flag too, so anything that later asks
         what this session was started with is told what actually ran."""
         self._options = replace(self._options, worktree=False) if self._options else None
+        self._shells_follow_armed = False  # no worktree to follow into
         command = self.provider.new_command(self._options)
         if command is None:  # the CLI vanished from PATH between the two launches
             return
@@ -2128,6 +2358,66 @@ class TerminalTab(Gtk.Box):
             self._editor.request_root(cwd)
         else:
             self._editor.offer_root(cwd)
+        # The shells' offer rides the same settled move, whichever scope the
+        # editor gave it: NONE above is never a worktree (it means "not a
+        # move at all" — no cwd, a missing directory, or the root itself),
+        # and a worktree under the repository is AUTO, so every move the
+        # launch could have made reaches here.
+        self._maybe_offer_shells_follow(cwd)
+
+    def _maybe_offer_shells_follow(self, cwd: str) -> None:
+        """The session a new-chat screen just started has settled into its
+        worktree, and shells were open beside the screen when Send was
+        pressed: offer to move them there too.
+
+        Offered, not done: those shells were opened against the project
+        directory on purpose — a build running there, a log being tailed —
+        and a `cd` typed into them uninvited would be a surprise. Only the
+        launch that asked for a worktree arms this (see begin_session), and
+        only once: the first settled move after the launch is the worktree
+        being entered, and the answer given then stands.
+        """
+        if not self._shells_follow_armed:
+            return
+        self._shells_follow_armed = False
+        shells = [shell for shell in self._dock.shell_pages() if shell.ever_spawned]
+        if not shells:
+            return
+        dialogs.confirm_dialog(
+            self,
+            _("Move terminals to {name}?").format(name=Path(cwd).name),
+            ngettext(
+                "This session started in a worktree at {path}. The terminal "
+                "open beside it is still in the project directory — change "
+                "its directory to the worktree? A terminal running a command "
+                "is left alone.",
+                "This session started in a worktree at {path}. The {count} "
+                "terminals open beside it are still in the project directory "
+                "— change their directory to the worktree? A terminal running "
+                "a command is left alone.",
+                len(shells),
+            ).format(path=display_path(cwd), count=len(shells)),
+            _("Change Directory"),
+            lambda: self._follow_shells(shells, cwd),
+            default_response="confirm",
+            destructive=False,
+        )
+
+    def _follow_shells(self, shells: list, cwd: str) -> None:
+        skipped = 0
+        for shell in shells:
+            if shell.get_root() is None:
+                continue  # closed while the question was up
+            if not shell.follow_cwd(cwd) and shell.has_running_command():
+                skipped += 1
+        if skipped:
+            self.feed_message(
+                ngettext(
+                    "{n} terminal is running a command and stayed where it was",
+                    "{n} terminals are running commands and stayed where they were",
+                    skipped,
+                ).format(n=skipped)
+            )
 
     def register_root_name_links(self, links: _RootNameLinks) -> None:
         """Called by a `_RootNameLinks` the first time it resolves this tab, so
@@ -3432,6 +3722,11 @@ class TerminalTab(Gtk.Box):
         The seeding lands a beat after the panel does, because a cut can't
         be taken off a screen that is still moving (see _begin_cut); the
         composer opens on the spot either way."""
+        if self._new_chat is not None:
+            # The screen's composer *is* this tab's composer until the first
+            # prompt goes: Ctrl+. just puts the keyboard back in it.
+            self._new_chat.focus()
+            return
         if self._composer_page is not None:
             # One composer per tab: docked, the button fronts the page —
             # revealing a hidden home strip if that's where it lives —
@@ -4042,8 +4337,15 @@ class TerminalTab(Gtk.Box):
         except GLib.Error:
             return  # cancelled
         # The composer can close (or the tab die) while the dialog is up;
-        # a mention with nowhere to land is dropped.
-        if self.get_root() is None or not self.composer_open():
+        # a mention with nowhere to land is dropped. On the new-chat screen
+        # the screen's own composer is the one that asked.
+        if self.get_root() is None:
+            return
+        if self._new_chat is not None:
+            composer = self._new_chat.composer
+        elif self.composer_open():
+            composer = self._composer
+        else:
             return
         path = gfile.get_path()
         if path is None:
@@ -4052,7 +4354,7 @@ class TerminalTab(Gtk.Box):
         if reference is None:
             self.feed_message(_("Add to chat isn't available for this file"))
             return
-        self._composer.insert_mention(reference + " ")
+        composer.insert_mention(reference + " ")
 
     def inject_prompt(self, text: str) -> None:
         """Type *text* into the agent, send it, and put the tab in front.
@@ -4244,7 +4546,14 @@ class TerminalTab(Gtk.Box):
         session id — sitting at an empty input box right now. Closing one
         loses nothing, so the window skips the active-session confirmation
         for it. Anything typed into the box (takes_prompt says no) brings
-        the confirmation back."""
+        the confirmation back.
+
+        A tab still on its new-chat screen is unstarted by definition —
+        nothing is running behind it — and what is typed there is kept as a
+        draft rather than lost, so the confirmation isn't owed for that
+        either."""
+        if self._new_chat is not None:
+            return True
         return (
             self._resolver_cwd is not None
             and self.session_id is None
@@ -4640,6 +4949,11 @@ class TerminalTab(Gtk.Box):
         (numbered dock-wide) at the agent's current working directory."""
         strip = PanelStrip(shell_factory=self._make_panel_shell)
         strip.set_cwd_lookup(self.current_agent_cwd)
+        # A page arriving or the last one leaving is what makes (or unmakes)
+        # a new-chat screen a draft worth keeping; no-ops after the session
+        # starts (see _note_new_chat_change).
+        strip.connect("empty", lambda *_a: self._note_new_chat_change())
+        strip.connect("page-touched", lambda *_a: self._note_new_chat_change())
         return strip
 
     def _make_panel_shell(self) -> PanelTerminal:
@@ -4809,6 +5123,7 @@ class TerminalTab(Gtk.Box):
         self._dock.show_panel_terminal(restore, focus=focus)
         if focus:
             GLib.idle_add(self._dock.focus_panel_terminal)
+        self._note_new_chat_change()
 
     def hide_panel(self) -> None:
         self._dock.hide_panel_terminal()
@@ -4838,7 +5153,9 @@ class TerminalTab(Gtk.Box):
         if not self._dock.shell_pages():
             self.show_panel(focus=False)
             return self._dock.panel_terminal
-        return self._dock.open_shell_page()
+        shell = self._dock.open_shell_page()
+        self._note_new_chat_change()
+        return shell
 
     def reveal_panel_shell(self, shell) -> None:
         """Put *shell* on the user's screen without moving keyboard focus
@@ -4864,17 +5181,28 @@ class TerminalTab(Gtk.Box):
         """Saved shell scrollbacks by history ordinal for this session —
         forks don't restore (their panel would clash with the original
         tab's) and never save."""
-        if self.fork or not self.session_id:
+        history_id = self._history_id()
+        if self.fork or not history_id:
             return {}
-        return panelhistory.load_all(self.session_id)
+        return panelhistory.load_all(history_id)
+
+    def _history_id(self) -> str | None:
+        """What this tab's panel scrollback is filed under: the session id,
+        or — on the new-chat screen, where there is no session yet — the
+        draft id the window assigned (None until it did: a screen that is
+        not yet a draft has nothing on disk to restore or write)."""
+        if self._new_chat is not None:
+            return self._history_key
+        return self.session_id
 
     def save_panel_history(self) -> None:
         """Persist each panel tab's scrollback so re-opening this session
         restores them. A panel never opened in this tab leaves prior history
         untouched; tabs closed along the way drop out of the saved set."""
-        if self.fork or not self.session_id or not self._dock.ever_spawned:
+        history_id = self._history_id()
+        if self.fork or not history_id or not self._dock.ever_spawned:
             return
-        panelhistory.save_all(self.session_id, self._dock.capture_shell_texts())
+        panelhistory.save_all(history_id, self._dock.capture_shell_texts())
 
     def clear_panel_history(self) -> None:
         """Wipe every panel tab's scrollback and the persisted history files.
@@ -5220,10 +5548,14 @@ class TerminalTab(Gtk.Box):
         self._composer_on_typing = bool(settings.get("composer_on_typing"))
         self._composer_spell_click = bool(settings.get("composer_spell_click", True))
         self._composer_font = font
-        if self._composer is not None:
-            self._composer.set_enter_sends(self._composer_enter_sends)
-            self._composer.set_spell_click(self._composer_spell_click)
-            self._composer.set_font(self._composer_font)
+        for composer in (
+            self._composer,
+            self._new_chat.composer if self._new_chat is not None else None,
+        ):
+            if composer is not None:
+                composer.set_enter_sends(self._composer_enter_sends)
+                composer.set_spell_click(self._composer_spell_click)
+                composer.set_font(self._composer_font)
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
         self._keys = keymap.KeyMatcher.from_settings(settings)
         self._auto_open_prs = bool(settings.get("open_pr_panel_on_attach"))
@@ -5297,6 +5629,11 @@ class TerminalTab(Gtk.Box):
         maximized = self._dock.maximized_page
         if maximized is not None:
             maximized.grab_page_focus()
+            return
+        if self._new_chat is not None:
+            # The screen is what the tab is showing; its composer is where
+            # the keyboard belongs, the console being hidden behind it.
+            self._new_chat.focus()
             return
         self.terminal.grab_focus()
 

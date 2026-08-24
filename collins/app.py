@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-21. Full change history: git log for this file.
+# fork. Last modified: 2026-08-23. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -254,6 +254,23 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
    two are a shade apart, but only by coincidence of the palette. */
 .composer-panel.docked textview text {
   background-color: @view_bg_color;
+}
+
+/* the new-chat screen (newchatview.py): the first prompt's composer, sitting
+   in the middle of an otherwise empty tab. It covers no terminal and isn't a
+   pane either, so it is a card -- solid, rounded on every corner, and edged
+   all the way round with the hairline the rest of the app draws seams with,
+   which is what lifts it off the window background it shares. */
+.composer-panel.new-chat-composer {
+  border-radius: 12px;
+  background-color: @view_bg_color;
+  border: 1px solid alpha(currentColor, 0.15);
+}
+.composer-panel.new-chat-composer textview text {
+  background-color: @view_bg_color;
+}
+.new-chat {
+  background-color: @window_bg_color;
 }
 
 /* the attachments handle on the terminal's right edge: the same pill as

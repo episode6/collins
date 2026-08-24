@@ -86,6 +86,10 @@ class ComposerView(Gtk.Box):
         # The chrome's dock/float toggle; what docking means is the host's
         # business, like every other signal here.
         "dock-toggle-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # The buffer changed — typed into, pasted, seeded, emptied. What a
+        # host that keeps the draft on disk (the new-chat screen) listens
+        # to; the terminal's overlay never needs it and never connects.
+        "text-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(
@@ -94,16 +98,24 @@ class ComposerView(Gtk.Box):
         file_reference: Callable[[str], str | None],
         notify: Callable[[str], None],
         model_popover: Gtk.Popover | None = None,
+        chrome: bool = True,
     ) -> None:
+        """*chrome* is the close and dock/float pair at the row's left — the
+        stand-in's controls, for a composer raised over a terminal it can
+        lower itself back into. False leaves them out: on the new-chat
+        screen the composer *is* the page, with nothing to close into or
+        dock beside, and Escape means nothing there either."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("composer-panel")
         self._enter_sends = True
         self._spell_click = True
+        self._chrome = bool(chrome)
         self._font_provider: Gtk.CssProvider | None = None
         self._file_reference = file_reference
         self._notify = notify
 
         self._buffer = GtkSource.Buffer()
+        self._buffer.connect("changed", lambda *_a: self.emit("text-changed"))
         # No language, no brackets: this is prose bound for a prompt, and
         # the one GtkSource behavior wanted from the buffer is that
         # libspelling's adapter is built for it.
@@ -192,12 +204,14 @@ class ComposerView(Gtk.Box):
         )
         close.add_css_class("flat")
         close.connect("clicked", lambda *_a: self.emit("close-requested"))
+        close.set_visible(self._chrome)
         row.append(close)
         self._dock_btn = Gtk.Button()
         self._dock_btn.add_css_class("flat")
         self._dock_btn.connect(
             "clicked", lambda *_a: self.emit("dock-toggle-requested")
         )
+        self._dock_btn.set_visible(self._chrome)
         row.append(self._dock_btn)
         row.append(Gtk.Box(hexpand=True))
         # The model picker sits with the composing half of the row: choosing
@@ -535,6 +549,8 @@ class ComposerView(Gtk.Box):
 
     def _on_key(self, _controller, keyval: int, _keycode: int, state) -> bool:
         if keyval == _ESCAPE_KEYVAL:
+            if not self._chrome:
+                return False  # nothing to close into (see __init__)
             self.emit("close-requested")
             return True
         action = composerkeys.enter_action(int(keyval), int(state), self._enter_sends)

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-21. Full change history: git log for this file.
+fork. Last modified: 2026-08-23. Full change history: git log for this file.
 -->
 
 # Features
@@ -204,6 +204,9 @@ one-line input:
 - **Model button**: the composer names the model the session is answering
   with, and clicking it opens the same switch menu as the footer's — pick a
   different model mid-draft and carry on writing.
+- **It's also where a session begins.** A new session's first prompt is
+  written in this same composer, on the [new-chat screen](#starting-sessions)
+  that stands in for the console until Send.
 
 ![The composer floating over an agent terminal](/img/composer.png)
 
@@ -399,10 +402,26 @@ flipped the switch is refused if it calls it anyway.
   entry picks a model, a permission mode, or an extra directory
   (`--add-dir`), and **Continue** resumes the most recent session in a
   folder (`claude --continue`).
+- **The first prompt is written on a new-chat screen**, not in the agent's
+  console: the project's icon and name over the [composer](#prompt-composer),
+  with a *Start in a new git worktree* checkbox under it (ticked or not as
+  the project's setting says — see below). Nothing runs until you press
+  Send; then the agent starts with your prompt as its first turn, and the
+  tab is an ordinary session tab from there. `Ctrl+J` opens a terminal
+  beside the screen just as it would beside the console.
+- **Unsent screens are drafts.** As soon as there is text on the screen, or
+  a terminal open beside it, it is kept: closing the tab or quitting Collins
+  leaves a **Draft** row under the project in the sidebar (named after the
+  prompt's first line, with a pencil mark), and clicking that row brings the
+  screen back with the text, the checkbox, and the terminal panel as you
+  left them. Send spends the draft; the row's trash button discards it.
 - With *Start new sessions in a git worktree* on, each new session works in
   a fresh worktree of its project, so it won't see uncommitted local
   changes; a launch that can't cut one (a repository with nothing committed
-  yet, say) says so and starts in the project directory instead.
+  yet, say) says so and starts in the project directory instead. If
+  terminals were open beside the new-chat screen when a worktree launch was
+  sent, Collins offers to `cd` them into the worktree once it exists — a
+  terminal running a command is left alone.
 - **Folder trust is asked once, up front**: the first launch in a project
   the agent doesn't trust yet asks *Do you trust this folder?* before
   anything starts, and records the answer where the agent reads it, so the

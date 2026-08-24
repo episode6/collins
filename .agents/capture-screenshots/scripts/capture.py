@@ -34,11 +34,18 @@ parser.add_argument("--panel", action="store_true",
                     help="also show the opened tab's secondary terminal panel")
 parser.add_argument("--editor", action="store_true",
                     help="also show the opened tab's editor pane")
+parser.add_argument("--new-session", metavar="DIR",
+                    help="start a new session in DIR: the tab opens onto the "
+                         "new-chat screen (the directory is trusted first)")
+parser.add_argument("--new-session-text", metavar="TEXT", default="",
+                    help="seed the new-chat screen's composer with TEXT")
 parser.add_argument("--settle-ms", type=int, default=2500,
                     help="delay before the shot, for scan/paint to settle")
 args = parser.parse_args()
-if (args.panel or args.editor) and not args.open_session:
-    parser.error("--panel/--editor require --open-session")
+if (args.panel or args.editor) and not (args.open_session or args.new_session):
+    parser.error("--panel/--editor require --open-session or --new-session")
+if args.open_session and args.new_session:
+    parser.error("--open-session and --new-session are exclusive")
 
 sys.path.insert(0, args.repo_root)
 
@@ -48,11 +55,13 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import GLib, Graphene, Gtk  # noqa: E402
 
-from collins import i18n  # noqa: E402
+from collins import i18n, trust  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
 i18n.init(AppState().get_setting("language"))
+if args.new_session:
+    trust.trust_dir(trust.trust_root(args.new_session))  # no trust dialog over the shot
 app = App()
 exit_code = 1
 tries = 0
@@ -93,6 +102,11 @@ def prepare() -> bool:
         return GLib.SOURCE_CONTINUE
     if session is not None:
         win.open_session(session)
+    elif args.new_session:
+        win._start_new_session(args.new_session)
+        if args.new_session_text:
+            win.tab_view.get_selected_page().get_child().seed_new_chat_text(args.new_session_text)
+    if session is not None or args.new_session:
         if args.panel:
             win.tab_view.get_selected_page().get_child().show_panel()
         if args.editor:

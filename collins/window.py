@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-21. Full change history: git log for this file.
+# fork. Last modified: 2026-08-23. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ from . import (
     keybindings,
     keymap,
     mcptools,
+    newchat,
     openwith,
     paneldnd,
     panelhistory,
@@ -128,6 +129,9 @@ _LAUNCH_SWEEP_DELAY_MS = 2500
 # long as nobody selects the tab — wide enough that its boxes and diffs aren't
 # wrapped into nonsense by VTE's 80x24 default.
 _BACKGROUND_TERMINAL_SIZE = (120, 40)
+# How long after the last change to a new-chat screen (a keystroke, the
+# worktree box, a panel page) its draft is written (see _on_new_chat_changed).
+_NEW_CHAT_SAVE_MS = 600
 
 # How long the "session archived" snackbar offers its Undo button before
 # sliding away (see _offer_undo). The undo itself lives longer: Ctrl+Shift+Z
@@ -424,6 +428,10 @@ class MainWindow(Adw.ApplicationWindow):
         # submit, so even the ungated pole starters hold through the startup
         # paint. See _startup_held.
         self._fresh_spawns: set[Adw.TabPage] = set()
+        # Per new-chat tab, the pending debounced write of its draft (see
+        # _on_new_chat_changed): a keystroke's worth of typing shouldn't be a
+        # state.json write each.
+        self._new_chat_saves: dict[Adw.TabPage, int] = {}
         # Per fresh-spawn tab, the cmdlines seen running under its agent
         # before anything was submitted: the CLI's own plumbing (MCP servers),
         # absorbed by the process poll until the tab's gate arms and ignored
@@ -682,7 +690,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._save_panel_data()
             self._persist_last_session()
             return False  # tabs drained (or the user insisted) — really close
-        self._last_active_session = self._active_session_id() or ""
+        self._last_active_session = self._active_restore_id() or ""
         busy = self._busy_tab_count()
         if busy and not self._quit_requested and not self._quit_asking and (
             self.state.get_setting("quit_with_running_sessions") == "hide"
@@ -710,6 +718,29 @@ class MainWindow(Adw.ApplicationWindow):
     def _active_session_id(self) -> str | None:
         page = self.tab_view.get_selected_page()
         return self._session_id_of(page) if page is not None else None
+
+    def _active_restore_id(self) -> str | None:
+        """What "reopen the last session" should bring back for the active
+        tab: its session id — or, for a new-chat screen with something on
+        it, its draft id (the draft is written on the way out, so the id
+        will name a record by the time the next launch reads it). A screen
+        with nothing on it is nothing to come back to."""
+        page = self.tab_view.get_selected_page()
+        if page is None:
+            return None
+        session_id = self._session_id_of(page)
+        if session_id:
+            return session_id
+        tab = page.get_child()
+        draft_id = self._placeholder_pages.get(page)
+        if (
+            isinstance(tab, TerminalTab)
+            and tab.is_new_chat
+            and tab.new_chat_worthy()
+            and newchat.is_draft_id(draft_id)
+        ):
+            return draft_id
+        return None
 
     def _persist_last_session(self, among_visible: bool = False) -> None:
         """Remember the active tab's session when the last window closes, so
@@ -816,8 +847,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _save_panel_data(self) -> None:
         for i in range(self.tab_view.get_n_pages()):
-            tab = self.tab_view.get_nth_page(i).get_child()
+            page = self.tab_view.get_nth_page(i)
+            tab = page.get_child()
             if isinstance(tab, TerminalTab):
+                # A new-chat screen's draft first: it files the panel history
+                # under the draft id, which the generic save below then reuses.
+                self._save_new_chat_draft(tab, page)
                 tab.save_panel_history()
                 self._save_panel_layout(tab)
                 self._save_editor_state(tab)
@@ -1501,6 +1536,11 @@ class MainWindow(Adw.ApplicationWindow):
         session_id = self.state.get_setting("last_active_session")
         if not session_id:
             return
+        if newchat.is_draft_id(session_id):
+            # The active tab was a new-chat screen with a kept draft: back
+            # onto the screen, then, text and all (see _open_new_chat_draft).
+            self._open_new_chat_draft(str(session_id))
+            return
         session = self.store.get_session(session_id)
         if session is not None:
             self.open_session(session)
@@ -1852,6 +1892,27 @@ class MainWindow(Adw.ApplicationWindow):
             worktree = self._worktree_for_new_session(cwd)
         else:
             worktree = worktree and (Path(cwd) / ".git").exists()
+        if not background:
+            # A session started by hand opens onto the new-chat screen: the
+            # first prompt is written there, and its Send is what launches
+            # the agent (_on_new_chat_send) — with the worktree decision as
+            # the screen's checkbox then says, seeded from what was resolved
+            # above. Nothing runs until then, so nothing is trusted or
+            # flagged here either.
+            tab = TerminalTab(
+                cwd=cwd, session_id=None, settings=self.state.settings, provider=provider,
+                options=options, new_chat=True, worktree_default=worktree,
+            )
+            page = self._add_tab(
+                tab,
+                _("New chat") if chats.is_chat_cwd(cwd) else GLib.path_get_basename(cwd),
+                f"new {provider.name} session — {cwd}",
+            )
+            # Its sidebar row is keyed by a draft id from the start, so the
+            # row it has while empty ("New Thread") and the draft it becomes
+            # are one row, and nothing has to be re-keyed when text lands.
+            self._add_placeholder(page, cwd, newchat.new_draft_id())
+            return tab
         if worktree:
             # The agent's worktree flag reads trust off the launch directory
             # itself, with none of the inheritance an ordinary session enjoys
@@ -1884,11 +1945,16 @@ class MainWindow(Adw.ApplicationWindow):
 
     # -- sidebar placeholders for unresolved new-session tabs ----------------
 
-    def _add_placeholder(self, page: Adw.TabPage, cwd: str) -> None:
+    def _add_placeholder(
+        self, page: Adw.TabPage, cwd: str, placeholder_id: str | None = None
+    ) -> None:
         """Give a fresh new-session tab a transient "New Thread" sidebar row
-        until the store discovers the real session."""
-        self._placeholder_seq += 1
-        placeholder_id = f"placeholder-{self._placeholder_seq}"
+        until the store discovers the real session. *placeholder_id* names
+        the row for a new-chat tab (its draft id, see _launch_new_session);
+        anything else gets a `placeholder-N` of its own."""
+        if placeholder_id is None:
+            self._placeholder_seq += 1
+            placeholder_id = f"placeholder-{self._placeholder_seq}"
         self._placeholder_pages[page] = placeholder_id
         self.sidebar.add_placeholder(placeholder_id, cwd)
         self._update_active_row()
@@ -1912,11 +1978,167 @@ class MainWindow(Adw.ApplicationWindow):
         if page is not None:
             self.tab_view.set_selected_page(page)
             self._clear_unread(page)  # already-selected tabs emit no switch; see open_session
+            return
+        if newchat.is_draft_id(placeholder_id):
+            self._open_new_chat_draft(placeholder_id)  # a kept draft with no tab: reopen it
 
     def _on_sidebar_close_placeholder(self, _sidebar, placeholder_id: str) -> None:
         page = self._placeholder_page(placeholder_id)
         if page is not None:  # usual close flow: busy tabs confirm first
             self.tab_view.close_page(page)
+            return
+        if newchat.is_draft_id(placeholder_id):
+            self._discard_new_chat_draft(placeholder_id)
+
+    # -- new-chat drafts -----------------------------------------------------
+
+    def _on_new_chat_changed(self, tab: TerminalTab, page: Adw.TabPage) -> None:
+        """The screen's text, checkbox or dock moved: write the draft, a
+        moment after the last change rather than on each."""
+        self._cancel_new_chat_save(page)
+        self._new_chat_saves[page] = GLib.timeout_add(
+            _NEW_CHAT_SAVE_MS, self._flush_new_chat_save, tab, page
+        )
+
+    def _flush_new_chat_save(self, tab: TerminalTab, page: Adw.TabPage) -> bool:
+        self._new_chat_saves.pop(page, None)
+        self._save_new_chat_draft(tab, page)
+        return GLib.SOURCE_REMOVE
+
+    def _cancel_new_chat_save(self, page: Adw.TabPage) -> None:
+        source = self._new_chat_saves.pop(page, None)
+        if source is not None:
+            GLib.source_remove(source)
+
+    def _save_new_chat_draft(self, tab: TerminalTab, page: Adw.TabPage) -> None:
+        """Write a new-chat screen's draft to the state — or take it back
+        out. A screen with text on it or a panel page beside it is kept
+        (newchat.draft_worthy), under the draft id its sidebar row already
+        carries, with the dock's layout and the shells' scrollback filed
+        under the same id; one emptied back to nothing is forgotten, so an
+        abandoned screen doesn't leave a "Draft" row behind. Every window's
+        sidebar is told either way: the rows are read off the shared state.
+
+        No-op for anything but a live new-chat screen — a tab whose Send has
+        gone through has no draft, and its panel history goes under the
+        session id like every other tab's."""
+        self._cancel_new_chat_save(page)
+        draft_id = self._placeholder_pages.get(page)
+        if not tab.is_new_chat or not newchat.is_draft_id(draft_id):
+            return
+        existing = self.state.get_new_chat_draft(draft_id)
+        if tab.new_chat_worthy():
+            tab.set_new_chat_history_key(draft_id)
+            tab.save_panel_history()
+            record = newchat.draft_record(
+                cwd=tab.start_cwd or "",
+                provider=tab.provider.id,
+                text=tab.new_chat_text(),
+                worktree=tab.new_chat_worktree_choice(),
+                layout=tab.capture_panel_layout(),
+                created=existing["created"] if existing else time.time(),
+            )
+            if record == existing:
+                return
+            self.state.set_new_chat_draft(draft_id, record)
+        else:
+            if existing is None:
+                return
+            self.state.remove_new_chat_draft(draft_id)
+            panelhistory.delete(draft_id)
+        self._refresh_draft_rows()
+
+    def _on_new_chat_send(
+        self, tab: TerminalTab, text: str, worktree: bool, page: Adw.TabPage
+    ) -> None:
+        """The screen's Send: settle the launch the way _launch_new_session
+        settles a console launch — the worktree flag as the checkbox says
+        (never outside a git checkout), trust written where the CLI's
+        worktree flag reads it — then start the session with the prompt.
+        The draft is spent: the text is about to be the session's first
+        turn, and the dock's shells go on under the session id from here."""
+        cwd = tab.start_cwd or ""
+        worktree = bool(worktree) and (Path(cwd) / ".git").exists()
+        if worktree:
+            trust.trust_launch_dir(cwd)  # see _launch_new_session
+        options = replace(tab.launch_options or SessionOptions(), worktree=worktree)
+        self._cancel_new_chat_save(page)
+        draft_id = self._placeholder_pages.get(page)
+        if newchat.is_draft_id(draft_id):
+            self.state.remove_new_chat_draft(draft_id)
+            panelhistory.delete(draft_id)
+        tab.begin_session(options, text)
+        # The same opt-in a console launch honours (see _launch_new_session):
+        # a docked composer joins the session's layout from its first turn.
+        tab.autoshow_composer(self.state.get_setting("composer_new_sessions"))
+        self._refresh_draft_rows()  # the row reads "New Thread" again
+
+    def _open_new_chat_draft(self, draft_id: str) -> None:
+        """Bring a kept draft back onto a new-chat screen — in the window
+        that already has it open, if one does, else a fresh tab here, behind
+        the same folder-trust question a new session gets."""
+        record = self.state.get_new_chat_draft(draft_id)
+        if record is None:
+            return
+        app = self.get_application()
+        for other in (app.get_windows() if app is not None else []):
+            if isinstance(other, MainWindow) and other is not self:
+                page = other._placeholder_page(draft_id)
+                if page is not None:
+                    other.tab_view.set_selected_page(page)
+                    other.present()
+                    return
+        cwd = record["cwd"]
+        provider = get_provider(record["provider"])
+
+        def proceed() -> None:
+            chats.ensure_chat_dir(cwd)  # a chat's throwaway dir may have been swept
+            tab = TerminalTab(
+                cwd=cwd, session_id=None, settings=self.state.settings, provider=provider,
+                new_chat=True, worktree_default=self._worktree_for_new_session(cwd),
+            )
+            page = self._add_tab(
+                tab,
+                _("New chat") if chats.is_chat_cwd(cwd) else GLib.path_get_basename(cwd),
+                f"new {provider.name} session — {cwd}",
+            )
+            self._add_placeholder(page, cwd, draft_id)
+            tab.restore_new_chat(
+                draft_id, record["text"], record.get("worktree"), record.get("layout")
+            )
+
+        self._with_folder_trust(cwd, provider, proceed)
+
+    def _discard_new_chat_draft(self, draft_id: str) -> None:
+        """The draft row's trash button: forget the draft, after asking —
+        it is the user's own writing, and there is no undo."""
+        record = self.state.get_new_chat_draft(draft_id)
+        if record is None:
+            return
+
+        def discard() -> None:
+            self.state.remove_new_chat_draft(draft_id)
+            panelhistory.delete(draft_id)
+            self._refresh_draft_rows()
+
+        dialogs.confirm_dialog(
+            self,
+            _("Discard draft?"),
+            _("“{label}” will be forgotten, along with any terminal panel it kept.").format(
+                label=newchat.draft_label(record["text"], _("Draft"))
+            ),
+            _("Discard"),
+            discard,
+        )
+
+    def _refresh_draft_rows(self) -> None:
+        """Every window's sidebar re-reads the drafts (they live in the
+        shared state, so a change here is a change everywhere)."""
+        app = self.get_application()
+        windows = app.get_windows() if app is not None else [self]
+        for window in windows:
+            if isinstance(window, MainWindow):
+                window.sidebar.refresh_drafts()
 
     # -- advanced new session / continue -----------------------------------
 
@@ -2035,6 +2257,8 @@ class MainWindow(Adw.ApplicationWindow):
         watch(tab, "bell", self._on_bell)
         watch(tab, "attachments-changed", self._on_tab_attachments_changed)
         watch(tab, "draft-changed", self._on_tab_draft_changed)
+        watch(tab, "new-chat-changed", self._on_new_chat_changed, page)
+        watch(tab, "new-chat-send", self._on_new_chat_send, page)
         # The PR hub: the tab writes its footer list through it and follows
         # everyone else's writes and fetches from it (see prstore).
         tab.set_pr_store(self.store.pr_store)
@@ -2563,6 +2787,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._spinner_watches.pop(page, None)
         self._progress_watches.pop(page, None)
         self._fresh_spawns.discard(page)
+        self._cancel_new_chat_save(page)
         self._baseline_captures.pop(page, None)
         self._notify_tray()
         self._sync_process_poll()
@@ -4745,6 +4970,11 @@ class MainWindow(Adw.ApplicationWindow):
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
         self._echo_gates.pop(page, None)
+        if isinstance(tab, TerminalTab):
+            # Before the placeholder goes: the draft is filed under the id it
+            # carries. What is kept keeps its sidebar row (see the sidebar's
+            # remove_placeholder); an empty screen leaves nothing behind.
+            self._save_new_chat_draft(tab, page)
         self._remove_placeholder(page)
         self._local_titles.discard(page)
         if isinstance(tab, TerminalTab):
