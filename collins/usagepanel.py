@@ -284,6 +284,15 @@ class UsagePanel(Gtk.Box):
         self._refresh()
         return GLib.SOURCE_CONTINUE
 
+    def refetch(self) -> None:
+        """The login just changed under the panel (launch token refresh —
+        see tokenrefresh): ask again now if the bars are on screen. An
+        unmapped or collapsed panel keeps its economy; its next map fetches
+        anyway, since the expired login left it without a snapshot to be
+        fresh."""
+        if self._stack.get_mapped() and not self._paused():
+            self._refresh()
+
     def _refresh(self, manual: bool = False) -> None:
         # A click during an in-flight background fetch still claims its
         # result: the user asked, so a failure owes them the snackbar.

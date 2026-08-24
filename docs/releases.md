@@ -39,6 +39,14 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **An expired Claude login repairs itself at launch.** The usage panel
+  and the model pickers ride the OAuth token the `claude` CLI stores, and
+  only the CLI can refresh it — so a launch that finds the CLI installed
+  but the token past its expiry now runs one throwaway headless `claude -p`
+  prompt in the background, then re-fetches the usage bars and, when a
+  models query had already failed, the model catalog. Before, the panel sat
+  on *Claude login expired — run claude to refresh* until you ran the CLI
+  yourself.
 - **New sessions open onto a new-chat screen.** The project's icon and
   name over the composer, with a *Start in a new git worktree* checkbox
   (seeded from the project's setting); the agent starts when the first
