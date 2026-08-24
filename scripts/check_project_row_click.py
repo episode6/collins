@@ -14,7 +14,9 @@ on activation.
         python3 scripts/check_project_row_click.py
 
 Nothing is spawned: the new-chat screen starts no CLI until its first
-prompt is sent, and this check never sends one.
+prompt is sent, and this check never sends one. A `claude` stub still has
+to be on PATH — a provider whose CLI is missing has no sessions discovered
+at all, so without it the project never gets a header.
 """
 
 import json
@@ -37,11 +39,16 @@ os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
 
 PROJECT = f"{E2E}/dev/alpha"
+SHIM = f"{E2E}/bin/claude"
 
-for path in (f"{E2E}/projects", f"{E2E}/chats", PROJECT):
+for path in (f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin", PROJECT):
     os.makedirs(path, exist_ok=True)
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
+with open(SHIM, "w", encoding="utf-8") as fh:
+    fh.write("#!/bin/sh\nexit 0\n")  # never run; only found
+os.chmod(SHIM, 0o755)
+os.environ["PATH"] = f"{E2E}/bin:{os.environ['PATH']}"
 
 # One session on disk, so the project has a header row (and a session row
 # under it to fold away).
