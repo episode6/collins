@@ -236,13 +236,15 @@ def test_maybe_repair_trusts_the_caller_over_the_file(credentials, monkeypatch):
 
 def test_attempts_are_cooled_down(credentials, monkeypatch):
     # A broken login reports the same failure on every poll; only the first
-    # report inside the cooldown spends a run — success or not.
+    # report inside the cooldown spends a run — success or not. The refused
+    # calls are turned away at the peek, before any thread exists.
     _write_credentials(credentials)
     monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
     events = []
     monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or False)
-    for _i in range(3):
-        tokenrefresh.maybe_repair(lambda: events.append("cb")).join(5)
+    tokenrefresh.maybe_repair(lambda: events.append("cb")).join(5)
+    assert tokenrefresh.maybe_repair(lambda: events.append("cb")) is None
+    assert tokenrefresh.maybe_repair(lambda: events.append("cb")) is None
     assert events == ["refresh"]
 
 
@@ -269,7 +271,7 @@ def test_launch_attempt_counts_toward_the_cooldown(credentials, monkeypatch):
     events = []
     monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or False)
     tokenrefresh.maybe_start(lambda: events.append("cb")).join(5)
-    tokenrefresh.maybe_repair(lambda: events.append("cb")).join(5)
+    assert tokenrefresh.maybe_repair(lambda: events.append("cb")) is None
     assert events == ["refresh"]
 
 

@@ -139,18 +139,27 @@ _running = False
 _last_attempt: float | None = None  # time.monotonic() of the last claim
 
 
+def _slot_free() -> bool:
+    """Whether the repair slot looks claimable: no repair running, cooldown
+    passed. Takes no lock and claims nothing — `_begin_attempt` calls it
+    under the lock to decide for real, and `_spawn` peeks lock-free (cheap
+    enough for the main loop) before paying for a thread. The lock-free
+    peek is only advisory: two peeks can both say yes, and the claim
+    settles who actually goes."""
+    if _running:
+        return False
+    return _last_attempt is None or time.monotonic() - _last_attempt >= _REPAIR_COOLDOWN_S
+
+
 def _begin_attempt() -> bool:
     """Claim the one repair slot: False while a repair is already running or
     the cooldown since the last claim hasn't passed. Claiming starts the
     cooldown — a failed attempt counts, that being the whole point."""
     global _running, _last_attempt
     with _attempt_lock:
-        if _running:
+        if not _slot_free():
             return False
-        now = time.monotonic()
-        if _last_attempt is not None and now - _last_attempt < _REPAIR_COOLDOWN_S:
-            return False
-        _running, _last_attempt = True, now
+        _running, _last_attempt = True, time.monotonic()
         return True
 
 
@@ -174,11 +183,18 @@ def _repair(on_refreshed: Callable[[], None]) -> None:
 
 
 def _spawn(check: Callable[[], bool], on_refreshed: Callable[[], None]) -> threading.Thread | None:
-    """The shared entry shape: gate on the fixture harness, then run
-    *check* + claim + repair on a daemon thread. Returns the thread, or
-    None when the whole feature is off — callers need neither; tests join.
+    """The shared entry shape: gate on the fixture harness and a doomed
+    attempt, then run *check* + claim + repair on a daemon thread. Returns
+    the thread, or None when nothing was started (the fixture harness, or
+    a slot certain to refuse) — callers need neither; tests join.
+
+    The peek keeps every-poll callers honest: during a broken login's
+    cooldown, `maybe_repair` costs a couple of reads, not a thread spawned
+    to be told no. *check* still runs on the thread — it does file and
+    PATH I/O that doesn't belong on the main loop — and the claim is still
+    the worker's first act, so peek races resolve there.
     """
-    if os.environ.get("COLLINS_USAGE_FIXTURE"):
+    if os.environ.get("COLLINS_USAGE_FIXTURE") or not _slot_free():
         return None
 
     def work() -> None:
@@ -219,7 +235,9 @@ def maybe_repair(on_refreshed: Callable[[], None]) -> threading.Thread | None:
 
     Safe to call on every such failure: attempts are single-flight and
     cooled down (`_begin_attempt`), so a login that repairs can't fix costs
-    one throwaway run an hour, not one per poll. *on_refreshed* is as in
-    `maybe_start`: worker thread, successful refresh only.
+    one throwaway run an hour, not one per poll — and a call inside the
+    cooldown is refused before it even spawns a thread (`_spawn`'s peek).
+    *on_refreshed* is as in `maybe_start`: worker thread, successful
+    refresh only.
     """
     return _spawn(clisetup.on_path, on_refreshed)
