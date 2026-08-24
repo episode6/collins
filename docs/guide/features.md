@@ -17,10 +17,11 @@ the app reads, are in
 
 ## Sidebar
 
-- **Every session** under `~/.claude/projects/`, **grouped by project** with
-  collapsible headers (plus a collapse-all/expand-all toggle). Which projects
-  are expanded is remembered across restarts, and **dragging a project
-  header** reorders the projects — the order is yours and persists.
+- **Every session** under `~/.claude/projects/`, **grouped by project**.
+  **Click a project header** to start a new session there; its icon folds
+  and unfolds the group (plus a collapse-all/expand-all toggle). Which
+  projects are expanded is remembered across restarts, and **dragging a
+  project header** reorders the projects — the order is yours and persists.
 - A **Favorites** section pinned on top — star any session to move it there.
 - **Compact single-line rows**: name, relative time, status — with an
   optional second line for the project folder path. Within a project,
