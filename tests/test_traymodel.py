@@ -1,3 +1,5 @@
+import pytest
+
 from collins import traymodel
 from collins.traymodel import (
     ACTION_FOCUS,
@@ -284,3 +286,33 @@ def test_label_truncates_a_whole_first_message():
     assert len(label) <= traymodel.LABEL_MAX
     assert label.endswith("…")
     assert label.startswith("alpha — fix the thing")
+
+
+def test_tokened_action_brackets_the_action_with_its_token():
+    calls = []
+    run = traymodel.tokened_action(
+        lambda: calls.append("action"), "token-a", calls.append
+    )
+    assert calls == []  # nothing delivered at wrap time
+    run()
+    assert calls == ["token-a", "action", ""]
+
+
+def test_tokened_action_withdraws_the_token_when_the_action_raises():
+    calls = []
+
+    def explode():
+        raise RuntimeError("boom")
+
+    run = traymodel.tokened_action(explode, "token-a", calls.append)
+    with pytest.raises(RuntimeError):
+        run()
+    assert calls == ["token-a", ""]
+
+
+def test_tokened_action_without_a_token_or_receiver_stays_bare():
+    def action():
+        pass
+
+    assert traymodel.tokened_action(action, "", list().append) is action
+    assert traymodel.tokened_action(action, "token-a", None) is action

@@ -29,6 +29,15 @@ GNOME's `ubuntu-appindicators@ubuntu.com` — actually behaves:
   `ItemIsMenu`: with it exported, left single click opens the menu, left
   double click calls `Activate`, middle calls `SecondaryActivate`. There is no
   left-click-to-show to be had; the menu is the primary interface.
+- **`ProvideXdgActivationToken` must be spent, not just accepted.** GNOME's
+  host mints the token from a startup-notification sequence
+  (`get_startup_notify_id` in appIndicator.js) right before every Activate
+  and every menu click, and mutter keeps the busy pointer up until a surface
+  is activated with that exact token — or fifteen seconds pass. GTK's
+  `present()` asks the compositor for a token of its own, which does nothing
+  for the host's sequence, so the token has to be set on the window
+  (`Gtk.Window.set_startup_id`) before the present. `_dispatch` hands it to
+  the app for the one action it came with.
 - **Icons are resolved in the host's process**, whose icon theme knows nothing
   about the `data/icons` path a source checkout adds to its own. So the
   artwork ships as `IconPixmap` — decoded here, handed over as ARGB32 — and
@@ -511,7 +520,7 @@ class StatusIcon:
     The app builds it, calls `start()`, and calls `refresh()` whenever the
     sessions move; `stop()` takes it off the bus. Nothing here reaches into
     the app — it asks `view_provider` for the state and the callbacks for the
-    actions, so a headless test can drive the whole surface with five lambdas.
+    actions, so a headless test can drive the whole surface with a few lambdas.
     """
 
     def __init__(
@@ -526,6 +535,7 @@ class StatusIcon:
         on_focus=None,
         on_new_window=None,
         on_quit=None,
+        on_activation_token=None,
     ) -> None:
         self._app_id = app_id
         self._title = title
@@ -537,6 +547,10 @@ class StatusIcon:
         self._on_focus = on_focus
         self._on_new_window = on_new_window
         self._on_quit = on_quit
+        # Called with the host's activation token just before the action it
+        # was provided for, and with "" right after; see _dispatch.
+        self._on_activation_token = on_activation_token
+        self._activation_token = ""
 
         self._bus: Gio.DBusConnection | None = None
         self._bus_name = f"org.kde.StatusNotifierItem-{os.getpid()}-1"
@@ -859,10 +873,16 @@ class StatusIcon:
             # send a right click: all of them mean "put Collins on screen".
             self._dispatch(self._on_show)
         elif method == "ProvideXdgActivationToken":
-            # Wayland's "this click is allowed to raise a window" token. The
-            # app presents through GTK, which asks for its own, so the token
-            # is accepted and dropped rather than refused with an error.
-            pass
+            # Wayland's "this click is allowed to raise a window" token,
+            # handed over just before the Activate or menu click it belongs
+            # to (the host awaits this reply before sending that). Kept for
+            # that action: the token doubles as a startup-notification
+            # sequence in the host's compositor, and the busy pointer that
+            # sequence puts up only comes down once a surface is activated
+            # with it. GTK's present() asks for a token of its own, which
+            # raises the window but leaves the host's sequence — and the
+            # pointer — standing for its full timeout.
+            self._activation_token = params.unpack()[0]
         invocation.return_value(None)
 
     # -- com.canonical.dbusmenu --------------------------------------------
@@ -996,11 +1016,23 @@ class StatusIcon:
         elif entry.action == traymodel.ACTION_QUIT:
             self._dispatch(self._on_quit)
 
-    @staticmethod
-    def _dispatch(callback, *args) -> None:
+    def _dispatch(self, callback, *args) -> None:
         """Run a menu action after the D-Bus reply, never inside it: Quit puts
         up dialogs and waits for them, and a method call that hasn't returned
-        holds the host's menu open behind them."""
+        holds the host's menu open behind them.
+
+        The activation token the host provided ahead of this action goes
+        along with it: on_activation_token gets it just before the callback
+        runs and "" as soon as it has run — even by raising (see
+        traymodel.tokened_action). A token is good for the one click it was
+        minted for, so it must not outlive its action — one left over from a
+        cancelled Quit would be spent on some later, unrelated present, where
+        the compositor, finding it expired, would refuse the raise outright.
+        """
+        token, self._activation_token = self._activation_token, ""
         if callback is None:
             return
-        GLib.idle_add(lambda: (callback(*args), GLib.SOURCE_REMOVE)[1])
+        run = traymodel.tokened_action(
+            lambda: callback(*args), token, self._on_activation_token
+        )
+        GLib.idle_add(lambda: (run(), GLib.SOURCE_REMOVE)[1])

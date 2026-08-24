@@ -1441,6 +1441,9 @@ class App(Adw.Application):
 
         self._status_icon: statusicon.StatusIcon | None = None
         self._status_icon_source: int | None = None
+        # The tray host's activation token for the action it is about to
+        # dispatch; spent by the next _present. See StatusIcon._dispatch.
+        self._activation_token = ""
         self.connect("window-added", lambda *_: self.refresh_status_icon())
         self.connect("window-removed", lambda *_: self.refresh_status_icon())
         self.store.connect("refreshed", lambda *_: self.refresh_status_icon())
@@ -1588,6 +1591,7 @@ class App(Adw.Application):
             on_focus=lambda sid: self.activate_action("focus-session", GLib.Variant("s", sid)),
             on_new_window=lambda: self.activate_action("new-window", None),
             on_quit=self.quit_all_windows,
+            on_activation_token=self._take_activation_token,
         )
         if icon.start():
             self._status_icon = icon
@@ -1652,6 +1656,27 @@ class App(Adw.Application):
             self._status_icon.refresh()
         return GLib.SOURCE_REMOVE
 
+    def _take_activation_token(self, token: str) -> None:
+        """The tray host's "this click may raise a window" token, arriving
+        just ahead of the action it was minted for and withdrawn ("") right
+        after it. On GNOME the token is also a startup-notification sequence,
+        and the shell shows its busy pointer until the sequence is completed
+        by a surface being activated with that token — a present() without it
+        leaves the pointer busy until the sequence times out, fifteen seconds
+        after the click."""
+        self._activation_token = token
+
+    def _present(self, window: Gtk.Window) -> None:
+        """present(), spending a pending activation token on the window that
+        takes the focus. Gtk.Window.set_startup_id is the whole of it: GTK
+        activates the surface with that token instead of asking the compositor
+        for one of its own — a request GTK makes without an input serial, so
+        the host's token is also the better claim on the raise itself."""
+        token, self._activation_token = self._activation_token, ""
+        if token:
+            window.set_startup_id(token)
+        window.present()
+
     def _present_main_window(self) -> None:
         """The icon's "give me my app back" — Activate, SecondaryActivate and
         the menu's Show Collins all land here, so one gesture is enough to
@@ -1672,7 +1697,7 @@ class App(Adw.Application):
         for window in reversed(windows[1:]):
             if not window.get_visible():
                 window.present()
-        windows[0].present()
+        self._present(windows[0])
 
     def _dismiss_hide_notice(self) -> None:
         """Take down the first-hide notice, if one is still standing.
@@ -2326,7 +2351,7 @@ class App(Adw.Application):
 
     def _new_window(self) -> MainWindow:
         window = MainWindow(application=self, state=self.state, store=self.store)
-        window.present()
+        self._present(window)
         return window
 
     def open_new_window(self) -> MainWindow:
@@ -2349,12 +2374,15 @@ class App(Adw.Application):
         # window that happens to be active — go to the window that has it.
         window = session_window(self, session_id) if session_id else None
         if window is not None:
+            # focus_session presents the window itself; go first so a tray
+            # token is spent on this raise and not left for a later one.
+            self._present(window)
             window.focus_session(session_id)
             return
         window = self._main_window()
         if window is None:
             return
-        window.present()
+        self._present(window)
         if session_id:
             window.focus_session(session_id)
 
