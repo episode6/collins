@@ -20,6 +20,12 @@ focus where a click would have (a button, a label, an editor), rebuilds the
 way a landed fetch does, and reads back where the focus went and which labels
 carry a selection 150 ms later, past the paint the relocation waits for.
 
+The other route into a label is covered too: the page sits in an
+`Adw.TabView` beside a second page, and switching away and back hands the
+page its last focus (a clicked label) — which, with GTK's select-on-focus
+left on, selected it; `app.apply_gtk_settings` turns that off, and the last
+steps check that a re-grab and a Tab into a label select nothing.
+
 Run it behind the headless wrapper, or a window opens on the user's screen.
 """
 
@@ -48,6 +54,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from collins import i18n, prdetail, prview  # noqa: E402
+from collins.app import apply_gtk_settings  # noqa: E402
 from collins.prstatus import PullRequest  # noqa: E402
 
 PR_URL = "https://github.com/episode6/collins/pull/55"
@@ -164,13 +171,24 @@ def later(fn, ms: int = 150) -> bool:
 
 
 def on_activate(app: Adw.Application) -> None:
+    apply_gtk_settings()  # what App.do_startup does; the switch under test
     win = Adw.ApplicationWindow(application=app, default_width=1000, default_height=700)
     pr = PullRequest(number=55, url=PR_URL, repository="episode6/collins")
     page = prview.PrViewPage(pr, lambda: HOST)
-    win.set_content(page)
+    # Beside a second page in a tab view, the way the dock holds it: the tab
+    # view's own focus handling is one of the routes under test.
+    view = Adw.TabView()
+    other = Gtk.Box()
+    other.append(Gtk.Entry())
+    state["pr_tab"] = view.append(page)
+    state["other_tab"] = view.append(other)
+    view.set_selected_page(state["pr_tab"])
+    win.set_content(view)
     win.present()
     state["win"] = win
     state["page"] = page
+    state["view"] = view
+    state["other"] = other
     later(step_loaded, 800)  # the (stubbed) fetch lands from an idle
 
 
@@ -300,6 +318,49 @@ def step_after_no_focus() -> bool:
         describe(win.get_focus()),
     )
     check("…and selects nothing", not selected_labels(page), selected_labels(page))
+    # 7. A click in the description, then the tab switched away and back:
+    # the tab view hands the page its last focus — the label — by a plain
+    # grab, which used to select it.
+    label = description_label(page)
+    label.grab_focus()
+    label.select_region(0, 0)
+    state["view"].set_selected_page(state["other_tab"])
+    return later(step_switched_away)
+
+
+def step_switched_away() -> bool:
+    win, other = state["win"], state["other"]
+    check(
+        "switching tabs moves the keyboard to the other page",
+        win.get_focus() is not None and win.get_focus().is_ancestor(other),
+        describe(win.get_focus()),
+    )
+    state["view"].set_selected_page(state["pr_tab"])
+    return later(step_switched_back)
+
+
+def step_switched_back() -> bool:
+    page, win = state["page"], state["win"]
+    check(
+        "switching back hands the page its last focus, the label",
+        win.get_focus() is description_label(page),
+        describe(win.get_focus()),
+    )
+    check("…without selecting it", not selected_labels(page), selected_labels(page))
+    # 8. Tab from the scroller into the header's title label.
+    page._scroller.grab_focus()
+    win.child_focus(Gtk.DirectionType.TAB_FORWARD)
+    return later(step_tabbed)
+
+
+def step_tabbed() -> bool:
+    page, win = state["page"], state["win"]
+    check(
+        "Tab from the scroller lands on a label",
+        isinstance(win.get_focus(), Gtk.Label),
+        describe(win.get_focus()),
+    )
+    check("…without selecting it", not selected_labels(page), selected_labels(page))
     return done()
 
 

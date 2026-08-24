@@ -1316,6 +1316,23 @@ class _BackgroundSpawn:
         self._on_done()
 
 
+def apply_gtk_settings() -> None:
+    """The GTK-wide switches this app runs with, on the default display.
+
+    Selectable labels don't select themselves on focus. GtkLabel's default
+    is to select every character it holds whenever the keyboard reaches it
+    by any route but a click — Tab, a tab switch handing a page its last
+    focus back, GTK re-placing a focus whose widget was just unparented —
+    which is how the PR page's description kept turning up highlighted with
+    nobody having selected anything (see prview's `_park_focus` for the
+    rebuild half of that). Nothing here wants the old behaviour: the labels
+    that are selectable (PR titles and bodies, a chat bubble) are selectable
+    so a mouse can copy out of them, and a click still selects exactly what
+    was dragged over.
+    """
+    Gtk.Settings.get_default().set_property("gtk-label-select-on-focus", False)
+
+
 class App(Adw.Application):
     def __init__(self) -> None:
         # COLLINS_APP_ID lets a demo instance run alongside the real one (for screenshots).
@@ -1374,6 +1391,7 @@ class App(Adw.Application):
 
         # No tooltips from the UI behind an open menu (see tooltipmute).
         tooltipmute.install()
+        apply_gtk_settings()
 
         # Scheme-dependent colors ride in their own provider so a light/dark
         # flip only reloads these few rules, never the stylesheet above.

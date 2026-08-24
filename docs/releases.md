@@ -73,6 +73,9 @@ downloads of each version, see the
   page, which selects itself on focus. A rebuild now parks the focus on the
   page's scroller first, and gives it back to the comment box or the reply
   editor being typed in, whose cursor a background refresh used to throw out.
+  The other way in — switching to another tab and back after a click in the
+  description — is closed too: GTK's select-a-label-on-focus is off across
+  the app, so text is only ever selected by dragging over it.
 
 ### v0.1.1 — 2026-08-22
 
