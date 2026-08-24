@@ -58,7 +58,8 @@ downloads of each version, see the
   text on it, or a terminal open beside it, is kept as a **draft**: closing
   the tab or quitting leaves a Draft row under the project in the sidebar,
   and clicking it brings the screen back — text, checkbox and terminal panel
-  included. When terminals were open beside a worktree launch, Collins
+  included; the row's trash button discards it, closing the open screen
+  with it. When terminals were open beside a worktree launch, Collins
   offers to `cd` them into the worktree once it exists.
 - **A click on a project header starts a session there.** From the title
   on, a click opens the new-chat screen for that project, the same as its

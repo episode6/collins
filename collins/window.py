@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-23. Full change history: git log for this file.
+# fork. Last modified: 2026-08-24. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -432,6 +432,10 @@ class MainWindow(Adw.ApplicationWindow):
         # _on_new_chat_changed): a keystroke's worth of typing shouldn't be a
         # state.json write each.
         self._new_chat_saves: dict[Adw.TabPage, int] = {}
+        # New-chat pages closing at the sidebar's trash button: the close
+        # drops the page's draft instead of filing it (see
+        # _discard_new_chat_draft and _save_new_chat_draft).
+        self._discarding_drafts: set[Adw.TabPage] = set()
         # Per fresh-spawn tab, the cmdlines seen running under its agent
         # before anything was submitted: the CLI's own plumbing (MCP servers),
         # absorbed by the process poll until the tab's gate arms and ignored
@@ -1985,11 +1989,22 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_sidebar_close_placeholder(self, _sidebar, placeholder_id: str) -> None:
         page = self._placeholder_page(placeholder_id)
-        if page is not None:  # usual close flow: busy tabs confirm first
-            self.tab_view.close_page(page)
+        if page is None:
+            if newchat.is_draft_id(placeholder_id):
+                self._discard_new_chat_draft(placeholder_id)
             return
-        if newchat.is_draft_id(placeholder_id):
-            self._discard_new_chat_draft(placeholder_id)
+        tab = page.get_child()
+        if (
+            isinstance(tab, TerminalTab)
+            and tab.is_new_chat
+            and newchat.is_draft_id(placeholder_id)
+        ):
+            # A new-chat screen's row: the button closes the tab *and*
+            # forgets its draft -- a screen closed from the sidebar is one
+            # the user is done with, not one to keep as a row.
+            self._discard_new_chat_draft(placeholder_id, page)
+            return
+        self.tab_view.close_page(page)  # usual close flow: busy tabs confirm first
 
     # -- new-chat drafts -----------------------------------------------------
 
@@ -2028,7 +2043,9 @@ class MainWindow(Adw.ApplicationWindow):
         if not tab.is_new_chat or not newchat.is_draft_id(draft_id):
             return
         existing = self.state.get_new_chat_draft(draft_id)
-        if tab.new_chat_worthy():
+        # A page closing at the sidebar's trash button is not kept, whatever
+        # is on it (see _discard_new_chat_draft).
+        if tab.new_chat_worthy() and page not in self._discarding_drafts:
             tab.set_new_chat_history_key(draft_id)
             tab.save_panel_history()
             record = newchat.draft_record(
@@ -2110,23 +2127,47 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._with_folder_trust(cwd, provider, proceed)
 
-    def _discard_new_chat_draft(self, draft_id: str) -> None:
+    def _discard_new_chat_draft(self, draft_id: str, page: Adw.TabPage | None = None) -> None:
         """The draft row's trash button: forget the draft, after asking —
-        it is the user's own writing, and there is no undo."""
+        it is the user's own writing, or a terminal panel kept for it, and
+        there is no undo.
+
+        With *page*, the draft is open on a new-chat screen in this window:
+        the screen's text is what is asked about (the state's record trails
+        it by a save delay), and the tab closes along with the draft — the
+        close does the forgetting (see _save_new_chat_draft), so a close the
+        tab's own confirmations decline (a running panel command, an
+        unsaved editor buffer) keeps the draft as well. A screen with nothing
+        written on it (only a shell beside it, or text just emptied) closes
+        without a question: the shell is in view, and a running command in
+        it gets the tab's own ask. A kept draft with no screen open always
+        asks — what it holds is out of sight."""
         record = self.state.get_new_chat_draft(draft_id)
-        if record is None:
+        tab = page.get_child() if page is not None else None
+        if isinstance(tab, TerminalTab):
+            text = tab.new_chat_text()
+        elif record is not None:
+            text = record["text"]
+        else:
             return
 
         def discard() -> None:
+            if page is not None:
+                self._discarding_drafts.add(page)
+                self.tab_view.close_page(page)
+                return
             self.state.remove_new_chat_draft(draft_id)
             panelhistory.delete(draft_id)
             self._refresh_draft_rows()
 
+        if page is not None and not text.strip():
+            discard()
+            return
         dialogs.confirm_dialog(
             self,
             _("Discard draft?"),
             _("“{label}” will be forgotten, along with any terminal panel it kept.").format(
-                label=newchat.draft_label(record["text"], _("Draft"))
+                label=newchat.draft_label(text, _("Draft"))
             ),
             _("Discard"),
             discard,
@@ -2789,6 +2830,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._progress_watches.pop(page, None)
         self._fresh_spawns.discard(page)
         self._cancel_new_chat_save(page)
+        self._discarding_drafts.discard(page)
         self._baseline_captures.pop(page, None)
         self._notify_tray()
         self._sync_process_poll()
@@ -4974,8 +5016,10 @@ class MainWindow(Adw.ApplicationWindow):
         if isinstance(tab, TerminalTab):
             # Before the placeholder goes: the draft is filed under the id it
             # carries. What is kept keeps its sidebar row (see the sidebar's
-            # remove_placeholder); an empty screen leaves nothing behind.
+            # remove_placeholder); an empty screen, or one closed at the
+            # sidebar's trash button, leaves nothing behind.
             self._save_new_chat_draft(tab, page)
+            self._discarding_drafts.discard(page)
         self._remove_placeholder(page)
         self._local_titles.discard(page)
         if isinstance(tab, TerminalTab):
@@ -5469,7 +5513,9 @@ class MainWindow(Adw.ApplicationWindow):
     def _archive_cancelled(self, page: Adw.TabPage) -> None:
         """A close that was carrying an archive got declined: forget the
         archive and bring the session's ghosted row back (see the sidebar's
-        begin_archiving)."""
+        begin_archiving). A close carrying a draft discard likewise forgets
+        the discard: the draft stays, as the tab does."""
+        self._discarding_drafts.discard(page)
         session_id = self._archive_on_close.pop(page, None)
         if session_id is not None:
             self.sidebar.clear_archiving(session_id)
