@@ -96,12 +96,18 @@ it) and queries Anthropic's usage endpoint every 5 minutes, pausing
 while the window is minimized or the screen is locked.
 
 Refreshing that token is the CLI's job, done at the start of any `claude`
-run — so a launch that finds the CLI installed but the stored token past its
-expiry runs one throwaway headless `claude -p` prompt in the background (in
-the same scratch directory the title runs use, so it never appears as a
-session), then re-asks the usage endpoint and, if a query had already
-failed, the model catalog. No credentials file at all means not logged in,
-which no background run can fix; the panel just says so.
+run — so when Collins finds the CLI installed but the token dead, it runs
+one throwaway headless `claude -p` prompt in the background (in the same
+scratch directory the title runs use, so it never appears as a session),
+then re-asks the usage endpoint and, if a query had already failed, the
+model catalog. That happens at launch, when the stored token is already
+past its expiry, and mid-run, when a usage poll comes back refused — an app
+left running outlives its token, and a token can also be revoked
+server-side while the file still looks fine. Repair attempts are
+single-flight and run at most once an hour, so a login no run can fix
+costs one background subprocess an hour, not one per poll. No credentials
+file at all means not logged in, which no background run can fix; the
+panel just says so.
 
 ## Archiving on claude.ai
 

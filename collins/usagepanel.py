@@ -19,7 +19,7 @@ import time
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
-from . import usage
+from . import tokenrefresh, usage
 from .i18n import _
 from .state import AppState
 
@@ -284,9 +284,15 @@ class UsagePanel(Gtk.Box):
         self._refresh()
         return GLib.SOURCE_CONTINUE
 
+    def _on_login_repaired(self) -> None:
+        # tokenrefresh worker-thread callback: the throwaway run this panel's
+        # failed fetch asked for succeeded — marshal home and re-ask. Other
+        # windows' panels recover on their own next poll.
+        GLib.idle_add(self.refetch)
+
     def refetch(self) -> None:
-        """The login just changed under the panel (launch token refresh —
-        see tokenrefresh): ask again now if the bars are on screen. An
+        """The login just changed under the panel (a token refresh — see
+        tokenrefresh): ask again now if the bars are on screen. An
         unmapped or collapsed panel keeps its economy; its next map fetches
         anyway, since the expired login left it without a snapshot to be
         fresh."""
@@ -325,6 +331,13 @@ class UsagePanel(Gtk.Box):
                 self._error_toast.dismiss()
             return GLib.SOURCE_REMOVE
         err = result if isinstance(result, usage.UsageError) else None
+        if err is not None and err.kind in ("expired", "auth"):
+            # The login died under a running app — the token aged out since
+            # launch, or was revoked outright (auth: the file still looks
+            # fine). The same throwaway run the launch check uses can fix
+            # both; safe to ask on every failing poll, since attempts are
+            # single-flight and cooled down on tokenrefresh's side.
+            tokenrefresh.maybe_repair(self._on_login_repaired)
         if self._snapshot is not None:
             # Keep showing stale data; just note its age in the tooltip.
             age_min = max(1, int((time.time() - self._snapshot.fetched_at) / 60))

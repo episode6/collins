@@ -1,6 +1,6 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
-"""A launch-time repair for an expired Claude Code login.
+"""A quiet repair for an expired Claude Code login.
 
 The sidebar usage panel and the model pickers both ride the OAuth token the
 claude CLI keeps in ``~/.claude/.credentials.json`` (see usage/claudemodels),
@@ -9,15 +9,20 @@ any run. So a machine that sat overnight comes up with the app running, the
 CLI installed and logged in, and both features reporting an expired login
 that any one `claude` run would have fixed.
 
-This module is that run. When a launch finds the CLI on PATH but the stored
-token past its expiry, a tiny headless ``claude -p`` prompt executes in
-titles' scratch directory — the same carve-out every title and icon run
+This module is that run. When the token is found dead — at launch, past
+its expiry in the file (`maybe_start`), or mid-run, when a usage fetch
+comes back refused because the app outlived its token or the token died
+unexpired (`maybe_repair`) — a tiny headless ``claude -p`` prompt executes
+in titles' scratch directory: the same carve-out every title and icon run
 uses, so it never shows up as a session and its transcript is swept away
 with the workdir. The CLI refreshes the token before answering, which is
 the entire point: the reply is discarded, and what decides success is the
 credentials file afterwards. On success the app re-asks what the stale
 token spoiled — the model catalog, when a query already failed, and the
-usage panel's bars (the caller's side, via `maybe_start`'s callback).
+usage panel's bars (the caller's side, via the entries' callback).
+Attempts are single-flight and cooled down, so a login no run can fix (a
+revoked refresh token) costs one throwaway subprocess an hour, not one
+per panel poll.
 
 Deliberately narrow. No credentials file at all means not logged in, which
 a headless run cannot fix — it would only fail slower; a token inside its
@@ -37,6 +42,7 @@ import os
 import shutil
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 
 from . import claudemodels, clisetup, titles, usage
@@ -118,26 +124,41 @@ def refresh() -> bool:
     return ok
 
 
-def maybe_start(on_refreshed: Callable[[], None]) -> threading.Thread | None:
-    """The launch-time entry: check, and repair if called for, off-thread.
+# One repair at a time, and not too often. `_running` is the single-flight
+# gate — the launch check and any number of usage panels can all notice the
+# same dead login at once, and one throwaway run serves them all. The
+# cooldown is the loop-breaker for a login that repairs never fix (a revoked
+# refresh token, say): every poll of a broken panel reports the same error,
+# and without it each report would spawn another subprocess. A *working*
+# login never feels the cooldown — a successful repair means the next
+# fetches succeed, and nothing triggers again until the token actually
+# expires, hours past any cooldown.
+_REPAIR_COOLDOWN_S = 3600
+_attempt_lock = threading.Lock()
+_running = False
+_last_attempt: float | None = None  # time.monotonic() of the last claim
 
-    *on_refreshed* fires on the worker thread after a successful refresh —
-    with the model catalog already retried, so by the time the caller hears
-    about it the pickers' next ask is served fresh — and never fires
-    otherwise. The caller marshals to its main loop and re-asks whatever it
-    was showing as expired (the usage panel).
 
-    Returns the started thread, or None when the check is off (the fixture
-    harness) — callers don't need either; tests join on it.
-    """
-    if os.environ.get("COLLINS_USAGE_FIXTURE"):
-        return None
+def _begin_attempt() -> bool:
+    """Claim the one repair slot: False while a repair is already running or
+    the cooldown since the last claim hasn't passed. Claiming starts the
+    cooldown — a failed attempt counts, that being the whole point."""
+    global _running, _last_attempt
+    with _attempt_lock:
+        if _running:
+            return False
+        now = time.monotonic()
+        if _last_attempt is not None and now - _last_attempt < _REPAIR_COOLDOWN_S:
+            return False
+        _running, _last_attempt = True, now
+        return True
 
-    def work() -> None:
-        # No CLI is cliwelcome's business, not a repair to attempt — and not
-        # a warning to log on every launch of a CLI-less install.
-        if not clisetup.on_path() or not token_expired():
-            return
+
+def _repair(on_refreshed: Callable[[], None]) -> None:
+    """The claimed attempt: refresh, retry what the stale token spoiled,
+    tell the caller. Only ever runs holding the `_begin_attempt` claim."""
+    global _running
+    try:
         if not refresh():
             return
         # A models query that already failed this run left the pickers on a
@@ -147,7 +168,58 @@ def maybe_start(on_refreshed: Callable[[], None]) -> threading.Thread | None:
         if claudemodels.cache_failed():
             claudemodels.refresh_models()
         on_refreshed()
+    finally:
+        with _attempt_lock:
+            _running = False
+
+
+def _spawn(check: Callable[[], bool], on_refreshed: Callable[[], None]) -> threading.Thread | None:
+    """The shared entry shape: gate on the fixture harness, then run
+    *check* + claim + repair on a daemon thread. Returns the thread, or
+    None when the whole feature is off — callers need neither; tests join.
+    """
+    if os.environ.get("COLLINS_USAGE_FIXTURE"):
+        return None
+
+    def work() -> None:
+        if not check() or not _begin_attempt():
+            return
+        _repair(on_refreshed)
 
     thread = threading.Thread(target=work, name="token-refresh", daemon=True)
     thread.start()
     return thread
+
+
+def maybe_start(on_refreshed: Callable[[], None]) -> threading.Thread | None:
+    """The launch-time entry: check, and repair if called for, off-thread.
+
+    *on_refreshed* fires on the worker thread after a successful refresh —
+    with the model catalog already retried, so by the time the caller hears
+    about it the pickers' next ask is served fresh — and never fires
+    otherwise. The caller marshals to its main loop and re-asks whatever it
+    was showing as expired (the usage panel).
+    """
+
+    # No CLI is cliwelcome's business, not a repair to attempt — and not
+    # a warning to log on every launch of a CLI-less install.
+    return _spawn(lambda: clisetup.on_path() and token_expired(), on_refreshed)
+
+
+def maybe_repair(on_refreshed: Callable[[], None]) -> threading.Thread | None:
+    """The mid-run entry: a usage fetch was just refused for login reasons.
+
+    An app left running rides its token past expiry with no launch to
+    notice — the panel's poll is what finds out — and a token can also die
+    unexpired (revoked server-side, the fetch's `auth` kind), which the
+    local file never shows. So unlike `maybe_start` this trusts the
+    caller's observed error over `token_expired` and attempts regardless of
+    what the file claims. The caller decides what counts as a login refusal
+    (the usage panel: its `expired` and `auth` error kinds).
+
+    Safe to call on every such failure: attempts are single-flight and
+    cooled down (`_begin_attempt`), so a login that repairs can't fix costs
+    one throwaway run an hour, not one per poll. *on_refreshed* is as in
+    `maybe_start`: worker thread, successful refresh only.
+    """
+    return _spawn(clisetup.on_path, on_refreshed)

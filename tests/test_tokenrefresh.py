@@ -26,6 +26,14 @@ def _write_credentials(path: Path, expires_in_s: float = 3600) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _fresh_attempt_state(monkeypatch):
+    """The single-flight flag and cooldown clock are module-global; every
+    test starts with no attempt made yet."""
+    monkeypatch.setattr(tokenrefresh, "_running", False)
+    monkeypatch.setattr(tokenrefresh, "_last_attempt", None)
+
+
 @pytest.fixture
 def credentials(tmp_path, monkeypatch):
     """A credentials path the module reads (via COLLINS_CLAUDE_CREDENTIALS);
@@ -194,3 +202,80 @@ def test_maybe_start_failed_refresh_never_signals(credentials, monkeypatch):
     thread = tokenrefresh.maybe_start(lambda: events.append("cb"))
     thread.join(5)
     assert events == ["refresh"]
+
+
+# -- maybe_repair --------------------------------------------------------------
+
+
+def test_maybe_repair_is_off_under_the_fixture_harness(credentials, monkeypatch):
+    monkeypatch.setenv("COLLINS_USAGE_FIXTURE", "/nowhere/usage.json")
+    assert tokenrefresh.maybe_repair(lambda: None) is None
+
+
+def test_maybe_repair_skips_a_cli_less_install(credentials, monkeypatch):
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: False)
+    events = []
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or True)
+    thread = tokenrefresh.maybe_repair(lambda: events.append("cb"))
+    thread.join(5)
+    assert events == []
+
+
+def test_maybe_repair_trusts_the_caller_over_the_file(credentials, monkeypatch):
+    # The auth case: the file holds an unexpired token, but the server just
+    # refused it — the observed error outranks token_expired().
+    _write_credentials(credentials)
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
+    events = []
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or True)
+    monkeypatch.setattr(claudemodels, "cache_failed", lambda: False)
+    thread = tokenrefresh.maybe_repair(lambda: events.append("cb"))
+    thread.join(5)
+    assert events == ["refresh", "cb"]
+
+
+def test_attempts_are_cooled_down(credentials, monkeypatch):
+    # A broken login reports the same failure on every poll; only the first
+    # report inside the cooldown spends a run — success or not.
+    _write_credentials(credentials)
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
+    events = []
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or False)
+    for _i in range(3):
+        tokenrefresh.maybe_repair(lambda: events.append("cb")).join(5)
+    assert events == ["refresh"]
+
+
+def test_cooldown_expiry_allows_another_attempt(credentials, monkeypatch):
+    _write_credentials(credentials)
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
+    events = []
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or False)
+    tokenrefresh.maybe_repair(lambda: events.append("cb")).join(5)
+    monkeypatch.setattr(
+        tokenrefresh,
+        "_last_attempt",
+        tokenrefresh._last_attempt - tokenrefresh._REPAIR_COOLDOWN_S,
+    )
+    tokenrefresh.maybe_repair(lambda: events.append("cb")).join(5)
+    assert events == ["refresh", "refresh"]
+
+
+def test_launch_attempt_counts_toward_the_cooldown(credentials, monkeypatch):
+    # The launch check and a panel's first failing poll notice the same dead
+    # login; the launch's attempt is the one that runs.
+    _write_credentials(credentials, expires_in_s=-60)
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
+    events = []
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or False)
+    tokenrefresh.maybe_start(lambda: events.append("cb")).join(5)
+    tokenrefresh.maybe_repair(lambda: events.append("cb")).join(5)
+    assert events == ["refresh"]
+
+
+def test_a_running_attempt_is_single_flight(credentials, monkeypatch):
+    assert tokenrefresh._begin_attempt()
+    assert not tokenrefresh._begin_attempt()  # running
+    with tokenrefresh._attempt_lock:
+        tokenrefresh._running = False
+    assert not tokenrefresh._begin_attempt()  # done running, but cooling down
