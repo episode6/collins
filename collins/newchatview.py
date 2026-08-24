@@ -169,9 +169,13 @@ class NewChatView(Gtk.Box):
         if choice is None:
             return
         self._worktree_touched = True
-        with_handler = self._worktree.get_active() != bool(choice)
+        # set_active fires "toggled" (and so "changed") only when the value
+        # actually flips; a restored choice that happens to equal the box's
+        # current state still has to announce itself, since the box just
+        # became an explicit choice the draft record must keep.
+        toggles = self._worktree.get_active() != bool(choice)
         self._worktree.set_active(bool(choice))
-        if not with_handler:
+        if not toggles:
             self.emit("changed")
 
     # -- behaviour ------------------------------------------------------------

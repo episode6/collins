@@ -1719,6 +1719,13 @@ class TerminalTab(Gtk.Box):
     def new_chat_text(self) -> str:
         return self._new_chat.text() if self._new_chat is not None else ""
 
+    def seed_new_chat_text(self, text: str) -> None:
+        """Put *text* in the screen's composer, cursor at the end — a
+        screenshot's staged prompt, or anything else that wants the box
+        filled without restoring a whole draft (restore_new_chat)."""
+        if self._new_chat is not None:
+            self._new_chat.set_text(text)
+
     def new_chat_worktree_choice(self) -> bool | None:
         """The screen's worktree box as the user left it, None while it still
         follows the project's default (see NewChatView.worktree_choice)."""
@@ -2351,6 +2358,11 @@ class TerminalTab(Gtk.Box):
             self._editor.request_root(cwd)
         else:
             self._editor.offer_root(cwd)
+        # The shells' offer rides the same settled move, whichever scope the
+        # editor gave it: NONE above is never a worktree (it means "not a
+        # move at all" — no cwd, a missing directory, or the root itself),
+        # and a worktree under the repository is AUTO, so every move the
+        # launch could have made reaches here.
         self._maybe_offer_shells_follow(cwd)
 
     def _maybe_offer_shells_follow(self, cwd: str) -> None:

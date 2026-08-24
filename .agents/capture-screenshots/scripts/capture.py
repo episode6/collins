@@ -105,8 +105,7 @@ def prepare() -> bool:
     elif args.new_session:
         win._start_new_session(args.new_session)
         if args.new_session_text:
-            tab = win.tab_view.get_selected_page().get_child()
-            tab._new_chat.set_text(args.new_session_text)
+            win.tab_view.get_selected_page().get_child().seed_new_chat_text(args.new_session_text)
     if session is not None or args.new_session:
         if args.panel:
             win.tab_view.get_selected_page().get_child().show_panel()
