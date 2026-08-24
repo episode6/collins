@@ -1911,7 +1911,7 @@ class MainWindow(Adw.ApplicationWindow):
             # Its sidebar row is keyed by a draft id from the start, so the
             # row it has while empty ("New Thread") and the draft it becomes
             # are one row, and nothing has to be re-keyed when text lands.
-            self._add_placeholder(page, cwd, newchat.new_draft_id())
+            self._add_placeholder(page, tab, cwd, newchat.new_draft_id())
             return tab
         if worktree:
             # The agent's worktree flag reads trust off the launch directory
@@ -1932,7 +1932,7 @@ class MainWindow(Adw.ApplicationWindow):
             f"new {provider.name} session — {cwd}",
             background=background,
         )
-        self._add_placeholder(page, cwd)
+        self._add_placeholder(page, tab, cwd)
         if not background:
             # A session Collins starts fresh can come up with its composer
             # already open (opt-in; see TerminalTab.autoshow_composer). Only
@@ -1946,17 +1946,18 @@ class MainWindow(Adw.ApplicationWindow):
     # -- sidebar placeholders for unresolved new-session tabs ----------------
 
     def _add_placeholder(
-        self, page: Adw.TabPage, cwd: str, placeholder_id: str | None = None
+        self, page: Adw.TabPage, tab: TerminalTab, cwd: str, placeholder_id: str | None = None
     ) -> None:
         """Give a fresh new-session tab a transient "New Thread" sidebar row
-        until the store discovers the real session. *placeholder_id* names
-        the row for a new-chat tab (its draft id, see _launch_new_session);
-        anything else gets a `placeholder-N` of its own."""
+        until the store discovers the real session, led by the mark of the
+        agent *tab* runs. *placeholder_id* names the row for a new-chat tab
+        (its draft id, see _launch_new_session); anything else gets a
+        `placeholder-N` of its own."""
         if placeholder_id is None:
             self._placeholder_seq += 1
             placeholder_id = f"placeholder-{self._placeholder_seq}"
         self._placeholder_pages[page] = placeholder_id
-        self.sidebar.add_placeholder(placeholder_id, cwd)
+        self.sidebar.add_placeholder(placeholder_id, cwd, tab.provider.icon_name)
         self._update_active_row()
 
     def _remove_placeholder(self, page: Adw.TabPage) -> None:
@@ -2102,7 +2103,7 @@ class MainWindow(Adw.ApplicationWindow):
                 _("New chat") if chats.is_chat_cwd(cwd) else GLib.path_get_basename(cwd),
                 f"new {provider.name} session — {cwd}",
             )
-            self._add_placeholder(page, cwd, draft_id)
+            self._add_placeholder(page, tab, cwd, draft_id)
             tab.restore_new_chat(
                 draft_id, record["text"], record.get("worktree"), record.get("layout")
             )

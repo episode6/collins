@@ -415,11 +415,16 @@ class PlaceholderRow(Gtk.ListBoxRow):
 
     Also the row a *new-chat draft* gets (see newchat): a screen the user
     typed on, or opened a terminal beside, and hasn't sent yet. `label` is
-    then the draft's first line rather than "New Thread", the row leads
-    with a pencil where a session row's agent mark goes, and `live` says
+    then the draft's first line rather than "New Thread", and `live` says
     whether a tab is open on it right now — a kept draft with no tab reads
     like every row without one (dimmed, no outline), and its trailing
     button discards the draft instead of closing a tab.
+
+    The row leads with a mark in the column a SessionRow's agent mark
+    takes: `icon_name`, the agent the tab is (or will be) running — the
+    same promise the group's offer row makes (see NewThreadRow) — or, for
+    a draft with something written on it (`written`), a pencil: the row
+    stands for the user's writing rather than a session.
 
     `arriving` plays the row in rather than having it appear: see
     _arrive_by_slide.
@@ -430,10 +435,12 @@ class PlaceholderRow(Gtk.ListBoxRow):
         placeholder_id: str,
         group_key: tuple,
         sidebar: SessionSidebar,
+        icon_name: str,
         arriving: bool = False,
         label: str | None = None,
         live: bool = True,
         draft: bool = False,
+        written: bool = False,
     ) -> None:
         super().__init__()
         self.placeholder_id = placeholder_id
@@ -446,22 +453,20 @@ class PlaceholderRow(Gtk.ListBoxRow):
         box.set_valign(Gtk.Align.CENTER)  # match SessionRow in a taller row
         box.set_margin_top(4)  # match SessionRow: the flat button fills the row
         box.set_margin_bottom(4)
-        if draft:
-            # The draft's mark, in the slot a SessionRow leads with (the
-            # agent mark's column, see NewThreadRow): a pencil, for a row
-            # that stands for writing rather than a session.
-            mark = Gtk.Image.new_from_icon_name("document-edit-symbolic")
-            mark.set_pixel_size(prmenu.ROW_ICON_PX)
-            mark.set_valign(Gtk.Align.CENTER)
-            mark.add_css_class("agent-mark")
-            mark.add_css_class("dim-label")
-            box.append(mark)
-        else:
-            # Stands in for the mark column a SessionRow leads with -- the
-            # button's 4px of left padding plus half the badge overhang the
-            # mark centers itself in (see prmenu._mark) -- so this label
-            # starts where the icons above it do.
-            box.set_margin_start(6)
+        # The mark, in the slot a SessionRow leads with (the agent mark's
+        # column, see .agent-mark in app.py): the agent's own icon -- a
+        # fresh screen with nothing typed yet, a draft kept only for the
+        # terminal beside it, and a tab whose session is still resolving
+        # all stand for a session of that agent -- or the pencil for a
+        # draft with writing on it.
+        mark = Gtk.Image.new_from_icon_name(
+            "document-edit-symbolic" if written else icon_name
+        )
+        mark.set_pixel_size(prmenu.ROW_ICON_PX)
+        mark.set_valign(Gtk.Align.CENTER)
+        mark.add_css_class("agent-mark")
+        mark.add_css_class("dim-label")
+        box.append(mark)
 
         title = Gtk.Label(label=label or _("New Thread"), xalign=0.0, hexpand=True)
         # Full strength, like the real rows with a tab open: dimming now means
@@ -1309,6 +1314,7 @@ class SessionSidebar(Gtk.Box):
         # The stand-in row under each group that has nothing else in it.
         self._new_thread_rows: dict[tuple, NewThreadRow] = {}
         self._placeholders: dict[str, str] = {}  # placeholder id -> cwd
+        self._placeholder_icons: dict[str, str] = {}  # placeholder id -> agent icon
         self._placeholder_rows: dict[str, PlaceholderRow] = {}
         self._row_order: list[str] = []  # session/placeholder ids, top to bottom
         # Placeholders whose tab is producing output right now. Kept here
@@ -1730,6 +1736,14 @@ class SessionSidebar(Gtk.Box):
                     pid,
                     key,
                     self,
+                    # A live tab knows its agent; a kept draft's record says
+                    # which one it was opened for.
+                    icon_name=self._placeholder_icons.get(
+                        pid,
+                        get_provider(record["provider"]).icon_name
+                        if record is not None
+                        else default_provider().icon_name,
+                    ),
                     arriving=arriving,
                     label=(
                         newchat.draft_label(record["text"], _("Draft"))
@@ -1738,6 +1752,7 @@ class SessionSidebar(Gtk.Box):
                     ),
                     live=pid in self._placeholders,
                     draft=record is not None,
+                    written=record is not None and bool(record["text"].strip()),
                 )
                 prow.set_margin_start(child_indent)
                 if pid == self._active_session_id:
@@ -2117,8 +2132,9 @@ class SessionSidebar(Gtk.Box):
             return CHATS_GROUP
         return ("proj", project_name_for_cwd(cwd))
 
-    def add_placeholder(self, placeholder_id: str, cwd: str) -> None:
-        """Show a transient "New Thread" row for a tab with no session yet.
+    def add_placeholder(self, placeholder_id: str, cwd: str, icon_name: str) -> None:
+        """Show a transient "New Thread" row for a tab with no session yet,
+        led by *icon_name*, the mark of the agent the tab runs.
 
         The row slides down out from behind its project header rather than
         appearing under it (see PlaceholderRow.slide_in) — the sidebar answers
@@ -2131,6 +2147,7 @@ class SessionSidebar(Gtk.Box):
         back down again.
         """
         self._placeholders[placeholder_id] = cwd
+        self._placeholder_icons[placeholder_id] = icon_name
         key = self._placeholder_group_key(cwd)
         if not self.store.state.is_group_expanded(_group_state_key(key)):
             # Starting a thread in a collapsed group expands it for real —
@@ -2214,6 +2231,7 @@ class SessionSidebar(Gtk.Box):
         self._busy_placeholders.discard(placeholder_id)
         self._unread_placeholders.discard(placeholder_id)
         self._arriving_placeholders.discard(placeholder_id)
+        self._placeholder_icons.pop(placeholder_id, None)
         if self._placeholders.pop(placeholder_id, None) is None:
             return
         self._rebuild_rows()
