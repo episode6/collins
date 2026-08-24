@@ -222,7 +222,17 @@ def _group_state_key(group_key: tuple) -> str:
 
 class GroupHeaderRow(Gtk.ListBoxRow):
     """A real row acting as a group header, so it stays visible when the
-    group's session rows are filtered out (collapsed)."""
+    group's session rows are filtered out (collapsed).
+
+    The row is two targets. Its icon is the group's collapse toggle: the
+    caret it turns into under the pointer is the hint, and a click there
+    folds or unfolds the group and goes no further (the press is claimed, so
+    the list never sees a row activation). Everywhere else the row does what
+    its + button does — starts a session in the project (see the sidebar's
+    _on_row_activated) — so a project reads as one wide "new session" target
+    with a fold handle at its head, the same way its empty-group NewThreadRow
+    does. Favorites has no folder to start in, so its whole row still folds.
+    """
 
     def __init__(
         self,
@@ -276,10 +286,16 @@ class GroupHeaderRow(Gtk.ListBoxRow):
 
         self._hovered = False
         self._collapsed = collapsed
+        # The caret shows over the icon alone — the one place a click folds
+        # the group — not over the whole row, where a click starts a session.
         hover = Gtk.EventControllerMotion()
         hover.connect("enter", self._on_hover_enter)
         hover.connect("leave", self._on_hover_leave)
-        self.add_controller(hover)
+        icon.add_controller(hover)
+        if sidebar is not None and self.starts_session:
+            fold = Gtk.GestureClick(button=1)
+            fold.connect("pressed", self._on_icon_pressed, sidebar)
+            icon.add_controller(fold)
 
         label = Gtk.Label(label=group_label.upper(), xalign=0.0, hexpand=True, valign=Gtk.Align.CENTER)
         label.add_css_class("caption-heading")
@@ -317,6 +333,33 @@ class GroupHeaderRow(Gtk.ListBoxRow):
 
         self.set_child(box)
         self.set_collapsed(collapsed)
+        if self.starts_session:
+            self.set_tooltip_text(
+                _("New chat")
+                if group_key == CHATS_GROUP
+                else _("New session in {path}").format(path=_abbreviate_path(cwd))
+            )
+
+    @property
+    def starts_session(self) -> bool:
+        """Whether a click on the row (off its icon) starts a session — every
+        group that has somewhere to start one, i.e. all but Favorites."""
+        return self.group_key == CHATS_GROUP or bool(self.cwd)
+
+    def start_session(self) -> None:
+        """Do what the + button on this row does."""
+        if self.group_key == CHATS_GROUP:
+            self.activate_action("win.new-session-in-chats", None)
+        elif self.cwd:
+            self.activate_action("win.new-session-in", GLib.Variant("s", self.cwd))
+
+    def _on_icon_pressed(
+        self, gesture: Gtk.GestureClick, _n: int, _x: float, _y: float, sidebar: SessionSidebar
+    ) -> None:
+        # Claimed, so the list's own click gesture (an ancestor's, in the same
+        # bubble phase) is denied the sequence and the row is not activated.
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        sidebar.toggle_group(self.group_key)
 
     def set_collapsed(self, collapsed: bool) -> None:
         self._collapsed = collapsed
@@ -332,6 +375,8 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         self._update_icon()
 
     def _update_icon(self) -> None:
+        if self.starts_session:
+            self._icon.set_tooltip_text(_("Expand") if self._collapsed else _("Collapse"))
         if self._hovered:
             self._icon.set_from_icon_name(
                 "pan-end-symbolic" if self._collapsed else "pan-down-symbolic"
@@ -2289,7 +2334,7 @@ class SessionSidebar(Gtk.Box):
             return query in row.item.search_text  # search ignores collapsed state
         return row.item.group_key not in self._collapsed
 
-    def _toggle_group(self, group_key: tuple) -> None:
+    def toggle_group(self, group_key: tuple) -> None:
         expanded = group_key in self._collapsed
         if expanded:
             self._collapsed.discard(group_key)
@@ -2392,7 +2437,14 @@ class SessionSidebar(Gtk.Box):
 
     def _on_row_activated(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         if isinstance(row, GroupHeaderRow):
-            self._toggle_group(row.group_key)
+            # A press on the icon never gets here (see GroupHeaderRow): the
+            # rest of the row starts a session where there is one to start.
+            # Selection mode is about the sessions already there, so the row
+            # keeps folding for as long as it lasts; Favorites always does.
+            if row.starts_session and not self._selection_mode:
+                row.start_session()
+            else:
+                self.toggle_group(row.group_key)
             return
         if isinstance(row, PlaceholderRow):
             if not self._selection_mode:  # focus the still-unbound tab

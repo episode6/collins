@@ -2,6 +2,8 @@ collins (0.1.2) UNRELEASED; urgency=medium
 
   * The PR page's Checks list folds past four rows behind "Show more", like
     the description does, instead of scrolling in place.
+  * Clicking a project header in the sidebar starts a session there (the
+    new-chat screen); the header's icon is what folds the group now.
 
  -- Geoff Hackett <ghackett@episode6.com>  Sat, 22 Aug 2026 08:26:06 -0400
 
