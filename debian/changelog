@@ -5,6 +5,9 @@ collins (0.1.2) UNRELEASED; urgency=medium
   * Clicking a project header in the sidebar starts a session there (the
     new-chat screen); the strip left of the header's title is what folds
     the group now, as do Left/Right on a focused header.
+  * The PR page no longer selects its whole description by itself after a
+    click in it (or on "Show more" / a thread's Reply) is followed by a
+    background re-read; the comment box keeps its cursor across one too.
 
  -- Geoff Hackett <ghackett@episode6.com>  Sat, 22 Aug 2026 08:26:06 -0400
 

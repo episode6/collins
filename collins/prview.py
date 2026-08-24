@@ -705,8 +705,64 @@ class PrViewPage(Adw.Bin):
         label.set_margin_top(24)
         self._content.append(label)
 
+    def _park_focus(self, *boxes: Gtk.Widget) -> Gtk.Widget | str | None:
+        """Get the keyboard out of *boxes* before they are emptied, and say
+        what should have it back once they are refilled (`_restore_focus`).
+
+        Unparenting the focused widget doesn't drop the focus: GTK re-places
+        it after the next paint, walking up from the removed widget's parent
+        — or, for a widget still unparented then, from the top of the window
+        down the focus-child chain to the first thing in the emptied box that
+        will take it. Here that is the description's first label, and a
+        selectable label handed the focus by anything but a click selects
+        every character it holds (`gtk-label-select-on-focus`). So a click
+        on "Show more", in the description, or on a thread's Reply, followed
+        by any background re-read, painted the whole description selected;
+        and the composer, re-appended rather than replaced, had its parent
+        grabbed instead — the scroller — which threw the cursor out of a
+        half-typed comment. Parking the focus on the view's scroller first
+        (the page's own home for it, see `grab_page_focus`) means nothing
+        focused is ever unparented, so GTK has nothing to re-place.
+
+        Two things inside the boxes outlive a rebuild and get the keyboard
+        back: the composer, the very widget re-appended (returned as such),
+        and a thread's reply editor, rebuilt with its draft (returned as the
+        thread's id). Anything else was a button or a label that no longer
+        exists, and the scroller is where it ends up.
+        """
+        root = self.get_root()
+        focus = root.get_focus() if root is not None else None
+        if focus is None or not any(focus.is_ancestor(box) for box in boxes):
+            return None
+        kept: Gtk.Widget | str | None = None
+        if focus.is_ancestor(self._composer):
+            kept = focus
+        else:
+            card = focus.get_parent()
+            while card is not None and not isinstance(card, _ThreadCard):
+                card = card.get_parent()
+            if card is not None and card.holds_reply(focus):
+                kept = card.thread_id
+        self.grab_page_focus()
+        return kept
+
+    @staticmethod
+    def _restore_focus(kept: Gtk.Widget | str | None, cards: list[_ThreadCard]) -> None:
+        """Hand the keyboard back after a rebuild: to the widget `_park_focus`
+        named, or to the reply editor of whichever of *cards* now stands for
+        the thread it named. A card whose editor didn't come back open (no
+        draft was typed) leaves the focus where it was parked."""
+        if isinstance(kept, str):
+            for card in cards:
+                if card.thread_id == kept:
+                    card.focus_reply()
+                    return
+        elif kept is not None:
+            kept.grab_focus()
+
     def _rebuild(self) -> None:
         detail = self._detail
+        kept = self._park_focus(self._content)
         self._clear_content()
         self._thread_cards = []
         # Cleared here rather than in _rebuild_files: the two always run as a
@@ -738,6 +794,7 @@ class PrViewPage(Adw.Bin):
             self._content.append(empty)
         self._composer.sync(self._pr, detail.viewer_is_author)
         self._content.append(self._composer)
+        self._restore_focus(kept, [card for _thread, card in self._thread_cards])
 
     def _acted(self) -> None:
         """Something the page did just landed on GitHub — a comment, a review,
@@ -936,6 +993,8 @@ class PrViewPage(Adw.Bin):
 
     def _rebuild_files(self) -> None:
         detail = self._detail
+        # The list's rows take focus too (a click on one), and go the same way.
+        kept = self._park_focus(self._files_column, self._file_list)
         self._clear_files()
         if not detail.files:
             self._files_placeholder(_("No changed files."))
@@ -950,6 +1009,9 @@ class PrViewPage(Adw.Bin):
             self._sections.append(section)
             self._files_column.append(section)
             self._file_list.append(self._file_row(file))
+        self._restore_focus(
+            kept, [card for card in self._cards if card.is_ancestor(self._files_column)]
+        )
 
     def _file_row(self, file: prdetail.PrFile) -> Gtk.Widget:
         """One navigation-list row: the path, then its +/− counts."""
@@ -1878,6 +1940,22 @@ class _ThreadCard(Gtk.Box):
             # Built while this thread's mutation is still in flight (a fetch
             # rebuilt the cards under it): look as held as the original did.
             self.set_sensitive(False)
+
+    @property
+    def thread_id(self) -> str:
+        return self._thread.id
+
+    def holds_reply(self, widget: Gtk.Widget) -> bool:
+        """Whether *widget* is this card's reply editor, or something in it
+        — the one part of a card a rebuild's twin can pick up where it was
+        (see the page's `_park_focus`)."""
+        return widget is self._reveal or widget.is_ancestor(self._reveal)
+
+    def focus_reply(self) -> None:
+        """Put the keyboard in the reply editor, if it came back open — where
+        a rebuild found it on the card this one replaced."""
+        if self._reveal.get_reveal_child():
+            self._text.grab_focus()
 
     def _write_row(self) -> Gtk.Widget:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)

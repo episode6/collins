@@ -66,6 +66,13 @@ downloads of each version, see the
   fifteen seconds: the host hands over an activation token that doubles as a
   startup-notification sequence, and Collins was dropping it instead of
   raising the window with it. The window now comes up on that token.
+- **The PR page no longer selects its description by itself.** A click on
+  "Show more", in the description or on a thread's Reply, followed by any
+  background re-read of the page, left the whole description highlighted —
+  GTK re-placing the keyboard focus onto the first label of the rebuilt
+  page, which selects itself on focus. A rebuild now parks the focus on the
+  page's scroller first, and gives it back to the comment box or the reply
+  editor being typed in, whose cursor a background refresh used to throw out.
 
 ### v0.1.1 — 2026-08-22
 
