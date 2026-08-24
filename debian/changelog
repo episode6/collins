@@ -12,6 +12,10 @@ collins (0.1.2) UNRELEASED; urgency=medium
     without a click (a tab switch, Tab): GTK's select-on-focus is off.
   * Right-clicking the PR page's Conversation or Files tab opens that view
     of the pull request on github.com.
+  * A panel page that opens itself in a background tab (an agent attaching
+    its pull request) no longer comes up squeezed to its minimum width when
+    that tab is next selected; the column takes its proper size the moment
+    the tab is first shown.
 
  -- Geoff Hackett <ghackett@episode6.com>  Sat, 22 Aug 2026 08:26:06 -0400
 

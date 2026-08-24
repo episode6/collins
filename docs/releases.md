@@ -91,6 +91,12 @@ downloads of each version, see the
   The other way in — switching to another tab and back after a click in the
   description — is closed too: GTK's select-a-label-on-focus is off across
   the app, so text is only ever selected by dragging over it.
+- **A PR page opened behind another tab gets its full width.** A panel
+  page that opens itself in a background tab — an agent attaching its
+  pull request while you read another session — used to come up squeezed
+  to its minimum width when that tab was next selected, however much room
+  the terminal had to spare. The column now takes its proper size the
+  moment the tab is first shown.
 
 ### v0.1.1 — 2026-08-22
 
