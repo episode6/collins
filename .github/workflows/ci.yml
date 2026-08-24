@@ -57,10 +57,10 @@ jobs:
   # tests/conftest.py's blocklist), the e2e checks drive real widgets: they
   # need the full gir stack, a display (Xvfb) and a session bus
   # (dbus-run-session, one per check), all of which the full CI image
-  # (.github/docker/ci.Dockerfile, --target full) carries. Once its own
-  # workflow (e2e.yml, when the suite was informational); it lives here now
-  # so a Dockerfile-editing PR builds the image once instead of racing two
-  # identical builds from two workflows.
+  # (.github/docker/ci.Dockerfile, --target full) carries. This was once
+  # its own workflow (e2e.yml, from when the suite was informational); it
+  # lives here now so a Dockerfile-editing PR builds the image once instead
+  # of racing two identical builds from two workflows.
   e2e:
     needs: image
     runs-on: ubuntu-latest
