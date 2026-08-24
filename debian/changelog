@@ -10,6 +10,8 @@ collins (0.1.2) UNRELEASED; urgency=medium
     background re-read; the comment box keeps its cursor across one too.
   * Labels no longer select all their text when the keyboard reaches them
     without a click (a tab switch, Tab): GTK's select-on-focus is off.
+  * Right-clicking the PR page's Conversation or Files tab opens that view
+    of the pull request on github.com.
 
  -- Geoff Hackett <ghackett@episode6.com>  Sat, 22 Aug 2026 08:26:06 -0400
 
