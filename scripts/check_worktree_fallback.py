@@ -145,8 +145,14 @@ def later(fn, ms: int = 3000) -> bool:
 
 
 def start(cwd: str):
+    """A session started by hand opens onto the new-chat screen; its Send,
+    with the worktree box ticked, is the launch this check watches (the
+    window settles the flag and the trust exactly as it does for the screen,
+    see MainWindow._on_new_chat_send)."""
     win = state["win"]
-    return win._launch_new_session(cwd, win._default_provider(), None, True)
+    tab = win._launch_new_session(cwd, win._default_provider(), None, True)
+    tab._new_chat.emit("send-requested", "hello", True)
+    return tab
 
 
 # -- the steps ---------------------------------------------------------------

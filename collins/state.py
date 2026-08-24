@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-21. Full change history: git log for this file.
+# fork. Last modified: 2026-08-23. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -17,7 +17,7 @@ import shutil
 from collections.abc import Iterable
 from pathlib import Path
 
-from . import mcptools, panelhistory, panellayout
+from . import mcptools, newchat, panelhistory, panellayout
 
 _CONFIG_BASE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 _CONFIG_DIR = _CONFIG_BASE / "collins"
@@ -354,6 +354,13 @@ class AppState:
         # to sleep, and comes back the next time that session's composer
         # opens on an empty box.
         self.session_drafts: dict[str, str] = {}
+        # draft id -> a new-chat screen the user walked away from with
+        # something in it: the prompt being written for a session that hasn't
+        # been started, the worktree choice, and the dock layout (see
+        # newchat.draft_record). Listed in the sidebar under the draft's
+        # project, and opened back onto the same screen; consumed by the Send
+        # that starts the session.
+        self.new_chat_drafts: dict[str, dict] = {}
         # session id -> cmdlines of the processes the CLI had spawned under
         # itself before anything was ever submitted to it — its MCP servers,
         # plumbing that must not read as "the agent left something running".
@@ -431,6 +438,11 @@ class AppState:
         self.session_drafts = {
             k: v for k, v in (data.get("session_drafts") or {}).items() if isinstance(v, str) and v
         }
+        self.new_chat_drafts = {}
+        for k, v in (data.get("new_chat_drafts") or {}).items():
+            clean = newchat.valid_draft(v)
+            if newchat.is_draft_id(k) and clean is not None:
+                self.new_chat_drafts[k] = clean
         self.process_baselines = {
             k: v for k, v in (data.get("process_baselines") or {}).items() if isinstance(v, list)
         }
@@ -461,6 +473,7 @@ class AppState:
             "session_prs": self.session_prs,  # order is the payload — never sort
             "session_attachments": self.session_attachments,  # newest first; never sort
             "session_drafts": self.session_drafts,
+            "new_chat_drafts": self.new_chat_drafts,
             "process_baselines": self.process_baselines,
             "session_forwards": self.session_forwards,
             "pending_detaches": self.pending_detaches,
@@ -879,6 +892,36 @@ class AppState:
             if session_id not in self.session_drafts:
                 return
             del self.session_drafts[session_id]
+        self.save()
+
+    # -- new-chat drafts -----------------------------------------------------
+
+    def get_new_chat_drafts(self) -> dict[str, dict]:
+        """Every kept new-chat screen, by draft id, oldest first (the order
+        the sidebar lists them in under a project)."""
+        return dict(sorted(self.new_chat_drafts.items(), key=lambda kv: kv[1].get("created", 0.0)))
+
+    def get_new_chat_draft(self, draft_id: str) -> dict | None:
+        return self.new_chat_drafts.get(draft_id)
+
+    def set_new_chat_draft(self, draft_id: str, record: dict) -> None:
+        """Keep a new-chat screen's state (see newchat.draft_record). Written
+        on every change the tab reports, so the unchanged case — the debounce
+        firing on a box that was retyped back to what it was — is deliberately
+        not rewritten to disk."""
+        if not newchat.is_draft_id(draft_id):
+            return
+        if self.new_chat_drafts.get(draft_id) == record:
+            return
+        self.new_chat_drafts[draft_id] = record
+        self.save()
+
+    def remove_new_chat_draft(self, draft_id: str) -> None:
+        """Forget a draft: its Send started the session, it was emptied, or
+        the user discarded it from the sidebar."""
+        if draft_id not in self.new_chat_drafts:
+            return
+        del self.new_chat_drafts[draft_id]
         self.save()
 
     # -- settings ------------------------------------------------------------

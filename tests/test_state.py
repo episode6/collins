@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-20. Full change history: git log for this file.
+# fork. Last modified: 2026-08-23. Full change history: git log for this file.
 
 import json
 
@@ -913,3 +913,59 @@ def test_project_worktree_pin_survives_app_default_flip(app_state):
     state.set_project_worktree("alpha", False)
     state.set_setting("worktree_new_sessions", True)
     assert state.worktree_for_project("alpha") is False
+
+
+def test_new_chat_drafts_roundtrip_oldest_first(app_state):
+    state = app_state.AppState()
+    later = {"cwd": "/p", "provider": "claude", "text": "second", "created": 20.0}
+    earlier = {"cwd": "/p", "provider": "claude", "text": "first", "created": 10.0, "worktree": True}
+    state.set_new_chat_draft("draft-b", later)
+    state.set_new_chat_draft("draft-a", earlier)
+
+    fresh = app_state.AppState()
+    assert list(fresh.get_new_chat_drafts()) == ["draft-a", "draft-b"]
+    assert fresh.get_new_chat_draft("draft-a") == earlier
+    assert fresh.get_new_chat_draft("draft-zzz") is None
+
+    fresh.remove_new_chat_draft("draft-a")
+    fresh.remove_new_chat_draft("draft-never")  # nothing to forget, no error
+    assert list(app_state.AppState().get_new_chat_drafts()) == ["draft-b"]
+
+
+def test_new_chat_drafts_refuse_bad_ids_and_records(app_state):
+    state = app_state.AppState()
+    state.set_new_chat_draft("placeholder-1", {"cwd": "/p"})  # not a draft id
+    assert state.get_new_chat_drafts() == {}
+
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps(
+            {
+                "new_chat_drafts": {
+                    "draft-ok": {"cwd": "/p", "text": "hi", "created": 1},
+                    "draft-bad": {"text": "no cwd"},
+                    "not-a-draft": {"cwd": "/q"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    fresh = app_state.AppState()
+    assert list(fresh.get_new_chat_drafts()) == ["draft-ok"]
+    assert fresh.get_new_chat_draft("draft-ok") == {
+        "cwd": "/p",
+        "provider": "claude",
+        "text": "hi",
+        "created": 1.0,
+    }
+
+
+def test_new_chat_draft_unchanged_write_is_skipped(app_state):
+    state = app_state.AppState()
+    record = {"cwd": "/p", "provider": "claude", "text": "hi", "created": 1.0}
+    state.set_new_chat_draft("draft-a", record)
+    app_state._STATE_FILE.unlink()  # a rewrite would recreate it
+    state.set_new_chat_draft("draft-a", dict(record))
+    assert not app_state._STATE_FILE.exists()
+    state.remove_new_chat_draft("draft-a")
+    assert app_state._STATE_FILE.exists()

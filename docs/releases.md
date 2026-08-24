@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-22. Full change history: git log for this file.
+fork. Last modified: 2026-08-23. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -39,6 +39,16 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **New sessions open onto a new-chat screen.** The project's icon and
+  name over the composer, with a *Start in a new git worktree* checkbox
+  (seeded from the project's setting); the agent starts when the first
+  prompt is sent, with that prompt as its first turn. `Ctrl+J`'s terminal
+  opens beside the screen as it would beside the console. A screen with
+  text on it, or a terminal open beside it, is kept as a **draft**: closing
+  the tab or quitting leaves a Draft row under the project in the sidebar,
+  and clicking it brings the screen back — text, checkbox and terminal panel
+  included. When terminals were open beside a worktree launch, Collins
+  offers to `cd` them into the worktree once it exists.
 - **The PR page's Checks list folds instead of scrolling.** Past four
   checks the rest wait behind a "Show more" button, the same step the
   description takes, with the failing and pending rows kept on top. The
