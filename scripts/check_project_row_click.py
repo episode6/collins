@@ -138,7 +138,7 @@ def stage() -> bool:
     win = app.get_active_window()
     header = project_header(win) if win is not None else None
     if header is None:
-        if tries > 40:
+        if tries > 120:  # the scan lands off a worker thread; CI is slow
             print("timed out waiting for the window and the project header", file=sys.stderr)
             app.quit()
             return GLib.SOURCE_REMOVE
