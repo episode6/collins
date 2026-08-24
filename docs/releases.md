@@ -53,6 +53,12 @@ downloads of each version, see the
   checks the rest wait behind a "Show more" button, the same step the
   description takes, with the failing and pending rows kept on top. The
   little in-place scroller is gone.
+- **No more busy pointer after bringing Collins back from the tray.** On
+  GNOME, double-clicking the status icon (or picking Show Collins, a
+  session, or New Window from its menu) left the shell's busy cursor up for
+  fifteen seconds: the host hands over an activation token that doubles as a
+  startup-notification sequence, and Collins was dropping it instead of
+  raising the window with it. The window now comes up on that token.
 
 ### v0.1.1 — 2026-08-22
 
