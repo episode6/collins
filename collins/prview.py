@@ -471,6 +471,10 @@ class PrViewPage(Adw.Bin):
         toggle = switcher.get_first_child()
         for index in range(pages.get_n_items()):
             if toggle is None:
+                # The walk-and-zip assumption broke — a libadwaita keeping
+                # widgets other than the toggles in the switcher. Say so
+                # rather than silently shipping tabs without their links.
+                log.warning("view switcher has fewer toggles than pages; tab links incomplete")
                 break
             path = _VIEW_GITHUB_PATHS.get(pages.get_item(index).get_name())
             if path is not None:
