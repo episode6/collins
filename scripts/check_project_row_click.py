@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """End-to-end check for what a click on a sidebar project header does.
 
-A project header is two targets (sidebar.GroupHeaderRow): its icon folds
-the group, and the rest of the row starts a session there — onto the
-new-chat screen, exactly as its + button does. This check stages one
-project with a session under it, activates its header row and expects a
-new-chat tab filed against the project, then fires the icon's own click
-gesture and expects the group folded with no further tab opened. The
-Favorites header, which has nowhere to start a session, must keep folding
-on activation.
+A project header is two targets (sidebar.GroupHeaderRow): the fold zone —
+everything before the title, full row height — folds the group, and the
+rest of the row starts a session there, onto the new-chat screen, exactly
+as its + button does. This check stages one project with a session under
+it, activates its header row and expects a new-chat tab filed against the
+project, then presses inside and outside the fold zone and expects only
+the in-zone press to fold, with no further tab opened. Left/Right on the
+row fold and unfold from the keyboard. The Favorites header, which has
+nowhere to start a session, must keep folding on activation.
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \
         python3 scripts/check_project_row_click.py
@@ -74,10 +75,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import gi  # noqa: E402
 
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
-from gi.repository import GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from collins import i18n, trust  # noqa: E402
 from collins.app import App  # noqa: E402
@@ -105,14 +107,34 @@ def project_header(win) -> GroupHeaderRow | None:
     return None
 
 
-def icon_click_gesture(row: GroupHeaderRow) -> Gtk.GestureClick | None:
-    """The fold gesture, which lives on the icon and nowhere else."""
-    controllers = row._icon.observe_controllers()
+def _controller(widget: Gtk.Widget, kind: type, button: int | None = None):
+    controllers = widget.observe_controllers()
     for i in range(controllers.get_n_items()):
         controller = controllers.get_item(i)
-        if isinstance(controller, Gtk.GestureClick) and controller.get_button() == 1:
+        if isinstance(controller, kind) and (button is None or controller.get_button() == button):
             return controller
     return None
+
+
+def fold_gesture(row: GroupHeaderRow) -> Gtk.GestureClick | None:
+    """The fold gesture on the row (the menu's is button 3, so distinct)."""
+    return _controller(row, Gtk.GestureClick, button=1)
+
+
+def zone_edge(row: GroupHeaderRow) -> float:
+    """Row-x where the title starts — the fold zone's right edge."""
+    ok, bounds = row._label.compute_bounds(row)
+    assert ok
+    return bounds.origin.x
+
+
+def press(row: GroupHeaderRow, x: float) -> None:
+    fold_gesture(row).emit("pressed", 1, x, 4.0)
+
+
+def press_key(row: GroupHeaderRow, keyval: int) -> None:
+    """Fire the row's key controller as a key on the focused row would."""
+    _controller(row, Gtk.EventControllerKey).emit("key-pressed", keyval, 0, Gdk.ModifierType(0))
 
 
 def new_chat_tabs(win) -> list:
@@ -155,16 +177,21 @@ def stage() -> bool:
     check("the project is the group seeded open", header.group_key == ("proj", "alpha"), header.group_key)
     check("…and starts expanded", header.group_key not in sidebar._collapsed)
     check("the header row offers a session", header.starts_session)
+    edge = zone_edge(header)
+    check("the title leaves room for the fold zone", edge > 4, edge)
     check(
-        "…and says so",
-        header.get_tooltip_text() == f"New session in {PROJECT}",
-        header.get_tooltip_text(),
+        "…and says so past the zone",
+        header._tooltip_text_at(edge + 4) == f"New session in {PROJECT}",
+        header._tooltip_text_at(edge + 4),
     )
-    check("the icon carries the fold gesture", icon_click_gesture(header) is not None)
+    check("the row carries the fold gesture", fold_gesture(header) is not None)
+    check("the fold zone runs to the title", header._in_fold_zone(edge - 1))
+    check("…and no further", not header._in_fold_zone(edge + 1))
+    check("…including left of the icon", header._in_fold_zone(1.0))
     check(
-        "…and names the fold",
-        header._icon.get_tooltip_text() == "Collapse",
-        header._icon.get_tooltip_text(),
+        "…naming the fold there",
+        header._tooltip_text_at(edge - 4) == "Collapse",
+        header._tooltip_text_at(edge - 4),
     )
     state["before"] = win.tab_view.get_n_pages()
 
@@ -193,30 +220,35 @@ def after_the_row_click() -> bool:
     check("…and the group left as it was", header.group_key not in win.sidebar._collapsed)
     state["after_row"] = win.tab_view.get_n_pages()
 
-    # A click on the icon: the gesture fires and claims the press, so the row
-    # activation the list would have made never comes.
-    gesture = icon_click_gesture(header)
-    gesture.emit("pressed", 1, 8.0, 8.0)
-    GLib.timeout_add(800, after_the_icon_click)
+    # A press on the title's side of the zone edge is not the fold's: the
+    # handler leaves it unclaimed for the list, which would activate the row
+    # (that path is the emit above; here only "no fold" can be asserted).
+    press(header, zone_edge(header) + 4)
+    check("a press past the zone never folds", header.group_key not in win.sidebar._collapsed)
+
+    # A press in the fold zone: the gesture fires and claims the press, so
+    # the row activation the list would have made never comes.
+    press(header, zone_edge(header) - 4)
+    GLib.timeout_add(800, after_the_zone_click)
     return GLib.SOURCE_REMOVE
 
 
-def after_the_icon_click() -> bool:
+def after_the_zone_click() -> bool:
     win = state["win"]
     header = project_header(win)
-    check("the icon click folds the group", header.group_key in win.sidebar._collapsed)
+    check("the fold-zone press folds the group", header.group_key in win.sidebar._collapsed)
     check("…and the row knows", header._collapsed)
     check(
         "…naming the unfold now",
-        header._icon.get_tooltip_text() == "Expand",
-        header._icon.get_tooltip_text(),
+        header._tooltip_text_at(4.0) == "Expand",
+        header._tooltip_text_at(4.0),
     )
     check(
         "…without opening a tab",
         win.tab_view.get_n_pages() == state["after_row"],
         win.tab_view.get_n_pages(),
     )
-    icon_click_gesture(header).emit("pressed", 1, 8.0, 8.0)
+    press(header, zone_edge(header) - 4)
     GLib.timeout_add(300, after_the_unfold)
     return GLib.SOURCE_REMOVE
 
@@ -224,13 +256,25 @@ def after_the_icon_click() -> bool:
 def after_the_unfold() -> bool:
     win = state["win"]
     header = project_header(win)
-    check("a second icon click unfolds it", header.group_key not in win.sidebar._collapsed)
+    check("a second fold-zone press unfolds it", header.group_key not in win.sidebar._collapsed)
+
+    # The keyboard's fold: Left folds, Right unfolds, on the focused row.
+    press_key(header, Gdk.KEY_Left)
+    check("Left on the row folds the group", header.group_key in win.sidebar._collapsed)
+    press_key(header, Gdk.KEY_Left)
+    check("…and a second Left is a no-op", header.group_key in win.sidebar._collapsed)
+    press_key(header, Gdk.KEY_Right)
+    check("Right unfolds it", header.group_key not in win.sidebar._collapsed)
 
     fav = win.sidebar._header_rows.get(FAV_GROUP)
     check("Favorites has a header", fav is not None)
     if fav is not None:
         check("…that offers no session", not fav.starts_session)
-        check("…and no fold gesture on its icon", icon_click_gesture(fav) is None)
+        check("…and no zone-gated fold gesture", fold_gesture(fav) is None)
+        check(
+            "…with the hover caret on the whole row, its fold target",
+            _controller(fav, Gtk.EventControllerMotion) is not None,
+        )
         before = win.tab_view.get_n_pages()
         was_folded = FAV_GROUP in win.sidebar._collapsed
         win.sidebar.list.emit("row-activated", fav)

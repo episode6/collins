@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-23. Full change history: git log for this file.
+# fork. Last modified: 2026-08-24. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -224,14 +224,18 @@ class GroupHeaderRow(Gtk.ListBoxRow):
     """A real row acting as a group header, so it stays visible when the
     group's session rows are filtered out (collapsed).
 
-    The row is two targets. Its icon is the group's collapse toggle: the
-    caret it turns into under the pointer is the hint, and a click there
-    folds or unfolds the group and goes no further (the press is claimed, so
-    the list never sees a row activation). Everywhere else the row does what
-    its + button does — starts a session in the project (see the sidebar's
+    The row is two targets. Everything before the title — the row's edge,
+    its padding, the icon, the gap after it, full-bleed top to bottom — is
+    the group's collapse toggle: the caret the icon turns into while the
+    pointer is in that zone is the hint, and a click there folds or unfolds
+    the group and goes no further (the press is claimed, so the list never
+    sees a row activation). From the title on, the row does what its +
+    button does — starts a session in the project (see the sidebar's
     _on_row_activated) — so a project reads as one wide "new session" target
     with a fold handle at its head, the same way its empty-group NewThreadRow
-    does. Favorites has no folder to start in, so its whole row still folds.
+    does. Favorites has no folder to start in, so its whole row still folds —
+    and the caret hint follows the fold target in both cases. From the
+    keyboard, Left and Right on the focused row fold and unfold.
     """
 
     def __init__(
@@ -286,21 +290,32 @@ class GroupHeaderRow(Gtk.ListBoxRow):
 
         self._hovered = False
         self._collapsed = collapsed
-        # The caret shows over the icon alone — the one place a click folds
-        # the group — not over the whole row, where a click starts a session.
+        # The caret shows wherever a click folds the group: within the fold
+        # zone before the title when the rest of the row starts a session,
+        # over the whole row when all of it folds (Favorites).
         hover = Gtk.EventControllerMotion()
         hover.connect("enter", self._on_hover_enter)
+        hover.connect("motion", self._on_hover_motion)
         hover.connect("leave", self._on_hover_leave)
-        icon.add_controller(hover)
-        if sidebar is not None and self.starts_session:
-            fold = Gtk.GestureClick(button=1)
-            fold.connect("pressed", self._on_icon_pressed, sidebar)
-            icon.add_controller(fold)
+        self.add_controller(hover)
+        if sidebar is not None:
+            if self.starts_session:
+                fold = Gtk.GestureClick(button=1)
+                fold.connect("pressed", self._on_fold_pressed, sidebar)
+                self.add_controller(fold)
+            # The keyboard's fold: Left and Right on the focused row, the
+            # convention tree expanders follow — Enter is taken by the row
+            # activation (start a session), and the fold zone can't take
+            # focus of its own.
+            keys = Gtk.EventControllerKey()
+            keys.connect("key-pressed", self._on_key_pressed, sidebar)
+            self.add_controller(keys)
 
         label = Gtk.Label(label=group_label.upper(), xalign=0.0, hexpand=True, valign=Gtk.Align.CENTER)
         label.add_css_class("caption-heading")
         label.add_css_class("dim-label")
         label.set_ellipsize(_ELLIPSIZE_END)
+        self._label = label
         box.append(label)
 
         count_label = Gtk.Label(label=str(count))
@@ -334,11 +349,15 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         self.set_child(box)
         self.set_collapsed(collapsed)
         if self.starts_session:
-            self.set_tooltip_text(
+            self._session_tooltip = (
                 _("New chat")
                 if group_key == CHATS_GROUP
                 else _("New session in {path}").format(path=_abbreviate_path(cwd))
             )
+            # One row, two tooltips: which one depends on where the pointer
+            # is, so they go through query-tooltip rather than a fixed text.
+            self.set_has_tooltip(True)
+            self.connect("query-tooltip", self._on_query_tooltip)
 
     @property
     def starts_session(self) -> bool:
@@ -353,13 +372,48 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         elif self.cwd:
             self.activate_action("win.new-session-in", GLib.Variant("s", self.cwd))
 
-    def _on_icon_pressed(
-        self, gesture: Gtk.GestureClick, _n: int, _x: float, _y: float, sidebar: SessionSidebar
+    def _in_fold_zone(self, x: float) -> bool:
+        """Whether row-x is in the fold zone: anywhere on the icon's side of
+        the title, edge to edge (in RTL the icon's side is the right one)."""
+        ok_label, label = self._label.compute_bounds(self)
+        ok_icon, icon = self._icon.compute_bounds(self)
+        if not ok_label or not ok_icon:
+            return False
+        if icon.origin.x <= label.origin.x:
+            return x < label.origin.x
+        return x > label.origin.x + label.size.width
+
+    def _on_fold_pressed(
+        self, gesture: Gtk.GestureClick, _n: int, x: float, _y: float, sidebar: SessionSidebar
     ) -> None:
+        if not self._in_fold_zone(x):
+            return  # not ours: the press goes on to activate the row
         # Claimed, so the list's own click gesture (an ancestor's, in the same
         # bubble phase) is denied the sequence and the row is not activated.
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         sidebar.toggle_group(self.group_key)
+
+    def _tooltip_text_at(self, x: float) -> str:
+        if self._in_fold_zone(x):
+            return _("Expand") if self._collapsed else _("Collapse")
+        return self._session_tooltip
+
+    def _on_query_tooltip(self, _w, x: int, _y: int, keyboard: bool, tooltip) -> bool:
+        tooltip.set_text(self._session_tooltip if keyboard else self._tooltip_text_at(x))
+        return True
+
+    def _on_key_pressed(
+        self, _ctrl: Gtk.EventControllerKey, keyval: int, _code: int, state, sidebar: SessionSidebar
+    ) -> bool:
+        if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK):
+            return False
+        if keyval == Gdk.KEY_Left and not self._collapsed:
+            sidebar.toggle_group(self.group_key)
+            return True
+        if keyval == Gdk.KEY_Right and self._collapsed:
+            sidebar.toggle_group(self.group_key)
+            return True
+        return False
 
     def set_collapsed(self, collapsed: bool) -> None:
         self._collapsed = collapsed
@@ -375,8 +429,6 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         self._update_icon()
 
     def _update_icon(self) -> None:
-        if self.starts_session:
-            self._icon.set_tooltip_text(_("Expand") if self._collapsed else _("Collapse"))
         if self._hovered:
             self._icon.set_from_icon_name(
                 "pan-end-symbolic" if self._collapsed else "pan-down-symbolic"
@@ -391,13 +443,20 @@ class GroupHeaderRow(Gtk.ListBoxRow):
             self._icon.set_from_icon_name(self._fallback_icon_name)
             self._icon.add_css_class("dim-label")
 
-    def _on_hover_enter(self, _ctrl: Gtk.EventControllerMotion, _x: float, _y: float) -> None:
-        self._hovered = True
-        self._update_icon()
+    def _set_hovered(self, hovered: bool) -> None:
+        if hovered != self._hovered:
+            self._hovered = hovered
+            self._update_icon()
+
+    def _on_hover_enter(self, _ctrl: Gtk.EventControllerMotion, x: float, _y: float) -> None:
+        self._set_hovered(self._in_fold_zone(x) if self.starts_session else True)
+
+    def _on_hover_motion(self, _ctrl: Gtk.EventControllerMotion, x: float, _y: float) -> None:
+        if self.starts_session:
+            self._set_hovered(self._in_fold_zone(x))
 
     def _on_hover_leave(self, _ctrl: Gtk.EventControllerMotion) -> None:
-        self._hovered = False
-        self._update_icon()
+        self._set_hovered(False)
 
     def _on_drag_prepare(self, _source: Gtk.DragSource, _x: float, _y: float) -> Gdk.ContentProvider:
         value = GObject.Value(GObject.TYPE_STRING, self.group_key[1])
