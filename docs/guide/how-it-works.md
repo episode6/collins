@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-21. Full change history: git log for this file.
+fork. Last modified: 2026-08-24. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -91,9 +91,23 @@ is logged at `WARNING`, which the default level already prints.
 ## Claude usage
 
 The sidebar's usage panel reads the OAuth token the `claude` CLI already
-stores in `~/.claude/.credentials.json` (read-only — Collins never refreshes
-or writes it) and queries Anthropic's usage endpoint every 5 minutes, pausing
+stores in `~/.claude/.credentials.json` (read-only — Collins never writes
+it) and queries Anthropic's usage endpoint every 5 minutes, pausing
 while the window is minimized or the screen is locked.
+
+Refreshing that token is the CLI's job, done at the start of any `claude`
+run — so when Collins finds the CLI installed but the token dead, it runs
+one throwaway headless `claude -p` prompt in the background (in the same
+scratch directory the title runs use, so it never appears as a session),
+then re-asks the usage endpoint and, if a query had already failed, the
+model catalog. That happens at launch, when the stored token is already
+past its expiry, and mid-run, when a usage poll comes back refused — an app
+left running outlives its token, and a token can also be revoked
+server-side while the file still looks fine. Repair attempts are
+single-flight and run at most once an hour, so a login no run can fix
+costs one background subprocess an hour, not one per poll. No credentials
+file at all means not logged in, which no background run can fix; the
+panel just says so.
 
 ## Archiving on claude.ai
 
@@ -148,7 +162,8 @@ never a crash.
 ### Undocumented APIs
 
 Three features call Anthropic directly, on the OAuth token the CLI stores in
-`~/.claude/.credentials.json` (read, never refreshed or written) and the
+`~/.claude/.credentials.json` (read, never written — an expired token is
+refreshed by the CLI itself, via a throwaway headless run at launch) and the
 same beta header the CLI sends:
 
 | Feature | Endpoint | When it breaks |

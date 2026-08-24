@@ -38,6 +38,7 @@ from . import (
     providers,
     remoteimages,
     statusicon,
+    tokenrefresh,
     tooltipmute,
     traymodel,
 )
@@ -2429,7 +2430,23 @@ class App(Adw.Application):
                 self.store,
                 then=lambda: ghwelcome.maybe_show(window, self.state),
             )
+            # With the CLI in place but the login expired, one throwaway
+            # headless run refreshes the token in the background, then the
+            # usage panel and model catalog are re-asked (see tokenrefresh).
+            tokenrefresh.maybe_start(self._on_claude_token_refreshed)
         window.present()
+
+    def _on_claude_token_refreshed(self) -> None:
+        # Worker-thread callback (tokenrefresh.maybe_start); the model
+        # catalog is already retried by the time this fires, so only the
+        # usage panels are left to tell — on the main loop.
+        GLib.idle_add(self._refetch_usage_panels)
+
+    def _refetch_usage_panels(self) -> bool:
+        for window in self.get_windows():
+            if isinstance(window, MainWindow):
+                window.sidebar.usage_panel.refetch()
+        return GLib.SOURCE_REMOVE
 
 
 def main() -> int:
