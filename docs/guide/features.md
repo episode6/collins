@@ -421,7 +421,10 @@ flipped the switch is refused if it calls it anyway.
   terminal is called *Draft* and keeps the agent's mark), and clicking that
   row brings the screen back with the text, the checkbox, and the terminal
   panel as you left them. Send spends the draft; the row's trash button
-  discards it.
+  discards it. While the screen is still open, that same button closes the
+  tab too — it is a close cross until something is written, and turns into
+  the trash can with the pencil, since the click then throws the draft away
+  along with the tab.
 - With *Start new sessions in a git worktree* on, each new session works in
   a fresh worktree of its project, so it won't see uncommitted local
   changes; a launch that can't cut one (a repository with nothing committed

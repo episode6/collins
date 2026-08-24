@@ -522,7 +522,8 @@ class PlaceholderRow(Gtk.ListBoxRow):
     then the draft's first line rather than "New Thread", and `live` says
     whether a tab is open on it right now — a kept draft with no tab reads
     like every row without one (dimmed, no outline), and its trailing
-    button discards the draft instead of closing a tab.
+    button discards the draft instead of closing a tab. With a tab open,
+    the button does both: the screen closes and its draft is forgotten.
 
     The row leads with a mark in the column a SessionRow's agent mark
     takes: `icon_name`, the agent the tab is (or will be) running — the
@@ -583,14 +584,20 @@ class PlaceholderRow(Gtk.ListBoxRow):
 
         # There is no session to archive yet, so the slot the archive button
         # occupies closes the tab instead (through the usual busy-tab
-        # confirmation flow) -- or, for a kept draft with no tab open on it,
-        # discards the draft.
-        if live:
+        # confirmation flow), forgetting the tab's draft with it -- and, for
+        # a kept draft with no tab open on it, discards the draft. The
+        # button says which it is about to lose: the close cross until
+        # something is written, the trash can once the row stands for the
+        # user's writing (the pencil above), since the click then throws
+        # that writing away.
+        if live and not written:
             trailing = Gtk.Button(icon_name="tab-close-symbolic", valign=Gtk.Align.CENTER)
             trailing.set_tooltip_text(_("Close tab"))
         else:
             trailing = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER)
-            trailing.set_tooltip_text(_("Discard draft"))
+            trailing.set_tooltip_text(
+                _("Discard draft and close tab") if live else _("Discard draft")
+            )
         trailing.add_css_class("flat")
         trailing.connect(
             "clicked", lambda *_: sidebar.emit("close-placeholder", placeholder_id)
