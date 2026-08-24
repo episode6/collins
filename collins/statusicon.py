@@ -1023,23 +1023,16 @@ class StatusIcon:
 
         The activation token the host provided ahead of this action goes
         along with it: on_activation_token gets it just before the callback
-        runs and "" as soon as the callback returns. A token is good for the
-        one click it was minted for, so it must not outlive its action — one
-        left over from a cancelled Quit would be spent on some later,
-        unrelated present, where the compositor, finding it expired, would
-        refuse the raise outright.
+        runs and "" as soon as it has run — even by raising (see
+        traymodel.tokened_action). A token is good for the one click it was
+        minted for, so it must not outlive its action — one left over from a
+        cancelled Quit would be spent on some later, unrelated present, where
+        the compositor, finding it expired, would refuse the raise outright.
         """
         token, self._activation_token = self._activation_token, ""
         if callback is None:
             return
-        deliver = self._on_activation_token if token else None
-
-        def run() -> bool:
-            if deliver is not None:
-                deliver(token)
-            callback(*args)
-            if deliver is not None:
-                deliver("")
-            return GLib.SOURCE_REMOVE
-
-        GLib.idle_add(run)
+        run = traymodel.tokened_action(
+            lambda: callback(*args), token, self._on_activation_token
+        )
+        GLib.idle_add(lambda: (run(), GLib.SOURCE_REMOVE)[1])

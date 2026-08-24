@@ -299,3 +299,24 @@ def tray_view(
         working=working,
         unread=unread,
     )
+
+
+def tokened_action(action, token: str, deliver):
+    """Wrap a menu action with the activation token that came with its click.
+
+    `deliver` gets the token just before the action runs and "" as soon as it
+    has run — returned from or raised out of alike — so the token can never
+    outlive the one action it was minted for. With no token, or nobody to
+    deliver it to, the action comes back unwrapped.
+    """
+    if not token or deliver is None:
+        return action
+
+    def run() -> None:
+        deliver(token)
+        try:
+            action()
+        finally:
+            deliver("")
+
+    return run
