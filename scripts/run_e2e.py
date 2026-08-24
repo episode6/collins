@@ -21,7 +21,7 @@ headless compositor wrapper so no window ever appears on screen:
         python3 scripts/run_e2e.py
 
 In CI there is no compositor; Xvfb provides the display instead (see
-.github/workflows/e2e.yml).
+the e2e job in .github/workflows/ci.yml).
 
 Options:
     --only SUBSTR   run only checks whose filename contains SUBSTR

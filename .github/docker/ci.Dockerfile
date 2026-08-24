@@ -3,7 +3,7 @@
 #
 # The CI image: every build/test dependency of the containered CI jobs,
 # prebuilt, so a run pulls one image from GHCR and fetches nothing else. This
-# file is the single canonical list of build dependencies; ci.yml, e2e.yml and
+# file is the single canonical list of build dependencies; ci.yml and
 # release.yml run their containered jobs inside it.
 #
 # Two stages, two tags, one content-addressed hash:

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-23. Full change history: git log for this file.
+# fork. Last modified: 2026-08-24. Full change history: git log for this file.
 
 name: CI
 
@@ -52,6 +52,33 @@ jobs:
       # widget (and a display) fails on a dev machine the same way it would
       # here. Widening that blocklist is a deliberate change.
       - run: python3 -m pytest tests/ -q
+
+  # Unlike the unit-test job (which deliberately stays GTK-free to match
+  # tests/conftest.py's blocklist), the e2e checks drive real widgets: they
+  # need the full gir stack, a display (Xvfb) and a session bus
+  # (dbus-run-session, one per check), all of which the full CI image
+  # (.github/docker/ci.Dockerfile, --target full) carries. This was once
+  # its own workflow (e2e.yml, from when the suite was informational); it
+  # lives here now so a Dockerfile-editing PR builds the image once instead
+  # of racing two identical builds from two workflows.
+  e2e:
+    needs: image
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      # Worst case, every check hangs on both attempts: checks x 2 x 120s
+      # (40 min at 10 checks) plus the image pull. timeout-minutes must
+      # stay comfortably above that — and grow as checks are added — so a
+      # pathological run still writes its step-summary table instead of
+      # being hard-killed by GitHub mid-suite. The whole suite passes in
+      # under two minutes; a check that needs more than 120s is hung.
+      - run: xvfb-run -a -s "-screen 0 1920x1200x24" python3 scripts/run_e2e.py --timeout 120
 
   # The wheel is the whole of `pip install collins` -- no post-install script
   # runs -- so the icons, launcher template and metainfo have to be inside it.

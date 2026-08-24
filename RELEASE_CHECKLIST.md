@@ -63,12 +63,12 @@ list the PRs merged since the last release (`gh pr list --state merged
 
 ## Cut new Release Branch
 
-1. Ensure the `main` branch is green (CI + e2e).
+1. Ensure the `main` branch is green (every CI job, e2e included).
 2. `<VERSION>` = the current `version` in `pyproject.toml` on `main`.
 3. `git checkout -b release/v<VERSION>`
 4. Push/track the empty branch: `git push -u origin release/v<VERSION>`
 
-CI and the e2e gate run on pushes to `release/**`, so the branch stays
+CI (e2e included) runs on pushes to `release/**`, so the branch stays
 verified while it hardens.
 
 ## Version bump PRs
@@ -106,7 +106,7 @@ Create 2 PRs (as drafts, per repo convention):
 
 ## Harden Release Branch
 
-- CI + e2e green on the release branch.
+- CI green (e2e included) on the release branch.
 - Sanity pass on a real install: `./scripts/build_deb.sh`,
   `sudo apt install ./dist/collins_<VERSION>_all.deb`, launch it, open a
   session, then remove/reinstall your dev setup as needed.

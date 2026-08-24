@@ -7,7 +7,7 @@
 # default; most containered jobs) and the noble packaging-only image (the
 # noble PPA source build). A PR that edits the Dockerfile therefore builds and
 # uses its own images; one that leaves it alone finds both tags (~15s of job
-# overhead) and builds nothing. Called from ci.yml and e2e.yml.
+# overhead) and builds nothing. Called from ci.yml and release.yml.
 #
 # Known limitation: on a pull_request from a *fork*, GITHUB_TOKEN is read-only
 # no matter what permissions are requested, so a fork PR that edits the

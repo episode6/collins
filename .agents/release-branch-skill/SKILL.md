@@ -25,7 +25,7 @@ the version agrees; run it after each edit below.
 ## Steps to Execute
 
 ### 1. Pre-check
-- Ensure the `main` branch is passing all CI checks including the e2e gate
+- Ensure the `main` branch is passing all CI checks, the e2e job included
   (is "green").
 - `<VERSION>` = the current `version` in `pyproject.toml` on `main`. This is
   the version being released.
@@ -95,6 +95,6 @@ Create two separate Pull Requests (as drafts, per repo convention).
 
 ## Verification
 - After these steps, the project is ready for the "Harden Release Branch"
-  phase (CI + e2e on the branch, a real `.deb` install sanity pass, license
+  phase (CI green on the branch, a real `.deb` install sanity pass, license
   check), which requires manual verification and cherry-picking of bug fixes
   (via the `cherry-pick-pr` skill). See `RELEASE_CHECKLIST.md`.
