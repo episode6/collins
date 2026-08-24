@@ -356,8 +356,8 @@ def step_switched_back() -> bool:
 def step_tabbed() -> bool:
     page, win = state["page"], state["win"]
     check(
-        "Tab from the scroller lands on a label",
-        isinstance(win.get_focus(), Gtk.Label),
+        "Tab from the scroller lands on the header's title label",
+        win.get_focus() is page._title,
         describe(win.get_focus()),
     )
     check("…without selecting it", not selected_labels(page), selected_labels(page))

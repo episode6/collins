@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-23. Full change history: git log for this file.
+# fork. Last modified: 2026-08-24. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1326,9 +1326,9 @@ def apply_gtk_settings() -> None:
     which is how the PR page's description kept turning up highlighted with
     nobody having selected anything (see prview's `_park_focus` for the
     rebuild half of that). Nothing here wants the old behaviour: the labels
-    that are selectable (PR titles and bodies, a chat bubble) are selectable
-    so a mouse can copy out of them, and a click still selects exactly what
-    was dragged over.
+    that are selectable (the PR page's title and bodies, a chat bubble, the
+    session view's detail body) are selectable so a mouse can copy out of
+    them, and a click still selects exactly what was dragged over.
     """
     Gtk.Settings.get_default().set_property("gtk-label-select-on-focus", False)
 
