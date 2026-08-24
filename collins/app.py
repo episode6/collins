@@ -459,8 +459,8 @@ row.session-child checkbutton {
    line however even the two sides measured. This padding is the gap the
    overhang cannot be, and it is the one value to move to change how far the
    mark stands off the line: image.agent-mark below -- which is what the offer
-   row carries too (see NewThreadRow) -- and the mark-less PlaceholderRow in
-   sidebar.py all align to this column and have to move with it.
+   row (see NewThreadRow) and the PlaceholderRow in sidebar.py carry too --
+   all align to this column and have to move with it.
    A base with no badge over it -- a merged PR's mark, and the agent mark
    below -- is centered inside the slot rather than filling it (see
    prmenu._mark), so it inherits the slot's own 8-and-6 and reads about 2px

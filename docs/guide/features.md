@@ -412,9 +412,11 @@ flipped the switch is refused if it calls it anyway.
 - **Unsent screens are drafts.** As soon as there is text on the screen, or
   a terminal open beside it, it is kept: closing the tab or quitting Collins
   leaves a **Draft** row under the project in the sidebar (named after the
-  prompt's first line, with a pencil mark), and clicking that row brings the
-  screen back with the text, the checkbox, and the terminal panel as you
-  left them. Send spends the draft; the row's trash button discards it.
+  prompt's first line, with a pencil mark; a screen kept only for its
+  terminal is called *Draft* and keeps the agent's mark), and clicking that
+  row brings the screen back with the text, the checkbox, and the terminal
+  panel as you left them. Send spends the draft; the row's trash button
+  discards it.
 - With *Start new sessions in a git worktree* on, each new session works in
   a fresh worktree of its project, so it won't see uncommitted local
   changes; a launch that can't cut one (a repository with nothing committed
