@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-24. Full change history: git log for this file.
+# fork. Last modified: 2026-08-26. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -2055,6 +2055,7 @@ class MainWindow(Adw.ApplicationWindow):
                 worktree=tab.new_chat_worktree_choice(),
                 layout=tab.capture_panel_layout(),
                 created=existing["created"] if existing else time.time(),
+                model=tab.new_chat_model(),
             )
             if record == existing:
                 return
@@ -2067,19 +2068,23 @@ class MainWindow(Adw.ApplicationWindow):
         self._refresh_draft_rows()
 
     def _on_new_chat_send(
-        self, tab: TerminalTab, text: str, worktree: bool, page: Adw.TabPage
+        self, tab: TerminalTab, text: str, worktree: bool, model: str, page: Adw.TabPage
     ) -> None:
         """The screen's Send: settle the launch the way _launch_new_session
         settles a console launch — the worktree flag as the checkbox says
         (never outside a git checkout), trust written where the CLI's
-        worktree flag reads it — then start the session with the prompt.
-        The draft is spent: the text is about to be the session's first
-        turn, and the dock's shells go on under the session id from here."""
+        worktree flag reads it, --model as the picker says ("" passes
+        nothing, and the CLI runs on its configured default) — then start
+        the session with the prompt. The draft is spent: the text is about
+        to be the session's first turn, and the dock's shells go on under
+        the session id from here."""
         cwd = tab.start_cwd or ""
         worktree = bool(worktree) and (Path(cwd) / ".git").exists()
         if worktree:
             trust.trust_launch_dir(cwd)  # see _launch_new_session
-        options = replace(tab.launch_options or SessionOptions(), worktree=worktree)
+        options = replace(
+            tab.launch_options or SessionOptions(), worktree=worktree, model=model or ""
+        )
         self._cancel_new_chat_save(page)
         draft_id = self._placeholder_pages.get(page)
         if newchat.is_draft_id(draft_id):
@@ -2122,7 +2127,11 @@ class MainWindow(Adw.ApplicationWindow):
             )
             self._add_placeholder(page, tab, cwd, draft_id)
             tab.restore_new_chat(
-                draft_id, record["text"], record.get("worktree"), record.get("layout")
+                draft_id,
+                record["text"],
+                record.get("worktree"),
+                record.get("layout"),
+                record.get("model", ""),
             )
 
         self._with_folder_trust(cwd, provider, proceed)

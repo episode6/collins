@@ -4,10 +4,20 @@
 prompt is sent.
 
 The project's icon and name sit centered over the native composer (see
-composer.py) and a checkbox for the worktree launch; nothing is running
-behind it yet. Send hands the text and the checkbox up to the tab, which
-spawns the agent and types the prompt in once the CLI is at its input box
-(TerminalTab.begin_session). The screen owns no launch plumbing and no
+composer.py), with a checkbox for the worktree launch under it; nothing is
+running behind it yet. Send hands the text, the checkbox and the model pick
+up to the tab, which spawns the agent and types the prompt in once the CLI
+is at its input box (TerminalTab.begin_session).
+
+The model picker sits in the composer's own Send row, where the running
+session's switch menu sits, and chooses the ``--model`` that launch passes.
+It opens on
+*Default* — the CLI's own default, named after what the CLI's settings
+resolve it to (claudemodels.cli_default_model), so the screen says what a
+plain launch would run on — and a pick here is for this launch alone: the
+default is left as it was, and the tab is on the CLI's configured model
+with nothing passed. A model chosen in the Advanced dialog seeds the
+picker instead of the default. The screen owns no launch plumbing and no
 persistence — it announces ``send-requested`` and ``changed`` and its host
 (the tab, then the window) decides what those mean, the same division the
 composer itself draws.
@@ -27,6 +37,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, GObject, Gtk, Pango  # noqa: E402
 
+from . import claudemodels, modelmenu  # noqa: E402
 from .chats import is_chat_cwd  # noqa: E402
 from .composer import ComposerView  # noqa: E402
 from .formatting import display_path  # noqa: E402
@@ -54,13 +65,18 @@ class NewChatView(Gtk.Box):
     passed straight through (ComposerView says what each is for).
     *worktree_default* is the project's effective "new sessions use a
     worktree" value, which the checkbox starts on; *is_git* False leaves the
-    checkbox out — the flag has no meaning outside a checkout.
+    checkbox out — the flag has no meaning outside a checkout. *model* is
+    the ``--model`` the tab was opened with (the Advanced dialog's pick, ""
+    for none), which the picker starts on; *pick_model* False leaves the
+    picker out — the provider has no model flag.
     """
 
     __gsignals__ = {
-        # The Send: the prompt, and whether the worktree box is ticked.
-        "send-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, bool)),
-        # The text or the checkbox changed — what the draft's keeper debounces.
+        # The Send: the prompt, whether the worktree box is ticked, and the
+        # model to launch with ("" = the CLI's default, nothing passed).
+        "send-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, str)),
+        # The text, the checkbox or the model changed — what the draft's
+        # keeper debounces.
         "changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
@@ -72,11 +88,15 @@ class NewChatView(Gtk.Box):
         notify: Callable[[str], None],
         worktree_default: bool,
         is_git: bool,
+        model: str = "",
+        pick_model: bool = True,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.add_css_class("new-chat")
         self._cwd = cwd
         self._worktree_touched = False
+        self._model = (model or "").strip()
+        self._pick_model = bool(pick_model)
 
         column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         column.set_valign(Gtk.Align.CENTER)
@@ -112,16 +132,32 @@ class NewChatView(Gtk.Box):
             subtitle.set_max_width_chars(60)
             column.append(subtitle)
 
+        # The picker rides in the composer's Send row, on the button the
+        # running session's switch menu would use — a MenuButton, which
+        # re-measures its popover as the catalog fills in from a worker
+        # thread while the menu is open.
+        popover = (
+            modelmenu.new_launch_model_popover(
+                default_model=lambda: claudemodels.cli_default_model(self._cwd),
+                choice=lambda: self._model,
+                on_pick=self._on_model_picked,
+            )
+            if self._pick_model
+            else None
+        )
         self.composer = ComposerView(
             pick_attach=pick_attach,
             file_reference=file_reference,
             notify=notify,
+            model_popover=popover,
             chrome=False,
+            model_tooltip=_("Model to start this session on"),
         )
         self.composer.add_css_class("new-chat-composer")
         self.composer.set_margin_top(24)
         self.composer.connect("send-requested", self._on_send)
         self.composer.connect("text-changed", lambda *_a: self.emit("changed"))
+        self._name_model()
         column.append(self.composer)
 
         self._worktree = Gtk.CheckButton(label=_("Start in a new git worktree"))
@@ -178,6 +214,21 @@ class NewChatView(Gtk.Box):
         if not toggles:
             self.emit("changed")
 
+    def model(self) -> str:
+        """The model the launch passes as --model: a picked id, or "" for
+        the CLI's default (nothing passed) — also what the draft record
+        keeps. Always "" without a picker."""
+        return self._model if self._pick_model else ""
+
+    def set_model(self, model: str | None) -> None:
+        """Put a kept draft's pick back ("" or None = the default)."""
+        model = (model or "").strip()
+        if model == self._model:
+            return
+        self._model = model
+        self._name_model()
+        self.emit("changed")
+
     # -- behaviour ------------------------------------------------------------
 
     def focus(self) -> None:
@@ -190,12 +241,27 @@ class NewChatView(Gtk.Box):
         self._worktree_touched = True
         self.emit("changed")
 
+    def _on_model_picked(self, model: str) -> None:
+        self.set_model(model)
+
+    def _name_model(self) -> None:
+        """The picker button reads what the launch will run on: the picked
+        model's name, or Default with the CLI's own default in brackets when
+        the settings name one (re-read here, so a screen coming back from a
+        draft shows today's default, not the one it was opened over)."""
+        if self._model:
+            self.composer.set_model_name(modelmenu.model_label(self._model))
+        else:
+            self.composer.set_model_name(
+                modelmenu.default_label(claudemodels.cli_default_model(self._cwd))
+            )
+
     def _on_send(self, _view, text: str) -> None:
         # Nothing but whitespace sends nothing: there is no box to close, so
         # the empty Send simply stays on the screen it was pressed on.
         if not text.strip():
             return
-        self.emit("send-requested", text, self.worktree())
+        self.emit("send-requested", text, self.worktree(), self.model())
 
 
 def is_git_checkout(cwd: str) -> bool:

@@ -6,15 +6,16 @@ rather than the agent's console; the first prompt is written there, and its
 Send is what launches the CLI. Between those two moments the tab is a draft
 (newchat.py): text on the screen, or a terminal opened beside it, is written
 to state.json under a draft id, listed in the sidebar, survives the tab
-closing, and comes back — text, checkbox, dock and all — when the row is
-clicked. Send spends the draft and types the prompt into the CLI once it is
-at its input box.
+closing, and comes back — text, checkbox, model pick, dock and all — when
+the row is clicked. Send spends the draft, launches the CLI with the picked
+model as its --model, and types the prompt in once it is at its input box.
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \
         python3 scripts/check_new_chat.py
 
-`claude` is a stub that draws an idle prompt, logs the first line it is
-sent, writes a transcript so the session resolves, and holds the terminal.
+`claude` is a stub that draws an idle prompt, logs its arguments and the
+first line it is sent, writes a transcript so the session resolves, and
+holds the terminal.
 """
 
 import json
@@ -53,6 +54,10 @@ subprocess.run(["git", "init", "-q", PROJECT], check=True)
 _SHIM = r'''#!/usr/bin/env python3
 import os, re, sys, time, tty, uuid, pathlib
 tty.setraw(0)  # as the CLI does: the submitting Return arrives as a bare \r
+log = os.environ.get("SPAWN_LOG")
+if log:
+    with open(log, "a", encoding="utf-8") as fh:
+        fh.write("<<<ARGV>>>\n" + " ".join(sys.argv[1:]) + "\n<<<END>>>\n")
 sys.stdout.write("❯ ")  # ❯ + no-break space; cursor parks right after
 sys.stdout.flush()
 buf = b""
@@ -62,7 +67,6 @@ while b"\r" not in buf:
         buf += b"<EOF>"
         break
     buf += ch
-log = os.environ.get("SPAWN_LOG")
 if log:
     with open(log, "a", encoding="utf-8") as fh:
         fh.write("<<<PROMPT>>>\n" + buf.decode("utf-8", "replace") + "\n<<<END>>>\n")
@@ -98,6 +102,7 @@ from collins.state import AppState  # noqa: E402
 PASSED = 0
 FAILED = 0
 PROMPT = "first prompt, from the screen"
+MODEL = "sonnet"  # the pick: an alias the CLI's --model takes
 
 
 def check(label: str, ok: bool, detail: object = "") -> None:
@@ -171,6 +176,8 @@ def on_the_screen() -> bool:
     check("the screen's composer holds the keyboard", tab._new_chat.has_focus_within())
     check("a git project offers the worktree box", tab._new_chat._worktree.get_visible())
     check("…following the project's default (off)", tab.new_chat_worktree_choice() is None)
+    check("the model picker is in the composer's send row", tab._new_chat.composer._model_btn is not None)
+    check("…standing on the CLI's default", tab.new_chat_model() == "", tab.new_chat_model())
     check("the screen is an unstarted thread", tab.unstarted_thread())
 
     # Typing makes it a draft; the write is debounced.
@@ -189,6 +196,7 @@ def after_the_write() -> bool:
         check("…with the project directory", record.get("cwd") == PROJECT, record)
         check("…and the text", record.get("text", "").startswith(PROMPT), record)
         check("…and no worktree choice while the box is untouched", "worktree" not in record, record)
+        check("…nor a model while the picker stands on the default", "model" not in record, record)
     row = win.sidebar._placeholder_rows.get(draft_id)
     check(
         "the sidebar row shows the draft's first line",
@@ -197,8 +205,11 @@ def after_the_write() -> bool:
     )
     check("…as a live row (a tab is open on it)", row is not None and row.has_css_class("running"))
 
-    # The worktree box, and a terminal beside the screen, are parts of the draft too.
+    # The worktree box, the model pick, and a terminal beside the screen are
+    # parts of the draft too.
     tab._new_chat._worktree.set_active(True)
+    tab._new_chat.set_model(MODEL)
+    check("a pick names the model on the button", tab._new_chat.composer._model_btn.get_label() != "Model")
     tab.show_panel(focus=False)
     check("a terminal opened beside the screen starts in the project", tab.panel_shells() != [])
     GLib.timeout_add(1500, after_the_panel)
@@ -209,6 +220,7 @@ def after_the_panel() -> bool:
     win, page, draft_id = state["win"], state["page"], state["draft_id"]
     record = saved_drafts().get(draft_id) or {}
     check("the ticked box is kept", record.get("worktree") is True, record)
+    check("the model pick is kept", record.get("model") == MODEL, record)
     layout = record.get("layout")
     check("the dock layout is kept", isinstance(layout, dict) and layout.get("tree"), record)
     check(
@@ -248,6 +260,7 @@ def after_the_reopen() -> bool:
     check("…on the new-chat screen", tab.is_new_chat)
     check("…with the text back", tab.new_chat_text().startswith(PROMPT), tab.new_chat_text())
     check("…the worktree box ticked", tab.new_chat_worktree_choice() is True)
+    check("…the model pick back", tab.new_chat_model() == MODEL, tab.new_chat_model())
     check("…and the terminal beside it again", tab.panel_shells() != [], tab.panel_shells())
 
     # A shell can be told to follow the session into a worktree (the offer's
@@ -270,8 +283,13 @@ def after_the_follow() -> bool:
 
     # Send: the draft is spent, the console appears, the prompt is typed in.
     tab, draft_id = state["tab"], state["draft_id"]
-    tab._new_chat.emit("send-requested", PROMPT, False)
+    tab._new_chat.emit("send-requested", PROMPT, False, MODEL)
     check("Send leaves the screen", not tab.is_new_chat)
+    check(
+        "…launching on the picked model",
+        tab.launch_options is not None and tab.launch_options.model == MODEL,
+        tab.launch_options,
+    )
     check("…for the console", tab._stage.get_visible_child_name() == "terminal")
     check("…and spends the draft", draft_id not in saved_drafts(), list(saved_drafts()))
     check("…and its panel history files", history_files(draft_id) == [], history_files(draft_id))
@@ -286,6 +304,7 @@ def after_the_send() -> bool:
     if os.path.exists(os.environ["SPAWN_LOG"]):
         with open(os.environ["SPAWN_LOG"], encoding="utf-8") as fh:
             log = fh.read()
+    check("the CLI was passed the picked model", f"--model {MODEL}" in log, repr(log[:300]))
     check("the CLI received the prompt", PROMPT in log, repr(log[-300:]))
     check("the tab is a session now", tab.session_id is not None, tab.session_id)
     check("no draft row lingers", draft_id not in win.sidebar._placeholder_rows)

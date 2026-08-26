@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-24. Full change history: git log for this file.
+fork. Last modified: 2026-08-26. Full change history: git log for this file.
 -->
 
 # Features
@@ -410,21 +410,31 @@ flipped the switch is refused if it calls it anyway.
 - **The first prompt is written on a new-chat screen**, not in the agent's
   console: the project's icon and name over the [composer](#prompt-composer),
   with a *Start in a new git worktree* checkbox under it (ticked or not as
-  the project's setting says — see below). Nothing runs until you press
-  Send; then the agent starts with your prompt as its first turn, and the
-  tab is an ordinary session tab from there. `Ctrl+J` opens a terminal
-  beside the screen just as it would beside the console.
+  the project's setting says — see below) and a **model picker** in the
+  composer's Send row, where a running session's model menu sits. The
+  picker opens on *Default* — the CLI's own default, named after
+  what its settings resolve it to (`~/.claude/settings.json`'s `model`,
+  the key `/model` writes, with a project's `.claude/settings.json` or
+  `ANTHROPIC_MODEL` taking precedence the way the CLI has it), or bare
+  when nothing sets one — over the same catalog the session's model menu
+  lists. A pick is for this session alone: it is passed as `--model` on
+  launch and the default is left as it was; *Default* passes nothing, so
+  the session runs on whatever the CLI resolves at that moment. A model
+  chosen in the **Advanced** dialog seeds the picker instead. Nothing runs
+  until you press Send; then the agent starts with your prompt as its
+  first turn, and the tab is an ordinary session tab from there. `Ctrl+J`
+  opens a terminal beside the screen just as it would beside the console.
 - **Unsent screens are drafts.** As soon as there is text on the screen, or
   a terminal open beside it, it is kept: closing the tab or quitting Collins
   leaves a **Draft** row under the project in the sidebar (named after the
   prompt's first line, with a pencil mark; a screen kept only for its
   terminal is called *Draft* and keeps the agent's mark), and clicking that
-  row brings the screen back with the text, the checkbox, and the terminal
-  panel as you left them. Send spends the draft; the row's trash button
-  discards it. While the screen is still open, that same button closes the
-  tab too — it is a close cross until something is written, and turns into
-  the trash can with the pencil, since the click then throws the draft away
-  along with the tab.
+  row brings the screen back with the text, the checkbox, the model pick,
+  and the terminal panel as you left them. Send spends the draft; the row's
+  trash button discards it. While the screen is still open, that same button
+  closes the tab too — it is a close cross until something is written, and
+  turns into the trash can with the pencil, since the click then throws the
+  draft away along with the tab.
 - With *Start new sessions in a git worktree* on, each new session works in
   a fresh worktree of its project, so it won't see uncommitted local
   changes; a launch that can't cut one (a repository with nothing committed

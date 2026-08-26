@@ -33,6 +33,15 @@ weakest tier still offered.
 Reading an id back out is here too: short_name() turns one into the name a
 person would say, for the footer's "which model is this session on?".
 
+The CLI's own default — what a launch with no ``--model`` runs on — is read
+the way the CLI reads it (cli_default_model): the ``ANTHROPIC_MODEL``
+environment variable, else the ``"model"`` key of its settings files, most
+specific first: managed policy, then the project's ``.claude/settings.local.
+json`` and ``.claude/settings.json``, then ``~/.claude/settings.json`` (the
+file ``/model`` writes). None of them set: the CLI falls back to a built-in
+per-plan default it writes nowhere, and the answer is None — "Default", with
+no name to put to it until a session answers.
+
 Kept GTK-free (like projecticons/titles) so the ranking, resolution and
 naming logic is unit-testable headless.
 """
@@ -602,6 +611,67 @@ def resolve_model(setting: str | None, models: list[ClaudeModel], prefer: str = 
     choice when the setting holds one, else the automatic default."""
     setting = (setting or "").strip()
     return setting or default_model(models, prefer)
+
+
+# Where the CLI reads its settings from, and in what order — the more
+# specific file wins, so the first one naming a model is the answer. Managed
+# (policy) settings outrank the user's own; a project's local file outranks
+# its shared one, which outranks the user file. The user file lives under
+# CLAUDE_CONFIG_DIR when that is set, as the CLI's does.
+_MANAGED_SETTINGS = Path("/etc/claude-code/managed-settings.json")
+_MODEL_ENV = "ANTHROPIC_MODEL"
+
+
+def _cli_config_dir() -> Path:
+    configured = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(configured) if configured else Path.home() / ".claude"
+
+
+def _settings_files(cwd: str | None) -> list[Path]:
+    files = [_MANAGED_SETTINGS]
+    if cwd:
+        files += [
+            Path(cwd) / ".claude" / "settings.local.json",
+            Path(cwd) / ".claude" / "settings.json",
+        ]
+    files.append(_cli_config_dir() / "settings.json")
+    return files
+
+
+def _read_settings(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def cli_default_model(cwd: str | None = None) -> str | None:
+    """The model a ``claude`` launched in *cwd* with no ``--model`` runs on,
+    as far as it can be told from outside the CLI (see the module docstring
+    for the chain), or None when nothing sets one and the CLI's own built-in
+    default — unknowable until a session answers — is what applies.
+
+    The value is handed back as written: an alias, a full id, or one with
+    the ``[1m]`` context-window suffix ``/model`` can leave behind; all are
+    things ``--model`` takes, and short_name reads any of them. A settings
+    file's ``env`` block can set ``ANTHROPIC_MODEL`` too, and that counts
+    after every file's own ``model`` key, since the CLI applies those blocks
+    to the environment before it looks."""
+    from_env = (os.environ.get(_MODEL_ENV) or "").strip()
+    if from_env:
+        return from_env
+    settings = [_read_settings(path) for path in _settings_files(cwd)]
+    for data in settings:
+        model = data.get("model")
+        if isinstance(model, str) and model.strip():
+            return model.strip()
+    for data in settings:
+        env = data.get("env")
+        model = env.get(_MODEL_ENV) if isinstance(env, dict) else None
+        if isinstance(model, str) and model.strip():
+            return model.strip()
+    return None
 
 
 def pick_model(setting: str | None, prefer: str = "sonnet") -> str:

@@ -76,3 +76,17 @@ def test_effective_worktree_follows_choice_then_default_never_outside_git():
     assert newchat.effective_worktree(True, False, True)
     assert not newchat.effective_worktree(False, True, True)
     assert not newchat.effective_worktree(True, True, False)
+
+
+def test_draft_record_keeps_a_model_pick_only():
+    record = newchat.draft_record("/p", "claude", "hi", None, None, 1.0, model="")
+    assert "model" not in record  # the default is re-read, not kept
+    record = newchat.draft_record("/p", "claude", "hi", None, None, 1.0, model="claude-opus-5")
+    assert record["model"] == "claude-opus-5"
+    assert newchat.valid_draft(record) == record
+
+
+def test_valid_draft_repairs_the_model_slot():
+    assert "model" not in newchat.valid_draft({"cwd": "/p", "model": 3})
+    assert "model" not in newchat.valid_draft({"cwd": "/p", "model": "  "})
+    assert newchat.valid_draft({"cwd": "/p", "model": " sonnet "})["model"] == "sonnet"

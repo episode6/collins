@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-23. Full change history: git log for this file.
+# fork. Last modified: 2026-08-26. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -1232,11 +1232,12 @@ class TerminalTab(Gtk.Box):
         # first prompt is sent — see begin_session). "new-chat-changed" says
         # the draft's parts moved: text typed, the worktree box toggled, a
         # panel page opened or closed — the window debounces it into a
-        # persisted draft. "new-chat-send" is the screen's Send: the prompt
-        # and whether the worktree box is ticked; the window turns it into
-        # launch options (trust, the flag) and calls begin_session.
+        # persisted draft. "new-chat-send" is the screen's Send: the prompt,
+        # whether the worktree box is ticked, and the model picked ("" for
+        # the CLI's default); the window turns them into launch options
+        # (trust, the flags) and calls begin_session.
         "new-chat-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
-        "new-chat-send": (GObject.SignalFlags.RUN_FIRST, None, (str, bool)),
+        "new-chat-send": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, str)),
         # Emitted (debounced) when the editor panel's divider is moved: the
         # new panel px size, so the window can persist it as the app-wide
         # default. Mirrors panel-size-changed, minus the mode — the editor
@@ -1543,11 +1544,15 @@ class TerminalTab(Gtk.Box):
                 notify=self.feed_message,
                 worktree_default=worktree_default,
                 is_git=bool(cwd) and is_git_checkout(cwd),
+                model=(options.model if options else "") or "",
+                pick_model=bool(self.provider.session_models()),
             )
             self._new_chat.connect("changed", lambda *_a: self.emit("new-chat-changed"))
             self._new_chat.connect(
                 "send-requested",
-                lambda _v, text, worktree: self.emit("new-chat-send", text, worktree),
+                lambda _v, text, worktree, model: self.emit(
+                    "new-chat-send", text, worktree, model
+                ),
             )
             self._stage = Gtk.Stack(vexpand=True, hexpand=True)
             self._stage.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
@@ -1731,6 +1736,11 @@ class TerminalTab(Gtk.Box):
         follows the project's default (see NewChatView.worktree_choice)."""
         return self._new_chat.worktree_choice() if self._new_chat is not None else None
 
+    def new_chat_model(self) -> str:
+        """The screen's model pick, "" while it stands on the CLI's default
+        (see NewChatView.model)."""
+        return self._new_chat.model() if self._new_chat is not None else ""
+
     def new_chat_worthy(self) -> bool:
         """Whether the screen holds anything worth keeping as a draft: text,
         or a panel page open beside it (see newchat.draft_worthy)."""
@@ -1739,17 +1749,23 @@ class TerminalTab(Gtk.Box):
         return newchat.draft_worthy(self._new_chat.text(), bool(self._dock.pages()))
 
     def restore_new_chat(
-        self, draft_id: str, text: str, worktree: bool | None, layout: dict | None
+        self,
+        draft_id: str,
+        text: str,
+        worktree: bool | None,
+        layout: dict | None,
+        model: str = "",
     ) -> None:
-        """Put a kept draft back on the screen: its text, its checkbox, and
-        the dock the way it was left — shells and their scrollback included,
-        which are filed under the draft id until the session starts (see
-        _history_id)."""
+        """Put a kept draft back on the screen: its text, its checkbox, its
+        model pick, and the dock the way it was left — shells and their
+        scrollback included, which are filed under the draft id until the
+        session starts (see _history_id)."""
         if self._new_chat is None:
             return
         self._history_key = draft_id
         self._new_chat.set_text(text)
         self._new_chat.set_worktree_choice(worktree)
+        self._new_chat.set_model(model)
         if layout:
             self.restore_panel_layout(layout)
 

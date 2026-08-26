@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-24. Full change history: git log for this file.
+fork. Last modified: 2026-08-26. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -52,13 +52,19 @@ downloads of each version, see the
   CLI yourself.
 - **New sessions open onto a new-chat screen.** The project's icon and
   name over the composer, with a *Start in a new git worktree* checkbox
-  (seeded from the project's setting); the agent starts when the first
-  prompt is sent, with that prompt as its first turn. `Ctrl+J`'s terminal
+  (seeded from the project's setting) and a model picker in the composer's
+  Send row; the agent starts
+  when the first prompt is sent, with that prompt as its first turn and
+  the picked model as its `--model`. The picker opens on *Default*, named
+  after the CLI's own default as its settings files resolve it (the
+  `model` that `/model` saves to `~/.claude/settings.json`, a project's
+  `.claude/settings.json`, `ANTHROPIC_MODEL`), and a pick is for that
+  session only — the default is left alone. `Ctrl+J`'s terminal
   opens beside the screen as it would beside the console. A screen with
   text on it, or a terminal open beside it, is kept as a **draft**: closing
   the tab or quitting leaves a Draft row under the project in the sidebar,
-  and clicking it brings the screen back — text, checkbox and terminal panel
-  included; the row's trash button discards it, closing the open screen
+  and clicking it brings the screen back — text, checkbox, model pick and
+  terminal panel included; the row's trash button discards it, closing the open screen
   with it. When terminals were open beside a worktree launch, Collins
   offers to `cd` them into the worktree once it exists.
 - **A click on a project header starts a session there.** From the title
