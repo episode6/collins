@@ -4,13 +4,14 @@
 
 A session Collins starts fresh no longer opens straight onto the agent's
 console. It opens onto a *new-chat screen* -- the project's icon and name
-over the native composer, with a checkbox for the worktree launch -- and
-only the first prompt's Send spawns the CLI (see newchatview.NewChatView
-and TerminalTab.begin_session). Until then the tab is a draft: nothing is
-running, so closing it loses nothing *as long as what was written is kept*
--- and it is, here. A draft that holds text, or has a terminal open in its
-dock, is written to state.json under a ``draft-`` id, listed in the
-sidebar under its project, and comes back the same way a session does.
+over the native composer, with a checkbox for the worktree launch and a
+picker for the model -- and only the first prompt's Send spawns the CLI
+(see newchatview.NewChatView and TerminalTab.begin_session). Until then
+the tab is a draft: nothing is running, so closing it loses nothing *as
+long as what was written is kept* -- and it is, here. A draft that holds
+text, or has a terminal open in its dock, is written to state.json under a
+``draft-`` id, listed in the sidebar under its project, and comes back the
+same way a session does.
 
 The rules -- what makes a tab worth keeping, what a record has to look
 like to be trusted back off disk, what a sidebar row calls a draft -- are
@@ -62,12 +63,15 @@ def draft_record(
     worktree: bool | None,
     layout: dict | None,
     created: float,
+    model: str = "",
 ) -> dict:
     """The persisted shape of a draft (see valid_draft for the contract).
 
     *worktree* is the checkbox as the user left it, or None when it was
     never touched -- an untouched box keeps following the project's default,
-    which may change before the draft is picked up again.
+    which may change before the draft is picked up again. *model* is the
+    picker's choice, "" while it stands on the CLI's default -- which,
+    likewise, is read afresh when the draft comes back rather than kept.
     """
     record = {
         "cwd": cwd,
@@ -77,6 +81,8 @@ def draft_record(
     }
     if worktree is not None:
         record["worktree"] = bool(worktree)
+    if model:
+        record["model"] = model
     if layout:
         record["layout"] = layout
     return record
@@ -106,6 +112,9 @@ def valid_draft(record: object) -> dict | None:
     worktree = record.get("worktree")
     if isinstance(worktree, bool):
         clean["worktree"] = worktree
+    model = record.get("model")
+    if isinstance(model, str) and model.strip():
+        clean["model"] = model.strip()
     layout = record.get("layout")
     if isinstance(layout, dict) and layout:
         clean["layout"] = layout

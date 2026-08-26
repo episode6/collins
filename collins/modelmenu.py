@@ -16,6 +16,12 @@ The list arrives asynchronously: the menu pops at once — holding
 whatever the cache already has, or a placeholder on a cold start — and a
 worker thread swaps the live answer in underneath. A Gio.Menu is a live
 model, so an open popover follows the change.
+
+The new-chat screen's picker (new_launch_model_popover) is the same list
+with different semantics: it chooses the ``--model`` a session not yet
+started will launch with, so the mark follows the pick at once, and a
+*Default* row heads the list — the CLI's own default, named when the
+settings say what it is (claudemodels.cli_default_model).
 """
 
 from __future__ import annotations
@@ -110,6 +116,14 @@ def _fill(
     have_current: bool,
 ) -> None:
     menu.remove_all()
+    _append_families(menu, models)
+    if have_current:
+        extra = Gio.Menu()
+        extra.append(_("Copy model id"), f"{_GROUP}.copy-id")
+        menu.append_section(None, extra)
+
+
+def _append_families(menu: Gio.Menu, models: list[claudemodels.ClaudeModel] | None) -> None:
     if not models:
         # An actionless item draws insensitive: a placeholder the worker
         # thread replaces, not a choice.
@@ -127,7 +141,78 @@ def _fill(
             )
             section.append_item(item)
         menu.append_section(None, section)
-    if have_current:
-        extra = Gio.Menu()
-        extra.append(_("Copy model id"), f"{_GROUP}.copy-id")
-        menu.append_section(None, extra)
+
+
+# -- the new-chat screen's launch picker ---------------------------------------
+
+
+def default_label(default_model: str | None) -> str:
+    """What the launch picker calls the CLI's default: named after the model
+    the settings resolve to, or bare when nothing sets one."""
+    name = claudemodels.short_name(default_model or "")
+    return _("Default ({model})").format(model=name) if name else _("Default")
+
+
+def model_label(model_id: str) -> str:
+    """What the launch picker calls a picked model: the catalog's display
+    name when the id is listed, else the short name read off the id."""
+    for model in claudemodels.cached_models() or claudemodels.FALLBACK_MODELS:
+        if model.id == model_id:
+            return model.display_name
+    return claudemodels.short_name(model_id) or model_id
+
+
+def new_launch_model_popover(
+    default_model: Callable[[], str | None],
+    choice: Callable[[], str],
+    on_pick: Callable[[str], None],
+) -> Gtk.PopoverMenu:
+    """A popover choosing the ``--model`` a session not yet started launches
+    with: a *Default* row (the CLI's own default, *default_model* naming it
+    when known — re-read on every show, since ``/model`` in another session
+    can move it) over the catalog. *choice* is the current pick, "" for the
+    default; picking hands the id (or "") to *on_pick* and moves the mark
+    at once — this menu chooses, it doesn't wait on a session to answer.
+    Hand it to a MenuButton, for the same reason new_model_popover asks."""
+    menu = Gio.Menu()
+    popover = Gtk.PopoverMenu.new_from_model(menu)
+    pick = Gio.SimpleAction.new_stateful(
+        "pick", GLib.VariantType.new("s"), GLib.Variant.new_string("")
+    )
+
+    def on_activate(_action, param) -> None:
+        pick.set_state(param)
+        on_pick(param.get_string())
+
+    pick.connect("activate", on_activate)
+    group = Gio.SimpleActionGroup()
+    group.add_action(pick)
+    popover.insert_action_group(_GROUP, group)
+
+    def fill(models: list[claudemodels.ClaudeModel] | None) -> None:
+        menu.remove_all()
+        head = Gio.Menu()
+        item = Gio.MenuItem.new(default_label(default_model()), None)
+        item.set_action_and_target_value(f"{_GROUP}.pick", GLib.Variant.new_string(""))
+        head.append_item(item)
+        menu.append_section(None, head)
+        _append_families(menu, models)
+
+    def refresh(*_a) -> None:
+        pick.set_state(GLib.Variant.new_string(choice()))
+        cached = claudemodels.cached_models()
+        fill(cached)
+
+        def work() -> None:
+            live = claudemodels.available_models() or list(claudemodels.FALLBACK_MODELS)
+            GLib.idle_add(apply_models, live)
+
+        def apply_models(live: list[claudemodels.ClaudeModel]) -> bool:
+            if live != cached:
+                fill(live)
+            return GLib.SOURCE_REMOVE
+
+        threading.Thread(target=work, name="launch-model-menu", daemon=True).start()
+
+    popover.connect("show", refresh)
+    return popover

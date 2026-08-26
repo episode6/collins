@@ -763,3 +763,83 @@ def test_grouped_models_clusters_each_unknown_family_on_its_own():
 
 def test_grouped_models_of_nothing_is_empty():
     assert claudemodels.grouped_models([]) == []
+
+
+# -- the CLI's own default ------------------------------------------------------
+
+
+def _settings_home(monkeypatch, tmp_path, user: dict | None = None):
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
+    settings = home / ".claude" / "settings.json"
+    if user is not None:
+        settings.write_text(json.dumps(user))
+    elif settings.exists():
+        settings.unlink()
+    monkeypatch.setattr(claudemodels.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+    monkeypatch.setattr(claudemodels, "_MANAGED_SETTINGS", tmp_path / "managed.json")
+    return home
+
+
+def test_cli_default_model_reads_the_user_settings(monkeypatch, tmp_path):
+    _settings_home(monkeypatch, tmp_path, {"model": "claude-fable-5[1m]"})
+    assert claudemodels.cli_default_model(str(tmp_path / "proj")) == "claude-fable-5[1m]"
+    assert claudemodels.cli_default_model(None) == "claude-fable-5[1m]"
+
+
+def test_cli_default_model_is_none_when_nothing_sets_one(monkeypatch, tmp_path):
+    _settings_home(monkeypatch, tmp_path, {"theme": "dark", "model": ""})
+    assert claudemodels.cli_default_model(str(tmp_path / "proj")) is None
+    _settings_home(monkeypatch, tmp_path, None)  # no file at all
+    assert claudemodels.cli_default_model(None) is None
+
+
+def test_cli_default_model_prefers_the_more_specific_file(monkeypatch, tmp_path):
+    _settings_home(monkeypatch, tmp_path, {"model": "user"})
+    proj = tmp_path / "proj"
+    (proj / ".claude").mkdir(parents=True)
+    (proj / ".claude" / "settings.json").write_text(json.dumps({"model": "project"}))
+    assert claudemodels.cli_default_model(str(proj)) == "project"
+    (proj / ".claude" / "settings.local.json").write_text(json.dumps({"model": "local"}))
+    assert claudemodels.cli_default_model(str(proj)) == "local"
+    (tmp_path / "managed.json").write_text(json.dumps({"model": "managed"}))
+    assert claudemodels.cli_default_model(str(proj)) == "managed"
+    # Another project sees none of that project's files.
+    assert claudemodels.cli_default_model(str(tmp_path / "other")) == "managed"
+
+
+def test_cli_default_model_env_outranks_every_file(monkeypatch, tmp_path):
+    _settings_home(monkeypatch, tmp_path, {"model": "user"})
+    monkeypatch.setenv("ANTHROPIC_MODEL", "opus")
+    assert claudemodels.cli_default_model(None) == "opus"
+
+
+def test_cli_default_model_reads_a_settings_env_block_last(monkeypatch, tmp_path):
+    _settings_home(monkeypatch, tmp_path, {"env": {"ANTHROPIC_MODEL": "haiku"}})
+    proj = tmp_path / "proj"
+    (proj / ".claude").mkdir(parents=True)
+    assert claudemodels.cli_default_model(str(proj)) == "haiku"
+    # A file's own model key wins over any file's env block.
+    (proj / ".claude" / "settings.json").write_text(json.dumps({"model": "sonnet"}))
+    assert claudemodels.cli_default_model(str(proj)) == "sonnet"
+
+
+def test_cli_default_model_honours_claude_config_dir(monkeypatch, tmp_path):
+    _settings_home(monkeypatch, tmp_path, {"model": "home"})
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    (other / "settings.json").write_text(json.dumps({"model": "elsewhere"}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(other))
+    assert claudemodels.cli_default_model(None) == "elsewhere"
+
+
+def test_cli_default_model_shrugs_off_junk_files(monkeypatch, tmp_path):
+    home = _settings_home(monkeypatch, tmp_path, None)
+    (home / ".claude" / "settings.json").write_text("{not json")
+    assert claudemodels.cli_default_model(None) is None
+    (home / ".claude" / "settings.json").write_text(json.dumps(["a list"]))
+    assert claudemodels.cli_default_model(None) is None
+    (home / ".claude" / "settings.json").write_text(json.dumps({"model": 5, "env": "x"}))
+    assert claudemodels.cli_default_model(None) is None
