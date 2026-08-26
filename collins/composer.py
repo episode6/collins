@@ -73,11 +73,14 @@ class ComposerView(Gtk.Box):
     (it doesn't sit over the terminal once docked), but stays GTK-only with
     no provider knowledge.
 
-    *model_popover* is the model-switch menu (modelmenu, wired by the host
-    to post the switch to the chat), shown on a button in the send row; None
-    — a provider with no mid-session switch — leaves the row without one.
-    The button names the session's current model when the host pushes it
-    (`set_model_name`, off the same transcript read as the footer's label).
+    *model_popover* is the model menu (modelmenu), shown on a button in the
+    send row; None — a provider with no model to choose — leaves the row
+    without one. Over a running session it is the switch menu, wired by the
+    host to post the switch to the chat, and the button names the session's
+    current model when the host pushes it (`set_model_name`, off the same
+    transcript read as the footer's label); on the new-chat screen it is the
+    launch picker, and the label is the pick. *model_tooltip* is the
+    button's tooltip, the switch menu's wording by default.
     """
 
     __gsignals__ = {
@@ -99,6 +102,7 @@ class ComposerView(Gtk.Box):
         notify: Callable[[str], None],
         model_popover: Gtk.Popover | None = None,
         chrome: bool = True,
+        model_tooltip: str | None = None,
     ) -> None:
         """*chrome* is the close and dock/float pair at the row's left — the
         stand-in's controls, for a composer raised over a terminal it can
@@ -222,7 +226,9 @@ class ComposerView(Gtk.Box):
             self._model_btn = Gtk.MenuButton(popover=model_popover)
             self._model_btn.set_always_show_arrow(True)
             self._model_btn.add_css_class("flat")
-            self._model_btn.set_tooltip_text(_("Switch the model for this session"))
+            self._model_btn.set_tooltip_text(
+                model_tooltip or _("Switch the model for this session")
+            )
             row.append(self._model_btn)
             self.set_model_name(None)
         attach = Gtk.Button(

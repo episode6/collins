@@ -410,8 +410,9 @@ flipped the switch is refused if it calls it anyway.
 - **The first prompt is written on a new-chat screen**, not in the agent's
   console: the project's icon and name over the [composer](#prompt-composer),
   with a *Start in a new git worktree* checkbox under it (ticked or not as
-  the project's setting says — see below) and a **model picker** beside
-  that. The picker opens on *Default* — the CLI's own default, named after
+  the project's setting says — see below) and a **model picker** in the
+  composer's Send row, where a running session's model menu sits. The
+  picker opens on *Default* — the CLI's own default, named after
   what its settings resolve it to (`~/.claude/settings.json`'s `model`,
   the key `/model` writes, with a project's `.claude/settings.json` or
   `ANTHROPIC_MODEL` taking precedence the way the CLI has it), or bare
