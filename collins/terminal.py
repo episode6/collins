@@ -3989,20 +3989,25 @@ class TerminalTab(Gtk.Box):
 
     def _verify_paste_back(self, pieces: list[str], index: int) -> bool:
         """Read how a close's paste-back landed, on the cut's own verify
-        schedule: the first read that finds the box (the agent may be
-        mid-redraw at the first beat) settles it. A read that finds nothing
-        to align with — an open's cut has already emptied the box, say —
-        gives up on the pieces: nothing is recorded, and a stand-in seen
-        later reads as somebody else's."""
+        schedule: the first read that finds the box holding the pieces
+        settles it, and a beat that finds no box (the agent mid-redraw) or
+        a box that doesn't align yet (a repaint caught halfway) leaves them
+        pending for the next. Pieces still unsettled after the last beat —
+        an open's cut has emptied the box already, say — are given up on:
+        nothing is recorded, and a stand-in seen later reads as somebody
+        else's."""
         if self._paste_back_pending is not pieces:
             return GLib.SOURCE_REMOVE  # a later close, or an open got there first
         prompt = self.entered_prompt()
-        if prompt is None and index + 1 < len(_CUT_VERIFY_MS):
-            GLib.timeout_add(_CUT_VERIFY_MS[index + 1], self._verify_paste_back, pieces, index + 1)
-            return GLib.SOURCE_REMOVE
         if prompt is not None:
             self._settle_paste_back(prompt.text)
-        self._paste_back_pending = None
+        if self._paste_back_pending is pieces:
+            if index + 1 < len(_CUT_VERIFY_MS):
+                GLib.timeout_add(
+                    _CUT_VERIFY_MS[index + 1], self._verify_paste_back, pieces, index + 1
+                )
+            else:
+                self._paste_back_pending = None
         return GLib.SOURCE_REMOVE
 
     def _settle_paste_back(self, screen: str) -> None:
@@ -4026,7 +4031,9 @@ class TerminalTab(Gtk.Box):
         start over with each one."""
         if self._paste_back_pending is not None:
             self._settle_paste_back(screen)
-        record = self._pasted_back if self._paste_back_agent == self._agent_pid() else {}
+        record = self._pasted_back
+        if record and self._paste_back_agent != self._agent_pid():
+            record = {}  # the /proc walk is only paid while there is a record to scope
         return composerkeys.expand_pasted_back(screen, record)
 
     def _foreign_paste_in_box(self) -> bool:

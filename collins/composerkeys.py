@@ -139,9 +139,10 @@ def restore_text(text: str) -> str:
 # So the text goes back as *pieces*, each its own bracketed paste and each
 # under both limits, all in one write (the CLI reads every bracketed paste as
 # its own event however the bytes arrive, so no timing is involved). The
-# character cap is well under the CLI's, and in code points rather than the
-# UTF-16 units it counts, so a piece of nothing but emoji still clears it.
-_PIECE_CHARS = 400
+# character cap is in code points rather than the UTF-16 units the CLI
+# counts, and set so that a piece of nothing but astral characters (two
+# units each) still sits a fifth under the CLI's limit rather than on it.
+_PIECE_CHARS = 320
 _PIECE_NEWLINES = 2
 # A paste ending in "[I" or "[O" loses those two characters: the CLI trims
 # what it takes for a focus-report tail off every paste it receives.

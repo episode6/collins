@@ -160,22 +160,23 @@ def test_paste_pieces_hold_at_most_two_line_breaks():
 
 def test_paste_pieces_cut_a_long_line():
     pieces = paste_pieces("y" * 1000)
-    assert [len(piece) for piece in pieces] == [400, 400, 200]
-    assert all(len(piece) <= 400 for piece in paste_pieces("z" * 399 + "\n" + "z" * 399))
+    assert [len(piece) for piece in pieces] == [320, 320, 320, 40]
+    assert all(len(piece) <= 320 for piece in paste_pieces("z" * 319 + "\n" + "z" * 319))
 
 
 def test_paste_pieces_count_code_points_not_utf16_units():
-    # 500 astral characters are 1000 UTF-16 units, past the CLI's 800; two
-    # pieces of 400 code points are 800 units each at worst, which is not.
+    # 500 astral characters are 1000 UTF-16 units, past the CLI's 800; a
+    # piece of 320 code points is 640 units at worst, a fifth under it.
     pieces = paste_pieces("🙂" * 500)
-    assert [len(piece) for piece in pieces] == [400, 100]
+    assert [len(piece) for piece in pieces] == [320, 180]
+    assert all(len(piece.encode("utf-16-le")) // 2 <= 640 for piece in pieces)
 
 
 def test_paste_pieces_never_end_on_a_focus_report_tail():
     # The CLI trims a trailing "[I" / "[O" off every paste it receives.
-    tail = "x" * 398 + "[I" + "rest"
+    tail = "x" * 318 + "[I" + "rest"
     pieces = paste_pieces(tail)
-    assert pieces[0] == "x" * 398 + "[" and pieces[1] == "Irest"
+    assert pieces[0] == "x" * 318 + "[" and pieces[1] == "Irest"
     assert paste_pieces("see [O") == ["see [", "O"]
     assert "".join(paste_pieces(tail)) == tail
 
