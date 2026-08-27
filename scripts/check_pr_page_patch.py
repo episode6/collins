@@ -7,8 +7,9 @@ last one did is the same widget afterwards, with its fold, its expanded
 diff, its draft and the keyboard where they were; only what the reply
 changed is built again, in its place; and the scroll stays anchored on
 what was in view. None of that is reachable from pytest (tests/conftest.py
-blocks the GTK stack, and the scroll pin lands from an idle after a real
-layout), so it is checked here against the real page in a real window:
+blocks the GTK stack, and the scroll pin lands in the frame clock's layout
+phase, after a real allocation), so it is checked here against the real
+page in a real window:
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \\
         python3 scripts/check_pr_page_patch.py
