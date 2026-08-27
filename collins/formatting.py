@@ -131,12 +131,25 @@ _ATTR_RE = re.compile(r"""([A-Za-z-]{1,20})\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s'"
 _HTML_SRC_RE = re.compile(r"^https?://[^\s'\"<>]+$")
 
 
-# What a preview's cut must not land inside: an inline code span, a link or
-# image, a bold run, an autolink or a bare URL. Half of any of these renders
-# literal — "[Show" or "https://exa…" — so a cut that would split one moves
-# back to where it starts instead.
+# What a preview's cut must not land inside: every inline run `md_to_pango`
+# renders — code, a link or image, bold, italics, strikethrough, an autolink
+# — plus a bare URL. Half of any of these renders literal ("[Show", a stray
+# `*`, "https://exa…"), so a cut that would split one moves back to where it
+# starts instead. Built from the renderer's own patterns so the two can't
+# drift: a run it renders is a run the cut respects.
 _INLINE_SPAN_RE = re.compile(
-    rf"`[^`\n]+`|!?\[[^\]\n]*\]\({_MD_URL}\)|\*\*[^*\n]+\*\*|<https?://[^>\s]+>|https?://\S+"
+    "|".join(
+        (
+            _INLINE_CODE_RE.pattern,
+            rf"!?\[[^\]\n]*\]\({_MD_URL}\)",
+            _BOLD_RE.pattern,
+            _ITALIC_STAR_RE.pattern,
+            _ITALIC_UNDER_RE.pattern,
+            _STRIKE_RE.pattern,
+            _AUTOLINK_RE.pattern,
+            r"https?://\S+",
+        )
+    )
 )
 
 

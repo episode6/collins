@@ -377,3 +377,15 @@ def test_body_head_never_splits_a_link_or_code_span():
 def test_body_head_with_no_room_on_the_overrunning_line_stops_before_it():
     head, whole = body_head("first line here\nsecond", 15, 8)
     assert (head, whole) == ("first line here", False)
+
+
+def test_body_head_never_splits_italics_or_strikethrough():
+    head, _whole = body_head("this is *very important* stuff", 15, 8)
+    assert head == "this is"
+    head, _whole = body_head("this is _very important_ stuff", 15, 8)
+    assert head == "this is"
+    head, _whole = body_head("this is ~~very important~~ stuff", 15, 8)
+    assert head == "this is"
+    # snake_case is not italics: the cut lands on the space after it.
+    head, _whole = body_head("call some_long_name here", 19, 8)
+    assert head == "call some_long_name"

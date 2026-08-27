@@ -2914,9 +2914,10 @@ def _fill_body(
         if preview and not whole:
             # The backstop for the shape a character budget can't size: the
             # cut paragraph's front wraps to however many lines the panel's
-            # width makes of it. Only on the cut segment — a label that holds all its text must
-            # not ellipsize, or a body that fits the fold in a narrow panel
-            # would hide its tail with no "Show more" to press.
+            # width makes of it. Only on the cut segment — a label that holds
+            # all its text must not ellipsize, or a body that fits the fold
+            # in a narrow panel would hide its tail with no "Show more" to
+            # press.
             label.set_lines(_FOLD_LINES)
             label.set_ellipsize(Pango.EllipsizeMode.END)
         # rstrip: an "…" after a kept blank line would render as its own line.
