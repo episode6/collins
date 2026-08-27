@@ -217,7 +217,9 @@ class ComposerView(Gtk.Box):
         )
         self._dock_btn.set_visible(self._chrome)
         row.append(self._dock_btn)
-        row.append(Gtk.Box(hexpand=True))
+        self._spacer = Gtk.Box(hexpand=True)
+        row.append(self._spacer)
+        self._row = row
         # The model picker sits with the composing half of the row: choosing
         # what answers the prompt is part of writing it. The button wears the
         # session's current model as its label (set_model_name).
@@ -246,6 +248,14 @@ class ComposerView(Gtk.Box):
         self._docked = False
         self.set_docked(False)
         self._setup_drop()
+
+    def add_row_option(self, widget: Gtk.Widget) -> None:
+        """Seat a host's own control in the Send row, at the left of the
+        right-hand cluster (before the model picker): the new-chat screen's
+        worktree checkbox. A setting for the prompt rides with the buttons
+        that send it rather than on a row of its own, so the row stays the
+        one place the launch's choices sit."""
+        self._row.insert_child_after(widget, self._spacer)
 
     # -- text ------------------------------------------------------------------
 
