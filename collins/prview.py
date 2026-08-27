@@ -133,6 +133,7 @@ from .copylabel import (  # noqa: E402
 )
 from .editor import GtkSource, style_scheme  # noqa: E402 — require_version + friendly exit live there
 from .formatting import (  # noqa: E402
+    body_head,
     format_relative,
     format_timestamp,
     md_to_pango,
@@ -2907,13 +2908,13 @@ def _fill_body(
         if spent:
             complete = False
             continue
-        head, whole = _head(segment, chars, lines)
+        head, whole = body_head(segment, chars, lines)
         label = Gtk.Label(xalign=0.0, selectable=True, wrap=True, hexpand=True)
         label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         if preview and not whole:
-            # The backstop for the shape a budget can't catch: one paragraph
-            # longer than the fold, whose head is still a single line here.
-            # Only on the cut segment — a label that holds all its text must
+            # The backstop for the shape a character budget can't size: the
+            # cut paragraph's front wraps to however many lines the panel's
+            # width makes of it. Only on the cut segment — a label that holds all its text must
             # not ellipsize, or a body that fits the fold in a narrow panel
             # would hide its tail with no "Show more" to press.
             label.set_lines(_FOLD_LINES)
@@ -2932,21 +2933,6 @@ def _fill_body(
             lines -= segment.count("\n") + 1
             spent = spent or lines <= 0
     return complete
-
-
-def _head(text: str, chars: int | None, lines: int | None) -> tuple[str, bool]:
-    """The front of *text* that fits the budgets, and whether that is all of
-    it. Whole lines while the budget lasts — a cut mid-line can sever a
-    link's markdown and render it literal — and only a first line over the
-    budget by itself is cut mid-way."""
-    if (chars is None or len(text) <= chars) and (lines is None or text.count("\n") < lines):
-        return text, True
-    head = ""
-    for line in text.split("\n")[:lines]:
-        if head and chars is not None and len(head) + len(line) > chars:
-            break
-        head = f"{head}\n{line}" if head else line[:chars]
-    return head, False
 
 
 def _image_row(row: tuple) -> Gtk.Widget:

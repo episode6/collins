@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-11. Full change history: git log for this file.
+# fork. Last modified: 2026-08-27. Full change history: git log for this file.
 
 """Small human-readable formatting helpers shared across the UI."""
 
@@ -129,6 +129,62 @@ _ATTR_RE = re.compile(r"""([A-Za-z-]{1,20})\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s'"
 # What an `<img src>` must look like to be fetched: markdown's own http(s)
 # rule, restated for a value that arrives quoted rather than parenthesized.
 _HTML_SRC_RE = re.compile(r"^https?://[^\s'\"<>]+$")
+
+
+# What a preview's cut must not land inside: an inline code span, a link or
+# image, a bold run, an autolink or a bare URL. Half of any of these renders
+# literal — "[Show" or "https://exa…" — so a cut that would split one moves
+# back to where it starts instead.
+_INLINE_SPAN_RE = re.compile(
+    rf"`[^`\n]+`|!?\[[^\]\n]*\]\({_MD_URL}\)|\*\*[^*\n]+\*\*|<https?://[^>\s]+>|https?://\S+"
+)
+
+
+def body_head(text: str, chars: int | None, lines: int | None) -> tuple[str, bool]:
+    """The front of *text* that fits the *chars* / *lines* budgets, and
+    whether that is all of it — the preview a folded PR description shows.
+
+    Whole lines while the character budget lasts; the line that would
+    overrun it is cut mid-way to what is left of the budget, at a word
+    boundary and never inside an inline markdown span (`_INLINE_SPAN_RE`),
+    so a preview neither renders half a link literally nor ends on a
+    broken word. That cut happens wherever the overrunning line falls: a
+    body that opens with a heading and then one long paragraph — the
+    ``## Why`` shape most PR descriptions here take — gets the paragraph's
+    front, not a preview that is the heading alone. A budget of None is
+    no budget on that axis.
+    """
+    if (chars is None or len(text) <= chars) and (lines is None or text.count("\n") < lines):
+        return text, True
+    kept: list[str] = []
+    remaining = chars
+    for line in text.split("\n")[:lines]:
+        if remaining is not None and len(line) > remaining:
+            front = _cut_line(line, remaining)
+            if front:
+                kept.append(front)
+            break
+        kept.append(line)
+        if remaining is not None:
+            remaining -= len(line) + 1  # the newline joining it to the next
+    return "\n".join(kept), False
+
+
+def _cut_line(line: str, budget: int) -> str:
+    """The first *budget* characters of *line*, backed off to a word
+    boundary and out of any inline span the cut would have split."""
+    cut = max(budget, 0)
+    if cut < len(line) and not line[cut].isspace():
+        space = max(line.rfind(" ", 0, cut), line.rfind("\t", 0, cut))
+        if space > 0:
+            cut = space
+    for match in _INLINE_SPAN_RE.finditer(line):
+        if match.start() >= cut:
+            break
+        if match.end() > cut:
+            cut = match.start()
+            break
+    return line[:cut].rstrip()
 
 
 def split_body(text: str) -> list[str | tuple[BodyImage, ...]]:
@@ -304,7 +360,7 @@ def display_path(path: str) -> str:
     if path == home:
         return "~"
     if path.startswith(home + "/"):
-        return "~" + path[len(home):]
+        return "~" + path[len(home) :]
     return path
 
 
@@ -328,9 +384,7 @@ def format_timestamp(ts: str | None) -> str:
     if not ts:
         return "—"
     try:
-        return (
-            datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M")
-        )
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M")
     except ValueError:
         return ts
 
@@ -391,10 +445,12 @@ def blast_radius_body(total: int, breakdown: list[tuple[str, int, int]]) -> str:
     at least tapers evenly instead of jumping about.
     """
     lines = [
-        _("{n} session(s) in {p} project(s) have their transcripts moved to "
-          "the trash, where they can be restored. Sessions archived with "
-          "their whole project — and originals a backgrounded fork replaced "
-          "— are included.").format(n=total, p=len(breakdown))
+        _(
+            "{n} session(s) in {p} project(s) have their transcripts moved to "
+            "the trash, where they can be restored. Sessions archived with "
+            "their whole project — and originals a backgrounded fork replaced "
+            "— are included."
+        ).format(n=total, p=len(breakdown))
     ]
     if len(breakdown) <= _BLAST_RADIUS_MAX:
         shown, rest = breakdown, []
@@ -416,7 +472,5 @@ def blast_radius_body(total: int, breakdown: list[tuple[str, int, int]]) -> str:
     emptied = sum(1 for _name, count, project_total in breakdown if count >= project_total)
     if emptied:
         lines.append("")
-        lines.append(
-            _("{p} of these project(s) lose every session they have.").format(p=emptied)
-        )
+        lines.append(_("{p} of these project(s) lose every session they have.").format(p=emptied))
     return "\n".join(lines)
