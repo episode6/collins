@@ -16,6 +16,17 @@ the page comes back into view; the widgets here only ever render what that
 GTK-free layer parsed and bounded. Failures keep the last-loaded content
 under an inline banner — stale beats blank, as everywhere in the PR stack.
 
+A landed fetch patches the page rather than rebuilding it (`_Slots`): every
+card, check row, file section and list row is keyed, and one the new reply
+describes exactly as the last one did stays as the reader left it — the fold
+they opened, the diff they expanded, the scroll they were at, the keyboard
+where it was. Only what the reply changed is built again, and only in its own
+place: a check going green swaps that one row, a new comment lands at the end
+of the timeline, and nothing else on the page so much as flickers. Refreshes
+arrive on their own (the hub's news, a re-map, a finished run), most often
+while the page is being read, and one the reader notices by anything other
+than the news is a refresh that took something from them.
+
 On the switcher's own row, at its end, sits the action that moves the PR
 itself along, as one button: whatever `practions.header_actions` says its
 state offers — "Ready" for a draft, "Auto-Merge" or "Merge" for an open one,
@@ -57,7 +68,7 @@ Conversation timeline by when they started, and again under their file's
 section in the Files view, each with the thread's write half — a reply
 composer behind a revealer, and Resolve/Unresolve. Resolved threads collapse
 behind an expander. Reply drafts live on the page keyed by thread id, so the
-rebuild that lands a background refresh never eats one — the main composer's
+patch that swaps a changed thread's card never eats one — the main composer's
 lesson, thread-sized. `reveal_unresolved` is the unresolved badge's deep
 link: the Conversation view fronted and scrolled to the first unresolved
 thread, deferred until the first fetch when the page is fresh.
@@ -109,6 +120,7 @@ from . import (  # noqa: E402
     bodyimages,
     dialogs,
     practions,
+    prblobs,
     prdetail,
     prfileimages,
     prmenu,
@@ -257,12 +269,20 @@ class PrViewPage(Adw.Bin):
         )
         # The Conversation view's thread cards in timeline order — what the
         # unresolved deep link scans — and the reply drafts, keyed by thread
-        # id so they survive the rebuilds that replace the cards.
-        self._thread_cards: list[tuple[prdetail.PrThread, Gtk.Widget]] = []
+        # id so they survive the patch that swaps a changed thread's card.
+        self._thread_cards: list[tuple[prdetail.PrThread, _ThreadCard]] = []
         # Every live thread card, both views' copies of each — the ones a
         # landed fetch releases (the timeline list above is the Conversation
         # view's alone, and the deep link's business).
         self._cards: list[_ThreadCard] = []
+        # What the header's mark and label pills were last built from: both
+        # are widgets swapped whole, and a sync that says the same thing
+        # leaves them be (see _sync_header).
+        self._marked: PullRequest | None = None
+        self._pills: tuple[str, ...] | None = None
+        # The description's "Show more", while it has one: what a card built
+        # for an edited description opens itself to match (_description_card).
+        self._description_fold: _Fold | None = None
         self._thread_drafts: dict[str, str] = {}
         # Thread ids with a mutation in flight. On the page rather than the
         # card for the same reason the drafts are: a thread renders as twin
@@ -374,9 +394,14 @@ class PrViewPage(Adw.Bin):
         self._scroller = Gtk.ScrolledWindow(child=self._content, vexpand=True)
         self._scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self._scroller.set_focusable(True)
-        # The write half, built once and re-appended across rebuilds: the
-        # rebuild that lands a background refresh must not eat a half-typed
-        # comment (see _Composer).
+        # The column's children, keyed, so a landed fetch patches the ones
+        # that changed and leaves the rest alone (see _Slots).
+        self._content_slots = _BoxSlots(self._content)
+        # The Checks list, one widget for the page's life: it takes each new
+        # rollup row by row rather than being built again (see _ChecksSection).
+        self._checks = _ChecksSection()
+        # The write half, built once and kept across fetches: a landed
+        # background refresh must not eat a half-typed comment (see _Composer).
         self._composer = _Composer(host_factory, self._acted)
 
         # -- files ------------------------------------------------------------
@@ -393,6 +418,7 @@ class PrViewPage(Adw.Bin):
         self._file_list = Gtk.ListBox()
         self._file_list.add_css_class("navigation-sidebar")
         self._file_list.connect("row-activated", self._on_file_row)
+        self._list_slots = _ListSlots(self._file_list)
         list_scroller = Gtk.ScrolledWindow(child=self._file_list, vexpand=True)
         list_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self._files_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -400,6 +426,7 @@ class PrViewPage(Adw.Bin):
         self._files_column.set_margin_bottom(10)
         self._files_column.set_margin_start(10)
         self._files_column.set_margin_end(10)
+        self._files_slots = _BoxSlots(self._files_column)
         self._files_scroller = Gtk.ScrolledWindow(
             child=self._files_column, vexpand=True, hexpand=True
         )
@@ -539,10 +566,11 @@ class PrViewPage(Adw.Bin):
         if inline_images != self._inline_images:
             self._inline_images = inline_images
             # Bodies are built with the setting baked in, so the switch only
-            # means anything once the cards are rebuilt around it.
+            # means anything once the cards are rebuilt around it — all of
+            # them, this once: the reply hasn't changed, the rendering has.
             if self._detail is not None:
-                self._rebuild()
-                self._rebuild_files()
+                self._sync_conversation(reset=True)
+                self._sync_files(reset=True)
 
     def page_state(self) -> dict:
         """This page's slot in a serialized dock layout (see panellayout):
@@ -674,8 +702,8 @@ class PrViewPage(Adw.Bin):
         self._detail = detail
         self._pr = detail.summary
         self._sync_header()
-        self._rebuild()
-        self._rebuild_files()
+        self._sync_conversation()
+        self._sync_files()
         self.emit("title-changed")
         if self._pending_reveal:
             # The deep link arrived before the page had anything to land on.
@@ -691,7 +719,12 @@ class PrViewPage(Adw.Bin):
         # enough of a state for the buttons, so a draft opened from the footer
         # offers "Mark ready for review" while the fetch is still in flight.
         self._actions.sync(pr)
-        self._mark_slot.set_child(prmenu.status_icon(pr))
+        if pr != self._marked:
+            # A widget swapped whole, so only for news: the labels below are
+            # set in place and a same-text set is nothing, but a new mark is
+            # a new mark whatever it shows.
+            self._mark_slot.set_child(prmenu.status_icon(pr))
+            self._marked = pr
         self._number.set_label(f"#{pr.number}")
         title = pr.title or pr.repository or _("Pull request")
         self._title.set_label(title)
@@ -712,6 +745,9 @@ class PrViewPage(Adw.Bin):
                 n=detail.changed_files
             )
         )
+        if detail.labels == self._pills:
+            return
+        self._pills = detail.labels
         child = self._labels.get_first_child()
         while child is not None:
             self._labels.remove(child)
@@ -724,55 +760,51 @@ class PrViewPage(Adw.Bin):
 
     # -- content --------------------------------------------------------------
 
-    def _clear_content(self) -> None:
-        child = self._content.get_first_child()
-        while child is not None:
-            self._content.remove(child)
-            child = self._content.get_first_child()
-
     def _show_loading(self) -> None:
-        self._clear_content()
         spinner = Gtk.Spinner(spinning=True)
         spinner.set_size_request(24, 24)
         spinner.set_halign(Gtk.Align.CENTER)
         spinner.set_margin_top(24)
-        self._content.append(spinner)
+        self._content_slots.clear()
+        self._content_slots.plan([("loading", None, lambda: spinner)]).commit()
 
     def _show_empty(self) -> None:
-        self._clear_content()
         label = Gtk.Label(label=_("Nothing loaded yet."))
         label.add_css_class("dim-label")
         label.set_margin_top(24)
-        self._content.append(label)
+        self._content_slots.clear()
+        self._content_slots.plan([("empty", None, lambda: label)]).commit()
 
-    def _park_focus(self, *boxes: Gtk.Widget) -> Gtk.Widget | str | None:
-        """Get the keyboard out of *boxes* before they are emptied, and say
-        what should have it back once they are refilled (`_restore_focus`).
+    def _park_focus(self, *going: Gtk.Widget) -> Gtk.Widget | str | None:
+        """Get the keyboard out of *going* — widgets a patch is about to
+        remove — before it does, and say what should have it back once the
+        patch has landed (`_restore_focus`).
 
         Unparenting the focused widget doesn't drop the focus: GTK re-places
         it after the next paint, walking up from the removed widget's parent
         — or, for a widget still unparented then, from the top of the window
-        down the focus-child chain to the first thing in the emptied box that
+        down the focus-child chain to the first thing in the column that
         will take it. Here that is the description's first label, and a
         selectable label handed the focus by anything but a click selects
         every character it holds (`gtk-label-select-on-focus`). So a click
         on "Show more", in the description, or on a thread's Reply, followed
-        by any background re-read, painted the whole description selected;
-        and the composer, re-appended rather than replaced, had its parent
-        grabbed instead — the scroller — which threw the cursor out of a
-        half-typed comment. Parking the focus on the view's scroller first
-        (the page's own home for it, see `grab_page_focus`) means nothing
-        focused is ever unparented, so GTK has nothing to re-place.
+        by any background re-read, painted the whole description selected.
+        Parking the focus on the view's scroller first (the page's own home
+        for it, see `grab_page_focus`) means nothing focused is ever
+        unparented, so GTK has nothing to re-place.
 
-        Two things inside the boxes outlive a rebuild and get the keyboard
-        back: the composer, the very widget re-appended (returned as such),
-        and a thread's reply editor, rebuilt with its draft (returned as the
-        thread's id). Anything else was a button or a label that no longer
-        exists, and the scroller is where it ends up.
+        Only what is going is a reason to move: a patch that swaps one card
+        leaves the keyboard alone everywhere else on the page, the composer
+        and every unchanged card included. Two things among the going get
+        the keyboard back: the composer, which only ever goes on a reset and
+        comes straight back as itself (returned as the focused widget), and
+        a thread's reply editor, whose replacement is built with its draft
+        (returned as the thread's id). Anything else was a button or a label
+        that no longer exists, and the scroller is where it ends up.
         """
         root = self.get_root()
         focus = root.get_focus() if root is not None else None
-        if focus is None or not any(focus.is_ancestor(box) for box in boxes):
+        if focus is None or not any(focus is w or focus.is_ancestor(w) for w in going):
             return None
         kept: Gtk.Widget | str | None = None
         if focus.is_ancestor(self._composer):
@@ -788,7 +820,7 @@ class PrViewPage(Adw.Bin):
 
     @staticmethod
     def _restore_focus(kept: Gtk.Widget | str | None, cards: list[_ThreadCard]) -> None:
-        """Hand the keyboard back after a rebuild: to the widget `_park_focus`
+        """Hand the keyboard back after a patch: to the widget `_park_focus`
         named, or to the reply editor of whichever of *cards* now stands for
         the thread it named. A card whose editor didn't come back open (no
         draft was typed) leaves the focus where it was parked."""
@@ -800,40 +832,56 @@ class PrViewPage(Adw.Bin):
         elif kept is not None:
             kept.grab_focus()
 
-    def _rebuild(self) -> None:
+    def _sync_conversation(self, reset: bool = False) -> None:
+        """Bring the Conversation column up to `_detail`, touching only what
+        changed (see `_Slots`). *reset* throws every card away first — for
+        a setting that changes how an unchanged reply renders."""
         detail = self._detail
-        kept = self._park_focus(self._content)
-        self._clear_content()
-        self._thread_cards = []
-        # Cleared here rather than in _rebuild_files: the two always run as a
-        # pair, this one first, and the files view's twins join the same list.
-        self._cards = []
+        kept: Gtk.Widget | str | None = None
+        if reset:
+            # Everything goes, so the keyboard leaves first — the same step
+            # a patch takes for the few things it drops.
+            kept = self._park_focus(*self._content_slots.widgets)
+            self._content_slots.clear()
         # Drafts for threads that no longer exist have nowhere to go back to.
         alive = {thread.id for thread in detail.threads}
         for gone in [key for key in self._thread_drafts if key not in alive]:
             del self._thread_drafts[gone]
-        self._content.append(self._description_card(detail))
+        plans: list[_Plan] = []
+        items: list[tuple[object, object, Callable[[], Gtk.Widget]]] = [
+            (
+                "description",
+                (detail.author, detail.created_at, detail.body),
+                lambda: self._description_card(detail),
+            )
+        ]
         if detail.checks:
-            self._content.append(self._checks_section(detail.checks))
+            items.append(("checks", None, lambda: self._checks))
+            plans.extend(self._checks.plan(detail.checks, self._repair_action(), self._repair_button))
+        threads: list[tuple[prdetail.PrThread, int]] = []
         if detail.timeline:
-            heading = Gtk.Label(label=_("Conversation"), xalign=0.0)
-            heading.add_css_class("caption-heading")
-            self._content.append(heading)
+            items.append(("heading", None, lambda: _heading(_("Conversation"))))
             for entry in detail.timeline:
                 if isinstance(entry, prdetail.PrThread):
-                    card = self._thread_card(entry)
-                    self._thread_cards.append((entry, card))
-                    self._content.append(card)
+                    threads.append((entry, len(items)))
+                    items.append((("thread", entry.id), entry, lambda e=entry: self._thread_card(e)))
                 elif isinstance(entry, prdetail.PrReview):
-                    self._content.append(self._review_card(entry))
+                    key = ("review", entry.author, entry.created_at)
+                    items.append((key, entry, lambda e=entry: self._review_card(e)))
                 else:
-                    self._content.append(self._comment_card(entry))
+                    key = ("comment", entry.url or (entry.author, entry.created_at))
+                    items.append((key, entry, lambda e=entry: self._comment_card(e)))
         else:
-            empty = Gtk.Label(label=_("No comments yet."), xalign=0.0)
-            empty.add_css_class("dim-label")
-            self._content.append(empty)
+            items.append(("empty", None, lambda: _dim(_("No comments yet."))))
+        items.append(("composer", None, lambda: self._composer))
+        plan = self._content_slots.plan(items)
+        plans.append(plan)
+        kept = self._park_focus(*(w for p in plans for w in p.dropped)) or kept
+        self._pin(self._scroller, plan.kept)
+        for each in plans:
+            each.commit()
+        self._thread_cards = [(thread, plan.widgets[index]) for thread, index in threads]
         self._composer.sync(self._pr, detail.viewer_is_author)
-        self._content.append(self._composer)
         self._restore_focus(kept, [card for _thread, card in self._thread_cards])
 
     def _acted(self) -> None:
@@ -846,80 +894,45 @@ class PrViewPage(Adw.Bin):
         self.refresh()
 
     def _description_card(self, detail: prdetail.PullRequestDetail) -> Gtk.Widget:
+        """The description as a card — folded, and open if the one this
+        replaces was: an edit to the description is news, the reader
+        having unfolded it isn't."""
+        previous = self._description_fold
+        self._description_fold = None
         card = _card(detail.author, detail.created_at)
         if detail.body:
-            card.append(_folded_body(detail.body, self._inline_images))
+            body = _folded_body(detail.body, self._inline_images)
+            if isinstance(body, _Fold):
+                self._description_fold = body
+                if previous is not None:
+                    body.set_expanded(previous.expanded)
+            card.append(body)
         else:
             none = Gtk.Label(label=_("No description provided."), xalign=0.0)
             none.add_css_class("dim-label")
             card.append(none)
         return card
 
-    def _checks_section(self, checks) -> Gtk.Widget:
-        """The rollup as a list, folded past _CHECK_ROWS_SHOWN rows.
-
-        A repository can put fifty contexts on one pull request, and fifty
-        rows here would push the description off the top of the panel and the
-        conversation off the bottom — this section says how the checks stand,
-        it isn't where they are all read. Past the cap the rest waits behind
-        "Show more" (`_fold`, the same step the description takes) and the
-        heading starts carrying the count, since a list cut short with
-        nothing saying so reads as a list that short.
-
-        A folded list also reorders, blockers first (`prdetail.by_urgency`):
-        the rows that get folded away should be the ones with nothing to say,
-        not the two failures that happened to be numbered eleven and nineteen.
-        An unfolded one keeps gh's own order — every row is on screen, so
-        there is nothing for a reshuffle to rescue.
-
-        The heading and the repair button stay outside the fold: what is
-        offered about the checks must not hide with them.
-        """
-        section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        folded = len(checks) > _CHECK_ROWS_SHOWN
-        heading = Gtk.Label(
-            label=_("Checks ({n})").format(n=len(checks)) if folded else _("Checks"),
-            xalign=0.0,
-        )
-        heading.add_css_class("caption-heading")
-        heading.set_margin_bottom(2)
-        section.append(heading)
-        ordered = prdetail.by_urgency(checks) if folded else checks
-        shown = self._check_rows(ordered[:_CHECK_ROWS_SHOWN])
-        # The full list is built afresh rather than growing the preview: a
-        # widget has one parent, and the fold swaps whole boxes.
-        section.append(_fold(shown, self._check_rows(ordered)) if folded else shown)
-        repair = self._repair_button()
-        if repair is not None:
-            section.append(repair)
-        return section
-
-    def _check_rows(self, checks) -> Gtk.Box:
-        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=_CHECK_ROW_GAP)
-        for check in checks:
-            rows.append(self._check_row(check))
-        return rows
-
-    def _repair_button(self) -> Gtk.Widget | None:
+    def _repair_action(self) -> practions.Action | None:
         """The offer to make the agent clear whatever is blocking the merge —
-        or None where nothing is.
+        or None where nothing is. Under the Checks list rather than beside
+        the row it is about: a PR can fail several checks and conflict as
+        well, and one button asking for all of it in the right order
+        (practions.repair_action) is the offer, not one per red row."""
+        return practions.repair_action(self._pr, self._host_factory().prompt_block())
 
-        Under the list rather than beside the row it is about: a PR can fail
-        several checks and conflict as well, and one button asking for all of
-        it in the right order (practions.repair_action) is the offer, not one
-        per red row. It says the action's `short` wording, with the prompt it
-        would send in full on its tooltip, and wears Claude's mark like the
-        composer's own agent button — this is the session's work, not gh's.
+    def _repair_button(self, action: practions.Action) -> Gtk.Widget:
+        """*action* (see `_repair_action`) as the Checks list's button.
+
+        It says the action's `short` wording, with the prompt it would send
+        in full on its tooltip, and wears Claude's mark like the composer's
+        own agent button — this is the session's work, not gh's.
 
         Greyed with the reason when the session can't be typed into just now,
         the blocked action rows' treatment: the tooltip goes on a sensitive
         wrapper, since GTK skips insensitive widgets when it picks what the
         pointer is over.
         """
-        pr = self._pr
-        action = practions.repair_action(pr, self._host_factory().prompt_block())
-        if action is None:
-            return None
         content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         content.append(Gtk.Image.new_from_icon_name("agent-claude-symbolic"))
         content.append(Gtk.Label(label=action.short or action.label))
@@ -942,7 +955,8 @@ class PrViewPage(Adw.Bin):
             return
         host.send_prompt(prompt)
 
-    def _check_row(self, check: prdetail.PrCheck) -> Gtk.Widget:
+    @staticmethod
+    def _check_row(check: prdetail.PrCheck) -> Gtk.Widget:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         row.append(prmenu.check_image(check.state))
         name = Gtk.Label(label=check.name, xalign=0.0, hexpand=True)
@@ -987,7 +1001,7 @@ class PrViewPage(Adw.Bin):
         shows in both — so the shared draft dict is what keeps the copies
         agreeing on a half-typed reply, and the shared busy set what keeps
         them from mutating the same thread twice."""
-        card = _ThreadCard(
+        return _ThreadCard(
             thread,
             self._pr,
             self._thread_drafts,
@@ -995,65 +1009,85 @@ class PrViewPage(Adw.Bin):
             self._acted,
             self._inline_images,
         )
-        # Every card built for this page, both views' copies: a mutation holds
-        # its card until the re-read it asked for lands, and the page is what
-        # tells them it did (see `_landed`).
-        self._cards.append(card)
-        return card
 
     # -- the files view --------------------------------------------------------
 
-    def _clear_files(self) -> None:
-        self._sections = []
-        child = self._files_column.get_first_child()
-        while child is not None:
-            self._files_column.remove(child)
-            child = self._files_column.get_first_child()
-        row = self._file_list.get_row_at_index(0)
-        while row is not None:
-            self._file_list.remove(row)
-            row = self._file_list.get_row_at_index(0)
-
     def _files_placeholder(self, text: str) -> None:
-        self._clear_files()
-        label = Gtk.Label(label=text)
-        label.add_css_class("dim-label")
-        label.set_margin_top(24)
-        self._files_column.append(label)
+        self._sections = []
+        self._list_slots.clear()
+        self._files_slots.clear()
+        self._files_slots.plan([("placeholder", text, lambda: _placeholder(text))]).commit()
 
     def _files_loading(self) -> None:
         """The Conversation column's first-load spinner, Files flavored —
         so a slow first fetch doesn't leave this tab looking idle."""
-        self._clear_files()
         spinner = Gtk.Spinner(spinning=True)
         spinner.set_size_request(24, 24)
         spinner.set_halign(Gtk.Align.CENTER)
         spinner.set_margin_top(24)
-        self._files_column.append(spinner)
+        self._sections = []
+        self._list_slots.clear()
+        self._files_slots.clear()
+        self._files_slots.plan([("loading", None, lambda: spinner)]).commit()
 
-    def _rebuild_files(self) -> None:
+    def _sync_files(self, reset: bool = False) -> None:
+        """Bring the Files view up to `_detail`: the sections, the threads
+        hanging under each, and the navigation list, each patched in place
+        (see `_Slots`). A section stays — built buffer, expanded or not, its
+        pictures fetched — for as long as its file's stanza reads the same;
+        the threads under it are patched on their own, so a reply landing on
+        a file leaves that file's diff exactly where it was.
+
+        Runs after `_sync_conversation`, always: the page's list of every
+        live thread card, both views' copies, is gathered here from both.
+        """
         detail = self._detail
-        # The list's rows take focus too (a click on one), and go the same way.
-        kept = self._park_focus(self._files_column, self._file_list)
-        self._clear_files()
-        if not detail.files:
-            self._files_placeholder(_("No changed files."))
-            return
+        kept: Gtk.Widget | str | None = None
+        if reset:
+            kept = self._park_focus(*self._files_slots.widgets, *self._list_slots.widgets)
+            self._list_slots.clear()
+            self._files_slots.clear()
         scheme = style_scheme(self._scheme_setting, self._dark)
+        sections = []
+        rows = []
         for file in detail.files:
-            section = _FileSection(file, scheme, detail, self._inline_images)
+            # An image's pictures are fetched by commit, so a new push is
+            # news for its section where a text file's own stanza says it all.
+            value = (file, detail.base_oid, detail.head_oid, detail.head_repository)
+            if not prblobs.is_image(file.path):
+                value = (file,)
+            sections.append(
+                (
+                    file.path,
+                    value,
+                    lambda f=file: _FileSection(f, scheme, detail, self._inline_images),
+                )
+            )
+            rows.append((file.path, (file.additions, file.deletions), lambda f=file: self._file_row(f)))
+        if not sections:
+            sections.append(("placeholder", None, lambda: _placeholder(_("No changed files."))))
+        plan = self._files_slots.plan(sections)
+        plans = [plan, self._list_slots.plan(rows)]
+        self._sections = [w for w in plan.widgets if isinstance(w, _FileSection)]
+        for section in self._sections:
             # The file's threads hang under its diff, top of the file first —
             # visible even while a large patch stays collapsed.
-            for thread in prdetail.file_threads(detail.threads, file.path):
-                section.append(self._thread_card(thread))
-            self._sections.append(section)
-            self._files_column.append(section)
-            self._file_list.append(self._file_row(file))
-        self._restore_focus(
-            kept, [card for card in self._cards if card.is_ancestor(self._files_column)]
-        )
+            threads = prdetail.file_threads(detail.threads, section.path)
+            plans.append(section.plan_threads(threads, self._thread_card))
+        # The list's rows take focus too (a click on one), and go the same way.
+        kept = self._park_focus(*(w for p in plans for w in p.dropped)) or kept
+        self._pin(self._files_scroller, plan.kept)
+        for each in plans:
+            each.commit()
+        # Every card built for this page, both views' copies: a mutation holds
+        # its card until the re-read it asked for lands, and the page is what
+        # tells them it did (see `_landed`).
+        self._cards = [card for _thread, card in self._thread_cards]
+        for section in self._sections:
+            self._cards.extend(section.thread_cards)
+        self._restore_focus(kept, [c for c in self._cards if c.is_ancestor(self._files_column)])
 
-    def _file_row(self, file: prdetail.PrFile) -> Gtk.Widget:
+    def _file_row(self, file: prdetail.PrFile) -> Gtk.ListBoxRow:
         """One navigation-list row: the path, then its +/− counts."""
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         path = Gtk.Label(label=file.path, xalign=0.0, hexpand=True)
@@ -1063,7 +1097,7 @@ class PrViewPage(Adw.Bin):
         row.append(path)
         row.append(_count_label(f"+{file.additions}", "pr-checks-passed"))
         row.append(_count_label(f"−{file.deletions}", "pr-checks-failed"))
-        return row
+        return Gtk.ListBoxRow(child=row)
 
     def _on_file_row(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         index = row.get_index()
@@ -1076,6 +1110,62 @@ class PrViewPage(Adw.Bin):
     def _scroll_to_section(self, section: Gtk.Widget) -> None:
         """Put *section*'s top at the top of the Files scroll."""
         self._scroll_to(self._files_scroller, section)
+
+    @staticmethod
+    def _pin(scroller: Gtk.ScrolledWindow, kept: list[Gtk.Widget]) -> None:
+        """Keep what the reader is looking at where it is across a patch.
+
+        Called before the patch commits, with the column's children that
+        survive it. The anchor is the first of them that reaches into the
+        viewport — kept, so it will still be there after — and what is
+        remembered is where its top sits against the viewport's. Once the
+        patch has been laid out, the scroll is re-placed so the anchor is
+        back at that offset, and a description above the viewport that came
+        out of its rebuild taller shifts nothing the reader can see. With no
+        kept child in view (the first fetch, a reset) the value itself is
+        kept, clamped to whatever the column now allows.
+
+        "Once laid out" is the frame clock's layout phase, joined after
+        GDK's own handler (the one that allocates the window's tree): the new
+        children's allocation is a frame away, so a value set now is set
+        against the old one, and an idle is no better — the clock ticks on a
+        timer, and an idle runs before it. Moving the adjustment from inside
+        the phase asks for another pass, which the clock runs in the same
+        frame: the reader never sees the unpinned one. An unrealized page
+        has no clock and nothing on screen to keep still; an idle does there.
+        """
+        adj = scroller.get_vadjustment()
+        value = adj.get_value()
+        anchor: Gtk.Widget | None = None
+        offset = 0.0
+        for widget in kept:
+            ok, bounds = widget.compute_bounds(scroller)
+            if ok and bounds.get_y() + bounds.get_height() > 0:
+                anchor, offset = widget, bounds.get_y()
+                break
+
+        def place() -> None:
+            target = value
+            if anchor is not None and anchor.get_parent() is not None:
+                ok, bounds = anchor.compute_bounds(scroller)
+                if ok:
+                    target = adj.get_value() + bounds.get_y() - offset
+            adj.set_value(max(0.0, min(target, adj.get_upper() - adj.get_page_size())))
+
+        clock = scroller.get_frame_clock()
+        if clock is None:
+            GLib.idle_add(lambda: (place(), GLib.SOURCE_REMOVE)[1])
+            return
+        handler: list[int] = []
+
+        def on_layout(clock: Gdk.FrameClock) -> None:
+            clock.disconnect(handler[0])
+            place()
+
+        handler.append(clock.connect_after("layout", on_layout))
+        # A patch that changed nothing queues no layout of its own; the
+        # phase is asked for so the handler runs (and lets go) regardless.
+        clock.request_phase(Gdk.FrameClockPhase.LAYOUT)
 
     def _scroll_to(self, scroller: Gtk.ScrolledWindow, widget: Gtk.Widget | None) -> None:
         """Put *widget*'s top at the top of *scroller* — or, with None, land
@@ -1138,6 +1228,277 @@ class PrViewPage(Adw.Bin):
         if url != self.pr_url or self._fetching or not self.get_mapped():
             return
         self._fetch(force=True)
+
+
+class _Plan:
+    """What one `_Slots.plan` worked out, held back until `commit`.
+
+    Between the two the page gets the keyboard out of `dropped` — the
+    widgets on their way out — since GTK re-places a focus it finds
+    unparented somewhere the page didn't choose (see `_park_focus`). The
+    building has already happened by then: `widgets` is the container's
+    children as they will stand, in order, new and kept alike.
+    """
+
+    def __init__(
+        self,
+        slots: _Slots,
+        entries: list[tuple[object, object, Gtk.Widget]],
+        dropped: list[Gtk.Widget],
+        built: list[Gtk.Widget],
+    ) -> None:
+        self._slots = slots
+        self._entries = entries
+        self.dropped = dropped
+        self._built = built
+
+    @property
+    def widgets(self) -> list[Gtk.Widget]:
+        return [widget for _key, _value, widget in self._entries]
+
+    @property
+    def kept(self) -> list[Gtk.Widget]:
+        """The children that survive the patch, in order — what a scroll
+        can be anchored on (see the page's `_pin`)."""
+        return [widget for widget in self.widgets if widget not in self._built]
+
+    def commit(self) -> list[Gtk.Widget]:
+        """Make the container match: remove the dropped, insert the built
+        where they go, move whatever kept its widget but not its place —
+        and nothing else. Returns `widgets`."""
+        slots = self._slots
+        going = set(self.dropped)
+        for widget in self.dropped:
+            slots._remove(widget)
+        # The container's children as they stand now, in order — the last
+        # commit's, less the dropped — kept in step with every move below so
+        # "is this one already where it goes" is a plain index check.
+        current = [w for _k, _v, w in slots._entries if w not in going]
+        previous: Gtk.Widget | None = None
+        for index, (_key, _value, widget) in enumerate(self._entries):
+            if widget in self._built:
+                slots._insert(widget, previous)
+                current.insert(index, widget)
+            elif current[index] is not widget:
+                slots._move(widget, previous)
+                current.remove(widget)
+                current.insert(index, widget)
+            previous = widget
+        slots._entries = self._entries
+        return self.widgets
+
+
+class _Slots:
+    """The keyed children of one container, patched rather than rebuilt.
+
+    A landed fetch used to empty both views and build every card, section
+    and row again from the new reply — which threw away every fold the
+    reader had opened, every diff they had expanded, the scroll they were at
+    and the keyboard wherever it was, for a reply that nine times in ten
+    said what the last one said. This keeps the children that still stand
+    for what the reply says and touches only the rest: `plan` takes what the
+    container should hold, as (key, value, build) triples in order, and
+    works out the fewest changes that make it so — a child whose key is back
+    with an equal value stays exactly as it is, one whose value moved is
+    built again in that place, and the rest are inserted, reordered, or
+    removed around them. The values are prdetail's frozen records (or None,
+    for a child that is only ever itself: the composer), so "equal" is
+    "says the same thing"; a key that repeats is told apart by its turn.
+
+    The containers the page patches speak different dialects — a Box
+    inserts after a sibling and can reorder, a ListBox inserts at an index
+    and wraps what it is given in a row — so each has a subclass answering
+    the three moves, and `plan` and `clear` are the whole of what the page
+    says to either.
+    """
+
+    def __init__(self) -> None:
+        self._entries: list[tuple[object, object, Gtk.Widget]] = []
+
+    @property
+    def widgets(self) -> list[Gtk.Widget]:
+        return [widget for _key, _value, widget in self._entries]
+
+    def plan(self, items: list[tuple[object, object, Callable[[], Gtk.Widget]]]) -> _Plan:
+        """Work out (and build) what it takes to hold *items* — see `_Plan`."""
+        old = {key: (value, widget) for key, value, widget in self._entries}
+        seen: dict[object, int] = {}
+        entries: list[tuple[object, object, Gtk.Widget]] = []
+        dropped: list[Gtk.Widget] = []
+        built: list[Gtk.Widget] = []
+        for key, value, build in items:
+            turn = seen.get(key, 0)
+            seen[key] = turn + 1
+            if turn:
+                key = (key, turn)  # a repeated key: its nth showing
+            previous = old.pop(key, None)
+            if previous is not None and previous[0] == value:
+                widget = previous[1]
+            else:
+                if previous is not None:
+                    dropped.append(previous[1])
+                widget = build()
+                built.append(widget)
+            entries.append((key, value, widget))
+        dropped.extend(widget for _value, widget in old.values())
+        return _Plan(self, entries, dropped, built)
+
+    def clear(self) -> None:
+        """Let go of everything — for a state that isn't a patch of the last
+        one: the loading spinner, or a setting that changes how an unchanged
+        reply renders."""
+        for widget in self.widgets:
+            self._remove(widget)
+        self._entries = []
+
+    def _insert(self, widget: Gtk.Widget, after: Gtk.Widget | None) -> None:
+        raise NotImplementedError
+
+    def _move(self, widget: Gtk.Widget, after: Gtk.Widget | None) -> None:
+        raise NotImplementedError
+
+    def _remove(self, widget: Gtk.Widget) -> None:
+        raise NotImplementedError
+
+
+class _BoxSlots(_Slots):
+    """`_Slots` over a Gtk.Box. With an *anchor*, the box's children up to
+    and including it are the caller's own and stay put; the slots are
+    everything after (a file section's header, then its threads)."""
+
+    def __init__(self, box: Gtk.Box, anchor: Gtk.Widget | None = None) -> None:
+        super().__init__()
+        self._box = box
+        self._anchor = anchor
+
+    def _insert(self, widget: Gtk.Widget, after: Gtk.Widget | None) -> None:
+        self._box.insert_child_after(widget, after or self._anchor)
+
+    def _move(self, widget: Gtk.Widget, after: Gtk.Widget | None) -> None:
+        self._box.reorder_child_after(widget, after or self._anchor)
+
+    def _remove(self, widget: Gtk.Widget) -> None:
+        self._box.remove(widget)
+
+
+class _ListSlots(_Slots):
+    """`_Slots` over a Gtk.ListBox, whose children are rows: what `build`
+    hands it must be a Gtk.ListBoxRow (the list would wrap anything else in
+    one of its own, and the row is what it would then hand back)."""
+
+    def __init__(self, list_box: Gtk.ListBox) -> None:
+        super().__init__()
+        self._list = list_box
+
+    def _insert(self, widget: Gtk.Widget, after: Gtk.Widget | None) -> None:
+        self._list.insert(widget, 0 if after is None else after.get_index() + 1)
+
+    def _move(self, widget: Gtk.Widget, after: Gtk.Widget | None) -> None:
+        self._list.remove(widget)
+        self._insert(widget, after)
+
+    def _remove(self, widget: Gtk.Widget) -> None:
+        self._list.remove(widget)
+
+
+class _ChecksSection(Gtk.Box):
+    """The rollup as a list, folded past _CHECK_ROWS_SHOWN rows — one widget
+    for the page's life, taking each new rollup a row at a time.
+
+    A repository can put fifty contexts on one pull request, and fifty rows
+    here would push the description off the top of the panel and the
+    conversation off the bottom — this section says how the checks stand,
+    it isn't where they are all read. Past the cap the rest waits behind
+    "Show more" (`_fold`, the same step the description takes) and the
+    heading starts carrying the count, since a list cut short with nothing
+    saying so reads as a list that short.
+
+    A folded list also reorders, blockers first (`prdetail.by_urgency`):
+    the rows that get folded away should be the ones with nothing to say,
+    not the two failures that happened to be numbered eleven and nineteen.
+    An unfolded one keeps gh's own order — every row is on screen, so
+    there is nothing for a reshuffle to rescue.
+
+    The heading and the repair button stay outside the fold: what is
+    offered about the checks must not hide with them.
+
+    This is the part of the page a refresh most often has news for — the
+    hub re-reads the page precisely when a check changes state — so it is
+    patched with the most care: the row that changed is the row that is
+    swapped (keyed by the check's name, in both the preview and the whole
+    list), the fold stays as the reader left it, and the repair button is
+    built again only when what it offers moved. Only the fold itself
+    flipping — a rollup growing past the cap, or shrinking under it —
+    starts the rows over.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self._heading = Gtk.Label(xalign=0.0)
+        self._heading.add_css_class("caption-heading")
+        self._heading.set_margin_bottom(2)
+        self.append(self._heading)
+        # The rows, under one of two shapes keyed by whether they fold: the
+        # preview's box alone, or that box and the whole list behind _fold.
+        self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.append(self._body)
+        self._shape = _BoxSlots(self._body)
+        self._shown: _BoxSlots | None = None
+        self._all: _BoxSlots | None = None
+        # The fold, while the list has one: a fold built for a list that
+        # grew opens itself to match (see _build_shape).
+        self._fold: _Fold | None = None
+        # The repair button's slot: one child, or none.
+        self._repair_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.append(self._repair_box)
+        self._repair = _BoxSlots(self._repair_box)
+
+    def plan(
+        self,
+        checks: tuple[prdetail.PrCheck, ...],
+        repair: practions.Action | None,
+        build_repair: Callable[[practions.Action], Gtk.Widget],
+    ) -> list[_Plan]:
+        """What it takes to show *checks* and *repair* (the button's action,
+        or None for no button) — every plan the page has to commit, once it
+        has moved the keyboard out of their dropped (see `_Slots.plan`)."""
+        folded = len(checks) > _CHECK_ROWS_SHOWN
+        self._heading.set_label(
+            _("Checks ({n})").format(n=len(checks)) if folded else _("Checks")
+        )
+        plans = [self._shape.plan([("shape", folded, lambda: self._build_shape(folded))])]
+        ordered = prdetail.by_urgency(checks) if folded else checks
+        plans.append(self._shown.plan(_check_items(ordered[:_CHECK_ROWS_SHOWN])))
+        if self._all is not None:
+            # The full list is its own rows rather than the preview's grown:
+            # a widget has one parent, and the fold swaps whole boxes.
+            plans.append(self._all.plan(_check_items(ordered)))
+        plans.append(
+            self._repair.plan(
+                [] if repair is None else [("repair", repair, lambda: build_repair(repair))]
+            )
+        )
+        return plans
+
+    def _build_shape(self, folded: bool) -> Gtk.Widget:
+        previous = self._fold
+        self._fold = None
+        shown = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=_CHECK_ROW_GAP)
+        self._shown = _BoxSlots(shown)
+        if not folded:
+            self._all = None
+            return shown
+        everything = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=_CHECK_ROW_GAP)
+        self._all = _BoxSlots(everything)
+        self._fold = _fold(shown, everything)
+        if previous is not None:
+            self._fold.set_expanded(previous.expanded)
+        return self._fold
+
+
+def _check_items(checks) -> list[tuple[object, object, Callable[[], Gtk.Widget]]]:
+    """*checks* as slot items: keyed by name, valued by the whole record."""
+    return [(check.name, check, lambda c=check: PrViewPage._check_row(c)) for check in checks]
 
 
 class _WrapLayout(Gtk.LayoutManager):
@@ -1899,13 +2260,13 @@ class _ThreadCard(Gtk.Box):
     read that replaces this card with one saying the new thing. A failure
     comes back as gh's own sentence with the text kept, released on the spot
     since no read is coming; success hands off to the page's posted path,
-    which re-reads everything. Every fetch rebuilds the cards
-    wholesale (and each thread gets one per view), so the per-thread state
-    lives in the page's containers rather than in this widget — the reply
-    draft in *drafts* and the in-flight guard in *busy*, both keyed by
-    thread id: the composer's own rebuild lesson, thread-sized, with the
-    guard held where a twin card in the other view (or a copy a mid-flight
-    fetch rebuilt) checks it too.
+    which re-reads everything. A fetch that says the thread changed swaps
+    its card for a new one (and each thread gets one per view), so the
+    per-thread state lives in the page's containers rather than in this
+    widget — the reply draft in *drafts* and the in-flight guard in *busy*,
+    both keyed by thread id: the composer's own lesson, thread-sized, with
+    the guard held where a twin card in the other view (or the card a
+    mid-flight fetch swapped in) checks it too.
     """
 
     def __init__(
@@ -2191,6 +2552,11 @@ class _FileSection(Gtk.Box):
         self._buffer: GtkSource.Buffer | None = None
         self._expander: Gtk.Expander | None = None
         self._diff_expander: Gtk.Expander | None = None
+        # The file's review threads, hung under the diff and patched by key
+        # (`plan_threads`), so a reply landing on this file leaves the diff
+        # above it exactly where it was. Anchored after the last child the
+        # constructor appends, which is what everything before them is.
+        self._threads: _BoxSlots | None = None
         # Built here rather than on expand: it is a slot plus a fetch, and
         # it is what the section leads with. None whenever this file isn't
         # an image, the setting is off, or the reply didn't name the commits
@@ -2225,6 +2591,7 @@ class _FileSection(Gtk.Box):
         )
         if self._preview is None and not self._show_diff:
             self.append(header)  # stat-only: the header is the whole section
+            self._threads = _BoxSlots(self, anchor=header)
             return
 
         # The count rides the header only when the header is what stays
@@ -2242,6 +2609,27 @@ class _FileSection(Gtk.Box):
             expander.set_child(self._content_widget())
         else:
             expander.connect("notify::expanded", self._on_expanded)
+        self._threads = _BoxSlots(self, anchor=expander)
+
+    @property
+    def path(self) -> str:
+        return self._file.path
+
+    @property
+    def thread_cards(self) -> list[_ThreadCard]:
+        """The cards hanging under the diff, top of the file first."""
+        return [card for card in self._threads.widgets if isinstance(card, _ThreadCard)]
+
+    def plan_threads(
+        self, threads: tuple[prdetail.PrThread, ...], build: Callable[[prdetail.PrThread], _ThreadCard]
+    ) -> _Plan:
+        """What it takes to hang *threads* under the diff — cards for the
+        new and changed ones, the rest kept — held back for the page to
+        commit once it has moved the keyboard out of the going (see
+        `_Slots.plan`)."""
+        return self._threads.plan(
+            [(thread.id, thread, lambda t=thread: build(t)) for thread in threads]
+        )
 
     def reveal(self) -> None:
         """Expand (building the buffer if this is the first time).
@@ -2400,34 +2788,53 @@ def _folded_body(text: str, images: bool = False) -> Gtk.Widget:
     return _fold(preview, _body_widget(segments))
 
 
-def _fold(preview: Gtk.Widget, full: Gtk.Widget) -> Gtk.Widget:
+class _Fold(Gtk.Box):
     """*preview* over a "Show more" toggle that swaps it for *full* — the
     step a description and a long Checks list both take, so the two fold
     the same way: one flat button, the word and a caret, that turns into
-    "Show less" once the whole thing is out."""
-    full.set_visible(False)
-    word = Gtk.Label(label=_("Show more"))
-    caret = Gtk.Image.new_from_icon_name("pan-down-symbolic")
-    inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-    inner.append(word)
-    inner.append(caret)
-    toggle = Gtk.Button(child=inner)
-    toggle.add_css_class("flat")
-    toggle.set_halign(Gtk.Align.START)
+    "Show less" once the whole thing is out.
 
-    def flip(_button: Gtk.Button) -> None:
-        expanded = full.get_visible()
-        full.set_visible(not expanded)
-        preview.set_visible(expanded)
-        word.set_label(_("Show more") if expanded else _("Show less"))
-        caret.set_from_icon_name("pan-down-symbolic" if expanded else "pan-up-symbolic")
+    A widget of its own so that whether it is open can be read and carried:
+    a fetch that changes the description — or grows the Checks list past
+    the cap — builds a new fold, and one that came back closed over a body
+    the reader had just opened is the refresh taking something from them
+    (see the module's note on patching).
+    """
 
-    toggle.connect("clicked", flip)
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-    box.append(preview)
-    box.append(full)
-    box.append(toggle)
-    return box
+    __gtype_name__ = "CollinsPrFold"
+
+    def __init__(self, preview: Gtk.Widget, full: Gtk.Widget) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._preview = preview
+        self._full = full
+        self._word = Gtk.Label(label=_("Show more"))
+        self._caret = Gtk.Image.new_from_icon_name("pan-down-symbolic")
+        inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        inner.append(self._word)
+        inner.append(self._caret)
+        toggle = Gtk.Button(child=inner)
+        toggle.add_css_class("flat")
+        toggle.set_halign(Gtk.Align.START)
+        toggle.connect("clicked", lambda *_a: self.set_expanded(not self.expanded))
+        full.set_visible(False)
+        self.append(preview)
+        self.append(full)
+        self.append(toggle)
+
+    @property
+    def expanded(self) -> bool:
+        return self._full.get_visible()
+
+    def set_expanded(self, expanded: bool) -> None:
+        self._full.set_visible(expanded)
+        self._preview.set_visible(not expanded)
+        self._word.set_label(_("Show less") if expanded else _("Show more"))
+        self._caret.set_from_icon_name("pan-up-symbolic" if expanded else "pan-down-symbolic")
+
+
+def _fold(preview: Gtk.Widget, full: Gtk.Widget) -> _Fold:
+    """See `_Fold`."""
+    return _Fold(preview, full)
 
 
 def _body_label(text: str, images: bool = False) -> Gtk.Widget:
@@ -2560,6 +2967,28 @@ def _has_hunks(patch: str) -> bool:
     differ", which is a sentence, not a diff: the picture beside it
     (prfileimages) says everything that line was standing in for."""
     return patch.startswith("@@") or "\n@@" in patch
+
+
+def _heading(text: str) -> Gtk.Label:
+    """A column's section heading."""
+    label = Gtk.Label(label=text, xalign=0.0)
+    label.add_css_class("caption-heading")
+    return label
+
+
+def _dim(text: str) -> Gtk.Label:
+    """A column's nothing-here note, in its place."""
+    label = Gtk.Label(label=text, xalign=0.0)
+    label.add_css_class("dim-label")
+    return label
+
+
+def _placeholder(text: str) -> Gtk.Label:
+    """A whole view's nothing-here note, centered under some air."""
+    label = Gtk.Label(label=text)
+    label.add_css_class("dim-label")
+    label.set_margin_top(24)
+    return label
 
 
 def _count_label(text: str, css_class: str) -> Gtk.Label:

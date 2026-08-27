@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
-"""End-to-end check that a PR page rebuild leaves no text selected — dev machine.
+"""End-to-end check that a PR page patch leaves no text selected — dev machine.
 
-Every landed fetch rebuilds the Conversation and Files views wholesale
-(`PrViewPage._rebuild` / `_rebuild_files`), background ones included. If the
-keyboard focus was on anything in the box being emptied, GTK re-places it
-after the next paint — and, for a widget that stays unparented, lands it on
-the first focusable thing in the emptied box: the description's first label,
-which, being selectable, selects all of itself on focus. None of this is
-reachable from pytest (tests/conftest.py blocks the GTK stack, and the
-relocation is an after-paint step of a real window), so it is checked here
-against the real page in a real window:
+A landed fetch patches the Conversation and Files views (`PrViewPage.
+_sync_conversation` / `_sync_files`, see prview._Slots), background ones
+included, and the widgets it drops can hold the keyboard focus. Unparenting
+the focused widget doesn't drop the focus: GTK re-places it after the next
+paint — and, for a widget that stays unparented, lands it on the first
+focusable thing in the column: the description's first label, which, being
+selectable, selects all of itself on focus. None of this is reachable from
+pytest (tests/conftest.py blocks the GTK stack, and the relocation is an
+after-paint step of a real window), so it is checked here against the real
+page in a real window:
 
-    bash .agents/capture-screenshots/scripts/with-headless-display.sh \
+    bash .agents/capture-screenshots/scripts/with-headless-display.sh \\
         python3 scripts/check_pr_page_focus.py
 
 `prdetail.fetch` is stubbed with a canned detail — a folded description, a
 review thread, no files — so nothing leaves the machine. Each step puts the
-focus where a click would have (a button, a label, an editor), rebuilds the
-way a landed fetch does, and reads back where the focus went and which labels
+focus where a click would have (a button, a label, an editor), patches the
+way a landed fetch does with a reply that changes the widget under it (or,
+in one step, doesn't), and reads back where the focus went and which labels
 carry a selection 150 ms later, past the paint the relocation waits for.
 
 The other route into a label is covered too: the page sits in an
@@ -32,6 +34,7 @@ Run it behind the headless wrapper, or a window opens on the user's screen.
 import os
 import sys
 import tempfile
+from dataclasses import replace
 from types import SimpleNamespace
 
 E2E = tempfile.mkdtemp(prefix="collins-prfocus-")
@@ -143,7 +146,7 @@ def description_label(page: Gtk.Widget) -> Gtk.Label:
 
 def show_more_button(page: Gtk.Widget) -> Gtk.Button:
     # The description's fold toggle: the one button whose child is a box
-    # (the word and the caret), see prview._fold.
+    # (the word and the caret), see prview._Fold.
     return find(page, lambda w: isinstance(w, Gtk.Button) and isinstance(w.get_child(), Gtk.Box))
 
 
@@ -155,6 +158,26 @@ def clear_selections(page: Gtk.Widget) -> None:
     for w in walk(page):
         if isinstance(w, Gtk.Label):
             w.select_region(0, 0)
+
+
+# -- patching the page -------------------------------------------------------
+#
+# A patch only drops what the reply changed, so each step edits the part of
+# the detail under the focus before syncing — the description's body, or the
+# thread — the way a real fetch that changed it would.
+
+
+def patch_description(page) -> None:
+    body = page._detail.body
+    body = body[:-1] if body.endswith(".") else body + "."
+    page._detail = replace(page._detail, body=body)
+    page._sync_conversation()
+
+
+def patch_thread(page) -> None:
+    thread = replace(page._detail.threads[0], is_outdated=not page._detail.threads[0].is_outdated)
+    page._detail = replace(page._detail, threads=(thread,), timeline=(thread,))
+    page._sync_conversation()
 
 
 # -- the run ----------------------------------------------------------------
@@ -201,16 +224,32 @@ def step_loaded() -> bool:
     if page._detail is None:
         return done()
     check("nothing is selected after the load", not selected_labels(page), selected_labels(page))
-    # 1. "Show more" pressed (a click leaves the focus on the button).
-    show_more_button(page).grab_focus()
-    page._rebuild()
+    # 0. "Show more" pressed, then a reply that changes nothing: the button
+    # stays, and so does the keyboard on it.
+    button = show_more_button(page)
+    button.grab_focus()
+    page._sync_conversation()
+    state["button"] = button
+    return later(step_after_same)
+
+
+def step_after_same() -> bool:
+    page, win = state["page"], state["win"]
+    check(
+        "a patch that changes nothing leaves the keyboard on \"Show more\"",
+        win.get_focus() is state["button"],
+        describe(win.get_focus()),
+    )
+    check("…and selects nothing", not selected_labels(page), selected_labels(page))
+    # 1. "Show more" pressed, then the description changes under it.
+    patch_description(page)
     return later(step_after_show_more)
 
 
 def step_after_show_more() -> bool:
     page, win = state["page"], state["win"]
     check(
-        "a rebuild after \"Show more\" selects nothing",
+        "a patch after \"Show more\" selects nothing",
         not selected_labels(page),
         selected_labels(page),
     )
@@ -224,14 +263,14 @@ def step_after_show_more() -> bool:
     label = description_label(page)
     label.grab_focus()
     label.select_region(0, 0)
-    page._rebuild()
+    patch_description(page)
     return later(step_after_description_click)
 
 
 def step_after_description_click() -> bool:
     page, win = state["page"], state["win"]
     check(
-        "a rebuild after a click in the description selects nothing",
+        "a patch after a click in the description selects nothing",
         not selected_labels(page),
         selected_labels(page),
     )
@@ -240,11 +279,13 @@ def step_after_description_click() -> bool:
         win.get_focus() is page._scroller,
         describe(win.get_focus()),
     )
-    # 3. Typing in the comment box.
+    # 3. Typing in the comment box, through a reset — the one sync that
+    # drops the composer itself (a setting flip), so the keyboard has to be
+    # handed back to it.
     text = page._composer._text
     text.get_buffer().set_text("half a comm")
     text.grab_focus()
-    page._rebuild()
+    page._sync_conversation(reset=True)
     return later(step_after_composer)
 
 
@@ -252,7 +293,7 @@ def step_after_composer() -> bool:
     page, win = state["page"], state["win"]
     text = page._composer._text
     check(
-        "a rebuild while typing a comment keeps the cursor in the box",
+        "a reset while typing a comment keeps the cursor in the box",
         win.get_focus() is text,
         describe(win.get_focus()),
     )
@@ -262,12 +303,13 @@ def step_after_composer() -> bool:
         buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True) == "half a comm",
     )
     check("…and selects nothing", not selected_labels(page), selected_labels(page))
-    # 4. Typing a reply in a thread: the editor is rebuilt with its draft.
+    # 4. Typing a reply in a thread that then changes: the card is rebuilt
+    # with its draft.
     card = thread_card(page)
     card._on_reply_toggled()
     card._text.get_buffer().set_text("a reply draft")
     card._text.grab_focus()
-    page._rebuild()
+    patch_thread(page)
     return later(step_after_thread_reply)
 
 
@@ -275,7 +317,7 @@ def step_after_thread_reply() -> bool:
     page, win = state["page"], state["win"]
     card = thread_card(page)
     check(
-        "a rebuild while typing a thread reply lands in the rebuilt editor",
+        "a patch while typing a thread reply lands in the rebuilt editor",
         win.get_focus() is card._text,
         describe(win.get_focus()),
     )
@@ -284,18 +326,18 @@ def step_after_thread_reply() -> bool:
     # 5. A thread's Reply button pressed, nothing typed: the new card's editor
     # isn't open, so the scroller keeps the keyboard.
     del page._thread_drafts[THREAD_ID]
-    page._rebuild()
+    patch_thread(page)
     clear_selections(page)
     reply = find(thread_card(page), lambda w: isinstance(w, Gtk.Button) and w.get_label())
     reply.grab_focus()
-    page._rebuild()
+    patch_thread(page)
     return later(step_after_reply_button)
 
 
 def step_after_reply_button() -> bool:
     page, win = state["page"], state["win"]
     check(
-        "a rebuild after a thread's button selects nothing",
+        "a patch after a thread's button selects nothing",
         not selected_labels(page),
         selected_labels(page),
     )
@@ -306,14 +348,14 @@ def step_after_reply_button() -> bool:
     )
     # 6. The keyboard elsewhere entirely is left alone.
     win.set_focus(None)
-    page._rebuild()
+    patch_description(page)
     return later(step_after_no_focus)
 
 
 def step_after_no_focus() -> bool:
     page, win = state["page"], state["win"]
     check(
-        "a rebuild with no focus in the page leaves it nowhere",
+        "a patch with no focus in the page leaves it nowhere",
         win.get_focus() is None,
         describe(win.get_focus()),
     )

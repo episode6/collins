@@ -39,6 +39,19 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **A PR page refresh only touches what changed.** Every refresh — the
+  Refresh button, the page coming back into view, a check finishing, a
+  run ending — used to rebuild the whole page from the new reply, which
+  reset the scroll, closed the description's and the checks list's *Show
+  more*, collapsed every diff you had expanded and dropped the keyboard
+  wherever GTK saw fit, usually while you were reading. The page now
+  patches itself instead: cards, check rows, file sections and list rows
+  are keyed, and one the reply describes as it did last time is left
+  exactly as you had it; a check going green swaps that one row, a new
+  comment lands at the end of the timeline, a reply on a file lands under
+  that file's diff without rebuilding the diff, and the scroll stays
+  anchored on whatever was in view. An edited description or a checks
+  list grown past the fold does get rebuilt, open if you had it open.
 - **An expired Claude login repairs itself.** The usage panel and the
   model pickers ride the OAuth token the `claude` CLI stores, and only the
   CLI can refresh it — so when the token is found dead, at launch or when
