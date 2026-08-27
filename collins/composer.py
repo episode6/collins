@@ -220,6 +220,9 @@ class ComposerView(Gtk.Box):
         self._spacer = Gtk.Box(hexpand=True)
         row.append(self._spacer)
         self._row = row
+        # Where the next add_row_option lands: after the chrome, then after
+        # the option before it, so options read in the order they were added.
+        self._last_option: Gtk.Widget = self._dock_btn
         # The model picker sits with the composing half of the row: choosing
         # what answers the prompt is part of writing it. The button wears the
         # session's current model as its label (set_model_name).
@@ -252,10 +255,12 @@ class ComposerView(Gtk.Box):
     def add_row_option(self, widget: Gtk.Widget) -> None:
         """Seat a host's own control at the left of the Send row, before
         the spacer that pushes the picker, attach and Send to the right
-        (after the chrome, when there is any): the new-chat screen's
-        worktree checkbox. A setting for the prompt rides on the row that
-        sends it rather than on a line of its own."""
-        self._row.insert_child_after(widget, self._dock_btn)
+        (after the chrome, when there is any), and after any option seated
+        earlier — e.g. the new-chat screen's worktree checkbox. A setting
+        for the prompt rides on the row that sends it rather than on a line
+        of its own."""
+        self._row.insert_child_after(widget, self._last_option)
+        self._last_option = widget
 
     # -- text ------------------------------------------------------------------
 

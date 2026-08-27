@@ -5,13 +5,13 @@ prompt is sent.
 
 The project's icon and name sit centered over the native composer (see
 composer.py), with a checkbox for the worktree launch in its Send row;
-nothing is running behind it yet. Send hands the text, the checkbox and the model pick
-up to the tab, which spawns the agent and types the prompt in once the CLI
-is at its input box (TerminalTab.begin_session).
+nothing is running behind it yet. Send hands the text, the checkbox and
+the model pick up to the tab, which spawns the agent and types the prompt
+in once the CLI is at its input box (TerminalTab.begin_session).
 
 The model picker sits in the composer's own Send row too, where the
-running session's switch menu sits, and chooses the ``--model`` that launch
-passes.
+running session's switch menu sits, and chooses the ``--model`` that
+launch passes.
 It opens on
 *Default* — the CLI's own default, named after what the CLI's settings
 resolve it to (claudemodels.cli_default_model), so the screen says what a
