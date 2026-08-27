@@ -147,7 +147,7 @@ _failures = 0  # consecutive failed attempts; each one doubles the cooldown
 def _cooldown_s() -> float:
     """How long the slot stays claimed after the last attempt: an hour,
     doubled for every consecutive failure past the first, capped at a day."""
-    return min(_REPAIR_COOLDOWN_S * 2 ** max(_failures - 1, 0), _REPAIR_COOLDOWN_MAX_S)
+    return min(_REPAIR_COOLDOWN_S * 2 ** max(0, _failures - 1), _REPAIR_COOLDOWN_MAX_S)
 
 
 def _slot_free() -> bool:
