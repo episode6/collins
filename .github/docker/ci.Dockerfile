@@ -3,20 +3,23 @@
 #
 # The CI image: every build/test dependency of the containered CI jobs,
 # prebuilt, so a run pulls one image from GHCR and fetches nothing else. This
-# file is the single canonical list of build dependencies; ci.yml and
-# release.yml run their containered jobs inside it.
+# file is the single canonical list of build dependencies (the aur stage
+# excepted: its list is the PKGBUILD's own); ci.yml and release.yml run their
+# containered jobs inside it.
 #
-# Two stages, two tags, one content-addressed hash:
-# .github/workflows/ci-image.yml names both images by the first 12 hex of
-# hashFiles(this file) and only builds what GHCR does not already have —
+# Three stages, three tags, content-addressed:
+# .github/workflows/ci-image.yml names each image by the first 12 hex of a
+# hashFiles() over its inputs and only builds what GHCR does not already have —
 #   ghcr.io/episode6/collins-ci:<hash>            --target full (resolute)
 #   ghcr.io/episode6/collins-ci:<hash>-noble-pkg  --build-arg SERIES=24.04,
 #                                                 --target packaging
-# Edit this file and the next run rebuilds both; revert it and the old tags
-# are still there. Nothing rebuilds on its own, so bump the date below to pick
-# up package updates.
+#   ghcr.io/episode6/collins-ci:<hash2>-aur       --target aur (Arch)
+# <hash> is over this file; <hash2> over this file plus packaging/aur/PKGBUILD,
+# whose dependency arrays the aur stage installs. Edit this file and the next
+# run rebuilds all three; revert it and the old tags are still there. Nothing
+# rebuilds on its own, so bump the date below to pick up package updates.
 #
-# refreshed: 2026-08-23
+# refreshed: 2026-08-27
 #
 # ubuntu:26.04 (resolute) is the default base: the containered jobs run on the
 # newest supported stack (GTK 4.22, adw 1.9, Python 3.14) — the one
@@ -64,3 +67,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb xauth dbus fonts-dejavu-core \
   && rm -rf /var/lib/apt/lists/*
 USER runner
+
+# The Arch image: what release.yml's aur job publishes the PKGBUILD from and
+# ci.yml's aur-build job test-builds it in. Unrelated to the Ubuntu stages
+# above (a separate FROM), and the one stage whose dependency list is not
+# written here: Arch's already lives in the PKGBUILD's depends/makedepends
+# arrays, which every AUR user's makepkg installs from, so this stage sources
+# the PKGBUILD and installs the same. That is why this tag's hash covers the
+# PKGBUILD too -- a PR that edits the recipe rebuilds this image, and a
+# typo'd package name fails that build ("target not found") on the PR, long
+# before a release. The packages age between rebuilds like everything else
+# here; the test build is a recipe check, not a build against today's Arch.
+FROM archlinux:base-devel AS aur
+COPY packaging/aur/PKGBUILD /tmp/PKGBUILD
+# archlinux-keyring first, on its own: the base image can predate the keys
+# that signed today's packages. git: the checkouts and aur-build's archive of
+# HEAD; openssh: the push to the AUR; curl: the tag tarball. Version
+# constraints (foo>=1.2) are stripped for pacman -S, which takes bare names;
+# makepkg enforces them itself at build time.
+RUN pacman -Sy --noconfirm archlinux-keyring \
+  && pacman -Su --noconfirm --needed git openssh curl \
+  && bash -c 'source /tmp/PKGBUILD && pacman -S --noconfirm --needed \
+       "${depends[@]%%[<>=]*}" "${makedepends[@]%%[<>=]*}"' \
+  && rm -rf /var/cache/pacman/pkg/* /tmp/PKGBUILD
+# makepkg refuses to run as root; same uid as the Ubuntu stages, same reason.
+RUN useradd --uid 1001 --create-home runner
+USER runner
+WORKDIR /home/runner

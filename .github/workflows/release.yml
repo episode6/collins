@@ -24,10 +24,10 @@ on:
         required: false
         type: string
 
-# build and ppa run inside the prebuilt CI images (.github/docker/ci.Dockerfile,
-# resolved or built by the image job) -- the same images ci.yml's packaging and
-# ppa-source jobs use, so a release builds in exactly the environment every PR
-# rehearsed. github-release and pypi stay on the bare runner: they need only gh
+# build, ppa and aur run inside the prebuilt CI images
+# (.github/docker/ci.Dockerfile, resolved or built by the image job) -- the
+# same images ci.yml's packaging, ppa-source and aur-build jobs use, so a
+# release builds in exactly the environment every PR rehearsed. github-release and pypi stay on the bare runner: they need only gh
 # and the PyPI action, and the pypi job's OIDC environment wiring must not
 # move. A manual dispatch takes its images from the dispatching branch's
 # Dockerfile, not the tag's -- the same way it takes this file.
@@ -234,23 +234,26 @@ jobs:
   #
   # sha256sums stays SKIP in git, since the hash cannot exist before the tag
   # does; this job fills it in, regenerates .SRCINFO with makepkg, and
-  # test-builds the package -- a typo'd dependency name or broken recipe
-  # stops here instead of on some Arch user's machine. Re-running a tag's
-  # workflow is harmless: an AUR repo already at this content skips the push.
+  # test-builds the package -- a broken recipe stops here instead of on some
+  # Arch user's machine. Re-running a tag's workflow is harmless: an AUR repo
+  # already at this content skips the push.
   aur:
-    needs: build
+    needs: [image, build]
     if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     runs-on: ubuntu-latest
-    container: archlinux:latest
+    # The Arch image: base-devel, git, openssh, and every package the
+    # PKGBUILD's depends/makedepends arrays name (the image hashes the
+    # PKGBUILD, so a typo'd name fails the image build on its PR, not here).
+    # The same image ci.yml's aur-build job test-builds the recipe in on
+    # every PR. A manual dispatch takes the dispatching branch's image, whose
+    # PKGBUILD may declare different packages than the tag's -- makepkg's
+    # own dependency check below catches that.
+    container:
+      image: ${{ needs.image.outputs.image_aur }}
     env:
       # The tag being published: the pushed one, or the one a manual run names.
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
-      - name: Install packaging tools
-        run: |
-          pacman -Sy --noconfirm archlinux-keyring
-          pacman -Su --noconfirm --needed base-devel git openssh
-
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
@@ -291,11 +294,8 @@ jobs:
 
       - name: Regenerate .SRCINFO and test-build the package
         run: |
-          useradd -m builder
-          chown -R builder packaging/aur
           cd packaging/aur
-          # makepkg refuses to run as root, hence the builder user.
-          runuser -u builder -- makepkg --printsrcinfo > "$RUNNER_TEMP/srcinfo.new"
+          makepkg --printsrcinfo > "$RUNNER_TEMP/srcinfo.new"
           # The committed .SRCINFO is a tracked mirror; the generated copy is
           # ground truth for what gets pushed. Drift is a repo-hygiene problem,
           # not a release problem -- warn, don't block the release. (Ignores
@@ -312,15 +312,12 @@ jobs:
           fi
           { grep '^#' .SRCINFO; echo; cat "$RUNNER_TEMP/srcinfo.new"; } \
             > "$RUNNER_TEMP/srcinfo.aur"
-          # Test build before publishing anything: pacman resolving every
-          # declared dependency catches a typo'd name, and makepkg re-verifies
-          # the tarball hash and exercises the whole recipe. pacman -S takes
-          # bare package names, so any version constraint (foo>=1.2) is
-          # stripped first -- makepkg still enforces the constraint itself.
-          (source PKGBUILD && \
-            pacman -S --noconfirm --needed \
-              "${depends[@]%%[<>=]*}" "${makedepends[@]%%[<>=]*}")
-          runuser -u builder -- makepkg --noconfirm
+          # Test build before publishing anything: makepkg re-verifies the
+          # tarball hash and exercises the whole recipe -- against the
+          # image's packages, which are the recipe's own dependency arrays,
+          # so it also fails on any dependency the checked-out PKGBUILD
+          # names that the image lacks.
+          makepkg --noconfirm
 
       - name: Push to the AUR
         env:

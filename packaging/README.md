@@ -13,7 +13,7 @@ exist once set up for it.)
 | Channel | Files | Notes |
 | --- | --- | --- |
 | **`.deb`** (GitHub releases) | `scripts/build_deb.sh` | Hand-rolled binary deb attached to each release. |
-| **AUR** | `packaging/aur/` | `PKGBUILD` + `.SRCINFO`, auto-pushed to the AUR on tag by `release.yml`'s `aur` job; see `packaging/aur/README.md`. |
+| **AUR** | `packaging/aur/` | `PKGBUILD` + `.SRCINFO`, test-built on every PR and auto-pushed to the AUR on tag by `release.yml`'s `aur` job, both in the Arch CI image; see `packaging/aur/README.md`. |
 | **PyPI** | `pyproject.toml` + `.github/workflows/release.yml` | Auto-published on tag via trusted publishing (once configured). |
 | **Ubuntu PPA** | `debian/` + `packaging/build-ppa-source.sh` | Source upload to Launchpad; see below. |
 

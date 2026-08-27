@@ -133,9 +133,10 @@ Create 2 PRs (as drafts, per repo convention):
    - fills the tag tarball's hash into the AUR `PKGBUILD`, regenerates
      `.SRCINFO`, test-builds the package, and pushes both files to the AUR
      repo (`packaging/aur/README.md`).
-   CI's `ppa-source` job rehearses the source build unsigned on every PR, in
-   the same container images the `ppa` job uses, so a missing build-dep
-   should already have surfaced before the tag.
+   CI's `ppa-source` and `aur-build` jobs rehearse the source build
+   (unsigned) and the AUR package build (unpublished, from the working tree)
+   on every PR, in the same container images the `ppa` and `aur` jobs use,
+   so a missing build-dep should already have surfaced before the tag.
    If a `ppa` or `aur` job fails for a reason fixed in the workflow itself,
    the tag's run cannot pick the fix up (it is frozen on the file as of the
    tag): land the fix on the release branch and dispatch it for the tag —

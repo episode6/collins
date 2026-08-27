@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-22. Full change history: git log for this file.
+fork. Last modified: 2026-08-27. Full change history: git log for this file.
 -->
 # AUR packaging
 
@@ -25,28 +25,55 @@ release version-bump PRs (see
 `sha256sums` stays `SKIP` in git by design: the hash cannot exist before the
 tag does. When changing any other PKGBUILD field, update `.SRCINFO` to match —
 `makepkg --printsrcinfo` on an Arch box (keeping the notice header), or edit
-the mirrored lines by hand.
+the mirrored lines by hand. CI fails on drift (below).
+
+## The Arch CI image
+
+Both jobs below run in the `aur` stage of `.github/docker/ci.Dockerfile`:
+Arch with `base-devel`, `git`, `openssh`, and every package the PKGBUILD's
+`depends`/`makedepends` arrays name — the stage sources the PKGBUILD and
+installs from it, rather than mirroring the list. `.github/workflows/ci-image.yml`
+names the tag by a hash over the Dockerfile *and* the PKGBUILD, so a PR that
+edits either rebuilds the image (and a typo'd package name fails that build
+on the PR, with pacman's "target not found"); one that edits neither pulls
+the existing tag. Nothing rebuilds on its own, so the packages inside age
+until the next edit — the test builds are recipe checks, not builds against
+today's Arch.
+
+## Rehearsed on every PR
+
+`.github/workflows/ci.yml`'s `aur-build` job does everything the release job
+below does short of publishing, from the working tree rather than a tag
+tarball (the `v<pkgver>` tag need not exist yet on a PR): it fails if the
+committed `.SRCINFO` has drifted from what `makepkg --printsrcinfo` generates,
+archives `HEAD` under the name the `source` array expects (makepkg skips its
+download when the file is already there), builds the package, and checks the
+result carries the launcher, desktop entry, icon and metainfo.
 
 ## Automated publish on a tag
 
 `.github/workflows/release.yml` has an `aur` job that runs on every `v*` tag
 (normally pushed by `scripts/ship-release.py`, which creates the GitHub
-release — and with it the tag tarball — before the tag reaches CI). In an
-`archlinux` container it:
+release — and with it the tag tarball — before the tag reaches CI). In the
+Arch CI image it:
 
 1. refuses to publish if `pkgver` disagrees with the tag;
 2. downloads the tag tarball and fills the real hash into `sha256sums`;
 3. regenerates `.SRCINFO` with `makepkg --printsrcinfo`, warning if the
-   committed mirror has drifted from the PKGBUILD;
-4. test-builds the package — pacman resolving every declared dependency
-   catches a typo'd name, and makepkg re-verifies the tarball hash, before
+   committed mirror has drifted from the PKGBUILD (the PR rehearsal above
+   already fails on that; here it must not stop a release);
+4. test-builds the package — makepkg re-verifies the tarball hash and
+   exercises the whole recipe against the image's packages — before
    anything is published;
 5. pushes `PKGBUILD` + `.SRCINFO` to the AUR repo. Re-running the workflow
    for an already-published tag finds nothing to commit and skips.
 
 The job also runs on a manual dispatch naming an existing tag
 (`gh workflow run release.yml --ref <branch> -f tag=v<VER>`), which is how a
-workflow fix reaches a tag whose own run is frozen on the old file.
+workflow fix reaches a tag whose own run is frozen on the old file. A
+dispatch runs in the dispatching branch's image, not the tag's; if that
+branch's PKGBUILD declares different packages, makepkg's dependency check
+fails the test build rather than publishing.
 
 One required secret:
 

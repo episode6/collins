@@ -73,8 +73,9 @@ Create two separate Pull Requests (as drafts, per repo convention).
           and a short `<ul>`) — software centers show it.
     - Mirror the outgoing release into the AUR files: set
       `pkgver=<VERSION>` in `packaging/aur/PKGBUILD` + the matching
-      `pkgver`/`source` lines in `packaging/aur/.SRCINFO` (the sha256 refresh
-      waits until the tag exists — post-ship step in the checklist).
+      `pkgver`/`source` lines in `packaging/aur/.SRCINFO` (`sha256sums` stays
+      `SKIP` in git; the release workflow's `aur` job fills it in at publish
+      time).
 
 #### PR 2: Release Finalization on Release Branch
 - **Target Branch:** `release/v<VERSION>`

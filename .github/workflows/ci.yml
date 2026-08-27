@@ -11,7 +11,7 @@ on:
 
 # Jobs that use image dependencies run inside a prebuilt CI image
 # (.github/docker/ci.Dockerfile is the one canonical list of build
-# dependencies); the image job resolves or builds the two tags. The tiny jobs
+# dependencies); the image job resolves or builds the three tags. The tiny jobs
 # (lint, verify-versions) stay on the bare runner: they need nothing from the
 # image, and pulling one to run a one-second script would only slow them down.
 # The package is public, so pulling needs no credentials; only the image job
@@ -121,6 +121,55 @@ jobs:
           test -f collins_*~${{ matrix.series }}1_source.changes
           test -f collins_*~${{ matrix.series }}1.dsc
           test -f collins_*~${{ matrix.series }}1.tar.xz
+
+  # Everything release.yml's aur job does short of pushing, in the same Arch
+  # image -- built from the working tree rather than the tag tarball the
+  # PKGBUILD names, since that tag need not exist yet (pkgver is bumped ahead
+  # of the ship). makepkg skips its download when the file the source array
+  # names is already present, so an archive of HEAD under the tarball's
+  # top-level directory name stands in for it: the same archive GitHub serves
+  # once the tag exists. The image already proved every declared dependency
+  # resolves (it installed them); this proves the recipe builds against them.
+  # A drifted .SRCINFO fails here, where the release job only warns: the
+  # committed mirror is a PR's problem to fix, not a release's to stop for.
+  aur-build:
+    needs: image
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.image.outputs.image_aur }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: The committed .SRCINFO matches the PKGBUILD
+        run: |
+          cd packaging/aur
+          makepkg --printsrcinfo > "$RUNNER_TEMP/srcinfo.new"
+          # Comment lines (the notice header) and blank lines aside.
+          norm() { grep -v '^#' "$1" | sed '/^[[:space:]]*$/d'; }
+          if ! diff -u <(norm .SRCINFO) <(norm "$RUNNER_TEMP/srcinfo.new"); then
+            echo "::error::packaging/aur/.SRCINFO is out of date with what"
+            echo "makepkg generates from PKGBUILD. Regenerate it (makepkg"
+            echo "--printsrcinfo, keeping the notice header) and commit."
+            exit 1
+          fi
+      - name: Build the package from the working tree
+        run: |
+          cd packaging/aur
+          pkgver="$(sed -n 's/^pkgver=//p' PKGBUILD)"
+          git archive --format=tar.gz --prefix="collins-$pkgver/" \
+            -o "collins-$pkgver.tar.gz" HEAD
+          makepkg --noconfirm
+      - name: The package is complete
+        run: |
+          cd packaging/aur
+          ls -l collins-*.pkg.tar.zst
+          tar -tf collins-*.pkg.tar.zst > "$RUNNER_TEMP/contents"
+          for path in usr/bin/collins \
+              usr/share/applications/com.episode6.Collins.desktop \
+              usr/share/icons/hicolor/scalable/apps/com.episode6.Collins.svg \
+              usr/share/metainfo/com.episode6.Collins.metainfo.xml; do
+            grep -qx "$path" "$RUNNER_TEMP/contents" \
+              || { echo "::error::$path is missing from the package"; exit 1; }
+          done
 
   # Every committed copy of the version must agree (see RELEASE_CHECKLIST.md);
   # scripts/ship-release.py re-checks the same invariants at ship time.
