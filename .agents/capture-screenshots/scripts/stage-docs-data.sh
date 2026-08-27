@@ -130,6 +130,8 @@ mkgit "$C" main
 
 enc() { echo "$1" | sed 's/[^a-zA-Z0-9]/-/g'; }
 
+# The prompt and reply land in the JSON verbatim, unescaped: keep them free
+# of double quotes and backslashes (a session title reads them back).
 mk() { # cwd uuid t1 t2 prompt reply
   local dir="$E2E/projects/$(enc "$1")"
   mkdir -p "$dir"

@@ -82,6 +82,9 @@ from collins import dialogs, i18n, prdetail, trust  # noqa: E402
 from collins.prstatus import PullRequest  # noqa: E402
 
 U1 = "11111111-1111-4111-8111-111111111111"
+# Every session the scene stages (stage-docs-data.sh): the shot waits for
+# all of them, so a sidebar is never caught mid-scan with a project missing.
+STAGED = tuple(f"{d * 8}-{d * 4}-4{d * 3}-8{d * 3}-{d * 12}" for d in "123456")
 ALPHA = os.path.expanduser("~/dev/alpha-widgets")
 PR_URL = "https://github.com/episode6/alpha-widgets/pull/214"
 
@@ -279,7 +282,7 @@ def prepare() -> bool:
     global tries
     tries += 1
     win = app.get_active_window()
-    ready = win is not None and app.store.get_session(U1) is not None
+    ready = win is not None and all(app.store.get_session(u) for u in STAGED)
     if not ready:
         if tries > 40:
             print("timed out waiting for the window/sessions", file=sys.stderr)
