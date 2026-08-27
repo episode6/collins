@@ -52,8 +52,8 @@ downloads of each version, see the
   CLI yourself.
 - **New sessions open onto a new-chat screen.** The project's icon and
   name over the composer, with a *Start in a new git worktree* checkbox
-  (seeded from the project's setting) and a model picker in the composer's
-  Send row, beside the Attach and Send buttons; the agent starts
+  (seeded from the project's setting) at the left of the composer's Send
+  row and a model picker at its right; the agent starts
   when the first prompt is sent, with that prompt as its first turn and
   the picked model as its `--model`. The picker opens on *Default*, named
   after the CLI's own default as its settings files resolve it (the

@@ -161,9 +161,9 @@ class NewChatView(Gtk.Box):
         self._name_model()
         column.append(self.composer)
 
-        # The checkbox rides in the Send row with the model picker and the
-        # buttons, at the left of that right-aligned cluster: one row holds
-        # everything the launch is sent with.
+        # The checkbox rides at the left of the Send row, across from the
+        # model picker and the buttons: one row holds everything the launch
+        # is sent with.
         self._worktree = Gtk.CheckButton(label=_("Start in a new git worktree"))
         self._worktree.set_valign(Gtk.Align.CENTER)
         self._worktree.set_tooltip_text(

@@ -250,12 +250,12 @@ class ComposerView(Gtk.Box):
         self._setup_drop()
 
     def add_row_option(self, widget: Gtk.Widget) -> None:
-        """Seat a host's own control in the Send row, at the left of the
-        right-hand cluster (before the model picker): the new-chat screen's
-        worktree checkbox. A setting for the prompt rides with the buttons
-        that send it rather than on a row of its own, so the row stays the
-        one place the launch's choices sit."""
-        self._row.insert_child_after(widget, self._spacer)
+        """Seat a host's own control at the left of the Send row, before
+        the spacer that pushes the picker, attach and Send to the right
+        (after the chrome, when there is any): the new-chat screen's
+        worktree checkbox. A setting for the prompt rides on the row that
+        sends it rather than on a line of its own."""
+        self._row.insert_child_after(widget, self._dock_btn)
 
     # -- text ------------------------------------------------------------------
 
