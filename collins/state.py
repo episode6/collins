@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-23. Full change history: git log for this file.
+# fork. Last modified: 2026-08-27. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -123,7 +123,11 @@ DEFAULT_SETTINGS = {
     # remotearchive.py). On by default; sessions with no remote page cost one
     # transcript scan and no network.
     "archive_on_claude_ai": True,
-    "show_tab_bar": True,  # tab bar visibility (tabs keep working underneath)
+    # The session tab bar under the header. Hidden by default: the sidebar is
+    # the intended way to move between sessions (the window title names the
+    # active one), and the tabs keep working underneath; the header's own
+    # toggle shows the bar for anyone who wants it.
+    "show_tab_bar": False,
     # A StatusNotifierItem in the top bar: presence, and a menu that jumps to
     # any open session (see statusicon.py). On by default — an icon nobody
     # knows to turn on isn't presence — and free on a desktop with no host for

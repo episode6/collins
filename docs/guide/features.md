@@ -449,6 +449,8 @@ flipped the switch is refused if it calls it anyway.
   question isn't asked a second time inside the terminal. Trust covers
   everything under the folder, worktrees included.
 
+![The new-chat screen: the project over its composer, a worktree checkbox and a model picker on the Send row, the unsent prompt already a Draft row in the sidebar](/img/new-chat.png)
+
 ## Bulk actions & housekeeping
 
 - **Select mode** (sidebar menu → *Select multiple sessions*) to open, star,

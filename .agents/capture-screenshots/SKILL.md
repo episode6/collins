@@ -171,19 +171,35 @@ the store hadn't settled (raise `--settle-ms`).
 
 ## Refreshing the docs screenshot set
 
-`.agents/capture-screenshots/scripts/stage-docs-data.sh <dir>` stages the
-richer scene used by the docs site (three projects, MCP config, a usage
-fixture, git repos for the branch footer, transcripts with models/tokens, and
-a `claude` shim in `<dir>/bin` that renders demo output for `--resume`).
-`scripts/capture-docs.py <repo-root> <out.png> --scene NAME` then captures one
-of: `main-window`, `sidebar-search`, `quick-switcher`, `tab-emoji`,
-`session-details`, `mcp-servers`, `preferences`, `terminal-panel`, `hero`
-(the last one is `data/screenshot.png`). Run it behind the same headless
-wrapper, with the isolation env from
-above **plus** `COLLINS_USAGE_FIXTURE=<dir>/usage-fixture.json`, `HOME=<dir>`
-(so paths render as `~/dev/...`), and `PATH=<dir>/bin:$PATH` (so the typed
-command is the shim). The two sidebar images in `docs/public/img/` are crops
-of the leftmost ~417px of the `hero` and `sidebar-search` shots.
+One command recaptures every screenshot the docs site and the README embed:
+
+```bash
+bash .agents/capture-screenshots/scripts/refresh-docs-screenshots.sh <repo-root> [scene ...]
+```
+
+It stages the docs scene with
+`.agents/capture-screenshots/scripts/stage-docs-data.sh <dir>` (three projects,
+each a git checkout wearing a `project-icon.svg`; MCP config; a usage fixture;
+transcripts with models, tokens and edited files; pull requests on the sidebar
+rows via `session_prs`; an attachments gallery; and a `claude` shim in
+`<dir>/bin` that clears the screen and renders demo output for `--resume`),
+then runs `scripts/capture-docs.py <repo-root> <out.png> --scene NAME` once
+per scene behind the headless wrapper, with the isolation env from above
+**plus** `COLLINS_USAGE_FIXTURE=<dir>/usage-fixture.json`, `HOME=<dir>` (so
+paths render as `~/dev/...`) and `PATH=<dir>/bin:$PATH` (so the typed command
+is the shim). Scenes: `main-window`, `hero` (also `data/screenshot.png`, and
+cropped to its sidebar column as `sidebar.png`), `quick-switcher`,
+`session-details`, `mcp-servers`, `preferences`, `terminal-panel`,
+`composer`, `pr-page` (a fabricated `prdetail.fetch` reply — nothing reaches
+GitHub), `editor-panel`, `attachments-panel`, and `new-chat`. Name scenes to
+redo only those. `capture-docs.py` takes `--size WxH` and `--set KEY=JSON`,
+which edit the staged `state.json`'s settings before launch — that is how one
+staged tree serves every window size and panel width.
+
+Two traps the driver already handles: `new-chat` runs last, because the draft
+it writes to `state.json` would show as a Draft row in every scene shot after
+it; and the shim's output is wrapped at ~58 columns, so the terminal beside a
+PR page or editor doesn't rewrap it. Look at every PNG before committing.
 
 ## Before/after comparisons
 

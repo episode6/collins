@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-21. Full change history: git log for this file.
+fork. Last modified: 2026-08-26. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -150,8 +150,9 @@ auto-generated title (locally, from its first prompt), so you see names
 instead of UUIDs right away. Expand a project, click a session, and it opens
 in a terminal tab that resumes it. If you haven't used Claude Code yet, start
 a session right from the app — the **New Session** button (`Ctrl+Shift+T`)
-asks for a project folder and launches `claude` there — or run `claude` in a
-project yourself and the session will show up automatically.
+asks for a project folder and opens a new-chat screen where you write the
+first prompt; Send launches `claude` there — or run `claude` in a project
+yourself and the session will show up automatically.
 
 Later launches start with no session open by default. Turn on **Reopen the
 last session** (Preferences → Session behavior) and the app instead reopens the

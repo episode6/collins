@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-26. Full change history: git log for this file.
+fork. Last modified: 2026-08-27. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -39,6 +39,13 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **The tab bar is hidden by default.** The sidebar is where sessions are
+  switched, and the window title names the active one, so the row of tabs
+  under the header was chrome most windows never needed; the header's
+  toggle shows it again, and a window that had it showing keeps it. The
+  docs' screenshots are recaptured against the app as it is now — the
+  new-chat screen, project icons, PR marks — and the new-chat screen gets
+  a picture of its own.
 - **A PR page refresh only touches what changed.** Every refresh — the
   Refresh button, the page coming back into view, a check finishing, a
   run ending — used to rebuild the whole page from the new reply, which
