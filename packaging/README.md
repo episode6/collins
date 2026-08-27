@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-23. Full change history: git log for this file.
+fork. Last modified: 2026-08-27. Full change history: git log for this file.
 -->
 # Packaging
 
@@ -166,8 +166,9 @@ Launchpad still builds and installs the noble binary against noble's real
 dependencies at release time; if a noble-only regression class ever appears,
 the fix is a `test` matrix leg on a noble image, not a base flip.
 
-The full image reproduces the e2e job on any machine with Docker, typelibs
-installed or not:
+The package is public, so `docker pull` needs no login (and the container
+jobs pass no credentials). The full image reproduces the e2e job on any
+machine with Docker, typelibs installed or not:
 
 ```sh
 docker run --rm -it --init -v "$PWD:/src" -w /src ghcr.io/episode6/collins-ci:<tag> \
