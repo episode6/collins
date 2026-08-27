@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-24. Full change history: git log for this file.
+# fork. Last modified: 2026-08-26. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -252,6 +252,7 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         self.group_key = group_key
         self.cwd = cwd
         self.set_selectable(False)
+        self.add_css_class("group-header-row")
 
         if sidebar is not None and group_key != FAV_GROUP:
             right_click = Gtk.GestureClick(button=3)
