@@ -153,16 +153,18 @@ jobs:
           fi
       - name: Build the package from the working tree
         run: |
-          cd packaging/aur
-          pkgver="$(sed -n 's/^pkgver=//p' PKGBUILD)"
+          pkgver="$(sed -n 's/^pkgver=//p' packaging/aur/PKGBUILD)"
+          # From the repo root: git archive roots the archive at the working
+          # directory, so run from packaging/aur it would hold only that.
           git archive --format=tar.gz --prefix="collins-$pkgver/" \
-            -o "collins-$pkgver.tar.gz" HEAD
+            -o "packaging/aur/collins-$pkgver.tar.gz" HEAD
+          cd packaging/aur
           makepkg --noconfirm
       - name: The package is complete
         run: |
           cd packaging/aur
           ls -l collins-*.pkg.tar.zst
-          tar -tf collins-*.pkg.tar.zst > "$RUNNER_TEMP/contents"
+          bsdtar -tf collins-*.pkg.tar.zst > "$RUNNER_TEMP/contents"
           for path in usr/bin/collins \
               usr/share/applications/com.episode6.Collins.desktop \
               usr/share/icons/hicolor/scalable/apps/com.episode6.Collins.svg \
