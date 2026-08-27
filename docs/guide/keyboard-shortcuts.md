@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-21. Full change history: git log for this file.
+fork. Last modified: 2026-08-26. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -18,6 +18,7 @@ These are the defaults. Every one of them can be changed — see
 | `Ctrl+C` / `Ctrl+V` | Copy selection / paste (easy copy & paste, on by default) |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in the terminal (always available) |
 | `Ctrl+Shift+G` | Find in the terminal |
+| `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Zoom the terminal in / out / back to normal |
 | `Ctrl+K` | Quick switcher — jump to any session |
 | `Ctrl+Shift+A` | Archive the current session (closes its tab) |
 | `Ctrl+Shift+Z` | Undo the last archive (until another session is archived) |
@@ -36,6 +37,7 @@ These are the defaults. Every one of them can be changed — see
 | `Ctrl+F` (in the editor) | Find in the current file |
 | `F9` | Toggle the sidebar |
 | `Ctrl+,` | Preferences |
+| `Ctrl+Q` | Quit |
 
 In the close-tab and close-window confirmation dialogs (shown when a session
 is still active), a single keypress answers the dialog:
