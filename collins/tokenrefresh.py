@@ -20,9 +20,10 @@ the entire point: the reply is discarded, and what decides success is the
 credentials file afterwards. On success the app re-asks what the stale
 token spoiled — the model catalog, when a query already failed, and the
 usage panel's bars (the caller's side, via the entries' callback).
-Attempts are single-flight and cooled down, so a login no run can fix (a
-revoked refresh token) costs one throwaway subprocess an hour, not one
-per panel poll.
+Attempts are single-flight and cooled down, and the cooldown doubles with
+every consecutive failure (an hour, then two, four... up to a day), so a
+login no run can fix (a revoked refresh token) costs a handful of throwaway
+subprocesses a day, not one per panel poll.
 
 Deliberately narrow. No credentials file at all means not logged in, which
 a headless run cannot fix — it would only fail slower; a token inside its
@@ -129,14 +130,24 @@ def refresh() -> bool:
 # same dead login at once, and one throwaway run serves them all. The
 # cooldown is the loop-breaker for a login that repairs never fix (a revoked
 # refresh token, say): every poll of a broken panel reports the same error,
-# and without it each report would spawn another subprocess. A *working*
-# login never feels the cooldown — a successful repair means the next
-# fetches succeed, and nothing triggers again until the token actually
-# expires, hours past any cooldown.
-_REPAIR_COOLDOWN_S = 3600
+# and without it each report would spawn another subprocess. It starts at an
+# hour and doubles with every consecutive failure, up to a day — a login
+# that stays broken for a week is a few runs a day, not one an hour — and a
+# success sets it back to the hour. A *working* login never feels the
+# cooldown at all: a successful repair means the next fetches succeed, and
+# nothing triggers again until the token actually expires, hours past it.
+_REPAIR_COOLDOWN_S = 3600  # after a success, or the first failure
+_REPAIR_COOLDOWN_MAX_S = 24 * 3600  # the doubling stops here
 _attempt_lock = threading.Lock()
 _running = False
 _last_attempt: float | None = None  # time.monotonic() of the last claim
+_failures = 0  # consecutive failed attempts; each one doubles the cooldown
+
+
+def _cooldown_s() -> float:
+    """How long the slot stays claimed after the last attempt: an hour,
+    doubled for every consecutive failure past the first, capped at a day."""
+    return min(_REPAIR_COOLDOWN_S * 2 ** max(_failures - 1, 0), _REPAIR_COOLDOWN_MAX_S)
 
 
 def _slot_free() -> bool:
@@ -148,13 +159,14 @@ def _slot_free() -> bool:
     settles who actually goes."""
     if _running:
         return False
-    return _last_attempt is None or time.monotonic() - _last_attempt >= _REPAIR_COOLDOWN_S
+    return _last_attempt is None or time.monotonic() - _last_attempt >= _cooldown_s()
 
 
 def _begin_attempt() -> bool:
     """Claim the one repair slot: False while a repair is already running or
     the cooldown since the last claim hasn't passed. Claiming starts the
-    cooldown — a failed attempt counts, that being the whole point."""
+    cooldown — a failed attempt counts, that being the whole point — and
+    how long it lasts is settled when the attempt ends (`_settle`)."""
     global _running, _last_attempt
     with _attempt_lock:
         if not _slot_free():
@@ -163,12 +175,31 @@ def _begin_attempt() -> bool:
         return True
 
 
+def _settle(ok: bool) -> None:
+    """Release the claim, and let the outcome set the next cooldown: a
+    failure doubles it (and says so in the log, since an hourly retry that
+    quietly became a daily one is otherwise a mystery), a success resets
+    it. Not a lock-free counter: a claim can only follow a release, so the
+    count and the flag move together."""
+    global _running, _failures
+    with _attempt_lock:
+        _running = False
+        _failures = 0 if ok else _failures + 1
+        if not ok:
+            log.info(
+                "tokenrefresh: %d consecutive failed repair(s); next attempt in %.0fh at the earliest",
+                _failures,
+                _cooldown_s() / 3600,
+            )
+
+
 def _repair(on_refreshed: Callable[[], None]) -> None:
     """The claimed attempt: refresh, retry what the stale token spoiled,
     tell the caller. Only ever runs holding the `_begin_attempt` claim."""
-    global _running
+    ok = False
     try:
-        if not refresh():
+        ok = refresh()
+        if not ok:
             return
         # A models query that already failed this run left the pickers on a
         # stale (or empty) list and the failure backoff serving it; retry
@@ -178,8 +209,7 @@ def _repair(on_refreshed: Callable[[], None]) -> None:
             claudemodels.refresh_models()
         on_refreshed()
     finally:
-        with _attempt_lock:
-            _running = False
+        _settle(ok)
 
 
 def _spawn(check: Callable[[], bool], on_refreshed: Callable[[], None]) -> threading.Thread | None:
@@ -234,9 +264,11 @@ def maybe_repair(on_refreshed: Callable[[], None]) -> threading.Thread | None:
     (the usage panel: its `expired` and `auth` error kinds).
 
     Safe to call on every such failure: attempts are single-flight and
-    cooled down (`_begin_attempt`), so a login that repairs can't fix costs
-    one throwaway run an hour, not one per poll — and a call inside the
-    cooldown is refused before it even spawns a thread (`_spawn`'s peek).
+    cooled down (`_begin_attempt`), with the cooldown doubling on every
+    consecutive failure (`_settle`), so a login that repairs can't fix costs
+    an hourly throwaway run tapering to a daily one, not one per poll — and
+    a call inside the cooldown is refused before it even spawns a thread
+    (`_spawn`'s peek).
     *on_refreshed* is as in `maybe_start`: worker thread, successful
     refresh only.
     """
