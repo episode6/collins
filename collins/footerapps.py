@@ -14,22 +14,24 @@ import subprocess
 import sys
 from pathlib import Path
 
-from gi.repository import Gio, GLib
+from gi.repository import Gio, GioUnix, GLib
 
 # Exec-line field codes (Desktop Entry spec). %f/%u/%F/%U carry the files
 # argument; the rest expand to metadata we don't supply.
 _FIELD_CODES = {"%f", "%F", "%u", "%U", "%i", "%c", "%k", "%d", "%D", "%n", "%N", "%v", "%m"}
 
 
-def resolve_app(app_id: str) -> Gio.DesktopAppInfo | None:
+def resolve_app(app_id: str) -> GioUnix.DesktopAppInfo | None:
     """The installed app for a desktop-file ID, or None if it's gone."""
+    # GLib 2.80 moved the Unix-only Gio API into the GioUnix typelib;
+    # Gio.DesktopAppInfo is a deprecated alias that returns this same type.
     try:
-        return Gio.DesktopAppInfo.new(app_id)
+        return GioUnix.DesktopAppInfo.new(app_id)
     except (TypeError, GLib.Error):
         return None
 
 
-def resolve_apps(app_ids: list[str]) -> list[tuple[str, Gio.DesktopAppInfo]]:
+def resolve_apps(app_ids: list[str]) -> list[tuple[str, GioUnix.DesktopAppInfo]]:
     """Resolve IDs in order, silently dropping uninstalled ones."""
     resolved = []
     for app_id in app_ids:
