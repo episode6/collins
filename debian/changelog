@@ -1,5 +1,10 @@
 collins (0.1.2) UNRELEASED; urgency=medium
 
+  * Closing the floating composer pastes its draft back into the agent's
+    input box in pieces small enough to show in full, instead of one chunk
+    the CLI folded into a "[Pasted text]" stand-in that the next open then
+    cut in place of the draft; a stand-in that appears anyway is read back,
+    and one Collins didn't make keeps the composer from opening over it.
   * The PR page's Checks list folds past four rows behind "Show more", like
     the description does, instead of scrolling in place.
   * Clicking a project header in the sidebar starts a session there (the

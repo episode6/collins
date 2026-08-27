@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-26. Full change history: git log for this file.
+# fork. Last modified: 2026-08-27. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -1429,6 +1429,17 @@ class TerminalTab(Gtk.Box):
         # (see _stash_draft), and saved against the session by the window,
         # so it outlives the tab and the app too.
         self._composer_stash = ""
+        # What the last close's paste-back turned into on the CLI's screen:
+        # every "[Pasted text #N +M lines]" stand-in the CLI folded a piece
+        # of it into, mapped to that piece's text, so the next open can put
+        # the draft itself in the composer rather than the stand-in (see
+        # _restore_or_stash). `_paste_back_pending` holds the pieces from
+        # the moment they are fed until a screen read has said how they
+        # landed; `_paste_back_agent` is the CLI process the stand-ins
+        # belong to — their numbers start over with a new one.
+        self._pasted_back: dict[str, str] = {}
+        self._paste_back_pending: list[str] | None = None
+        self._paste_back_agent: int | None = None
         # Counts up only while a new session set to open floating waits for
         # its agent (see autoshow_composer).
         self._composer_autoshow_tries = 0
@@ -3759,6 +3770,13 @@ class TerminalTab(Gtk.Box):
         if self.composer_open() or self._composer_opening:
             self._composer.focus_view()
             return
+        # A box holding a paste the CLI folded away — one of the user's
+        # own, an image — is one the open-cut can't read: cutting it would
+        # cost them the paste. The composer stays down over such a box (the
+        # cut's settled read checks again, for what this glance can miss).
+        if self._foreign_paste_in_box():
+            self.feed_message(_("Composer: the input box holds a paste Collins can't read"))
+            return
         composer = self._ensure_composer()
         composer.set_text("")
         self._restore_stashed_draft(composer)
@@ -3912,8 +3930,9 @@ class TerminalTab(Gtk.Box):
 
     def close_composer(self, restore: bool = True) -> None:
         """Lower the composer. Its text goes back where it came from —
-        typed into the CLI's box, unsubmitted (multi-line arrives as one
-        paste chunk, whose newlines are line breaks in the box) — unless
+        pasted into the CLI's box, unsubmitted, in pieces small enough that
+        the CLI shows every line rather than a "[Pasted text]" stand-in
+        (see `_restore_or_stash`) — unless
         *restore* is False (sending already emptied it) or the agent has
         left the terminal, which stashes it instead of typing it: what's
         there now is a shell prompt, where a pasted draft isn't a draft,
@@ -3945,13 +3964,91 @@ class TerminalTab(Gtk.Box):
         Both closes (overlaid and docked) end here so the two can't drift:
         a draft is never dropped on the floor, whichever way the panel went
         away.
+
+        Into the box it goes as pieces, each a bracketed paste small enough
+        that the CLI shows it in full (`composerkeys.paste_pieces`) rather
+        than folding it into a "[Pasted text #N +M lines]" stand-in, which
+        the next open's cut would take at face value — the draft behind it
+        unreadable and, once the stand-in was erased, gone. Should a piece
+        be folded anyway (a CLI with other limits), a read of the box a beat
+        later writes down which stand-in holds which piece, and the next
+        open puts the piece back in the composer in the stand-in's place
+        (see `_verify_paste_back`, `_apply_cut`).
         """
         if self._agent_is_running():
             restored = composerkeys.restore_text(text)
             if restored:
-                self.feed_child_text(restored)
+                pieces = composerkeys.paste_pieces(restored)
+                self.feed_child_text("".join(_bracketed_paste(piece) for piece in pieces))
+                self._pasted_back = {}
+                self._paste_back_pending = pieces
+                self._paste_back_agent = self._agent_pid()
+                GLib.timeout_add(_CUT_VERIFY_MS[0], self._verify_paste_back, pieces, 0)
             return
         self._stash_draft(text)
+
+    def _verify_paste_back(self, pieces: list[str], index: int) -> bool:
+        """Read how a close's paste-back landed, on the cut's own verify
+        schedule: the first read that finds the box (the agent may be
+        mid-redraw at the first beat) settles it. A read that finds nothing
+        to align with — an open's cut has already emptied the box, say —
+        gives up on the pieces: nothing is recorded, and a stand-in seen
+        later reads as somebody else's."""
+        if self._paste_back_pending is not pieces:
+            return GLib.SOURCE_REMOVE  # a later close, or an open got there first
+        prompt = self.entered_prompt()
+        if prompt is None and index + 1 < len(_CUT_VERIFY_MS):
+            GLib.timeout_add(_CUT_VERIFY_MS[index + 1], self._verify_paste_back, pieces, index + 1)
+            return GLib.SOURCE_REMOVE
+        if prompt is not None:
+            self._settle_paste_back(prompt.text)
+        self._paste_back_pending = None
+        return GLib.SOURCE_REMOVE
+
+    def _settle_paste_back(self, screen: str) -> None:
+        """Align the pending pieces with *screen* and, if they fit, record
+        the stand-ins among them. Pieces that don't fit stay pending — the
+        read may have caught the box mid-draw — for the next read to try."""
+        pieces = self._paste_back_pending
+        if pieces is None:
+            return
+        record = composerkeys.pasted_back(screen, pieces)
+        if record is None:
+            return
+        self._pasted_back = record
+        self._paste_back_pending = None
+
+    def _expand_box_read(self, screen: str) -> str | None:
+        """*screen* (an `entered_prompt` read) with the stand-ins the last
+        paste-back left replaced by the text they hold, or None when it
+        holds a stand-in that isn't ours — what an open must not cut. A
+        record from another CLI process doesn't count: stand-in numbers
+        start over with each one."""
+        if self._paste_back_pending is not None:
+            self._settle_paste_back(screen)
+        record = self._pasted_back if self._paste_back_agent == self._agent_pid() else {}
+        return composerkeys.expand_pasted_back(screen, record)
+
+    def _foreign_paste_in_box(self) -> bool:
+        """Whether the CLI's box holds a paste Collins can't read (see
+        `_expand_box_read`) — asked before a composer is raised over it.
+        Pieces still unaligned after this glance are given the benefit of
+        the doubt: the cut's settled read is the one that decides."""
+        prompt = self.entered_prompt()
+        if prompt is None:
+            return False
+        expanded = self._expand_box_read(prompt.text)
+        if expanded is None and self._paste_back_pending is not None:
+            return False
+        return expanded is None
+
+    def _agent_pid(self) -> int | None:
+        cli = getattr(self.provider, "cli", "") or ""
+        for pid in self._candidate_pids():
+            agent = proctree.agent_descendant_pid(pid, cli)
+            if agent is not None:
+                return agent
+        return None
 
     def _stash_draft(self, text: str) -> None:
         """Keep a draft the terminal wouldn't take, for the next composer.
@@ -4270,15 +4367,34 @@ class TerminalTab(Gtk.Box):
         self, composer: ComposerView, seq: int, prompt: EnteredPrompt | None
     ) -> None:
         """Erase the settled read from the box, seed it into the composer,
-        and start checking that the box really emptied."""
+        and start checking that the box really emptied.
+
+        What is seeded is the read with any stand-in of ours expanded back
+        into the draft it folded (see `_restore_or_stash`); the erase still
+        works from the read as drawn, which is what the verify rounds
+        compare against — a stand-in goes on the first backspace that
+        reaches it, and the ones budgeted for its characters land on an
+        empty box. A stand-in that isn't ours lowers the composer instead:
+        the box holds a paste no read can recover, and an empty box is
+        the one thing a cut must never make of it. Whatever the composer
+        had gathered in the meantime — the stash it was seeded with, a
+        keystroke — goes back to the stash."""
         if prompt is None or not prompt.text.strip():
+            self._pasted_back = {}  # nothing folded is left on screen
+            return
+        text = self._expand_box_read(prompt.text)
+        if text is None:
+            self._stash_draft(composer.peek_text())
+            self.close_composer(restore=False)
+            self.feed_message(_("Composer: the input box holds a paste Collins can't read"))
             return
         keys = self.provider.clear_prompt_keys(prompt)
         if not keys:
             return
         self.feed_child_text(keys)
         self._cut_pending = prompt.text
-        composer.seed_text(prompt.text)
+        self._pasted_back = {}  # spent: the stand-ins are being erased
+        composer.seed_text(text)
         GLib.timeout_add(_CUT_VERIFY_MS[0], self._verify_cut, composer, seq, 0)
 
     def _verify_cut(self, composer: ComposerView, seq: int, index: int) -> bool:

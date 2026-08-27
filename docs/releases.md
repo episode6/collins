@@ -39,6 +39,17 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **A big draft survives the composer's round trip.** Closing the floating
+  composer typed its draft back into the agent's input box as one chunk,
+  and past a few lines the CLI folded that into a `[Pasted text #1 +12
+  lines]` stand-in — which the next open then cut into the composer in
+  place of the draft, gone for good once the stand-in was erased. The
+  draft now goes back as a series of pastes each small enough to show in
+  full, so the box holds every line of it; should the CLI fold one anyway,
+  Collins notes which stand-in holds which piece and puts the piece itself
+  back in the composer. A stand-in Collins didn't make — a paste of your
+  own, an image — is one it can't read, so the composer refuses to open
+  over it rather than cut it.
 - **A folded PR description shows the start of its first paragraph.** The
   collapsed description keeps whole lines until its character budget runs
   out, and the line that would overrun the budget used to be dropped
