@@ -39,6 +39,14 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **A folded PR description shows the start of its first paragraph.** The
+  collapsed description keeps whole lines until its character budget runs
+  out, and the line that would overrun the budget used to be dropped
+  entirely — so a description in the usual `## Why` shape, a heading and
+  then one long paragraph, folded to nothing but the heading and an
+  ellipsis. That line is now cut to the room left instead, at a word
+  boundary and never through a link, code span or URL, so the preview reads
+  as the opening of the description it stands for.
 - **The tab bar is hidden by default.** The sidebar is where sessions are
   switched, and the window title names the active one, so the row of tabs
   under the header was chrome most windows never needed; the header's

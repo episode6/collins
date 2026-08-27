@@ -4,6 +4,7 @@ from collins.formatting import (
     MAX_BODY_IMAGES,
     BodyImage,
     blast_radius_body,
+    body_head,
     format_relative,
     md_to_pango,
     split_body,
@@ -331,3 +332,60 @@ def test_blast_radius_omits_the_warning_when_no_project_empties():
     body = blast_radius_body(3, [("alpha", 3, 9)])
     assert "alpha — 3 of 9" in body
     assert "lose every session" not in body
+
+
+def test_body_head_leaves_a_body_within_budget_whole():
+    assert body_head("one\ntwo", 550, 8) == ("one\ntwo", True)
+    assert body_head("x" * 600, None, 8) == ("x" * 600, True)
+
+
+def test_body_head_keeps_whole_lines_while_the_budget_lasts():
+    text = "\n".join(f"line {n}" for n in range(20))
+    head, whole = body_head(text, 550, 8)
+    assert not whole
+    assert head == "\n".join(f"line {n}" for n in range(8))
+
+
+def test_body_head_cuts_the_paragraph_after_a_heading_instead_of_dropping_it():
+    # The ``## Why`` shape: a heading, a blank, then one paragraph longer
+    # than the whole character budget. The preview used to be "## Why" alone.
+    paragraph = " ".join(["word"] * 200)
+    head, whole = body_head(f"## Why\n\n{paragraph}\n\n## What\n\nmore", 100, 8)
+    assert not whole
+    assert head.startswith("## Why\n\nword word")
+    assert len(head) <= 100
+    assert head.endswith("word")  # a word boundary, not "wor"
+
+
+def test_body_head_cuts_an_opening_paragraph_over_the_budget_mid_way():
+    head, whole = body_head("alpha beta gamma delta", 12, 8)
+    assert (head, whole) == ("alpha beta", False)
+
+
+def test_body_head_never_splits_a_link_or_code_span():
+    text = "see [the docs](https://example.com/a/very/long/path) for more"
+    head, _whole = body_head(text, 20, 8)
+    assert head == "see"
+    text = "run `pytest tests/test_formatting.py` then push"
+    head, _whole = body_head(text, 12, 8)
+    assert head == "run"
+    text = "at https://example.com/some/long/url now"
+    head, _whole = body_head(text, 15, 8)
+    assert head == "at"
+
+
+def test_body_head_with_no_room_on_the_overrunning_line_stops_before_it():
+    head, whole = body_head("first line here\nsecond", 15, 8)
+    assert (head, whole) == ("first line here", False)
+
+
+def test_body_head_never_splits_italics_or_strikethrough():
+    head, _whole = body_head("this is *very important* stuff", 15, 8)
+    assert head == "this is"
+    head, _whole = body_head("this is _very important_ stuff", 15, 8)
+    assert head == "this is"
+    head, _whole = body_head("this is ~~very important~~ stuff", 15, 8)
+    assert head == "this is"
+    # snake_case is not italics: the cut lands on the space after it.
+    head, _whole = body_head("call some_long_name here", 19, 8)
+    assert head == "call some_long_name"
