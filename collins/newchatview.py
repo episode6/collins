@@ -4,13 +4,14 @@
 prompt is sent.
 
 The project's icon and name sit centered over the native composer (see
-composer.py), with a checkbox for the worktree launch under it; nothing is
-running behind it yet. Send hands the text, the checkbox and the model pick
-up to the tab, which spawns the agent and types the prompt in once the CLI
-is at its input box (TerminalTab.begin_session).
+composer.py), with a checkbox for the worktree launch in its Send row;
+nothing is running behind it yet. Send hands the text, the checkbox and
+the model pick up to the tab, which spawns the agent and types the prompt
+in once the CLI is at its input box (TerminalTab.begin_session).
 
-The model picker sits in the composer's own Send row, where the running
-session's switch menu sits, and chooses the ``--model`` that launch passes.
+The model picker sits in the composer's own Send row too, where the
+running session's switch menu sits, and chooses the ``--model`` that
+launch passes.
 It opens on
 *Default* — the CLI's own default, named after what the CLI's settings
 resolve it to (claudemodels.cli_default_model), so the screen says what a
@@ -160,16 +161,18 @@ class NewChatView(Gtk.Box):
         self._name_model()
         column.append(self.composer)
 
+        # The checkbox rides at the left of the Send row, across from the
+        # model picker and the buttons: one row holds everything the launch
+        # is sent with.
         self._worktree = Gtk.CheckButton(label=_("Start in a new git worktree"))
-        self._worktree.set_halign(Gtk.Align.START)
-        self._worktree.set_margin_top(6)
+        self._worktree.set_valign(Gtk.Align.CENTER)
         self._worktree.set_tooltip_text(
             _("Work in a fresh worktree of this project, apart from its uncommitted changes")
         )
         self._worktree.set_active(bool(worktree_default))
         self._worktree.set_visible(bool(is_git))
         self._worktree.connect("toggled", self._on_worktree_toggled)
-        column.append(self._worktree)
+        self.composer.add_row_option(self._worktree)
 
         clamp = Adw.Clamp(child=column, maximum_size=_CLAMP_PX, tightening_threshold=_CLAMP_PX)
         clamp.set_vexpand(True)
