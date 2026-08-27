@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-24. Full change history: git log for this file.
+# fork. Last modified: 2026-08-26. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -105,7 +105,12 @@ _START_SESSION_DEADLINE_MS = 12_000
 _START_SESSION_POLL_MS = 300
 
 _CSS = b"""
-.group-header { padding: 10px 10px 4px 10px; }
+/* a group header (sidebar.py's GroupHeaderRow): the gap that separates one
+   group from the last row of the one above is the row's margin, not extra
+   padding at the top of its box -- padding would sit inside the row's hover
+   highlight and carry the icon, title and + button below its centre line */
+row.group-header-row { margin-top: 6px; }
+.group-header { padding: 4px 10px; }
 
 /* the image lightbox (lightbox.py): the widget itself is the shade, floated
    over the whole window in MainWindow.lightbox_overlay */

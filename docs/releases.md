@@ -104,6 +104,12 @@ downloads of each version, see the
   to its minimum width when that tab was next selected, however much room
   the terminal had to spare. The column now takes its proper size the
   moment the tab is first shown.
+- **Project headers are centred.** The icon, title, count and + button of
+  a sidebar group header sat a few pixels below the middle of the row —
+  plainest under the pointer, where the row's highlight framed a + that
+  rode low in it. The space that separates one group from the last row
+  of the one above now sits outside the row instead of padding the top of
+  it, so the row's contents are centred in its highlight.
 
 ### v0.1.1 — 2026-08-22
 
