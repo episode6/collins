@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-24. Full change history: git log for this file.
+fork. Last modified: 2026-08-27. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -104,8 +104,10 @@ model catalog. That happens at launch, when the stored token is already
 past its expiry, and mid-run, when a usage poll comes back refused — an app
 left running outlives its token, and a token can also be revoked
 server-side while the file still looks fine. Repair attempts are
-single-flight and run at most once an hour, so a login no run can fix
-costs one background subprocess an hour, not one per poll. No credentials
+single-flight and cooled down, and every consecutive failure doubles the
+cooldown — an hour, then two, four, up to a day — so a login no run can
+fix costs a few background subprocesses a day, not one per poll; a success
+sets the cooldown back to an hour. No credentials
 file at all means not logged in, which no background run can fix; the
 panel just says so.
 

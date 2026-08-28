@@ -74,8 +74,9 @@ downloads of each version, see the
   its token, or the token was revoked server-side), Collins now runs one
   throwaway headless `claude -p` prompt in the background, then re-fetches
   the usage bars and, when a models query had already failed, the model
-  catalog. Attempts are single-flight and at most hourly, so a login no
-  run can fix never turns into a subprocess-per-poll. Before, the panel
+  catalog. Attempts are single-flight and cooled down — an hour, doubling
+  with every consecutive failure up to a day — so a login no run can fix
+  never turns into a subprocess-per-poll. Before, the panel
   sat on *Claude login expired — run claude to refresh* until you ran the
   CLI yourself.
 - **New sessions open onto a new-chat screen.** The project's icon and

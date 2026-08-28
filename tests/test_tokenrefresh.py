@@ -32,6 +32,7 @@ def _fresh_attempt_state(monkeypatch):
     test starts with no attempt made yet."""
     monkeypatch.setattr(tokenrefresh, "_running", False)
     monkeypatch.setattr(tokenrefresh, "_last_attempt", None)
+    monkeypatch.setattr(tokenrefresh, "_failures", 0)
 
 
 @pytest.fixture
@@ -273,6 +274,54 @@ def test_launch_attempt_counts_toward_the_cooldown(credentials, monkeypatch):
     tokenrefresh.maybe_start(lambda: events.append("cb")).join(5)
     assert tokenrefresh.maybe_repair(lambda: events.append("cb")) is None
     assert events == ["refresh"]
+
+
+def _rewind_cooldown(monkeypatch):
+    """Pretend the current cooldown has just elapsed."""
+    monkeypatch.setattr(
+        tokenrefresh,
+        "_last_attempt",
+        tokenrefresh._last_attempt - tokenrefresh._cooldown_s(),
+    )
+
+
+def test_consecutive_failures_double_the_cooldown(credentials, monkeypatch):
+    # A login no run can fix keeps failing; every failure doubles the wait
+    # before the next attempt — an hour, two, four — so a broken login
+    # stops costing a subprocess an hour.
+    _write_credentials(credentials)
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
+    events = []
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or False)
+    hour = tokenrefresh._REPAIR_COOLDOWN_S
+    tokenrefresh.maybe_repair(lambda: None).join(5)
+    assert tokenrefresh._cooldown_s() == hour
+    _rewind_cooldown(monkeypatch)
+    tokenrefresh.maybe_repair(lambda: None).join(5)
+    assert tokenrefresh._cooldown_s() == 2 * hour
+    # An hour past the second failure is inside its two-hour cooldown.
+    monkeypatch.setattr(tokenrefresh, "_last_attempt", tokenrefresh._last_attempt - hour)
+    assert tokenrefresh.maybe_repair(lambda: None) is None
+    _rewind_cooldown(monkeypatch)
+    tokenrefresh.maybe_repair(lambda: None).join(5)
+    assert tokenrefresh._cooldown_s() == 4 * hour
+    assert events == ["refresh"] * 3
+
+
+def test_the_cooldown_caps_at_a_day(monkeypatch):
+    monkeypatch.setattr(tokenrefresh, "_failures", 40)
+    assert tokenrefresh._cooldown_s() == tokenrefresh._REPAIR_COOLDOWN_MAX_S
+
+
+def test_a_success_resets_the_backoff(credentials, monkeypatch):
+    _write_credentials(credentials)
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
+    monkeypatch.setattr(claudemodels, "cache_failed", lambda: False)
+    monkeypatch.setattr(tokenrefresh, "_failures", 5)
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: True)
+    tokenrefresh.maybe_repair(lambda: None).join(5)
+    assert tokenrefresh._failures == 0
+    assert tokenrefresh._cooldown_s() == tokenrefresh._REPAIR_COOLDOWN_S
 
 
 def test_a_running_attempt_is_single_flight(credentials, monkeypatch):
