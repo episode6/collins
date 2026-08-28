@@ -2327,33 +2327,33 @@ msgid ""
 "run it"
 msgstr ""
 
-#: collins/welcome.py:120
+#: collins/welcome.py:127
 msgid "Before you start"
 msgstr ""
 
-#: collins/welcome.py:139
+#: collins/welcome.py:147
 msgid ""
 "Collins runs Claude for you in a few places. Here's where, and the switches "
 "for each."
 msgstr ""
 
-#: collins/welcome.py:165
+#: collins/welcome.py:172
 msgid "Continue"
 msgstr ""
 
-#: collins/welcome.py:187
+#: collins/welcome.py:194
 msgid "Using claude at {path}"
 msgstr ""
 
-#: collins/welcome.py:188
+#: collins/welcome.py:195
 msgid "Change it later in Preferences"
 msgstr ""
 
-#: collins/welcome.py:201
+#: collins/welcome.py:208
 msgid "Collins needs the Claude Code CLI"
 msgstr ""
 
-#: collins/welcome.py:202
+#: collins/welcome.py:210
 msgid ""
 "Every session runs through the claude command, and it isn't on the PATH "
 "that launches from the desktop are given — that PATH doesn't include the "
@@ -2361,65 +2361,65 @@ msgid ""
 "remembered from then on."
 msgstr ""
 
-#: collins/welcome.py:209
+#: collins/welcome.py:216
 msgid "Path to the claude executable"
 msgstr ""
 
-#: collins/welcome.py:211
+#: collins/welcome.py:218
 msgid "Browse…"
 msgstr ""
 
-#: collins/welcome.py:160
+#: collins/welcome.py:167
 msgid "Quit"
 msgstr ""
 
-#: collins/welcome.py:267
+#: collins/welcome.py:274
 msgid "Use This CLI"
 msgstr ""
 
-#: collins/welcome.py:343
+#: collins/welcome.py:350
 msgid "Found it — Collins will remember this location."
 msgstr ""
 
-#: collins/welcome.py:345
+#: collins/welcome.py:353
 msgid ""
 "This path has a version number in it, so it would break the next time "
 "Claude Code updates itself. Point at a stable launcher instead — usually "
 "~/.local/bin/claude."
 msgstr ""
 
-#: collins/welcome.py:357
+#: collins/welcome.py:364
 msgid ""
 "That's an executable, but not one named “claude” — pick the claude launcher "
 "itself."
 msgstr ""
 
-#: collins/welcome.py:359
+#: collins/welcome.py:366
 msgid ""
 "It wasn't in any of the usual places — enter or browse to where it's "
 "installed."
 msgstr ""
 
-#: collins/welcome.py:360
+#: collins/welcome.py:367
 msgid "There's no executable file at this path."
 msgstr ""
 
-#: collins/welcome.py:375
+#: collins/welcome.py:382
 msgid "No Claude Code yet? Get it at {link}, then come back."
 msgstr ""
 
-#: collins/welcome.py:270
+#: collins/welcome.py:277
 msgid "Choose the claude executable"
 msgstr ""
 
-#: collins/welcome.py:351
+#: collins/welcome.py:359
 msgid ""
 "This is inside a version manager's tree, so Collins can't validate a stable "
 "path — it will work until that tool updates, and then this question comes "
 "back."
 msgstr ""
 
-#: collins/welcome.py:188
+#: collins/welcome.py:192
 msgid "Claude Code CLI"
 msgstr ""
 
