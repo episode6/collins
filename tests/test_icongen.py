@@ -1,6 +1,9 @@
 """Tests for icon generation prompt/reply handling (collins.icongen)."""
 
+import pytest
+
 from collins import icongen, projecticons
+from collins.claudemodels import NO_MODEL
 
 _SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect/></svg>'
 
@@ -182,5 +185,19 @@ def test_run_honours_the_dialogs_own_pick(monkeypatch):
     # The dialog's drop-down overrides the preference for one run only: the
     # setting is read, not written, and an explicit id needs no catalog.
     calls = _capture_popen(monkeypatch)
+    icongen.IconRun().run("brief", model="claude-opus-5")
+    assert calls[0][calls[0].index("--model") + 1] == "claude-opus-5"
+
+
+def test_run_refuses_a_none_preference(monkeypatch):
+    # Under a preference of None the dialog is the one deciding when to run
+    # (with a model it picked); a run that reaches the preference anyway
+    # spawns nothing.
+    calls = _capture_popen(monkeypatch)
+    monkeypatch.setattr(icongen.AppState, "get_setting", lambda _self, _key: NO_MODEL)
+    with pytest.raises(ValueError):
+        icongen.IconRun().run("brief")
+    assert calls == []
+    # The dialog's own pick still runs, preference notwithstanding.
     icongen.IconRun().run("brief", model="claude-opus-5")
     assert calls[0][calls[0].index("--model") + 1] == "claude-opus-5"

@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from . import mcptools, newchat, panelhistory, panellayout
+from .claudemodels import NO_MODEL
 
 _CONFIG_BASE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 _CONFIG_DIR = _CONFIG_BASE / "collins"
@@ -65,16 +66,19 @@ DEFAULT_SETTINGS = {
     # _agent_tab_environment). Off = the inferred sources alone, as before;
     # the env half only takes effect for tabs opened after a change.
     "progress_termprop": True,
-    "auto_title_sessions": True,  # summarize each new session's first prompt into a short title
     # Read each new session's first prompt for pull request references and
     # attach every PR it names to the session's row (see prattach.py).
     "attach_prompt_prs": True,
     # Claude models for the app's own headless runs, as --model values.
     # "" = automatic: the newest model of the setting's preferred tier, or
     # the weakest model offered should that tier ever be dropped (see
-    # claudemodels.resolve_model).
+    # claudemodels.resolve_model). NO_MODEL = the picker's None: the feature
+    # runs nothing by itself — new sessions keep the free local title (the
+    # first words of their prompt), and the Generate Icon dialog waits for a
+    # model to be picked. It replaced the auto_title_sessions switch, which
+    # _load migrates: false became title_model = NO_MODEL.
     "title_model": "",  # session title generation ("" = newest Haiku)
-    "icon_model": "",  # the sidebar's Generate Icon ("" = newest Sonnet)
+    "icon_model": NO_MODEL,  # the sidebar's Generate Icon ("" = newest Sonnet)
     # Retitle a session to its newest pull request's title as PRs are
     # detected (see SessionStore.apply_pr_title). Fills the generated-name
     # slot, so a manual rename always wins.
@@ -456,7 +460,13 @@ class AppState:
         self.pending_detaches = {
             k: v for k, v in (data.get("pending_detaches") or {}).items() if isinstance(v, dict)
         }
-        self.settings = {**DEFAULT_SETTINGS, **(data.get("settings") or {})}
+        settings = dict(data.get("settings") or {})
+        # Read-time, one-way migration of the auto_title_sessions switch the
+        # title model's None item replaced: off becomes None, on is just the
+        # default. Either way the old key goes, dropped on the next save.
+        if settings.pop("auto_title_sessions", None) is False:
+            settings["title_model"] = NO_MODEL
+        self.settings = {**DEFAULT_SETTINGS, **settings}
 
     def save(self) -> None:
         _CONFIG_DIR.mkdir(parents=True, exist_ok=True)

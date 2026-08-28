@@ -115,7 +115,7 @@ alpha-widgets session `$U1`). Adapt it, or hand-roll following these rules:
     favorited or archived shows an empty header — count 0).
   - `expanded_groups`: groups start **collapsed**; list `"proj:<project-name>"`
     for each project plus `"fav:"` for favorites.
-  - `settings`: set `"auto_title_sessions": false` (otherwise the app spawns
+  - `settings`: set `"title_model": "none"` (otherwise the app spawns
     headless `claude` runs to title your fake sessions);
     `window_width`/`window_height` size the shot (1100×720 reads well).
 - Saved panel-terminal history is plain text at

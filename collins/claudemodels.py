@@ -25,10 +25,14 @@ Every query says how it went through the module logger: what came back at
 INFO (`COLLINS_LOG=INFO`), and anything that failed at WARNING, which the
 default level already shows.
 
-Both settings default to "" — automatic — which resolve_model() turns into
-the newest model of that setting's preferred tier (Haiku for titles, Sonnet
-for icons), or, should the tier ever be dropped, the newest model of the
-weakest tier still offered.
+A setting holds "" — automatic — which resolve_model() turns into the
+newest model of that setting's preferred tier (Haiku for titles, Sonnet for
+icons), or, should the tier ever be dropped, the newest model of the weakest
+tier still offered; or an explicit model id; or NO_MODEL, the pickers' "None"
+item, under which the feature doesn't run by itself. NO_MODEL is a value the
+resolvers refuse rather than a fourth answer: each consumer decides what None
+means (no title run queued, an icon dialog that waits for a pick) before it
+asks for a model, so the sentinel can never reach a ``--model`` flag.
 
 Reading an id back out is here too: short_name() turns one into the name a
 person would say, for the footer's "which model is this session on?".
@@ -75,6 +79,13 @@ _MIN_TRUSTED_MODELS = 2
 _RETRY_AFTER_FAILURE_S = 300
 _MAX_PAGES = 5  # the catalog is ~a dozen models; more pages means something is wrong
 _CACHE_VERSION = 1  # bumped if the file's shape changes; a file from another version is ignored
+
+# The model pickers' "None": the feature stays off until a model is chosen.
+# A string rather than JSON null, so a setting holding it can't be mistaken
+# for "unset — use the default"; a constant, so nothing compares against a
+# bare "none". resolve_model / pick_model raise on it (see the module
+# docstring) — it is a decision for the caller, never a model.
+NO_MODEL = "none"
 
 # Weakest tier first. An id that names none of these is treated as beyond
 # the strongest tier, so an unrecognized future model is never picked as
@@ -606,10 +617,23 @@ def default_model(models: list[ClaudeModel], prefer: str = "sonnet") -> str:
     return prefer
 
 
+def _refuse_no_model(setting: str) -> None:
+    """NO_MODEL is not a model. A caller that gets here with it has skipped
+    the decision the sentinel exists for, and answering with any model at all
+    would spend tokens the user turned off."""
+    if setting == NO_MODEL:
+        raise ValueError(
+            "NO_MODEL is the pickers' None, not a model: decide what None means "
+            "before resolving a model"
+        )
+
+
 def resolve_model(setting: str | None, models: list[ClaudeModel], prefer: str = "sonnet") -> str:
     """What a headless run should pass to --model: the user's explicit
-    choice when the setting holds one, else the automatic default."""
+    choice when the setting holds one, else the automatic default. Raises
+    ValueError on NO_MODEL — see the module docstring."""
     setting = (setting or "").strip()
+    _refuse_no_model(setting)
     return setting or default_model(models, prefer)
 
 
@@ -678,6 +702,7 @@ def pick_model(setting: str | None, prefer: str = "sonnet") -> str:
     """resolve_model over the live list. Blocking on first use (the list
     may need querying) — call from the worker thread that runs the CLI."""
     setting = (setting or "").strip()
+    _refuse_no_model(setting)
     if setting:
         return setting  # an explicit choice needs no query at all
     return default_model(available_models(), prefer)

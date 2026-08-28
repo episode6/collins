@@ -1,15 +1,21 @@
 import threading
 import time
 
+import pytest
+
 from collins import titles
+from collins.claudemodels import NO_MODEL, ClaudeModel
 from collins.titles import (
     PRReference,
     TitleError,
     TitleGenerator,
+    enabled,
     fallback_title,
     pr_reference,
     pr_references,
     quote_for_prompt,
+    regenerate_model,
+    regenerate_name_label,
     sanitize_title,
 )
 
@@ -29,9 +35,11 @@ class FakeRunner:
     def __init__(self, replies: list) -> None:
         self.replies = replies
         self.prompts: list[str] = []
+        self.settings: list[str | None] = []  # the title-model value each run got
 
-    def __call__(self, prompt: str) -> str:
+    def __call__(self, prompt: str, setting: str | None = None) -> str:
         self.prompts.append(prompt)
+        self.settings.append(setting)
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
@@ -465,3 +473,96 @@ def test_is_scratch_project_covers_per_run_children(app_state):
     child = titles._project_dirname(titles.scratch_dir() / "abc123")
     assert titles.is_scratch_project(child)
     assert not titles.is_scratch_project("-home-user-alpha")
+
+
+# -- the None title model ------------------------------------------------------
+
+
+class _State:
+    """Just enough of AppState for the setting readers."""
+
+    def __init__(self, **settings) -> None:
+        self.settings = settings
+
+    def get_setting(self, key):
+        return self.settings.get(key)
+
+
+def test_enabled_is_anything_but_none():
+    assert enabled(_State(title_model=""))
+    assert enabled(_State(title_model="claude-haiku-4-5"))
+    assert enabled(_State())  # unset reads as the default
+    assert not enabled(_State(title_model=NO_MODEL))
+    assert not enabled(_State(title_model=" none "))
+
+
+_CATALOG = [
+    ClaudeModel("claude-sonnet-5", "Sonnet 5", "2026-03-01"),
+    ClaudeModel("claude-haiku-4-5-20251001", "Haiku 4.5", "2025-10-01"),
+    ClaudeModel("claude-haiku-3-5", "Haiku 3.5", "2024-10-01"),
+]
+
+
+def test_regenerate_runs_on_the_explicit_model():
+    assert regenerate_model("claude-sonnet-5", _CATALOG) == "claude-sonnet-5"
+    assert regenerate_name_label("claude-sonnet-5", _CATALOG) == "Regenerate name (Sonnet 5)"
+
+
+def test_regenerate_runs_on_the_newest_cached_haiku_by_default():
+    # Default and None alike: the automatic Haiku, resolved off the catalog.
+    for setting in ("", None, NO_MODEL):
+        assert regenerate_model(setting, _CATALOG) == "claude-haiku-4-5-20251001"
+        assert regenerate_name_label(setting, _CATALOG) == "Regenerate name (Haiku 4.5)"
+
+
+def test_regenerate_names_the_bare_alias_without_a_catalog():
+    # No catalog ever saved: the run would pass the CLI's own alias, and
+    # that is what the item says.
+    for catalog in (None, []):
+        assert regenerate_model(NO_MODEL, catalog) == "haiku"
+        assert regenerate_name_label("", catalog) == "Regenerate name (Haiku)"
+
+
+def test_submit_hands_the_runner_its_setting():
+    runner = FakeRunner(["One\n", "Two\n"])
+    collector = Collector()
+    generator = TitleGenerator(collector, runner=runner, pr_fetcher=no_lookup)
+    generator.submit("sid-1", "first prompt")  # the preference, at run time
+    generator.submit("sid-2", "second prompt", force=True, setting="")  # automatic
+    assert wait_until(lambda: len(collector.results) == 2)
+    assert runner.settings == [None, ""]
+
+
+def test_run_claude_refuses_a_none_preference(app_state, monkeypatch):
+    # The store queues nothing under None, so a run that reads the preference
+    # and finds it is a bug — and a fatal one, not a model to fall back to.
+    monkeypatch.setattr(titles.shutil, "which", lambda _name: "/usr/bin/claude")
+    monkeypatch.setattr(
+        titles.subprocess, "run", lambda *a, **k: pytest.fail("claude must not run")
+    )
+    app_state.AppState().set_setting("title_model", NO_MODEL)
+    with pytest.raises(TitleError) as err:
+        titles._run_claude("prompt")
+    assert err.value.fatal
+
+
+def test_run_claude_takes_an_explicit_setting_over_a_none_preference(app_state, monkeypatch):
+    # A regenerate under None: the store passes "" and the run resolves the
+    # automatic Haiku without ever reading the preference.
+    monkeypatch.setattr(titles.shutil, "which", lambda _name: "/usr/bin/claude")
+    monkeypatch.setattr(titles, "pick_model", lambda setting, prefer: f"{prefer}:{setting!r}")
+    argv = []
+
+    class _Done:
+        returncode = 0
+        stdout = "A title"
+        stderr = ""
+
+    def run(cmd, **_kw):
+        argv.append(cmd)
+        return _Done()
+
+    monkeypatch.setattr(titles.subprocess, "run", run)
+    app_state.AppState().set_setting("title_model", NO_MODEL)
+    assert titles._run_claude("prompt", setting="") == "A title"
+    assert argv[0][-2:] == ["--model", "haiku:''"]

@@ -1,9 +1,10 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-23. Full change history: git log for this file.
+# fork. Last modified: 2026-08-27. Full change history: git log for this file.
 
 import json
 
+from collins.claudemodels import NO_MODEL
 from collins.state import (
     clamp_window_size,
     editor_pops_out,
@@ -969,3 +970,71 @@ def test_new_chat_draft_unchanged_write_is_skipped(app_state):
     assert not app_state._STATE_FILE.exists()
     state.remove_new_chat_draft("draft-a")
     assert app_state._STATE_FILE.exists()
+
+
+# -- the model pickers' None -----------------------------------------------------
+
+
+def test_model_setting_defaults(app_state):
+    # Titles default to the automatic model; icons to None, so Generate Icon
+    # waits for a pick instead of running on open.
+    state = app_state.AppState()
+    assert state.get_setting("title_model") == ""
+    assert state.get_setting("icon_model") == NO_MODEL
+    assert "auto_title_sessions" not in app_state.DEFAULT_SETTINGS
+
+
+def test_old_state_without_the_model_keys_loads_the_new_defaults(app_state):
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps({"settings": {"scrollback": 5000}}), encoding="utf-8"
+    )
+    state = app_state.AppState()
+    assert state.get_setting("scrollback") == 5000
+    assert state.get_setting("title_model") == ""
+    assert state.get_setting("icon_model") == NO_MODEL
+
+
+def test_every_default_is_persisted(app_state):
+    # Every default is written out on save, not only the keys that were set:
+    # an install that saved under the old default carries an explicit
+    # icon_model of "" forward, keeping its auto-start.
+    app_state.AppState().set_setting("scrollback", 5000)
+    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
+    assert data["settings"]["icon_model"] == NO_MODEL
+    assert data["settings"]["title_model"] == ""
+
+    data["settings"]["icon_model"] = ""
+    app_state._STATE_FILE.write_text(json.dumps(data), encoding="utf-8")
+    assert app_state.AppState().get_setting("icon_model") == ""
+
+
+def test_auto_title_off_migrates_to_a_none_title_model(app_state):
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps({"settings": {"auto_title_sessions": False, "title_model": "claude-haiku-4-5"}}),
+        encoding="utf-8",
+    )
+    state = app_state.AppState()
+    assert state.get_setting("title_model") == NO_MODEL
+    assert "auto_title_sessions" not in state.settings
+
+    state.save()
+    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
+    assert data["settings"]["title_model"] == NO_MODEL
+    assert "auto_title_sessions" not in data["settings"]
+
+
+def test_auto_title_on_just_drops_the_key(app_state):
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps({"settings": {"auto_title_sessions": True, "title_model": "claude-haiku-4-5"}}),
+        encoding="utf-8",
+    )
+    state = app_state.AppState()
+    assert state.get_setting("title_model") == "claude-haiku-4-5"
+    assert "auto_title_sessions" not in state.settings
+
+    state.save()
+    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
+    assert "auto_title_sessions" not in data["settings"]

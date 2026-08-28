@@ -633,16 +633,6 @@ msgstr ""
 msgid "Show subscription usage limits below the session list"
 msgstr ""
 
-#: collins/prefs.py:173
-msgid "Auto-generate session titles"
-msgstr ""
-
-#: collins/prefs.py:337
-msgid ""
-"Summarize each new session's first prompt into a short title using the "
-"claude CLI; pre-existing sessions are titled locally from their prompt"
-msgstr ""
-
 #: collins/prefs.py:438
 msgid "Follow Claude's own session names"
 msgstr ""
@@ -665,16 +655,21 @@ msgstr ""
 msgid "Session title model"
 msgstr ""
 
-#: collins/prefs.py:377
-msgid "Model that summarizes each new session's first prompt into its name"
+#: collins/prefs.py:361
+msgid ""
+"Names each new session from its first prompt — every session Collins sees "
+"under ~/.claude/projects, including ones an agent or a terminal started. "
+"None: sessions keep the first words of their prompt, which costs nothing"
 msgstr ""
 
 #: collins/prefs.py:381
 msgid "Icon generation model"
 msgstr ""
 
-#: collins/prefs.py:382
-msgid "Model that designs project icons in the sidebar's Generate Icon dialog"
+#: collins/prefs.py:374
+msgid ""
+"Model the sidebar's Generate Icon dialog starts with. None: the dialog "
+"waits for you to pick a model and click Generate"
 msgstr ""
 
 #: collins/prefs.py:379
@@ -1040,8 +1035,9 @@ msgstr ""
 msgid "Rename…"
 msgstr ""
 
-#: collins/sidebar.py:779
-msgid "Regenerate name"
+#: collins/titles.py:143
+#, python-brace-format
+msgid "Regenerate name ({model})"
 msgstr ""
 
 #: collins/sidebar.py:2047
@@ -2093,6 +2089,18 @@ msgstr ""
 
 #: collins/dialogs.py:687
 msgid "Generating icon…"
+msgstr ""
+
+#: collins/dialogs.py:816
+msgid "Pick a model to generate an icon"
+msgstr ""
+
+#: collins/dialogs.py:824
+msgid "Generate"
+msgstr ""
+
+#: collins/dialogs.py:836
+msgid "Choose a model…"
 msgstr ""
 
 #: collins/dialogs.py:691

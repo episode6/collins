@@ -7,6 +7,7 @@ import pytest
 
 from collins import chats as chats_mod
 from collins import store as store_mod
+from collins.claudemodels import NO_MODEL
 from collins.models import CHATS_GROUP
 from collins.sessions import discover_sessions
 
@@ -870,7 +871,6 @@ def test_cli_titled_sessions_skip_auto_titling(store, monkeypatch):
     monkeypatch.setattr(
         store._titles, "submit", lambda sid, *a, **k: submitted.append(sid)
     )
-    store.state.set_setting("auto_title_sessions", True)
     store.state.set_setting("cli_title_sessions", True)
     titled = store._last_sessions[0].session_id
     store.state.set_cli_titles({titled: "cli name"})
@@ -884,3 +884,46 @@ def test_cli_titled_sessions_skip_auto_titling(store, monkeypatch):
     submitted.clear()
     store._request_titles(store._last_sessions)
     assert titled in submitted
+
+
+def test_a_none_title_model_queues_no_title_runs(store, monkeypatch):
+    submitted = []
+    monkeypatch.setattr(
+        store._titles, "submit", lambda sid, *a, **k: submitted.append(sid)
+    )
+    store.state.set_setting("title_model", NO_MODEL)
+    store._request_titles(store._last_sessions)
+    assert submitted == []
+
+    # Default and an explicit model both queue as before.
+    store.state.set_setting("title_model", "")
+    store._request_titles(store._last_sessions)
+    assert len(submitted) == len(store._last_sessions)
+
+
+def test_the_local_backfill_runs_under_a_none_title_model(store):
+    # The first words of the prompt cost nothing, so None doesn't skip them —
+    # a sidebar of blank rows was never what turning the model off was for.
+    store.state.set_setting("title_model", NO_MODEL)
+    for session in store._last_sessions:
+        store.state.set_generated_name(session.session_id, "")
+    store._backfill_names(store._last_sessions)
+    for session in store._last_sessions:
+        assert store.state.get_generated_name(session.session_id) == session.preview
+
+
+def test_regenerate_name_under_none_runs_on_the_automatic_default(store, monkeypatch):
+    submitted = []
+    monkeypatch.setattr(
+        store._titles, "submit", lambda sid, *a, **k: submitted.append((sid, k))
+    )
+    session = store._last_sessions[0]
+    store.state.set_setting("title_model", NO_MODEL)
+    store.regenerate_name(session.session_id)
+    assert submitted == [(session.session_id, {"force": True, "setting": ""})]
+
+    # With a model set the run reads the preference itself, as it always did.
+    submitted.clear()
+    store.state.set_setting("title_model", "claude-haiku-4-5")
+    store.regenerate_name(session.session_id)
+    assert submitted == [(session.session_id, {"force": True, "setting": None})]
