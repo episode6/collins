@@ -4,7 +4,7 @@
 
 Word-wise rather than one substring: every word of the query has to turn up
 somewhere in a setting's text, in any order, so "title session" finds
-"Auto-generate session titles" the same as "session title" does. Words match
+"Session title model" the same as "session title" does. Words match
 unanchored, because half of what people remember about a setting is a word
 from the middle of its subtitle. Kept free of GTK (like fuzzy.py) so it is
 unit-testable headless; prefs.py owns the widgets and collects the text.

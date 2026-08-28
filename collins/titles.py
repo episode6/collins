@@ -354,8 +354,9 @@ def _run_claude(prompt: str, setting: str | None = None) -> str:
     now: a fresh AppState per run, so a just-changed preference applies to
     the next title (state writes are atomic, so a mid-write read can't
     happen). The preference being None is asserted against rather than
-    resolved: the store queues nothing under it, so a run that reads it is a
-    bug, and answering with a model anyway would spend what was turned off.
+    resolved: the store queues nothing under it and the worker drops what
+    was queued before the switch, so a run that reads it is a bug, and
+    answering with a model anyway would spend what was turned off.
     """
     cli = shutil.which("claude")
     if cli is None:
@@ -443,6 +444,15 @@ class TitleGenerator:
         while True:
             session_id, prompt, cwd, setting = self._queue.get()
             if self._disabled:
+                continue
+            if setting is None and not enabled(state.AppState()):
+                # Queued on the preference, which has since been switched to
+                # None: the store queues nothing under None, so this item is
+                # stale, not a bug — drop it. Forgetting the id lets a later
+                # refresh queue the session again once a model is picked.
+                # The runner's own assertion stays as the last-resort guard.
+                log.debug("session titles: %s dropped, title model is now None", session_id)
+                self._seen.discard(session_id)
                 continue
             title = self._generate(prompt, cwd, setting)
             if title:

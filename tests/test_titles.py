@@ -566,3 +566,41 @@ def test_run_claude_takes_an_explicit_setting_over_a_none_preference(app_state, 
     app_state.AppState().set_setting("title_model", NO_MODEL)
     assert titles._run_claude("prompt", setting="") == "A title"
     assert argv[0][-2:] == ["--model", "haiku:''"]
+
+
+def test_a_title_queued_before_the_switch_to_none_is_dropped_not_fatal(app_state):
+    # A refresh queues a session on the preference; the user picks None
+    # while it waits its turn. That item is stale, not a failure: the worker
+    # drops it without a run and without disabling itself, so picking a
+    # model again — or a regenerate under None — still gets its title.
+    gate = threading.Event()
+    calls: list[tuple[str, str | None]] = []
+
+    def runner(prompt: str, setting: str | None = None) -> str:
+        calls.append((prompt, setting))
+        if setting is None and not enabled(app_state.AppState()):
+            raise TitleError("session title model is None", fatal=True)
+        gate.wait(timeout=5)  # holds the worker while the next item queues
+        return f"Title {len(calls)}"
+
+    collector = Collector()
+    generator = TitleGenerator(collector, runner=runner, pr_fetcher=no_lookup)
+    generator.submit("sid-1", "first prompt")  # running, blocked on the gate
+    assert wait_until(lambda: len(calls) == 1)
+    generator.submit("sid-2", "second prompt")  # queued behind it
+    app_state.AppState().set_setting("title_model", NO_MODEL)
+    gate.set()
+    assert wait_until(lambda: collector.results.get("sid-1") == "Title 1")
+
+    # sid-2 never reached the runner, and the generator is still alive: a
+    # regenerate under None runs on the automatic default as promised...
+    generator.submit("sid-3", "third prompt", force=True, setting="")
+    assert wait_until(lambda: collector.results.get("sid-3") == "Title 2")
+    assert [setting for _prompt, setting in calls] == [None, ""]
+    assert not generator._disabled
+
+    # ...and once a model is picked again, the dropped session is not
+    # remembered as seen, so the next refresh queues it afresh.
+    app_state.AppState().set_setting("title_model", "")
+    generator.submit("sid-2", "second prompt")
+    assert wait_until(lambda: collector.results.get("sid-2") == "Title 3")

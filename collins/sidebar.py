@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-26. Full change history: git log for this file.
+# fork. Last modified: 2026-08-27. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 

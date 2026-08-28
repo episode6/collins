@@ -20,15 +20,15 @@ def test_match_is_case_insensitive():
 
 
 def test_every_word_has_to_appear():
-    text = "Auto-generate session titles"
-    assert matches("session titles", text)
+    text = "Session title model"
+    assert matches("session title", text)
     assert not matches("session prompts", text)
 
 
 def test_words_may_appear_in_any_order():
-    text = "Auto-generate session titles"
-    assert matches("titles session", text)
-    assert matches("titles auto", text)
+    text = "Session title model"
+    assert matches("title session", text)
+    assert matches("model title", text)
 
 
 def test_words_need_not_be_adjacent():
