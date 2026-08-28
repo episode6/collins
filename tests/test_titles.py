@@ -575,20 +575,23 @@ def test_a_title_queued_before_the_switch_to_none_is_dropped_not_fatal(app_state
     # model again — or a regenerate under None — still gets its title.
     gate = threading.Event()
     calls: list[tuple[str, str | None]] = []
+    app = app_state.AppState()  # the store's instance: the one preferences write
 
     def runner(prompt: str, setting: str | None = None) -> str:
         calls.append((prompt, setting))
-        if setting is None and not enabled(app_state.AppState()):
+        if setting is None and not enabled(app):
             raise TitleError("session title model is None", fatal=True)
         gate.wait(timeout=5)  # holds the worker while the next item queues
         return f"Title {len(calls)}"
 
     collector = Collector()
-    generator = TitleGenerator(collector, runner=runner, pr_fetcher=no_lookup)
+    generator = TitleGenerator(
+        collector, runner=runner, pr_fetcher=no_lookup, enabled=lambda: enabled(app)
+    )
     generator.submit("sid-1", "first prompt")  # running, blocked on the gate
     assert wait_until(lambda: len(calls) == 1)
     generator.submit("sid-2", "second prompt")  # queued behind it
-    app_state.AppState().set_setting("title_model", NO_MODEL)
+    app.set_setting("title_model", NO_MODEL)
     gate.set()
     assert wait_until(lambda: collector.results.get("sid-1") == "Title 1")
 
@@ -601,6 +604,21 @@ def test_a_title_queued_before_the_switch_to_none_is_dropped_not_fatal(app_state
 
     # ...and once a model is picked again, the dropped session is not
     # remembered as seen, so the next refresh queues it afresh.
-    app_state.AppState().set_setting("title_model", "")
+    app.set_setting("title_model", "")
     generator.submit("sid-2", "second prompt")
     assert wait_until(lambda: collector.results.get("sid-2") == "Title 3")
+
+
+def test_the_generator_reads_no_state_of_its_own(monkeypatch):
+    # The gate is the caller's: a generator built without one never loads
+    # an AppState — so a developer whose own Collins is set to None (and
+    # every test with a fake runner) is not gated by the real state.json.
+    monkeypatch.setattr(
+        titles.state, "AppState", lambda: pytest.fail("the worker must not load state")
+    )
+    runner = FakeRunner(["A Title\n"])
+    collector = Collector()
+    generator = TitleGenerator(collector, runner=runner, pr_fetcher=no_lookup)
+    generator.submit("sid-1", "first prompt")  # on the preference, ungated
+    assert wait_until(lambda: collector.results.get("sid-1") == "A Title")
+    assert runner.settings == [None]

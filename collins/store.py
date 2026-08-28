@@ -129,8 +129,12 @@ class SessionStore(GObject.Object):
         self.show_archived = False
 
         # Delivers on the worker thread; hop to the main loop before mutating.
+        # The gate reads this store's own AppState — the one the preferences
+        # dialog writes — so a title queued before a switch to None is
+        # dropped at its turn (see TitleGenerator).
         self._titles = TitleGenerator(
-            lambda session_id, title: GLib.idle_add(self._on_title_generated, session_id, title)
+            lambda session_id, title: GLib.idle_add(self._on_title_generated, session_id, title),
+            enabled=lambda: titles_enabled(self.state),
         )
         # Same worker-thread delivery, same hop (see prattach).
         self._prompt_prs = PromptAttacher(

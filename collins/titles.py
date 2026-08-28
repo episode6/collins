@@ -389,6 +389,14 @@ class TitleGenerator:
     ``submit()`` must be called from a single thread (the GLib main loop);
     ``callback(session_id, title)`` fires on the worker thread, so the caller
     is responsible for marshalling back to the main loop.
+
+    *enabled* answers, on the worker thread, whether an item queued on the
+    preference (``setting=None``) is still wanted when its turn comes — the
+    store passes ``enabled`` over the AppState it queues from, so a switch
+    to None between queue and run drops the item instead of running it.
+    The generator reads no state of its own: without a gate every item is
+    wanted, which is what a caller that passes explicit settings, or a test
+    with a fake runner, means.
     """
 
     def __init__(
@@ -396,10 +404,12 @@ class TitleGenerator:
         callback: Callable[[str, str], None],
         runner: Callable[[str, str | None], str] = _run_claude,
         pr_fetcher: Callable[[PRReference, str | None], str | None] = _fetch_pr_title,
+        enabled: Callable[[], bool] = lambda: True,
     ) -> None:
         self._callback = callback
         self._runner = runner
         self._pr_fetcher = pr_fetcher
+        self._enabled = enabled
         self._queue: queue.SimpleQueue[tuple[str, str, str | None, str | None]] = (
             queue.SimpleQueue()
         )
@@ -445,7 +455,7 @@ class TitleGenerator:
             session_id, prompt, cwd, setting = self._queue.get()
             if self._disabled:
                 continue
-            if setting is None and not enabled(state.AppState()):
+            if setting is None and not self._enabled():
                 # Queued on the preference, which has since been switched to
                 # None: the store queues nothing under None, so this item is
                 # stale, not a bug — drop it. Forgetting the id lets a later

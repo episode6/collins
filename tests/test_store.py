@@ -901,6 +901,17 @@ def test_a_none_title_model_queues_no_title_runs(store, monkeypatch):
     assert len(submitted) == len(store._last_sessions)
 
 
+def test_the_title_worker_gate_reads_the_store_state(store):
+    # What the worker asks at an item's turn is the same rule, over the same
+    # AppState, that _request_titles queued on — so a switch to None in the
+    # preferences dialog reaches an item already in the queue.
+    assert store._titles._enabled()
+    store.state.set_setting("title_model", NO_MODEL)
+    assert not store._titles._enabled()
+    store.state.set_setting("title_model", "claude-haiku-4-5")
+    assert store._titles._enabled()
+
+
 def test_the_local_backfill_runs_under_a_none_title_model(store):
     # The first words of the prompt cost nothing, so None doesn't skip them —
     # a sidebar of blank rows was never what turning the model off was for.
