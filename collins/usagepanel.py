@@ -287,8 +287,9 @@ class UsagePanel(Gtk.Box):
     def _on_login_repaired(self) -> None:
         # tokenrefresh worker-thread callback: the throwaway run this panel's
         # failed fetch asked for succeeded — marshal home and re-ask. Other
-        # windows' panels recover on their own next poll.
-        GLib.idle_add(self.refetch)
+        # windows' panels recover on their own next poll. PRIORITY_DEFAULT:
+        # a cross-thread landing that advances a pipeline, like _on_result.
+        GLib.idle_add(self.refetch, priority=GLib.PRIORITY_DEFAULT)
 
     def refetch(self) -> None:
         """The login just changed under the panel (a token refresh — see
@@ -315,7 +316,11 @@ class UsagePanel(Gtk.Box):
                 result = err
             except Exception as err:  # never let a surprise kill the panel
                 result = usage.UsageError("http", str(err))
-            GLib.idle_add(self._on_result, result)
+            # The landing resets the _fetching gate, so it must not sit at
+            # idle priority: under a display that never goes quiet (CI's
+            # Xvfb) a default-idle callback can starve for the life of the
+            # process, leaving the gate shut and every later poll dropped.
+            GLib.idle_add(self._on_result, result, priority=GLib.PRIORITY_DEFAULT)
 
         threading.Thread(target=work, name="usage-fetch", daemon=True).start()
 
