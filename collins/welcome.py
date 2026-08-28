@@ -338,6 +338,10 @@ class WelcomeDialog(Adw.Dialog):
         was toggled, and the dialog has been seen. In the not-found state a
         close is never the user's (can_close is off); a programmatic
         force_close (tests, probes) must not count as one."""
+        # The two flags already cover every close the not-found state can
+        # reach today; the third check is deliberate insurance, so a future
+        # close path that forgets to set one can't record an answer the
+        # user never gave.
         if self._done or self._quit or not self._cli_found:
             return
         self._done = True

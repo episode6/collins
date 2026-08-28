@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-28. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -2431,6 +2431,8 @@ class App(Adw.Application):
             # blocks until answered (there is no app without it). The rest
             # of the launch's welcome-work takes its turn after — immediately
             # on a launch that owes no welcome.
+            # _after_welcome only builds the closure; nothing in it runs
+            # until the dialog is answered (or at once, when none shows).
             welcome.maybe_show(window, self.state, self.store, then=self._after_welcome(window))
         window.present()
 
