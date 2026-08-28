@@ -26,6 +26,48 @@ msgstr "Verwendet claude unter {path}"
 msgid "Change it later in Preferences"
 msgstr "Später in den Einstellungen änderbar"
 
+msgid "Claude Code CLI"
+msgstr "Claude Code CLI"
+
+msgid "Use This CLI"
+msgstr "Diese CLI verwenden"
+
+msgid "Browse…"
+msgstr "Durchsuchen…"
+
+msgid "Path to the claude executable"
+msgstr "Pfad zur ausführbaren claude-Datei"
+
+msgid "Collins needs the Claude Code CLI"
+msgstr "Collins braucht die Claude Code CLI"
+
+msgid "Found it — Collins will remember this location."
+msgstr "Gefunden — Collins merkt sich diesen Ort."
+
+msgid "Choose the claude executable"
+msgstr "Ausführbare claude-Datei auswählen"
+
+msgid "No Claude Code yet? Get it at {link}, then come back."
+msgstr "Noch kein Claude Code? Holen Sie es unter {link} und kommen Sie dann zurück."
+
+msgid "There's no executable file at this path."
+msgstr "Unter diesem Pfad gibt es keine ausführbare Datei."
+
+msgid "It wasn't in any of the usual places — enter or browse to where it's installed."
+msgstr "Es war an keinem der üblichen Orte — geben Sie ein, wo es installiert ist, oder suchen Sie danach."
+
+msgid "That's an executable, but not one named “claude” — pick the claude launcher itself."
+msgstr "Das ist eine ausführbare Datei, aber keine namens „claude“ — wählen Sie den claude-Starter selbst."
+
+msgid "This is inside a version manager's tree, so Collins can't validate a stable path — it will work until that tool updates, and then this question comes back."
+msgstr "Das liegt im Baum eines Versionsmanagers, daher kann Collins keinen stabilen Pfad prüfen — es funktioniert, bis dieses Tool sich aktualisiert, und dann kommt diese Frage zurück."
+
+msgid "This path has a version number in it, so it would break the next time Claude Code updates itself. Point at a stable launcher instead — usually ~/.local/bin/claude."
+msgstr "Dieser Pfad enthält eine Versionsnummer und würde beim nächsten Selbst-Update von Claude Code kaputtgehen. Zeigen Sie stattdessen auf einen stabilen Starter — meist ~/.local/bin/claude."
+
+msgid "Every session runs through the claude command, and it isn't on the PATH that launches from the desktop are given — that PATH doesn't include the folders your shell adds. Point Collins at the CLI once; the location is remembered from then on."
+msgstr "Jede Sitzung läuft über den Befehl claude, und der liegt nicht auf dem PATH, den vom Desktop gestartete Programme bekommen — der enthält nicht die Ordner, die Ihre Shell hinzufügt. Zeigen Sie Collins die CLI einmal; der Ort wird von da an gemerkt."
+
 msgid "Token use"
 msgstr "Token-Verbrauch"
 

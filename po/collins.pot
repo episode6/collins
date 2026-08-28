@@ -2419,7 +2419,7 @@ msgid ""
 "back."
 msgstr ""
 
-#: collins/prefs.py:662
+#: collins/welcome.py:188
 msgid "Claude Code CLI"
 msgstr ""
 

@@ -26,6 +26,48 @@ msgstr "A claude innen fut: {path}"
 msgid "Change it later in Preferences"
 msgstr "Később a Beállításokban módosítható"
 
+msgid "Claude Code CLI"
+msgstr "Claude Code CLI"
+
+msgid "Use This CLI"
+msgstr "Ezt a CLI-t használja"
+
+msgid "Browse…"
+msgstr "Tallózás…"
+
+msgid "Path to the claude executable"
+msgstr "A claude futtatható fájl elérési útja"
+
+msgid "Collins needs the Claude Code CLI"
+msgstr "A Collinsnak szüksége van a Claude Code CLI-re"
+
+msgid "Found it — Collins will remember this location."
+msgstr "Megvan — a Collins megjegyzi ezt a helyet."
+
+msgid "Choose the claude executable"
+msgstr "Válassza ki a claude futtatható fájlt"
+
+msgid "No Claude Code yet? Get it at {link}, then come back."
+msgstr "Még nincs Claude Code? Szerezze be innen: {link}, majd térjen vissza."
+
+msgid "There's no executable file at this path."
+msgstr "Ezen az elérési úton nincs futtatható fájl."
+
+msgid "It wasn't in any of the usual places — enter or browse to where it's installed."
+msgstr "Nem volt a szokásos helyek egyikén sem — adja meg vagy tallózza ki, hova van telepítve."
+
+msgid "That's an executable, but not one named “claude” — pick the claude launcher itself."
+msgstr "Ez futtatható fájl, de nem „claude” a neve — magát a claude indítót válassza."
+
+msgid "This is inside a version manager's tree, so Collins can't validate a stable path — it will work until that tool updates, and then this question comes back."
+msgstr "Ez egy verziókezelő fájában van, így a Collins nem tud stabil elérési utat ellenőrizni — működni fog, amíg az az eszköz nem frissül, aztán ez a kérdés visszatér."
+
+msgid "This path has a version number in it, so it would break the next time Claude Code updates itself. Point at a stable launcher instead — usually ~/.local/bin/claude."
+msgstr "Ebben az elérési útban verziószám van, így elromlana, amikor a Claude Code legközelebb frissíti magát. Mutasson inkább egy stabil indítóra — általában ~/.local/bin/claude."
+
+msgid "Every session runs through the claude command, and it isn't on the PATH that launches from the desktop are given — that PATH doesn't include the folders your shell adds. Point Collins at the CLI once; the location is remembered from then on."
+msgstr "Minden munkamenet a claude parancson keresztül fut, és az nincs azon a PATH-on, amelyet az asztalról indított programok kapnak — az a PATH nem tartalmazza a shell által hozzáadott mappákat. Mutasson egyszer a CLI-re a Collinsban; a helyet ettől kezdve megjegyzi."
+
 msgid "Token use"
 msgstr "Tokenhasználat"
 
