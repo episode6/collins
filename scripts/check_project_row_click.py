@@ -46,6 +46,11 @@ for path in (f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin", PROJECT):
     os.makedirs(path, exist_ok=True)
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
+# The first-launch welcome (collins.welcome) is answered already: it would
+# otherwise sit over the window under test.
+os.makedirs(f"{E2E}/config/collins", exist_ok=True)
+with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
+    fh.write('{"settings": {"welcome_seen": true}}')
 with open(SHIM, "w", encoding="utf-8") as fh:
     fh.write("#!/bin/sh\nexit 0\n")  # never run; only found
 os.chmod(SHIM, 0o755)

@@ -52,7 +52,9 @@ for path in (FAIL_CWD, OK_CWD):
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
 with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
-    fh.write('{"settings": {"title_model": "none"}}')
+    # Titles on None so nothing asks the shim for a `-p` run; the
+    # first-launch welcome answered already.
+    fh.write('{"settings": {"title_model": "none", "welcome_seen": true}}')
 
 # The CLI the tab spawns. Every run is logged, so the check can see exactly
 # which command lines the tab typed; what it does then is the scene:

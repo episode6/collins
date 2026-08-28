@@ -154,11 +154,12 @@ def bail(win, why: str) -> bool:
 seed = AppState()
 i18n.init(seed.get_setting("language"))
 # Seeded before the App reads the same file: the behavior under test, and no
-# gh-welcome notice — on a runner with gh signed out that dialog lands over
-# the window, and a window close then dismisses the dialog instead of
-# reaching close-request at all (Adw closes the topmost dialog first).
+# welcome dialog or gh-welcome notice — on a runner with gh signed out that
+# notice lands over the window, and a window close then dismisses the dialog
+# instead of reaching close-request at all (Adw closes the topmost dialog
+# first); the first-launch welcome would sit there on every runner.
 seed.update_settings(
-    {"quit_with_running_sessions": "hide", "gh_welcome_dismissed": True}
+    {"quit_with_running_sessions": "hide", "gh_welcome_dismissed": True, "welcome_seen": True}
 )
 trust.trust_dir(TRUSTED)
 app = App()

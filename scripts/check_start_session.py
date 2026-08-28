@@ -55,6 +55,11 @@ for path in (f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin", TRUSTED):
     os.makedirs(path, exist_ok=True)
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
+# The first-launch welcome (collins.welcome) is answered already: it would
+# otherwise sit over the window under test.
+os.makedirs(f"{E2E}/config/collins", exist_ok=True)
+with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
+    fh.write('{"settings": {"welcome_seen": true}}')
 
 # The child under test. It draws the idle prompt, reads the injected bracketed
 # paste (capturing its body so the test can confirm the prompt survived the

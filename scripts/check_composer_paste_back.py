@@ -52,6 +52,11 @@ for path in (f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin", TRUSTED):
     os.makedirs(path, exist_ok=True)
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
+# The first-launch welcome (collins.welcome) is answered already: it would
+# otherwise sit over the window under test.
+os.makedirs(f"{E2E}/config/collins", exist_ok=True)
+with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
+    fh.write('{"settings": {"welcome_seen": true}}')
 
 # The prompt mark is ❯ + U+00A0, exactly as the CLI draws it (takes_prompt
 # keys on the no-break space); copied from check_new_chat.py's shim.
