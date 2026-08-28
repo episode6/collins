@@ -923,18 +923,17 @@ def test_the_local_backfill_runs_under_a_none_title_model(store):
         assert store.state.get_generated_name(session.session_id) == session.preview
 
 
-def test_regenerate_name_under_none_runs_on_the_automatic_default(store, monkeypatch):
+def test_regenerate_name_fixes_its_model_at_the_click(store, monkeypatch):
+    # Never None (read the preference at the run): the worker drops an item
+    # queued on the preference once it turns to None, and a click is an
+    # explicit ask that must outlive a preference change made after it.
     submitted = []
     monkeypatch.setattr(
         store._titles, "submit", lambda sid, *a, **k: submitted.append((sid, k))
     )
     session = store._last_sessions[0]
-    store.state.set_setting("title_model", NO_MODEL)
-    store.regenerate_name(session.session_id)
-    assert submitted == [(session.session_id, {"force": True, "setting": ""})]
-
-    # With a model set the run reads the preference itself, as it always did.
-    submitted.clear()
-    store.state.set_setting("title_model", "claude-haiku-4-5")
-    store.regenerate_name(session.session_id)
-    assert submitted == [(session.session_id, {"force": True, "setting": None})]
+    for pref, expected in [(NO_MODEL, ""), ("", ""), ("claude-haiku-4-5", "claude-haiku-4-5")]:
+        submitted.clear()
+        store.state.set_setting("title_model", pref)
+        store.regenerate_name(session.session_id)
+        assert submitted == [(session.session_id, {"force": True, "setting": expected})]

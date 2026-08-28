@@ -16,6 +16,7 @@ from collins.titles import (
     quote_for_prompt,
     regenerate_model,
     regenerate_name_label,
+    regenerate_setting,
     sanitize_title,
 )
 
@@ -503,6 +504,13 @@ _CATALOG = [
 ]
 
 
+def test_regenerate_setting_is_fixed_at_the_click():
+    assert regenerate_setting("claude-haiku-4-5") == "claude-haiku-4-5"
+    assert regenerate_setting("") == ""
+    assert regenerate_setting(None) == ""
+    assert regenerate_setting(NO_MODEL) == ""
+
+
 def test_regenerate_runs_on_the_explicit_model():
     assert regenerate_model("claude-sonnet-5", _CATALOG) == "claude-sonnet-5"
     assert regenerate_name_label("claude-sonnet-5", _CATALOG) == "Regenerate name (Sonnet 5)"
@@ -591,22 +599,28 @@ def test_a_title_queued_before_the_switch_to_none_is_dropped_not_fatal(app_state
     generator.submit("sid-1", "first prompt")  # running, blocked on the gate
     assert wait_until(lambda: len(calls) == 1)
     generator.submit("sid-2", "second prompt")  # queued behind it
+    # A Regenerate name click, also queued behind it, with its model fixed
+    # at the click (regenerate_setting) rather than read at the run.
+    regen = regenerate_setting(app.get_setting("title_model"))
+    generator.submit("sid-4", "fourth prompt", force=True, setting=regen)
     app.set_setting("title_model", NO_MODEL)
     gate.set()
     assert wait_until(lambda: collector.results.get("sid-1") == "Title 1")
 
-    # sid-2 never reached the runner, and the generator is still alive: a
-    # regenerate under None runs on the automatic default as promised...
+    # sid-2 never reached the runner, the explicit sid-4 did, and the
+    # generator is still alive: a regenerate under None runs on the
+    # automatic default as promised...
+    assert wait_until(lambda: collector.results.get("sid-4") == "Title 2")
     generator.submit("sid-3", "third prompt", force=True, setting="")
-    assert wait_until(lambda: collector.results.get("sid-3") == "Title 2")
-    assert [setting for _prompt, setting in calls] == [None, ""]
+    assert wait_until(lambda: collector.results.get("sid-3") == "Title 3")
+    assert [setting for _prompt, setting in calls] == [None, "", ""]
     assert not generator._disabled
 
     # ...and once a model is picked again, the dropped session is not
     # remembered as seen, so the next refresh queues it afresh.
     app.set_setting("title_model", "")
     generator.submit("sid-2", "second prompt")
-    assert wait_until(lambda: collector.results.get("sid-2") == "Title 3")
+    assert wait_until(lambda: collector.results.get("sid-2") == "Title 4")
 
 
 def test_the_generator_reads_no_state_of_its_own(monkeypatch):

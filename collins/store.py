@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-28. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -36,7 +36,7 @@ from .sessions import (
     worktree_project_root,
 )
 from .state import AppState, merge_project_order, move_in_order
-from .titles import TitleGenerator, fallback_title
+from .titles import TitleGenerator, fallback_title, regenerate_setting
 from .titles import enabled as titles_enabled
 
 log = logging.getLogger(__name__)
@@ -319,13 +319,16 @@ class SessionStore(GObject.Object):
         Available under a title model of None too — the click is an explicit
         ask, the same consent the icon dialog's Generate button gives — and
         then runs on the automatic default (the newest Haiku), which is what
-        the menu item said it would (titles.regenerate_name_label)."""
+        the menu item said it would (titles.regenerate_name_label). The
+        model is fixed here, at the click, never read at the run: an item
+        queued on the preference is dropped by the worker if the preference
+        turns to None while it waits, and an explicit ask must survive a
+        preference change made after it."""
         session = self.sessions.get(session_id)
         if session is None or not session.preview:
             return
         self._regen_pending.add(session_id)
-        # None reads the preference at run time; "" is the automatic default.
-        setting = None if titles_enabled(self.state) else ""
+        setting = regenerate_setting(self.state.get_setting("title_model"))
         self._titles.submit(session_id, session.preview, session.cwd, force=True, setting=setting)
 
     def _on_title_generated(self, session_id: str, title: str) -> bool:

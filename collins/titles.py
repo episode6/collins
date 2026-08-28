@@ -125,13 +125,25 @@ def enabled(app_state: state.AppState) -> bool:
     return (app_state.get_setting("title_model") or "").strip() != NO_MODEL
 
 
+def regenerate_setting(setting: str | None) -> str:
+    """The title-model value an explicit "Regenerate name" runs on, fixed at
+    the click: the explicit id when the preference names one, else "" — the
+    automatic default — which is what the preference means when it is the
+    default and what a regenerate falls back to under None. Never None: a
+    click is an ask made now, and an item that read the preference at its
+    turn instead could be dropped by a switch to None made while it waited
+    in the queue."""
+    setting = (setting or "").strip()
+    return "" if setting == NO_MODEL else setting
+
+
 def regenerate_model(setting: str | None, catalog: list[ClaudeModel] | None) -> str:
     """What "Regenerate name" would pass to ``--model``: the explicit title
     model when the setting names one, else the automatic Haiku default
     resolved against *catalog* — or, with no catalog ever saved (None), the
     CLI's bare ``haiku`` alias, which is exactly what the run would pass."""
-    setting = (setting or "").strip()
-    if setting and setting != NO_MODEL:
+    setting = regenerate_setting(setting)
+    if setting:
         return setting
     return resolve_model("", catalog or [], prefer="haiku")
 
