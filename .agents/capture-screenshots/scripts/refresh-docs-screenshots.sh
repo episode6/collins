@@ -70,7 +70,7 @@ run_scene() {
     mcp-servers)    shoot mcp-servers "$IMG/mcp-servers.png" --size 1280x860 ;;
     preferences)    shoot preferences "$IMG/preferences.png" --size 1280x860 ;;
     terminal-panel) shoot terminal-panel "$IMG/terminal-panel.png" --size 1280x860 ;;
-    new-chat)       shoot new-chat "$IMG/new-chat.png" --size 1280x860 ;;
+    new-chat)       shoot new-chat "$IMG/new-chat.png" --size 1280x860 --set welcome_seen=true ;;
     composer)       shoot composer "$IMG/composer.png" --size 1280x860 ;;
     pr-page)        shoot pr-page "$IMG/pr-page.png" --size 1700x950 \
                       --set page_panel_size_right=700 --settle-ms 6000 ;;
@@ -78,14 +78,20 @@ run_scene() {
                       --set editor_width=620 ;;
     attachments-panel) shoot attachments-panel "$IMG/attachments-panel.png" --size 1500x1100 \
                       --set page_panel_size_right=420 --settle-ms 5000 ;;
+    welcome)        shoot welcome "$IMG/welcome.png" --size 1280x860 --set welcome_seen=false ;;
+    welcome-cli)    shoot welcome-cli "$IMG/welcome-cli.png" --size 1280x860 --set welcome_seen=false ;;
   esac
 }
 
-# new-chat goes last: the draft it writes to state.json would otherwise show
-# up as a Draft row in every scene shot after it.
+# The welcome scenes set welcome_seen back to false in the shared state.json
+# (the dialog only shows on an unseen install), so they go after every plain
+# scene and new-chat, which sets it true again, goes last of all — last
+# anyway, since the draft it writes to state.json would otherwise show up as
+# a Draft row in every scene shot after it.
 SCENES=("$@")
 for s in main-window hero quick-switcher session-details mcp-servers preferences \
-         terminal-panel composer pr-page editor-panel attachments-panel new-chat; do
+         terminal-panel composer pr-page editor-panel attachments-panel \
+         welcome welcome-cli new-chat; do
   run_scene "$s"
 done
 echo "staged data left in $E2E"

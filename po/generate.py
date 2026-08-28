@@ -20,6 +20,16 @@ DOMAIN = "collins"
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "hu": {
+        'Before you start':
+            'Mielőtt elkezdené',
+        "Collins runs Claude for you in a few places. Here's where, and the switches for each.":
+            'A Collins néhány helyen Ön helyett futtatja a Claude-ot. Itt látható, hol — és mindegyikhez a kapcsoló.',
+        'Continue':
+            'Folytatás',
+        'Using claude at {path}':
+            'A claude innen fut: {path}',
+        'Change it later in Preferences':
+            'Később a Beállításokban módosítható',
         "Token use":
             "Tokenhasználat",
         "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
@@ -561,6 +571,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "A Collins mostantól megtalálható az alkalmazások között",
     },
     "de": {
+        'Before you start':
+            'Bevor Sie loslegen',
+        "Collins runs Claude for you in a few places. Here's where, and the switches for each.":
+            'Collins führt Claude an einigen Stellen für Sie aus. Hier steht, wo — und der Schalter für jede davon.',
+        'Continue':
+            'Weiter',
+        'Using claude at {path}':
+            'Verwendet claude unter {path}',
+        'Change it later in Preferences':
+            'Später in den Einstellungen änderbar',
         "Token use":
             "Token-Verbrauch",
         "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
@@ -1112,6 +1132,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Collins ist jetzt in deinen Anwendungen",
     },
     "es": {
+        'Before you start':
+            'Antes de empezar',
+        "Collins runs Claude for you in a few places. Here's where, and the switches for each.":
+            'Collins ejecuta Claude por usted en algunos sitios. Aquí está dónde, y el interruptor de cada uno.',
+        'Continue':
+            'Continuar',
+        'Using claude at {path}':
+            'Usando claude en {path}',
+        'Change it later in Preferences':
+            'Cámbielo más tarde en Preferencias',
         "Token use":
             "Uso de tokens",
         "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
@@ -1660,6 +1690,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Collins ya está en tus aplicaciones",
     },
     "fr": {
+        'Before you start':
+            'Avant de commencer',
+        "Collins runs Claude for you in a few places. Here's where, and the switches for each.":
+            "Collins exécute Claude pour vous à quelques endroits. Voici lesquels, et l'interrupteur de chacun.",
+        'Continue':
+            'Continuer',
+        'Using claude at {path}':
+            'Utilise claude depuis {path}',
+        'Change it later in Preferences':
+            'Modifiable plus tard dans les Préférences',
         "Token use":
             "Utilisation des jetons",
         "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":

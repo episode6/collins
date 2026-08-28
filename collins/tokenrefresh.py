@@ -268,7 +268,7 @@ def maybe_start(on_refreshed: Callable[[], None]) -> threading.Thread | None:
     was showing as expired (the usage panel).
     """
 
-    # No CLI is cliwelcome's business, not a repair to attempt — and not
+    # No CLI is the welcome dialog's business, not a repair to attempt — and not
     # a warning to log on every launch of a CLI-less install.
     return _spawn(lambda: clisetup.on_path() and token_expired(), on_refreshed)
 

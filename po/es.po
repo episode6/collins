@@ -11,6 +11,21 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+msgid "Before you start"
+msgstr "Antes de empezar"
+
+msgid "Collins runs Claude for you in a few places. Here's where, and the switches for each."
+msgstr "Collins ejecuta Claude por usted en algunos sitios. Aquí está dónde, y el interruptor de cada uno."
+
+msgid "Continue"
+msgstr "Continuar"
+
+msgid "Using claude at {path}"
+msgstr "Usando claude en {path}"
+
+msgid "Change it later in Preferences"
+msgstr "Cámbielo más tarde en Preferencias"
+
 msgid "Token use"
 msgstr "Uso de tokens"
 

@@ -11,6 +11,21 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+msgid "Before you start"
+msgstr "Mielőtt elkezdené"
+
+msgid "Collins runs Claude for you in a few places. Here's where, and the switches for each."
+msgstr "A Collins néhány helyen Ön helyett futtatja a Claude-ot. Itt látható, hol — és mindegyikhez a kapcsoló."
+
+msgid "Continue"
+msgstr "Folytatás"
+
+msgid "Using claude at {path}"
+msgstr "A claude innen fut: {path}"
+
+msgid "Change it later in Preferences"
+msgstr "Később a Beállításokban módosítható"
+
 msgid "Token use"
 msgstr "Tokenhasználat"
 

@@ -121,7 +121,10 @@ Collins runs Claude on your behalf — against your subscription's usage
 limits — in four places, each with its setting in **Preferences → Token
 use** (directly under General) or the **Built-in MCP tools** group right
 below it. Every headless run is a `claude -p` from a scratch directory, so
-none of them ever appears as a session.
+none of them ever appears as a session. A fresh install is shown these
+settings once, in the **Before you start** dialog on its first launch,
+before the first of the runs happens — and the login repair waits until
+that dialog has been answered.
 
 - **Session titling** — a `claude -p` on the *Session title model* for
   every unnamed transcript that appears under `~/.claude/projects` while
@@ -250,6 +253,7 @@ collins/
 ├── titles.py         # auto-generated session titles (local + claude)
 ├── usage.py          # Claude subscription usage fetch/parse
 ├── tokensettings.py  # the Token use rows: what runs Claude for you
+├── welcome.py        # the first-launch dialog: those rows, and where claude is
 ├── gitinfo.py        # git branch for the tab footer; is the tree dirty?
 ├── transcript.py     # tail transcripts for touched files and PR links
 ├── dialogs.py        # rename / emoji / confirm / details / MCP dialogs

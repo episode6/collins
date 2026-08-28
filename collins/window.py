@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-26. Full change history: git log for this file.
+# fork. Last modified: 2026-08-27. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -1476,7 +1476,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _apply_keybindings(self) -> None:
         # Through the app, which re-applies to every window; hasattr rather
         # than isinstance because window.py can't import App (app.py
-        # imports this module) — the same shape as _apply_preferences.
+        # imports this module) — the same shape as apply_preferences.
         app = self.get_application()
         if hasattr(app, "apply_keybindings"):
             app.apply_keybindings()
@@ -5896,9 +5896,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._switcher.present(self)
 
     def _show_preferences(self) -> None:
-        PreferencesDialog(self.state, self._apply_preferences).present(self)
+        PreferencesDialog(self.state, self.apply_preferences).present(self)
 
-    def _apply_preferences(self) -> None:
+    def apply_preferences(self) -> None:
+        """Push freshly written settings where they take effect: the
+        preferences dialog's on_change, and the welcome dialog's (its rows
+        are the same ones)."""
         self._apply_settings_to_tabs()
         app = self.get_application()
         if hasattr(app, "refresh_caffeine_inhibit"):

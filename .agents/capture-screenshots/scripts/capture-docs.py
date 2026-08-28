@@ -5,7 +5,14 @@ Usage: python3 capture-docs.py <repo-root> <output.png> --scene NAME
 
 Scenes: main-window, hero, quick-switcher, session-details, mcp-servers,
 preferences, terminal-panel, new-chat, composer, pr-page, editor-panel,
-attachments-panel.
+attachments-panel, welcome, welcome-cli.
+
+The two welcome scenes shoot the first-launch dialog (collins/welcome.py),
+so they need the staged state's welcome_seen set back to false (--set
+welcome_seen=false; refresh-docs-screenshots.sh does). welcome shows the
+CLI found; welcome-cli hides `claude` from clisetup and seeds
+~/.local/bin/claude under the scratch HOME, so the dialog opens on the
+ask, prefilled with the launcher's usual place and a green verdict.
 
 Same isolation env contract as the skill's capture.py (a per-run COLLINS_APP_ID,
 COLLINS_PROJECTS_DIR, COLLINS_CLAUDE_CONFIG, COLLINS_CHATS_DIR,
@@ -38,7 +45,7 @@ args = parser.parse_args()
 SCENES = (
     "main-window", "hero", "quick-switcher", "session-details", "mcp-servers",
     "preferences", "terminal-panel", "new-chat", "composer", "pr-page",
-    "editor-panel", "attachments-panel",
+    "editor-panel", "attachments-panel", "welcome", "welcome-cli",
 )
 if args.scene not in SCENES:
     parser.error(f"unknown scene {args.scene}")
@@ -67,7 +74,7 @@ import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import GLib, Graphene, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Graphene, Gtk  # noqa: E402
 
 import shutil  # noqa: E402
 
@@ -78,7 +85,7 @@ shutil.which = lambda cmd, *a, **k: (
     "claude" if cmd == "claude" else _orig_which(cmd, *a, **k)
 )
 
-from collins import dialogs, i18n, prdetail, trust  # noqa: E402
+from collins import clisetup, dialogs, i18n, prdetail, trust  # noqa: E402
 from collins.prstatus import PullRequest  # noqa: E402
 
 U1 = "11111111-1111-4111-8111-111111111111"
@@ -171,6 +178,24 @@ def staged_detail(_url: str) -> prdetail.PullRequestDetail:
 if args.scene == "pr-page":
     prdetail.fetch = staged_detail
 
+# The CLI launcher's usual place, under the scratch HOME: what the not-found
+# ask prefills. The entry then reads it as ~/.local/bin/claude (see stage).
+CLI_HOME_LAUNCHER = os.path.expanduser("~/.local/bin/claude")
+if args.scene == "welcome":
+    # The found state names the claude in use; the patched shutil.which
+    # above would name it "claude", so say where a real one usually is.
+    clisetup.found_at = lambda: "~/.local/bin/claude"
+if args.scene == "welcome-cli":
+    # A launch that can't find claude: the dialog's blocking state. The
+    # shim stays on PATH for everything else (the store's provider check
+    # goes through the patched shutil.which above).
+    clisetup.on_path = lambda: False
+    clisetup.found_at = lambda: None
+    os.makedirs(os.path.dirname(CLI_HOME_LAUNCHER), exist_ok=True)
+    shutil.copy(os.path.join(os.path.dirname(os.environ["COLLINS_PROJECTS_DIR"]), "bin", "claude"),
+                CLI_HOME_LAUNCHER)
+    os.chmod(CLI_HOME_LAUNCHER, 0o755)
+
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
@@ -236,7 +261,25 @@ def stage(win) -> list[tuple[int, callable]]:
     elif scene == "attachments-panel":
         tab = open_tab(win, U1)
         return [(1500, lambda: tab.dock_attachments(focus=False))]
+    elif scene == "welcome-cli":
+        # The dialog is up already (do_activate presented it); the prefilled
+        # path is the scratch HOME's absolute one, which reads as ~ here.
+        def tilde_path() -> None:
+            dialog = win.get_visible_dialog()
+            entry = next(w for w in _walk(dialog) if isinstance(w, Adw.EntryRow))
+            entry.set_text("~/.local/bin/claude")
+            entry.set_position(-1)
+
+        return [(500, tilde_path)]
     return []
+
+
+def _walk(widget):
+    child = widget.get_first_child()
+    while child is not None:
+        yield child
+        yield from _walk(child)
+        child = child.get_next_sibling()
 
 
 def capture() -> bool:
