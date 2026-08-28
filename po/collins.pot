@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-28. Full change history: git log for this file.
 
 # SOME DESCRIPTIVE TITLE.
 # Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
@@ -680,7 +680,7 @@ msgstr ""
 msgid "Default (latest Sonnet)"
 msgstr ""
 
-#: collins/tokensettings.py:121
+#: collins/tokensettings.py:169
 msgid "Model list"
 msgstr ""
 
@@ -688,7 +688,7 @@ msgstr ""
 msgid "Checking…"
 msgstr ""
 
-#: collins/tokensettings.py:115
+#: collins/tokensettings.py:171
 msgid "Refresh"
 msgstr ""
 
@@ -2219,7 +2219,7 @@ msgstr ""
 msgid "Session tools"
 msgstr ""
 
-#: collins/tokensettings.py:43
+#: collins/tokensettings.py:42
 msgid "Token use"
 msgstr ""
 
@@ -2230,11 +2230,11 @@ msgid ""
 "scratch directory, so it never appears as a session."
 msgstr ""
 
-#: collins/tokensettings.py:302
+#: collins/tokensettings.py:323
 msgid "Auto-renew the Claude login"
 msgstr ""
 
-#: collins/tokensettings.py:303
+#: collins/tokensettings.py:325
 msgid ""
 "When the login the usage panel and model list are fetched with has expired "
 "— at launch, or when a fetch is refused later — run one throwaway claude -p "
@@ -2242,7 +2242,7 @@ msgid ""
 "run claude yourself"
 msgstr ""
 
-#: collins/tokensettings.py:235
+#: collins/tokensettings.py:252
 #, python-brace-format
 msgid "{status} · free, no tokens"
 msgstr ""
