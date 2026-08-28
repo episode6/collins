@@ -27,9 +27,11 @@ def _write_credentials(path: Path, expires_in_s: float = 3600) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _fresh_attempt_state(monkeypatch):
+def _fresh_attempt_state(monkeypatch, app_state):
     """The single-flight flag and cooldown clock are module-global; every
-    test starts with no attempt made yet."""
+    test starts with no attempt made yet. `app_state` isolates the state
+    file the switch is read from, so the auto_renew_login default (on)
+    governs unless a test turns it off."""
     monkeypatch.setattr(tokenrefresh, "_running", False)
     monkeypatch.setattr(tokenrefresh, "_last_attempt", None)
     monkeypatch.setattr(tokenrefresh, "_failures", 0)
@@ -149,6 +151,33 @@ def test_maybe_start_is_off_under_the_fixture_harness(credentials, monkeypatch):
     assert tokenrefresh.maybe_start(lambda: None) is None
 
 
+def test_maybe_start_is_off_when_the_switch_is_off(credentials, app_state, monkeypatch):
+    # The Token use switch: an expired login the user asked not to have
+    # repaired spawns nothing — no thread, no check, no run.
+    _write_credentials(credentials, expires_in_s=-60)
+    app_state.AppState().set_setting("auto_renew_login", False)
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
+    events = []
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or True)
+    assert tokenrefresh.maybe_start(lambda: events.append("cb")) is None
+    assert events == []
+
+
+def test_the_switch_is_read_fresh_at_each_attempt(credentials, app_state, monkeypatch):
+    # Flipped on again (as the preferences row does), the next attempt runs.
+    _write_credentials(credentials, expires_in_s=-60)
+    state = app_state.AppState()
+    state.set_setting("auto_renew_login", False)
+    assert tokenrefresh.maybe_start(lambda: None) is None
+    state.set_setting("auto_renew_login", True)
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: True)
+    monkeypatch.setattr(claudemodels, "cache_failed", lambda: False)
+    events = []
+    tokenrefresh.maybe_start(lambda: events.append("cb")).join(5)
+    assert events == ["cb"]
+
+
 def test_maybe_start_leaves_a_live_token_alone(credentials, monkeypatch):
     _write_credentials(credentials)
     monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
@@ -211,6 +240,18 @@ def test_maybe_start_failed_refresh_never_signals(credentials, monkeypatch):
 def test_maybe_repair_is_off_under_the_fixture_harness(credentials, monkeypatch):
     monkeypatch.setenv("COLLINS_USAGE_FIXTURE", "/nowhere/usage.json")
     assert tokenrefresh.maybe_repair(lambda: None) is None
+
+
+def test_maybe_repair_is_off_when_the_switch_is_off(credentials, app_state, monkeypatch):
+    # A refused poll under a switched-off repair leaves the panel to say
+    # "run claude" — the same gate as the launch entry.
+    _write_credentials(credentials)
+    app_state.AppState().set_setting("auto_renew_login", False)
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
+    events = []
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or True)
+    assert tokenrefresh.maybe_repair(lambda: events.append("cb")) is None
+    assert events == []
 
 
 def test_maybe_repair_skips_a_cli_less_install(credentials, monkeypatch):

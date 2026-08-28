@@ -651,64 +651,64 @@ msgstr ""
 msgid "Models the app's own headless claude runs ask for"
 msgstr ""
 
-#: collins/prefs.py:376
+#: collins/tokensettings.py:143
 msgid "Session title model"
 msgstr ""
 
-#: collins/prefs.py:361
+#: collins/tokensettings.py:145
 msgid ""
 "Names each new session from its first prompt — every session Collins sees "
 "under ~/.claude/projects, including ones an agent or a terminal started. "
 "None: sessions keep the first words of their prompt, which costs nothing"
 msgstr ""
 
-#: collins/prefs.py:381
+#: collins/tokensettings.py:153
 msgid "Icon generation model"
 msgstr ""
 
-#: collins/prefs.py:374
+#: collins/tokensettings.py:155
 msgid ""
 "Model the sidebar's Generate Icon dialog starts with. None: the dialog "
 "waits for you to pick a model and click Generate"
 msgstr ""
 
-#: collins/prefs.py:379
+#: collins/tokensettings.py:127
 msgid "Default (latest Haiku)"
 msgstr ""
 
-#: collins/prefs.py:385
+#: collins/tokensettings.py:128
 msgid "Default (latest Sonnet)"
 msgstr ""
 
-#: collins/prefs.py:667
+#: collins/tokensettings.py:121
 msgid "Model list"
 msgstr ""
 
-#: collins/prefs.py:667
+#: collins/tokensettings.py:170
 msgid "Checking…"
 msgstr ""
 
-#: collins/prefs.py:669
+#: collins/tokensettings.py:115
 msgid "Refresh"
 msgstr ""
 
-#: collins/prefs.py:672
+#: collins/tokensettings.py:174
 msgid ""
 "Ask Anthropic for the model list now, rather than waiting for the saved one "
 "to age out"
 msgstr ""
 
-#: collins/prefs.py:1437
+#: collins/tokensettings.py:268
 msgid ""
 "Couldn't reach Anthropic — offering the CLI's aliases (opus, sonnet, haiku)"
 msgstr ""
 
-#: collins/prefs.py:1445
+#: collins/tokensettings.py:276
 #, python-brace-format
 msgid "Couldn't reach Anthropic — still showing the list fetched {when}"
 msgstr ""
 
-#: collins/prefs.py:1449
+#: collins/tokensettings.py:279
 #, python-brace-format
 msgid "{count} models, updated {when}"
 msgstr ""
@@ -2219,79 +2219,109 @@ msgstr ""
 msgid "Session tools"
 msgstr ""
 
-#: collins/prefs.py:663
-msgid ""
-"Tools a session can call to drive Collins. Turning one off takes effect "
-"immediately; sessions already running are only offered the tool again once "
-"they restart"
+#: collins/tokensettings.py:43
+msgid "Token use"
 msgstr ""
 
-#: collins/prefs.py:88
+#: collins/tokensettings.py:44
+msgid ""
+"Each of these runs Claude on your behalf, against your subscription's usage "
+"limits, without a prompt from you. Every run is a headless claude -p from a "
+"scratch directory, so it never appears as a session."
+msgstr ""
+
+#: collins/tokensettings.py:302
+msgid "Auto-renew the Claude login"
+msgstr ""
+
+#: collins/tokensettings.py:303
+msgid ""
+"When the login the usage panel and model list are fetched with has expired "
+"— at launch, or when a fetch is refused later — run one throwaway claude -p "
+"(a one-word prompt on Haiku) so the CLI renews it; off, the panel says to "
+"run claude yourself"
+msgstr ""
+
+#: collins/tokensettings.py:235
+#, python-brace-format
+msgid "{status} · free, no tokens"
+msgstr ""
+
+#: collins/tokensettings.py:56
+msgid ""
+"Every enabled tool's definition rides in each session's context, "
+"read_terminal sends the panel's text into the conversation, and a session "
+"start_session starts is titled like any other. Turning one off takes "
+"effect immediately; sessions already running are only offered the tool "
+"again once they restart"
+msgstr ""
+
+#: collins/tokensettings.py:71
 msgid "Name its own session"
 msgstr ""
 
-#: collins/prefs.py:89
+#: collins/tokensettings.py:72
 msgid "set_session_title — the session titles its own tab and sidebar row"
 msgstr ""
 
-#: collins/prefs.py:92
+#: collins/tokensettings.py:75
 msgid "Open files in the editor"
 msgstr ""
 
-#: collins/prefs.py:93
+#: collins/tokensettings.py:76
 msgid "open_in_editor — put a file from the project on screen, at a line"
 msgstr ""
 
-#: collins/prefs.py:96
+#: collins/tokensettings.py:79
 msgid "Show images"
 msgstr ""
 
-#: collins/prefs.py:99
+#: collins/tokensettings.py:83
 msgid "show_image — a screenshot, plot, render, or image URL in the in-app lightbox"
 msgstr ""
 
-#: collins/prefs.py:100
+#: collins/tokensettings.py:86
 msgid "Send desktop notifications"
 msgstr ""
 
-#: collins/prefs.py:101
+#: collins/tokensettings.py:87
 msgid ""
 "notify_user — a notification titled with the session; clicking it opens the "
 "tab"
 msgstr ""
 
-#: collins/prefs.py:104
+#: collins/tokensettings.py:90
 msgid "Attach pull requests"
 msgstr ""
 
-#: collins/prefs.py:105
+#: collins/tokensettings.py:91
 msgid ""
 "attach_pr — put a pull request on the session's own footer and sidebar row"
 msgstr ""
 
-#: collins/prefs.py:108
+#: collins/tokensettings.py:94
 msgid "Start sessions in the background"
 msgstr ""
 
-#: collins/prefs.py:109
+#: collins/tokensettings.py:95
 msgid ""
 "start_session — spawn a sibling agent in a new background tab, with a prompt"
 msgstr ""
 
-#: collins/prefs.py:138
+#: collins/tokensettings.py:98
 msgid "Read the terminal panel"
 msgstr ""
 
-#: collins/prefs.py:141
+#: collins/tokensettings.py:101
 msgid ""
 "read_terminal — the panel tabs' text and scrollback, your own typing included"
 msgstr ""
 
-#: collins/prefs.py:143
+#: collins/tokensettings.py:104
 msgid "Run commands in the terminal panel"
 msgstr ""
 
-#: collins/prefs.py:144
+#: collins/tokensettings.py:105
 msgid ""
 "run_in_terminal — type a command into an idle panel tab (or a new one) and "
 "run it"

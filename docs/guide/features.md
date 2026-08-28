@@ -530,13 +530,18 @@ trigger, Enter behavior, the floating button, auto-open in new sessions),
 the editor's **color scheme**, **font**, and **line numbers**/**hidden
 files** toggles, the app's **Dark / Light Mode** (system / light / dark), the
 **language** (English, Magyar, Deutsch, Español, Français), the sidebar's
-**Show folder paths in sidebar** and **Show Claude usage** toggles, the
-**Session title model** and **Icon generation model** pickers (each with a
-**None** option — it replaced the *Auto-generate session titles* switch, and
-is the icon picker's default), the **status icon**, **Reopen the last session**, what to
-do **when quitting with running sessions** (ask / exit / background / hide),
-**Archive on claude.ai too**, and a switch for each of the **built-in MCP tools**
-the agent can call — reachable from the sidebar menu or `Ctrl+,`.
+**Show folder paths in sidebar** and **Show Claude usage** toggles, a
+**Token use** group directly under General that gathers everything that runs
+Claude on your behalf — the **Session title model** and **Icon generation
+model** pickers (each with a **None** option — it replaced the
+*Auto-generate session titles* switch, and is the icon picker's default), an
+**Auto-renew the Claude login** switch for the throwaway run that repairs
+an expired login (off, the usage panel says to run `claude` yourself), and
+the **Model list** row, which is free — followed by a switch for each of the
+**built-in MCP tools** the agent can call, the **status icon**, **Reopen the
+last session**, what to do **when quitting with running sessions** (ask /
+exit / background / hide), and **Archive on claude.ai too** — reachable from
+the sidebar menu or `Ctrl+,`.
 
 A **search bar across the top** filters the whole screen as you type, and it
 has the focus the moment preferences opens, so the way to a setting is to
