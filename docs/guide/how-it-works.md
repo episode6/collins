@@ -41,8 +41,9 @@ Pre-existing sessions are titled **locally** on launch (first words of the
 initial prompt) — no model call, so your backlog is never sent anywhere. Only
 sessions created while the app runs get a headless `claude -p` summarization
 (the model is the *Session title model* preference, defaulting to the newest
-Haiku), executed in a scratch directory so the title runs don't appear as
-sessions themselves.
+Haiku; its **None** option keeps the local title for new sessions too),
+executed in a scratch directory so the title runs don't appear as sessions
+themselves.
 
 ## Model list
 
