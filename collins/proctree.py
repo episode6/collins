@@ -138,6 +138,15 @@ def agent_descendant_cwd(pid: int, cli: str, depth: int = _MAX_DEPTH) -> str | N
     return process_cwd(agent_pid) if agent_pid is not None else None
 
 
+def agent_descendant_pid(pid: int, cli: str, depth: int = _MAX_DEPTH) -> int | None:
+    """The pid of the deepest agent process at or below *pid*, or None when
+    *pid* is not an agent process at all — the identity of the CLI a tab is
+    talking to right now, for state that is only good for one of them (the
+    composer's paste-back record: the CLI numbers its pasted-text stand-ins
+    from one per process). See `_deepest_agent_pid`."""
+    return _deepest_agent_pid(pid, cli, depth)
+
+
 def descendant_cmdlines(pid: int, cli: str) -> set[str]:
     """The cmdlines of everything running directly below the agent process at
     or below *pid* — empty when *pid* is not an agent process, or when the
