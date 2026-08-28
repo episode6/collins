@@ -336,7 +336,11 @@ class UsagePanel(Gtk.Box):
             # launch, or was revoked outright (auth: the file still looks
             # fine). The same throwaway run the launch check uses can fix
             # both; safe to ask on every failing poll, since attempts are
-            # single-flight and cooled down on tokenrefresh's side.
+            # single-flight and cooled down on tokenrefresh's side — and safe
+            # to ask from under the welcome dialog, which this panel's first
+            # fetch does on a fresh install with a dead token: tokenrefresh
+            # refuses until the dialog that discloses the run is answered,
+            # and the status text below names `claude` as the fix meanwhile.
             tokenrefresh.maybe_repair(self._on_login_repaired)
         if self._snapshot is not None:
             # Keep showing stale data; just note its age in the tooltip.

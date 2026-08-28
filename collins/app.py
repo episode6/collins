@@ -2440,7 +2440,11 @@ class App(Adw.Application):
         login expired, one throwaway headless run refreshes the token in the
         background, then the usage panel and model catalog are re-asked (see
         tokenrefresh). It waits because its switch is on the dialog: a repair
-        that ran first would be a run the dialog discloses after the fact."""
+        that ran first would be a run the dialog discloses after the fact.
+        The sequencing here covers only this launch check; the usage panel
+        asks for the same repair from under the open dialog when its first
+        fetch is refused, and tokenrefresh itself refuses both until the
+        dialog is answered."""
 
         def then() -> None:
             ghwelcome.maybe_show(window, self.state)

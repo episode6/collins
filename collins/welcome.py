@@ -93,7 +93,11 @@ def maybe_show(window, state: AppState, store, then: Callable[[], None]):
     `then` is the rest of the launch's welcome-work: the GitHub CLI notice,
     and the expired-login repair — which must not fire before the switch
     that governs it has been seen, or the dialog is disclosing a run that
-    already happened. Returns the dialog, or None when nothing showed.
+    already happened. (Sequencing `then` is not what holds that line — the
+    usage panel asks for the same repair from under the dialog — tokenrefresh
+    refusing until ``welcome_seen`` is written is; `then` just keeps the
+    launch check from being refused for nothing.) Returns the dialog, or
+    None when nothing showed.
     """
     cli_found = clisetup.on_path()
     if not welcomegate.should_show(state, cli_found):

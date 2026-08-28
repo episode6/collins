@@ -46,7 +46,8 @@ downloads of each version, see the
   runs Claude on your behalf is disclosed before the first of those runs
   happens, with the switch for each right there. Toggles write at once;
   Continue (or Escape) records the dialog as seen, and the expired-login
-  repair now waits until it has been. Its first group is the CLI: a row
+  repair now waits until it has been — the launch check and the usage
+  panel's own ask alike. Its first group is the CLI: a row
   naming the `claude` in use, or — on a launch that can't find one — the
   path ask that used to be a dialog of its own, prefilled, with its live
   verdict, Browse and Quit, and no way past it until the path validates.

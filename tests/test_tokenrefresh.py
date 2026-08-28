@@ -9,7 +9,7 @@ import pytest
 
 import collins.sessions as sessions_mod
 import collins.titles as titles
-from collins import claudemodels, tokenrefresh
+from collins import claudemodels, tokenrefresh, welcomegate
 
 
 def _write_credentials(path: Path, expires_in_s: float = 3600) -> None:
@@ -30,11 +30,14 @@ def _write_credentials(path: Path, expires_in_s: float = 3600) -> None:
 def _fresh_attempt_state(monkeypatch, app_state):
     """The single-flight flag and cooldown clock are module-global; every
     test starts with no attempt made yet. `app_state` isolates the state
-    file the switch is read from, so the auto_renew_login default (on)
-    governs unless a test turns it off."""
+    file the switches are read from: the auto_renew_login default (on)
+    governs unless a test turns it off, and the welcome is recorded as
+    answered — an install that has been shown the switch — unless a test
+    says otherwise (the welcome-gate tests below)."""
     monkeypatch.setattr(tokenrefresh, "_running", False)
     monkeypatch.setattr(tokenrefresh, "_last_attempt", None)
     monkeypatch.setattr(tokenrefresh, "_failures", 0)
+    app_state.AppState().set_setting(welcomegate.SEEN_SETTING, True)
 
 
 @pytest.fixture
@@ -178,6 +181,41 @@ def test_the_switch_is_read_fresh_at_each_attempt(credentials, app_state, monkey
     assert events == ["cb"]
 
 
+def test_maybe_start_waits_for_the_welcome(credentials, app_state, monkeypatch):
+    # A fresh install (or one from before the setting) with a dead token:
+    # the launch check must not run before the dialog disclosing it is
+    # answered. The app sequences its own call after the dialog; this gate
+    # is what holds for the callers it doesn't sequence (maybe_repair, from
+    # a usage panel mapped under the open dialog).
+    _write_credentials(credentials, expires_in_s=-60)
+    state = app_state.AppState()
+    state.set_setting(welcomegate.SEEN_SETTING, False)
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
+    events = []
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or True)
+    monkeypatch.setattr(claudemodels, "cache_failed", lambda: False)
+    assert tokenrefresh.maybe_start(lambda: events.append("cb")) is None
+    assert events == []
+    # Answered (Continue writes the setting, then runs the launch check):
+    # the very next attempt goes.
+    state.set_setting(welcomegate.SEEN_SETTING, True)
+    tokenrefresh.maybe_start(lambda: events.append("cb")).join(5)
+    assert events == ["refresh", "cb"]
+
+
+def test_an_install_from_before_the_welcome_waits_too(credentials, app_state, monkeypatch):
+    # No welcome_seen key at all — an upgrade — owes the dialog (welcomegate),
+    # so it is refused the same as an explicit False.
+    _write_credentials(credentials, expires_in_s=-60)
+    state = app_state.AppState()
+    del state.settings[welcomegate.SEEN_SETTING]
+    state.save()
+    assert welcomegate.SEEN_SETTING not in json.loads(app_state._STATE_FILE.read_text())["settings"]
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: True)
+    assert tokenrefresh.maybe_start(lambda: None) is None
+
+
 def test_maybe_start_leaves_a_live_token_alone(credentials, monkeypatch):
     _write_credentials(credentials)
     monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
@@ -252,6 +290,25 @@ def test_maybe_repair_is_off_when_the_switch_is_off(credentials, app_state, monk
     monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or True)
     assert tokenrefresh.maybe_repair(lambda: events.append("cb")) is None
     assert events == []
+
+
+def test_maybe_repair_waits_for_the_welcome(credentials, app_state, monkeypatch):
+    # The panel's poll under the open dialog: its first fetch is refused
+    # (expired), it asks for a repair, and nothing runs — the panel says to
+    # run claude, as it does with the switch off — until the dialog is
+    # answered.
+    _write_credentials(credentials, expires_in_s=-60)
+    state = app_state.AppState()
+    state.set_setting(welcomegate.SEEN_SETTING, False)
+    monkeypatch.setattr(tokenrefresh.clisetup, "on_path", lambda: True)
+    events = []
+    monkeypatch.setattr(tokenrefresh, "refresh", lambda: events.append("refresh") or True)
+    monkeypatch.setattr(claudemodels, "cache_failed", lambda: False)
+    assert tokenrefresh.maybe_repair(lambda: events.append("cb")) is None
+    assert events == []
+    state.set_setting(welcomegate.SEEN_SETTING, True)
+    tokenrefresh.maybe_repair(lambda: events.append("cb")).join(5)
+    assert events == ["refresh", "cb"]
 
 
 def test_maybe_repair_skips_a_cli_less_install(credentials, monkeypatch):

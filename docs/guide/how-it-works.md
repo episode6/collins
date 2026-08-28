@@ -113,7 +113,11 @@ file at all means not logged in, which no background run can fix; the
 panel just says so. The run spends tokens without a prompt from you, so it
 has a switch — **Auto-renew the Claude login**, in Preferences → Token use,
 on by default — and with it off the panel says the login expired and leaves
-running `claude` to you.
+running `claude` to you. Nor does any repair run before the first-launch
+welcome dialog that discloses the switch has been answered: not the launch
+check, and not one the usage panel asks for from under the open dialog
+(its first fetch is refused the same way); until Continue, the panel says
+the login expired, exactly as it does with the switch off.
 
 ## What spends tokens
 

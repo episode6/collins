@@ -17,6 +17,18 @@ here, against a real App:
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \\
         python3 scripts/check_welcome.py
 
+The launch is staged with an expired login on purpose: the case the repair
+exists for, and the one the dialog must hold back. The app's own launch
+check waits on the dialog by sequencing, but the sidebar's usage panel maps
+under the open dialog, has its first fetch refused, and asks tokenrefresh
+for the same repair — which must be refused too, or a throwaway ``claude
+-p`` runs while the switch governing it is still being disclosed. So this
+check keeps the real ``maybe_repair`` (wrapped, to see what it answered)
+and leaves the usage fixture off: with a dead token the fetch fails on the
+file, before any network. The relaunch is the positive control — the same
+refusal, with the welcome answered, runs the repair (the shim logs a
+``-p --model haiku``).
+
 The relaunch is a real second process on the same scratch tree (this
 script again, with ``--relaunch <dir>``). The model catalog is a canned
 list patched over claudemodels, so nothing here reaches the network; the
@@ -31,6 +43,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 RELAUNCH = "--relaunch"
@@ -43,7 +56,7 @@ os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
 os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
-os.environ["COLLINS_USAGE_FIXTURE"] = f"{E2E}/usage-fixture.json"  # no usage poll, no token repair
+os.environ["COLLINS_CLAUDE_CREDENTIALS"] = f"{E2E}/credentials.json"  # expired: the repair's case
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
 os.environ["XDG_CACHE_HOME"] = f"{E2E}/cache"  # no saved model list from a real run
@@ -62,8 +75,13 @@ if not SECOND:
         os.makedirs(path, exist_ok=True)
     with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
         fh.write("{}")
-    with open(f"{E2E}/usage-fixture.json", "w", encoding="utf-8") as fh:
-        json.dump({"limits": [], "extra_usage": {"is_enabled": False}}, fh)
+    # A login an hour past its expiry: the usage panel's fetch fails on the
+    # file (no network), and asks for the repair the welcome must hold back.
+    with open(f"{E2E}/credentials.json", "w", encoding="utf-8") as fh:
+        json.dump(
+            {"claudeAiOauth": {"accessToken": "tok-e2e", "expiresAt": (time.time() - 3600) * 1000}},
+            fh,
+        )
     # No state.json at all: a fresh install, which is the case under test.
     # The CLI the app finds: every run is logged; a `-p` run reads its prompt
     # and answers with a title, anything else draws an idle prompt.
@@ -127,11 +145,26 @@ claudemodels.cache_failed = lambda: False
 
 # The welcome-work that waits on the dialog, recorded rather than run: the
 # GitHub notice would land over the window on a runner with gh signed out,
-# and the repair is off under the fixture anyway. The app looks both up by
-# attribute at call time, so patching the modules is enough.
+# and the launch check's order is the point, not its run. The app looks both
+# up by attribute at call time, so patching the modules is enough.
 AFTER: list[str] = []
 ghwelcome.maybe_show = lambda *_a, **_k: AFTER.append("ghwelcome")
 tokenrefresh.maybe_start = lambda *_a, **_k: AFTER.append("tokenrefresh")
+
+# The mid-run entry stays real — it is the one the welcome doesn't sequence
+# — wrapped to record what each ask got back: None for a refusal, a thread
+# for a repair under way. The usage panel looks it up by attribute too.
+REPAIRS: list[object] = []
+_real_maybe_repair = tokenrefresh.maybe_repair
+
+
+def _recording_maybe_repair(*args, **kwargs):
+    result = _real_maybe_repair(*args, **kwargs)
+    REPAIRS.append(result)
+    return result
+
+
+tokenrefresh.maybe_repair = _recording_maybe_repair
 
 
 def headless_runs() -> list[str]:
@@ -142,6 +175,21 @@ def headless_runs() -> list[str]:
     except OSError:
         return []
     return [line for line in lines if line.split()[:1] == ["-p"]]
+
+
+REPAIR_RUN = f"-p --model {tokenrefresh._MODEL}"  # the throwaway run's argv, as the shim logs it
+
+
+def repair_runs() -> list[str]:
+    return [run for run in headless_runs() if run == REPAIR_RUN]
+
+
+def usage_status() -> tuple[str, str]:
+    """What the sidebar's usage panel shows: its stack page, and the status
+    line's text — "Claude login expired — run claude to refresh" is the
+    refused fetch that asked for the repair."""
+    panel = state["win"].sidebar.usage_panel
+    return panel._stack.get_visible_child_name(), panel._status.get_text()
 
 
 def saved_settings() -> dict:
@@ -266,8 +314,27 @@ def step_opened() -> bool:
     check("one Continue button, live", cont is not None and cont.get_sensitive())
     check("no Quit in the found state", button(dialog, "Quit") is None)
     check("no Use This CLI either", button(dialog, "Use This CLI") is None)
-    state.update(cont=cont, title_combo=combos.get("Session title model"))
-    return later(step_pick_none, 500)
+    state.update(cont=cont, title_combo=combos.get("Session title model"), waits=0)
+    return later(step_panel_refused, 250)
+
+
+def step_panel_refused() -> bool:
+    """The usage panel, mapped under the dialog, has had its fetch refused
+    (expired) and asked for the repair — bounded wait for the ask, which is
+    a thread and an idle away from the map."""
+    if not REPAIRS and state["waits"] < 20:
+        state["waits"] += 1
+        return later(step_panel_refused, 250)
+    page, text = usage_status()
+    check(
+        "under the dialog, the usage panel's fetch is refused for the expired login",
+        (page, text) == ("status", "Claude login expired — run claude to refresh"),
+        (page, text),
+    )
+    check("the panel asked for a repair, and was refused", REPAIRS != [] and all(r is None for r in REPAIRS),
+          REPAIRS)
+    check("so no throwaway run while the dialog is up", headless_runs() == [], headless_runs())
+    return later(step_pick_none, 250)
 
 
 def step_pick_none() -> bool:
@@ -334,6 +401,20 @@ def step_relaunched() -> bool:
           type(dialog).__name__ if dialog else None)
     check("welcome_seen is still recorded", saved_settings().get("welcome_seen") is True)
     check("the welcome-work ran at once", AFTER == ["ghwelcome", "tokenrefresh"], AFTER)
+    state["waits"] = 0
+    return later(step_repaired, 250)
+
+
+def step_repaired() -> bool:
+    """The positive control: the same refused fetch, with the welcome
+    answered, runs the repair — so it was the dialog holding it back, not
+    the harness. The shim can't renew anything, so the run just logs."""
+    if repair_runs() == [] and state["waits"] < 32:  # the shim run is a subprocess away
+        state["waits"] += 1
+        return later(step_repaired, 250)
+    check("the panel asked for the repair again", REPAIRS != [] and REPAIRS[-1] is not None, REPAIRS)
+    check("and with the welcome answered, the throwaway run happened", len(repair_runs()) == 1,
+          headless_runs())
     return done()
 
 
