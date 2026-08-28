@@ -574,6 +574,18 @@ def test_run_claude_takes_an_explicit_setting_over_a_none_preference(app_state, 
     app_state.AppState().set_setting("title_model", NO_MODEL)
     assert titles._run_claude("prompt", setting="") == "A title"
     assert argv[0][-2:] == ["--model", "haiku:''"]
+    # Five words back need no tool schemas, skills, or MCP servers.
+    assert argv[0][:5] == ["/usr/bin/claude", "-p", "--strict-mcp-config", "--tools", ""]
+
+
+def test_headless_argv_is_a_trimmed_claude_p():
+    # Every run Collins makes on the user's behalf builds its command line
+    # here: no built-in tools (and so no skill list), no MCP server beyond
+    # what --mcp-config names (nothing does), the model last. Not --bare:
+    # that drops the OAuth login the token repair exists to renew.
+    argv = titles.headless_argv("/usr/bin/claude", "haiku")
+    assert argv == ["/usr/bin/claude", "-p", "--strict-mcp-config", "--tools", "", "--model", "haiku"]
+    assert "--bare" not in argv
 
 
 def test_a_title_queued_before_the_switch_to_none_is_dropped_not_fatal(app_state):

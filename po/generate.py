@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-28. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -60,8 +60,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Minden munkamenet a claude parancson keresztül fut, és az nincs azon a PATH-on, amelyet az asztalról indított programok kapnak — az a PATH nem tartalmazza a shell által hozzáadott mappákat. Mutasson egyszer a CLI-re a Collinsban; a helyet ettől kezdve megjegyzi.",
         "Token use":
             "Tokenhasználat",
-        "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
-            "Ezek mindegyike az Ön nevében futtatja a Claude-ot, az előfizetése használati keretének terhére, anélkül, hogy Ön kérné. Minden futtatás egy fej nélküli claude -p egy ideiglenes könyvtárból, így sosem jelenik meg munkamenetként.",
+        "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, carrying none of your skills, MCP servers, or the CLI's tools, so it never appears as a session and costs little more than its prompt.":
+            "Ezek mindegyike az Ön nevében futtatja a Claude-ot, az előfizetése használati keretének terhére, anélkül, hogy Ön kérné. Minden futtatás egy fej nélküli claude -p egy ideiglenes könyvtárból, az Ön skilljei, MCP-kiszolgálói és a CLI eszközei nélkül, így sosem jelenik meg munkamenetként, és alig kerül többe a promptjánál.",
         "Auto-renew the Claude login":
             "A Claude-bejelentkezés automatikus megújítása",
         "When the login the usage panel and model list are fetched with has expired — at launch, or when a fetch is refused later — run one throwaway claude -p (a one-word prompt on Haiku) so the CLI renews it; off, the panel says to run claude yourself":
@@ -639,8 +639,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Jede Sitzung läuft über den Befehl claude, und der liegt nicht auf dem PATH, den vom Desktop gestartete Programme bekommen — der enthält nicht die Ordner, die Ihre Shell hinzufügt. Zeigen Sie Collins die CLI einmal; der Ort wird von da an gemerkt.",
         "Token use":
             "Token-Verbrauch",
-        "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
-            "Jede dieser Einstellungen lässt Claude in Ihrem Namen laufen – auf Kosten der Nutzungsgrenzen Ihres Abonnements, ohne eine Eingabe von Ihnen. Jeder Lauf ist ein kopfloses claude -p aus einem Arbeitsverzeichnis und erscheint darum nie als Sitzung.",
+        "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, carrying none of your skills, MCP servers, or the CLI's tools, so it never appears as a session and costs little more than its prompt.":
+            "Jede dieser Einstellungen lässt Claude in Ihrem Namen laufen – auf Kosten der Nutzungsgrenzen Ihres Abonnements, ohne eine Eingabe von Ihnen. Jeder Lauf ist ein kopfloses claude -p aus einem Arbeitsverzeichnis, ohne Ihre Skills, MCP-Server oder die Werkzeuge der CLI, erscheint darum nie als Sitzung und kostet kaum mehr als seinen Prompt.",
         "Auto-renew the Claude login":
             "Claude-Anmeldung automatisch erneuern",
         "When the login the usage panel and model list are fetched with has expired — at launch, or when a fetch is refused later — run one throwaway claude -p (a one-word prompt on Haiku) so the CLI renews it; off, the panel says to run claude yourself":
@@ -1228,8 +1228,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Cada sesión pasa por el comando claude, y no está en el PATH que reciben los programas lanzados desde el escritorio — ese PATH no incluye las carpetas que añade su shell. Indique a Collins dónde está la CLI una vez; la ubicación se recuerda desde entonces.",
         "Token use":
             "Uso de tokens",
-        "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
-            "Cada una de estas opciones ejecuta Claude en su nombre, contra los límites de uso de su suscripción, sin que usted lo pida. Cada ejecución es un claude -p sin interfaz desde un directorio temporal, así que nunca aparece como sesión.",
+        "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, carrying none of your skills, MCP servers, or the CLI's tools, so it never appears as a session and costs little more than its prompt.":
+            "Cada una de estas opciones ejecuta Claude en su nombre, contra los límites de uso de su suscripción, sin que usted lo pida. Cada ejecución es un claude -p sin interfaz desde un directorio temporal, sin sus skills, servidores MCP ni las herramientas de la CLI, así que nunca aparece como sesión y cuesta poco más que su prompt.",
         "Auto-renew the Claude login":
             "Renovar automáticamente el inicio de sesión de Claude",
         "When the login the usage panel and model list are fetched with has expired — at launch, or when a fetch is refused later — run one throwaway claude -p (a one-word prompt on Haiku) so the CLI renews it; off, the panel says to run claude yourself":
@@ -1814,8 +1814,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Chaque session passe par la commande claude, qui n'est pas dans le PATH donné aux programmes lancés depuis le bureau — ce PATH n'inclut pas les dossiers ajoutés par votre shell. Indiquez la CLI à Collins une fois ; l'emplacement est retenu dès lors.",
         "Token use":
             "Utilisation des jetons",
-        "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
-            "Chacun de ces réglages fait tourner Claude pour vous, sur les limites d’utilisation de votre abonnement, sans que vous le demandiez. Chaque exécution est un claude -p sans interface depuis un répertoire temporaire, elle n’apparaît donc jamais comme session.",
+        "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, carrying none of your skills, MCP servers, or the CLI's tools, so it never appears as a session and costs little more than its prompt.":
+            "Chacun de ces réglages fait tourner Claude pour vous, sur les limites d’utilisation de votre abonnement, sans que vous le demandiez. Chaque exécution est un claude -p sans interface depuis un répertoire temporaire, sans vos skills, serveurs MCP ni les outils de la CLI ; elle n’apparaît donc jamais comme session et ne coûte guère plus que son prompt.",
         "Auto-renew the Claude login":
             "Renouveler automatiquement la connexion Claude",
         "When the login the usage panel and model list are fetched with has expired — at launch, or when a fetch is refused later — run one throwaway claude -p (a one-word prompt on Haiku) so the CLI renews it; off, the panel says to run claude yourself":
@@ -2364,7 +2364,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 _HEADER = (
     "# Modified from the original agent-session-manager\n"
     "# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett\n"
-    "# fork. Last modified: 2026-08-27. Full change history: git log for this file.\n"
+    "# fork. Last modified: 2026-08-28. Full change history: git log for this file.\n"
     "# Generated by po/generate.py — do not edit by hand.\n"
     'msgid ""\n'
     'msgstr ""\n'

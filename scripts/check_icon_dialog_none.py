@@ -94,7 +94,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import GLib, Gtk  # noqa: E402
 
-from collins import claudemodels, dialogs, i18n, icongen  # noqa: E402
+from collins import claudemodels, dialogs, i18n, icongen, titles  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
@@ -232,7 +232,10 @@ def step_ran() -> bool:
         return later(step_ran, 250)
     runs = headless_runs()
     check("Generate ran exactly once", len(runs) == 1, runs)
-    check("on the picked model", runs[:1] == [f"-p --model {CATALOG[0].id}"], runs)
+    # The argv as the shim logs it: sys.argv[1:] space-joined, the trimmed
+    # headless flags included (the empty --tools value shows as two spaces).
+    picked = " ".join(titles.headless_argv("claude", CATALOG[0].id)[1:])
+    check("on the picked model", runs[:1] == [picked], runs)
     check("the preview landed", stack.get_visible_child_name() == "preview", stack.get_visible_child_name())
     check("the button is Regenerate from here on", state["generate"].get_label() == "Regenerate",
           state["generate"].get_label())

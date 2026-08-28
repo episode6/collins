@@ -35,6 +35,7 @@ and *Delete permanently* actions, both behind a confirmation. See
 Collins talks to no third parties. Everything goes through the `claude` CLI
 and the login you already have: resuming sessions runs `claude` in a
 terminal; auto-titling and icon generation run headless `claude -p` jobs
+with none of your skills, MCP servers, or the CLI's tools loaded
 (pre-existing sessions are titled locally, and each model picker in
 Preferences has a **None** option that turns the runs off); and three
 things call Anthropic directly with the CLI's own stored token — read-only,

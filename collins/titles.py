@@ -203,6 +203,28 @@ def scratch_workdir() -> Iterator[Path]:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+# What every headless run passes besides its model. A plain `claude -p`
+# loads what an interactive session would — the built-in tool set, the
+# user's skills (they ride in the Skill tool), and every MCP server in
+# ~/.claude.json, dozens of tool schemas — into a prompt that wants five
+# words back. --tools "" (the CLI's spelling for no tools) drops the
+# built-ins and, with them, the skill list; --strict-mcp-config keeps every
+# MCP server not named by --mcp-config out, and nothing names one. Measured
+# on CLI 2.1.251 with a one-line prompt on Haiku: ~23k input tokens without
+# the flags, ~8k with. --bare would trim the rest (the global CLAUDE.md
+# still loads) but disables OAuth, which the login repair depends on. The
+# cwd being a child of scratch_dir() is what keeps a project's CLAUDE.md
+# and .claude/settings.json out: the CLI reads those from the cwd and its
+# ancestors, and nothing under ~/.config/collins carries either.
+HEADLESS_FLAGS = ("--strict-mcp-config", "--tools", "")
+
+
+def headless_argv(cli: str, model: str) -> list[str]:
+    """The argv of one headless `claude -p` on *model* — every trimmed-down
+    run Collins makes on the user's behalf builds its command line here."""
+    return [cli, "-p", *HEADLESS_FLAGS, "--model", model]
+
+
 def sanitize_title(text: str) -> str:
     """Normalize a model reply into a short single-line title."""
     title = " ".join(text.split())
@@ -382,7 +404,7 @@ def _run_claude(prompt: str, setting: str | None = None) -> str:
     model = pick_model(setting, prefer="haiku")
     with scratch_workdir() as workdir:
         result = subprocess.run(
-            [cli, "-p", "--model", model],
+            headless_argv(cli, model),
             input=prompt,
             capture_output=True,
             text=True,

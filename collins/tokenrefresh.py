@@ -129,7 +129,7 @@ def refresh() -> bool:
     try:
         with titles.scratch_workdir() as workdir:
             result = subprocess.run(
-                [cli, "-p", "--model", _MODEL],
+                titles.headless_argv(cli, _MODEL),
                 input=_PROMPT,
                 capture_output=True,
                 text=True,

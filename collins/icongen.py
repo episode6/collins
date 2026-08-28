@@ -34,7 +34,7 @@ from pathlib import Path
 from . import projecticons
 from .claudemodels import pick_model
 from .state import AppState
-from .titles import scratch_workdir
+from .titles import headless_argv, scratch_workdir
 
 # One SVG document, but the model may think about the design for a while.
 _TIMEOUT_S = 300
@@ -224,7 +224,7 @@ class IconRun:
                 if self._cancelled:
                     raise IconGenCancelled()
                 self._proc = subprocess.Popen(
-                    [cli, "-p", "--model", model],
+                    headless_argv(cli, model),
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,

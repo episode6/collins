@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-27. Full change history: git log for this file.
+fork. Last modified: 2026-08-28. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -39,6 +39,16 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **The headless runs carry none of your skills, MCP servers, or tools.**
+  Session titling, icon generation, and the login repair each run a
+  `claude -p`, and each used to load what an interactive session does — the
+  built-in tool set, your skills, every MCP server in `~/.claude.json` —
+  into a prompt that wants five words back. They now pass
+  `--strict-mcp-config --tools ""`: on CLI 2.1.251 a one-line prompt on
+  Haiku went from about 23k input tokens to 8k. The *Token use* description
+  (in Preferences and the welcome dialog) and the guide say so. `--bare`
+  would trim the global `CLAUDE.md` too, but drops the OAuth login the
+  repair exists to renew, so it stays off.
 - **A welcome dialog that says what spends tokens.** The first launch of a
   fresh install — and, once, of every install that predates this release —
   opens on a **Before you start** dialog: the *Token use* rows and the
