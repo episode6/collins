@@ -183,19 +183,32 @@ Enter opens, Esc closes.
 
 A real text box for writing prompts — multi-line, spell-checked, floating
 over the agent's terminal — for every prompt that outgrows the CLI's
-one-line input:
+one-line input. And unlike that input box, which dies with the process, it
+keeps what you haven't sent: a half-written prompt is a **draft** that
+belongs to its session, and it is there when you come back to it.
 
 - **Start typing and it's there** (on by default): type at an agent's empty
   prompt and the composer opens with what you typed already in it. The CLI's
   own `/`, `!`, `#` and `@` keep their keys, and so do dialogs and menus.
   `Ctrl+.` opens it deliberately; pressed again it closes the composer and
   puts the draft back in the agent's own input box, so nothing you wrote is
-  ever stranded. If the agent has since left the terminal — a bare shell,
-  where pasting a draft would run it — the draft is kept instead, and comes
-  back the next time you open that session's composer. Kept on disk, so it
-  survives closing the tab and quitting the app — as does a draft still in
-  an open composer when Collins goes away. A semi-transparent
-  **composer button** on the corner of each agent terminal opens it by mouse.
+  ever stranded. A semi-transparent **composer button** on the corner of
+  each agent terminal opens it by mouse.
+- **Drafts wait for you.** Whatever is in the composer when you leave stays
+  with the session: close the tab, quit Collins, come back a day later, and
+  the draft is back in the box the next time you open that session's
+  composer — by `Ctrl+.`, by the button, or by starting to type (what you
+  typed goes in first, the draft under it). The same holds when the agent
+  has left the terminal under an open composer — a bare shell, where pasting
+  a draft would run it as commands — so closing the composer keeps the draft
+  instead of typing it back. Drafts are saved to disk with the rest of the
+  session's state
+  (`~/.config/collins/state.json`), never to the agent's transcript, and a
+  draft that has been sent or taken back into the agent's input box is
+  spent — it won't turn up a second time. A **new session's** first prompt
+  works the same way from the other end: it is written in this composer on
+  the [new-chat screen](#starting-sessions), and until you send it the
+  screen is a **Draft** row in the sidebar, ready to reopen.
 - **Send on Enter** — or flip *Enter sends composer text* off to make Enter
   a newline and `Ctrl+Enter` the send. `Shift+Enter` is always a newline.
   The box is drawn in the terminal's own font on purpose: the text is about
@@ -224,7 +237,8 @@ one-line input:
   different model mid-draft and carry on writing.
 - **It's also where a session begins.** A new session's first prompt is
   written in this same composer, on the [new-chat screen](#starting-sessions)
-  that stands in for the console until Send.
+  that stands in for the console until Send — worktree checkbox and model
+  picker on its Send row.
 
 ![The composer floating over an agent terminal](/img/composer.png)
 

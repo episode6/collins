@@ -26,22 +26,22 @@ hero:
 features:
   - icon: 🗂️
     title: Every session, organized
-    details: A sidebar of all your agent sessions, grouped by project — searchable, auto-titled, starred and renamed as you like, with live guide lines saying which sessions are working and which are waiting on you.
-  - icon: 🖥️
-    title: Embedded terminals
-    details: Click a session to resume it in a real VTE terminal tab — in the directory it last worked in, inside your own shell — re-attaching to backgrounded sessions instead of resuming a copy.
+    details: A sidebar of all your agent sessions, grouped by project — searchable, auto-titled, starred and renamed as you like, with guide lines saying which are working and which are waiting on you — and a click resumes any of them in a real VTE terminal tab, in the directory it last worked in, inside your own shell.
   - icon: 📋
     title: Copy & paste that just works
     details: Plain Ctrl+C copies whenever text is selected (and interrupts otherwise); Ctrl+V pastes; right-click for a menu. No Ctrl+Shift gymnastics.
+  - icon: ✍️
+    title: Drafts that wait for you
+    details: A real prompt box — multi-line, spell-checked, open the moment you start typing, pasted images and all — that never loses a prompt. Close the tab or quit mid-sentence and the draft is back when you return, for a running session or one you haven't started yet.
   - icon: 🔀
     title: Pull requests, start to merge
     details: Every PR a session opens is tracked on its row and tab — CI, conflicts, unanswered comments — with the actions to match — read the diff beside the terminal, merge, ask for a review, or send the failure back to the agent as a prompt.
   - icon: 🧰
     title: An IDE around the agent
-    details: A code editor with the agent's latest edits one click away, shell panels under every tab, and a spell-checked prompt composer that opens the moment you start typing — drop or paste images straight into it.
+    details: A code editor with the agent's latest edits one click away, shell panels under every tab, a gallery of everything the session has shown you, and the composer floating over the terminal or docked below it.
   - icon: 🔔
     title: Stays out of your way
-    details: Close the window and sessions keep running behind a status icon that counts what's waiting for you. Sessions raise notifications when they need you, and Caffeine Mode keeps the machine awake while agents work.
+    details: Close the window and sessions keep running behind a status icon that counts what's waiting for you — reopen one and Collins re-attaches to the live process instead of resuming a copy. Sessions raise notifications when they need you, and Caffeine Mode keeps the machine awake while agents work.
 ---
 
 ## An opinionated, Claude-first workspace
