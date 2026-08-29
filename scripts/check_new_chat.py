@@ -326,14 +326,14 @@ def send_an_empty_screen() -> bool:
     win = state["win"]
     tab = win.tab_view.get_selected_page().get_child()
     view = tab._new_chat
-    send = view.composer._send
+    label = view.composer.send_label
     empty, full = i18n._("Empty Session"), i18n._("Send")
-    check("an empty box's Send reads Empty Session", send.get_label() == empty, send.get_label())
+    check("an empty box's Send reads Empty Session", label() == empty, label())
     view.set_text("a prompt")
-    check("…and Send once there is text", send.get_label() == full, send.get_label())
+    check("…and Send once there is text", label() == full, label())
     view.set_text("   ")
-    check("…whitespace counting as empty", send.get_label() == empty, send.get_label())
-    send.emit("clicked")
+    check("…whitespace counting as empty", label() == empty, label())
+    view.composer._send.emit("clicked")  # the button itself: the real path
     check("Empty Session leaves the screen", not tab.is_new_chat)
     check("…for the console", tab._stage.get_visible_child_name() == "terminal")
     check("…with no prompt waiting to be typed", tab._new_chat_prompt is None)

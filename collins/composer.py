@@ -277,6 +277,10 @@ class ComposerView(Gtk.Box):
         self._send.set_label(label)
         self._send.set_tooltip_text(tooltip)
 
+    def send_label(self) -> str:
+        """What the Send button reads right now."""
+        return self._send.get_label() or ""
+
     # -- text ------------------------------------------------------------------
 
     def set_text(self, text: str) -> None:
