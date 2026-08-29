@@ -34,6 +34,7 @@ from . import (
     keymap,
     mcpserver,
     mcptools,
+    notifycenter,
     proctree,
     providers,
     remoteimages,
@@ -418,6 +419,25 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
 .notification-kind-bell { color: #e5a50a; }
 .notification-kind-finished { color: #2ec27e; }
 .notification-footer { padding: 4px 4px 4px 12px; }
+
+/* the in-app notification card (notifyoverlay.NotificationCard): Adwaita's
+   .card (its background and border; .activatable adds the hover wash), with
+   the canvas's 12px radius, the shadow that lifts it off a terminal, and a
+   32px tile for the project icon. The kind marks above are shared. */
+.notification-card {
+  padding: 10px 10px 10px 12px;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px alpha(black, 0.12), 0 8px 24px alpha(black, 0.10);
+}
+.notification-card-tile {
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: 8px;
+  background-color: alpha(currentColor, 0.05);
+}
+.notification-card-title { font-weight: 600; }
+.notification-card-body { opacity: 0.85; }
+.notification-card-close { min-width: 24px; min-height: 24px; padding: 0; }
 
 /* a session with something going on -- a tab open, or running detached -- is
    drawn as an outlined card with a left guide line; what a running one adds
@@ -2111,10 +2131,15 @@ class App(Adw.Application):
         return deferred
 
     def _mcp_notify_user(self, found, args: dict) -> tuple[bool, str]:
+        """The reply says where the message went — a card in Collins, the
+        desktop, or straight into the history because the user is looking
+        at this very session — since the model can only know by asking
+        (see MainWindow.notify_session and notifycenter.tool_reply)."""
         window, tab = found
-        if not window.notify_session(tab, args["message"]):
+        deliveries = window.notify_session(tab, args["message"])
+        if deliveries is None:
             return False, "Collins couldn't post a notification"
-        return True, "The user was notified."
+        return True, notifycenter.tool_reply(deliveries)
 
     def _mcp_attach_pr(self, found, args: dict) -> tuple[bool, str]:
         """Put a PR on the calling session's row without a gh call: the

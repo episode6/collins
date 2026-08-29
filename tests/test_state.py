@@ -1141,3 +1141,21 @@ def test_notifications_are_pruned_and_capped_on_load(app_state):
     assert len(loaded) == ROW_CAP
     assert loaded[0]["id"] == "0"  # newest first
     assert all(row["id"] != "stale" for row in loaded)
+
+
+def test_notification_settings_have_their_defaults(app_state):
+    # The four rows of the Notifications group (see prefslayout): cards and
+    # bell routing on, the desktop's sound, and finished runs quiet.
+    assert app_state.DEFAULT_SETTINGS["inapp_notifications"] is True
+    assert app_state.DEFAULT_SETTINGS["notification_sound"] == "default"
+    assert app_state.DEFAULT_SETTINGS["bell_notifications"] is True
+    assert app_state.DEFAULT_SETTINGS["announce_finished_runs"] is False
+
+
+def test_notification_settings_round_trip(app_state):
+    state = app_state.AppState()
+    state.set_setting("notification_sound", "/home/me/chime.ogg")
+    state.set_setting("announce_finished_runs", True)
+    reloaded = app_state.AppState()
+    assert reloaded.get_setting("notification_sound") == "/home/me/chime.ogg"
+    assert reloaded.get_setting("announce_finished_runs") is True

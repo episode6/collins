@@ -26,22 +26,25 @@ Install the system libraries with your distro's package manager:
 ::: code-group
 
 ```bash [Ubuntu / Debian]
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 gir1.2-spelling-1
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 gir1.2-spelling-1 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0
 ```
 
 ```bash [Fedora]
-sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling
+sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling gstreamer1 gstreamer1-plugins-base
 ```
 
 ```bash [Arch]
-sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 libspelling
+sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 libspelling gstreamer gst-plugins-base-libs
 ```
 
 :::
 
-The spelling package at the end of each line (`gir1.2-spelling-1` /
-`libspelling`) is optional — it adds spell-check to the prompt composer, and
-Collins runs fine without it.
+The last three packages on each line are optional. The spelling one
+(`gir1.2-spelling-1` / `libspelling`) adds spell-check to the prompt
+composer; the two GStreamer ones play the notification sound for in-app
+notifications — without them Collins uses the desktop's beep instead, and
+says so under Preferences → *Notifications* → *Sound*. Collins runs fine
+without any of the three, and the .deb and RPM only recommend them.
 
 ## Install
 

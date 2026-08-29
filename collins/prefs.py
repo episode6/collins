@@ -23,6 +23,8 @@ from . import (  # noqa: E402
     composerkeys,
     editor,
     footerapps,
+    notifycenter,
+    notifysound,
     prefslayout,
     prefssearch,
     statusicon,
@@ -239,6 +241,7 @@ class PreferencesDialog(Adw.Dialog):
             "token_use": self._build_token_use_group,
             "mcp_tools": self._build_mcp_tools_group,
             "sessions": self._build_sessions_group,
+            "notifications": self._build_notifications_group,
             "composer": self._build_composer_group,
             "terminal": self._build_terminal_group,
             "footer_apps": self._build_footer_apps_group,
@@ -501,6 +504,95 @@ class PreferencesDialog(Adw.Dialog):
         self._bg_poll_row.connect("notify::active", self._on_bg_poll_changed)
         sessions_group.add(self._bg_poll_row)
         return sessions_group
+
+    def _build_notifications_group(self, state: AppState) -> _SearchableGroup:
+        """The four rows of the spec's Notifications group: the in-app card,
+        the sound it plays, bells from other sessions, and finished runs.
+
+        The sound row is a combo of the three shapes the setting takes —
+        Default (the desktop's message sound), None, and Custom…, which opens
+        a file picker — with a ▶ beside it, the one place a user hears what
+        they picked. Its subtitle says what the choice means in words
+        (notifycenter.sound_subtitle), and, when GStreamer is not here to
+        play anything, says that instead and the row goes insensitive: the
+        beep is what a card gets then, whatever the row says.
+        """
+        group = _searchable(
+            _SearchableGroup(title=_("Notifications")),
+            *prefslayout.NOTIFICATION_SEARCH_TERMS,
+        )
+        self._inapp_row = Adw.SwitchRow(
+            title=_("In-app notifications"),
+            subtitle=_(
+                "Show a message from another session inside the window while "
+                "Collins is focused. Off sends every notification to the desktop"
+            ),
+        )
+        self._inapp_row.set_active(bool(state.get_setting("inapp_notifications")))
+        self._inapp_row.connect("notify::active", self._on_inapp_changed)
+        group.add(_searchable(self._inapp_row, "card", "banner", "desktop", "popup"))
+
+        self._sound_row = Adw.ComboRow(title=_("Sound"))
+        self._sound_row.set_model(Gtk.StringList.new([_("Default"), _("None"), _("Custom…")]))
+        self._sound_value = str(state.get_setting("notification_sound") or notifycenter.SOUND_DEFAULT)
+        self._sound_row.set_selected(self._sound_index(self._sound_value))
+        self._sound_row.connect("notify::selected", self._on_sound_selected)
+        self._sound_play = Gtk.Button(
+            icon_name="media-playback-start-symbolic",
+            valign=Gtk.Align.CENTER,
+            tooltip_text=_("Play the notification sound"),
+        )
+        self._sound_play.add_css_class("flat")
+        self._sound_play.connect("clicked", self._on_sound_play)
+        self._sound_row.add_suffix(self._sound_play)
+        self._refresh_sound_row()
+        group.add(
+            _searchable(self._sound_row, _("Default"), _("None"), _("Custom…"), "file", "gstreamer", "mute")
+        )
+
+        self._bell_row = Adw.SwitchRow(
+            title=_("Bells from other sessions"),
+            subtitle=_(
+                "A terminal bell from a session you aren't looking at posts a "
+                "notification and plays the sound. Off keeps the desktop's beep"
+            ),
+        )
+        self._bell_row.set_active(bool(state.get_setting("bell_notifications")))
+        self._bell_row.connect("notify::active", self._on_bell_notifications_changed)
+        group.add(_searchable(self._bell_row, "beep", "BEL", "terminal"))
+
+        self._announce_row = Adw.SwitchRow(
+            title=_("Announce finished runs"),
+            subtitle=_("Also notify when a session's run finishes, not only when it asks for you"),
+        )
+        self._announce_row.set_active(bool(state.get_setting("announce_finished_runs")))
+        self._announce_row.connect("notify::active", self._on_announce_finished_changed)
+        group.add(_searchable(self._announce_row, "finished", "done", "complete", "green"))
+        return group
+
+    @staticmethod
+    def _sound_index(value: str) -> int:
+        """Which of the combo's three rows the setting's value is."""
+        if not value or value == notifycenter.SOUND_DEFAULT:
+            return 0
+        if value == notifycenter.SOUND_NONE:
+            return 1
+        return 2
+
+    def _refresh_sound_row(self) -> None:
+        """The subtitle says what the choice means — or, with no GStreamer,
+        why the row is greyed and what a card gets instead."""
+        if notifysound.available():
+            self._sound_row.set_subtitle(notifycenter.sound_subtitle(self._sound_value))
+            self._sound_row.set_sensitive(True)
+            self._sound_play.set_sensitive(not notifycenter.sound_is_silent(self._sound_value))
+        else:
+            self._sound_row.set_subtitle(
+                _("Sound needs GStreamer ({package}); the desktop's beep is used instead").format(
+                    package=notifysound.GSTREAMER_PACKAGE
+                )
+            )
+            self._sound_row.set_sensitive(False)
 
     def _build_composer_group(self, state: AppState) -> _SearchableGroup:
         composer_group = _SearchableGroup(title=_("Composer"))
@@ -1191,6 +1283,70 @@ class PreferencesDialog(Adw.Dialog):
     def _on_attach_overlay_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("attach_overlay_button", row.get_active())
         self._on_change()
+
+    def _on_inapp_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("inapp_notifications", row.get_active())
+        self._on_change()
+
+    def _on_bell_notifications_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("bell_notifications", row.get_active())
+        self._on_change()
+
+    def _on_announce_finished_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("announce_finished_runs", row.get_active())
+        self._on_change()
+
+    def _on_sound_selected(self, row: Adw.ComboRow, _pspec) -> None:
+        """Default and None are written at once; Custom… asks for the file
+        first and writes on the pick, falling back to the row's previous
+        choice when the picker is dismissed — a "Custom" with no file behind
+        it would be a setting that means nothing."""
+        selected = row.get_selected()
+        if selected == self._sound_index(self._sound_value):
+            return
+        if selected == 0:
+            self._set_sound(notifycenter.SOUND_DEFAULT)
+        elif selected == 1:
+            self._set_sound(notifycenter.SOUND_NONE)
+        else:
+            self._browse_sound()
+
+    def _set_sound(self, value: str) -> None:
+        self._sound_value = value
+        self._state.set_setting("notification_sound", value)
+        self._sound_row.set_selected(self._sound_index(value))
+        self._refresh_sound_row()
+        self._on_change()
+
+    def _browse_sound(self) -> None:
+        picker = Gtk.FileDialog(title=_("Choose a notification sound"))
+        audio = Gtk.FileFilter()
+        audio.set_name(_("Sound files"))
+        audio.add_mime_type("audio/*")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(audio)
+        picker.set_filters(filters)
+        picker.set_default_filter(audio)
+        if self._sound_index(self._sound_value) == 2:
+            picker.set_initial_file(Gio.File.new_for_path(self._sound_value))
+
+        def picked(picker: Gtk.FileDialog, result) -> None:
+            try:
+                file = picker.open_finish(result)
+            except Exception:
+                file = None  # dismissed
+            path = file.get_path() if file is not None else None
+            if path:
+                self._set_sound(path)
+            else:
+                self._sound_row.set_selected(self._sound_index(self._sound_value))
+
+        picker.open(self.get_root(), None, picked)
+
+    def _on_sound_play(self, _button: Gtk.Button) -> None:
+        """Hear the choice, now — past the debounce and the single-flight
+        gate, but never past the desktop's mute (see notifysound.play)."""
+        notifysound.play(self._sound_value, force=True)
 
     def _on_composer_typing_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("composer_on_typing", row.get_active())

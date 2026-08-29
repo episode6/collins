@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-29. Full change history: git log for this file.
 
 # Maintainer: episode6 <support@episode6.com>
 # Contributor: Máté Molnár <molnar.mate@zengo.eu> (original agent-session-manager)
@@ -14,7 +14,9 @@ license=('GPL-3.0-or-later')
 depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'vte4' 'gtksourceview5')
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
 optdepends=('claude-code: resume Claude Code sessions'
-            'libspelling: spell-check in the prompt composer')
+            'libspelling: spell-check in the prompt composer'
+            'gstreamer: the notification sound (the beep stands in without it)'
+            'gst-plugins-base-libs: playbin, which plays it')
 # Refresh the sha256 when a v$pkgver tag exists (see packaging/aur/README.md).
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')

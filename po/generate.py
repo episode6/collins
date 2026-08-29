@@ -383,6 +383,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "1 unread": "1 olvasatlan",
         "{n} unread": "{n} olvasatlan",
         "Finished a run": "Befejezett egy futást",
+        "Default: the desktop's message sound": "Alapértelmezett: az asztal üzenethangja",
+        "Silent": "Néma",
+        "Rang the bell": "Csengetett",
+        "In-app notifications": "Alkalmazáson belüli értesítések",
+        "Show a message from another session inside the window while Collins is focused. Off sends every notification to the desktop": "Másik munkamenet üzenetének megjelenítése az ablakban, amíg a Collins fókuszban van. Kikapcsolva minden értesítés az asztalra megy",
+        "Sound": "Hang",
+        "Custom…": "Egyéni…",
+        "Play the notification sound": "Értesítési hang lejátszása",
+        "Bells from other sessions": "Csengetés más munkamenetekből",
+        "A terminal bell from a session you aren't looking at posts a notification and plays the sound. Off keeps the desktop's beep": "Egy éppen nem nézett munkamenet terminálcsengetése értesítést küld és lejátssza a hangot. Kikapcsolva az asztal sípolása marad",
+        "Announce finished runs": "Befejezett futások bejelentése",
+        "Also notify when a session's run finishes, not only when it asks for you": "Akkor is értesítsen, amikor egy munkamenet futása befejeződik, ne csak amikor Önt kéri",
+        "Sound needs GStreamer ({package}); the desktop's beep is used instead": "A hanghoz GStreamer ({package}) kell; helyette az asztal sípolása szól",
+        "Choose a notification sound": "Válasszon értesítési hangot",
+        "Sound files": "Hangfájlok",
         "Notifications": "Értesítések",
         "1 unread notification": "1 olvasatlan értesítés",
         "{n} unread notifications": "{n} olvasatlan értesítés",
@@ -523,9 +538,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show images": "Képek megjelenítése",
         "show_image — a screenshot, plot, render, or image URL in the in-app lightbox":
             "show_image — képernyőkép, diagram, render vagy képhivatkozás az alkalmazás képnézegetőjében",
-        "Send desktop notifications": "Asztali értesítések küldése",
-        "notify_user — a notification titled with the session; clicking it opens the tab":
-            "notify_user — a munkamenet nevét viselő értesítés; rákattintva megnyílik a lap",
+        "Send notifications": "Értesítések küldése",
+        "notify_user — a card in the window or a desktop notification, titled with the session; clicking it opens the tab":
+            "notify_user — kártya az ablakban vagy asztali értesítés a munkamenet nevével; kattintásra megnyílik a lap",
         "Attach pull requests": "Pull requestek csatolása",
         "attach_pr — put a pull request on the session's own footer and sidebar row":
             "attach_pr — pull request elhelyezése a munkamenet saját láblécén "
@@ -1001,6 +1016,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "1 unread": "1 ungelesen",
         "{n} unread": "{n} ungelesen",
         "Finished a run": "Hat einen Lauf beendet",
+        "Default: the desktop's message sound": "Standard: der Nachrichtenton des Desktops",
+        "Silent": "Stumm",
+        "Rang the bell": "Hat geklingelt",
+        "In-app notifications": "Benachrichtigungen in der App",
+        "Show a message from another session inside the window while Collins is focused. Off sends every notification to the desktop": "Eine Nachricht aus einer anderen Sitzung im Fenster anzeigen, solange Collins den Fokus hat. Aus sendet jede Benachrichtigung an den Desktop",
+        "Sound": "Ton",
+        "Custom…": "Benutzerdefiniert…",
+        "Play the notification sound": "Benachrichtigungston abspielen",
+        "Bells from other sessions": "Klingeln aus anderen Sitzungen",
+        "A terminal bell from a session you aren't looking at posts a notification and plays the sound. Off keeps the desktop's beep": "Ein Terminal-Klingeln aus einer Sitzung, die Sie gerade nicht ansehen, erzeugt eine Benachrichtigung und spielt den Ton. Aus behält den Signalton des Desktops",
+        "Announce finished runs": "Beendete Läufe melden",
+        "Also notify when a session's run finishes, not only when it asks for you": "Auch benachrichtigen, wenn der Lauf einer Sitzung endet, nicht nur, wenn sie nach Ihnen fragt",
+        "Sound needs GStreamer ({package}); the desktop's beep is used instead": "Für den Ton wird GStreamer ({package}) benötigt; stattdessen wird der Signalton des Desktops verwendet",
+        "Choose a notification sound": "Benachrichtigungston auswählen",
+        "Sound files": "Tondateien",
         "Notifications": "Benachrichtigungen",
         "1 unread notification": "1 ungelesene Benachrichtigung",
         "{n} unread notifications": "{n} ungelesene Benachrichtigungen",
@@ -1145,10 +1175,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show images": "Bilder anzeigen",
         "show_image — a screenshot, plot, render, or image URL in the in-app lightbox":
             "show_image — ein Screenshot, Diagramm, Render oder eine Bild-URL in der integrierten Lightbox",
-        "Send desktop notifications": "Desktop-Benachrichtigungen senden",
-        "notify_user — a notification titled with the session; clicking it opens the tab":
-            "notify_user — eine Benachrichtigung mit dem Sitzungsnamen; ein Klick "
-            "öffnet den Tab",
+        "Send notifications": "Benachrichtigungen senden",
+        "notify_user — a card in the window or a desktop notification, titled with the session; clicking it opens the tab":
+            "notify_user — eine Karte im Fenster oder eine Desktop-Benachrichtigung mit dem Sitzungsnamen; ein Klick öffnet den Tab",
         "Attach pull requests": "Pull-Requests anheften",
         "attach_pr — put a pull request on the session's own footer and sidebar row":
             "attach_pr — setzt einen Pull-Request auf die Fußzeile und "
@@ -1624,6 +1653,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "1 unread": "1 sin leer",
         "{n} unread": "{n} sin leer",
         "Finished a run": "Terminó una ejecución",
+        "Default: the desktop's message sound": "Predeterminado: el sonido de mensaje del escritorio",
+        "Silent": "Silencio",
+        "Rang the bell": "Sonó la campana",
+        "In-app notifications": "Notificaciones en la aplicación",
+        "Show a message from another session inside the window while Collins is focused. Off sends every notification to the desktop": "Mostrar un mensaje de otra sesión dentro de la ventana mientras Collins tiene el foco. Desactivado, cada notificación va al escritorio",
+        "Sound": "Sonido",
+        "Custom…": "Personalizado…",
+        "Play the notification sound": "Reproducir el sonido de notificación",
+        "Bells from other sessions": "Campanas de otras sesiones",
+        "A terminal bell from a session you aren't looking at posts a notification and plays the sound. Off keeps the desktop's beep": "Una campana de terminal de una sesión que no está mirando publica una notificación y reproduce el sonido. Desactivado, se mantiene el pitido del escritorio",
+        "Announce finished runs": "Anunciar ejecuciones terminadas",
+        "Also notify when a session's run finishes, not only when it asks for you": "Notificar también cuando termina la ejecución de una sesión, no solo cuando pregunta por usted",
+        "Sound needs GStreamer ({package}); the desktop's beep is used instead": "El sonido necesita GStreamer ({package}); se usa el pitido del escritorio en su lugar",
+        "Choose a notification sound": "Elija un sonido de notificación",
+        "Sound files": "Archivos de sonido",
         "Notifications": "Notificaciones",
         "1 unread notification": "1 notificación sin leer",
         "{n} unread notifications": "{n} notificaciones sin leer",
@@ -1765,10 +1809,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show images": "Mostrar imágenes",
         "show_image — a screenshot, plot, render, or image URL in the in-app lightbox":
             "show_image — una captura, gráfico, render o URL de imagen en el visor de la aplicación",
-        "Send desktop notifications": "Enviar notificaciones de escritorio",
-        "notify_user — a notification titled with the session; clicking it opens the tab":
-            "notify_user — una notificación titulada con la sesión; al pulsarla "
-            "se abre la pestaña",
+        "Send notifications": "Enviar notificaciones",
+        "notify_user — a card in the window or a desktop notification, titled with the session; clicking it opens the tab":
+            "notify_user — una tarjeta en la ventana o una notificación de escritorio con el nombre de la sesión; al hacer clic se abre la pestaña",
         "Attach pull requests": "Adjuntar pull requests",
         "attach_pr — put a pull request on the session's own footer and sidebar row":
             "attach_pr — coloca un pull request en el pie y la fila de la "
@@ -2243,6 +2286,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "1 unread": "1 non lue",
         "{n} unread": "{n} non lues",
         "Finished a run": "A terminé une exécution",
+        "Default: the desktop's message sound": "Par défaut : le son de message du bureau",
+        "Silent": "Silencieux",
+        "Rang the bell": "A sonné la cloche",
+        "In-app notifications": "Notifications dans l'application",
+        "Show a message from another session inside the window while Collins is focused. Off sends every notification to the desktop": "Afficher un message d'une autre session dans la fenêtre tant que Collins a le focus. Désactivé, chaque notification va au bureau",
+        "Sound": "Son",
+        "Custom…": "Personnalisé…",
+        "Play the notification sound": "Jouer le son de notification",
+        "Bells from other sessions": "Cloches des autres sessions",
+        "A terminal bell from a session you aren't looking at posts a notification and plays the sound. Off keeps the desktop's beep": "Une cloche de terminal d'une session que vous ne regardez pas publie une notification et joue le son. Désactivé, le bip du bureau est conservé",
+        "Announce finished runs": "Annoncer les exécutions terminées",
+        "Also notify when a session's run finishes, not only when it asks for you": "Notifier aussi quand l'exécution d'une session se termine, pas seulement quand elle vous demande",
+        "Sound needs GStreamer ({package}); the desktop's beep is used instead": "Le son nécessite GStreamer ({package}) ; le bip du bureau est utilisé à la place",
+        "Choose a notification sound": "Choisir un son de notification",
+        "Sound files": "Fichiers audio",
         "Notifications": "Notifications",
         "1 unread notification": "1 notification non lue",
         "{n} unread notifications": "{n} notifications non lues",
@@ -2385,9 +2443,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show images": "Afficher des images",
         "show_image — a screenshot, plot, render, or image URL in the in-app lightbox":
             "show_image — une capture, un graphique, un rendu ou une URL d’image dans la visionneuse intégrée",
-        "Send desktop notifications": "Envoyer des notifications de bureau",
-        "notify_user — a notification titled with the session; clicking it opens the tab":
-            "notify_user — une notification au nom de la session ; un clic ouvre l’onglet",
+        "Send notifications": "Envoyer des notifications",
+        "notify_user — a card in the window or a desktop notification, titled with the session; clicking it opens the tab":
+            "notify_user — une carte dans la fenêtre ou une notification de bureau au nom de la session ; un clic ouvre l’onglet",
         "Attach pull requests": "Attacher des pull requests",
         "attach_pr — put a pull request on the session's own footer and sidebar row":
             "attach_pr — place une pull request sur le pied de page et la "

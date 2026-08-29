@@ -41,7 +41,11 @@ BuildRequires:  appstream
 # would have been fine. The GIR typelibs ship inside these packages on Fedora
 # and RHEL alike, so there is nothing else to name. libspelling is a weak
 # dependency: the composer degrades to an unchecked text box without it, and
-# dnf installs it by default anyway. The claude CLI is a curl-installed
+# dnf installs it by default anyway. So are gstreamer1 and its base plugins
+# (the notification sound; the beep stands in without them): their GIR
+# typelibs ship inside those two packages — Gst-1.0.typelib in gstreamer1,
+# GstAudio/GstPbutils/GstVideo-1.0.typelib and libgstplayback.so in
+# gstreamer1-plugins-base — so, again, nothing else to name. The claude CLI is a curl-installed
 # binary with no package, so it cannot be a dependency at all; the app's own
 # first-run check handles its absence.
 Requires:       python3-gobject
@@ -50,6 +54,8 @@ Requires:       libadwaita >= 1.5
 Requires:       vte291-gtk4
 Requires:       gtksourceview5
 Recommends:     libspelling
+Recommends:     gstreamer1
+Recommends:     gstreamer1-plugins-base
 
 %description
 Collins browses every Claude Code session on your machine in a sidebar

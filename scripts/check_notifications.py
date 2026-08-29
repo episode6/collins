@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Headless check of the header bell and the notification history sheet — run
-on a dev machine, never by pytest.
+"""Headless check of the header bell, the notification history sheet, the
+in-app cards and the delivery routing — run on a dev machine, never by
+pytest.
 
 Drives a real App against staged data and pushes notifications through its
 center, asserting what the window does with them: the bell's badge and
@@ -10,6 +11,21 @@ session's, a placeholder's — in this window or another) with the keyboard
 staying in the sheet, Mark all read, Clear and a row's Remove, the
 Preferences link's open-on-group, and a second window wearing the same
 number and letting go of the center when it closes.
+
+Then the delivery table, through the window's own entry points
+(notify_session and _on_bell) with a real TerminalTab: a message from a tab
+that isn't selected is a card in the overlay (under the header bar, the
+sound asked for, the row unread and the sidebar flagged), clicking the card
+selects the tab and reads the row, a message to the selected tab is a read
+row and no card, an unfocused window gets the desktop notification, a bell
+from another tab is a card and a coalesced row while the selected tab's bell
+is a beep and no row, the three switches (in-app, bells, announce finished
+runs) do what their subtitles say, a placeholder tab's card still finds its
+page, a fourth card evicts the oldest, the × leaves the row unread, the
+notify_user tool's reply names where the message went, and the Preferences
+group's sound picker writes the setting the sheet's footer reads. Focus is
+the harness's to declare — is_active is read per window instance — so
+nothing here depends on what the headless compositor decides to focus.
 
 Stages its own throwaway scratch tree and app id (two sessions in a project
 named alpha-widgets, named in state.json), so it runs anywhere the e2e suite
@@ -99,8 +115,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import GLib, Gtk  # noqa: E402
 
-from collins import i18n, notifycenter  # noqa: E402
+from collins import i18n, notifycenter, notifysound  # noqa: E402
 from collins.app import App  # noqa: E402
+from collins.terminal import TerminalTab  # noqa: E402
 from collins.window import MainWindow  # noqa: E402
 
 failures = []
@@ -324,9 +341,9 @@ def steps(app: App):
         dialog = win.get_visible_dialog()
         check("the footer's link opens Preferences", dialog is not None)
         if dialog is not None:
-            check("on the whole page while the Notifications group isn't built",
-                  dialog._search_entry.get_text() == "" and not dialog.show_group("notifications"))
-            check("and can open on a group that exists",
+            check("on the Notifications group, by its title in the search box",
+                  dialog._search_entry.get_text() == "Notifications")
+            check("and can open on another group that exists",
                   dialog.show_group("terminal") and dialog._search_entry.get_text() == "Terminal")
             dialog.force_close()
     yield preferences
@@ -392,6 +409,299 @@ def steps(app: App):
         center.mark_all_read()
         check("a closed window let go of the center", bell.badge_text() == "")
     yield after_destroy
+
+    # -- the delivery table ------------------------------------------------------
+    cards = win.notify_cards
+    played = []
+
+    def wait():
+        pass
+
+    def deliveries_setup():
+        # The sound, for real, once: whatever this machine has (GStreamer and
+        # a theme, or neither), play() answers and never raises.
+        first = notifysound.play("default", force=True)
+        check("play() answers for the default sound",
+              first in (notifysound.PLAYED, notifysound.BEEPED, notifysound.MUTED), first)
+        second = notifysound.play("default")
+        check("a second play right after is debounced or busy",
+              second in (notifysound.DEBOUNCED, notifysound.BUSY), second)
+        check("silence is silence", notifysound.play("none", force=True) == notifysound.SILENT)
+        check("GStreamer's absence is a fact, not an error", isinstance(notifysound.available(), bool))
+        # From here the sound is recorded, not played.
+        notifysound.play = lambda value, **_kw: played.append(value) or notifysound.PLAYED
+        # Focus is declared: this window is the active one.
+        win.is_active = lambda: True
+        center.clear()
+        center.mark_all_read()
+        store.set_unread(SESSION_A, False)
+        store.set_unread(SESSION_B, False)
+        # A real terminal tab for session B: notify_session and _on_bell
+        # take a TerminalTab, and the tab's session id is what a row is
+        # filed under. The shell runs `sleep`, never the CLI.
+        tab_b = TerminalTab(cwd=PROJECT_DIR, session_id=SESSION_B, command_override="sleep 300")
+        page = win.tab_view.append(tab_b)
+        page.set_title("Router profiling")
+        win._pages[SESSION_B] = page
+        shared["tab_b"], shared["page_b"] = tab_b, page
+        win.tab_view.set_selected_page(page_a)
+        check("no cards stand before anything is delivered", cards.cards() == [])
+    yield deliveries_setup
+
+    def message_elsewhere():
+        result = win.notify_session(shared["tab_b"], "Profiling done: p95 latency is down 31%.")
+        check("a message from another tab is a card, the sound, a row, a flag and the flash",
+              result == {notifycenter.DELIVER_CARD, notifycenter.DELIVER_SOUND, notifycenter.DELIVER_ROW,
+                         notifycenter.DELIVER_FLAG, notifycenter.DELIVER_FLASH}, str(result))
+        check("the sound was asked for, with the setting", played == ["default"], str(played))
+        rows = [r for r in center.rows() if r.kind != notifycenter.KIND_FINISHED]
+        check("the row is unread, under the session, with its name and project",
+              len(rows) == 1 and not rows[0].read and rows[0].session_id == SESSION_B
+              and rows[0].title == "Router profiling" and rows[0].project == "alpha-widgets",
+              str([(r.kind, r.session_id, r.body, r.read) for r in rows]))
+        check("the sidebar row is flagged", store.get_item(SESSION_B).unread)
+        # The flag's own synthetic row rides along (set_green tracks every
+        # flag edge, a message's included): the badge reads two until the
+        # tab is visited, which takes both down.
+        check("and the flag's synthetic row stands beside the message", center.is_green(SESSION_B))
+        check("the tool reply says in Collins", notifycenter.tool_reply(result) == notifycenter.REPLY_IN_APP)
+        shared["msg_row"] = rows[0]
+    yield message_elsewhere
+
+    def card_up():
+        up = cards.cards()
+        check("one card stands", len(up) == 1, str(len(up)))
+        if not up:
+            return
+        card = up[0]
+        check("it is revealed", card.get_reveal_child())
+        check("it holds the row", card.notification is shared["msg_row"])
+        check("it holds the page it came from", card.page is shared["page_b"])
+        header_h = win._content_header.get_height()
+        check("the stack sits 12px under the header bar",
+              header_h > 0 and cards.get_margin_top() == header_h + 12,
+              f"header {header_h}, margin {cards.get_margin_top()}")
+        check("and 14px from the right edge", cards.get_margin_end() == 14)
+        card.activate()
+        check("clicking the card selects its tab", win.tab_view.get_selected_page() is shared["page_b"])
+        check("which reads the row, clears the flag and drops the flag's row",
+              shared["msg_row"].read and not store.get_item(SESSION_B).unread
+              and not center.is_green(SESSION_B))
+        check("and the card is on its way out", not card.get_reveal_child())
+    yield card_up
+    yield wait
+    yield wait
+
+    def card_gone():
+        check("the card is gone once the slide ends", cards.cards() == [], str(len(cards.cards())))
+        result = win.notify_session(shared["tab_b"], "Still here?")
+        check("a message to the selected tab is a read row and the flash, no card",
+              result == {notifycenter.DELIVER_ROW_READ, notifycenter.DELIVER_FLASH}, str(result))
+        check("the row is read on arrival", center.rows()[0].read and center.rows()[0].body == "Still here?")
+        check("no card came up", cards.cards() == [])
+        check("the tool reply says the user is looking",
+              notifycenter.tool_reply(result) == notifycenter.REPLY_SELECTED)
+        check("the sound was not asked for", played == ["default"])
+        win.tab_view.set_selected_page(page_a)
+    yield card_gone
+
+    def message_unfocused():
+        win.is_active = lambda: False
+        result = win.notify_session(shared["tab_b"], "Away message")
+        check("with no window active the message is a desktop notification, a row and a flag",
+              result == {notifycenter.DELIVER_DESKTOP, notifycenter.DELIVER_ROW, notifycenter.DELIVER_FLAG},
+              str(result))
+        check("the tool reply says the desktop",
+              notifycenter.tool_reply(result) == notifycenter.REPLY_DESKTOP)
+        check("the sidebar row is flagged again", store.get_item(SESSION_B).unread)
+        win.is_active = lambda: True
+        # The app's tool dispatch, end to end: the reply is one of the three.
+        ok, reply = app._mcp_notify_user((win, shared["tab_b"]), {"message": "Through the tool"})
+        check("the notify_user tool replies 'in Collins' for a card",
+              ok and reply == "The user was notified in Collins.", reply)
+    yield message_unfocused
+
+    def visit_reads():
+        unread_before = center.unread_count()
+        check("three rows wait (the desktop one, the tool's, and the flag's)",
+              unread_before == 3, str(unread_before))
+        win.tab_view.set_selected_page(shared["page_b"])
+        check("selecting the tab reads every row the session posted", center.unread_count() == 0)
+        check("and takes its card down", all(not c.get_reveal_child() for c in cards.cards()))
+        win.tab_view.set_selected_page(page_a)
+    yield visit_reads
+    yield wait
+    yield wait
+
+    def bell_elsewhere():
+        played.clear()
+        before = len(center.rows())
+        win._on_bell(shared["tab_b"])
+        win._on_bell(shared["tab_b"])
+        rows = center.rows()
+        check("two bells from another tab are one unread bell row",
+              len(rows) == before + 1 and rows[0].kind == notifycenter.KIND_BELL
+              and rows[0].count == 2 and not rows[0].read and rows[0].body == "Rang the bell",
+              f"{len(rows) - before} new, count {rows[0].count}")
+        check("the sound was asked for each time (notifysound debounces)", played == ["default", "default"])
+        check("a bell flags nothing", not store.get_item(SESSION_B).unread)
+        shared["bell_row"] = rows[0]
+    yield bell_elsewhere
+
+    def bell_card():
+        up = cards.cards()
+        check("the bell's card stands, once, wearing the count",
+              len(up) == 1 and up[0].notification is shared["bell_row"], str(len(up)))
+        win.tab_view.set_selected_page(shared["page_b"])
+        before = len(center.rows())
+        win._on_bell(shared["tab_b"])
+        check("a bell from the selected tab posts no row", len(center.rows()) == before)
+        win.tab_view.set_selected_page(page_a)
+        win.state.set_setting("bell_notifications", False)
+        win._on_bell(shared["tab_b"])
+        check("nor does any bell with 'Bells from other sessions' off",
+              len(center.rows()) == before and shared["bell_row"].count == 2)
+        win.state.set_setting("bell_notifications", True)
+    yield bell_card
+
+    def inapp_off():
+        cards.dismiss_all()
+        win.state.set_setting("inapp_notifications", False)
+        result = win.notify_session(shared["tab_b"], "Cards off")
+        check("with in-app notifications off the card becomes a desktop notification",
+              notifycenter.DELIVER_DESKTOP in result and notifycenter.DELIVER_CARD not in result
+              and notifycenter.DELIVER_SOUND not in result, str(result))
+        check("the row and the flag still land",
+              notifycenter.DELIVER_ROW in result and store.get_item(SESSION_B).unread)
+        win.state.set_setting("inapp_notifications", True)
+        win.tab_view.set_selected_page(shared["page_b"])  # reads it all
+        win.tab_view.set_selected_page(page_a)
+    yield inapp_off
+    yield wait
+    yield wait
+
+    def announce_off():
+        cards.dismiss_all()
+        check("announce finished runs is off by default", not win.state.get_setting("announce_finished_runs"))
+        win._on_session_finished(SESSION_B)
+        check("a finish flags the row and puts the synthetic row up",
+              store.get_item(SESSION_B).unread and center.is_green(SESSION_B))
+    yield announce_off
+
+    def announce_off_no_card():
+        check("but shows no card while the setting is off", cards.cards() == [], str(len(cards.cards())))
+        store.set_unread(SESSION_B, False)
+        win.state.set_setting("announce_finished_runs", True)
+        played.clear()
+        win._on_session_finished(SESSION_B)
+        check("with the setting on a finish plays the sound", played == ["default"], str(played))
+    yield announce_off_no_card
+
+    def announce_card():
+        up = cards.cards()
+        check("and shows a finished-run card for the synthetic row",
+              len(up) == 1 and up[0].notification.kind == notifycenter.KIND_FINISHED
+              and up[0].notification.id == notifycenter.green_id(SESSION_B), str(len(up)))
+        if up:
+            up[0].activate()
+            check("clicking it selects the tab, which clears the flag and drops the row",
+                  win.tab_view.get_selected_page() is shared["page_b"]
+                  and not store.get_item(SESSION_B).unread and not center.is_green(SESSION_B))
+        win.state.set_setting("announce_finished_runs", False)
+        win.tab_view.set_selected_page(page_a)
+    yield announce_card
+    yield wait
+    yield wait
+
+    def placeholder_card():
+        # A tab with no session id yet: its message is filed under the
+        # placeholder id, and its card holds the page.
+        tab_p = TerminalTab(cwd=PROJECT_DIR, command_override="sleep 300")
+        page = win.tab_view.append(tab_p)
+        page.set_title("New Thread")
+        win._placeholder_pages[page] = "placeholder-90"
+        win.sidebar.add_placeholder("placeholder-90", PROJECT_DIR, "agent-claude-symbolic")
+        shared["page_p"] = page
+        win.tab_view.set_selected_page(page_a)
+        result = win.notify_session(tab_p, "From a tab with no id yet")
+        row = center.rows()[0]
+        check("a placeholder tab's message is a card and a row under the placeholder id",
+              notifycenter.DELIVER_CARD in result and row.session_id == "placeholder-90"
+              and row.project == "alpha-widgets", f"{row.session_id!r} {row.project!r}")
+        check("and flags the placeholder row", win.sidebar.placeholder_unread("placeholder-90"))
+        shared["p_row"] = row
+    yield placeholder_card
+
+    def placeholder_card_click():
+        up = cards.cards()
+        check("its card holds the page", len(up) == 1 and up[0].page is shared["page_p"], str(len(up)))
+        if up:
+            up[0].activate()
+            check("clicking it selects the placeholder's tab and reads the row",
+                  win.tab_view.get_selected_page() is shared["page_p"] and shared["p_row"].read
+                  and not win.sidebar.placeholder_unread("placeholder-90"))
+        win.tab_view.set_selected_page(page_a)
+    yield placeholder_card_click
+    yield wait
+    yield wait
+
+    def four_cards():
+        for n in range(4):
+            win.notify_session(shared["tab_b"], f"Message {n}")
+    yield four_cards
+
+    def three_stand():
+        up = cards.cards()
+        check("a fourth card pushes the oldest out: three stand, newest on top",
+              [c.notification.body for c in up if c.get_reveal_child()]
+              == ["Message 3", "Message 2", "Message 1"],
+              str([c.notification.body for c in up]))
+        if up:
+            top = up[0]
+            top.close_button.emit("clicked")
+            check("the × takes the card down", not top.get_reveal_child())
+            check("and leaves the row unread", not top.notification.read and center.unread_count() >= 4)
+        cards.dismiss_all()
+        center.clear()
+        store.set_unread(SESSION_B, False)
+    yield three_stand
+
+    # -- the Notifications group in Preferences -------------------------------------
+    def preferences_group():
+        win._show_preferences("notifications")
+        dialog = win.get_visible_dialog()
+        check("the sheet's link opens Preferences on the Notifications group",
+              dialog is not None and dialog._search_entry.get_text() == "Notifications")
+        if dialog is None:
+            return
+        check("the group is visible and holds the four rows",
+              dialog._inapp_row.get_visible() and dialog._sound_row.get_visible()
+              and dialog._bell_row.get_visible() and dialog._announce_row.get_visible())
+        check("the sound row says what Default means",
+              dialog._sound_row.get_subtitle() == (
+                  "Default: the desktop's message sound" if notifysound.available()
+                  else "Sound needs GStreamer (gir1.2-gstreamer-1.0); the desktop's beep is used instead"),
+              dialog._sound_row.get_subtitle())
+        check("and is greyed exactly when GStreamer is missing",
+              dialog._sound_row.get_sensitive() == notifysound.available())
+        if notifysound.available():
+            dialog._sound_row.set_selected(1)
+            check("picking None writes the setting", win.state.get_setting("notification_sound") == "none")
+            check("and the subtitle says Silent", dialog._sound_row.get_subtitle() == "Silent")
+            check("the ▶ is greyed for silence", not dialog._sound_play.get_sensitive())
+        dialog._announce_row.set_active(True)
+        check("the announce switch writes its setting",
+              win.state.get_setting("announce_finished_runs") is True)
+        dialog._announce_row.set_active(False)
+        dialog.force_close()
+    yield preferences_group
+
+    def footer_after_prefs():
+        expected = "Sound: None" if notifysound.available() else "Sound: Default"
+        check("the sheet's footer follows the sound setting",
+              sheet._sound_label.get_label() == expected, sheet._sound_label.get_label())
+        win.state.set_setting("notification_sound", "default")
+    yield footer_after_prefs
 
 
 def main() -> int:

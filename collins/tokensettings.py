@@ -85,8 +85,11 @@ _MCP_TOOL_LABELS = {
         N_("show_image — a screenshot, plot, render, or image URL in the in-app lightbox"),
     ),
     "notify_user": (
-        N_("Send desktop notifications"),
-        N_("notify_user — a notification titled with the session; clicking it opens the tab"),
+        N_("Send notifications"),
+        N_(
+            "notify_user — a card in the window or a desktop notification, titled with "
+            "the session; clicking it opens the tab"
+        ),
     ),
     "attach_pr": (
         N_("Attach pull requests"),
