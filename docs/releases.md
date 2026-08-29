@@ -38,6 +38,12 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **The composer always picks up at the end.** Every way into the composer
+  now appends and leaves the cursor at the end of the box: the prompt cut
+  out of the CLI's input box on open lands after a restored draft instead
+  of above it, and a keystroke typed at the terminal continues the box
+  wherever a docked composer's cursor was left. Before, the cut went in at
+  the top with the cursor between it and the draft.
 - **Paste an image into the composer.** An image on the clipboard — a
   screenshot tool's copy, a browser's *Copy image* — pasted into the
   composer (floating, docked, or on the new-chat screen) lands the way a
