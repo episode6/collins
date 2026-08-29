@@ -20,7 +20,7 @@ downloads of each version, see the
 - ✅ **Workflow** — terminal panel per tab, session backgrounding (`/bg`) & re-attach, graceful `Ctrl+C` close, per-tab cwd + git-branch footer, Export as Markdown, tab emoji
 - ✅ **Pull requests** — every session's PRs tracked through `gh` (checks, conflicts, unanswered comments) as sidebar marks, footer chips, and an in-app PR page; merge / auto-merge / ready-for-review / request-a-review actions, with red CI, conflicts, and unanswered comments sendable back to the agent as prompts
 - ✅ **Editor** — a per-tab code editor beside the terminal: file tree, quick open, an agent-files list of what the session just wrote, pop-out to a second monitor
-- ✅ **Composer** — a spell-checked, multi-line prompt box that opens the moment you start typing, floating or docked, with drag-and-drop image attachments
+- ✅ **Composer** — a spell-checked, multi-line prompt box that opens the moment you start typing, floating or docked, with dropped or pasted image attachments
 - ✅ **Session tools** — an in-app MCP server every launched session can call: rename itself, open a file or an image on your screen, notify you when it needs you, attach a pull request to its own row, spawn a sibling session, and read or drive the terminal panel
 - ✅ **Desktop presence** — a status icon with an unread badge, close-to-hide (sessions keep running without a window), notifications wearing each project's own icon, Caffeine Mode
 - ✅ **Theming** — light/dark plus selectable terminal color palettes
@@ -38,6 +38,15 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **Paste an image into the composer.** An image on the clipboard — a
+  screenshot tool's copy, a browser's *Copy image* — pasted into the
+  composer (floating, docked, or on the new-chat screen) lands the way a
+  dropped one does: saved as a PNG under `~/.cache/collins/dropped-images/`
+  (a `paste-…` file beside the `drop-…` ones, pruned after a week), its
+  mention typed at the cursor, a thumbnail in the strip. GTK's text box
+  pastes text and nothing else, so an image used to paste nothing at all.
+  Files copied in a file manager paste as their mentions too; plain text
+  pastes as it always did.
 - **Collins is on Fedora.** `sudo dnf copr enable episode6/stable && sudo dnf
   install collins` — the `episode6/stable` COPR builds every release for
   every current Fedora (new ones join as Fedora branches them) and for RHEL

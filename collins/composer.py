@@ -11,8 +11,10 @@ announces ``send-requested`` / ``close-requested`` and its host
 text out of the CLI's box on the way in, type it back or submit it on the
 way out. It is also a drop target in its own right — files and raw images
 land as mentions, and images earn a strip of preview thumbnails over the
-text — through injected provider callbacks, so the view itself stays
-host-agnostic.
+text — and a paste of the same two payloads (an image copied off a
+screenshot tool or a browser, files copied in a file manager) lands the
+same way; both through injected provider callbacks, so the view itself
+stays host-agnostic.
 
 libspelling is optional — unlike GtkSourceView (which the spell-check
 adapter is built for, and which stays a hard dependency): without the
@@ -34,7 +36,7 @@ import gi
 
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 try:
     gi.require_version("Spelling", "1")
@@ -180,6 +182,10 @@ class ComposerView(Gtk.Box):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key)
         self._view.add_controller(keys)
+        # Every way of pasting — Ctrl+V, Shift+Insert, the context menu —
+        # arrives as this one signal, ahead of the view's own text-only
+        # handler (see _on_paste).
+        self._view.connect("paste-clipboard", self._on_paste)
 
         # Image previews ride above the text view: a row of square thumbs
         # for dropped images, hidden until the first one lands. Their own
@@ -351,32 +357,43 @@ class ComposerView(Gtk.Box):
 
     def _on_drop(self, _target: Gtk.DropTarget, value, _x: float, _y: float) -> bool:
         if isinstance(value, Gdk.Texture):
-            # Raw image data: save the PNG copy, mention the copy.
-            try:
-                data = value.save_to_png_bytes().get_data()
-                directory = dropimages.default_directory()
-                dropimages.prune_stale(directory)
-                path = dropimages.save_png(bytes(data), directory)
-            except (GLib.Error, OSError):
-                self._notify(_("couldn't save a copy of the dropped image"))
-                return False
-            return self._mention_dropped([str(path)])
+            return self._attach_texture(
+                value, dropimages.DROP_PREFIX, _("couldn't save a copy of the dropped image")
+            )
         if isinstance(value, Gdk.FileList):
-            files = value.get_files()
-            paths = [p for f in files if (p := f.get_path()) is not None]
-            skipped = len(files) - len(paths)
-            if skipped:
-                # Counted, not echoed — the URIs are untrusted bytes (the
-                # terminal's _drop_files says why).
-                self._notify(
-                    ngettext(
-                        "skipped {n} dropped item that isn't a local file",
-                        "skipped {n} dropped items that aren't local files",
-                        skipped,
-                    ).format(n=skipped)
-                )
-            return self._mention_dropped(paths)
+            return self._mention_files(value.get_files())
         return False
+
+    def _mention_files(self, files: list[Gio.File]) -> bool:
+        """A file list, dropped or pasted: mention every local one. The
+        rest (a remote URI has no path) are counted, not echoed — the URIs
+        are untrusted bytes (the terminal's _drop_files says why)."""
+        paths = [p for f in files if (p := f.get_path()) is not None]
+        skipped = len(files) - len(paths)
+        if skipped:
+            self._notify(
+                ngettext(
+                    "skipped {n} item that isn't a local file",
+                    "skipped {n} items that aren't local files",
+                    skipped,
+                ).format(n=skipped)
+            )
+        return self._mention_dropped(paths)
+
+    def _attach_texture(self, texture: Gdk.Texture, prefix: str, failure: str) -> bool:
+        """Raw image data, dropped or pasted: save a PNG copy under the
+        cache (dropimages says why there, and prunes the old ones on the
+        way) and mention the copy. *prefix* names how it arrived in the
+        file name; *failure* is what the host hears when the save fails."""
+        try:
+            data = texture.save_to_png_bytes().get_data()
+            directory = dropimages.default_directory()
+            dropimages.prune_stale(directory)
+            path = dropimages.save_png(bytes(data), directory, prefix=prefix)
+        except (GLib.Error, OSError):
+            self._notify(failure)
+            return False
+        return self._mention_dropped([str(path)])
 
     def _mention_dropped(self, paths: list[str]) -> bool:
         """Mention every path the provider will name, and thumbnail the
@@ -454,6 +471,81 @@ class ComposerView(Gtk.Box):
         while (child := self._thumb_box.get_first_child()) is not None:
             self._thumb_box.remove(child)
         self._thumb_scroller.set_visible(False)
+
+    # -- paste -----------------------------------------------------------------
+
+    def _on_paste(self, view: Gtk.TextView) -> None:
+        """Take a paste over when the clipboard holds one of the drop
+        target's two payloads; leave every other one to the view.
+
+        The text view's own paste-clipboard handler reads text and nothing
+        else, so an image on the clipboard — a screenshot tool's copy, a
+        browser's "Copy image" — pasted nothing at all. Now it lands the
+        way the same image dropped does: saved as a PNG copy under the
+        cache (a ``paste-…`` file beside the drop copies), its mention
+        typed at the cursor, a thumbnail in the strip. Copied files (a
+        file manager's Copy) are mentioned in place, likewise as dropped.
+        The image reading wins over a file list, and both win over text,
+        in the order the drop target lists its formats and for the same
+        reason: a browser's "Copy image" offers the pixels with an HTML
+        stand-in beside them, and the pixels are what was copied.
+
+        The advertised formats are the whole decision, and it is made
+        here, synchronously: the data itself comes across later (another
+        process owns the clipboard) and the signal has to be stopped now
+        or the default handler pastes whatever text rides along. A read
+        that then comes back with nothing — an owner that advertised a
+        format and failed to hand it over — does the text paste the view
+        would have done, by hand. Both payloads are read as the drop target
+        delivers them, so a file list goes through the same accounting
+        (_mention_files): what isn't local is counted and reported, not
+        silently thinned.
+        """
+        if self._file_reference("image.png") is None:
+            return  # no mention syntax to type: only text can land
+        clipboard = view.get_clipboard()
+        # A foreign clipboard advertises mime types; the GTypes GDK can
+        # deserialize those into — image/png to Gdk.Texture, text/uri-list
+        # to Gdk.FileList — are what the drop target's formats match on.
+        formats = clipboard.get_formats().union_deserialize_gtypes()
+        if formats.contain_gtype(Gdk.Texture):
+            view.stop_emission_by_name("paste-clipboard")
+            clipboard.read_texture_async(None, self._on_pasted_texture)
+        elif formats.contain_gtype(Gdk.FileList):
+            view.stop_emission_by_name("paste-clipboard")
+            clipboard.read_value_async(
+                Gdk.FileList.__gtype__, GLib.PRIORITY_DEFAULT, None, self._on_pasted_files
+            )
+
+    def _on_pasted_texture(self, clipboard: Gdk.Clipboard, result) -> None:
+        try:
+            texture = clipboard.read_texture_finish(result)
+        except GLib.Error:
+            texture = None
+        if texture is None:
+            self._paste_text(clipboard)
+            return
+        self._attach_texture(
+            texture, dropimages.PASTE_PREFIX, _("couldn't save a copy of the pasted image")
+        )
+
+    def _on_pasted_files(self, clipboard: Gdk.Clipboard, result) -> None:
+        try:
+            value = clipboard.read_value_finish(result)
+        except GLib.Error:
+            value = None
+        files = value.get_files() if isinstance(value, Gdk.FileList) else []
+        if not files:
+            self._paste_text(clipboard)
+            return
+        self._mention_files(files)
+
+    def _paste_text(self, clipboard: Gdk.Clipboard) -> None:
+        """The paste the view's own handler would have done — its text, if
+        it has any — for a payload this view claimed and then couldn't
+        read (see _on_paste)."""
+        self._buffer.paste_clipboard(clipboard, None, self._view.get_editable())
+        self._view.scroll_to_mark(self._buffer.get_insert(), 0.0, False, 0.0, 0.0)
 
     # -- behavior --------------------------------------------------------------
 

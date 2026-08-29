@@ -1,12 +1,15 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
-"""GTK-free helpers for drops onto an agent terminal.
+"""GTK-free helpers for drops onto an agent terminal, and for pastes into
+its composer.
 
 An image dragged in as raw data (from a browser, a screenshot tool, an
 image viewer) has no path an @-mention could name, so a copy is written
-here and the mention points at the copy. Dropped *files* are mentioned in
-place — only the text built for them (mention_text) lives here, along with
-how that text joins whatever is already typed (leading_space, which the
+here and the mention points at the copy — and so is one pasted into the
+composer off the clipboard, under its own `paste-` prefix so the directory
+says which way each copy arrived. Dropped *files* are mentioned in place —
+only the text built for them (mention_text) lives here, along with how
+that text joins whatever is already typed (leading_space, which the
 attach-file button shares).
 
 Kept GTK-free (like editorfiles.py/gitinfo.py) so this stays unit-testable
@@ -163,10 +166,21 @@ def default_directory() -> Path:
     return cache_directory() / "dropped-images"
 
 
-def save_png(data: bytes, directory: Path, timestamp: float | None = None) -> Path:
-    """Write *data* to a fresh ``drop-YYYYMMDD-HHMMSS[-N].png`` under
-    *directory*; see `save_copy`."""
-    return save_copy(data, directory, "drop", ".png", timestamp)
+# How a saved image copy arrived, as the first word of its file name.
+DROP_PREFIX = "drop"
+PASTE_PREFIX = "paste"
+
+
+def save_png(
+    data: bytes,
+    directory: Path,
+    timestamp: float | None = None,
+    prefix: str = DROP_PREFIX,
+) -> Path:
+    """Write *data* to a fresh ``<prefix>-YYYYMMDD-HHMMSS[-N].png`` under
+    *directory* — ``drop-…`` unless told otherwise (the composer's paste
+    path says `PASTE_PREFIX`); see `save_copy`."""
+    return save_copy(data, directory, prefix, ".png", timestamp)
 
 
 def save_copy(

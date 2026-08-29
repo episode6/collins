@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-27. Full change history: git log for this file.
+fork. Last modified: 2026-08-29. Full change history: git log for this file.
 -->
 
 # Features
@@ -206,9 +206,14 @@ one-line input:
   cursor untouched by a right-click. Spell-check needs libspelling
   installed (see [Getting started](/guide/getting-started)); without it the
   composer is a plain text box.
-- **Drop images and files straight in.** Files land in the prompt as
-  mentions; images get a strip of preview thumbnails above the text (click
-  one to inspect it full-size) and go to the agent with the prompt.
+- **Drop or paste images and files straight in.** Files land in the
+  prompt as mentions; images get a strip of preview thumbnails above the
+  text (click one to inspect it full-size) and go to the agent with the
+  prompt. Pasting works the same way: an image on the clipboard (a
+  screenshot tool's copy, a browser's *Copy image*) is saved as a PNG under
+  `~/.cache/collins/dropped-images/` — where dropped images go too, pruned
+  after a week — and that copy is what the prompt mentions; files copied in
+  a file manager are mentioned in place.
 - **Floating or docked.** The composer floats translucent over the
   terminal; its dock button turns it into a panel below the terminal
   instead, where it stays for that session's later visits. The *Composer in

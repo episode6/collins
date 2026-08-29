@@ -3,6 +3,7 @@
 import time
 
 from collins.dropimages import (
+    PASTE_PREFIX,
     PRUNE_AFTER_SECONDS,
     cell_width,
     default_directory,
@@ -196,6 +197,16 @@ def test_save_png_same_second_gets_distinct_names(tmp_path):
     assert second == tmp_path / f"{_STEM}-2.png"
     assert third == tmp_path / f"{_STEM}-3.png"
     assert first.read_bytes() == b"one"  # never clobbered
+
+
+def test_save_png_prefix_names_how_the_copy_arrived(tmp_path):
+    # The composer's paste path files its copies beside the dropped ones
+    # under its own first word, so a listing says which way each came in.
+    path = save_png(b"pasted", tmp_path, _NOW, prefix=PASTE_PREFIX)
+    assert path == tmp_path / (_STEM.replace("drop-", "paste-", 1) + ".png")
+    assert path.read_bytes() == b"pasted"
+    # Its own name space: a paste in the same second as a drop is no clash.
+    assert save_png(b"dropped", tmp_path, _NOW) == tmp_path / f"{_STEM}.png"
 
 
 # -- prune_stale --------------------------------------------------------------
