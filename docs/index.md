@@ -1,7 +1,7 @@
 ---
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-28. Full change history: git log for this file.
+# fork. Last modified: 2026-08-29. Full change history: git log for this file.
 # https://vitepress.dev/reference/default-theme-home-page
 layout: home
 
@@ -38,7 +38,7 @@ features:
     details: Every PR a session opens is tracked on its row and tab — CI, conflicts, unanswered comments — with the actions to match — read the diff beside the terminal, merge, ask for a review, or send the failure back to the agent as a prompt.
   - icon: 🧰
     title: An IDE around the agent
-    details: A code editor with the agent's latest edits one click away, shell panels under every tab, and a spell-checked prompt composer that opens the moment you start typing — drop images straight into it.
+    details: A code editor with the agent's latest edits one click away, shell panels under every tab, and a spell-checked prompt composer that opens the moment you start typing — drop or paste images straight into it.
   - icon: 🔔
     title: Stays out of your way
     details: Close the window and sessions keep running behind a status icon that counts what's waiting for you. Sessions raise notifications when they need you, and Caffeine Mode keeps the machine awake while agents work.
