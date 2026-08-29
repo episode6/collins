@@ -2100,13 +2100,22 @@ class MainWindow(Adw.ApplicationWindow):
         return None
 
     def _on_sidebar_open_placeholder(self, _sidebar, placeholder_id: str) -> None:
+        self._open_placeholder(placeholder_id)
+
+    def _open_placeholder(self, placeholder_id: str) -> bool:
+        """Go to a placeholder's tab here, or bring a kept draft back onto a
+        screen. False when there is nothing to go to: no tab under that id in
+        this window and no draft record to reopen (see _open_new_chat_draft)
+        — the caller may have a row to leave standing (the notification
+        sheet does)."""
         page = self._placeholder_page(placeholder_id)
         if page is not None:
             self.tab_view.set_selected_page(page)
             self._clear_unread(page)  # already-selected tabs emit no switch; see open_session
-            return
+            return True
         if newchat.is_draft_id(placeholder_id):
-            self._open_new_chat_draft(placeholder_id)  # a kept draft with no tab: reopen it
+            return self._open_new_chat_draft(placeholder_id)  # a kept draft with no tab: reopen it
+        return False
 
     def _on_sidebar_close_placeholder(self, _sidebar, placeholder_id: str) -> None:
         page = self._placeholder_page(placeholder_id)
@@ -2218,13 +2227,15 @@ class MainWindow(Adw.ApplicationWindow):
         tab.autoshow_composer(self.state.get_setting("composer_new_sessions"))
         self._refresh_draft_rows()  # the row reads "New Thread" again
 
-    def _open_new_chat_draft(self, draft_id: str) -> None:
+    def _open_new_chat_draft(self, draft_id: str) -> bool:
         """Bring a kept draft back onto a new-chat screen — in the window
         that already has it open, if one does, else a fresh tab here, behind
-        the same folder-trust question a new session gets."""
+        the same folder-trust question a new session gets. False when there
+        is no such draft any more (sent, and its screen waiting on a session
+        id; or discarded) — nothing was opened."""
         record = self.state.get_new_chat_draft(draft_id)
         if record is None:
-            return
+            return False
         app = self.get_application()
         for other in (app.get_windows() if app is not None else []):
             if isinstance(other, MainWindow) and other is not self:
@@ -2232,7 +2243,7 @@ class MainWindow(Adw.ApplicationWindow):
                 if page is not None:
                     other.tab_view.set_selected_page(page)
                     other.present()
-                    return
+                    return True
         cwd = record["cwd"]
         provider = get_provider(record["provider"])
 
@@ -2257,6 +2268,7 @@ class MainWindow(Adw.ApplicationWindow):
             )
 
         self._with_folder_trust(cwd, provider, proceed)
+        return True
 
     def _discard_new_chat_draft(self, draft_id: str, page: Adw.TabPage | None = None) -> None:
         """The draft row's trash button: forget the draft, after asking —
@@ -4681,7 +4693,14 @@ class MainWindow(Adw.ApplicationWindow):
                 self._sync_status(session_id)
         if isinstance(page.get_child(), TerminalTab):
             page.get_child().refresh_pr_statuses()  # its chips may have gone stale unwatched
-            GLib.idle_add(page.get_child().grab_terminal_focus)
+            # The keyboard follows the tab — unless the notification sheet is
+            # open over it: a row click that switched here leaves the user in
+            # the sheet, triaging, and a terminal that took the focus under the
+            # scrim would eat the Escape that closes it. The sheet hands the
+            # keyboard to the selected tab when it closes (see
+            # _on_notify_sheet_toggled).
+            if not self._notify_sheet_shown():
+                GLib.idle_add(page.get_child().grab_terminal_focus)
 
     def _on_is_active_changed(self, *_args) -> None:
         """Window (re)focused: re-check the selected tab's PR statuses.
@@ -4834,28 +4853,50 @@ class MainWindow(Adw.ApplicationWindow):
         if page is not None and isinstance(page.get_child(), TerminalTab):
             GLib.idle_add(page.get_child().grab_terminal_focus, priority=GLib.PRIORITY_DEFAULT)
 
-    def _open_notification(self, notification: Notification) -> None:
+    def _notify_sheet_shown(self) -> bool:
+        """Whether the notification history is open over this window's
+        content. Asked from the tab switch, which can run before the split
+        exists (a page appended while the window is still being built)."""
+        split = getattr(self, "notify_split", None)
+        return split is not None and split.get_show_sidebar()
+
+    def _open_notification(self, notification: Notification) -> bool:
         """A row was clicked: go where it points. The sheet stays open —
-        the user may be triaging — and the row is the sheet's to mark read.
+        the user may be triaging — and whether the row is marked read is the
+        sheet's call, made on what this returns: True when something was
+        opened, False when the click went nowhere.
 
         A session id goes through the app's focus-session action, which
-        knows which window the tab is in and presents it. A synthetic row
-        for a tab still waiting on its id is keyed by the placeholder the
-        sidebar knows it by (see notifycenter.Notification), so it takes the
-        sidebar's own open-placeholder path in this window — the placeholder
-        can only be here, since a placeholder tab can't move windows. An
+        knows which window the tab is in and presents it; it landed when
+        some window has the tab (a row whose session has no tab open lands
+        on the active window, as a desktop notification's click does today).
+        A synthetic row for a tab still waiting on its id is keyed by the
+        placeholder the sidebar knows it by (see notifycenter.Notification),
+        and every window's sheet shows the one list, so the tab may be in
+        another window: the window holding the page takes the sidebar's own
+        open-placeholder path and is presented; a draft id with no page
+        anywhere reopens its kept draft here, if the draft still exists. An
         empty id (a message from such a tab, once those are posted) lands on
         the window, as the desktop notification's click does today.
         """
         session_id = notification.session_id
-        if session_id and (self.has_placeholder(session_id) or newchat.is_draft_id(session_id)):
-            self._on_sidebar_open_placeholder(self.sidebar, session_id)
-            return
         app = self.get_application()
-        if app is not None:
-            app.activate_action("focus-session", GLib.Variant("s", session_id))
-        elif session_id:
-            self.focus_session(session_id)
+        windows = [w for w in (app.get_windows() if app is not None else []) if isinstance(w, MainWindow)]
+        if self not in windows:
+            windows.insert(0, self)  # a window with no App behind it (an e2e harness)
+        if session_id:
+            owner = next((w for w in windows if w._placeholder_page(session_id) is not None), None)
+            if owner is not None:
+                if owner is not self:
+                    owner.present()
+                return owner._open_placeholder(session_id)
+            if newchat.is_draft_id(session_id):
+                return self._open_placeholder(session_id)
+        if app is None:
+            return bool(session_id) and self.focus_session(session_id)
+        landed = not session_id or session_window(app, session_id) is not None
+        app.activate_action("focus-session", GLib.Variant("s", session_id))
+        return landed
 
     def _notification_texture(self, notification: Notification) -> Gdk.Texture | None:
         """The project icon a row wears: the same project-icon.svg the

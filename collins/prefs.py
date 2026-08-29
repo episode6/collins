@@ -1033,8 +1033,9 @@ class PreferencesDialog(Adw.Dialog):
 
     def show_group(self, name: str) -> bool:
         """Open on one group: the search box is filled with the group's title,
-        so the page shows that group and nothing else — the way someone who
-        typed it would see it, and the one filter this dialog has (an
+        so the page is filtered to that group — plus any other row that
+        happens to name it (see _apply_filter) — the way someone who typed
+        it would see it, and the one filter this dialog has (an
         Adw.PreferencesPage can scroll to its top, not to a group).
 
         *name* is a prefslayout.GROUPS entry. False, with the page left whole,

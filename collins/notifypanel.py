@@ -241,7 +241,9 @@ class NotificationSheet(Gtk.Box):
 
     What a row does is the window's to say, through the callables here:
     `on_open(notification)` goes to the session (the window knows which
-    tab a placeholder's key names, and which window a session is in),
+    tab a placeholder's key names, and which window a session is in) and
+    says whether anything opened — a synthetic row is only marked read
+    when it did (see _on_row_activated),
     `on_preferences()` opens the dialog on the Notifications group,
     `project_icon(notification)` is the texture the sidebar would draw for
     the row's project (None for the generic icon), and `sound_name()` is
@@ -253,7 +255,7 @@ class NotificationSheet(Gtk.Box):
         self,
         center: NotificationCenter,
         *,
-        on_open: Callable[[Notification], None],
+        on_open: Callable[[Notification], bool],
         on_preferences: Callable[[], None],
         on_close: Callable[[], None],
         project_icon: Callable[[Notification], Gdk.Texture | None],
@@ -374,6 +376,11 @@ class NotificationSheet(Gtk.Box):
             GLib.source_remove(self._refresh_source)
             self._refresh_source = None
         self._icon_cache.clear()
+        # The keyboard survives the rebuild: a focused row is about to be
+        # destroyed with the rest, and GTK drops the focus with it — leaving
+        # Escape with nothing to bubble up from and the arrow keys with
+        # nothing to walk. Note which row had it and put it back after.
+        focused_id = self._focused_row_id()
         while (row := self.list.get_row_at_index(0)) is not None:
             self.list.remove(row)
         unread, earlier = notifycenter.split_rows(self._center.rows())
@@ -391,6 +398,21 @@ class NotificationSheet(Gtk.Box):
         self.mark_all_button.set_sensitive(bool(unread))
         self.clear_button.set_sensitive(any(r.kind != notifycenter.KIND_FINISHED for r in unread + earlier))
         self._sound_label.set_label(_("Sound: {name}").format(name=self._sound_name()))
+        if focused_id is not None:
+            self.take_focus(focused_id)
+
+    def _focused_row_id(self) -> str | None:
+        """The id of the notification whose row holds the keyboard, "" when
+        the focus is in the list but not on a row (a heading can't take it,
+        so: nowhere in particular), None when the focus is elsewhere."""
+        root = self.get_root()
+        focus = root.get_focus() if root is not None else None
+        if focus is None or not focus.is_ancestor(self.list):
+            return None
+        widget = focus
+        while widget is not None and not isinstance(widget, _NotificationRow):
+            widget = widget.get_parent()
+        return widget.notification.id if widget is not None else ""
 
     def _row(self, notification: Notification, now: float) -> _NotificationRow:
         key = notification.session_id or notification.project
@@ -409,22 +431,37 @@ class NotificationSheet(Gtk.Box):
             index += 1
         return found
 
-    def take_focus(self) -> bool:
-        """Put the keyboard in the sheet — the first row, or the × when there
-        is none — so Escape reaches the split that closes it and the arrow
-        keys walk the list. Called by the window once the sheet is shown."""
+    def take_focus(self, notification_id: str | None = None) -> bool:
+        """Put the keyboard in the sheet — the row for *notification_id*
+        when it is still listed, else the first row, else the × — so Escape
+        reaches the split that closes it and the arrow keys walk the list.
+        Called by the window once the sheet is shown, and by the rebuild to
+        put the focus back where it was."""
         rows = self.rows()
-        target: Gtk.Widget = rows[0] if rows else self.close_button
+        target: Gtk.Widget = next(
+            (row for row in rows if row.notification.id == notification_id),
+            rows[0] if rows else self.close_button,
+        )
         target.grab_focus()
         return GLib.SOURCE_REMOVE
 
     # -- what a row does ---------------------------------------------------------
 
     def _on_row_activated(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
+        """Go to the row's session, and mark the row read — except a
+        synthetic row whose click went nowhere. A message or a bell is read
+        by the click itself, wherever it landed: the user saw it and chose
+        it. A finished run's row stands for the sidebar's green pulse and
+        leaves with it when the click reaches the tab; when it can't (the
+        tab is gone), reading the row by hand would drop the badge while
+        the row it summarises keeps pulsing, which is the one divergence
+        the synthetic rows exist to rule out."""
         if not isinstance(row, _NotificationRow):
             return
         notification = row.notification
-        self._on_open(notification)
+        opened = self._on_open(notification)
+        if notification.kind == notifycenter.KIND_FINISHED and not opened:
+            return
         self._center.mark_read(notification.id)
 
     def _on_secondary_click(self, gesture: Gtk.GestureClick, _n: int, x: float, y: float) -> None:

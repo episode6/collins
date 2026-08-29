@@ -6,7 +6,8 @@ Drives a real App against staged data and pushes notifications through its
 center, asserting what the window does with them: the bell's badge and
 tooltip, the sheet's rows and their sections, the Ctrl+Shift+B action and
 the bell ↔ sheet binding, a row click landing on the right tab (a real
-session's, a placeholder's), Mark all read, Clear and a row's Remove, the
+session's, a placeholder's — in this window or another) with the keyboard
+staying in the sheet, Mark all read, Clear and a row's Remove, the
 Preferences link's open-on-group, and a second window wearing the same
 number and letting go of the center when it closes.
 
@@ -49,6 +50,8 @@ os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
 SESSION_A = "11111111-1111-4111-8111-111111111111"
 SESSION_B = "22222222-2222-4222-8222-222222222222"
 PLACEHOLDER = "placeholder-77"
+PLACEHOLDER_2 = "placeholder-78"  # a second window's
+PLACEHOLDER_3 = "placeholder-79"  # a sidebar row with no tab behind it
 PROJECT_DIR = f"{E2E}/dev/alpha-widgets"
 STATE_FILE = f"{E2E}/config/collins/state.json"
 
@@ -224,6 +227,7 @@ def steps(app: App):
     # -- a row click ------------------------------------------------------------
     def click_message():
         row = next(r for r in sheet.rows() if r.notification is shared["msg"])
+        row.grab_focus()  # a real click puts the keyboard on the row it lands on
         sheet.list.emit("row-activated", row)
         check("clicking the message row selects its session's tab",
               win.tab_view.get_selected_page() is page_b)
@@ -238,6 +242,10 @@ def steps(app: App):
         rows = sheet.rows()
         check("the read row lost its guide line",
               "unread" not in rows[1].get_css_classes() and rows[1].notification is shared["msg"])
+        focus = win.get_focus()
+        check("the keyboard is still in the sheet, on the row that was clicked",
+              focus is not None and focus.is_ancestor(sheet) and focus is rows[1],
+              type(focus).__name__ if focus else "None")
     yield after_click
 
     def close_by_split():
@@ -339,8 +347,46 @@ def steps(app: App):
     def second_window_rows():
         win2 = shared["win2"]
         check("its sheet shows the same rows", row_titles(win2) == row_titles(win), str(row_titles(win2)))
-        win2.destroy()
+        # A placeholder of the second window's, finished: its synthetic row
+        # is in every sheet, this window's included.
+        win2.sidebar.add_placeholder(PLACEHOLDER_2, PROJECT_DIR, "agent-claude-symbolic")
+        page = win2.tab_view.append(Gtk.Label(label="new thread, elsewhere"))
+        win2._placeholder_pages[page] = PLACEHOLDER_2
+        shared["placeholder_page_2"] = page
+        win2.tab_view.append(Gtk.Label(label="tab C"))
+        win2.tab_view.set_selected_page(win2.tab_view.get_nth_page(1))
+        win2._on_session_finished(PLACEHOLDER_2)
+        check("another window's placeholder finishing is a row here",
+              center.get(notifycenter.green_id(PLACEHOLDER_2)) is not None and bell.badge_text() == "2")
     yield second_window_rows
+
+    def click_other_windows_placeholder():
+        win2 = shared["win2"]
+        row = next(r for r in sheet.rows() if r.notification.session_id == PLACEHOLDER_2)
+        sheet.list.emit("row-activated", row)
+        check("clicking it from this window's sheet selects the tab in the window that has it",
+              win2.tab_view.get_selected_page() is shared["placeholder_page_2"])
+        check("which clears that window's flag and drops the row",
+              center.get(notifycenter.green_id(PLACEHOLDER_2)) is None and bell.badge_text() == "1")
+    yield click_other_windows_placeholder
+
+    def dead_placeholder_click():
+        # A synthetic row whose tab no window has any more: the click goes
+        # nowhere, and the row is left standing rather than read by hand.
+        win2 = shared["win2"]
+        win2.sidebar.add_placeholder(PLACEHOLDER_3, PROJECT_DIR, "agent-claude-symbolic")
+        win2._on_session_finished(PLACEHOLDER_3)
+        check("a placeholder with no page still counts", bell.badge_text() == "2")
+    yield dead_placeholder_click
+
+    def dead_placeholder_click_lands_nowhere():
+        row = next(r for r in sheet.rows() if r.notification.session_id == PLACEHOLDER_3)
+        sheet.list.emit("row-activated", row)
+        check("a synthetic row whose click goes nowhere stays unread",
+              not row.notification.read and bell.badge_text() == "2")
+        center.set_green(PLACEHOLDER_3, False)
+        shared["win2"].destroy()
+    yield dead_placeholder_click_lands_nowhere
 
     def after_destroy():
         center.mark_all_read()
