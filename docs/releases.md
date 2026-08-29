@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-28. Full change history: git log for this file.
+fork. Last modified: 2026-08-29. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -48,7 +48,9 @@ downloads of each version, see the
   and a tag uploads the SRPM and waits for every chroot to go green. A
   Fedora install that came from PyPI or a checkout sees *Add the Fedora
   COPR…* in the sidebar's ☰ menu until the repository is configured — the
-  Ubuntu PPA item's twin, with the same run-it-here dialog.
+  Ubuntu PPA item's twin, with the same run-it-here dialog (not on the
+  image-based variants, Silverblue and friends, where the command it
+  offers wouldn't install anything).
 - **Checkout the default branch from the project row** — next to *Git
   pull* in a project's right-click menu, *Checkout main* (or whatever the
   remote calls its trunk) switches the project folder back to it. Live

@@ -12,6 +12,8 @@ CENTOS10 = 'ID="centos"\nID_LIKE="rhel fedora"\nVERSION_ID="10"\n'
 ALMA10 = 'ID="almalinux"\nID_LIKE="rhel centos fedora"\nVERSION_ID="10.1"\n'
 RHEL9 = 'ID="rhel"\nID_LIKE="fedora"\nVERSION_ID="9.6"\n'
 NOBARA = "ID=nobara\nID_LIKE=fedora\nVERSION_ID=43\n"
+SILVERBLUE = "ID=fedora\nVERSION_ID=44\nVARIANT_ID=silverblue\n"
+KINOITE = 'ID=fedora\nVERSION_ID=44\nVARIANT_ID="kinoite"\n'
 
 DEB822 = """Types: deb
 URIs: https://ppa.launchpadcontent.net/episode6/stable/ubuntu/
@@ -153,13 +155,28 @@ enabled_metadata=1
         (CENTOS10, True),
         (ALMA10, True),
         (RHEL9, False),
+        (SILVERBLUE, False),
+        (KINOITE, False),
         (UBUNTU, False),
         (DEBIAN, False),
         ("", False),
     ],
 )
 def test_is_fedora_is_fedora_and_el10(tmp_path, text, expected):
-    assert pkgrepos.is_fedora(pkgrepos.os_release(write_release(tmp_path, text))) is expected
+    release = pkgrepos.os_release(write_release(tmp_path, text))
+    assert pkgrepos.is_fedora(release, ostree_booted=tmp_path / "not-ostree") is expected
+
+
+def test_is_fedora_excludes_any_ostree_booted_system(tmp_path):
+    """Bazzite, Aurora and the rest of Universal Blue don't say fedora in
+    VARIANT_ID; the boot marker is what rules them out."""
+    marker = tmp_path / "ostree-booted"
+    marker.touch()
+    bazzite = 'ID=bazzite\nID_LIKE="fedora"\nVERSION_ID=44\nVARIANT_ID=bazzite\n'
+    for text in (FEDORA, bazzite, CENTOS10):
+        release = pkgrepos.os_release(write_release(tmp_path, text))
+        assert pkgrepos.is_fedora(release, ostree_booted=marker) is False
+        assert pkgrepos.is_fedora(release, ostree_booted=tmp_path / "gone") is True
 
 
 def yum(tmp_path: Path, **files: str) -> Path:
@@ -199,6 +216,7 @@ def test_copr_configured_missing_dir(tmp_path):
 def test_offer_fedora_copr(tmp_path, monkeypatch):
     release = pkgrepos.os_release(write_release(tmp_path, FEDORA))
     monkeypatch.setattr(pkgrepos, "YUM_REPOS_DIR", tmp_path / "empty")
+    monkeypatch.setattr(pkgrepos, "OSTREE_BOOTED", tmp_path / "not-ostree")
     channel = pkgrepos.offer(release)
     assert channel is not None and channel.id == "fedora-copr"
     assert channel.commands == "sudo dnf copr enable episode6/stable && sudo dnf install collins"

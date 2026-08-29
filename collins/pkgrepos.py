@@ -44,6 +44,14 @@ OS_RELEASE = Path("/etc/os-release")
 APT_SOURCES = Path("/etc/apt/sources.list")
 APT_SOURCES_DIR = Path("/etc/apt/sources.list.d")
 YUM_REPOS_DIR = Path("/etc/yum.repos.d")
+# Present on every image-based (rpm-ostree / bootc) system: Silverblue,
+# Kinoite and the other Fedora Atomic desktops, Bazzite and the rest of
+# Universal Blue, CoreOS, IoT. They say ID=fedora too, but `dnf install`
+# doesn't install anything there.
+OSTREE_BOOTED = Path("/run/ostree-booted")
+# The atomic desktops' VARIANT_IDs, for when the marker can't be consulted
+# (the tests) or a spin forgot to set it.
+_ATOMIC_VARIANTS = frozenset({"silverblue", "kinoite", "sericea", "onyx", "coreos", "iot"})
 
 
 @dataclass(frozen=True)
@@ -98,7 +106,7 @@ def is_ubuntu(release: dict[str, str]) -> bool:
     return "ubuntu" in _distro_family(release)
 
 
-def is_fedora(release: dict[str, str]) -> bool:
+def is_fedora(release: dict[str, str], ostree_booted: Path | None = None) -> bool:
     """Fedora itself, any release — the COPR follows Fedora's branching, so
     every maintained one has a chroot — and the rest of the family from
     version 10 on: RHEL, CentOS Stream, AlmaLinux and Rocky (all of which say
@@ -106,7 +114,17 @@ def is_fedora(release: dict[str, str]) -> bool:
     derivatives like Nobara and Ultramarine, whose Fedora-numbered versions
     clear 10 by a mile. The floor is RHEL 10's: the first EL whose base repos
     carry Collins' GTK stack, and the only EPEL the COPR builds for — RHEL 9
-    would get a chroot-not-found from `dnf copr enable`."""
+    would get a chroot-not-found from `dnf copr enable`.
+
+    Not the image-based variants, though: Silverblue and friends report
+    ID=fedora, but packages go on through rpm-ostree (and a reboot), so the
+    `dnf install` this channel offers would fail there. Any ostree-booted
+    system is out, whatever its os-release says."""
+    if (ostree_booted or OSTREE_BOOTED).exists():
+        return False
+    variant = release.get("VARIANT_ID", "").lower()
+    if variant in _ATOMIC_VARIANTS or "atomic" in variant:
+        return False
     family = _distro_family(release)
     if release.get("ID", "").lower() == "fedora":
         return True

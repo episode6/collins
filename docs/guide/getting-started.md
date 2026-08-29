@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-28. Full change history: git log for this file.
+fork. Last modified: 2026-08-29. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -84,7 +84,8 @@ Collins needs. RHEL 9 is out of scope (GTK 4.8, libadwaita 1.2).
 
 As on Ubuntu, a Collins that came from PyPI or a checkout sees
 **Add the Fedora COPR…** in the sidebar's ☰ menu until the repository is
-configured.
+configured — except on the image-based variants (Silverblue, Kinoite,
+Bazzite…), where `dnf install` doesn't apply and the item stays out.
 
 ### Debian — `.deb`
 
