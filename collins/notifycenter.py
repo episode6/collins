@@ -15,9 +15,14 @@ badges) hang off one `changed()` callback.
 one (a *synthetic* row, see set_green), plus every message and bell nobody
 has gone to. The synthetic row tracks the sidebar's green pulse one-for-one —
 it appears when a session's unread flag comes on and leaves, rather than
-being marked read, when the flag goes off — so a user who never receives a
-`notify_user` message or a bell sees exactly the number the tray showed
-before there was a history at all.
+being marked read, when the flag goes off — so for a user who never receives
+a `notify_user` message or a bell the badge is the sidebar's pulses, counted.
+That is what the tray showed before there was a history at all, with one
+difference: the old number was counted per open *tab* and this one per green
+*row*, and the two part company where a row stands in for a tab it doesn't
+own — a tab attached to a /bg fork the store hasn't discovered pulses the
+row it forked from, and the badge now counts that pulse where the tab list
+skipped it (see App._sync_green).
 
 **What survives a restart**: message and bell rows, read flags included — a
 notification you missed before quitting is the kind of thing the history

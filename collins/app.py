@@ -1553,6 +1553,18 @@ class App(Adw.Application):
 
         A session the store has no item for is not green: the flag lives on
         the item, so there is nothing left to be on.
+
+        Rows, not tabs. The badge used to be counted off MainWindow's
+        tray_sessions — one per open tab with a store item — and this counts
+        one per flagged row instead, which is the sidebar's pulses exactly
+        and the old number almost always. They differ where a row stands in
+        for a tab it doesn't own (store.rows_representing): a tab attached
+        to a /bg fork the store never discovered is keyed by the fork's id,
+        which has no item, so the tab list skipped it while the row it forked
+        from pulsed on with nobody counting; here the pulse is the count. The
+        same goes for a legacy fork chain drawn with "Show archived sessions"
+        on, where a finish pulses both the moved row and its fork's and the
+        badge reads two for one tab — two pulses, two rows.
         """
         item = self.store.get_item(session_id) if session_id else None
         if item is None:

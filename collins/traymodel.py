@@ -133,10 +133,12 @@ def badge_text(unread: int) -> str:
 def status_for(sessions: int, unread: int, hidden_windows: bool = False) -> str:
     """The Status value for a session count and an unread count.
 
-    Unread wins outright, including over a session count of zero it should
-    never be seen with: a host that has hidden a Passive item defers every
-    property change until the item goes Active again, so a badge landing on a
-    Passive item would be invisible until something else moved.
+    Unread wins outright, including over a session count of zero — an
+    ordinary state now that the count is the notification center's (a message
+    or a bell from a session whose tab has since closed still counts), and
+    the right answer regardless: a host that has hidden a Passive item defers
+    every property change until the item goes Active again, so a badge
+    landing on a Passive item would be invisible until something else moved.
 
     Hidden windows hold the item Active on their own. With everything on
     screen a session count is enough — a hidden window's tabs keep feeding

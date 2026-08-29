@@ -5,9 +5,12 @@ on a dev machine, never by pytest.
 Drives a real App against staged data and pushes the store's edges through
 it: a session's unread flag going on and off, the barber pole covering and
 uncovering that flag, a placeholder tab's flag and pole (which live in the
-sidebar, not the store), the placeholder → real-row handoff, and a message
-row landing in state.json while the synthetic rows stay off disk. Every step
-asserts the center's rows and the number App.tray_view() would badge.
+sidebar, not the store), the placeholder → real-row handoff, a message row
+landing in state.json while the synthetic rows stay off disk, and the one
+edge where the badge parts company with the old per-tab count — a tab
+attached to a /bg fork the store never discovered, whose finish pulses the
+row it forked from. Every step asserts the center's rows and the number
+App.tray_view() would badge.
 
 Stages its own throwaway scratch tree and app id (one session's transcript
 under a project named alpha-widgets, and a name for it in state.json), so it
@@ -44,6 +47,7 @@ os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
 
 SESSION = "11111111-1111-4111-8111-111111111111"
+FORK = "22222222-2222-4222-8222-222222222222"  # a /bg fork of SESSION, never discovered
 PLACEHOLDER = "placeholder-77"
 PROJECT_DIR = f"{E2E}/dev/alpha-widgets"
 STATE_FILE = f"{E2E}/config/collins/state.json"
@@ -87,7 +91,7 @@ import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import GLib  # noqa: E402
+from gi.repository import GLib, Gtk  # noqa: E402
 
 from collins import i18n, notifycenter  # noqa: E402
 from collins.app import App  # noqa: E402
@@ -190,6 +194,32 @@ def run_checks(app: App) -> None:
 
     # A fresh AppState reads the same list back.
     check("a fresh load sees the message", [r["kind"] for r in AppState().get_notifications()] == ["message"])
+
+    # -- where the badge and the old per-tab count part company --------------
+    # A tab attached to a /bg fork the store never discovered: the page is
+    # keyed by the fork's id, which has no item, so the old count (one per
+    # tab with an item) skipped it — while the row it forked from, standing
+    # in for it (store.rows_representing), pulsed on with nobody counting.
+    # The badge follows the pulse now. Staged last: the bare page stays up
+    # until the app quits.
+    app.state.forward_session(SESSION, FORK)
+    page = win.tab_view.append(Gtk.Label(label="fork tab"))
+    win._pages[FORK] = page
+    check("the original row stands in for the undiscovered fork",
+          store.rows_representing(FORK) == [SESSION], str(store.rows_representing(FORK)))
+    win._on_session_finished(FORK)
+    check("the fork's finish pulses the row it forked from", store.get_item(SESSION).unread)
+    win._sync_status(FORK)
+    check("the row keeps its flag: its tab is the fork's, through the chain",
+          store.get_item(SESSION).unread and store.get_item(SESSION).status == "open",
+          store.get_item(SESSION).status)
+    check("the tab list never counted that pulse",
+          FORK not in [s.session_id for s in win.tray_sessions()]
+          and not any(s.unread for s in win.tray_sessions()))
+    check("the badge counts it: one green row, badge 1",
+          center.green_sessions() == [SESSION] and badge() == 1, str(center.green_sessions()))
+    store.set_unread(SESSION, False)
+    check("and lets it go with the flag", not center.is_green(SESSION) and badge() == 0)
 
 
 def main() -> int:

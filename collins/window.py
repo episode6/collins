@@ -4774,6 +4774,11 @@ class MainWindow(Adw.ApplicationWindow):
         window in turn (see App.tray_view). A tab whose session the store
         hasn't got a row for yet is skipped rather than guessed at — it has no
         name to show and no busy or unread flag to carry.
+
+        The badge is not counted here. It is the notification center's number
+        (see App._sync_green), counted per green *row* rather than per tab,
+        so a tab skipped here — one attached to a /bg fork the store never
+        discovered — still badges through the row standing in for it.
         """
         sessions = []
         for session_id in self._pages:
