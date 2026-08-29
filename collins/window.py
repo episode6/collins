@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-28. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -138,11 +138,12 @@ _NEW_CHAT_SAVE_MS = 600
 # works until the next archive replaces it.
 _UNDO_TOAST_SECONDS = 4
 
-# The project row's "Git pull": long enough for a fetch over a slow link,
-# short enough that a pull hung on a dead remote or a credential prompt
-# (there's no terminal here to answer one) ends in an error dialog rather
-# than a thread parked forever.
-_GIT_PULL_TIMEOUT_S = 120
+# The project row's git actions ("Git pull", "Checkout main"): long enough
+# for a fetch over a slow link, short enough that a pull hung on a dead remote
+# or a credential prompt (there's no terminal here to answer one) ends in an
+# error dialog rather than a thread parked forever. A checkout never waits on
+# the network, so the same ceiling is only ever a backstop there.
+_GIT_TIMEOUT_S = 120
 
 # Quit-time backgrounding, which runs one session at a time. How long to wait
 # for a tab's session id to land before giving up and exiting it cleanly, how
@@ -1346,6 +1347,14 @@ class MainWindow(Adw.ApplicationWindow):
             action = Gio.SimpleAction(name=name, parameter_type=GLib.VariantType("s"))
             action.connect("activate", callback)
             self.add_action(action)
+
+        # (project root, branch): the branch the menu named is the one that
+        # gets checked out, so a menu built a moment before can't act on a
+        # remote HEAD that moved under it. The sidebar arms the enabled flag
+        # per menu (see Sidebar._set_window_action_enabled).
+        checkout = Gio.SimpleAction(name="git-checkout", parameter_type=GLib.VariantType("(ss)"))
+        checkout.connect("activate", self._on_git_checkout)
+        self.add_action(checkout)
 
         # (path, line, col) with line/col 1-based and 0 meaning "no cursor" —
         # clicked file references carry a position, tool chips and the
@@ -5238,52 +5247,94 @@ class MainWindow(Adw.ApplicationWindow):
         """The project row's "Git pull (branch)": fetch and merge in the
         project root the action carries.
 
-        On a worker thread — a pull talks to the network — with the outcome
-        marshalled back to the main loop: a sidebar toast carrying git's own
-        summary line when it lands, an error dialog with git's words when it
-        doesn't (a detached HEAD, a merge conflict, no upstream). Anything
-        interactive is cut off up front: there is no terminal here to answer
-        a username prompt, so GIT_TERMINAL_PROMPT=0 turns one into a fast
-        failure instead of a hang the timeout would otherwise sit out — and
-        the same goes for the editor a non-fast-forward merge would open for
-        its commit message, which --no-edit skips (GIT_EDITOR=true backstops
+        Through _run_git, with the outcome marshalled back to the main loop: a
+        sidebar toast carrying git's own summary line when it lands, an error
+        dialog with git's words when it doesn't (a detached HEAD, a merge
+        conflict, no upstream). The editor a non-fast-forward merge would open
+        for its commit message is skipped with --no-edit (_run_git backstops
         any other editor git finds a reason to launch).
         """
         cwd = param.get_string()
         project = project_name_for_cwd(cwd)
+
+        def done(stdout: str) -> None:
+            # git's last stdout line is the one worth repeating: the
+            # shortstat of a fast-forward, or "Already up to date."
+            lines = stdout.strip().splitlines()
+            self._git_pull_done(project, lines[-1].strip() if lines else "")
+
+        self._run_git(cwd, ["pull", "--no-edit"], _("Git pull failed"), done)
+
+    def _on_git_checkout(self, _action, param: GLib.Variant) -> None:
+        """The project row's "Checkout main": switch the project root the
+        action carries to the branch it names — the repository's trunk, read
+        when the menu was built (gitinfo.default_branch).
+
+        Through _run_git like the pull: a toast when the branch is checked
+        out, git's own words in an error dialog when it refuses — local
+        changes the switch would overwrite, the branch checked out in another
+        worktree, a branch that no longer exists. Nothing here stashes or
+        forces: what a session left in the tree is its business.
+        """
+        cwd, branch = param.unpack()
+        if not branch:
+            return
+        project = project_name_for_cwd(cwd)
+        self._run_git(
+            cwd,
+            ["checkout", branch],
+            _("Git checkout failed"),
+            lambda _stdout: self.sidebar.toast_overlay.add_toast(
+                Adw.Toast(
+                    title=_("Checked out {branch} in {project}").format(
+                        branch=branch, project=project
+                    )
+                )
+            ),
+        )
+
+    def _run_git(
+        self, cwd: str, args: list[str], failed_title: str, done: Callable[[str], None]
+    ) -> None:
+        """Run `git *args*` in *cwd* on a worker thread — the pull talks to
+        the network, and a checkout of a large tree isn't instant either —
+        and hand the outcome back to the main loop: *done* with git's stdout
+        on success, an error dialog titled *failed_title* with git's stderr
+        (or stdout, or the exit status, whichever has words) otherwise.
+
+        Anything interactive is cut off up front: there is no terminal here
+        to answer a username prompt, so GIT_TERMINAL_PROMPT=0 turns one into
+        a fast failure instead of a hang the timeout would otherwise sit out,
+        and GIT_EDITOR=true does the same for any editor git finds a reason to
+        launch.
+        """
         git = shutil.which("git")
         if git is None:
-            dialogs.error_dialog(
-                self, _("Git pull failed"), _("git was not found on PATH.")
-            )
+            dialogs.error_dialog(self, failed_title, _("git was not found on PATH."))
             return
 
         def work() -> None:
             try:
                 result = subprocess.run(
-                    [git, "pull", "--no-edit"],
+                    [git, *args],
                     capture_output=True,
                     text=True,
-                    timeout=_GIT_PULL_TIMEOUT_S,
+                    timeout=_GIT_TIMEOUT_S,
                     cwd=cwd,
                     env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true"},
                 )
             except (OSError, subprocess.SubprocessError) as err:
-                GLib.idle_add(dialogs.error_dialog, self, _("Git pull failed"), str(err))
+                GLib.idle_add(dialogs.error_dialog, self, failed_title, str(err))
                 return
             if result.returncode == 0:
-                # git's last stdout line is the one worth repeating: the
-                # shortstat of a fast-forward, or "Already up to date."
-                lines = result.stdout.strip().splitlines()
-                summary = lines[-1].strip() if lines else ""
-                GLib.idle_add(self._git_pull_done, project, summary)
+                GLib.idle_add(done, result.stdout)
             else:
                 detail = (
                     result.stderr.strip()
                     or result.stdout.strip()
                     or _("git exited with status {code}").format(code=result.returncode)
                 )
-                GLib.idle_add(dialogs.error_dialog, self, _("Git pull failed"), detail)
+                GLib.idle_add(dialogs.error_dialog, self, failed_title, detail)
 
         threading.Thread(target=work, daemon=True).start()
 

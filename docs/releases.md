@@ -39,6 +39,11 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **Checkout the default branch from the project row** — next to *Git
+  pull* in a project's right-click menu, *Checkout main* (or whatever the
+  remote calls its trunk) switches the project folder back to it. Live
+  only while some other branch is checked out; git's own refusal (local
+  changes, the branch in another worktree) lands in an error dialog.
 - **The headless runs carry none of your skills, MCP servers, or tools.**
   Session titling, icon generation, and the login repair each run a
   `claude -p`, and each used to load what an interactive session does — the

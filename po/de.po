@@ -920,6 +920,18 @@ msgstr "{project} aktualisiert — {summary}"
 msgid "Pulled {project}"
 msgstr "{project} aktualisiert"
 
+msgid "Checkout {branch}"
+msgstr "{branch} auschecken"
+
+msgid "Checkout default branch"
+msgstr "Standardbranch auschecken"
+
+msgid "Git checkout failed"
+msgstr "Git checkout fehlgeschlagen"
+
+msgid "Checked out {branch} in {project}"
+msgstr "{branch} in {project} ausgecheckt"
+
 msgid "Rebase / resolve conflicts"
 msgstr "Rebase / Konflikte auflösen"
 

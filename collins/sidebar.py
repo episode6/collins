@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-28. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -34,7 +34,7 @@ from . import claudemodels, desktopentry, footerapps, newchat, openwith, pkgrepo
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
 from .formatting import format_size
-from .gitinfo import current_branch, github_url
+from .gitinfo import current_branch, default_branch, github_url
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .projecticons import project_icon_data
@@ -2765,6 +2765,31 @@ class SessionSidebar(Gtk.Box):
             )
             repo_section.append_item(pull_item)
 
+            # The way back to the trunk after a session left the checkout on
+            # its feature branch. Always listed once the pull is, but only
+            # live while it would change something: on the trunk already, it
+            # sits disabled rather than vanishing, so the menu keeps its shape
+            # and the state reads off it. A trunk that can't be named (no
+            # remote HEAD, no main/master — see gitinfo.default_branch) shows
+            # the generic label, disabled the same way. The enabled flag is
+            # the window action's, armed here like the worktree checkbox
+            # above: an item can't carry its own, and one menu is open at a
+            # time.
+            trunk = default_branch(row.cwd)
+            checkout_item = Gio.MenuItem.new(
+                _("Checkout {branch}").format(branch=trunk)
+                if trunk
+                else _("Checkout default branch"),
+                None,
+            )
+            checkout_item.set_action_and_target_value(
+                "win.git-checkout", GLib.Variant("(ss)", (row.cwd, trunk or ""))
+            )
+            self._set_window_action_enabled(
+                "git-checkout", bool(trunk) and trunk != branch
+            )
+            repo_section.append_item(checkout_item)
+
         # Anything cosmetic about the project's row itself.
         looks_section = Gio.Menu()
         if row.cwd:
@@ -2819,6 +2844,18 @@ class SessionSidebar(Gtk.Box):
         menu.append_section(None, looks_section)
         menu.append_section(None, danger_section)
         self._popup_menu(menu, row, x, y, rows)
+
+    def _set_window_action_enabled(self, name: str, enabled: bool) -> None:
+        """Arm a window ("win.") action's sensitivity for the menu about to
+        open. Gio menu items have no enabled flag of their own — the action's
+        is what a popover renders — so a per-item state has to be set on the
+        action just before the popup, which is safe because only one of these
+        menus is ever open. A no-op without a window root (a sidebar built on
+        its own in a test)."""
+        root = self.get_root()
+        action = root.lookup_action(name) if isinstance(root, Gio.ActionMap) else None
+        if action is not None:
+            action.set_enabled(enabled)
 
     def _on_project_worktree(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
         """The group menu's checkbox: pin the choice for the project the menu
