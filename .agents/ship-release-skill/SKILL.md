@@ -6,7 +6,8 @@ description: >-
   (or publish/finish a release): verifies every committed copy of the version
   agrees, extracts release notes from docs/releases.md, and creates the
   release + tag v<VERSION>; the tag push triggers release.yml to attach the
-  .deb, publish to PyPI, and upload to ppa:episode6/stable.
+  .deb, publish to PyPI, upload to ppa:episode6/stable, and upload the SRPM to
+  the episode6/stable COPR.
 ---
 
 # Ship Release Branch Skill
@@ -20,15 +21,17 @@ The `./scripts/ship-release.py` script keeps it consistent:
    to existing release branches, e.g. `release/v0.1.1` may be shipping
    `0.1.1.1`), cross-checking `collins/__init__.py`, the top `debian/changelog`
    entry (which must target `UNRELEASED` — the PPA series is stamped at build
-   time), and the metainfo's top `<release>` entry.
+   time), the metainfo's top `<release>` entry, and the Fedora spec's
+   `Version:`.
 2. Extracts release notes from the matching `### v<VERSION>` section of
    `docs/releases.md`, refusing a section still marked `UNRELEASED`.
 3. Publishes the GitHub release via `gh release create` with tag and title
    `v<VERSION>`, `--target` the release branch.
 4. The tag push triggers `.github/workflows/release.yml`: it builds the
    wheel/sdist + `.deb`, attaches the `.deb` to the release created in step 3,
-   publishes to PyPI (trusted publishing), and uploads a signed source package
-   per Ubuntu series (noble, resolute) to `ppa:episode6/stable`.
+   publishes to PyPI (trusted publishing), uploads a signed source package
+   per Ubuntu series (noble, resolute) to `ppa:episode6/stable`, and uploads
+   the SRPM to the `episode6/stable` COPR, waiting for every chroot to build.
 
 ## Prerequisites
 - **Merge PRs via GitHub**: the release-finalization PR (and any hardening
@@ -68,10 +71,18 @@ Ship the current release branch:
   series and builds/publishes the binaries (minutes to hours in the queue,
   plus ~20 minutes for the publisher). Confirm the builds go green on
   <https://launchpad.net/~episode6/+archive/ubuntu/stable>.
-- A `ppa` job that failed on a workflow bug cannot be fixed by re-running the
-  tag's run (frozen on the file as of the tag): land the fix on the release
-  branch and `gh workflow run release.yml --ref release/v<X> -f tag=v<VERSION>`;
-  the already-in-the-PPA guard makes repeats harmless.
+- The `copr` job waits for COPR's builds itself, so when it is green the
+  package is published; confirm on
+  <https://copr.fedorainfracloud.org/coprs/episode6/stable/builds/> that
+  every chroot built. If it failed at sign-in, the API token has expired (it
+  lasts 180 days): mint a new one at <https://copr.fedorainfracloud.org/api/>,
+  `gh secret set COPR_API_CONFIG --repo episode6/collins < ~/.config/copr`,
+  and dispatch the workflow for the tag as below.
+- A `ppa` or `copr` job that failed on a workflow bug cannot be fixed by
+  re-running the tag's run (frozen on the file as of the tag): land the fix
+  on the release branch and
+  `gh workflow run release.yml --ref release/v<X> -f tag=v<VERSION>`; the
+  already-published guards make repeats harmless.
 - If the AUR package is published: refresh `sha256sums` from the now-existing
   tag tarball, regenerate `.SRCINFO`, and push (`packaging/aur/README.md`).
 
@@ -79,10 +90,12 @@ Ship the current release branch:
 1. **Shipping from a non-release branch**: `main` always carries a
    releasable-looking plain version in this repo, so the script refuses unless
    the target is a `release/*` branch.
-2. **Half-landed version bump**: `pyproject.toml`, `__init__.py`, and
-   `debian/changelog` disagree — the script fails; land the version-bump PR
-   fully first. The `debian/changelog` check matters doubly: the PPA version
-   derives from it, and Launchpad burns version strings permanently.
+2. **Half-landed version bump**: `pyproject.toml`, `__init__.py`,
+   `debian/changelog` and the Fedora spec disagree — the script fails; land
+   the version-bump PR fully first. The `debian/changelog` check matters
+   doubly: the PPA version derives from it, and Launchpad burns version
+   strings permanently (the spec's `Version:` is what COPR publishes, though
+   COPR forgives a mistake).
 3. **Unfinalized changelog**: the `docs/releases.md` section still says
    `UNRELEASED` — merge the release-finalization PR first.
 4. **Hand-typed release notes**: always let the script extract them from

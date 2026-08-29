@@ -25,6 +25,7 @@ INIT_PY = "collins/__init__.py"
 DEBIAN_CHANGELOG = "debian/changelog"
 CHANGELOG = "docs/releases.md"
 METAINFO = "data/com.episode6.Collins.metainfo.xml"
+SPEC = "packaging/fedora/collins.spec"
 
 
 def fail(message):
@@ -90,6 +91,15 @@ def get_version():
         fail(
             f"the top <release> in {METAINFO} is {found}, expected {version}. "
             "The release-finalization PR adds it (see RELEASE_CHECKLIST.md)."
+        )
+
+    spec_match = re.search(r"^Version:\s*(\S+)", read_file(SPEC), re.MULTILINE)
+    if not spec_match or spec_match.group(1) != version:
+        found = spec_match.group(1) if spec_match else "<missing>"
+        fail(
+            f"{SPEC} says {found} but {PYPROJECT} says {version}. The COPR "
+            "upload version derives from the spec, so this would publish the "
+            "wrong version."
         )
 
     return version

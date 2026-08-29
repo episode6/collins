@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-27. Full change history: git log for this file.
+fork. Last modified: 2026-08-28. Full change history: git log for this file.
 -->
 # Packaging
 
@@ -16,6 +16,7 @@ exist once set up for it.)
 | **AUR** | `packaging/aur/` | `PKGBUILD` + `.SRCINFO`; see `packaging/aur/README.md`. |
 | **PyPI** | `pyproject.toml` + `.github/workflows/release.yml` | Auto-published on tag via trusted publishing (once configured). |
 | **Ubuntu PPA** | `debian/` + `packaging/build-ppa-source.sh` | Source upload to Launchpad; see below. |
+| **Fedora COPR** | `packaging/fedora/` | SRPM upload to COPR, which builds for every Fedora and RHEL 10; see below. |
 
 ## Ubuntu PPA
 
@@ -139,8 +140,8 @@ there rather than on a published tag.
 CI and release jobs that use image dependencies run inside prebuilt container
 images built from `.github/docker/ci.Dockerfile` — the **canonical list of
 build dependencies** for every channel (packaging tools, the gir stack for
-e2e). Add a build-dep there, not in a workflow. One Dockerfile, two stages,
-two tags under `ghcr.io/episode6/collins-ci`, both named by the first 12 hex
+e2e). Add a build-dep there, not in a workflow. One Dockerfile, three stages,
+three tags under `ghcr.io/episode6/collins-ci`, all named by the first 12 hex
 of the Dockerfile's hash:
 
 - `:<hash>` — the **resolute full** image (~355 MB compressed): the packaging
@@ -151,6 +152,12 @@ of the Dockerfile's hash:
   compressed): the same packaging toolchain on `ubuntu:24.04`, no GTK. Runs
   only the noble source builds — `ppa-source (noble)` in CI, `ppa (noble)` at
   release — since a source build compiles nothing.
+- `:<hash>-fedora-pkg` — the **Fedora packaging** image: `fedora:latest`
+  with rpm-build, rpmlint, copr-cli, the spec's BuildRequires, and the
+  package's runtime dependencies (so `dnf install` of the built RPM resolves
+  without a download). Runs `rpm` in CI and `copr` at release. Its own
+  `FROM`, not a stage of the Ubuntu chain, and root throughout — installing
+  the RPM needs it, and no unit test runs there.
 
 `.github/workflows/ci-image.yml` builds and pushes a tag only when it is
 missing, so a PR that edits the Dockerfile tests on its own images and one
@@ -195,7 +202,7 @@ writes a small wrapper that calls `gpg --batch --pinentry-mode loopback
 `--prepend-path`, since `debuild` normalizes `PATH` and `debsign` takes the GPG
 program by name. That is what the script's `--` passthrough is for.
 
-### Testing before you upload
+### Testing before you upload (PPA)
 
 A `debuild` on a dev box proves very little — a source-only build does not
 exercise the builder's dependency resolution, and the box is probably not
@@ -210,3 +217,114 @@ add-apt-repository ppa:episode6/stable
 apt install collins
 dpkg -L collins        # desktop entry, scalable app icon, action icons, metainfo
 ```
+
+## Fedora COPR
+
+COPR: **`episode6/stable`**
+(<https://copr.fedorainfracloud.org/coprs/episode6/stable/>)
+
+The PPA's twin on Fedora, named for the channel for the same reason and under
+the same rule: **leaf applications only, never a rebuilt system library** —
+everyone who enabled the repository gets every package in it. Users run
+`dnf copr enable episode6/stable` once and install whatever they want from it.
+
+### What COPR does and doesn't do
+
+COPR builds **binary RPMs on its own builders from a source RPM** (the spec
+plus the source tarball) in every chroot the project enables, and signs the
+resulting repository itself — no GPG key on our side. The project is set to
+*follow Fedora branching* (a new Fedora's chroots appear at branch time) with
+the `x86_64` and `aarch64` chroots of every maintained Fedora, rawhide, and
+`epel-10` (RHEL 10, AlmaLinux 10, Rocky 10, CentOS Stream 10: their base
+repositories carry the whole GTK stack at or above Collins' floors, so the
+same noarch SRPM builds there unchanged; RHEL 9 does not qualify). A noarch
+package still needs both architectures' chroots: dnf puts `$basearch` in the
+repository URL, so a package built only for x86_64 is invisible on ARM.
+
+Unlike Launchpad, **COPR does not burn version strings**: a failed build can
+be resubmitted, and a re-upload of the same version supersedes the previous
+build. The release job still checks and skips rather than guesses, so that a
+re-run stays boring.
+
+### The files
+
+- `packaging/fedora/collins.spec` — the RPM spec. Mirrors the AUR `PKGBUILD`
+  (the wheel carries the action icons, so only the desktop entry, app icon
+  and metainfo are installed on top of it) and `debian/control`'s
+  dependency floors. `Version:` is the plain next version, bumped in the
+  version-bump PRs with everything else, and `%changelog` gets one short
+  entry per release in the same PRs; `scripts/verify_versions.py` checks
+  both. `Release:` stays `1%{?dist}`; bump it to `2` only to re-upload a
+  botched build of a shipped version, and reset it at the next version bump.
+- `packaging/fedora/build-copr-srpm.sh` — the `build-ppa-source.sh` analog:
+  exports git HEAD as `collins-<VER>.tar.gz`, runs `rpmbuild -bs`, and
+  `rpmlint`s the spec and the SRPM into `/tmp/collins-copr/`. `--rebuild`
+  goes on to build the binary RPM from that SRPM the way a COPR chroot
+  would, which is what CI does.
+
+### Releasing a new version
+
+Shipping a release branch (see [../RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md))
+pushes tag `v<VER>`, and the release workflow's `copr` job uploads the SRPM
+and waits for every chroot to build. The manual equivalent, for recovery:
+
+```bash
+packaging/fedora/build-copr-srpm.sh
+copr-cli build episode6/stable /tmp/collins-copr/collins-<VER>-1.src.rpm
+```
+
+Both need Fedora tooling (`dnf install rpm-build rpmlint copr-cli`, and
+`~/.config/copr` from <https://copr.fedorainfracloud.org/api/> for the
+upload). On another distro, run them in the CI image's Fedora stage:
+
+```bash
+docker run --rm -it -v "$PWD:/src" -w /src -v ~/.config/copr:/root/.config/copr:ro \
+  ghcr.io/episode6/collins-ci:<tag>-fedora-pkg bash
+```
+
+### Automated uploads on a tag
+
+`.github/workflows/release.yml` has a `copr` job that runs on every `v*`
+tag beside `ppa`, in the Fedora stage of the CI image. It:
+
+- **fails** if the spec's `Version:` disagrees with the tag (the SRPM's
+  version is what COPR publishes);
+- signs in with `copr-cli whoami` and **names the fix** when the token is
+  rejected (below);
+- **skips** the upload when COPR's latest succeeded build of `collins` is
+  already this version, so a re-run of a tag's workflow is harmless;
+- builds the SRPM and runs `copr-cli build` *without* `--nowait`, so a chroot
+  that fails to build fails the job.
+
+One secret:
+
+| Secret | Contents |
+| --- | --- |
+| `COPR_API_CONFIG` | the whole `[copr-cli]` block from <https://copr.fedorainfracloud.org/api/>, verbatim |
+
+**That token expires 180 days after it is minted** — the only secret in the
+release pipeline that rots on a schedule. The `/api` page shows the expiry
+date and writes it into the block as a comment; the job warns when fewer
+than 30 days remain, and an expired token fails the sign-in step with the
+rotation instructions. Put the date on a calendar when minting one. To
+rotate: generate a new token on the `/api` page, replace the secret
+(`gh secret set COPR_API_CONFIG --repo episode6/collins < ~/.config/copr`),
+then dispatch the workflow for the tag that failed
+(`gh workflow run release.yml --ref <branch> -f tag=v<VERSION>`).
+
+CI (`.github/workflows/ci.yml`, job `rpm`) rehearses all of it short of the
+upload on every PR: the SRPM, `rpmlint`, a rebuild into the binary RPM with
+the spec's `%check` (desktop entry + AppStream validation), and a real
+`dnf install` of the result — so a renamed dependency or a wrong path fails
+the PR, not the first install after a release.
+
+### Testing before you upload (COPR)
+
+The `rpm` CI job is most of it. For the rest, once a build has published:
+
+```bash
+docker run --rm -it fedora:latest bash -c \
+  'dnf -y copr enable episode6/stable && dnf -y install collins && rpm -ql collins'
+```
+
+and the same on `quay.io/centos/centos:stream10` for the EPEL 10 chroot.

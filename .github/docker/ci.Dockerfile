@@ -6,17 +6,18 @@
 # file is the single canonical list of build dependencies; ci.yml and
 # release.yml run their containered jobs inside it.
 #
-# Two stages, two tags, one content-addressed hash:
-# .github/workflows/ci-image.yml names both images by the first 12 hex of
+# Three stages, three tags, one content-addressed hash:
+# .github/workflows/ci-image.yml names every image by the first 12 hex of
 # hashFiles(this file) and only builds what GHCR does not already have —
-#   ghcr.io/episode6/collins-ci:<hash>            --target full (resolute)
-#   ghcr.io/episode6/collins-ci:<hash>-noble-pkg  --build-arg SERIES=24.04,
-#                                                 --target packaging
-# Edit this file and the next run rebuilds both; revert it and the old tags
-# are still there. Nothing rebuilds on its own, so bump the date below to pick
-# up package updates.
+#   ghcr.io/episode6/collins-ci:<hash>             --target full (resolute)
+#   ghcr.io/episode6/collins-ci:<hash>-noble-pkg   --build-arg SERIES=24.04,
+#                                                  --target packaging
+#   ghcr.io/episode6/collins-ci:<hash>-fedora-pkg  --target fedora-pkg
+# Edit this file and the next run rebuilds all three; revert it and the old
+# tags are still there. Nothing rebuilds on its own, so bump the date below to
+# pick up package updates.
 #
-# refreshed: 2026-08-23
+# refreshed: 2026-08-28
 #
 # ubuntu:26.04 (resolute) is the default base: the containered jobs run on the
 # newest supported stack (GTK 4.22, adw 1.9, Python 3.14) — the one
@@ -64,3 +65,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb xauth dbus fonts-dejavu-core \
   && rm -rf /var/lib/apt/lists/*
 USER runner
+
+# The Fedora stage, for the RPM: rpm-build + rpmlint assemble and lint the
+# SRPM (ci.yml's rpm job, release.yml's copr job, which also needs copr-cli);
+# the spec's BuildRequires let the rpm job rebuild the SRPM into a binary
+# package the way a COPR chroot would; and the package's runtime dependencies
+# are preinstalled so `dnf install ./collins-*.rpm` proves the Requires
+# resolve without downloading the GTK stack per run. fedora:latest is
+# resolved when the image is built -- a `refreshed:` bump above moves it on.
+# Its own FROM rather than a stage of the ubuntu chain, and root throughout:
+# nothing here runs the unit suite, and installing the built RPM needs root.
+FROM fedora:latest AS fedora-pkg
+ENV LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1
+# glibc-langpack-en: rpmlint runs the spec's scriptlets under en_US.UTF-8 and
+# warns fourteen times when the locale is missing.
+RUN dnf install -y \
+    git rpm-build rpmlint copr-cli glibc-langpack-en \
+    python3-devel pyproject-rpm-macros python3-setuptools python3-wheel python3-pip \
+    desktop-file-utils appstream \
+    python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling \
+  && dnf clean all
+# Root here, but the runner checks the workspace out as uid 1001, and git
+# refuses to touch a repository someone else owns ("dubious ownership") --
+# actions/checkout's own exception lives in a temporary HOME the later steps
+# never see. The image exists only to run CI on that checkout.
+RUN git config --system --add safe.directory '*'

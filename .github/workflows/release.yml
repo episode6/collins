@@ -1,34 +1,37 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-28. Full change history: git log for this file.
 
 name: Release
 
 # Push a v* tag (scripts/ship-release.py, from a release branch) → build the
 # wheel/sdist + .deb, publish to PyPI (OIDC trusted publishing), attach the
-# .deb to the GitHub Release, and upload a source package per Ubuntu series
-# to ppa:episode6/stable. See RELEASE_CHECKLIST.md.
+# .deb to the GitHub Release, upload a source package per Ubuntu series to
+# ppa:episode6/stable, and an SRPM to the episode6/stable COPR. See
+# RELEASE_CHECKLIST.md.
 on:
   push:
     tags: ['v*']
-  # Manual runs re-drive the ppa job for a tag that already exists -- a
-  # tag's own run is frozen on the workflow as it was at the tag, so a fix to
-  # this file can only reach an already-shipped release this way. Dispatch it
-  # from the branch that carries the fix; the job checks out the tag itself.
+  # Manual runs re-drive the ppa and copr jobs for a tag that already exists
+  # -- a tag's own run is frozen on the workflow as it was at the tag, so a
+  # fix to this file can only reach an already-shipped release this way.
+  # Dispatch it from the branch that carries the fix; the jobs check out the
+  # tag themselves.
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing v* tag to (re)upload to the PPA
+        description: Existing v* tag to (re)upload to the PPA and COPR
         required: false
         type: string
 
-# build and ppa run inside the prebuilt CI images (.github/docker/ci.Dockerfile,
-# resolved or built by the image job) -- the same images ci.yml's packaging and
-# ppa-source jobs use, so a release builds in exactly the environment every PR
-# rehearsed. github-release and pypi stay on the bare runner: they need only gh
-# and the PyPI action, and the pypi job's OIDC environment wiring must not
-# move. A manual dispatch takes its images from the dispatching branch's
-# Dockerfile, not the tag's -- the same way it takes this file.
+# build, ppa and copr run inside the prebuilt CI images
+# (.github/docker/ci.Dockerfile, resolved or built by the image job) -- the
+# same images ci.yml's packaging, ppa-source and rpm jobs use, so a release
+# builds in exactly the environment every PR rehearsed. github-release and
+# pypi stay on the bare runner: they need only gh and the PyPI action, and the
+# pypi job's OIDC environment wiring must not move. A manual dispatch takes
+# its images from the dispatching branch's Dockerfile, not the tag's -- the
+# same way it takes this file.
 jobs:
   image:
     uses: ./.github/workflows/ci-image.yml
@@ -221,3 +224,99 @@ jobs:
         run: |
           dput "$PPA" \
             "/tmp/collins-ppa/${{ matrix.series }}"/collins_*_source.changes
+
+  # Source-RPM upload to the episode6/stable COPR, which builds the binary
+  # package in every chroot the project enables (maintained Fedoras + rawhide,
+  # EPEL 10) and signs the repository itself -- no key on our side. Same shape
+  # as ppa: exports git HEAD, gates on build, checks the packaging file against
+  # the tag, skips what is already published. The stakes are lower than
+  # Launchpad's (COPR does not burn a version on a failed build; a re-upload
+  # just supersedes), so these guards keep a tag re-run boring rather than
+  # prevent a permanent mistake.
+  #
+  # The one secret rots on a schedule: the API token behind COPR_API_CONFIG
+  # expires 180 days after it is minted, so the sign-in step names the fix.
+  copr:
+    needs: [image, build]
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.image.outputs.image_fedora_pkg }}
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      PROJECT: episode6/stable
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Check the tag against the spec
+        run: |
+          ver="$(rpmspec -q --srpm --qf '%{version}' packaging/fedora/collins.spec)"
+          tag="${TAG#v}"
+          if [ "$ver" != "$tag" ]; then
+            echo "::error::packaging/fedora/collins.spec is at $ver but the tag is $tag."
+            echo "COPR publishes the SRPM's version, which comes from the spec, not"
+            echo "the tag -- this would publish the wrong version. Bump the spec"
+            echo "(and add its %changelog entry) and re-tag."
+            exit 1
+          fi
+
+      - name: Sign in to COPR
+        env:
+          COPR_API_CONFIG: ${{ secrets.COPR_API_CONFIG }}
+        run: |
+          if [ -z "$COPR_API_CONFIG" ]; then
+            echo "::error::COPR_API_CONFIG is not set. It holds the whole [copr-cli]"
+            echo "block from https://copr.fedorainfracloud.org/api/, verbatim."
+            exit 1
+          fi
+          umask 077
+          mkdir -p ~/.config
+          printf '%s\n' "$COPR_API_CONFIG" > ~/.config/copr
+          # The /api page writes the token's expiry into the block as a comment;
+          # warn while there is still time to rotate it.
+          expiry="$(sed -n 's/^# *expiration date: *//p' ~/.config/copr | head -n 1)"
+          if [ -n "$expiry" ]; then
+            left=$(( ( $(date -d "$expiry" +%s) - $(date +%s) ) / 86400 ))
+            if [ "$left" -lt 30 ]; then
+              echo "::warning::The COPR API token expires on $expiry ($left days left). Mint a new one at https://copr.fedorainfracloud.org/api/ and replace the COPR_API_CONFIG secret."
+            fi
+          fi
+          if ! copr-cli whoami; then
+            echo "::error::COPR rejected the API token. Tokens expire 180 days after"
+            echo "they are minted: generate a new one at"
+            echo "https://copr.fedorainfracloud.org/api/ and replace the COPR_API_CONFIG"
+            echo "secret with the whole [copr-cli] block, then dispatch this workflow"
+            echo "for the tag (see RELEASE_CHECKLIST.md)."
+            exit 1
+          fi
+
+      - name: Skip if COPR already has this version
+        id: dupe
+        run: |
+          ver="${TAG#v}"
+          # The newest build that succeeded, or nothing (also when the package
+          # has never been built: get-package then fails, and that is "no").
+          built="$(copr-cli get-package "$PROJECT" --name collins \
+                     --with-latest-succeeded-build --output-format json 2>/dev/null \
+                   | python3 -c 'import json, sys; b = json.load(sys.stdin).get("latest_succeeded_build") or {}; print((b.get("source_package") or {}).get("version") or "")' \
+                   || true)"
+          if [ "${built%%-*}" = "$ver" ]; then
+            echo "::notice::$ver is already built in $PROJECT ($built) -- nothing to upload."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the SRPM
+        if: steps.dupe.outputs.skip == 'false'
+        run: packaging/fedora/build-copr-srpm.sh
+
+      # No --nowait: the job stays red when any chroot fails to build. A noarch
+      # Python package takes a few minutes per chroot, but the queue in front
+      # of it is COPR's to decide.
+      - name: Upload to COPR and wait for the builds
+        if: steps.dupe.outputs.skip == 'false'
+        timeout-minutes: 120
+        run: copr-cli build "$PROJECT" /tmp/collins-copr/collins-*.src.rpm

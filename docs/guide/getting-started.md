@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-27. Full change history: git log for this file.
+fork. Last modified: 2026-08-29. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -68,6 +68,25 @@ sidebar's ☰ menu offers **Add the Ubuntu PPA…** until the PPA is configured:
 it shows the commands above and runs them in a terminal of the current
 session, where `sudo` can ask for your password.
 
+### Fedora — the episode6 COPR
+
+The maintained channel on Fedora — the same idea as the PPA, on dnf:
+
+```bash
+sudo dnf copr enable episode6/stable
+sudo dnf install collins
+```
+
+The COPR builds for **every current Fedora** (new releases are added as
+Fedora branches them) and for **RHEL 10** and its rebuilds — AlmaLinux 10,
+Rocky Linux 10, CentOS Stream 10 — whose base repositories carry everything
+Collins needs. RHEL 9 is out of scope (GTK 4.8, libadwaita 1.2).
+
+As on Ubuntu, a Collins that came from PyPI or a checkout sees
+**Add the Fedora COPR…** in the sidebar's ☰ menu until the repository is
+configured — except on the image-based variants (Silverblue, Kinoite,
+Bazzite…), where `dnf install` doesn't apply and the item stays out.
+
 ### Debian — `.deb`
 
 A Launchpad PPA can only ever serve Ubuntu, so on Debian — and the
@@ -90,7 +109,7 @@ against the 1.5 APIs).
 ### PyPI — pipx or pip
 
 Available everywhere, and the way in on a distro with no package of its
-own — Arch, Fedora, and anything else outside the Debian family:
+own — Arch, openSUSE, and anything else without a channel above:
 
 ```bash
 pipx install --system-site-packages collins   # or: pip install --user collins
@@ -131,6 +150,7 @@ your `~/.config/collins/` state, so an update is always safe mid-stream.
 | Installed via | To update |
 | --- | --- |
 | **Ubuntu PPA** | Nothing special — `sudo apt update && sudo apt upgrade` (or your desktop's software updater) picks Collins up with everything else. |
+| **Fedora COPR** | Likewise — `sudo dnf upgrade` (or GNOME Software) picks it up with everything else. |
 | **Debian `.deb`** | Download the new `.deb` from the [releases page](https://github.com/episode6/collins/releases/latest) and install it over the old one the same way: `sudo apt install ./collins_*_all.deb`. apt treats it as an upgrade; settings stay put. |
 | **pipx** | `pipx upgrade collins` — the `--system-site-packages` flag you installed with is remembered by the venv, so it needn't be repeated. |
 | **pip** | `pip install --user --upgrade collins` |

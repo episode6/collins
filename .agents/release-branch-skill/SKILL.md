@@ -6,8 +6,8 @@ description: >-
   release branch" (or to cut/create/start a new release, release branch, or
   version): verifies main is green, creates release/v<VERSION>, and opens the
   next-version-on-main and release-on-branch PRs that update pyproject.toml,
-  collins/__init__.py, debian/changelog, docs/releases.md, the AppStream
-  metainfo, and the AUR PKGBUILD.
+  collins/__init__.py, debian/changelog, the Fedora spec, docs/releases.md,
+  the AppStream metainfo, and the AUR PKGBUILD.
 ---
 
 # Cut Release Branch Skill
@@ -54,6 +54,12 @@ Create two separate Pull Requests (as drafts, per repo convention).
       targeting `UNRELEASED` (`dch -v <NEXT_VERSION> -D UNRELEASED "..."`, or
       by hand matching the existing entries — author line
       `Geoff Hackett <ghackett@episode6.com>`).
+    - **(VITAL)** In `packaging/fedora/collins.spec`: set `Version:` to
+      `<NEXT_VERSION>` (and `Release:` back to `1%{?dist}` if it was bumped),
+      and add a new top `%changelog` entry for it — same header shape as the
+      existing ones (`* <Day Mon DD YYYY> Geoff Hackett
+      <ghackett@episode6.com> - <NEXT_VERSION>-1`, the date being today's,
+      weekday included), one `-` line saying what the release is.
     - **(VITAL)** In `docs/releases.md`: add a new
       `### v<NEXT_VERSION> — UNRELEASED` section atop the Changelog.
     - **(VITAL)** Finalize the outgoing `v<VERSION>` in **all three
@@ -71,6 +77,9 @@ Create two separate Pull Requests (as drafts, per repo convention).
           `<release version="<VERSION>" date="<planned ship date>">` entry
           atop the `<releases>` list, with a `<description>` (a paragraph
           and a short `<ul>`) — software centers show it.
+        - `packaging/fedora/collins.spec`: the `%changelog` entry for
+          `<VERSION>` says what shipped, in a line or two — `rpm -q
+          --changelog` and the COPR build page show it.
     - Mirror the outgoing release into the AUR files: set
       `pkgver=<VERSION>` in `packaging/aur/PKGBUILD` + the matching
       `pkgver`/`source` lines in `packaging/aur/.SRCINFO` (the sha256 refresh
@@ -84,10 +93,10 @@ Create two separate Pull Requests (as drafts, per repo convention).
       three changelogs for `v<VERSION>` (ship date in the `docs/releases.md`
       heading; every change since the last release in each), and the AUR
       `pkgver`.
-    - Verify `pyproject.toml`, `collins/__init__.py`, and the top
-      `debian/changelog` entry already agree on `<VERSION>` (no version change
-      expected — main carried the right version at cut time), e.g. by running
-      `python3 scripts/verify_versions.py`.
+    - Verify `pyproject.toml`, `collins/__init__.py`, the top
+      `debian/changelog` entry and the spec's `Version:` already agree on
+      `<VERSION>` (no version change expected — main carried the right
+      version at cut time), e.g. by running `python3 scripts/verify_versions.py`.
 
 ### 4. Create Pull Requests
 - Use `gh pr create` (as drafts) or the GitHub UI to create the two PRs from

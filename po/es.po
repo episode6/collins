@@ -113,6 +113,15 @@ msgstr "¿Añadir el PPA de Ubuntu?"
 msgid "Collins isn't installed from ppa:episode6/stable yet. The PPA keeps it updated with the rest of the system: apt upgrade and the software updater both pick up new releases."
 msgstr "Collins aún no está instalado desde ppa:episode6/stable. El PPA lo mantiene actualizado con el resto del sistema: tanto apt upgrade como el actualizador de software recogen las nuevas versiones."
 
+msgid "Add the Fedora COPR…"
+msgstr "Añadir el COPR de Fedora…"
+
+msgid "Add the Fedora COPR?"
+msgstr "¿Añadir el COPR de Fedora?"
+
+msgid "Collins isn't installed from the episode6/stable COPR yet. The COPR keeps it updated with the rest of the system: dnf upgrade and the software updater both pick up new releases."
+msgstr "Collins aún no está instalado desde el COPR episode6/stable. El COPR lo mantiene actualizado con el resto del sistema: tanto dnf upgrade como el actualizador de software recogen las nuevas versiones."
+
 msgid "Collins isn't installed from its package repository yet."
 msgstr "Collins aún no está instalado desde su repositorio de paquetes."
 
