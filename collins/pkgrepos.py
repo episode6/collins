@@ -9,10 +9,10 @@ channel for, and is the channel already configured? — and names the channel's
 commands. Running them is the window's job (they need sudo, so they run in a
 terminal the user can answer).
 
-One channel today, the Ubuntu PPA. Debian (once it has a repository of its
-own — Launchpad only serves Ubuntu) and Fedora (once there are rpms) are the
-next two, and each is a `Channel` entry in CHANNELS with its own `applies`
-and `configured` checks; the menu and the window handle every entry the same
+Two channels: the Ubuntu PPA and the Fedora COPR. Debian (once it has a
+repository of its own — Launchpad only serves Ubuntu) would be the third,
+and each is a `Channel` entry in CHANNELS with its own `applies` and
+`configured` checks; the menu and the window handle every entry the same
 way.
 
 Nothing here imports gi, so it is testable where GTK isn't.
@@ -32,9 +32,18 @@ from pathlib import Path
 PPA = "ppa:episode6/stable"
 _PPA_URI = re.compile(r"ppa\.launchpad(?:content)?\.net/episode6/stable/")
 
+# The COPR, as `dnf copr enable` writes it: a .repo file under yum.repos.d
+# (named _copr:copr.fedorainfracloud.org:episode6:stable.repo by current dnf,
+# _copr_episode6-stable.repo by older ones) whose baseurl and gpgkey both
+# point under this path. The URL is what identifies it, whatever the file
+# is called.
+COPR = "episode6/stable"
+_COPR_URI = re.compile(r"copr\.fedorainfracloud\.org/results/episode6/stable/")
+
 OS_RELEASE = Path("/etc/os-release")
 APT_SOURCES = Path("/etc/apt/sources.list")
 APT_SOURCES_DIR = Path("/etc/apt/sources.list.d")
+YUM_REPOS_DIR = Path("/etc/yum.repos.d")
 
 
 @dataclass(frozen=True)
@@ -89,6 +98,24 @@ def is_ubuntu(release: dict[str, str]) -> bool:
     return "ubuntu" in _distro_family(release)
 
 
+def is_fedora(release: dict[str, str]) -> bool:
+    """Fedora itself, any release — the COPR follows Fedora's branching, so
+    every maintained one has a chroot — and the rest of the family from
+    version 10 on: RHEL, CentOS Stream, AlmaLinux and Rocky (all of which say
+    ID_LIKE=rhel centos fedora, or are rhel/centos themselves), plus Fedora
+    derivatives like Nobara and Ultramarine, whose Fedora-numbered versions
+    clear 10 by a mile. The floor is RHEL 10's: the first EL whose base repos
+    carry Collins' GTK stack, and the only EPEL the COPR builds for — RHEL 9
+    would get a chroot-not-found from `dnf copr enable`."""
+    family = _distro_family(release)
+    if release.get("ID", "").lower() == "fedora":
+        return True
+    if not family & {"fedora", "rhel", "centos"}:
+        return False
+    major = release.get("VERSION_ID", "").split(".")[0]
+    return major.isdigit() and int(major) >= 10
+
+
 def _apt_source_files(sources: Path, sources_dir: Path) -> list[Path]:
     files = [sources]
     try:
@@ -138,6 +165,49 @@ def ppa_configured(sources: Path | None = None, sources_dir: Path | None = None)
     return False
 
 
+def _names_copr(text: str) -> bool:
+    """Whether one .repo file enables the COPR.
+
+    An ini file, one repository per [section]; `dnf copr disable` sets
+    enabled=0 in place rather than deleting the file (and `dnf copr enable`
+    flips it back), so a disabled section must read as not configured or the
+    menu would never offer to turn it back on.
+    """
+    for section in re.split(r"^\[", text, flags=re.MULTILINE):
+        lines = [line for line in section.splitlines() if not line.lstrip().startswith(("#", ";"))]
+        if not any(_COPR_URI.search(line) for line in lines):
+            continue
+        enabled = next(
+            (
+                line.partition("=")[2].strip().lower()
+                for line in lines
+                if line.partition("=")[0].strip().lower() == "enabled"
+            ),
+            "1",
+        )
+        if enabled not in ("0", "no", "false"):
+            return True
+    return False
+
+
+def copr_configured(repos_dir: Path | None = None) -> bool:
+    """Whether dnf already pulls from the episode6/stable COPR."""
+    try:
+        files = sorted((repos_dir or YUM_REPOS_DIR).iterdir())
+    except OSError:
+        return False
+    for path in files:
+        if path.suffix != ".repo" or not path.is_file():
+            continue
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
+            continue
+        if _names_copr(text):
+            return True
+    return False
+
+
 # The docs' install recipe (docs/index.md, docs/guide/getting-started.md):
 # adding the PPA alone changes nothing until the package is installed from
 # it, and on a machine running the GitHub .deb the install is the upgrade
@@ -146,6 +216,10 @@ def ppa_configured(sources: Path | None = None, sources_dir: Path | None = None)
 # password is read *as* the password — the first one fails to authenticate
 # and the second never runs.
 PPA_COMMANDS = f"sudo add-apt-repository {PPA} && sudo apt install collins"
+# The same recipe for dnf: the copr plugin picks the chroot from os-release
+# (fedora-<N> on Fedora, epel-<N> on the RHEL family), so the one line serves
+# every distro `is_fedora` admits.
+COPR_COMMANDS = f"sudo dnf copr enable {COPR} && sudo dnf install collins"
 
 CHANNELS: tuple[Channel, ...] = (
     Channel(
@@ -154,8 +228,14 @@ CHANNELS: tuple[Channel, ...] = (
         configured=ppa_configured,
         commands=PPA_COMMANDS,
     ),
-    # Next: a Debian repository (Channel "debian-apt") and a Fedora COPR
-    # ("fedora-copr"), once those channels exist to point at.
+    Channel(
+        id="fedora-copr",
+        applies=is_fedora,
+        configured=copr_configured,
+        commands=COPR_COMMANDS,
+    ),
+    # Next: a Debian repository (Channel "debian-apt"), once there is one to
+    # point at.
 )
 
 

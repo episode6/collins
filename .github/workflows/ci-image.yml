@@ -3,11 +3,12 @@
 
 # The gate every container job waits on: resolve the content-addressed tags of
 # .github/docker/ci.Dockerfile, and build + push only what GHCR does not have
-# yet. One hash, two tags from the same file: the resolute `full` image (the
-# default; most containered jobs) and the noble packaging-only image (the
-# noble PPA source build). A PR that edits the Dockerfile therefore builds and
-# uses its own images; one that leaves it alone finds both tags (~15s of job
-# overhead) and builds nothing. Called from ci.yml and release.yml.
+# yet. One hash, three tags from the same file: the resolute `full` image (the
+# default; most containered jobs), the noble packaging-only image (the noble
+# PPA source build) and the Fedora packaging image (the RPM / COPR jobs). A PR
+# that edits the Dockerfile therefore builds and uses its own images; one that
+# leaves it alone finds every tag (~15s of job overhead) and builds nothing.
+# Called from ci.yml and release.yml.
 #
 # Known limitation: on a pull_request from a *fork*, GITHUB_TOKEN is read-only
 # no matter what permissions are requested, so a fork PR that edits the
@@ -25,6 +26,9 @@ on:
       image_noble_pkg:
         description: The noble packaging-only image (<tag>-noble-pkg), for the noble PPA source build
         value: ${{ jobs.image.outputs.image_noble_pkg }}
+      image_fedora_pkg:
+        description: The Fedora packaging image (<tag>-fedora-pkg), for the RPM and COPR jobs
+        value: ${{ jobs.image.outputs.image_fedora_pkg }}
 
 jobs:
   image:
@@ -35,6 +39,7 @@ jobs:
     outputs:
       image: ${{ steps.tag.outputs.image }}
       image_noble_pkg: ${{ steps.tag.outputs.image_noble_pkg }}
+      image_fedora_pkg: ${{ steps.tag.outputs.image_fedora_pkg }}
     steps:
       - uses: actions/checkout@v7
       - id: tag
@@ -42,6 +47,7 @@ jobs:
           h="${{ hashFiles('.github/docker/ci.Dockerfile') }}"
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}-ci:${h::12}" >> "$GITHUB_OUTPUT"
           echo "image_noble_pkg=ghcr.io/${GITHUB_REPOSITORY,,}-ci:${h::12}-noble-pkg" >> "$GITHUB_OUTPUT"
+          echo "image_fedora_pkg=ghcr.io/${GITHUB_REPOSITORY,,}-ci:${h::12}-fedora-pkg" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -60,7 +66,8 @@ jobs:
           }
           check full "${{ steps.tag.outputs.image }}"
           check noble_pkg "${{ steps.tag.outputs.image_noble_pkg }}"
-      - if: steps.exists.outputs.full == 'false' || steps.exists.outputs.noble_pkg == 'false'
+          check fedora_pkg "${{ steps.tag.outputs.image_fedora_pkg }}"
+      - if: steps.exists.outputs.full == 'false' || steps.exists.outputs.noble_pkg == 'false' || steps.exists.outputs.fedora_pkg == 'false'
         uses: docker/setup-buildx-action@v3
       # provenance: false keeps each tag a plain image manifest rather than an
       # OCI index with an attestation alongside; nothing here needs one.
@@ -85,5 +92,16 @@ jobs:
           push: true
           provenance: false
           tags: ${{ steps.tag.outputs.image_noble_pkg }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - if: steps.exists.outputs.fedora_pkg == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/docker/ci.Dockerfile
+          target: fedora-pkg
+          push: true
+          provenance: false
+          tags: ${{ steps.tag.outputs.image_fedora_pkg }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

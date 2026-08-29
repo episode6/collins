@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-27. Full change history: git log for this file.
+fork. Last modified: 2026-08-28. Full change history: git log for this file.
 -->
 
 # Collins
@@ -134,6 +134,13 @@ sudo apt install collins
 
 Ubuntu 22.04 (jammy) is not supported — it ships libadwaita 1.1 and GTK 4.6, and Collins uses APIs from libadwaita 1.5 and GTK 4.10.
 
+**Fedora — the episode6 COPR.** The maintained channel on every current Fedora, and on RHEL 10 and its rebuilds (AlmaLinux 10, Rocky Linux 10, CentOS Stream 10). Same deal as the PPA: enable it once and Collins upgrades with the rest of your system.
+
+```bash
+sudo dnf copr enable episode6/stable
+sudo dnf install collins
+```
+
 **Debian — .deb package.** A Launchpad PPA can only serve Ubuntu, so on Debian — and the Debian-family distros that don't build on Ubuntu — this is the way in (outside the Debian family, PyPI above is). Grab one from [the releases page](https://github.com/episode6/collins/releases), or build it with `./scripts/build_deb.sh`:
 
 ```bash
@@ -142,7 +149,7 @@ sudo apt install ./collins_*_all.deb
 
 Dependencies are pulled in automatically and the app appears in your app grid as "Collins". Note that a `.deb` installed this way **does not update itself** — it adds no apt source, deliberately, so nothing is subscribed to a third-party archive behind your back. Watch the releases page, or use the PPA if you are on Ubuntu.
 
-**Updating.** PPA: `sudo apt upgrade` picks it up with everything else. `.deb`: install the new one over the old with the same `sudo apt install ./collins_*_all.deb`. pipx: `pipx upgrade collins` (the `--system-site-packages` flag is remembered). pip: `pip install --user --upgrade collins`. Source: `git pull`. Relaunch Collins afterwards — a running instance keeps the old code, including one hidden with *Keep Running*; use **Quit** for a real restart.
+**Updating.** PPA: `sudo apt upgrade` picks it up with everything else. COPR: `sudo dnf upgrade`, likewise. `.deb`: install the new one over the old with the same `sudo apt install ./collins_*_all.deb`. pipx: `pipx upgrade collins` (the `--system-site-packages` flag is remembered). pip: `pip install --user --upgrade collins`. Source: `git pull`. Relaunch Collins afterwards — a running instance keeps the old code, including one hidden with *Keep Running*; use **Quit** for a real restart.
 
 Debian 13 (trixie) and newer have everything Collins needs. Debian 12 (bookworm) does not — libadwaita 1.2 against the 1.5 APIs.
 
@@ -199,8 +206,9 @@ the GitHub Release (tag `v<VERSION>`, notes extracted from
 [docs/releases.md](docs/releases.md)), and the tag push runs
 `.github/workflows/release.yml` — build the wheel/sdist and the `.deb`,
 attach the `.deb` to the release, publish to PyPI (trusted publishing /
-OIDC), and upload a source package per Ubuntu series to
-`ppa:episode6/stable`.
+OIDC), upload a source package per Ubuntu series to `ppa:episode6/stable`,
+and an SRPM to the `episode6/stable` COPR, which builds it for every Fedora
+and for RHEL 10.
 
 ## Credits & license
 

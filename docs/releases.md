@@ -26,19 +26,29 @@ downloads of each version, see the
 - ✅ **Theming** — light/dark plus selectable terminal color palettes
 - ✅ **Localization** — English, Hungarian, German, Spanish, French
 - ✅ **Multi-window**
-- ✅ **Distribution** — Ubuntu PPA (`ppa:episode6/stable`), `.deb`, PyPI (`pipx install collins`), one-step tag-driven releases
+- ✅ **Distribution** — Ubuntu PPA (`ppa:episode6/stable`), Fedora COPR (`episode6/stable`, RHEL 10 included), `.deb`, PyPI (`pipx install collins`), one-step tag-driven releases
 
 ### Exploring next
 
 - 🔭 **Flathub** distribution
 - 🔭 **AUR** package
-- 🔭 **Fedora COPR** repository
 - 🔭 **A better native chat** — a first-class chat experience for an agent session, beyond the terminal
 
 ## Changelog
 
 ### v0.1.2 — UNRELEASED
 
+- **Collins is on Fedora.** `sudo dnf copr enable episode6/stable && sudo dnf
+  install collins` — the `episode6/stable` COPR builds every release for
+  every current Fedora (new ones join as Fedora branches them) and for RHEL
+  10 and its rebuilds, and upgrades with the rest of the system, the way the
+  PPA does on Ubuntu. The RPM (`packaging/fedora/collins.spec`) carries the
+  same GTK 4.10 / libadwaita 1.5 floors as the `.deb`, with libspelling as a
+  weak dependency; every PR builds and installs it in a Fedora container,
+  and a tag uploads the SRPM and waits for every chroot to go green. A
+  Fedora install that came from PyPI or a checkout sees *Add the Fedora
+  COPR…* in the sidebar's ☰ menu until the repository is configured — the
+  Ubuntu PPA item's twin, with the same run-it-here dialog.
 - **Checkout the default branch from the project row** — next to *Git
   pull* in a project's right-click menu, *Checkout main* (or whatever the
   remote calls its trunk) switches the project folder back to it. Live

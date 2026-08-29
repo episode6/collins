@@ -2,8 +2,9 @@
 
 This mirrors the episode6 library/app repos' release process — cut a release
 branch, harden it, ship from it — adapted to a Python/GTK app whose one tag
-push fans out to a GitHub release with a `.deb`, a PyPI publish, and a source
-upload per Ubuntu series to `ppa:episode6/stable`. Agent skills in
+push fans out to a GitHub release with a `.deb`, a PyPI publish, a source
+upload per Ubuntu series to `ppa:episode6/stable`, and an SRPM upload to the
+`episode6/stable` COPR. Agent skills in
 [.agents/](./.agents) automate most of it (`release-branch-skill`,
 `ship-release-skill`).
 
@@ -11,12 +12,12 @@ upload per Ubuntu series to `ppa:episode6/stable`. Agent skills in
 
 - `version` in `pyproject.toml` is the reference copy: plain dotted numerals,
   no suffixes — `MAJOR.MINOR.PATCH`, plus a fourth segment on hotfixes (see
-  below). `collins/__init__.py` (`__version__`) and
-  the top `debian/changelog` entry must match it exactly, and
-  `docs/releases.md` must carry a `### v<VERSION>` section for it —
-  `scripts/verify_versions.py` enforces all of that in CI (the `ci.yml`
-  verify-versions job), and `scripts/ship-release.py` re-checks it at ship
-  time.
+  below). `collins/__init__.py` (`__version__`), the top `debian/changelog`
+  entry and `Version:` in `packaging/fedora/collins.spec` must match it
+  exactly, and `docs/releases.md` must carry a `### v<VERSION>` section for
+  it (the spec's `%changelog` an entry) — `scripts/verify_versions.py`
+  enforces all of that in CI (the `ci.yml` verify-versions job), and
+  `scripts/ship-release.py` re-checks it at ship time.
 - Two files track *released* versions instead and may lag behind main, but
   never run ahead (also CI-checked): the AppStream metainfo
   (`data/com.episode6.Collins.metainfo.xml` — its top `<release>` entry is the
@@ -55,6 +56,7 @@ into one source is a future project; until then, every step below that says
 | `docs/releases.md` | The GitHub release page (the `### v<VERSION>` section becomes the release notes verbatim) and the docs site | Full notes: every user-visible change since the last release, in prose |
 | `debian/changelog` | `apt changelog collins`, the Launchpad PPA page, and the `.deb`'s `changelog.gz` | One `*` bullet per headline change, condensed — packaging changes first, then features and fixes |
 | `data/com.episode6.Collins.metainfo.xml` | GNOME Software and other AppStream software centers, via the `<release>` entry's `<description>` | A one-paragraph summary and a short `<ul>` of the headline changes |
+| `packaging/fedora/collins.spec` (`%changelog`) | `rpm -q --changelog collins` and the COPR build page | One entry per release, a line or two — the `debian/changelog` entry's first bullet, condensed |
 
 Mismatched versions are caught by CI (`scripts/verify_versions.py`), but
 nothing checks that the notes themselves are complete — before finalizing,
@@ -82,15 +84,19 @@ Create 2 PRs (as drafts, per repo convention):
     - Add a new top `debian/changelog` entry:
       `dch -v <NEXT_VERSION> -D UNRELEASED` (or by hand, matching the existing
       entries).
+    - Bump `Version:` in `packaging/fedora/collins.spec` to `<NEXT_VERSION>`
+      (and `Release:` back to `1%{?dist}` if it was bumped), and add a new
+      top `%changelog` entry for it.
     - `docs/releases.md`: add a new `### v<NEXT_VERSION> — UNRELEASED` section
       atop the changelog.
     - Finalize the outgoing `v<VERSION>` in **all three changelogs** (see
       Changelogs above): the `docs/releases.md` section gets its ship date
       (`### v<VERSION> — YYYY-MM-DD`) and complete notes; the `debian/changelog`
       `<VERSION>` entry gets a bullet per headline change, not just the
-      packaging ones; and the metainfo gets a `<release version="<VERSION>"
+      packaging ones; the metainfo gets a `<release version="<VERSION>"
       date="...">` entry (date = the planned ship date) with a `<description>`
-      summarizing the release.
+      summarizing the release; and the spec's `%changelog` entry for
+      `<VERSION>` says what shipped.
     - Mirror the outgoing release into the AUR files so main's copies stay
       current once it ships: set `pkgver` to `<VERSION>` in `PKGBUILD` +
       `.SRCINFO` (sha256 gets refreshed after the tag exists — see
@@ -100,9 +106,9 @@ Create 2 PRs (as drafts, per repo convention):
       changelogs for `v<VERSION>` (ship date in the `docs/releases.md`
       heading, every change since the last release in each), and the AUR
       `pkgver`.
-    - Verify `pyproject.toml` / `__init__.py` / `debian/changelog` already
-      agree on `<VERSION>` — no version change expected; main carried the
-      right version at cut time.
+    - Verify `pyproject.toml` / `__init__.py` / `debian/changelog` / the spec
+      already agree on `<VERSION>` — no version change expected; main carried
+      the right version at cut time.
 
 ## Harden Release Branch
 
@@ -128,18 +134,28 @@ Create 2 PRs (as drafts, per repo convention):
    - publishes to PyPI via trusted publishing,
    - uploads a signed source package per Ubuntu series (noble, resolute) to
      `ppa:episode6/stable` — Launchpad then builds and publishes the binaries
-     (minutes to hours in the queue, plus ~20 minutes for the publisher).
-   CI's `ppa-source` job rehearses the source build unsigned on every PR, in
-   the same container images the `ppa` job uses, so a missing build-dep
-   should already have surfaced before the tag.
-   If a `ppa` job fails for a reason fixed in the workflow itself, the tag's
-   run cannot pick the fix up (it is frozen on the file as of the tag): land
-   the fix on the release branch and dispatch it for the tag —
+     (minutes to hours in the queue, plus ~20 minutes for the publisher),
+   - uploads the SRPM to the `episode6/stable` COPR and waits for every
+     chroot (each maintained Fedora, rawhide, EPEL 10 — x86_64 and aarch64)
+     to build; a failed chroot fails the job.
+   CI's `ppa-source` and `rpm` jobs rehearse the source build unsigned and
+   the RPM build-and-install on every PR, in the same container images the
+   `ppa` and `copr` jobs use, so a missing build-dep should already have
+   surfaced before the tag.
+   If a `ppa` or `copr` job fails for a reason fixed in the workflow itself,
+   the tag's run cannot pick the fix up (it is frozen on the file as of the
+   tag): land the fix on the release branch and dispatch it for the tag —
    `gh workflow run release.yml --ref release/v<X> -f tag=v<VERSION>`. The
-   already-in-the-PPA guard makes this safe to repeat.
+   already-published guards make this safe to repeat. The `copr` job's API
+   token (`COPR_API_CONFIG`) expires every 180 days; when it fails on that,
+   mint a new one at <https://copr.fedorainfracloud.org/api/>, replace the
+   secret, and dispatch the same way (`packaging/README.md`).
 3. Verify: the `.deb` is attached and carries the right version; Launchpad
    sends an acceptance email per series and the builds go green; `apt install
-   collins` from the PPA on a covered series picks up the new version.
+   collins` from the PPA on a covered series picks up the new version; the
+   COPR build is green in every chroot on
+   <https://copr.fedorainfracloud.org/coprs/episode6/stable/builds/> and
+   `dnf install collins` from it picks up the new version.
 4. AUR (once the package is published there): refresh `sha256sums` from the
    now-existing tag tarball, regenerate `.SRCINFO`, and push to the AUR repo
    (`packaging/aur/README.md`).
@@ -154,7 +170,8 @@ Create 2 PRs (as drafts, per repo convention):
   increment the fourth version segment (`0.1.1` → `0.1.1.1` → `0.1.1.2`) and
   describe the hotfix in all three changelogs — a `debian/changelog` entry, a
   `### v<HOTFIX_VERSION>` section in `docs/releases.md`, and a metainfo
-  `<release>` entry with a description — plus the AUR `pkgver`. No
+  `<release>` entry with a description — plus the spec's `Version:` and
+  `%changelog`, and the AUR `pkgver`. No
   coordination with `main` is needed — its next-release version already
   outranks any hotfix of the previous release — but cherry-pick the docs
   updates back so main's history stays complete.

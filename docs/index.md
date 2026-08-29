@@ -1,7 +1,7 @@
 ---
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-28. Full change history: git log for this file.
 # https://vitepress.dev/reference/default-theme-home-page
 layout: home
 
@@ -75,6 +75,11 @@ sudo add-apt-repository ppa:episode6/stable
 sudo apt install collins
 ```
 
+```bash [Fedora (COPR)]
+sudo dnf copr enable episode6/stable
+sudo dnf install collins
+```
+
 ```bash [PyPI (pipx)]
 pipx install --system-site-packages collins
 collins --install-desktop   # optional: add it to the app grid
@@ -93,9 +98,11 @@ python3 -m collins
 
 :::
 
-The PPA is the channel that updates itself, on Ubuntu 24.04+ and its
-derivatives (Mint, Pop!_OS, elementary, Zorin); the `.deb` covers Debian and
-the rest of its family; and PyPI is the way in everywhere else — it works
+The PPA and the COPR are the channels that update themselves — the PPA on
+Ubuntu 24.04+ and its derivatives (Mint, Pop!_OS, elementary, Zorin), the
+COPR on every current Fedora and on RHEL 10 and its rebuilds; the `.deb`
+covers Debian and the rest of its family; and PyPI is the way in everywhere
+else — it works
 anywhere the system GTK libraries are installed (`--system-site-packages` is
 required — Collins gets GTK from your distro, not from PyPI). See [Getting Started](/guide/getting-started) for system
 requirements and the details of each channel. The installed command is

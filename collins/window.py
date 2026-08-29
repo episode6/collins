@@ -5441,6 +5441,13 @@ class MainWindow(Adw.ApplicationWindow):
                 "keeps it updated with the rest of the system: apt upgrade "
                 "and the software updater both pick up new releases."
             )
+        elif channel.id == "fedora-copr":
+            heading = _("Add the Fedora COPR?")
+            body = _(
+                "Collins isn't installed from the episode6/stable COPR yet. The "
+                "COPR keeps it updated with the rest of the system: dnf upgrade "
+                "and the software updater both pick up new releases."
+            )
         else:
             heading = package_repo_label(channel).rstrip("…")
             body = _("Collins isn't installed from its package repository yet.")

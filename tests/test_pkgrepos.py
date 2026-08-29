@@ -8,6 +8,10 @@ UBUNTU = 'NAME="Ubuntu"\nID=ubuntu\nID_LIKE=debian\nVERSION_CODENAME=resolute\n'
 MINT = 'ID=linuxmint\nID_LIKE="ubuntu debian"\n'
 DEBIAN = 'ID=debian\nVERSION_CODENAME=trixie\n'
 FEDORA = "ID=fedora\nVERSION_ID=42\n"
+CENTOS10 = 'ID="centos"\nID_LIKE="rhel fedora"\nVERSION_ID="10"\n'
+ALMA10 = 'ID="almalinux"\nID_LIKE="rhel centos fedora"\nVERSION_ID="10.1"\n'
+RHEL9 = 'ID="rhel"\nID_LIKE="fedora"\nVERSION_ID="9.6"\n'
+NOBARA = "ID=nobara\nID_LIKE=fedora\nVERSION_ID=43\n"
 
 DEB822 = """Types: deb
 URIs: https://ppa.launchpadcontent.net/episode6/stable/ubuntu/
@@ -116,8 +120,8 @@ def test_offer_is_nothing_once_configured(monkeypatch, tmp_path):
     assert pkgrepos.offer(pkgrepos.os_release(write_release(tmp_path, UBUNTU))) is None
 
 
-@pytest.mark.parametrize("text", [DEBIAN, FEDORA, ""])
-def test_offer_is_nothing_off_ubuntu_for_now(monkeypatch, tmp_path, text):
+@pytest.mark.parametrize("text", [DEBIAN, ""])
+def test_offer_is_nothing_on_a_distro_without_a_channel(monkeypatch, tmp_path, text):
     no_ppa(monkeypatch, tmp_path, configured=False)
     assert pkgrepos.offer(pkgrepos.os_release(write_release(tmp_path, text))) is None
 
@@ -126,3 +130,77 @@ def test_offer_reads_the_real_os_release_by_default(monkeypatch, tmp_path):
     monkeypatch.setattr(pkgrepos, "OS_RELEASE", write_release(tmp_path, UBUNTU))
     no_ppa(monkeypatch, tmp_path, configured=False)
     assert pkgrepos.offer().id == "ubuntu-ppa"
+
+
+COPR_REPO = """[copr:copr.fedorainfracloud.org:episode6:stable]
+name=Copr repo for stable owned by episode6
+baseurl=https://download.copr.fedorainfracloud.org/results/episode6/stable/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/episode6/stable/pubkey.gpg
+repo_gpgcheck=0
+enabled=1
+enabled_metadata=1
+"""
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (FEDORA, True),
+        (NOBARA, True),
+        (CENTOS10, True),
+        (ALMA10, True),
+        (RHEL9, False),
+        (UBUNTU, False),
+        (DEBIAN, False),
+        ("", False),
+    ],
+)
+def test_is_fedora_is_fedora_and_el10(tmp_path, text, expected):
+    assert pkgrepos.is_fedora(pkgrepos.os_release(write_release(tmp_path, text))) is expected
+
+
+def yum(tmp_path: Path, **files: str) -> Path:
+    repos_dir = tmp_path / "yum.repos.d"
+    repos_dir.mkdir()
+    for name, text in files.items():
+        (repos_dir / name).write_text(text)
+    return repos_dir
+
+
+def test_copr_configured_reads_the_repo_file(tmp_path):
+    assert pkgrepos.copr_configured(
+        yum(tmp_path, **{"_copr:copr.fedorainfracloud.org:episode6:stable.repo": COPR_REPO})
+    )
+
+
+def test_copr_configured_by_url_whatever_the_file_is_called(tmp_path):
+    assert pkgrepos.copr_configured(yum(tmp_path, **{"_copr_episode6-stable.repo": COPR_REPO}))
+
+
+def test_copr_disabled_is_not_configured(tmp_path):
+    disabled = COPR_REPO.replace("enabled=1\n", "enabled=0\n")
+    assert not pkgrepos.copr_configured(yum(tmp_path, **{"episode6.repo": disabled}))
+
+
+def test_copr_other_projects_and_non_repo_files_do_not_count(tmp_path):
+    other = COPR_REPO.replace("episode6/stable", "someone/else")
+    assert not pkgrepos.copr_configured(
+        yum(tmp_path, **{"other.repo": other, "notes.txt": COPR_REPO, "fedora.repo": "[fedora]\nenabled=1\n"})
+    )
+
+
+def test_copr_configured_missing_dir(tmp_path):
+    assert not pkgrepos.copr_configured(tmp_path / "nope")
+
+
+def test_offer_fedora_copr(tmp_path, monkeypatch):
+    release = pkgrepos.os_release(write_release(tmp_path, FEDORA))
+    monkeypatch.setattr(pkgrepos, "YUM_REPOS_DIR", tmp_path / "empty")
+    channel = pkgrepos.offer(release)
+    assert channel is not None and channel.id == "fedora-copr"
+    assert channel.commands == "sudo dnf copr enable episode6/stable && sudo dnf install collins"
+    monkeypatch.setattr(pkgrepos, "YUM_REPOS_DIR", yum(tmp_path, **{"e6.repo": COPR_REPO}))
+    assert pkgrepos.offer(release) is None

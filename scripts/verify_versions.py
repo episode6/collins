@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Verify every committed copy of the Collins version agrees.
 
-pyproject.toml is the reference; collins/__init__.py and debian/changelog must
-match it exactly, and docs/releases.md must carry a section for it. The
-AppStream metainfo and the AUR PKGBUILD track *released* versions instead, so
+pyproject.toml is the reference; collins/__init__.py, debian/changelog and the
+Fedora spec must match it exactly, and docs/releases.md and the spec's
+%changelog must carry an entry for it. The AppStream metainfo and the AUR
+PKGBUILD track *released* versions instead, so
 they may lag behind main (which always carries the next, not-yet-shipped
 version) but must never run ahead. Run by CI on every PR; scripts/
 ship-release.py re-checks the exact-match cases at ship time.
@@ -22,6 +23,7 @@ CHANGELOG = "docs/releases.md"
 METAINFO = "data/com.episode6.Collins.metainfo.xml"
 PKGBUILD = "packaging/aur/PKGBUILD"
 SRCINFO = "packaging/aur/.SRCINFO"
+SPEC = "packaging/fedora/collins.spec"
 
 errors = []
 
@@ -83,6 +85,17 @@ def main():
         rf"^###\s+v{re.escape(version)}(\s|$)", read_file(CHANGELOG), re.MULTILINE
     ):
         error(f"{CHANGELOG}: no '### v{version}' section for the current version")
+
+    spec = read_file(SPEC)
+    spec_match = re.search(r"^Version:\s*(\S+)", spec, re.MULTILINE)
+    if not spec_match:
+        error(f"{SPEC}: no Version: found")
+    elif spec_match.group(1) != version:
+        error(f"{SPEC}: Version is {spec_match.group(1)}, expected {version}")
+    # An entry header: "* <date> <author> - <version>-<release>". COPR shows
+    # the changelog per build, so a bumped version without one ships blank.
+    if not re.search(rf"^\* .+ - {re.escape(version)}-\d+\s*$", spec, re.MULTILINE):
+        error(f"{SPEC}: no %changelog entry for {version}")
 
     meta_match = re.search(r'<release version="([^"]+)"', read_file(METAINFO))
     if not meta_match:

@@ -85,6 +85,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Add the Ubuntu PPA?': 'Hozzáadja az Ubuntu PPA-t?',
         "Collins isn't installed from ppa:episode6/stable yet. The PPA keeps it updated with the rest of the system: apt upgrade and the software updater both pick up new releases.":
             'A Collins még nincs a ppa:episode6/stable tárolóból telepítve. A PPA a rendszer többi részével együtt tartja naprakészen: az apt upgrade és a szoftverfrissítő is felveszi az új kiadásokat.',
+        'Add the Fedora COPR…': 'A Fedora COPR hozzáadása…',
+        'Add the Fedora COPR?': 'Hozzáadja a Fedora COPR-t?',
+        "Collins isn't installed from the episode6/stable COPR yet. The COPR keeps it updated with the rest of the system: dnf upgrade and the software updater both pick up new releases.":
+            'A Collins még nincs az episode6/stable COPR tárolóból telepítve. A COPR a rendszer többi részével együtt tartja naprakészen: a dnf upgrade és a szoftverfrissítő is felveszi az új kiadásokat.',
         "Collins isn't installed from its package repository yet.":
             'A Collins még nincs a csomagtárolójából telepítve.',
         'These commands ask for your password; they run in a terminal in this session.':
@@ -668,6 +672,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Add the Ubuntu PPA?': 'Ubuntu-PPA hinzufügen?',
         "Collins isn't installed from ppa:episode6/stable yet. The PPA keeps it updated with the rest of the system: apt upgrade and the software updater both pick up new releases.":
             'Collins ist noch nicht aus ppa:episode6/stable installiert. Das PPA hält es zusammen mit dem restlichen System aktuell: apt upgrade und die Softwareaktualisierung holen neue Versionen automatisch.',
+        'Add the Fedora COPR…': 'Fedora-COPR hinzufügen…',
+        'Add the Fedora COPR?': 'Fedora-COPR hinzufügen?',
+        "Collins isn't installed from the episode6/stable COPR yet. The COPR keeps it updated with the rest of the system: dnf upgrade and the software updater both pick up new releases.":
+            'Collins ist noch nicht aus dem COPR episode6/stable installiert. Das COPR hält es zusammen mit dem restlichen System aktuell: dnf upgrade und die Softwareaktualisierung holen neue Versionen automatisch.',
         "Collins isn't installed from its package repository yet.":
             'Collins ist noch nicht aus seiner Paketquelle installiert.',
         'These commands ask for your password; they run in a terminal in this session.':
@@ -1262,6 +1270,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Add the Ubuntu PPA?': '¿Añadir el PPA de Ubuntu?',
         "Collins isn't installed from ppa:episode6/stable yet. The PPA keeps it updated with the rest of the system: apt upgrade and the software updater both pick up new releases.":
             'Collins aún no está instalado desde ppa:episode6/stable. El PPA lo mantiene actualizado con el resto del sistema: tanto apt upgrade como el actualizador de software recogen las nuevas versiones.',
+        'Add the Fedora COPR…': 'Añadir el COPR de Fedora…',
+        'Add the Fedora COPR?': '¿Añadir el COPR de Fedora?',
+        "Collins isn't installed from the episode6/stable COPR yet. The COPR keeps it updated with the rest of the system: dnf upgrade and the software updater both pick up new releases.":
+            'Collins aún no está instalado desde el COPR episode6/stable. El COPR lo mantiene actualizado con el resto del sistema: tanto dnf upgrade como el actualizador de software recogen las nuevas versiones.',
         "Collins isn't installed from its package repository yet.":
             'Collins aún no está instalado desde su repositorio de paquetes.',
         'These commands ask for your password; they run in a terminal in this session.':
@@ -1851,6 +1863,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Add the Ubuntu PPA?': 'Ajouter le PPA Ubuntu ?',
         "Collins isn't installed from ppa:episode6/stable yet. The PPA keeps it updated with the rest of the system: apt upgrade and the software updater both pick up new releases.":
             "Collins n'est pas encore installé depuis ppa:episode6/stable. Le PPA le maintient à jour avec le reste du système : apt upgrade et le gestionnaire de mises à jour récupèrent tous deux les nouvelles versions.",
+        'Add the Fedora COPR…': 'Ajouter le COPR Fedora…',
+        'Add the Fedora COPR?': 'Ajouter le COPR Fedora ?',
+        "Collins isn't installed from the episode6/stable COPR yet. The COPR keeps it updated with the rest of the system: dnf upgrade and the software updater both pick up new releases.":
+            "Collins n'est pas encore installé depuis le COPR episode6/stable. Le COPR le maintient à jour avec le reste du système : dnf upgrade et le gestionnaire de mises à jour récupèrent tous deux les nouvelles versions.",
         "Collins isn't installed from its package repository yet.":
             "Collins n'est pas encore installé depuis son dépôt de paquets.",
         'These commands ask for your password; they run in a terminal in this session.':

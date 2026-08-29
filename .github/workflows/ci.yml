@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-28. Full change history: git log for this file.
 
 name: CI
 
@@ -11,7 +11,7 @@ on:
 
 # Jobs that use image dependencies run inside a prebuilt CI image
 # (.github/docker/ci.Dockerfile is the one canonical list of build
-# dependencies); the image job resolves or builds the two tags. The tiny jobs
+# dependencies); the image job resolves or builds the three tags. The tiny jobs
 # (lint, verify-versions) stay on the bare runner: they need nothing from the
 # image, and pulling one to run a one-second script would only slow them down.
 # The package is public, so pulling needs no credentials; only the image job
@@ -121,6 +121,36 @@ jobs:
           test -f collins_*~${{ matrix.series }}1_source.changes
           test -f collins_*~${{ matrix.series }}1.dsc
           test -f collins_*~${{ matrix.series }}1.tar.xz
+
+  # Everything release.yml's copr job does short of uploading, plus what
+  # COPR's builders would do next: the SRPM from packaging/fedora/collins.spec
+  # (rpmlint on both), rebuilt into the binary RPM with its %check run, then
+  # installed with dnf so the Requires are proven to resolve on a current
+  # Fedora -- a renamed dependency fails a PR here, not the first dnf install
+  # after a release. Runs in the Fedora stage of the CI image.
+  rpm:
+    needs: image
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.image.outputs.image_fedora_pkg }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the SRPM, then the binary package from it
+        run: packaging/fedora/build-copr-srpm.sh --rebuild
+      - name: The package installs, and ships what the app looks for
+        run: |
+          dnf install -y /tmp/collins-copr/collins-*.noarch.rpm
+          rpm -q --requires collins
+          test -f /usr/share/applications/com.episode6.Collins.desktop
+          test -f /usr/share/metainfo/com.episode6.Collins.metainfo.xml
+          test -f /usr/share/icons/hicolor/scalable/apps/com.episode6.Collins.svg
+          test -x /usr/bin/collins
+          # The action icons ride inside the wheel (app.py's _PACKAGE_ICONS);
+          # from / so the import resolves to the installed copy, not the checkout.
+          cd /
+          icons="$(python3 -c 'import collins, os; print(os.path.dirname(collins.__file__))')/icons"
+          test -f "$icons/hicolor/scalable/actions/tab-close-symbolic.svg"
+          test -f "$icons/com.episode6.Collins-panel.svg"
 
   # Every committed copy of the version must agree (see RELEASE_CHECKLIST.md);
   # scripts/ship-release.py re-checks the same invariants at ship time.

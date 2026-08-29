@@ -67,6 +67,7 @@ def package_repo_label(channel: pkgrepos.Channel) -> str:
     """
     return {
         "ubuntu-ppa": _("Add the Ubuntu PPA…"),
+        "fedora-copr": _("Add the Fedora COPR…"),
     }.get(channel.id, _("Add the package repository…"))
 
 log = logging.getLogger(__name__)
@@ -1579,8 +1580,8 @@ class SessionSidebar(Gtk.Box):
         # Same shape, for the package channel: on a distro Collins has a
         # repository for, and only while this machine isn't on it. Not
         # decided at launch, though — re-asked every time the menu opens
-        # (see _refresh_package_repo_item). pkgrepos names the channel; only
-        # the Ubuntu PPA exists so far.
+        # (see _refresh_package_repo_item). pkgrepos names the channel: the
+        # Ubuntu PPA or the Fedora COPR.
         self._refresh_package_repo_item()
         menu.append(_("About Collins"), "win.about")
         # Last, and app-scoped: it closes every window, not this one. The
