@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-23. Full change history: git log for this file.
+# fork. Last modified: 2026-08-28. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -36,7 +36,8 @@ from .sessions import (
     worktree_project_root,
 )
 from .state import AppState, merge_project_order, move_in_order
-from .titles import TitleGenerator, fallback_title
+from .titles import TitleGenerator, fallback_title, regenerate_setting
+from .titles import enabled as titles_enabled
 
 log = logging.getLogger(__name__)
 
@@ -128,8 +129,12 @@ class SessionStore(GObject.Object):
         self.show_archived = False
 
         # Delivers on the worker thread; hop to the main loop before mutating.
+        # The gate reads this store's own AppState — the one the preferences
+        # dialog writes — so a title queued before a switch to None is
+        # dropped at its turn (see TitleGenerator).
         self._titles = TitleGenerator(
-            lambda session_id, title: GLib.idle_add(self._on_title_generated, session_id, title)
+            lambda session_id, title: GLib.idle_add(self._on_title_generated, session_id, title),
+            enabled=lambda: titles_enabled(self.state),
         )
         # Same worker-thread delivery, same hop (see prattach).
         self._prompt_prs = PromptAttacher(
@@ -252,9 +257,9 @@ class SessionStore(GObject.Object):
         """On the first scan of a run, give every unnamed pre-existing session
         a cheap local title (the first words of its prompt) — persisted, so
         the API titling below only ever sees sessions created while the app
-        runs, not a user's entire backlog."""
-        if not self.state.get_setting("auto_title_sessions"):
-            return
+        runs, not a user's entire backlog. Runs whatever the title model
+        setting says, None included: it costs nothing, and a sidebar of blank
+        rows was never what turning the model off was for."""
         names: dict[str, str] = {}
         for session in sessions:
             session_id = session.session_id
@@ -272,8 +277,9 @@ class SessionStore(GObject.Object):
         """Queue background API titling for sessions that have no name after
         the launch backfill — i.e. sessions that appeared while the app is
         running. A session whose transcript has no real user prompt yet is
-        picked up on a later refresh, once its preview appears."""
-        if not self.state.get_setting("auto_title_sessions"):
+        picked up on a later refresh, once its preview appears. Nothing is
+        queued with the title model set to None (titles.enabled)."""
+        if not titles_enabled(self.state):
             return
         for session in sessions:
             session_id = session.session_id
@@ -308,12 +314,22 @@ class SessionStore(GObject.Object):
 
     def regenerate_name(self, session_id: str) -> None:
         """Right-click → Regenerate name: re-title one session via the API,
-        replacing any existing generated or manual name once it arrives."""
+        replacing any existing generated or manual name once it arrives.
+
+        Available under a title model of None too — the click is an explicit
+        ask, the same consent the icon dialog's Generate button gives — and
+        then runs on the automatic default (the newest Haiku), which is what
+        the menu item said it would (titles.regenerate_name_label). The
+        model is fixed here, at the click, never read at the run: an item
+        queued on the preference is dropped by the worker if the preference
+        turns to None while it waits, and an explicit ask must survive a
+        preference change made after it."""
         session = self.sessions.get(session_id)
         if session is None or not session.preview:
             return
         self._regen_pending.add(session_id)
-        self._titles.submit(session_id, session.preview, session.cwd, force=True)
+        setting = regenerate_setting(self.state.get_setting("title_model"))
+        self._titles.submit(session_id, session.preview, session.cwd, force=True, setting=setting)
 
     def _on_title_generated(self, session_id: str, title: str) -> bool:
         self.state.set_generated_name(session_id, title)

@@ -39,6 +39,18 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **The model pickers gain a None option.** *Session title model* and *Icon
+  generation model* both list **None** first, ahead of the automatic default
+  and the catalog. For titles it replaces the *Auto-generate session titles*
+  switch (an install that had it off comes up with None): under None new
+  sessions keep the free local title — the first words of their prompt —
+  and nothing goes to a model, while right-click → *Regenerate name* stays
+  available and runs on the automatic default; the menu item now names the
+  model it will run, *Regenerate name (Haiku 4.5)*. For icons None is the
+  new default: the Generate Icon dialog no longer runs the moment it opens
+  but waits for a model to be picked from its drop-down (*Choose a model…*)
+  and **Generate** clicked; with a model set it generates on open, as
+  before.
 - **A big draft survives the composer's round trip.** Closing the floating
   composer typed its draft back into the agent's input box as one chunk,
   and past a few lines the CLI folded that into a `[Pasted text #1 +12

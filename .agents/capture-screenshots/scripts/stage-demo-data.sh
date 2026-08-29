@@ -45,7 +45,7 @@ cat > "$E2E/config/collins/state.json" <<EOF
   "favorites": ["$U4"],
   "expanded_groups": ["fav:", "proj:alpha-widgets", "proj:beta-server"],
   "settings": {
-    "auto_title_sessions": false,
+    "title_model": "none",
     "window_width": 1100,
     "window_height": 720
   }

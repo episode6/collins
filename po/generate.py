@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-24. Full change history: git log for this file.
+# fork. Last modified: 2026-08-27. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -20,6 +20,18 @@ DOMAIN = "collins"
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "hu": {
+        'Names each new session from its first prompt — every session Collins sees under ~/.claude/projects, including ones an agent or a terminal started. None: sessions keep the first words of their prompt, which costs nothing':
+            'Minden új munkamenetet az első promptja alapján nevez el — minden munkamenetet, amelyet a Collins a ~/.claude/projects alatt lát, az ügynök vagy terminál által indítottakat is. Egyik sem: a munkamenetek a promptjuk első szavait tartják meg, ami semmibe sem kerül',
+        "Model the sidebar's Generate Icon dialog starts with. None: the dialog waits for you to pick a model and click Generate":
+            'Az oldalsáv Ikon generálása párbeszédablakának kiinduló modellje. Egyik sem: az ablak megvárja, hogy modellt válasszon és a Generálás gombra kattintson',
+        'Regenerate name ({model})':
+            'Név újragenerálása ({model})',
+        'Pick a model to generate an icon':
+            'Válasszon modellt az ikon generálásához',
+        'Generate':
+            'Generálás',
+        'Choose a model…':
+            'Válasszon modellt…',
         'Add the Ubuntu PPA…': 'Az Ubuntu PPA hozzáadása…',
         'Add the package repository…': 'A csomagtároló hozzáadása…',
         'Add the Ubuntu PPA?': 'Hozzáadja az Ubuntu PPA-t?',
@@ -535,6 +547,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "A Collins mostantól megtalálható az alkalmazások között",
     },
     "de": {
+        'Names each new session from its first prompt — every session Collins sees under ~/.claude/projects, including ones an agent or a terminal started. None: sessions keep the first words of their prompt, which costs nothing':
+            'Benennt jede neue Sitzung nach ihrem ersten Prompt — jede Sitzung, die Collins unter ~/.claude/projects sieht, auch von einem Agenten oder Terminal gestartete. Keine: Sitzungen behalten die ersten Wörter ihres Prompts, was nichts kostet',
+        "Model the sidebar's Generate Icon dialog starts with. None: the dialog waits for you to pick a model and click Generate":
+            'Modell, mit dem der Dialog „Icon generieren“ der Seitenleiste startet. Keine: der Dialog wartet, bis Sie ein Modell wählen und auf Generieren klicken',
+        'Regenerate name ({model})':
+            'Namen neu generieren ({model})',
+        'Pick a model to generate an icon':
+            'Wählen Sie ein Modell, um ein Icon zu generieren',
+        'Generate':
+            'Generieren',
+        'Choose a model…':
+            'Modell wählen…',
         'Add the Ubuntu PPA…': 'Ubuntu-PPA hinzufügen…',
         'Add the package repository…': 'Paketquelle hinzufügen…',
         'Add the Ubuntu PPA?': 'Ubuntu-PPA hinzufügen?',
@@ -1059,6 +1083,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Collins ist jetzt in deinen Anwendungen",
     },
     "es": {
+        'Names each new session from its first prompt — every session Collins sees under ~/.claude/projects, including ones an agent or a terminal started. None: sessions keep the first words of their prompt, which costs nothing':
+            'Nombra cada sesión nueva a partir de su primer prompt — cada sesión que Collins ve en ~/.claude/projects, incluidas las iniciadas por un agente o una terminal. Ninguna: las sesiones conservan las primeras palabras de su prompt, lo que no cuesta nada',
+        "Model the sidebar's Generate Icon dialog starts with. None: the dialog waits for you to pick a model and click Generate":
+            'Modelo con el que arranca el diálogo Generar icono de la barra lateral. Ninguna: el diálogo espera a que elija un modelo y pulse Generar',
+        'Regenerate name ({model})':
+            'Regenerar nombre ({model})',
+        'Pick a model to generate an icon':
+            'Elija un modelo para generar un icono',
+        'Generate':
+            'Generar',
+        'Choose a model…':
+            'Elegir un modelo…',
         'Add the Ubuntu PPA…': 'Añadir el PPA de Ubuntu…',
         'Add the package repository…':
             'Añadir el repositorio de paquetes…',
@@ -1581,6 +1617,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Collins ya está en tus aplicaciones",
     },
     "fr": {
+        'Names each new session from its first prompt — every session Collins sees under ~/.claude/projects, including ones an agent or a terminal started. None: sessions keep the first words of their prompt, which costs nothing':
+            "Nomme chaque nouvelle session d'après son premier prompt — chaque session que Collins voit sous ~/.claude/projects, y compris celles lancées par un agent ou un terminal. Aucune : les sessions gardent les premiers mots de leur prompt, ce qui ne coûte rien",
+        "Model the sidebar's Generate Icon dialog starts with. None: the dialog waits for you to pick a model and click Generate":
+            'Modèle avec lequel démarre la boîte de dialogue Générer une icône de la barre latérale. Aucune : la boîte attend que vous choisissiez un modèle et cliquiez sur Générer',
+        'Regenerate name ({model})':
+            'Régénérer le nom ({model})',
+        'Pick a model to generate an icon':
+            'Choisissez un modèle pour générer une icône',
+        'Generate':
+            'Générer',
+        'Choose a model…':
+            'Choisir un modèle…',
         'Add the Ubuntu PPA…': 'Ajouter le PPA Ubuntu…',
         'Add the package repository…': 'Ajouter le dépôt de paquets…',
         'Add the Ubuntu PPA?': 'Ajouter le PPA Ubuntu ?',
@@ -2106,7 +2154,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 _HEADER = (
     "# Modified from the original agent-session-manager\n"
     "# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett\n"
-    "# fork. Last modified: 2026-08-24. Full change history: git log for this file.\n"
+    "# fork. Last modified: 2026-08-27. Full change history: git log for this file.\n"
     "# Generated by po/generate.py — do not edit by hand.\n"
     'msgid ""\n'
     'msgstr ""\n'

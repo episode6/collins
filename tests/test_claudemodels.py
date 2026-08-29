@@ -11,6 +11,7 @@ import pytest
 from collins import claudemodels
 from collins.claudemodels import (
     FALLBACK_MODELS,
+    NO_MODEL,
     ClaudeModel,
     default_model,
     parse_models,
@@ -190,6 +191,21 @@ def test_blank_setting_resolves_to_default():
 def test_pick_model_with_explicit_setting_needs_no_query():
     # Would hit the network for a blank setting; an explicit one never does.
     assert claudemodels.pick_model("claude-opus-5") == "claude-opus-5"
+
+
+def test_no_model_is_never_a_model(monkeypatch):
+    # The pickers' None is the caller's decision, not a fourth answer: both
+    # resolvers refuse it rather than hand it — or any model — to --model.
+    monkeypatch.setattr(
+        claudemodels, "available_models", lambda: pytest.fail("no query for None")
+    )
+    models = [_m("claude-sonnet-5", "2026-02-01")]
+    with pytest.raises(ValueError):
+        resolve_model(NO_MODEL, models)
+    with pytest.raises(ValueError):
+        resolve_model(f" {NO_MODEL} ", models, prefer="haiku")
+    with pytest.raises(ValueError):
+        claudemodels.pick_model(NO_MODEL)
 
 
 def test_available_models_single_flight(monkeypatch):

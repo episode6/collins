@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-26. Full change history: git log for this file.
+# fork. Last modified: 2026-08-27. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -30,7 +30,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import desktopentry, footerapps, newchat, openwith, pkgrepos, prmenu
+from . import claudemodels, desktopentry, footerapps, newchat, openwith, pkgrepos, prmenu
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
 from .formatting import format_size
@@ -53,6 +53,7 @@ from .sessions import Session, project_name_for_cwd, resume_cwd, worktree_projec
 from .state import merge_project_order
 from .store import SessionStore
 from .svgtexture import svg_texture
+from .titles import regenerate_name_label
 from .usagepanel import UsagePanel
 
 
@@ -2622,7 +2623,19 @@ class SessionSidebar(Gtk.Box):
 
         edit_section = Gio.Menu()
         edit_section.append_item(item(_("Rename…"), "rename-session"))
-        edit_section.append_item(item(_("Regenerate name"), "regenerate-name"))
+        # Names the model the click would run — the explicit title model, or
+        # the automatic Haiku under Default and None alike — so the ask is an
+        # informed one. Built here, per open, so a preference changed a
+        # moment ago shows in the next right-click; the cached catalog never
+        # touches the network.
+        edit_section.append_item(
+            item(
+                regenerate_name_label(
+                    self.store.state.get_setting("title_model"), claudemodels.cached_models()
+                ),
+                "regenerate-name",
+            )
+        )
         # Only for a session whose PR list has a title in it: the rename has
         # nothing to copy otherwise, and a PR nothing has been fetched for yet
         # is a row the menu would be promising a name it can't produce. The

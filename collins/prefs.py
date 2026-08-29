@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-21. Full change history: git log for this file.
+# fork. Last modified: 2026-08-27. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -352,26 +352,39 @@ class PreferencesDialog(Adw.Dialog):
         # holding an older one would save the wrong id (see _apply_model_rows).
         self._model_ids: dict[str, list[str]] = {}
         self._model_handlers: dict[str, int] = {}
-        for key, title, subtitle, default_label in (
+        for key, title, subtitle, default_label, terms in (
             (
                 "title_model",
                 _("Session title model"),
-                _("Model that summarizes each new session's first prompt into its name"),
+                _(
+                    "Names each new session from its first prompt — every session "
+                    "Collins sees under ~/.claude/projects, including ones an agent "
+                    "or a terminal started. None: sessions keep the first words of "
+                    "their prompt, which costs nothing"
+                ),
                 _("Default (latest Haiku)"),
+                # The switch this row's None item replaced, for anyone looking
+                # for it by its old name.
+                ("auto-generate", "titles", "off"),
             ),
             (
                 "icon_model",
                 _("Icon generation model"),
-                _("Model that designs project icons in the sidebar's Generate Icon dialog"),
+                _(
+                    "Model the sidebar's Generate Icon dialog starts with. None: "
+                    "the dialog waits for you to pick a model and click Generate"
+                ),
                 _("Default (latest Sonnet)"),
+                (),
             ),
         ):
             row = Adw.ComboRow(title=title, subtitle=subtitle)
-            # A placeholder until the live list lands (see _populate_model_rows).
-            row.set_model(Gtk.StringList.new([default_label]))
             self._model_rows[key] = row
             self._model_default_labels[key] = default_label
-            _searchable(row, "haiku", "sonnet", "opus")
+            _searchable(row, _("None"), "haiku", "sonnet", "opus", *terms)
+        # None and the default alone until the live list lands (see
+        # _populate_model_rows) — enough for the saved choice to show.
+        self._apply_model_rows([])
         # The list is cached for a day and across restarts (claudemodels), so
         # a model released this morning would otherwise not be offered until
         # tomorrow. This row says how old the list is and asks for a new one.
@@ -415,17 +428,6 @@ class PreferencesDialog(Adw.Dialog):
         self._worktree_row.set_active(bool(state.get_setting("worktree_new_sessions")))
         self._worktree_row.connect("notify::active", self._on_worktree_changed)
         sessions_group.add(self._worktree_row)
-        self._auto_title_row = Adw.SwitchRow(
-            title=_("Auto-generate session titles"),
-            subtitle=_(
-                "Summarize each new session's first prompt into a short title "
-                "using the claude CLI; pre-existing sessions are titled "
-                "locally from their prompt"
-            ),
-        )
-        self._auto_title_row.set_active(bool(state.get_setting("auto_title_sessions")))
-        self._auto_title_row.connect("notify::active", self._on_auto_title_changed)
-        sessions_group.add(self._auto_title_row)
         sessions_group.add(self._model_rows["title_model"])
         self._cli_title_row = Adw.SwitchRow(
             title=_("Follow Claude's own session names"),
@@ -1319,9 +1321,6 @@ class PreferencesDialog(Adw.Dialog):
         self._state.set_setting("show_usage_panel", row.get_active())
         self._on_change()
 
-    def _on_auto_title_changed(self, row: Adw.SwitchRow, _pspec) -> None:
-        self._state.set_setting("auto_title_sessions", row.get_active())
-
     def _on_cli_title_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("cli_title_sessions", row.get_active())
         self._on_change()
@@ -1367,16 +1366,20 @@ class PreferencesDialog(Adw.Dialog):
     def _apply_model_rows(self, models: list[claudemodels.ClaudeModel]) -> None:
         """Offer *models* in every picker, keeping each row's saved choice.
 
-        Runs more than once — the saved list, the query behind it, and every
-        Refresh — so each pass has to leave exactly one "notify::selected"
-        handler per row, and to stop set_model/set_selected from firing it:
-        an unblocked repopulate would write the settings back as though the
-        user had just picked something.
+        Every picker lists None first (the feature runs nothing by itself),
+        then the automatic default, then the catalog. Runs more than once —
+        the saved list, the query behind it, and every Refresh — so each pass
+        has to leave exactly one "notify::selected" handler per row, and to
+        stop set_model/set_selected from firing it: an unblocked repopulate
+        would write the settings back as though the user had just picked
+        something.
         """
         for key, row in self._model_rows.items():
             current = (self._state.get_setting(key) or "").strip()
-            ids = [""] + [m.id for m in models]
-            labels = [self._model_default_labels[key]] + [m.display_name for m in models]
+            ids = [claudemodels.NO_MODEL, ""] + [m.id for m in models]
+            labels = [_("None"), self._model_default_labels[key]] + [
+                m.display_name for m in models
+            ]
             if current and current not in ids:
                 # A saved model the API no longer lists stays visible and
                 # selected rather than silently snapping to the default.
@@ -1450,7 +1453,7 @@ class PreferencesDialog(Adw.Dialog):
         threading.Thread(target=work, name="prefs-models-refresh", daemon=True).start()
 
     def _on_model_row_changed(self, row: Adw.ComboRow, _pspec, key: str) -> None:
-        ids = self._model_ids.get(key) or [""]
+        ids = self._model_ids.get(key) or [claudemodels.NO_MODEL, ""]
         selected = row.get_selected()
         if not 0 <= selected < len(ids):
             return  # mid-repopulate; the pass that set it will restore the choice

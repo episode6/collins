@@ -52,7 +52,7 @@ for path in (FAIL_CWD, OK_CWD):
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
 with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
-    fh.write('{"settings": {"auto_title_sessions": false}}')
+    fh.write('{"settings": {"title_model": "none"}}')
 
 # The CLI the tab spawns. Every run is logged, so the check can see exactly
 # which command lines the tab typed; what it does then is the scene:

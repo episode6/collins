@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-20. Full change history: git log for this file.
+# fork. Last modified: 2026-08-27. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -719,11 +719,24 @@ def generate_icon_dialog(
     Nothing is written until Save — Cancel (or closing the dialog any other
     way) aborts whatever run is in flight. *on_saved* fires after a
     successful save, so the caller can refresh the sidebar.
+
+    With the preference set to None (claudemodels.NO_MODEL — the default)
+    nothing runs on open: the dialog opens on a "pick a model" page, the
+    drop-down's first item reads "Choose a model…", and the Regenerate
+    button, labelled Generate for its first run, stays insensitive until a
+    model is picked. Generate is then the same start as the auto-start
+    above, and the dialog goes on as it always has. The pick is still this
+    dialog's alone — the preference is never written.
     """
     # svg: the latest accepted attempt (what Save writes, what a revision
     # builds on). run: the in-flight generation, if any. gen: a counter so a
     # superseded run's late result is recognized and dropped.
     state: dict = {"svg": None, "run": None, "gen": 0}
+    # The preference as the dialog opened. None means the runs are the
+    # user's to start: item 0 of the drop-down is then no model at all, and
+    # nothing runs while it is selected.
+    preferred = (AppState().get_setting("icon_model") or "").strip()
+    pick_first = preferred == claudemodels.NO_MODEL
 
     spinner = Gtk.Spinner(spinning=True, width_request=32, height_request=32, halign=Gtk.Align.CENTER)
     loading_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, valign=Gtk.Align.CENTER)
@@ -745,10 +758,16 @@ def generate_icon_dialog(
     failure = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, valign=Gtk.Align.CENTER)
     failure.add_css_class("error")
 
+    # Where the dialog waits, under a preference of None, for a model to be
+    # picked and Generate clicked — in the spinner's place.
+    pick = Gtk.Label(label=_("Pick a model to generate an icon"), valign=Gtk.Align.CENTER)
+    pick.add_css_class("dim-label")
+
     stack = Gtk.Stack(height_request=200, vexpand=True)
     stack.add_named(loading_box, "loading")
     stack.add_named(preview_box, "preview")
     stack.add_named(failure, "failure")
+    stack.add_named(pick, "pick")
 
     # Adjustments go in a text view that grows with what's typed, up to
     # _FEEDBACK_MAX_LINES, then scrolls: "make it blue" is one line, but a
@@ -799,35 +818,51 @@ def generate_icon_dialog(
 
     entry.connect("realize", cap_entry_height)
 
-    regen = Gtk.Button(label=_("Regenerate"), sensitive=False, halign=Gtk.Align.END, hexpand=True)
+    # Labelled for its first run under None — the click that starts it is
+    # the consent the auto-start never asked for — and Regenerate from then on.
+    regen = Gtk.Button(
+        label=_("Generate") if pick_first else _("Regenerate"),
+        sensitive=False,
+        halign=Gtk.Align.END,
+        hexpand=True,
+    )
 
     # Which model the next run asks for. Item 0 is the Preferences setting
     # (whatever it resolves to at run time), the rest the live catalog, so
     # the first run — started before any list has landed — already honours
-    # the preference, and a pick here never writes it back.
+    # the preference, and a pick here never writes it back. Under None item
+    # 0 is no model: "Choose a model…", and no run can start on it.
+    item0 = _("Choose a model…") if pick_first else _("Default model")
     model_ids: list[str] = [""]
-    models = Gtk.DropDown.new_from_strings([_("Default model")])
+    models = Gtk.DropDown.new_from_strings([item0])
     models.set_tooltip_text(_("Model for this dialog's runs; Preferences sets the default"))
     action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
     action_row.append(models)
     action_row.append(regen)
 
+    def model_picked() -> bool:
+        """Whether the drop-down names something a run can ask for: anything
+        at all, unless the preference is None and item 0 is still selected."""
+        return not pick_first or models.get_selected() != 0
+
     def fill_models(catalog: list[claudemodels.ClaudeModel]) -> bool:
-        preferred = (AppState().get_setting("icon_model") or "").strip()
+        saved = "" if pick_first else (AppState().get_setting("icon_model") or "").strip()
         chosen = model_ids[models.get_selected()]
         ids = [""] + [m.id for m in catalog]
-        labels = [_("Default model")] + [m.display_name for m in catalog]
-        for extra in (preferred, chosen):
+        labels = [item0] + [m.display_name for m in catalog]
+        for extra in (saved, chosen):
             if extra and extra not in ids:
                 # A saved or picked id the API no longer lists stays
                 # offered rather than silently snapping to the default.
                 ids.append(extra)
                 labels.append(extra)
-        # Name what the default resolves to — the saved preference, or with
-        # none the same automatic pick icongen makes (the newest Sonnet).
-        resolved = claudemodels.resolve_model(preferred, catalog)
-        if resolved in ids:
-            labels[0] = _("Default ({model})").format(model=labels[ids.index(resolved)])
+        if not pick_first:
+            # Name what the default resolves to — the saved preference, or
+            # with none the same automatic pick icongen makes (the newest
+            # Sonnet). Under None there is no default to name.
+            resolved = claudemodels.resolve_model(saved, catalog)
+            if resolved in ids:
+                labels[0] = _("Default ({model})").format(model=labels[ids.index(resolved)])
         model_ids[:] = ids
         models.set_model(Gtk.StringList.new(labels))
         models.set_selected(ids.index(chosen))
@@ -883,12 +918,15 @@ def generate_icon_dialog(
     dialog.set_child(view)
 
     def start() -> None:
+        if not model_picked():
+            return  # nothing to run on; the button is insensitive anyway
         state["gen"] += 1
         gen = state["gen"]
         if state["run"] is not None:
             state["run"].cancel()
         run = icongen.IconRun()
         state["run"] = run
+        regen.set_label(_("Regenerate"))
         regen.set_sensitive(False)
         save.set_sensitive(False)
         status.set_visible(False)
@@ -925,7 +963,7 @@ def generate_icon_dialog(
         big.set_from_paintable(texture)
         small.set_from_paintable(svg_texture(svg, 16))
         stack.set_visible_child_name("preview")
-        regen.set_sensitive(True)
+        regen.set_sensitive(model_picked())
         save.set_sensitive(True)
         return GLib.SOURCE_REMOVE
 
@@ -942,7 +980,7 @@ def generate_icon_dialog(
             status.set_visible(True)
             stack.set_visible_child_name("preview")
             save.set_sensitive(True)
-        regen.set_sensitive(True)
+        regen.set_sensitive(model_picked())
         return GLib.SOURCE_REMOVE
 
     def on_save(*_a) -> None:
@@ -961,6 +999,13 @@ def generate_icon_dialog(
     cancel.connect("clicked", lambda *_a: dialog.close())
     save.connect("clicked", on_save)
     regen.connect("clicked", lambda *_a: start())
+    # The button follows the pick while no run is in flight: under None it
+    # wakes on the first real model and sleeps again on "Choose a model…".
+    # A repopulate re-selects the same item, so this is a no-op there.
+    models.connect(
+        "notify::selected",
+        lambda *_a: regen.set_sensitive(state["run"] is None and model_picked()),
+    )
 
     def on_entry_key(_ctrl, keyval: int, _keycode: int, modifiers) -> bool:
         action = composerkeys.enter_action(int(keyval), int(modifiers), True)
@@ -983,5 +1028,11 @@ def generate_icon_dialog(
     dialog.connect("closed", lambda *_a: state["run"] and state["run"].cancel())
 
     _present(dialog, parent)
+    if pick_first:
+        # Nothing runs until a model is picked, so the pick is what gets
+        # focus; Enter in the entry regenerates, and start() refuses too.
+        stack.set_visible_child_name("pick")
+        dialog.set_focus(models)
+        return
     dialog.set_focus(entry)
     start()

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-26. Full change history: git log for this file.
+fork. Last modified: 2026-08-27. Full change history: git log for this file.
 -->
 
 # Features
@@ -41,7 +41,11 @@ the app reads, are in
   **Generate Icon**, in a project header's right-click menu, has Claude
   design one from what's in the folder — previewed at full size and at the
   16px the sidebar actually uses, regenerable with an adjustment ("make it
-  blue") until it's right; *Save* writes the file to the project root.
+  blue") until it's right; *Save* writes the file to the project root. The
+  dialog starts on the *Icon generation model* preference, which is
+  **None** by default: it opens waiting for you to pick a model from its
+  drop-down and click **Generate**. With a model set, it generates the
+  moment it opens.
 - **Live updates** — new sessions appear the moment they're created, via a
   filesystem watch, and existing rows update in place without jumping
   around. A just-started session shows a **"New Thread"** placeholder row
@@ -67,11 +71,15 @@ handed to the model as quoted, untrusted context, so the title reads as
 words instead of a number.
 
 Titles are persisted so each is generated only once; right-click →
-**Regenerate name** re-runs the model for one session, and a Preferences
-toggle turns auto-titling off. A manual rename always wins. Claude names
-sessions for itself too — the **Follow Claude's own session names**
-preference (off by default) makes the sidebar adopt those names as they
-land in the transcript.
+**Regenerate name** re-runs the model for one session, and the menu item
+names the model it will run (*Regenerate name (Haiku 4.5)*). The **Session
+title model** preference has a **None** option that turns the model runs
+off (it replaced the *Auto-generate session titles* switch): under None
+sessions keep the free local title, and *Regenerate name* still works, on
+the automatic default. A manual rename always wins. Claude names sessions
+for itself too — the **Follow Claude's own session names** preference (off
+by default) makes the sidebar adopt those names as they land in the
+transcript.
 
 ### Quick switcher
 
@@ -522,8 +530,10 @@ trigger, Enter behavior, the floating button, auto-open in new sessions),
 the editor's **color scheme**, **font**, and **line numbers**/**hidden
 files** toggles, the app's **Dark / Light Mode** (system / light / dark), the
 **language** (English, Magyar, Deutsch, Español, Français), the sidebar's
-**Show folder paths in sidebar**, **Show Claude usage**, and **Auto-generate session
-titles** toggles, the **status icon**, **Reopen the last session**, what to
+**Show folder paths in sidebar** and **Show Claude usage** toggles, the
+**Session title model** and **Icon generation model** pickers (each with a
+**None** option — it replaced the *Auto-generate session titles* switch, and
+is the icon picker's default), the **status icon**, **Reopen the last session**, what to
 do **when quitting with running sessions** (ask / exit / background / hide),
 **Archive on claude.ai too**, and a switch for each of the **built-in MCP tools**
 the agent can call — reachable from the sidebar menu or `Ctrl+,`.

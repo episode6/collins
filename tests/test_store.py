@@ -7,6 +7,7 @@ import pytest
 
 from collins import chats as chats_mod
 from collins import store as store_mod
+from collins.claudemodels import NO_MODEL
 from collins.models import CHATS_GROUP
 from collins.sessions import discover_sessions
 
@@ -870,7 +871,6 @@ def test_cli_titled_sessions_skip_auto_titling(store, monkeypatch):
     monkeypatch.setattr(
         store._titles, "submit", lambda sid, *a, **k: submitted.append(sid)
     )
-    store.state.set_setting("auto_title_sessions", True)
     store.state.set_setting("cli_title_sessions", True)
     titled = store._last_sessions[0].session_id
     store.state.set_cli_titles({titled: "cli name"})
@@ -884,3 +884,56 @@ def test_cli_titled_sessions_skip_auto_titling(store, monkeypatch):
     submitted.clear()
     store._request_titles(store._last_sessions)
     assert titled in submitted
+
+
+def test_a_none_title_model_queues_no_title_runs(store, monkeypatch):
+    submitted = []
+    monkeypatch.setattr(
+        store._titles, "submit", lambda sid, *a, **k: submitted.append(sid)
+    )
+    store.state.set_setting("title_model", NO_MODEL)
+    store._request_titles(store._last_sessions)
+    assert submitted == []
+
+    # Default and an explicit model both queue as before.
+    store.state.set_setting("title_model", "")
+    store._request_titles(store._last_sessions)
+    assert len(submitted) == len(store._last_sessions)
+
+
+def test_the_title_worker_gate_reads_the_store_state(store):
+    # What the worker asks at an item's turn is the same rule, over the same
+    # AppState, that _request_titles queued on — so a switch to None in the
+    # preferences dialog reaches an item already in the queue.
+    assert store._titles._enabled()
+    store.state.set_setting("title_model", NO_MODEL)
+    assert not store._titles._enabled()
+    store.state.set_setting("title_model", "claude-haiku-4-5")
+    assert store._titles._enabled()
+
+
+def test_the_local_backfill_runs_under_a_none_title_model(store):
+    # The first words of the prompt cost nothing, so None doesn't skip them —
+    # a sidebar of blank rows was never what turning the model off was for.
+    store.state.set_setting("title_model", NO_MODEL)
+    for session in store._last_sessions:
+        store.state.set_generated_name(session.session_id, "")
+    store._backfill_names(store._last_sessions)
+    for session in store._last_sessions:
+        assert store.state.get_generated_name(session.session_id) == session.preview
+
+
+def test_regenerate_name_fixes_its_model_at_the_click(store, monkeypatch):
+    # Never None (read the preference at the run): the worker drops an item
+    # queued on the preference once it turns to None, and a click is an
+    # explicit ask that must outlive a preference change made after it.
+    submitted = []
+    monkeypatch.setattr(
+        store._titles, "submit", lambda sid, *a, **k: submitted.append((sid, k))
+    )
+    session = store._last_sessions[0]
+    for pref, expected in [(NO_MODEL, ""), ("", ""), ("claude-haiku-4-5", "claude-haiku-4-5")]:
+        submitted.clear()
+        store.state.set_setting("title_model", pref)
+        store.regenerate_name(session.session_id)
+        assert submitted == [(session.session_id, {"force": True, "setting": expected})]

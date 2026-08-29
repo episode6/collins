@@ -8,7 +8,16 @@ built on, so no separate API credentials are needed. The model comes from
 the "Session title model" preference (see claudemodels.pick_model). The
 store persists each result, so a title is generated exactly once per
 session.
-"Regenerate name" in the sidebar re-runs the model for one session on demand.
+
+That preference's None (claudemodels.NO_MODEL) turns the model runs off:
+``enabled()`` is the one rule the store's queue and the preferences row both
+read, and ``_run_claude`` refuses to run under it, since nothing should have
+been queued. The local title costs nothing and runs under None as under any
+model. "Regenerate name" in the sidebar re-runs the model for one session on
+demand — an explicit ask, so it stays available under None and runs on the
+automatic default (the newest Haiku); ``regenerate_model`` is what it would
+pass to ``--model``, and ``regenerate_name_label`` puts that on the menu item
+so the ask is an informed one.
 
 Headless runs write their own transcripts under ``~/.claude/projects``, so
 each one executes from its own child of a dedicated scratch directory (see
@@ -39,7 +48,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import prstatus, sessions, state
-from .claudemodels import pick_model
+from .claudemodels import NO_MODEL, ClaudeModel, pick_model, resolve_model, short_name
+from .i18n import _
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +116,45 @@ _PR_NUMBER = re.compile(
 # allowed one fall-through to the next form. Two calls is the whole budget: a
 # title is not worth a third subprocess.
 _MAX_PR_LOOKUPS = 2
+
+
+def enabled(app_state: state.AppState) -> bool:
+    """Whether new sessions get a model-generated title at all: the "Session
+    title model" preference is anything but None. The store's title queue
+    and the preferences row read the same rule from here."""
+    return (app_state.get_setting("title_model") or "").strip() != NO_MODEL
+
+
+def regenerate_setting(setting: str | None) -> str:
+    """The title-model value an explicit "Regenerate name" runs on, fixed at
+    the click: the explicit id when the preference names one, else "" — the
+    automatic default — which is what the preference means when it is the
+    default and what a regenerate falls back to under None. Never None: a
+    click is an ask made now, and an item that read the preference at its
+    turn instead could be dropped by a switch to None made while it waited
+    in the queue."""
+    setting = (setting or "").strip()
+    return "" if setting == NO_MODEL else setting
+
+
+def regenerate_model(setting: str | None, catalog: list[ClaudeModel] | None) -> str:
+    """What "Regenerate name" would pass to ``--model``: the explicit title
+    model when the setting names one, else the automatic Haiku default
+    resolved against *catalog* — or, with no catalog ever saved (None), the
+    CLI's bare ``haiku`` alias, which is exactly what the run would pass."""
+    setting = regenerate_setting(setting)
+    if setting:
+        return setting
+    return resolve_model("", catalog or [], prefer="haiku")
+
+
+def regenerate_name_label(setting: str | None, catalog: list[ClaudeModel] | None) -> str:
+    """The sidebar's "Regenerate name (Haiku 4.5)" menu item, naming the model
+    the click would run so that the ask is informed — a right-click is
+    consent to spend tokens, and under None it is the only way titles run."""
+    return _("Regenerate name ({model})").format(
+        model=short_name(regenerate_model(setting, catalog))
+    )
 
 
 def scratch_dir() -> Path:
@@ -309,15 +358,28 @@ class TitleError(Exception):
         self.fatal = fatal
 
 
-def _run_claude(prompt: str) -> str:
-    """One headless CLI call; returns the model's reply text."""
+def _run_claude(prompt: str, setting: str | None = None) -> str:
+    """One headless CLI call; returns the model's reply text.
+
+    *setting* is the title-model value to run on — "" for the automatic
+    default, an explicit id — or None to read the preference as it stands
+    now: a fresh AppState per run, so a just-changed preference applies to
+    the next title (state writes are atomic, so a mid-write read can't
+    happen). The preference being None is asserted against rather than
+    resolved: the store queues nothing under it and the worker drops what
+    was queued before the switch, so a run that reads it is a bug, and
+    answering with a model anyway would spend what was turned off.
+    """
     cli = shutil.which("claude")
     if cli is None:
         raise TitleError("claude CLI not found on PATH", fatal=True)
-    # A fresh AppState per run so a just-changed preference applies to the
-    # next title; state writes are atomic, so a mid-write read can't happen.
+    if setting is None:
+        app_state = state.AppState()
+        if not enabled(app_state):
+            raise TitleError("session title model is None; nothing should be queued", fatal=True)
+        setting = app_state.get_setting("title_model")
     # Titles are five words on a prompt excerpt — the Haiku tier's job.
-    model = pick_model(state.AppState().get_setting("title_model"), prefer="haiku")
+    model = pick_model(setting, prefer="haiku")
     with scratch_workdir() as workdir:
         result = subprocess.run(
             [cli, "-p", "--model", model],
@@ -339,25 +401,42 @@ class TitleGenerator:
     ``submit()`` must be called from a single thread (the GLib main loop);
     ``callback(session_id, title)`` fires on the worker thread, so the caller
     is responsible for marshalling back to the main loop.
+
+    *enabled* answers, on the worker thread, whether an item queued on the
+    preference (``setting=None``) is still wanted when its turn comes — the
+    store passes ``enabled`` over the AppState it queues from, so a switch
+    to None between queue and run drops the item instead of running it.
+    The generator reads no state of its own: without a gate every item is
+    wanted, which is what a caller that passes explicit settings, or a test
+    with a fake runner, means.
     """
 
     def __init__(
         self,
         callback: Callable[[str, str], None],
-        runner: Callable[[str], str] = _run_claude,
+        runner: Callable[[str, str | None], str] = _run_claude,
         pr_fetcher: Callable[[PRReference, str | None], str | None] = _fetch_pr_title,
+        enabled: Callable[[], bool] = lambda: True,
     ) -> None:
         self._callback = callback
         self._runner = runner
         self._pr_fetcher = pr_fetcher
-        self._queue: queue.SimpleQueue[tuple[str, str, str | None]] = queue.SimpleQueue()
+        self._enabled = enabled
+        self._queue: queue.SimpleQueue[tuple[str, str, str | None, str | None]] = (
+            queue.SimpleQueue()
+        )
         self._seen: set[str] = set()  # queued or attempted during this run
         self._failures = 0  # consecutive; reset on success
         self._disabled = False
         self._thread: threading.Thread | None = None
 
     def submit(
-        self, session_id: str, prompt: str, cwd: str | None = None, force: bool = False
+        self,
+        session_id: str,
+        prompt: str,
+        cwd: str | None = None,
+        force: bool = False,
+        setting: str | None = None,
     ) -> None:
         """Queue a session's first prompt for titling. Duplicate ids are
         ignored (so this is safe to call on every refresh) unless ``force``
@@ -365,14 +444,16 @@ class TitleGenerator:
 
         *cwd* is the session's directory, and only matters to a prompt that
         mentions a PR by bare number: that is the repository the number is
-        looked up in."""
+        looked up in. *setting* is the title-model value the run should use
+        instead of the preference — "" for the automatic default, which is
+        what a regenerate under None runs on (see regenerate_model)."""
         prompt = prompt.strip()
         if self._disabled or not prompt:
             return
         if not force and session_id in self._seen:
             return
         self._seen.add(session_id)
-        self._queue.put((session_id, prompt, cwd))
+        self._queue.put((session_id, prompt, cwd, setting))
         if self._thread is None:
             self._thread = threading.Thread(
                 target=self._work, name="session-titles", daemon=True
@@ -383,16 +464,25 @@ class TitleGenerator:
 
     def _work(self) -> None:
         while True:
-            session_id, prompt, cwd = self._queue.get()
+            session_id, prompt, cwd, setting = self._queue.get()
             if self._disabled:
                 continue
-            title = self._generate(prompt, cwd)
+            if setting is None and not self._enabled():
+                # Queued on the preference, which has since been switched to
+                # None: the store queues nothing under None, so this item is
+                # stale, not a bug — drop it. Forgetting the id lets a later
+                # refresh queue the session again once a model is picked.
+                # The runner's own assertion stays as the last-resort guard.
+                log.debug("session titles: %s dropped, title model is now None", session_id)
+                self._seen.discard(session_id)
+                continue
+            title = self._generate(prompt, cwd, setting)
             if title:
                 self._callback(session_id, title)
 
-    def _generate(self, prompt: str, cwd: str | None) -> str | None:
+    def _generate(self, prompt: str, cwd: str | None, setting: str | None) -> str | None:
         try:
-            reply = self._runner(self._prompt_for(_visible_prompt(prompt), cwd))
+            reply = self._runner(self._prompt_for(_visible_prompt(prompt), cwd), setting)
         except Exception as err:  # TitleError, TimeoutExpired, OSError, ...
             self._handle_error(err)
             return None
