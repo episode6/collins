@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-19. Full change history: git log for this file.
+fork. Last modified: 2026-08-29. Full change history: git log for this file.
 -->
 
 # What is Collins?
@@ -55,6 +55,13 @@ with respect to your agents' data — names, favorites, and all app state live i
   wants you back — and you can close the window entirely and let the
   sessions keep running behind a status icon that counts what's waiting for
   you.
+- **Write prompts like a person, and park them.** A multi-line, spell-checked
+  composer opens the moment you start typing at an agent's prompt, takes
+  pasted images — and keeps whatever you haven't sent. Close the tab, quit
+  Collins, come back tomorrow: the draft is waiting in that session's
+  composer, or under a **Draft** row in the sidebar for a session you
+  haven't started yet. The bare CLI drops an unsent prompt the moment it
+  exits.
 - **Follow the work to the PR.** Every pull request a session opens is
   tracked on its row and tab — CI, conflicts, unanswered comments — with the
   actions attached: read the diff beside the terminal, merge, ask for a
@@ -75,6 +82,9 @@ launches and organizes it:
 | Custom names & favorites | ❌ | ✅ |
 | Multiple sessions side by side | Manual terminals | ✅ Tabs |
 | "Which session was this?" | Read the UUID | ✅ Preview, details, peek |
+| Copy & paste | `Ctrl+Shift+C` / `Ctrl+Shift+V` | ✅ Plain `Ctrl+C` / `Ctrl+V` |
+| Writing a long prompt | The CLI's own line editor, no spell-check | ✅ Multi-line, spell-checked composer |
+| A prompt you haven't sent yet | Gone when the CLI exits | ✅ Kept as a draft, per session — or as a sidebar Draft row for a session not started yet |
 | Finished-in-the-background alerts | ❌ | ✅ Notifications |
 | Pull request status & actions | `gh` by hand | ✅ On every session's row |
 

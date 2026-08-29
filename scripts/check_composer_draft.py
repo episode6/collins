@@ -177,6 +177,24 @@ def adopt_a_saved_draft() -> bool:
     check("…and the stash is spent", not tab._composer_stash, tab._composer_stash)
     check("…and so is the entry on disk", "sid-saved" not in saved_drafts(), saved_drafts())
 
+    # Whatever arrives with the open — the cut of the CLI's box, the
+    # keystroke that raised the composer — lands after the draft, cursor at
+    # the end, wherever the cursor was before.
+    composer.seed_text(" plus the cut")
+    composer._buffer.place_cursor(composer._buffer.get_start_iter())
+    composer.insert_typed("!")
+    expected = "what the last run was writing plus the cut!"
+    check(
+        "the cut and a keystroke land after the draft",
+        composer.peek_text() == expected,
+        composer.peek_text(),
+    )
+    check(
+        "…with the cursor at the end",
+        composer._buffer.get_property("cursor-position") == len(expected),
+        composer._buffer.get_property("cursor-position"),
+    )
+
     # A box someone has already typed in is never written over, and the
     # draft waiting for an empty one stays where it is.
     tab._stash_draft("waiting for an empty box")

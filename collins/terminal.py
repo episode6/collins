@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-29. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -3744,7 +3744,8 @@ class TerminalTab(Gtk.Box):
 
         A draft an earlier close couldn't hand back to the terminal goes in
         first (`_restore_stashed_draft`), and the cut — should there be one
-        — lands above it, in the order the two were written.
+        — lands after it, cursor at the end: every way into the composer
+        appends, so typing carries on from the end of whatever is there.
 
         The seeding lands a beat after the panel does, because a cut can't
         be taken off a screen that is still moving (see _begin_cut); the
@@ -3850,8 +3851,9 @@ class TerminalTab(Gtk.Box):
         cut underneath is no hazard: this is only ever reached at an empty
         input box, so it finds nothing to seed. (Were the box to fill in
         the beat it takes anyway — a mention landing, the agent redrawing —
-        `seed_text` puts what was in the terminal first, where it was
-        typed.)
+        `seed_text` appends that too, cursor at the end.) A docked composer
+        left mid-edit takes the keystroke at its end as well, not at the
+        cursor: text typed at the terminal continues the box.
 
         Focus follows the text, docked composer included: what the keyboard
         writes into is where the rest of the keyboard — backspace, the

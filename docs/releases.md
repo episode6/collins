@@ -20,7 +20,7 @@ downloads of each version, see the
 - ✅ **Workflow** — terminal panel per tab, session backgrounding (`/bg`) & re-attach, graceful `Ctrl+C` close, per-tab cwd + git-branch footer, Export as Markdown, tab emoji
 - ✅ **Pull requests** — every session's PRs tracked through `gh` (checks, conflicts, unanswered comments) as sidebar marks, footer chips, and an in-app PR page; merge / auto-merge / ready-for-review / request-a-review actions, with red CI, conflicts, and unanswered comments sendable back to the agent as prompts
 - ✅ **Editor** — a per-tab code editor beside the terminal: file tree, quick open, an agent-files list of what the session just wrote, pop-out to a second monitor
-- ✅ **Composer** — a spell-checked, multi-line prompt box that opens the moment you start typing, floating or docked, with dropped or pasted image attachments
+- ✅ **Composer** — a spell-checked, multi-line prompt box that opens the moment you start typing, floating or docked, with dropped or pasted image attachments; an unsent prompt is a **draft** kept with its session across tab close and quit — or a sidebar Draft row, for a session not started yet
 - ✅ **Session tools** — an in-app MCP server every launched session can call: rename itself, open a file or an image on your screen, notify you when it needs you, attach a pull request to its own row, spawn a sibling session, and read or drive the terminal panel
 - ✅ **Desktop presence** — a status icon with an unread badge, close-to-hide (sessions keep running without a window), notifications wearing each project's own icon, Caffeine Mode
 - ✅ **Theming** — light/dark plus selectable terminal color palettes
@@ -38,6 +38,12 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **The composer always picks up at the end.** Every way into the composer
+  now appends and leaves the cursor at the end of the box: the prompt cut
+  out of the CLI's input box on open lands after a restored draft instead
+  of above it, and a keystroke typed at the terminal continues the box
+  wherever a docked composer's cursor was left. Before, the cut went in at
+  the top with the cursor between it and the draft.
 - **Paste an image into the composer.** An image on the clipboard — a
   screenshot tool's copy, a browser's *Copy image* — pasted into the
   composer (floating, docked, or on the new-chat screen) lands the way a

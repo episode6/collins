@@ -279,17 +279,18 @@ class ComposerView(Gtk.Box):
         self._clear_previews()
 
     def seed_text(self, text: str) -> None:
-        """Put the cut CLI prompt in at the top, cursor after it.
+        """Put the cut CLI prompt in at the end, cursor after it.
 
         Not `set_text`: the cut lands a beat after the composer opens (the
         screen it is read off has to settle first — terminal._begin_cut),
-        so it can find a box someone has already started typing into. What
-        was in the CLI's box was typed first and goes first, and the cursor
-        is left where they left off there. An empty box — the ordinary case
-        — makes this a plain seeding.
+        so it can find a box that already holds something — a restored
+        draft, a keystroke. Every way into the composer appends and leaves
+        the cursor at the end (`insert_typed` too), so whatever the box
+        held is above, and typing carries on from what was just cut. An
+        empty box — the ordinary case — makes this a plain seeding.
         """
-        self._buffer.insert(self._buffer.get_start_iter(), text)
-        self._buffer.place_cursor(self._buffer.get_iter_at_offset(len(text)))
+        self._buffer.insert(self._buffer.get_end_iter(), text)
+        self._buffer.place_cursor(self._buffer.get_end_iter())
         self._view.scroll_to_mark(self._buffer.get_insert(), 0.0, False, 0.0, 0.0)
 
     def peek_text(self) -> str:
@@ -306,13 +307,17 @@ class ComposerView(Gtk.Box):
         return text
 
     def insert_typed(self, text: str) -> None:
-        """Type *text* in at the cursor, exactly as given.
+        """Type *text* in at the end, exactly as given, cursor after it.
 
         The keystroke that opened the composer, handed over by the terminal
         (see TerminalTab.type_into_composer). Not `insert_mention`: a
         character the user just pressed carries none of a mention's spacing
         rules — it is only ever what typing it into the CLI's box would
-        have put there."""
+        have put there. At the end, not the cursor: text typed at the
+        terminal continues whatever the composer holds — a restored draft,
+        a docked box left mid-edit — the same way the cut does
+        (`seed_text`)."""
+        self._buffer.place_cursor(self._buffer.get_end_iter())
         self._buffer.insert_at_cursor(text)
 
     def insert_mention(self, text: str) -> None:
