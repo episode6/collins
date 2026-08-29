@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-28. Full change history: git log for this file.
+# fork. Last modified: 2026-08-29. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -29,6 +29,7 @@ from . import (
     desktopentry,
     editorfiles,
     ghwelcome,
+    is_debug_app_id,
     keybindings,
     keymap,
     mcpserver,
@@ -1369,10 +1370,10 @@ class App(Adw.Application):
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
-        # The debug build (same id prefix _app_icon_name keys on) runs out of
-        # a source checkout; note which commit — and whether the tree was
-        # dirty — now, so the About dialog reports the launch-time state.
-        if (self.get_application_id() or "").startswith(DEBUG_APP_ID):
+        # The debug build runs out of a source checkout; note which commit —
+        # and whether the tree was dirty — now, so the About dialog reports
+        # the launch-time state.
+        if is_debug_app_id(self.get_application_id()):
             buildinfo.capture()
         display = Gdk.Display.get_default()
         provider = Gtk.CssProvider()

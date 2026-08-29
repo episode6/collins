@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-28. Full change history: git log for this file.
+# fork. Last modified: 2026-08-29. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -2052,6 +2052,23 @@ class SessionSidebar(Gtk.Box):
             if action is not None and action.get_string() == action_name:
                 return i
         return None
+
+    def offer_debug_items(self) -> None:
+        """Put the debug build's items in the menu, right after Preferences.
+
+        The window calls this on a debug instance only (window._debug_build):
+        the sidebar can't see which instance it is in, and the items are for
+        whoever is developing Collins — so each says so in its label and,
+        like buildinfo's About paragraph, is deliberately not translated.
+        "Show NUX (debug)" reopens the first-launch welcome (welcome.show),
+        which a release build shows once per install and never again.
+        """
+        prefs = self._menu_index("win.preferences")
+        item = Gio.MenuItem.new("Show NUX (debug)", "win.show-welcome")
+        if prefs is None:
+            self._menu.append_item(item)
+        else:
+            self._menu.insert_item(prefs + 1, item)
 
     def drop_install_desktop_item(self) -> None:
         """Take "Install desktop icon" back out of the menu.
