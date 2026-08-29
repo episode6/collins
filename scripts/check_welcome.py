@@ -30,7 +30,12 @@ refusal, with the welcome answered, runs the repair (the shim logs a
 ``-p --model haiku``).
 
 The relaunch is a real second process on the same scratch tree (this
-script again, with ``--relaunch <dir>``). The model catalog is a canned
+script again, with ``--relaunch <dir>``), and it runs as a debug instance
+(a COLLINS_APP_ID derived from com.episode6.Collins.Debug): that build's
+hamburger menu carries "Show NUX (debug)", which brings the answered
+dialog back on demand with nothing waiting on it — checked last, against
+the first launch's release-shaped id, whose menu has no such item. The
+model catalog is a canned
 list patched over claudemodels, so nothing here reaches the network; the
 CLI is a shim that logs every run and answers a ``-p`` with a title.
 
@@ -52,7 +57,7 @@ E2E = sys.argv[sys.argv.index(RELAUNCH) + 1] if SECOND else tempfile.mkdtemp(pre
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum()) + ("b" if SECOND else "")
 
 # Isolation first: every one of these is read at import time somewhere below.
-os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
+os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins{'.Debug' if SECOND else ''}.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
 os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
@@ -111,7 +116,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from collins import claudemodels, ghwelcome, i18n, titles, tokenrefresh, welcome  # noqa: E402
 from collins.app import App  # noqa: E402
@@ -243,6 +248,16 @@ def button(dialog, label: str) -> Gtk.Button | None:
     return find(dialog, lambda w: isinstance(w, Gtk.Button) and w.get_label() == label)
 
 
+def menu_labels(win) -> list[str]:
+    """The sidebar's hamburger menu, top to bottom."""
+    menu = win.sidebar._menu
+    labels = []
+    for i in range(menu.get_n_items()):
+        label = menu.get_item_attribute_value(i, Gio.MENU_ATTRIBUTE_LABEL, None)
+        labels.append(label.get_string() if label is not None else "")
+    return labels
+
+
 def later(fn, ms: int = 1000) -> bool:
     GLib.timeout_add(ms, fn)
     return GLib.SOURCE_REMOVE
@@ -318,6 +333,8 @@ def step_opened() -> bool:
     check("one Continue button, live", cont is not None and cont.get_sensitive())
     check("no Quit in the found state", button(dialog, "Quit") is None)
     check("no Use This CLI either", button(dialog, "Use This CLI") is None)
+    check("a release-shaped instance offers no Show NUX item", "Show NUX (debug)" not in menu_labels(win),
+          menu_labels(win))
     state.update(cont=cont, title_combo=combos.get("Session title model"), waits=0)
     return later(step_panel_refused, 250)
 
@@ -419,6 +436,43 @@ def step_repaired() -> bool:
     check("the panel asked for the repair again", REPAIRS != [] and REPAIRS[-1] is not None, REPAIRS)
     check("and with the welcome answered, the throwaway run happened", len(repair_runs()) == 1,
           headless_runs())
+    return later(step_show_nux, 250)
+
+
+def step_show_nux() -> bool:
+    """The debug instance's menu item: the welcome again, on demand."""
+    win = state["win"]
+    labels = menu_labels(win)
+    check(
+        "the debug instance's menu offers Show NUX (debug), after Preferences",
+        "Show NUX (debug)" in labels
+        and labels.index("Show NUX (debug)") == labels.index("Preferences") + 1,
+        labels,
+    )
+    state["after"] = list(AFTER)
+    win.activate_action("win.show-welcome", None)
+    return later(step_nux_shown, 800)
+
+
+def step_nux_shown() -> bool:
+    win = state["win"]
+    dialog = win.get_visible_dialog()
+    check("Show NUX presents the welcome, seen or not", isinstance(dialog, welcome.WelcomeDialog),
+          type(dialog).__name__ if dialog else None)
+    if not isinstance(dialog, welcome.WelcomeDialog):
+        return done()
+    check("in the found state, Continue and all", button(dialog, "Continue") is not None)
+    check("with nothing waiting on it", AFTER == state["after"], AFTER)
+    dialog.close()
+    return later(step_nux_closed, 800)
+
+
+def step_nux_closed() -> bool:
+    win = state["win"]
+    check("closing it is an answer like any other", win.get_visible_dialog() is None,
+          type(win.get_visible_dialog()).__name__ if win.get_visible_dialog() else None)
+    check("welcome_seen stays recorded", saved_settings().get("welcome_seen") is True, saved_settings())
+    check("and still nothing ran off it", AFTER == state["after"], AFTER)
     return done()
 
 

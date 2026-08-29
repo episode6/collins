@@ -111,6 +111,23 @@ def maybe_show(window, state: AppState, store, then: Callable[[], None]):
     return dialog
 
 
+def show(window, state: AppState, store) -> WelcomeDialog:
+    """The dialog on demand, gate or no gate: the debug build's "Show NUX
+    (debug)" menu item, for looking at it.
+
+    Nothing waits on it — the launch's welcome-work had its turn when the
+    window opened — so `then` is a no-op. The rows are live all the same,
+    and answering it records ``welcome_seen`` exactly as a launch's would
+    (a no-op too: every launch that offers the item has it set, or is
+    showing the dialog already). The CLI state is the real one: with no
+    `claude` on PATH this is the not-found dialog, Quit and all.
+    """
+    log.info("welcome: showing the dialog on demand")
+    dialog = WelcomeDialog(window, state, store, lambda: None, clisetup.on_path())
+    dialog.present(window)
+    return dialog
+
+
 class WelcomeDialog(Adw.Dialog):
     """The dialog itself: a preferences page of three groups and one
     button. See the module docstring for what it is for."""

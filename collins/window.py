@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-28. Full change history: git log for this file.
+# fork. Last modified: 2026-08-29. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from . import (
     desktopentry,
     dialogs,
     footerapps,
+    is_debug_app_id,
     keybindings,
     keymap,
     mcptools,
@@ -40,6 +41,7 @@ from . import (
     panelhistory,
     pkgrepos,
     trust,
+    welcome,
 )
 from .activity import (
     BACKGROUND_IDLE_S,
@@ -269,14 +271,17 @@ def _monitor_logical_width(window: Gtk.Window) -> int:
     return monitor.get_geometry().width
 
 
-def _app_icon_name(window: Gtk.Window) -> str:
-    """The debug build (and any COLLINS_APP_ID derived from its id) wears a
-    recolored icon so the two apps read apart in a dock."""
+def _debug_build(window: Gtk.Window) -> bool:
+    """Whether this window belongs to a debug instance — the debug build, or
+    any COLLINS_APP_ID derived from its id (see is_debug_app_id)."""
     app = window.get_application()
-    app_id = app.get_application_id() if app is not None else None
-    if app_id and app_id.startswith(DEBUG_APP_ID):
-        return DEBUG_APP_ID
-    return APP_ID
+    return is_debug_app_id(app.get_application_id() if app is not None else None)
+
+
+def _app_icon_name(window: Gtk.Window) -> str:
+    """The debug build wears a recolored icon so the two apps read apart in
+    a dock."""
+    return DEBUG_APP_ID if _debug_build(window) else APP_ID
 
 
 def session_window(
@@ -597,6 +602,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.has_changes = self._session_has_changes
         self.sidebar.live_cwd = self._session_live_cwd
         self.sidebar.has_tab = self._session_has_tab
+        # The sidebar can't see which instance it is in; the window can, and
+        # only a debug one gets the developer items in the hamburger menu.
+        if _debug_build(self):
+            self.sidebar.offer_debug_items()
         self.sidebar.connect("open-session", self._on_sidebar_open)
         self.sidebar.connect("open-many", self._on_sidebar_open_many)
         self.sidebar.connect("trash-many", self._on_sidebar_trash_many)
@@ -1277,6 +1286,11 @@ class MainWindow(Adw.ApplicationWindow):
             "trash-archived": lambda *_: self._trash_archived(),
             "install-desktop": lambda *_: self._install_desktop_entry(),
             "add-package-repo": lambda *_: self._add_package_repo(),
+            # Reached from the menu on the debug build only ("Show NUX
+            # (debug)", see SessionSidebar.offer_debug_items); the action
+            # exists everywhere, like the other menu-only ones, so a custom
+            # keybinding can name it.
+            "show-welcome": lambda *_: self._show_welcome(),
             "archive-current-session": lambda *_: self._archive_current_session(),
             # Never disabled, even with nothing to undo: its shortcut must
             # always land here and be swallowed — a shortcut whose action is
@@ -5955,6 +5969,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _show_preferences(self) -> None:
         PreferencesDialog(self.state, self.apply_preferences).present(self)
+
+    def _show_welcome(self) -> None:
+        """The first-launch welcome again, on demand — the debug menu's
+        "Show NUX (debug)". Seen or not, and with nothing waiting on it
+        (see welcome.show)."""
+        welcome.show(self, self.state, self.store)
 
     def apply_preferences(self) -> None:
         """Push freshly written settings where they take effect: the
