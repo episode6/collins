@@ -85,3 +85,8 @@ RUN dnf install -y \
     desktop-file-utils appstream \
     python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling \
   && dnf clean all
+# Root here, but the runner checks the workspace out as uid 1001, and git
+# refuses to touch a repository someone else owns ("dubious ownership") --
+# actions/checkout's own exception lives in a temporary HOME the later steps
+# never see. The image exists only to run CI on that checkout.
+RUN git config --system --add safe.directory '*'
