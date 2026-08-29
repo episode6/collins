@@ -10,7 +10,7 @@ sidebar indistinguishable from an empty one.
 
 That is not a degradation to note in passing (as a missing `gh` is — see
 ghsetup); without the CLI there is nothing for Collins to manage. So a
-launch that can't find it stops and asks, once, where it is (cliwelcome),
+launch that can't find it stops and asks, once, where it is (welcome),
 and the answer is kept in settings and re-applied at every later launch
 before anything goes looking.
 

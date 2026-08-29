@@ -48,9 +48,13 @@ with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
 with open(f"{E2E}/usage-fixture.json", "w", encoding="utf-8") as fh:
     json.dump({"limits": [], "extra_usage": {"is_enabled": False}}, fh)
-# Titles on None so nothing asks the shim for a `-p` run; no usage panel.
+# Titles on None so nothing asks the shim for a `-p` run; no usage panel;
+# the first-launch welcome answered already.
 with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
-    fh.write('{"settings": {"title_model": "none", "show_usage_panel": false, "language": ""}}')
+    fh.write(
+        '{"settings": {"title_model": "none", "show_usage_panel": false, "language": "", '
+        '"welcome_seen": true}}'
+    )
 
 with open(SHIM, "w", encoding="utf-8") as fh:
     fh.write(

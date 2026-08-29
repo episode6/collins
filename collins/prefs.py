@@ -20,7 +20,6 @@ from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
 from . import (  # noqa: E402
     apppicker,
     clisetup,
-    cliwelcome,
     composerkeys,
     editor,
     footerapps,
@@ -28,6 +27,7 @@ from . import (  # noqa: E402
     prefssearch,
     statusicon,
     tokensettings,
+    welcome,
 )
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label, grace_seconds
 from .i18n import LANGUAGES, N_, _, ngettext
@@ -933,7 +933,7 @@ class PreferencesDialog(Adw.Dialog):
 
     def _build_cli_rows(self, state: AppState, group: _SearchableGroup) -> None:
         """Where the Claude Code CLI is — the same question the welcome
-        dialog asks a launch that can't find it (cliwelcome), now answerable
+        dialog asks a launch that can't find it (welcome), now answerable
         after the fact: point at a different install, or clear the box to
         fall back to whatever PATH offers. Tabs already open keep the CLI
         they started with."""
@@ -960,7 +960,7 @@ class PreferencesDialog(Adw.Dialog):
         self._refresh_cli_row(save=True)
 
     def _refresh_cli_row(self, save: bool) -> None:
-        """Judge the path in the box on cliwelcome's scale, keep it when it
+        """Judge the path in the box on the welcome dialog's scale, keep it when it
         would be accepted there, and say why either way.
 
         Saved states are the acceptable ones — plus empty, which here means
@@ -970,7 +970,7 @@ class PreferencesDialog(Adw.Dialog):
         """
         text = self._cli_row.get_text().strip()
         status = clisetup.validate(text)
-        acceptable = not text or status in cliwelcome.MARKS
+        acceptable = not text or status in welcome.MARKS
         stored = self._state.get_setting(clisetup.PATH_SETTING) or ""
         if save and acceptable and text != stored:
             self._state.set_setting(clisetup.PATH_SETTING, text)
@@ -979,15 +979,15 @@ class PreferencesDialog(Adw.Dialog):
             clisetup.apply(text)
             self._on_change()
         if text:
-            icon, style = cliwelcome.MARKS.get(status, cliwelcome.BAD_MARK)
-            reason = cliwelcome.reason_for(status, text)
+            icon, style = welcome.MARKS.get(status, welcome.BAD_MARK)
+            reason = welcome.reason_for(status, text)
         elif clisetup.on_path():
-            icon, style = cliwelcome.MARKS[clisetup.OK]
+            icon, style = welcome.MARKS[clisetup.OK]
             reason = _("Using the claude found on PATH at {path}.").format(
                 path=clisetup.found_at()
             )
         else:
-            icon, style = cliwelcome.BAD_MARK
+            icon, style = welcome.BAD_MARK
             reason = _(
                 "claude isn't on PATH — Collins will ask where it is at the "
                 "next launch."

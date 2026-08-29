@@ -158,6 +158,7 @@ class ModelRows:
             ),
         ):
             self.rows[key] = Adw.ComboRow(title=title, subtitle=subtitle)
+            _keep_value_readable(self.rows[key])
         # None and the default alone until the live list lands (see
         # _populate) — enough for the saved choice to show.
         self._apply_rows([])
@@ -310,6 +311,41 @@ class ModelRows:
             return  # mid-repopulate; the pass that set it will restore the choice
         self._state.set_setting(key, ids[selected])
         self._on_change()
+
+
+# The least a picker's value gets, in pixels: room for "Default (latest
+# Sonnet)", the longest of the labels the pickers show by default (see the
+# helper below).
+_VALUE_MIN_PX = 160
+
+
+def _keep_value_readable(row: Adw.ComboRow) -> None:
+    """Keep a picker's value ("Default (latest Haiku)") from ellipsizing
+    beside its long subtitle.
+
+    On a page tall enough to scroll, the row is allocated for a height that
+    was settled first, and a wrapping subtitle's minimum width for that
+    height is "wide enough to still fit in that many lines" — most of the
+    row. What is left goes to the value, whose own minimum is an ellipsis,
+    and the default reads "Def…". A minimum width on the value's widget
+    (Adwaita's inline list view — not public API, so a row without one is
+    left as it is) puts it ahead of the subtitle, which wraps to one more
+    line instead; a label the catalog makes longer than the room still
+    ellipsizes, as before.
+    """
+    child = row.get_first_child()
+    stack = [child] if child is not None else []
+    while stack:
+        widget = stack.pop()
+        if isinstance(widget, Gtk.ListView) and widget.has_css_class("inline"):
+            widget.set_size_request(_VALUE_MIN_PX, -1)
+            return
+        sibling = widget.get_next_sibling()
+        if sibling is not None:
+            stack.append(sibling)
+        first = widget.get_first_child()
+        if first is not None:
+            stack.append(first)
 
 
 def build_token_rows(state: AppState, on_change: Callable[[], None]) -> list[Gtk.Widget]:

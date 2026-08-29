@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-26. Full change history: git log for this file.
+fork. Last modified: 2026-08-27. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -144,7 +144,34 @@ first) for a real restart.
 
 ## First run
 
-On first launch the sidebar lists every session found under
+The first launch opens on a **Before you start** dialog. Collins runs Claude
+for you in a few places — naming new sessions, drawing project icons,
+renewing an expired login, and offering every session its built-in MCP
+tools — and this is where it says so, with the switch for each, before the
+first of those runs happens. The rows are the same ones Preferences shows
+under *Token use* and *Built-in MCP tools*, and they write as you toggle
+them: pick **None** for the session title model here if you would rather no
+prompt of yours went to a model unasked. **Continue** closes it, and it
+doesn't come back.
+
+![The first-launch dialog](/img/welcome.png)
+
+Its first group is the `claude` CLI. Launched from a shell, Collins finds
+the one on your `PATH` and names it. Launched from the desktop it often
+can't — that `PATH` doesn't include the folders your shell adds, and
+`~/.local/bin`, where Claude Code's own installer puts its launcher, is
+one of them — and then the group is a path box instead: prefilled from the
+usual install locations when one of them has the CLI, with a Browse button
+and a live verdict beside it. Point it at the stable launcher (usually
+`~/.local/bin/claude`; a path with a version number in it is refused, since
+it would break on the CLI's next self-update). The location is remembered,
+and the row at the top of Preferences changes it later. There is no
+skipping this one — without the CLI there is nothing for Collins to
+manage — so until the path validates the dialog offers **Quit** instead.
+
+![The first-launch dialog asking where the CLI is](/img/welcome-cli.png)
+
+Behind it the sidebar lists every session found under
 `~/.claude/projects/`, with all groups collapsed. Each session is given an
 auto-generated title (locally, from its first prompt), so you see names
 instead of UUIDs right away. Expand a project, click a session, and it opens

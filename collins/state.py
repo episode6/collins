@@ -112,6 +112,12 @@ DEFAULT_SETTINGS = {
     # ticked it appears on every launch that finds gh missing or signed out,
     # and it never appears on a launch that doesn't (see ghwelcome).
     "gh_welcome_dismissed": False,
+    # Whether the first-launch welcome — what runs Claude on the user's
+    # behalf, with the switch for each, and the CLI's location when that
+    # needs asking — has been answered (see welcome). Set by every answer
+    # but Quit. An install that predates the key sees the dialog once too:
+    # the disclosure is as new to it as to a fresh one, by design.
+    "welcome_seen": False,
     # What to do instead of the confirmation dialog when a running session's
     # tab has to close: ask (the dialog, as before) | exit | background.
     # quit_with_running_sessions takes a fourth value, hide: the window (not

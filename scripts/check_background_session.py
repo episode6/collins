@@ -48,6 +48,11 @@ for path in (f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin", TRUSTED, UNTRUSTED
     os.makedirs(path, exist_ok=True)
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
+# The first-launch welcome (collins.welcome) is answered already: it would
+# otherwise sit over the window under test.
+os.makedirs(f"{E2E}/config/collins", exist_ok=True)
+with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
+    fh.write('{"settings": {"welcome_seen": true}}')
 # The child under test: report the winsize this pty gave us, then hold the
 # terminal open the way a real CLI would. `stty size` prints "rows cols".
 with open(SHIM, "w", encoding="utf-8") as fh:

@@ -115,8 +115,10 @@ alpha-widgets session `$U1`). Adapt it, or hand-roll following these rules:
     favorited or archived shows an empty header — count 0).
   - `expanded_groups`: groups start **collapsed**; list `"proj:<project-name>"`
     for each project plus `"fav:"` for favorites.
-  - `settings`: set `"title_model": "none"` (otherwise the app spawns
-    headless `claude` runs to title your fake sessions);
+  - `settings`: set `"welcome_seen": true` (otherwise the first-launch
+    welcome dialog — collins/welcome.py — opens over every shot; leave it
+    unset only to shoot that dialog), `"title_model": "none"` (otherwise
+    the app spawns headless `claude` runs to title your fake sessions);
     `window_width`/`window_height` size the shot (1100×720 reads well).
 - Saved panel-terminal history is plain text at
   `state/collins/panel_history/<uuid>.txt`; a session with a file there
@@ -191,8 +193,11 @@ is the shim). Scenes: `main-window`, `hero` (also `data/screenshot.png`, and
 cropped to its sidebar column as `sidebar.png`), `quick-switcher`,
 `session-details`, `mcp-servers`, `preferences`, `terminal-panel`,
 `composer`, `pr-page` (a fabricated `prdetail.fetch` reply — nothing reaches
-GitHub), `editor-panel`, `attachments-panel`, and `new-chat`. Name scenes to
-redo only those. `capture-docs.py` takes `--size WxH` and `--set KEY=JSON`,
+GitHub), `editor-panel`, `attachments-panel`, `welcome` and `welcome-cli`
+(the first-launch dialog with the CLI found, and with it not found — the
+shot runs with `welcome_seen` set back to false, and the not-found one
+hides `claude` from clisetup and seeds `~/.local/bin/claude` for the
+prefill), and `new-chat`. Name scenes to redo only those. `capture-docs.py` takes `--size WxH` and `--set KEY=JSON`,
 which edit the staged `state.json`'s settings before launch — that is how one
 staged tree serves every window size and panel width.
 

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-26. Full change history: git log for this file.
+# fork. Last modified: 2026-08-28. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -26,7 +26,6 @@ from . import (
     attachrecords,
     buildinfo,
     clisetup,
-    cliwelcome,
     desktopentry,
     editorfiles,
     ghwelcome,
@@ -41,6 +40,7 @@ from . import (
     tokenrefresh,
     tooltipmute,
     traymodel,
+    welcome,
 )
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
 from .i18n import _
@@ -2426,20 +2426,33 @@ class App(Adw.Application):
                 )
             # Once per install, and only on a launch: an extra window is not a
             # first impression, and neither is one opened from a notification.
-            # The agent CLI comes first and blocks until answered (there is
-            # no app without it); the GitHub notice takes its turn after —
-            # immediately when the CLI is already in place.
-            cliwelcome.maybe_show(
-                window,
-                self.state,
-                self.store,
-                then=lambda: ghwelcome.maybe_show(window, self.state),
-            )
-            # With the CLI in place but the login expired, one throwaway
-            # headless run refreshes the token in the background, then the
-            # usage panel and model catalog are re-asked (see tokenrefresh).
-            tokenrefresh.maybe_start(self._on_claude_token_refreshed)
+            # The welcome comes first — what runs Claude on the user's behalf,
+            # and the agent CLI's location when a launch can't find it, which
+            # blocks until answered (there is no app without it). The rest
+            # of the launch's welcome-work takes its turn after — immediately
+            # on a launch that owes no welcome.
+            # _after_welcome only builds the closure; nothing in it runs
+            # until the dialog is answered (or at once, when none shows).
+            welcome.maybe_show(window, self.state, self.store, then=self._after_welcome(window))
         window.present()
+
+    def _after_welcome(self, window: MainWindow):
+        """The welcome-work that waits on the welcome dialog: the GitHub
+        notice, and the expired-login repair — with the CLI in place but the
+        login expired, one throwaway headless run refreshes the token in the
+        background, then the usage panel and model catalog are re-asked (see
+        tokenrefresh). It waits because its switch is on the dialog: a repair
+        that ran first would be a run the dialog discloses after the fact.
+        The sequencing here covers only this launch check; the usage panel
+        asks for the same repair from under the open dialog when its first
+        fetch is refused, and tokenrefresh itself refuses both until the
+        dialog is answered."""
+
+        def then() -> None:
+            ghwelcome.maybe_show(window, self.state)
+            tokenrefresh.maybe_start(self._on_claude_token_refreshed)
+
+        return then
 
     def _on_claude_token_refreshed(self) -> None:
         # Worker-thread callback (tokenrefresh.maybe_start); the model

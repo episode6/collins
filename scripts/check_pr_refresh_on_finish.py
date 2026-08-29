@@ -74,7 +74,9 @@ with open(f"{_PROJECT}/{SESSION}.jsonl", "w", encoding="utf-8") as fh:
     for line in _LINES:
         fh.write(json.dumps(line) + "\n")
 with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
-    fh.write('{"settings": {"title_model": "none"}}')
+    # Titles on None so nothing asks the shim for a `-p` run; the
+    # first-launch welcome answered already.
+    fh.write('{"settings": {"title_model": "none", "welcome_seen": true}}')
 
 # The CLI the tab spawns: an idle prompt and nothing else. The real one would
 # go looking for a session id that doesn't exist and print whatever it makes of

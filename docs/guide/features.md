@@ -548,4 +548,10 @@ has the focus the moment preferences opens, so the way to a setting is to
 type a word from it — a section heading, a word from a description
 (*Ctrl+C*), or an option folded away inside a row (*Dracula*, *Magyar*).
 
+The *Token use* rows and the tool switches are also the first thing a fresh
+install sees: a **Before you start** dialog shows them once, before any of
+those runs happens, along with the `claude` CLI in use — or, on a launch
+that can't find one, the path box that asks where it is (see
+[Getting Started](/guide/getting-started#first-run)).
+
 ![Preferences dialog](/img/preferences.png)

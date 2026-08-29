@@ -11,6 +11,63 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+msgid "Before you start"
+msgstr "Avant de commencer"
+
+msgid "Collins runs Claude for you in a few places. Here's where, and the switches for each."
+msgstr "Collins exécute Claude pour vous à quelques endroits. Voici lesquels, et l'interrupteur de chacun."
+
+msgid "Continue"
+msgstr "Continuer"
+
+msgid "Using claude at {path}"
+msgstr "Utilise claude depuis {path}"
+
+msgid "Change it later in Preferences"
+msgstr "Modifiable plus tard dans les Préférences"
+
+msgid "Claude Code CLI"
+msgstr "CLI Claude Code"
+
+msgid "Use This CLI"
+msgstr "Utiliser cette CLI"
+
+msgid "Browse…"
+msgstr "Parcourir…"
+
+msgid "Path to the claude executable"
+msgstr "Chemin de l'exécutable claude"
+
+msgid "Collins needs the Claude Code CLI"
+msgstr "Collins a besoin de la CLI Claude Code"
+
+msgid "Found it — Collins will remember this location."
+msgstr "Trouvé — Collins retiendra cet emplacement."
+
+msgid "Choose the claude executable"
+msgstr "Choisir l'exécutable claude"
+
+msgid "No Claude Code yet? Get it at {link}, then come back."
+msgstr "Pas encore de Claude Code ? Procurez-vous-le sur {link}, puis revenez."
+
+msgid "There's no executable file at this path."
+msgstr "Il n'y a pas de fichier exécutable à ce chemin."
+
+msgid "It wasn't in any of the usual places — enter or browse to where it's installed."
+msgstr "Il n'était à aucun des emplacements habituels — saisissez ou parcourez jusqu'à l'endroit où il est installé."
+
+msgid "That's an executable, but not one named “claude” — pick the claude launcher itself."
+msgstr "C'est un exécutable, mais pas un nommé « claude » — choisissez le lanceur claude lui-même."
+
+msgid "This is inside a version manager's tree, so Collins can't validate a stable path — it will work until that tool updates, and then this question comes back."
+msgstr "C'est dans l'arborescence d'un gestionnaire de versions, donc Collins ne peut pas valider un chemin stable — cela fonctionnera jusqu'à la mise à jour de cet outil, puis cette question reviendra."
+
+msgid "This path has a version number in it, so it would break the next time Claude Code updates itself. Point at a stable launcher instead — usually ~/.local/bin/claude."
+msgstr "Ce chemin contient un numéro de version et se casserait à la prochaine mise à jour de Claude Code. Pointez plutôt vers un lanceur stable — généralement ~/.local/bin/claude."
+
+msgid "Every session runs through the claude command, and it isn't on the PATH that launches from the desktop are given — that PATH doesn't include the folders your shell adds. Point Collins at the CLI once; the location is remembered from then on."
+msgstr "Chaque session passe par la commande claude, qui n'est pas dans le PATH donné aux programmes lancés depuis le bureau — ce PATH n'inclut pas les dossiers ajoutés par votre shell. Indiquez la CLI à Collins une fois ; l'emplacement est retenu dès lors."
+
 msgid "Token use"
 msgstr "Utilisation des jetons"
 

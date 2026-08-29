@@ -20,6 +20,44 @@ DOMAIN = "collins"
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "hu": {
+        'Before you start':
+            'Mielőtt elkezdené',
+        "Collins runs Claude for you in a few places. Here's where, and the switches for each.":
+            'A Collins néhány helyen Ön helyett futtatja a Claude-ot. Itt látható, hol — és mindegyikhez a kapcsoló.',
+        'Continue':
+            'Folytatás',
+        'Using claude at {path}':
+            'A claude innen fut: {path}',
+        'Change it later in Preferences':
+            'Később a Beállításokban módosítható',
+        "Claude Code CLI":
+            "Claude Code CLI",
+        "Use This CLI":
+            "Ezt a CLI-t használja",
+        "Browse…":
+            "Tallózás…",
+        "Path to the claude executable":
+            "A claude futtatható fájl elérési útja",
+        "Collins needs the Claude Code CLI":
+            "A Collinsnak szüksége van a Claude Code CLI-re",
+        "Found it — Collins will remember this location.":
+            "Megvan — a Collins megjegyzi ezt a helyet.",
+        "Choose the claude executable":
+            "Válassza ki a claude futtatható fájlt",
+        "No Claude Code yet? Get it at {link}, then come back.":
+            "Még nincs Claude Code? Szerezze be innen: {link}, majd térjen vissza.",
+        "There's no executable file at this path.":
+            "Ezen az elérési úton nincs futtatható fájl.",
+        "It wasn't in any of the usual places — enter or browse to where it's installed.":
+            "Nem volt a szokásos helyek egyikén sem — adja meg vagy tallózza ki, hova van telepítve.",
+        "That's an executable, but not one named “claude” — pick the claude launcher itself.":
+            "Ez futtatható fájl, de nem „claude” a neve — magát a claude indítót válassza.",
+        "This is inside a version manager's tree, so Collins can't validate a stable path — it will work until that tool updates, and then this question comes back.":
+            "Ez egy verziókezelő fájában van, így a Collins nem tud stabil elérési utat ellenőrizni — működni fog, amíg az az eszköz nem frissül, aztán ez a kérdés visszatér.",
+        "This path has a version number in it, so it would break the next time Claude Code updates itself. Point at a stable launcher instead — usually ~/.local/bin/claude.":
+            "Ebben az elérési útban verziószám van, így elromlana, amikor a Claude Code legközelebb frissíti magát. Mutasson inkább egy stabil indítóra — általában ~/.local/bin/claude.",
+        "Every session runs through the claude command, and it isn't on the PATH that launches from the desktop are given — that PATH doesn't include the folders your shell adds. Point Collins at the CLI once; the location is remembered from then on.":
+            "Minden munkamenet a claude parancson keresztül fut, és az nincs azon a PATH-on, amelyet az asztalról indított programok kapnak — az a PATH nem tartalmazza a shell által hozzáadott mappákat. Mutasson egyszer a CLI-re a Collinsban; a helyet ettől kezdve megjegyzi.",
         "Token use":
             "Tokenhasználat",
         "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
@@ -561,6 +599,44 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "A Collins mostantól megtalálható az alkalmazások között",
     },
     "de": {
+        'Before you start':
+            'Bevor Sie loslegen',
+        "Collins runs Claude for you in a few places. Here's where, and the switches for each.":
+            'Collins führt Claude an einigen Stellen für Sie aus. Hier steht, wo — und der Schalter für jede davon.',
+        'Continue':
+            'Weiter',
+        'Using claude at {path}':
+            'Verwendet claude unter {path}',
+        'Change it later in Preferences':
+            'Später in den Einstellungen änderbar',
+        "Claude Code CLI":
+            "Claude Code CLI",
+        "Use This CLI":
+            "Diese CLI verwenden",
+        "Browse…":
+            "Durchsuchen…",
+        "Path to the claude executable":
+            "Pfad zur ausführbaren claude-Datei",
+        "Collins needs the Claude Code CLI":
+            "Collins braucht die Claude Code CLI",
+        "Found it — Collins will remember this location.":
+            "Gefunden — Collins merkt sich diesen Ort.",
+        "Choose the claude executable":
+            "Ausführbare claude-Datei auswählen",
+        "No Claude Code yet? Get it at {link}, then come back.":
+            "Noch kein Claude Code? Holen Sie es unter {link} und kommen Sie dann zurück.",
+        "There's no executable file at this path.":
+            "Unter diesem Pfad gibt es keine ausführbare Datei.",
+        "It wasn't in any of the usual places — enter or browse to where it's installed.":
+            "Es war an keinem der üblichen Orte — geben Sie ein, wo es installiert ist, oder suchen Sie danach.",
+        "That's an executable, but not one named “claude” — pick the claude launcher itself.":
+            "Das ist eine ausführbare Datei, aber keine namens „claude“ — wählen Sie den claude-Starter selbst.",
+        "This is inside a version manager's tree, so Collins can't validate a stable path — it will work until that tool updates, and then this question comes back.":
+            "Das liegt im Baum eines Versionsmanagers, daher kann Collins keinen stabilen Pfad prüfen — es funktioniert, bis dieses Tool sich aktualisiert, und dann kommt diese Frage zurück.",
+        "This path has a version number in it, so it would break the next time Claude Code updates itself. Point at a stable launcher instead — usually ~/.local/bin/claude.":
+            "Dieser Pfad enthält eine Versionsnummer und würde beim nächsten Selbst-Update von Claude Code kaputtgehen. Zeigen Sie stattdessen auf einen stabilen Starter — meist ~/.local/bin/claude.",
+        "Every session runs through the claude command, and it isn't on the PATH that launches from the desktop are given — that PATH doesn't include the folders your shell adds. Point Collins at the CLI once; the location is remembered from then on.":
+            "Jede Sitzung läuft über den Befehl claude, und der liegt nicht auf dem PATH, den vom Desktop gestartete Programme bekommen — der enthält nicht die Ordner, die Ihre Shell hinzufügt. Zeigen Sie Collins die CLI einmal; der Ort wird von da an gemerkt.",
         "Token use":
             "Token-Verbrauch",
         "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
@@ -1112,6 +1188,44 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Collins ist jetzt in deinen Anwendungen",
     },
     "es": {
+        'Before you start':
+            'Antes de empezar',
+        "Collins runs Claude for you in a few places. Here's where, and the switches for each.":
+            'Collins ejecuta Claude por usted en algunos sitios. Aquí está dónde, y el interruptor de cada uno.',
+        'Continue':
+            'Continuar',
+        'Using claude at {path}':
+            'Usando claude en {path}',
+        'Change it later in Preferences':
+            'Cámbielo más tarde en Preferencias',
+        "Claude Code CLI":
+            "CLI de Claude Code",
+        "Use This CLI":
+            "Usar esta CLI",
+        "Browse…":
+            "Examinar…",
+        "Path to the claude executable":
+            "Ruta del ejecutable claude",
+        "Collins needs the Claude Code CLI":
+            "Collins necesita la CLI de Claude Code",
+        "Found it — Collins will remember this location.":
+            "Encontrado — Collins recordará esta ubicación.",
+        "Choose the claude executable":
+            "Elegir el ejecutable claude",
+        "No Claude Code yet? Get it at {link}, then come back.":
+            "¿Aún no tiene Claude Code? Consígalo en {link} y vuelva después.",
+        "There's no executable file at this path.":
+            "No hay ningún archivo ejecutable en esta ruta.",
+        "It wasn't in any of the usual places — enter or browse to where it's installed.":
+            "No estaba en ninguno de los lugares habituales — escriba o examine dónde está instalado.",
+        "That's an executable, but not one named “claude” — pick the claude launcher itself.":
+            "Es un ejecutable, pero no uno llamado «claude» — elija el propio lanzador claude.",
+        "This is inside a version manager's tree, so Collins can't validate a stable path — it will work until that tool updates, and then this question comes back.":
+            "Está dentro del árbol de un gestor de versiones, así que Collins no puede validar una ruta estable — funcionará hasta que esa herramienta se actualice, y entonces esta pregunta volverá.",
+        "This path has a version number in it, so it would break the next time Claude Code updates itself. Point at a stable launcher instead — usually ~/.local/bin/claude.":
+            "Esta ruta tiene un número de versión, así que se rompería la próxima vez que Claude Code se actualice. Apunte a un lanzador estable — normalmente ~/.local/bin/claude.",
+        "Every session runs through the claude command, and it isn't on the PATH that launches from the desktop are given — that PATH doesn't include the folders your shell adds. Point Collins at the CLI once; the location is remembered from then on.":
+            "Cada sesión pasa por el comando claude, y no está en el PATH que reciben los programas lanzados desde el escritorio — ese PATH no incluye las carpetas que añade su shell. Indique a Collins dónde está la CLI una vez; la ubicación se recuerda desde entonces.",
         "Token use":
             "Uso de tokens",
         "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
@@ -1660,6 +1774,44 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Collins ya está en tus aplicaciones",
     },
     "fr": {
+        'Before you start':
+            'Avant de commencer',
+        "Collins runs Claude for you in a few places. Here's where, and the switches for each.":
+            "Collins exécute Claude pour vous à quelques endroits. Voici lesquels, et l'interrupteur de chacun.",
+        'Continue':
+            'Continuer',
+        'Using claude at {path}':
+            'Utilise claude depuis {path}',
+        'Change it later in Preferences':
+            'Modifiable plus tard dans les Préférences',
+        "Claude Code CLI":
+            "CLI Claude Code",
+        "Use This CLI":
+            "Utiliser cette CLI",
+        "Browse…":
+            "Parcourir…",
+        "Path to the claude executable":
+            "Chemin de l'exécutable claude",
+        "Collins needs the Claude Code CLI":
+            "Collins a besoin de la CLI Claude Code",
+        "Found it — Collins will remember this location.":
+            "Trouvé — Collins retiendra cet emplacement.",
+        "Choose the claude executable":
+            "Choisir l'exécutable claude",
+        "No Claude Code yet? Get it at {link}, then come back.":
+            "Pas encore de Claude Code ? Procurez-vous-le sur {link}, puis revenez.",
+        "There's no executable file at this path.":
+            "Il n'y a pas de fichier exécutable à ce chemin.",
+        "It wasn't in any of the usual places — enter or browse to where it's installed.":
+            "Il n'était à aucun des emplacements habituels — saisissez ou parcourez jusqu'à l'endroit où il est installé.",
+        "That's an executable, but not one named “claude” — pick the claude launcher itself.":
+            "C'est un exécutable, mais pas un nommé « claude » — choisissez le lanceur claude lui-même.",
+        "This is inside a version manager's tree, so Collins can't validate a stable path — it will work until that tool updates, and then this question comes back.":
+            "C'est dans l'arborescence d'un gestionnaire de versions, donc Collins ne peut pas valider un chemin stable — cela fonctionnera jusqu'à la mise à jour de cet outil, puis cette question reviendra.",
+        "This path has a version number in it, so it would break the next time Claude Code updates itself. Point at a stable launcher instead — usually ~/.local/bin/claude.":
+            "Ce chemin contient un numéro de version et se casserait à la prochaine mise à jour de Claude Code. Pointez plutôt vers un lanceur stable — généralement ~/.local/bin/claude.",
+        "Every session runs through the claude command, and it isn't on the PATH that launches from the desktop are given — that PATH doesn't include the folders your shell adds. Point Collins at the CLI once; the location is remembered from then on.":
+            "Chaque session passe par la commande claude, qui n'est pas dans le PATH donné aux programmes lancés depuis le bureau — ce PATH n'inclut pas les dossiers ajoutés par votre shell. Indiquez la CLI à Collins une fois ; l'emplacement est retenu dès lors.",
         "Token use":
             "Utilisation des jetons",
         "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":

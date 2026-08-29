@@ -1045,3 +1045,18 @@ def test_auto_title_on_just_drops_the_key(app_state):
     state.save()
     data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
     assert "auto_title_sessions" not in data["settings"]
+
+
+def test_welcome_seen_defaults_off_and_an_old_state_file_loads_as_unseen(app_state):
+    # A fresh install owes the welcome dialog; so does one whose state.json
+    # predates the key — the disclosure is new to it too, by design.
+    assert app_state.AppState().get_setting("welcome_seen") is False
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps({"settings": {"gh_welcome_dismissed": True, "scrollback": 5000}}),
+        encoding="utf-8",
+    )
+    state = app_state.AppState()
+    assert state.get_setting("welcome_seen") is False
+    state.set_setting("welcome_seen", True)
+    assert app_state.AppState().get_setting("welcome_seen") is True

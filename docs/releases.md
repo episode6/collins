@@ -39,6 +39,18 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **A welcome dialog that says what spends tokens.** The first launch of a
+  fresh install — and, once, of every install that predates this release —
+  opens on a **Before you start** dialog: the *Token use* rows and the
+  *Built-in MCP tools* switches, the same ones Preferences shows, so what
+  runs Claude on your behalf is disclosed before the first of those runs
+  happens, with the switch for each right there. Toggles write at once;
+  Continue (or Escape) records the dialog as seen, and the expired-login
+  repair now waits until it has been — the launch check and the usage
+  panel's own ask alike. Its first group is the CLI: a row
+  naming the `claude` in use, or — on a launch that can't find one — the
+  path ask that used to be a dialog of its own, prefilled, with its live
+  verdict, Browse and Quit, and no way past it until the path validates.
 - **A Token use group in Preferences, with a login-renew switch.** The
   settings that run Claude on your behalf now sit together, directly
   under General: the *Session title model* and *Icon generation model*

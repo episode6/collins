@@ -57,9 +57,12 @@ with open(f"{CWD}/README.md", "w", encoding="utf-8") as fh:
     fh.write("# A staged project\n")
 # The scene: icons on None (the default, but said outright — the check is
 # about this value), titles on None too so nothing else asks the shim for a
-# `-p` run, and no usage panel.
+# `-p` run, no usage panel, and the first-launch welcome answered already.
 with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
-    fh.write('{"settings": {"icon_model": "none", "title_model": "none", "show_usage_panel": false}}')
+    fh.write(
+        '{"settings": {"icon_model": "none", "title_model": "none", "show_usage_panel": false, '
+        '"welcome_seen": true}}'
+    )
 
 # The CLI the dialog spawns. Every run is logged; a `-p` run reads its prompt
 # and answers with the SVG above, anything else draws an idle prompt.

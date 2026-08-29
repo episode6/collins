@@ -230,6 +230,7 @@ cat > "$E2E/config/collins/state.json" <<EOF
   },
   "settings": {
     "title_model": "none",
+    "welcome_seen": true,
     "window_width": 1280,
     "window_height": 860
   }
