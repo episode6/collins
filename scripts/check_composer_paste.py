@@ -34,7 +34,7 @@ import gi
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, GObject, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 import collins.composer as composer_mod  # noqa: E402
 from collins import dropimages, fileclipboard  # noqa: E402
@@ -184,6 +184,28 @@ def main() -> int:
     check("a copied file pastes as its mention", view.peek_text() == f"@{copied} ")
     check("…with no copy saved", len(saved_copies()) == 2)
     check("…and no thumbnail for a text file", not view._thumb_scroller.get_visible())
+    window.close()
+
+    # -- a list with something remote on it is thinned out loud ---------------
+    # The drop target counts what it skips; a paste of the same list must
+    # too, or a copy taken in a file manager showing a remote share would
+    # quietly lose entries.
+    notes = []
+    view, window = new_view(notes=notes)
+    mixed = Gdk.FileList.new_from_list(
+        [Gio.File.new_for_path(copied), Gio.File.new_for_uri("https://example.test/far.png")]
+    )
+    claim(clipboard, Gdk.ContentProvider.new_for_value(GObject.Value(Gdk.FileList, mixed)))
+    paste(view)
+    check("a mixed list mentions the local file", view.peek_text() == f"@{copied} ")
+    check("…and reports the remote one skipped", notes == ["skipped 1 item that isn't a local file"])
+    # The drop target's own delivery of that list lands on the same code,
+    # so it must say the same thing.
+    view.set_text("")
+    notes.clear()
+    view._on_drop(None, mixed, 0.0, 0.0)
+    check("a drop of the same list mentions the same file", view.peek_text() == f"@{copied} ")
+    check("…and reports the same skip", notes == ["skipped 1 item that isn't a local file"])
     window.close()
 
     # -- without a mention syntax the view keeps its own paste ----------------

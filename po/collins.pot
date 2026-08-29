@@ -1954,9 +1954,15 @@ msgstr ""
 msgid "couldn't save a copy of the dropped image"
 msgstr ""
 
-#: collins/composer.py:478
+#: collins/composer.py
 msgid "couldn't save a copy of the pasted image"
 msgstr ""
+
+#: collins/composer.py
+msgid "skipped {n} item that isn't a local file"
+msgid_plural "skipped {n} items that aren't local files"
+msgstr[0] ""
+msgstr[1] ""
 
 #: collins/terminal.py:1485
 msgid "skipped {n} dropped item that isn't a local file"
