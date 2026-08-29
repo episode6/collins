@@ -452,7 +452,10 @@ flipped the switch is refused if it calls it anyway.
   the session runs on whatever the CLI resolves at that moment. A model
   chosen in the **Advanced** dialog seeds the picker instead. Nothing runs
   until you press Send; then the agent starts with your prompt as its
-  first turn, and the tab is an ordinary session tab from there. `Ctrl+J`
+  first turn, and the tab is an ordinary session tab from there. With
+  nothing written, the button reads **Empty Session** instead — press it
+  (or Enter) and the agent starts with no prompt, waiting at its own input
+  box, the way a session used to open. `Ctrl+J`
   opens a terminal beside the screen just as it would beside the console.
 - **Unsent screens are drafts.** As soon as there is text on the screen, or
   a terminal open beside it, it is kept: closing the tab or quitting Collins

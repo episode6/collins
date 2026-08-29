@@ -1792,8 +1792,10 @@ class TerminalTab(Gtk.Box):
         spawn the shell and the agent as a console tab would have at open,
         show the console, and type *prompt* in the moment the CLI is at its
         input box (`_new_chat_prompt_tick`) — the background spawn's
-        prompt-poll, done in the foreground. The dock's pages ride along:
-        they hang off the leaf the stack sits in, not off the screen.
+        prompt-poll, done in the foreground. An empty *prompt* is the
+        screen's *Empty Session*: the agent is left at its own input box,
+        with no poll waiting to type anything in. The dock's pages ride
+        along: they hang off the leaf the stack sits in, not off the screen.
 
         The screen widget stays in the stack, hidden, rather than being torn
         down: its composer may be mid-drop when Send is clicked, and a
@@ -1811,11 +1813,12 @@ class TerminalTab(Gtk.Box):
             self._dock.shell_pages()
         )
         self._stage.set_visible_child_name("terminal")
-        self._new_chat_prompt = prompt
+        self._new_chat_prompt = prompt or None
         self._new_chat_ticks = 0
         self._spawn(self._cwd, None)
         self._start_transcript_resolver(self._cwd)
-        GLib.timeout_add(_NEW_CHAT_PROMPT_POLL_MS, self._new_chat_prompt_tick)
+        if prompt:
+            GLib.timeout_add(_NEW_CHAT_PROMPT_POLL_MS, self._new_chat_prompt_tick)
         self.grab_terminal_focus()
 
     def _new_chat_prompt_tick(self) -> bool:
