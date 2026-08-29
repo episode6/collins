@@ -118,7 +118,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
-from collins import claudemodels, ghwelcome, i18n, titles, tokenrefresh, welcome  # noqa: E402
+from collins import claudemodels, ghwelcome, i18n, mcptools, titles, tokenrefresh, welcome  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
@@ -328,7 +328,9 @@ def step_opened() -> bool:
     )
     switches = [r.get_title() for r in rows(dialog, Adw.SwitchRow)]
     check("the renew switch is there", "Auto-renew the Claude login" in switches, switches)
-    check("and a switch per MCP tool", len(switches) == 9, switches)
+    # The renew switch plus one per tool — counted off the table, so a tool
+    # landing in mcptools.TOOLS can't fail this without also missing a row.
+    check("and a switch per MCP tool", len(switches) == 1 + len(mcptools.TOOLS), switches)
     cont = button(dialog, "Continue")
     check("one Continue button, live", cont is not None and cont.get_sensitive())
     check("no Quit in the found state", button(dialog, "Quit") is None)

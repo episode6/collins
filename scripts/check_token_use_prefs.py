@@ -77,7 +77,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import Adw, GLib  # noqa: E402
 
-from collins import claudemodels, i18n, prefslayout  # noqa: E402
+from collins import claudemodels, i18n, mcptools, prefslayout  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.prefs import PreferencesDialog  # noqa: E402
 from collins.state import AppState  # noqa: E402
@@ -202,7 +202,11 @@ def step_layout() -> bool:
         "read_terminal" in (mcp.get_description() or ""),
         mcp.get_description(),
     )
-    check("the MCP group still lists every tool", len(mcp.rows) == 8, len(mcp.rows))
+    check(
+        "the MCP group still lists every tool",
+        len(mcp.rows) == len(mcptools.TOOLS),
+        (len(mcp.rows), len(mcptools.TOOLS)),
+    )
     renew = token.rows[2]
     status = token.rows[3]
     state.update(page=page, renew=renew, status=status, pickers=token.rows[:2])
