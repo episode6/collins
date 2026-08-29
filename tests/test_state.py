@@ -984,6 +984,13 @@ def test_model_setting_defaults(app_state):
     assert "auto_title_sessions" not in app_state.DEFAULT_SETTINGS
 
 
+def test_auto_renew_login_defaults_on(app_state):
+    # The login repair ran with no switch before it had one; the switch
+    # arriving must not turn it off under anyone.
+    assert app_state.AppState().get_setting("auto_renew_login") is True
+    assert app_state.DEFAULT_SETTINGS["auto_renew_login"] is True
+
+
 def test_old_state_without_the_model_keys_loads_the_new_defaults(app_state):
     app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     app_state._STATE_FILE.write_text(

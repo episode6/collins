@@ -11,6 +11,21 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+msgid "Token use"
+msgstr "Tokenhasználat"
+
+msgid "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session."
+msgstr "Ezek mindegyike az Ön nevében futtatja a Claude-ot, az előfizetése használati keretének terhére, anélkül, hogy Ön kérné. Minden futtatás egy fej nélküli claude -p egy ideiglenes könyvtárból, így sosem jelenik meg munkamenetként."
+
+msgid "Auto-renew the Claude login"
+msgstr "A Claude-bejelentkezés automatikus megújítása"
+
+msgid "When the login the usage panel and model list are fetched with has expired — at launch, or when a fetch is refused later — run one throwaway claude -p (a one-word prompt on Haiku) so the CLI renews it; off, the panel says to run claude yourself"
+msgstr "Ha lejárt a bejelentkezés, amellyel a használati panel és a modellista lekérése történik — indításkor, vagy amikor később egy lekérést elutasítanak —, egyetlen eldobható claude -p fut (egyszavas prompt Haiku-n), hogy a CLI megújítsa; kikapcsolva a panel azt kéri, hogy futtassa a claude-ot Ön"
+
+msgid "{status} · free, no tokens"
+msgstr "{status} · ingyenes, nem használ tokent"
+
 msgid "Names each new session from its first prompt — every session Collins sees under ~/.claude/projects, including ones an agent or a terminal started. None: sessions keep the first words of their prompt, which costs nothing"
 msgstr "Minden új munkamenetet az első promptja alapján nevez el — minden munkamenetet, amelyet a Collins a ~/.claude/projects alatt lát, az ügynök vagy terminál által indítottakat is. Egyik sem: a munkamenetek a promptjuk első szavait tartják meg, ami semmibe sem kerül"
 
@@ -1010,8 +1025,8 @@ msgstr "Üzenetszerkesztő"
 msgid "Built-in MCP tools"
 msgstr "Beépített MCP-eszközök"
 
-msgid "Tools a session can call to drive Collins. Turning one off takes effect immediately; sessions already running are only offered the tool again once they restart"
-msgstr "Eszközök, amelyeket egy munkamenet meghívhat a Collins vezérléséhez. A kikapcsolás azonnal érvénybe lép; a már futó munkamenetek csak újraindításuk után kapják vissza az eszközt"
+msgid "Every enabled tool's definition rides in each session's context, read_terminal sends the panel's text into the conversation, and a session start_session starts is titled like any other. Turning one off takes effect immediately; sessions already running are only offered the tool again once they restart"
+msgstr "Minden bekapcsolt eszköz leírása minden munkamenet kontextusába bekerül, a read_terminal a panel szövegét küldi a beszélgetésbe, a start_session által indított munkamenet pedig ugyanúgy címet kap, mint bármelyik másik. A kikapcsolás azonnal érvénybe lép; a már futó munkamenetek csak újraindításuk után kapják vissza az eszközt"
 
 msgid "Name its own session"
 msgstr "Elnevezheti a saját munkamenetét"

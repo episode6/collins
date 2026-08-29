@@ -20,6 +20,16 @@ DOMAIN = "collins"
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "hu": {
+        "Token use":
+            "Tokenhasználat",
+        "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
+            "Ezek mindegyike az Ön nevében futtatja a Claude-ot, az előfizetése használati keretének terhére, anélkül, hogy Ön kérné. Minden futtatás egy fej nélküli claude -p egy ideiglenes könyvtárból, így sosem jelenik meg munkamenetként.",
+        "Auto-renew the Claude login":
+            "A Claude-bejelentkezés automatikus megújítása",
+        "When the login the usage panel and model list are fetched with has expired — at launch, or when a fetch is refused later — run one throwaway claude -p (a one-word prompt on Haiku) so the CLI renews it; off, the panel says to run claude yourself":
+            "Ha lejárt a bejelentkezés, amellyel a használati panel és a modellista lekérése történik — indításkor, vagy amikor később egy lekérést elutasítanak —, egyetlen eldobható claude -p fut (egyszavas prompt Haiku-n), hogy a CLI megújítsa; kikapcsolva a panel azt kéri, hogy futtassa a claude-ot Ön",
+        "{status} · free, no tokens":
+            "{status} · ingyenes, nem használ tokent",
         'Names each new session from its first prompt — every session Collins sees under ~/.claude/projects, including ones an agent or a terminal started. None: sessions keep the first words of their prompt, which costs nothing':
             'Minden új munkamenetet az első promptja alapján nevez el — minden munkamenetet, amelyet a Collins a ~/.claude/projects alatt lát, az ügynök vagy terminál által indítottakat is. Egyik sem: a munkamenetek a promptjuk első szavait tartják meg, ami semmibe sem kerül',
         "Model the sidebar's Generate Icon dialog starts with. None: the dialog waits for you to pick a model and click Generate":
@@ -423,12 +433,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Session behavior": "Munkamenetek viselkedése",
         "Composer": "Szerkesztő",
         "Built-in MCP tools": "Beépített MCP-eszközök",
-        "Tools a session can call to drive Collins. Turning one off takes "
-        "effect immediately; sessions already running are only offered the "
-        "tool again once they restart":
-            "Eszközök, amelyeket egy munkamenet meghívhat a Collins vezérléséhez. "
-            "A kikapcsolás azonnal érvénybe lép; a már futó munkamenetek csak "
-            "újraindításuk után kapják vissza az eszközt",
+        "Every enabled tool's definition rides in each session's context, "
+        "read_terminal sends the panel's text into the conversation, and a "
+        "session start_session starts is titled like any other. Turning one "
+        "off takes effect immediately; sessions already running are only "
+        "offered the tool again once they restart":
+            "Minden bekapcsolt eszköz leírása minden munkamenet kontextusába "
+            "bekerül, a read_terminal a panel szövegét küldi a beszélgetésbe, a "
+            "start_session által indított munkamenet pedig ugyanúgy címet kap, "
+            "mint bármelyik másik. A kikapcsolás azonnal érvénybe lép; a már futó "
+            "munkamenetek csak újraindításuk után kapják vissza az eszközt",
         "Name its own session": "Elnevezheti a saját munkamenetét",
         "set_session_title — the session titles its own tab and sidebar row":
             "set_session_title — a munkamenet elnevezi a saját lapját és oldalsávsorát",
@@ -547,6 +561,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "A Collins mostantól megtalálható az alkalmazások között",
     },
     "de": {
+        "Token use":
+            "Token-Verbrauch",
+        "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
+            "Jede dieser Einstellungen lässt Claude in Ihrem Namen laufen – auf Kosten der Nutzungsgrenzen Ihres Abonnements, ohne eine Eingabe von Ihnen. Jeder Lauf ist ein kopfloses claude -p aus einem Arbeitsverzeichnis und erscheint darum nie als Sitzung.",
+        "Auto-renew the Claude login":
+            "Claude-Anmeldung automatisch erneuern",
+        "When the login the usage panel and model list are fetched with has expired — at launch, or when a fetch is refused later — run one throwaway claude -p (a one-word prompt on Haiku) so the CLI renews it; off, the panel says to run claude yourself":
+            "Ist die Anmeldung abgelaufen, mit der Nutzungsanzeige und Modellliste abgerufen werden – beim Start, oder wenn ein Abruf später abgewiesen wird –, läuft ein einzelnes Wegwerf-claude -p (ein Ein-Wort-Prompt auf Haiku), damit die CLI sie erneuert; aus, sagt die Anzeige, dass Sie claude selbst ausführen sollen",
+        "{status} · free, no tokens":
+            "{status} · kostenlos, keine Tokens",
         'Names each new session from its first prompt — every session Collins sees under ~/.claude/projects, including ones an agent or a terminal started. None: sessions keep the first words of their prompt, which costs nothing':
             'Benennt jede neue Sitzung nach ihrem ersten Prompt — jede Sitzung, die Collins unter ~/.claude/projects sieht, auch von einem Agenten oder Terminal gestartete. Keine: Sitzungen behalten die ersten Wörter ihres Prompts, was nichts kostet',
         "Model the sidebar's Generate Icon dialog starts with. None: the dialog waits for you to pick a model and click Generate":
@@ -958,12 +982,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Session behavior": "Sitzungsverhalten",
         "Composer": "Composer",
         "Built-in MCP tools": "Eingebaute MCP-Werkzeuge",
-        "Tools a session can call to drive Collins. Turning one off takes "
-        "effect immediately; sessions already running are only offered the "
-        "tool again once they restart":
-            "Werkzeuge, die eine Sitzung aufrufen kann, um Collins zu steuern. "
-            "Das Abschalten wirkt sofort; bereits laufende Sitzungen bekommen "
-            "das Werkzeug erst nach einem Neustart wieder angeboten",
+        "Every enabled tool's definition rides in each session's context, "
+        "read_terminal sends the panel's text into the conversation, and a "
+        "session start_session starts is titled like any other. Turning one "
+        "off takes effect immediately; sessions already running are only "
+        "offered the tool again once they restart":
+            "Die Definition jedes eingeschalteten Werkzeugs steckt im Kontext "
+            "jeder Sitzung, read_terminal schickt den Text des Panels in die "
+            "Unterhaltung, und eine von start_session gestartete Sitzung wird "
+            "wie jede andere betitelt. Das Abschalten wirkt sofort; bereits "
+            "laufende Sitzungen bekommen das Werkzeug erst nach einem Neustart "
+            "wieder angeboten",
         "Name its own session": "Sitzung selbst benennen",
         "set_session_title — the session titles its own tab and sidebar row":
             "set_session_title — die Sitzung benennt ihren eigenen Tab und ihre "
@@ -1083,6 +1112,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Collins ist jetzt in deinen Anwendungen",
     },
     "es": {
+        "Token use":
+            "Uso de tokens",
+        "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
+            "Cada una de estas opciones ejecuta Claude en su nombre, contra los límites de uso de su suscripción, sin que usted lo pida. Cada ejecución es un claude -p sin interfaz desde un directorio temporal, así que nunca aparece como sesión.",
+        "Auto-renew the Claude login":
+            "Renovar automáticamente el inicio de sesión de Claude",
+        "When the login the usage panel and model list are fetched with has expired — at launch, or when a fetch is refused later — run one throwaway claude -p (a one-word prompt on Haiku) so the CLI renews it; off, the panel says to run claude yourself":
+            "Cuando el inicio de sesión con el que se obtienen el panel de uso y la lista de modelos ha caducado — al arrancar, o cuando una consulta se rechaza más tarde —, ejecuta un claude -p desechable (un prompt de una palabra en Haiku) para que la CLI lo renueve; desactivado, el panel le pide ejecutar claude usted mismo",
+        "{status} · free, no tokens":
+            "{status} · gratis, sin tokens",
         'Names each new session from its first prompt — every session Collins sees under ~/.claude/projects, including ones an agent or a terminal started. None: sessions keep the first words of their prompt, which costs nothing':
             'Nombra cada sesión nueva a partir de su primer prompt — cada sesión que Collins ve en ~/.claude/projects, incluidas las iniciadas por un agente o una terminal. Ninguna: las sesiones conservan las primeras palabras de su prompt, lo que no cuesta nada',
         "Model the sidebar's Generate Icon dialog starts with. None: the dialog waits for you to pick a model and click Generate":
@@ -1493,12 +1532,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Session behavior": "Comportamiento de las sesiones",
         "Composer": "Compositor",
         "Built-in MCP tools": "Herramientas MCP integradas",
-        "Tools a session can call to drive Collins. Turning one off takes "
-        "effect immediately; sessions already running are only offered the "
-        "tool again once they restart":
-            "Herramientas que una sesión puede llamar para controlar Collins. "
-            "Desactivar una surte efecto de inmediato; las sesiones ya en marcha "
-            "solo vuelven a recibirla cuando se reinician",
+        "Every enabled tool's definition rides in each session's context, "
+        "read_terminal sends the panel's text into the conversation, and a "
+        "session start_session starts is titled like any other. Turning one "
+        "off takes effect immediately; sessions already running are only "
+        "offered the tool again once they restart":
+            "La definición de cada herramienta activada viaja en el contexto de "
+            "cada sesión, read_terminal envía el texto del panel a la "
+            "conversación, y una sesión iniciada por start_session recibe título "
+            "como cualquier otra. Desactivar una surte efecto de inmediato; las "
+            "sesiones ya en marcha solo vuelven a recibirla cuando se reinician",
         "Name its own session": "Ponerle nombre a su propia sesión",
         "set_session_title — the session titles its own tab and sidebar row":
             "set_session_title — la sesión titula su propia pestaña y su fila "
@@ -1617,6 +1660,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Collins ya está en tus aplicaciones",
     },
     "fr": {
+        "Token use":
+            "Utilisation des jetons",
+        "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session.":
+            "Chacun de ces réglages fait tourner Claude pour vous, sur les limites d’utilisation de votre abonnement, sans que vous le demandiez. Chaque exécution est un claude -p sans interface depuis un répertoire temporaire, elle n’apparaît donc jamais comme session.",
+        "Auto-renew the Claude login":
+            "Renouveler automatiquement la connexion Claude",
+        "When the login the usage panel and model list are fetched with has expired — at launch, or when a fetch is refused later — run one throwaway claude -p (a one-word prompt on Haiku) so the CLI renews it; off, the panel says to run claude yourself":
+            "Quand la connexion qui sert à récupérer le panneau d’utilisation et la liste des modèles a expiré — au lancement, ou quand une requête est refusée plus tard —, lance un claude -p jetable (une invite d’un mot sur Haiku) pour que la CLI la renouvelle ; désactivé, le panneau vous demande de lancer claude vous-même",
+        "{status} · free, no tokens":
+            "{status} · gratuit, sans jetons",
         'Names each new session from its first prompt — every session Collins sees under ~/.claude/projects, including ones an agent or a terminal started. None: sessions keep the first words of their prompt, which costs nothing':
             "Nomme chaque nouvelle session d'après son premier prompt — chaque session que Collins voit sous ~/.claude/projects, y compris celles lancées par un agent ou un terminal. Aucune : les sessions gardent les premiers mots de leur prompt, ce qui ne coûte rien",
         "Model the sidebar's Generate Icon dialog starts with. None: the dialog waits for you to pick a model and click Generate":
@@ -2027,12 +2080,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Session behavior": "Comportement des sessions",
         "Composer": "Compositeur",
         "Built-in MCP tools": "Outils MCP intégrés",
-        "Tools a session can call to drive Collins. Turning one off takes "
-        "effect immediately; sessions already running are only offered the "
-        "tool again once they restart":
-            "Outils qu’une session peut appeler pour piloter Collins. La "
-            "désactivation prend effet immédiatement ; les sessions déjà lancées "
-            "ne retrouvent l’outil qu’à leur prochain démarrage",
+        "Every enabled tool's definition rides in each session's context, "
+        "read_terminal sends the panel's text into the conversation, and a "
+        "session start_session starts is titled like any other. Turning one "
+        "off takes effect immediately; sessions already running are only "
+        "offered the tool again once they restart":
+            "La définition de chaque outil activé accompagne le contexte de "
+            "chaque session, read_terminal envoie le texte du panneau dans la "
+            "conversation, et une session lancée par start_session est titrée "
+            "comme toute autre. La désactivation prend effet immédiatement ; les "
+            "sessions déjà lancées ne retrouvent l’outil qu’à leur prochain "
+            "démarrage",
         "Name its own session": "Nommer sa propre session",
         "set_session_title — the session titles its own tab and sidebar row":
             "set_session_title — la session nomme son propre onglet et sa ligne "

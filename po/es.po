@@ -11,6 +11,21 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+msgid "Token use"
+msgstr "Uso de tokens"
+
+msgid "Each of these runs Claude on your behalf, against your subscription's usage limits, without a prompt from you. Every run is a headless claude -p from a scratch directory, so it never appears as a session."
+msgstr "Cada una de estas opciones ejecuta Claude en su nombre, contra los límites de uso de su suscripción, sin que usted lo pida. Cada ejecución es un claude -p sin interfaz desde un directorio temporal, así que nunca aparece como sesión."
+
+msgid "Auto-renew the Claude login"
+msgstr "Renovar automáticamente el inicio de sesión de Claude"
+
+msgid "When the login the usage panel and model list are fetched with has expired — at launch, or when a fetch is refused later — run one throwaway claude -p (a one-word prompt on Haiku) so the CLI renews it; off, the panel says to run claude yourself"
+msgstr "Cuando el inicio de sesión con el que se obtienen el panel de uso y la lista de modelos ha caducado — al arrancar, o cuando una consulta se rechaza más tarde —, ejecuta un claude -p desechable (un prompt de una palabra en Haiku) para que la CLI lo renueve; desactivado, el panel le pide ejecutar claude usted mismo"
+
+msgid "{status} · free, no tokens"
+msgstr "{status} · gratis, sin tokens"
+
 msgid "Names each new session from its first prompt — every session Collins sees under ~/.claude/projects, including ones an agent or a terminal started. None: sessions keep the first words of their prompt, which costs nothing"
 msgstr "Nombra cada sesión nueva a partir de su primer prompt — cada sesión que Collins ve en ~/.claude/projects, incluidas las iniciadas por un agente o una terminal. Ninguna: las sesiones conservan las primeras palabras de su prompt, lo que no cuesta nada"
 
@@ -1010,8 +1025,8 @@ msgstr "Redactor"
 msgid "Built-in MCP tools"
 msgstr "Herramientas MCP integradas"
 
-msgid "Tools a session can call to drive Collins. Turning one off takes effect immediately; sessions already running are only offered the tool again once they restart"
-msgstr "Herramientas que una sesión puede llamar para controlar Collins. Desactivar una surte efecto de inmediato; las sesiones ya en marcha solo vuelven a recibirla cuando se reinician"
+msgid "Every enabled tool's definition rides in each session's context, read_terminal sends the panel's text into the conversation, and a session start_session starts is titled like any other. Turning one off takes effect immediately; sessions already running are only offered the tool again once they restart"
+msgstr "La definición de cada herramienta activada viaja en el contexto de cada sesión, read_terminal envía el texto del panel a la conversación, y una sesión iniciada por start_session recibe título como cualquier otra. Desactivar una surte efecto de inmediato; las sesiones ya en marcha solo vuelven a recibirla cuando se reinician"
 
 msgid "Name its own session"
 msgstr "Ponerle nombre a su propia sesión"

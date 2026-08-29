@@ -73,7 +73,7 @@ for five minutes rather than making every picker wait out the network timeout
 again.
 
 The cost of caching that hard is a model released this morning not appearing
-until tomorrow, so **Preferences → General → Model list** dates the list
+until tomorrow, so **Preferences → Token use → Model list** dates the list
 ("12 models, updated 3h ago") and its **Refresh** button asks Anthropic
 outright, ignoring both the day and the backoff.
 
@@ -110,7 +110,40 @@ cooldown — an hour, then two, four, up to a day — so a login no run can
 fix costs a few background subprocesses a day, not one per poll; a success
 sets the cooldown back to an hour. No credentials
 file at all means not logged in, which no background run can fix; the
-panel just says so.
+panel just says so. The run spends tokens without a prompt from you, so it
+has a switch — **Auto-renew the Claude login**, in Preferences → Token use,
+on by default — and with it off the panel says the login expired and leaves
+running `claude` to you.
+
+## What spends tokens
+
+Collins runs Claude on your behalf — against your subscription's usage
+limits — in four places, each with its setting in **Preferences → Token
+use** (directly under General) or the **Built-in MCP tools** group right
+below it. Every headless run is a `claude -p` from a scratch directory, so
+none of them ever appears as a session.
+
+- **Session titling** — a `claude -p` on the *Session title model* for
+  every unnamed transcript that appears under `~/.claude/projects` while
+  the app runs: sessions Collins launched, sessions an agent spawned through
+  `start_session`, background jobs, and a `claude -p` you ran from a
+  terminal in some project. *None* turns the model runs off; the free local
+  title (the first words of the prompt) always runs.
+- **Project icon generation** — a `claude -p` on the *Icon generation
+  model*, only on **Generate Icon** in a project header's menu and then per
+  click of Regenerate. Under *None*, the default, the dialog waits for a
+  model pick and a click.
+- **Login repair** — one throwaway `claude -p` (a one-word prompt on Haiku)
+  when the CLI's login is found expired at launch or a usage poll is
+  refused mid-run, backing off from an hour to a day on repeated failure;
+  *Auto-renew the Claude login* turns it off.
+- **Built-in MCP tools** — no run of their own, but every enabled tool's
+  definition rides in each session's context, `read_terminal` sends the
+  panel's text into the conversation, and a session `start_session` starts
+  is titled like any other. One switch per tool.
+
+The **Model list** row beside the pickers is the odd one out: a Models API
+query that spends no tokens, which its subtitle says.
 
 ## Archiving on claude.ai
 
@@ -216,6 +249,7 @@ collins/
 ├── caffeine.py       # Caffeine Mode: inhibit sleep while agents work
 ├── titles.py         # auto-generated session titles (local + claude)
 ├── usage.py          # Claude subscription usage fetch/parse
+├── tokensettings.py  # the Token use rows: what runs Claude for you
 ├── gitinfo.py        # git branch for the tab footer; is the tree dirty?
 ├── transcript.py     # tail transcripts for touched files and PR links
 ├── dialogs.py        # rename / emoji / confirm / details / MCP dialogs

@@ -79,6 +79,11 @@ DEFAULT_SETTINGS = {
     # _load migrates: false became title_model = NO_MODEL.
     "title_model": "",  # session title generation ("" = newest Haiku)
     "icon_model": NO_MODEL,  # the sidebar's Generate Icon ("" = newest Sonnet)
+    # Repair an expired CLI login with one throwaway headless run — at
+    # launch, or when a usage fetch is refused mid-run (see tokenrefresh).
+    # Off, the usage panel just says the login expired and leaves running
+    # `claude` to the user. The third of the Token use rows in Preferences.
+    "auto_renew_login": True,
     # Retitle a session to its newest pull request's title as PRs are
     # detected (see SessionStore.apply_pr_title). Fills the generated-name
     # slot, so a manual rename always wins.

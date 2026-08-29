@@ -9,28 +9,25 @@ from __future__ import annotations
 import shlex
 import subprocess
 import sys
-import threading
 from collections.abc import Callable
-from datetime import datetime, timezone
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
 
 from . import (  # noqa: E402
     apppicker,
-    claudemodels,
     clisetup,
     cliwelcome,
     composerkeys,
     editor,
     footerapps,
-    formatting,
-    mcptools,
+    prefslayout,
     prefssearch,
     statusicon,
+    tokensettings,
 )
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label, grace_seconds
 from .i18n import LANGUAGES, N_, _, ngettext
@@ -108,50 +105,17 @@ _RUNNING_BEHAVIORS = [
 # label ellipsizes past ~130px.
 _QUIT_BEHAVIORS = _RUNNING_BEHAVIORS + [("hide", N_("Hide Window"))]
 
-# User-facing names for the tools Collins offers the sessions it starts, by
-# tool name (see mcptools.TOOLS). The table's own descriptions are written
-# for the agent and left untranslated by design, so the switches get labels
-# of their own: what the user gives up by turning one off, said in their
-# language. The tool's real name goes in the subtitle — it is what shows up
-# in the session's /mcp list and in its permission prompts.
-_MCP_TOOL_LABELS = {
-    "set_session_title": (
-        N_("Name its own session"),
-        N_("set_session_title — the session titles its own tab and sidebar row"),
-    ),
-    "open_in_editor": (
-        N_("Open files in the editor"),
-        N_("open_in_editor — put a file from the project on screen, at a line"),
-    ),
-    "show_image": (
-        N_("Show images"),
-        # The URL half is disclosure, not detail: it is the only tool that
-        # sends Collins to an address the agent chose (attach_pr reaches the
-        # network too, but only to ask gh about a GitHub PR).
-        N_("show_image — a screenshot, plot, render, or image URL in the in-app lightbox"),
-    ),
-    "notify_user": (
-        N_("Send desktop notifications"),
-        N_("notify_user — a notification titled with the session; clicking it opens the tab"),
-    ),
-    "attach_pr": (
-        N_("Attach pull requests"),
-        N_("attach_pr — put a pull request on the session's own footer and sidebar row"),
-    ),
-    "start_session": (
-        N_("Start sessions in the background"),
-        N_("start_session — spawn a sibling agent in a new background tab, with a prompt"),
-    ),
-    "read_terminal": (
-        N_("Read the terminal panel"),
-        # "everything you typed" is the disclosure: the dump carries the
-        # user's own input, echoed passwords included, not just output.
-        N_("read_terminal — the panel tabs' text and scrollback, your own typing included"),
-    ),
-    "run_in_terminal": (
-        N_("Run commands in the terminal panel"),
-        N_("run_in_terminal — type a command into an idle panel tab (or a new one) and run it"),
-    ),
+
+# The search keywords for the Token use group's rows (tokensettings builds
+# the rows; search is this dialog's business), by prefslayout.TOKEN_USE_ROWS
+# key. The model pickers' tier names are what people type when they want a
+# model; "auto-generate", "titles" and "off" are the switch the title
+# picker's None item replaced, for anyone looking for it by its old name.
+_TOKEN_ROW_TERMS = {
+    "title_model": (N_("None"), "haiku", "sonnet", "opus", "auto-generate", "titles", "off"),
+    "icon_model": (N_("None"), "haiku", "sonnet", "opus"),
+    "auto_renew_login": ("token", "oauth", "regenerate", "refresh", "expired", "login"),
+    "model_list": (N_("Refresh"), "models api"),
 }
 
 
@@ -265,13 +229,68 @@ class PreferencesDialog(Adw.Dialog):
         page = _SearchablePage(title=_("Preferences"), icon_name="preferences-system-symbolic")
         self._page = page
 
+        # The groups, in the order prefslayout promises them — a loop over
+        # data rather than a run of page.add calls, so the order is one the
+        # unit suite can hold the page to (the Token use group directly under
+        # General, above all).
+        builders = {
+            "cli": self._build_cli_group,
+            "general": self._build_general_group,
+            "token_use": self._build_token_use_group,
+            "mcp_tools": self._build_mcp_tools_group,
+            "sessions": self._build_sessions_group,
+            "composer": self._build_composer_group,
+            "terminal": self._build_terminal_group,
+            "footer_apps": self._build_footer_apps_group,
+            "pull_requests": self._build_pr_group,
+            "caffeine": self._build_caffeine_group,
+            "editor": self._build_editor_group,
+        }
+        for name in prefslayout.GROUPS:
+            page.add(builders[name](state))
+
+        self._no_results = Adw.StatusPage(
+            icon_name="system-search-symbolic",
+            title=_("No settings found"),
+            description=_("Try a different search."),
+        )
+        # Not homogeneous: the placeholder is free to be smaller than the
+        # settings, which would otherwise widen the dialog to fit it.
+        self._stack = Gtk.Stack(hhomogeneous=False, vhomogeneous=False)
+        self._stack.add_named(page, "settings")
+        self._stack.add_named(self._no_results, "no-results")
+
+        # The box lines up with the setting rows rather than running the full
+        # width of the dialog. Reproducing that inset takes the same clamp the
+        # page uses, not a fixed margin: Adw.Clamp eases the gap open between
+        # its tightening threshold and its maximum, so the rows sit 12px in at
+        # 360px wide and 54px in at 640px. Same two numbers, same 12px margin
+        # on the clamped child, and the two agree at every width.
+        self._search_entry.set_margin_start(12)
+        self._search_entry.set_margin_end(12)
+        self._search_entry.set_margin_top(6)
+        self._search_entry.set_margin_bottom(6)
+        search_bar = Adw.Clamp(
+            child=self._search_entry, maximum_size=600, tightening_threshold=400
+        )
+
+        toolbar_view = Adw.ToolbarView(content=self._stack)
+        toolbar_view.add_top_bar(Adw.HeaderBar())
+        toolbar_view.add_top_bar(search_bar)
+        # The search box is the first focusable widget in the dialog, so
+        # Adw.Dialog hands it the focus on open: preferences opens ready to
+        # type into. _on_search_stopped keeps Escape closing anyway.
+        self.set_child(toolbar_view)
+
+    def _build_cli_group(self, state: AppState) -> _SearchableGroup:
         # Above everything, under no heading: the CLI is the tool the app is
         # about, and the row that answers "which claude is Collins running?"
         # shouldn't take scrolling — or a category — to find.
         cli_group = _SearchableGroup()
         self._build_cli_rows(state, cli_group)
-        page.add(cli_group)
+        return cli_group
 
+    def _build_general_group(self, state: AppState) -> _SearchableGroup:
         # General: what Collins looks like and what the sidebar shows.
         general_group = _SearchableGroup(title=_("General"))
         current_lang = state.get_setting("language") or ""
@@ -345,65 +364,39 @@ class PreferencesDialog(Adw.Dialog):
         self._usage_panel_row.set_active(bool(state.get_setting("show_usage_panel")))
         self._usage_panel_row.connect("notify::active", self._on_usage_panel_changed)
         general_group.add(self._usage_panel_row)
-        self._model_rows: dict[str, Adw.ComboRow] = {}
-        self._model_default_labels: dict[str, str] = {}
-        # Per key rather than bound into each row's handler: the list is
-        # applied more than once (saved, queried, refreshed) and a handler
-        # holding an older one would save the wrong id (see _apply_model_rows).
-        self._model_ids: dict[str, list[str]] = {}
-        self._model_handlers: dict[str, int] = {}
-        for key, title, subtitle, default_label, terms in (
-            (
-                "title_model",
-                _("Session title model"),
-                _(
-                    "Names each new session from its first prompt — every session "
-                    "Collins sees under ~/.claude/projects, including ones an agent "
-                    "or a terminal started. None: sessions keep the first words of "
-                    "their prompt, which costs nothing"
-                ),
-                _("Default (latest Haiku)"),
-                # The switch this row's None item replaced, for anyone looking
-                # for it by its old name.
-                ("auto-generate", "titles", "off"),
-            ),
-            (
-                "icon_model",
-                _("Icon generation model"),
-                _(
-                    "Model the sidebar's Generate Icon dialog starts with. None: "
-                    "the dialog waits for you to pick a model and click Generate"
-                ),
-                _("Default (latest Sonnet)"),
-                (),
-            ),
-        ):
-            row = Adw.ComboRow(title=title, subtitle=subtitle)
-            self._model_rows[key] = row
-            self._model_default_labels[key] = default_label
-            _searchable(row, _("None"), "haiku", "sonnet", "opus", *terms)
-        # None and the default alone until the live list lands (see
-        # _populate_model_rows) — enough for the saved choice to show.
-        self._apply_model_rows([])
-        # The list is cached for a day and across restarts (claudemodels), so
-        # a model released this morning would otherwise not be offered until
-        # tomorrow. This row says how old the list is and asks for a new one.
-        self._model_status_row = Adw.ActionRow(
-            title=_("Model list"), subtitle=_("Checking…")
-        )
-        self._model_refresh_btn = Gtk.Button(label=_("Refresh"), valign=Gtk.Align.CENTER)
-        self._model_refresh_btn.add_css_class("flat")
-        self._model_refresh_btn.set_tooltip_text(
-            _("Ask Anthropic for the model list now, rather than waiting for the saved one to age out")
-        )
-        self._model_refresh_btn.connect("clicked", self._on_refresh_models)
-        self._model_status_row.add_suffix(self._model_refresh_btn)
-        _searchable(self._model_status_row, _("Refresh"), "models api")
-        self._populate_model_rows()
-        general_group.add(self._model_rows["icon_model"])
-        general_group.add(self._model_status_row)
-        page.add(general_group)
+        return general_group
 
+    def _build_token_use_group(self, state: AppState) -> _SearchableGroup:
+        """The settings that spend the user's Claude quota, together and
+        directly under General (see prefslayout). The rows are
+        tokensettings' — built there so a first-launch dialog can show the
+        same ones — and only the search keywords are added here."""
+        group = _SearchableGroup(
+            title=_(tokensettings.TITLE), description=_(tokensettings.DESCRIPTION)
+        )
+        _searchable(group, *tokensettings.SEARCH_TERMS)
+        rows = tokensettings.build_token_rows(state, self._on_change)
+        for key, row in zip(prefslayout.TOKEN_USE_ROWS, rows, strict=True):
+            # The N_-marked terms ("None", "Refresh") are what the row shows,
+            # so they match in the user's language; the rest are English
+            # keywords gettext hands back untouched.
+            group.add(_searchable(row, *(_(term) for term in _TOKEN_ROW_TERMS[key])))
+        return group
+
+    def _build_mcp_tools_group(self, state: AppState) -> _SearchableGroup:
+        """The on/off switch for each tool Collins offers a session — the
+        rows are tokensettings.build_mcp_rows', by tool name."""
+        group = _SearchableGroup(
+            title=_(tokensettings.MCP_TITLE), description=_(tokensettings.MCP_DESCRIPTION)
+        )
+        self._mcp_tool_rows = tokensettings.build_mcp_rows(state, self._on_change)
+        for name, row in self._mcp_tool_rows.items():
+            # The tool's name is in the subtitle already; "session tools" is
+            # what the group used to be called.
+            group.add(_searchable(row, "session tools", name))
+        return group
+
+    def _build_sessions_group(self, state: AppState) -> _SearchableGroup:
         sessions_group = _SearchableGroup(title=_("Session behavior"))
         self._restore_session_row = Adw.SwitchRow(
             title=_("Reopen the last session"),
@@ -428,7 +421,6 @@ class PreferencesDialog(Adw.Dialog):
         self._worktree_row.set_active(bool(state.get_setting("worktree_new_sessions")))
         self._worktree_row.connect("notify::active", self._on_worktree_changed)
         sessions_group.add(self._worktree_row)
-        sessions_group.add(self._model_rows["title_model"])
         self._cli_title_row = Adw.SwitchRow(
             title=_("Follow Claude's own session names"),
             subtitle=_(
@@ -508,8 +500,9 @@ class PreferencesDialog(Adw.Dialog):
         self._bg_poll_row.set_active(bool(state.get_setting("background_status_poll")))
         self._bg_poll_row.connect("notify::active", self._on_bg_poll_changed)
         sessions_group.add(self._bg_poll_row)
-        page.add(sessions_group)
+        return sessions_group
 
+    def _build_composer_group(self, state: AppState) -> _SearchableGroup:
         composer_group = _SearchableGroup(title=_("Composer"))
         self._composer_autoshow_row = Adw.ComboRow(
             title=_("Composer in new sessions"),
@@ -576,8 +569,9 @@ class PreferencesDialog(Adw.Dialog):
         self._spell_click_row.set_active(bool(state.get_setting("composer_spell_click")))
         self._spell_click_row.connect("notify::active", self._on_spell_click_changed)
         composer_group.add(self._spell_click_row)
-        page.add(composer_group)
+        return composer_group
 
+    def _build_terminal_group(self, state: AppState) -> _SearchableGroup:
         terminal_group = _SearchableGroup(title=_("Terminal"))
         current_theme = state.get_setting("terminal_theme") or DEFAULT_THEME
         if current_theme not in THEME_NAMES:
@@ -642,8 +636,9 @@ class PreferencesDialog(Adw.Dialog):
         self._easy_copy_row.set_active(bool(state.get_setting("easy_copy_paste")))
         self._easy_copy_row.connect("notify::active", self._on_easy_copy_changed)
         terminal_group.add(self._easy_copy_row)
-        page.add(terminal_group)
+        return terminal_group
 
+    def _build_footer_apps_group(self, state: AppState) -> _SearchableGroup:
         self._footer_apps_group = _SearchableGroup(
             title=_("Footer apps"),
             description=_("Buttons in each tab's footer that open the tab's directory"),
@@ -656,10 +651,9 @@ class PreferencesDialog(Adw.Dialog):
         _searchable(self._footer_apps_group, _("Add application…"))
         self._footer_app_rows: list[Adw.PreferencesRow] = []
         self._rebuild_footer_apps()
-        page.add(self._footer_apps_group)
+        return self._footer_apps_group
 
-        self._build_editor_group(state, page)
-
+    def _build_pr_group(self, state: AppState) -> _SearchableGroup:
         pr_group = _SearchableGroup(title=_("Pull requests"))
         pr_scale_row = Adw.SpinRow.new_with_range(50, 300, 5)
         pr_scale_row.set_title(_("Text size"))
@@ -741,8 +735,9 @@ class PreferencesDialog(Adw.Dialog):
         self._pr_launch_row.set_active(bool(state.get_setting("refresh_prs_on_launch")))
         self._pr_launch_row.connect("notify::active", self._on_pr_launch_changed)
         pr_group.add(self._pr_launch_row)
-        page.add(pr_group)
+        return pr_group
 
+    def _build_caffeine_group(self, state: AppState) -> _SearchableGroup:
         caffeine_group = _SearchableGroup(title=_("Caffeine Mode"))
         self._caffeine_screen_row = Adw.SwitchRow(
             title=_("Keep screen on"),
@@ -797,44 +792,9 @@ class PreferencesDialog(Adw.Dialog):
         self._caffeine_timer_row.set_sensitive(self._caffeine_launch_row.get_active())
         self._caffeine_timer_row.connect("notify::selected", self._on_caffeine_timer_changed)
         caffeine_group.add(_searchable(self._caffeine_timer_row, *duration_labels))
-        page.add(caffeine_group)
+        return caffeine_group
 
-        self._build_mcp_tools_group(state, page)
-
-        self._no_results = Adw.StatusPage(
-            icon_name="system-search-symbolic",
-            title=_("No settings found"),
-            description=_("Try a different search."),
-        )
-        # Not homogeneous: the placeholder is free to be smaller than the
-        # settings, which would otherwise widen the dialog to fit it.
-        self._stack = Gtk.Stack(hhomogeneous=False, vhomogeneous=False)
-        self._stack.add_named(page, "settings")
-        self._stack.add_named(self._no_results, "no-results")
-
-        # The box lines up with the setting rows rather than running the full
-        # width of the dialog. Reproducing that inset takes the same clamp the
-        # page uses, not a fixed margin: Adw.Clamp eases the gap open between
-        # its tightening threshold and its maximum, so the rows sit 12px in at
-        # 360px wide and 54px in at 640px. Same two numbers, same 12px margin
-        # on the clamped child, and the two agree at every width.
-        self._search_entry.set_margin_start(12)
-        self._search_entry.set_margin_end(12)
-        self._search_entry.set_margin_top(6)
-        self._search_entry.set_margin_bottom(6)
-        search_bar = Adw.Clamp(
-            child=self._search_entry, maximum_size=600, tightening_threshold=400
-        )
-
-        toolbar_view = Adw.ToolbarView(content=self._stack)
-        toolbar_view.add_top_bar(Adw.HeaderBar())
-        toolbar_view.add_top_bar(search_bar)
-        # The search box is the first focusable widget in the dialog, so
-        # Adw.Dialog hands it the focus on open: preferences opens ready to
-        # type into. _on_search_stopped keeps Escape closing anyway.
-        self.set_child(toolbar_view)
-
-    def _build_editor_group(self, state: AppState, page: _SearchablePage) -> None:
+    def _build_editor_group(self, state: AppState) -> _SearchableGroup:
         editor_group = _SearchableGroup(title=_("Editor"))
 
         scheme_ids = [""] + sorted(editor.GtkSource.StyleSchemeManager.get_default().get_scheme_ids())
@@ -905,8 +865,7 @@ class PreferencesDialog(Adw.Dialog):
         pop_out_row.set_value(int(state.get_setting("editor_pop_out_screen_width") or 0))
         pop_out_row.connect("notify::value", self._on_editor_pop_out_width_changed)
         editor_group.add(pop_out_row)
-
-        page.add(editor_group)
+        return editor_group
 
     def _build_status_icon_row(self, state: AppState, group: _SearchableGroup) -> None:
         """The status icon's switch, and the truth about whether this desktop
@@ -1056,38 +1015,6 @@ class PreferencesDialog(Adw.Dialog):
 
         picker.open(self.get_root(), None, picked)
 
-    def _build_mcp_tools_group(self, state: AppState, page: _SearchablePage) -> None:
-        """The on/off switch for each tool Collins offers a session (the
-        `collins` MCP server in the session's /mcp list).
-
-        Driven by mcptools.TOOLS, in the order sessions are served them, so a
-        tool added to the table can't ship without a switch — one with no
-        entry in _MCP_TOOL_LABELS falls back to its own name rather than
-        going unlisted.
-        """
-        group = _SearchableGroup(
-            title=_("Built-in MCP tools"),
-            description=_(
-                "Turning one off takes effect immediately; sessions already "
-                "running are only offered the tool again once they restart"
-            ),
-        )
-        self._mcp_tool_rows: dict[str, Adw.SwitchRow] = {}
-        for tool in mcptools.TOOLS:
-            name = tool["name"]
-            title, subtitle = _MCP_TOOL_LABELS.get(name, (name, ""))
-            row = Adw.SwitchRow(title=_(title), subtitle=_(subtitle) if subtitle else "")
-            row.set_active(bool(state.get_setting(mcptools.tool_setting_key(name))))
-            row.connect("notify::active", self._on_mcp_tool_changed, name)
-            self._mcp_tool_rows[name] = row
-            # The tool's name is in the subtitle already; "session tools" is
-            # what the group used to be called.
-            group.add(_searchable(row, "session tools", name))
-        page.add(group)
-
-    def _on_mcp_tool_changed(self, row: Adw.SwitchRow, _pspec, name: str) -> None:
-        self._state.set_setting(mcptools.tool_setting_key(name), row.get_active())
-        self._on_change()
 
     # -- search --------------------------------------------------------------
 
@@ -1328,137 +1255,6 @@ class PreferencesDialog(Adw.Dialog):
     def _on_attach_prompt_prs_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("attach_prompt_prs", row.get_active())
 
-    def _populate_model_rows(self) -> None:
-        """Fill the model pickers, off the main loop.
-
-        The saved list (claudemodels keeps one across restarts) fills the rows
-        at once when there is one, so the page opens on real models instead of
-        a placeholder; the worker behind it re-queries only if that list has
-        aged out, and the CLI's own aliases stand in when the API can't be
-        asked and nothing was ever saved.
-        """
-        cached = claudemodels.cached_models()
-        if cached:
-            self._apply_model_rows(cached)
-            self._apply_model_status(
-                len(cached), claudemodels.cache_fetched_at(), claudemodels.cache_failed()
-            )
-
-        def work() -> None:
-            models = claudemodels.available_models()
-            GLib.idle_add(
-                apply_models,
-                models,
-                claudemodels.cache_fetched_at(),
-                claudemodels.cache_failed(),
-                priority=GLib.PRIORITY_DEFAULT,
-            )
-
-        def apply_models(
-            models: list[claudemodels.ClaudeModel], fetched_at: float, failed: bool
-        ) -> bool:
-            self._apply_model_rows(models or list(claudemodels.FALLBACK_MODELS))
-            self._apply_model_status(len(models), fetched_at, failed)
-            return GLib.SOURCE_REMOVE
-
-        threading.Thread(target=work, name="prefs-models", daemon=True).start()
-
-    def _apply_model_rows(self, models: list[claudemodels.ClaudeModel]) -> None:
-        """Offer *models* in every picker, keeping each row's saved choice.
-
-        Every picker lists None first (the feature runs nothing by itself),
-        then the automatic default, then the catalog. Runs more than once —
-        the saved list, the query behind it, and every Refresh — so each pass
-        has to leave exactly one "notify::selected" handler per row, and to
-        stop set_model/set_selected from firing it: an unblocked repopulate
-        would write the settings back as though the user had just picked
-        something.
-        """
-        for key, row in self._model_rows.items():
-            current = (self._state.get_setting(key) or "").strip()
-            ids = [claudemodels.NO_MODEL, ""] + [m.id for m in models]
-            labels = [_("None"), self._model_default_labels[key]] + [
-                m.display_name for m in models
-            ]
-            if current and current not in ids:
-                # A saved model the API no longer lists stays visible and
-                # selected rather than silently snapping to the default.
-                ids.append(current)
-                labels.append(current)
-            handler = self._model_handlers.get(key)
-            if handler is not None:
-                row.handler_block(handler)
-            row.set_model(Gtk.StringList.new(labels))
-            row.set_selected(ids.index(current))
-            if handler is not None:
-                row.handler_unblock(handler)
-            self._model_ids[key] = ids
-            if handler is None:
-                self._model_handlers[key] = row.connect(
-                    "notify::selected", self._on_model_row_changed, key
-                )
-
-    def _apply_model_status(self, count: int, fetched_at: float, failed: bool) -> None:
-        """Date the list under the Refresh button, and say when it's a fallback.
-
-        The row never just goes quiet: whenever the list on screen is the
-        product of a query that didn't answer, it says so and keeps naming the
-        list it fell back to and how old that is.
-
-        *failed* is `claudemodels.cache_failed()` at both call sites, not a
-        flag off whichever call got here. Opening the page onto a lapsed TTL
-        with the network down is the same broken as pressing Refresh with the
-        network down, and the row should read the same either way.
-        """
-        if fetched_at <= 0:
-            self._model_status_row.set_subtitle(
-                _("Couldn't reach Anthropic — offering the CLI's aliases (opus, sonnet, haiku)")
-            )
-            return
-        when = formatting.format_relative(
-            datetime.fromtimestamp(fetched_at, timezone.utc).isoformat()
-        )
-        if failed:
-            self._model_status_row.set_subtitle(
-                _("Couldn't reach Anthropic — still showing the list fetched {when}").format(when=when)
-            )
-        else:
-            self._model_status_row.set_subtitle(
-                _("{count} models, updated {when}").format(count=count, when=when)
-            )
-
-    def _on_refresh_models(self, _button: Gtk.Button) -> None:
-        """Query the API outright, cache and backoff ignored."""
-        self._model_refresh_btn.set_sensitive(False)
-        self._model_status_row.set_subtitle(_("Checking…"))
-
-        def work() -> None:
-            models = claudemodels.refresh_models()
-            GLib.idle_add(
-                done,
-                models,
-                claudemodels.cache_fetched_at(),
-                claudemodels.cache_failed(),
-                priority=GLib.PRIORITY_DEFAULT,
-            )
-
-        def done(
-            models: list[claudemodels.ClaudeModel], fetched_at: float, failed: bool
-        ) -> bool:
-            self._apply_model_rows(models or list(claudemodels.FALLBACK_MODELS))
-            self._apply_model_status(len(models), fetched_at, failed)
-            self._model_refresh_btn.set_sensitive(True)
-            return GLib.SOURCE_REMOVE
-
-        threading.Thread(target=work, name="prefs-models-refresh", daemon=True).start()
-
-    def _on_model_row_changed(self, row: Adw.ComboRow, _pspec, key: str) -> None:
-        ids = self._model_ids.get(key) or [claudemodels.NO_MODEL, ""]
-        selected = row.get_selected()
-        if not 0 <= selected < len(ids):
-            return  # mid-repopulate; the pass that set it will restore the choice
-        self._state.set_setting(key, ids[selected])
-        self._on_change()
 
     def _on_pr_title_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("pr_title_sessions", row.get_active())

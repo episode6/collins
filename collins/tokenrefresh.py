@@ -27,10 +27,14 @@ subprocesses a day, not one per panel poll.
 
 Deliberately narrow. No credentials file at all means not logged in, which
 a headless run cannot fix — it would only fail slower; a token inside its
-expiry is trusted even though it could in principle be revoked. And the
-screenshot/e2e harness's fixture switch (``COLLINS_USAGE_FIXTURE``) turns
-the whole check off, for the same reason the switch exists: a throwaway
-harness instance must never spend real tokens.
+expiry is trusted even though it could in principle be revoked. The run
+spends the user's quota without a prompt from them, so it has a switch —
+the *Auto-renew the Claude login* row of the Token use preferences
+(``auto_renew_login``, on by default) — that both entries honor, leaving
+the usage panel to say the login expired and to name `claude` as the fix.
+And the screenshot/e2e harness's fixture switch (``COLLINS_USAGE_FIXTURE``)
+turns the whole check off, for the same reason the switch exists: a
+throwaway harness instance must never spend real tokens.
 
 GTK-free, like usage and claudemodels, so the check and the runner are
 unit-testable headless.
@@ -46,9 +50,12 @@ import threading
 import time
 from collections.abc import Callable
 
-from . import claudemodels, clisetup, titles, usage
+from . import claudemodels, clisetup, state, titles, usage
 
 log = logging.getLogger(__name__)
+
+# The preference that allows a throwaway run at all (see `enabled`).
+SETTING = "auto_renew_login"
 
 # The refresh happens during the CLI's startup, but success is only read off
 # the credentials file after the run — so the timeout must cover a whole
@@ -59,6 +66,17 @@ _PROMPT = "Reply with the single word: ok"
 # The CLI's own tier alias, chosen without a models query — asking the
 # Models API is exactly what doesn't work yet.
 _MODEL = "haiku"
+
+
+def enabled() -> bool:
+    """Whether the Token use switch allows a throwaway run at all.
+
+    Read off a fresh AppState rather than one handed in, the way a title
+    run reads its model (titles._run_claude): the entries are called from
+    the app and from any usage panel, and a preference flipped a moment ago
+    has to govern the very next attempt whichever of them makes it.
+    """
+    return bool(state.AppState().get_setting(SETTING))
 
 
 def token_expired() -> bool:
@@ -213,18 +231,21 @@ def _repair(on_refreshed: Callable[[], None]) -> None:
 
 
 def _spawn(check: Callable[[], bool], on_refreshed: Callable[[], None]) -> threading.Thread | None:
-    """The shared entry shape: gate on the fixture harness and a doomed
-    attempt, then run *check* + claim + repair on a daemon thread. Returns
-    the thread, or None when nothing was started (the fixture harness, or
-    a slot certain to refuse) — callers need neither; tests join.
+    """The shared entry shape: gate on the fixture harness, a doomed
+    attempt and the preference, then run *check* + claim + repair on a
+    daemon thread. Returns the thread, or None when nothing was started
+    (the fixture harness, a slot certain to refuse, or the switch off) —
+    callers need neither; tests join.
 
     The peek keeps every-poll callers honest: during a broken login's
     cooldown, `maybe_repair` costs a couple of reads, not a thread spawned
-    to be told no. *check* still runs on the thread — it does file and
-    PATH I/O that doesn't belong on the main loop — and the claim is still
-    the worker's first act, so peek races resolve there.
+    to be told no. The switch is read last, so the state file is only
+    parsed when a run is otherwise about to happen. *check* still runs on
+    the thread — it does file and PATH I/O that doesn't belong on the main
+    loop — and the claim is still the worker's first act, so peek races
+    resolve there.
     """
-    if os.environ.get("COLLINS_USAGE_FIXTURE") or not _slot_free():
+    if os.environ.get("COLLINS_USAGE_FIXTURE") or not _slot_free() or not enabled():
         return None
 
     def work() -> None:

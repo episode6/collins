@@ -39,6 +39,23 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **A Token use group in Preferences, with a login-renew switch.** The
+  settings that run Claude on your behalf now sit together, directly
+  under General: the *Session title model* and *Icon generation model*
+  pickers (moved from Session behavior and General), a new **Auto-renew
+  the Claude login** switch (on by default) for the throwaway `claude -p`
+  that repairs an expired login at launch or after a refused usage poll —
+  off, the usage panel says the login expired and leaves running
+  `claude` to you — and the *Model list* row, whose subtitle now says it
+  is free. The group's description says what the rows have in common:
+  each runs a headless `claude -p` from a scratch directory, against your
+  subscription's limits, without a prompt from you. *Built-in MCP tools*
+  moves up from the bottom of the page to follow it, and its description
+  now discloses that every enabled tool's definition rides in each
+  session's context, that `read_terminal` sends the panel's text into the
+  conversation, and that a session `start_session` starts is titled like
+  any other. Search finds every moved row where it was ("oauth",
+  "auto-generate", "quota"…).
 - **The model pickers gain a None option.** *Session title model* and *Icon
   generation model* both list **None** first, ahead of the automatic default
   and the catalog. For titles it replaces the *Auto-generate session titles*
