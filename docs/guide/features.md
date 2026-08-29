@@ -197,8 +197,10 @@ belongs to its session, and it is there when you come back to it.
 - **Drafts wait for you.** Whatever is in the composer when you leave stays
   with the session: close the tab, quit Collins, come back a day later, and
   the draft is back in the box the next time you open that session's
-  composer — by `Ctrl+.`, by the button, or by starting to type (what you
-  typed goes in first, the draft under it). The same holds when the agent
+  composer — by `Ctrl+.`, by the button, or by starting to type, in which
+  case what you typed lands after the draft; anything already typed-but-unsent
+  in the CLI's own box when the composer opens is cut into it *above* the
+  draft, in the order the two were written. The same holds when the agent
   has left the terminal under an open composer — a bare shell, where pasting
   a draft would run it as commands — so closing the composer keeps the draft
   instead of typing it back. Drafts are saved to disk with the rest of the
