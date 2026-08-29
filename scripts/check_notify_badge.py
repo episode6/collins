@@ -9,11 +9,9 @@ sidebar, not the store), the placeholder → real-row handoff, and a message
 row landing in state.json while the synthetic rows stay off disk. Every step
 asserts the center's rows and the number App.tray_view() would badge.
 
-The caller stages the data and isolates the run the way the capture skill
-does (a fresh COLLINS_APP_ID, COLLINS_PROJECTS_DIR, COLLINS_CLAUDE_CONFIG,
-COLLINS_CHATS_DIR, XDG_CONFIG_HOME, XDG_STATE_HOME — see
-.claude/skills/capture-screenshots/SKILL.md), points COLLINS_PROJECTS_DIR at
-stage-demo-data.sh's scene, and runs this behind with-headless-display.sh:
+Stages its own throwaway scratch tree and app id (one session's transcript
+under a project named alpha-widgets, and a name for it in state.json), so it
+runs anywhere the e2e suite does:
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \\
         python3 scripts/check_notify_badge.py
@@ -23,11 +21,53 @@ loop and the window's placeholder path needs a sidebar, and tests/conftest.py
 blocks the GTK stack to match CI. What can be decided without a toolkit —
 coalescing, counts, the delivery table, the persisted shape — is
 tests/test_notifycenter.py's.
+
+Run it behind the headless wrapper, or a window opens on the user's screen.
 """
 
 import json
 import os
+import re
+import shutil
 import sys
+import tempfile
+
+E2E = tempfile.mkdtemp(prefix="collins-badge-")
+RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
+
+# Isolation first: every one of these is read at import time somewhere below.
+os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
+os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
+os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
+os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
+os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
+os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
+
+SESSION = "11111111-1111-4111-8111-111111111111"
+PLACEHOLDER = "placeholder-77"
+PROJECT_DIR = f"{E2E}/dev/alpha-widgets"
+STATE_FILE = f"{E2E}/config/collins/state.json"
+
+# One session in one project, named so the row's title is a known string.
+_encoded = re.sub(r"[^A-Za-z0-9]", "-", PROJECT_DIR)
+for path in (f"{E2E}/projects/{_encoded}", f"{E2E}/chats", f"{E2E}/config/collins", PROJECT_DIR):
+    os.makedirs(path, exist_ok=True)
+with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
+    fh.write("{}")
+with open(f"{E2E}/projects/{_encoded}/{SESSION}.jsonl", "w", encoding="utf-8") as fh:
+    fh.write(
+        json.dumps(
+            {
+                "type": "user",
+                "timestamp": "2026-07-25T14:12:03Z",
+                "cwd": PROJECT_DIR,
+                "message": {"role": "user", "content": "Fix the flaky spinner animation"},
+            }
+        )
+        + "\n"
+    )
+with open(STATE_FILE, "w", encoding="utf-8") as fh:
+    json.dump({"names": {SESSION: "Fix spinner animation"}, "settings": {"welcome_seen": True}}, fh)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -41,24 +81,23 @@ from collins import i18n, notifycenter  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
-# The first alpha-widgets session of stage-demo-data.sh's scene.
-SESSION = "11111111-1111-4111-8111-111111111111"
-PLACEHOLDER = "placeholder-77"
-
 failures = []
+passed = [0]
 
 
 def check(label, ok, detail=""):
-    print(f"{'PASS' if ok else 'FAIL'}  {label}{f' — {detail}' if detail else ''}")
-    if not ok:
+    print(f"{'  ok' if ok else 'FAIL'}  {label}{f' — {detail}' if detail else ''}")
+    if ok:
+        passed[0] += 1
+    else:
         failures.append(label)
 
 
 def saved_notifications() -> list:
     """What state.json holds right now, read back off the disk."""
-    path = os.path.join(os.environ["XDG_CONFIG_HOME"], "collins", "state.json")
     try:
-        return json.loads(open(path, encoding="utf-8").read()).get("notifications", [])
+        with open(STATE_FILE, encoding="utf-8") as fh:
+            return json.load(fh).get("notifications", [])
     except (OSError, json.JSONDecodeError):
         return []
 
@@ -94,7 +133,7 @@ def run_checks(app: App) -> None:
     check("synthetic rows never touched the disk", saved_notifications() == [])
 
     # -- a placeholder's flag lives in the sidebar --------------------------
-    win.sidebar.add_placeholder(PLACEHOLDER, "/home/ghackett/dev/alpha-widgets", "agent-claude-symbolic")
+    win.sidebar.add_placeholder(PLACEHOLDER, PROJECT_DIR, "agent-claude-symbolic")
     win._on_session_finished(PLACEHOLDER)
     row = center.get(notifycenter.green_id(PLACEHOLDER))
     check("a placeholder's finish is a row under its own key",
@@ -164,16 +203,17 @@ def main() -> int:
             import traceback
 
             traceback.print_exc()
-        if failures:
-            print(f"\n{len(failures)} check(s) failed:\n  " + "\n  ".join(failures))
-        else:
-            print("\nall checks passed")
+        if not failures:
             exit_code[0] = 0
         app.quit()
         return GLib.SOURCE_REMOVE
 
     GLib.timeout_add(250, prepare)
-    app.run([])
+    try:
+        app.run([])
+    finally:
+        shutil.rmtree(E2E, ignore_errors=True)
+    print(f"{passed[0]} passed, {len(failures)} failed")
     return exit_code[0]
 
 
