@@ -9,7 +9,10 @@ window — this returns the four things the StatusNotifierItem exports:
 
 - **`Status`**: `Passive` with nothing open (a host may hide the item),
   `Active` with tabs open, `NeedsAttention` once something is unread.
-- **The badge text** composited onto the icon: `""`, `"1"`…`"9"`, `"9+"`.
+- **The badge text** composited onto the icon: `""`, `"1"`…`"9"`, `"9+"` —
+  and beside it the **working count**, which picks the artwork the badge
+  lands on: the glass pours the sidebar's barber pole while it is above
+  zero (statusicon.panel_icon_name).
 - **The tooltip**, the same state in words.
 - **The menu layout** as plain data — labels, markers, actions and the
   separators that survive — which the DBusMenu export walks.

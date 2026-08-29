@@ -1,5 +1,8 @@
 collins (0.1.2) UNRELEASED; urgency=medium
 
+  * The status icon's drink turns into the sidebar's blue barber pole while
+    any session is working, and back to the coral pour when the last run
+    stops — a change of picture, not an animation.
   * Closing the floating composer pastes its draft back into the agent's
     input box in pieces small enough to show in full, instead of one chunk
     the CLI folded into a "[Pasted text]" stand-in that the next open then

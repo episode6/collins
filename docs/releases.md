@@ -38,6 +38,12 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **The status icon shows when agents are working.** While any session is
+  busy, the drink in the panel icon's glass turns into the sidebar's blue
+  barber pole — the busy row's guide line, standing still — and the coral
+  pour comes back the moment the last run stops. One change of picture per
+  transition, not an animation: the tray protocol has none, and each frame
+  would cost the desktop a D-Bus round trip.
 - **The new-chat screen starts empty sessions again.** With nothing in
   its box, the screen's Send button reads *Empty Session*; pressing it — or
   Enter (`Ctrl+Enter`, if that is your send key) — launches the agent with

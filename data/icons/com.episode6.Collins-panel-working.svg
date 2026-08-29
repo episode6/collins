@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
+  <!--
+  Working variant of com.episode6.Collins-panel.svg (original artwork for the
+  ghackett fork): the same 22-grid glass, poured with the sidebar's barber
+  pole instead of the drink. The status icon exports it while any session
+  is busy, and goes back to the coral pour the moment the last one stops.
+
+  Keep this comment INSIDE the root element: gdk-pixbuf only recognizes an
+  SVG when the <svg> tag appears within its sniff buffer, and a long pre-root
+  comment pushes it out, leaving the icon blank.
+
+  The stripes are the sidebar's busy pole (see the barber-pole CSS in app.py):
+  the same two blues, the same 135deg, equal widths — so the icon in the panel
+  and the guide line in the sidebar say "working" with one drawing. The pole
+  does not climb here: StatusNotifierItem has no animation, and re-sending
+  the pixmap on a timer is a D-Bus round trip and a texture upload in the
+  shell per frame. A still pole reads as busy on its own.
+
+  Stripe geometry: a stripe is 2 units across, so the period along the
+  gradient is 4 and the lines are x + y = c with c stepping 4 * sqrt(2) —
+  drawn as the dark stripes over a light fill, clipped to the drink. Only
+  whole units survive 22 pixels, so the stripes rasterize as two-pixel
+  diagonals here and four-pixel ones at 44.
+  -->
+
+  <!-- keylines: the same shapes, a shade wider, under everything -->
+  <g stroke="#262320" fill="none" opacity="0.5" stroke-linecap="round">
+    <line x1="14.3" y1="2.2" x2="11.6" y2="8" stroke-width="2.6"/>
+    <rect x="6" y="3" width="10" height="16" rx="2" stroke-width="3"/>
+  </g>
+
+  <!-- straw: clears the rim by a hair, no more — at 22px a longer overhang
+       is a horn on the corner rather than a straw -->
+  <line x1="14.3" y1="2.2" x2="11.6" y2="8" stroke="#EDE9E1" stroke-width="1.8"
+        stroke-linecap="round"/>
+
+  <!-- drink: the barber pole -->
+  <clipPath id="drink">
+    <rect x="7" y="9" width="8" height="9" rx="1"/>
+  </clipPath>
+  <rect x="7" y="9" width="8" height="9" rx="1" fill="#99c1f1"/>
+  <g clip-path="url(#drink)" stroke="#1c71d8" stroke-width="2">
+    <line x1="-6" y1="19" x2="5" y2="8"/>
+    <line x1="-0.343" y1="19" x2="10.657" y2="8"/>
+    <line x1="5.314" y1="19" x2="16.314" y2="8"/>
+    <line x1="10.971" y1="19" x2="21.971" y2="8"/>
+    <line x1="16.628" y1="19" x2="27.628" y2="8"/>
+  </g>
+
+  <!-- cursor-block ice cube -->
+  <rect x="8" y="10.2" width="3.6" height="2.6" rx="0.6" fill="#EDE9E1"/>
+
+  <!-- glass: 2 wide on whole-pixel edges, so 5..17 and 2..20 stay crisp -->
+  <rect x="6" y="3" width="10" height="16" rx="2" fill="none" stroke="#EDE9E1"
+        stroke-width="2"/>
+</svg>
