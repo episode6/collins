@@ -36,6 +36,7 @@ from . import (
     keymap,
     mcptools,
     newchat,
+    notifypanel,
     openwith,
     paneldnd,
     panelhistory,
@@ -83,6 +84,7 @@ from .i18n import _
 from .keybindingsdialog import KeyboardBindingsDialog
 from .licenses import legal_sections
 from .models import SessionItem
+from .notifycenter import Notification, NotificationCenter, sound_display_name
 from .prefs import PreferencesDialog
 from .projecticons import project_icon_data
 from .providers import SessionOptions, available_providers, default_provider, get_provider
@@ -102,6 +104,7 @@ from .shellinput import shell_command
 from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar, package_repo_label
 from .state import AppState, clamp_window_size, editor_pops_out, panel_size_key
 from .store import SessionStore, emptied_projects
+from .svgtexture import svg_texture
 from .switcher import QuickSwitcher
 from .taborder import neighbour_tab, tab_order
 from .terminal import PROGRESS_HINT_TERMPROP, TerminalTab
@@ -558,8 +561,14 @@ class MainWindow(Adw.ApplicationWindow):
         self.background_btn.connect("clicked", lambda *_: self._background_current_tab())
         content_header.pack_start(self.background_btn)
 
-        # Caffeine Mode: first pack_end child, so it sits immediately left of
-        # the window controls (minimize/maximize/close).
+        # The notification bell: first pack_end child, so it sits immediately
+        # left of the window controls (minimize/maximize/close), wearing the
+        # unread count the tray icon and the dock badge show. Toggling it
+        # shows the history sheet (see the split below); the two are bound.
+        self.notify_bell = notifypanel.NotificationBell()
+        content_header.pack_end(self.notify_bell)
+        # Caffeine Mode: packed after the bell, so it lands one slot to its
+        # left.
         self.caffeine_btn = Gtk.ToggleButton(
             active=bool(getattr(self.get_application(), "caffeine_enabled", False))
         )
@@ -588,10 +597,43 @@ class MainWindow(Adw.ApplicationWindow):
         self.content_stack.add_named(placeholder, "empty")
         self.content_stack.add_named(self.tab_view, "tabs")
 
+        # The notification history, as a sheet over the content stack (see
+        # notifypanel.wrap_content): the toolbar view's content is the split,
+        # and the stack is the split's — every caller that flips the stack
+        # between "empty" and "tabs" still holds the stack itself. Inside the
+        # toolbar view rather than around it, so the sheet starts under the
+        # header bar, and inside the lightbox overlay with everything else,
+        # so a lightbox still floats over an open sheet.
+        self.notify_center = self._notification_center()
+        self.notify_sheet = notifypanel.NotificationSheet(
+            self.notify_center,
+            on_open=self._open_notification,
+            on_preferences=lambda: self._show_preferences("notifications"),
+            on_close=lambda: self.notify_bell.button.set_active(False),
+            project_icon=self._notification_texture,
+            sound_name=lambda: sound_display_name(
+                self.state.get_setting(notifypanel.SOUND_SETTING)
+            ),
+            fallback_icon_name=_app_icon_name(self),
+        )
+        self.notify_split = notifypanel.wrap_content(self.content_stack, self.notify_sheet)
+        # The bell is the sheet's switch, and the sheet's own ways out — the
+        # ×, the scrim, Escape — turn the bell off through the same binding.
+        self.notify_bell.button.bind_property(
+            "active",
+            self.notify_split,
+            "show-sidebar",
+            GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
+        )
+        self.notify_split.connect("notify::show-sidebar", self._on_notify_sheet_toggled)
+        self._notify_listener = self.notify_center.connect(self._on_notifications_changed)
+        self.connect("destroy", lambda *_: self.notify_center.disconnect(self._notify_listener))
+        self._on_notifications_changed()
+
         content_view = Adw.ToolbarView()
         content_view.add_top_bar(content_header)
         content_view.add_top_bar(self.tab_bar)
-        content_view.set_content(self.content_stack)
+        content_view.set_content(self.notify_split)
 
         # --- sidebar ---
         self.sidebar = SessionSidebar(self.store)
@@ -1282,6 +1324,11 @@ class MainWindow(Adw.ApplicationWindow):
             "quick-open": lambda *_: self._quick_open_file(),
             "toggle-sidebar": lambda *_: self.sidebar.set_visible(
                 not self.sidebar.get_visible()
+            ),
+            # Ctrl+Shift+B — the header bell, from the keyboard; the sheet
+            # follows the button through their binding.
+            "toggle-notifications": lambda *_: self.notify_bell.button.set_active(
+                not self.notify_bell.button.get_active()
             ),
             "trash-archived": lambda *_: self._trash_archived(),
             "install-desktop": lambda *_: self._install_desktop_entry(),
@@ -4751,6 +4798,79 @@ class MainWindow(Adw.ApplicationWindow):
         across windows by session_window()."""
         return self._page_for(session_id) is not None
 
+    # -- the bell and the history sheet --------------------------------------
+
+    def _notification_center(self) -> NotificationCenter:
+        """The app's center — one list for every window — or, for a window
+        with no App behind it (an e2e harness), an empty one of its own, so
+        the bell and the sheet exist and behave and simply have nothing to
+        show."""
+        center = getattr(self.get_application(), "notification_center", None)
+        return center if center is not None else NotificationCenter()
+
+    def _on_notifications_changed(self) -> None:
+        """The center moved: the bell shows the new count at once — a label
+        change, cheap and flicker-free — and the sheet rebuilds on an idle,
+        so the handoff's two back-to-back calls cost one rebuild."""
+        self.notify_bell.set_unread(self.notify_center.unread_count())
+        self.notify_sheet.schedule_refresh()
+
+    def _on_notify_sheet_toggled(self, split: Adw.OverlaySplitView, _pspec) -> None:
+        """The sheet opened or closed: put the keyboard where it belongs.
+
+        Open, the first row takes the focus — so the arrow keys walk the
+        list and Escape reaches the split that closes it; the scrim keeps
+        the pointer out of the content but does nothing for the keyboard,
+        and a terminal that kept the focus would eat Escape (VTE consumes
+        every key it is given). Closed, the focus goes back to the selected
+        tab's terminal, where a keystroke is expected to land. Both on an
+        idle: the sheet's rows are rebuilt on one too, and the split's
+        transition has only just started.
+        """
+        if split.get_show_sidebar():
+            GLib.idle_add(self.notify_sheet.take_focus, priority=GLib.PRIORITY_DEFAULT)
+            return
+        page = self.tab_view.get_selected_page()
+        if page is not None and isinstance(page.get_child(), TerminalTab):
+            GLib.idle_add(page.get_child().grab_terminal_focus, priority=GLib.PRIORITY_DEFAULT)
+
+    def _open_notification(self, notification: Notification) -> None:
+        """A row was clicked: go where it points. The sheet stays open —
+        the user may be triaging — and the row is the sheet's to mark read.
+
+        A session id goes through the app's focus-session action, which
+        knows which window the tab is in and presents it. A synthetic row
+        for a tab still waiting on its id is keyed by the placeholder the
+        sidebar knows it by (see notifycenter.Notification), so it takes the
+        sidebar's own open-placeholder path in this window — the placeholder
+        can only be here, since a placeholder tab can't move windows. An
+        empty id (a message from such a tab, once those are posted) lands on
+        the window, as the desktop notification's click does today.
+        """
+        session_id = notification.session_id
+        if session_id and (self.has_placeholder(session_id) or newchat.is_draft_id(session_id)):
+            self._on_sidebar_open_placeholder(self.sidebar, session_id)
+            return
+        app = self.get_application()
+        if app is not None:
+            app.activate_action("focus-session", GLib.Variant("s", session_id))
+        elif session_id:
+            self.focus_session(session_id)
+
+    def _notification_texture(self, notification: Notification) -> Gdk.Texture | None:
+        """The project icon a row wears: the same project-icon.svg the
+        sidebar's group header draws, rasterized at the row's 16px, found the
+        way the desktop notification finds its own (see _notification_icon):
+        the session's cwd mapped back to the repository. None — the generic
+        app icon — for a row whose session the store no longer lists, whose
+        project ships no icon, or whose bytes the loader won't take."""
+        session = self.store.get_session(notification.session_id) if notification.session_id else None
+        cwd = session.cwd if session is not None else ""
+        if not cwd:
+            return None
+        data = project_icon_data(worktree_project_root(cwd) or cwd)
+        return svg_texture(data, 16)
+
     # -- what the status icon shows ------------------------------------------
 
     def _notify_tray(self) -> None:
@@ -6031,8 +6151,14 @@ class MainWindow(Adw.ApplicationWindow):
         self._switcher.connect("closed", lambda *_: setattr(self, "_switcher", None))
         self._switcher.present(self)
 
-    def _show_preferences(self) -> None:
-        PreferencesDialog(self.state, self.apply_preferences).present(self)
+    def _show_preferences(self, group: str | None = None) -> None:
+        """Open Preferences — on one group, when a caller names one the
+        dialog has (see PreferencesDialog.show_group); on the whole page
+        otherwise, which is also what a group that isn't built yet gets."""
+        dialog = PreferencesDialog(self.state, self.apply_preferences)
+        dialog.present(self)
+        if group is not None:
+            dialog.show_group(group)
 
     def _show_welcome(self) -> None:
         """The first-launch welcome again, on demand — the debug menu's

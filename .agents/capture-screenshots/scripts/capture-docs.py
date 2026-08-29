@@ -5,7 +5,11 @@ Usage: python3 capture-docs.py <repo-root> <output.png> --scene NAME
 
 Scenes: main-window, hero, quick-switcher, session-details, mcp-servers,
 preferences, terminal-panel, new-chat, composer, pr-page, editor-panel,
-attachments-panel, welcome, welcome-cli.
+attachments-panel, notifications, welcome, welcome-cli.
+
+notifications opens a session, stages a few rows straight through the
+app's notification center (a message, a coalesced bell, a finished run —
+no real bell rings) and opens the history sheet from the header bell.
 
 The two welcome scenes shoot the first-launch dialog (collins/welcome.py),
 so they need the staged state's welcome_seen set back to false (--set
@@ -31,6 +35,7 @@ import json
 import os
 import sys
 import time
+import uuid
 
 parser = argparse.ArgumentParser()
 parser.add_argument("repo_root")
@@ -45,7 +50,7 @@ args = parser.parse_args()
 SCENES = (
     "main-window", "hero", "quick-switcher", "session-details", "mcp-servers",
     "preferences", "terminal-panel", "new-chat", "composer", "pr-page",
-    "editor-panel", "attachments-panel", "welcome", "welcome-cli",
+    "editor-panel", "attachments-panel", "notifications", "welcome", "welcome-cli",
 )
 if args.scene not in SCENES:
     parser.error(f"unknown scene {args.scene}")
@@ -85,7 +90,7 @@ shutil.which = lambda cmd, *a, **k: (
     "claude" if cmd == "claude" else _orig_which(cmd, *a, **k)
 )
 
-from collins import clisetup, dialogs, i18n, prdetail, trust  # noqa: E402
+from collins import clisetup, dialogs, i18n, notifycenter, prdetail, trust  # noqa: E402
 from collins.prstatus import PullRequest  # noqa: E402
 
 U1 = "11111111-1111-4111-8111-111111111111"
@@ -261,6 +266,9 @@ def stage(win) -> list[tuple[int, callable]]:
     elif scene == "attachments-panel":
         tab = open_tab(win, U1)
         return [(1500, lambda: tab.dock_attachments(focus=False))]
+    elif scene == "notifications":
+        open_tab(win, U1)
+        return [(1500, stage_notifications), (300, lambda: win.notify_bell.button.set_active(True))]
     elif scene == "welcome-cli":
         # The dialog is up already (do_activate presented it); the prefilled
         # path is the scratch HOME's absolute one, which reads as ~ here.
@@ -272,6 +280,42 @@ def stage(win) -> list[tuple[int, callable]]:
 
         return [(500, tilde_path)]
     return []
+
+
+def stage_notifications() -> None:
+    """A morning's worth of rows, through the center rather than the wires
+    that will feed it: two messages, a bell that rang three times, a finished
+    run (a session flagged unread, which the app turns into the synthetic
+    row), and two read rows under Earlier. Times are staged too, so the
+    ages read as a spread rather than "just now" six times over."""
+    center = app.notification_center
+    store = app.store
+    now = time.time()
+
+    def row(kind, session, body, age, read=False, count=1):
+        item = store.get_item(session)
+        n = notifycenter.Notification(
+            id=uuid.uuid4().hex, session_id=session,
+            title=item.display_name, project=item.session.project_name,
+            kind=kind, body=body, when=now - age, read=read, count=count,
+        )
+        center.post(n)
+        return n
+
+    # Oldest first: the center keeps what it is handed newest-on-top only
+    # by insertion, and a read row posted last would sit above the unread.
+    row(notifycenter.KIND_MESSAGE, STAGED[5],
+        "Refreshed all 14 screenshots; two changed visibly (preferences, composer).",
+        30 * 3600, read=True)
+    row(notifycenter.KIND_MESSAGE, STAGED[3],
+        "Profiling done: p95 latency is down 31% with the LRU route cache. Numbers are in the terminal.",
+        2 * 3600, read=True)
+    row(notifycenter.KIND_BELL, STAGED[2], "Rang the bell", 12, count=3)
+    row(notifycenter.KIND_MESSAGE, STAGED[1],
+        "Ready to review: the theme switch now persists across restarts. Open a PR for it?", 5)
+    store.set_unread(STAGED[4], True)  # the finished run: a green row, in the app's own way
+    win = app.get_active_window()
+    win.notify_sheet.refresh()
 
 
 def _walk(widget):

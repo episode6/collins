@@ -348,6 +348,19 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   the session's sidebar row too, so a popup you miss is still waiting in the
   list. Nothing is guessed from a quiet terminal: a notification means the
   agent asked for you.
+- **The bell in the header** wears the unread count — the same number the
+  status icon and the dock badge show — and opens the **notification
+  history**: a sheet that slides in over the session from the right edge
+  (`Ctrl+Shift+B`, or the bell). Every finished run nobody has looked at is
+  a row there, wearing the sidebar's green pulse, and it leaves when you
+  visit the tab, exactly as the pulse does; *Unread* rows sit above
+  *Earlier*. Clicking a row goes to its session and marks it read — the
+  sheet stays open, so you can work through a morning's worth — and
+  right-click offers *Mark read* and *Remove*. *Mark all read* and *Clear*
+  do what they say, except that a finished run's row is the green flag's to
+  remove, not yours. Opening the sheet reads nothing on your behalf.
+
+![The notification history sheet, open over a session](/img/notifications.png)
 - **Session details** (right-click → *Details…*): message and tool-call
   counts, models used, token totals, timestamps, transcript size — plus a
   **recent activity** peek of the last messages, so you can identify a
@@ -372,12 +385,17 @@ watched — and reached — without the window:
 - Its menu **jumps to any open session** by name, brings a hidden window
   back (*Show Collins*), opens a new window, or quits — and Quit from here
   really quits, hidden windows and all.
-- The icon **wears an unread badge**: the number of sessions that finished a
-  run nobody has looked at yet — the sidebar's green pulse, counted. A
+- The icon **wears an unread badge**: it counts unread notifications — the
+  same number as the bell in the header bar. Every session that finished a
+  run nobody has looked at yet is one (the sidebar's green pulse, counted),
+  and so is every message or bell in the history nobody has gone to. A
   flagged session that goes back to work drops out of the count while the
   run lasts (it isn't waiting on you) and comes back the moment the turn
   ends. Sessions that are merely *working* never light the badge, but the
-  tooltip carries both counts for the curious.
+  tooltip carries both counts for the curious. The dock badge, where the
+  desktop has one, shows the same number and lives with the status icon:
+  off when the icon is off. The bell is the one place the number is always
+  on.
 - While any session is **working**, the drink in the glass turns into the
   sidebar's blue **barber pole** — the same stripes as a busy row's guide
   line, standing still — and goes back to the coral pour the moment the

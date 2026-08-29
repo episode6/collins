@@ -857,6 +857,78 @@ msgstr "{n} sin leer"
 msgid "Finished a run"
 msgstr "Terminó una ejecución"
 
+msgid "Notifications"
+msgstr "Notificaciones"
+
+msgid "1 unread notification"
+msgstr "1 notificación sin leer"
+
+msgid "{n} unread notifications"
+msgstr "{n} notificaciones sin leer"
+
+msgid "just now"
+msgstr "ahora mismo"
+
+msgid "{n}s ago"
+msgstr "hace {n} s"
+
+msgid "{n}m ago"
+msgstr "hace {n} min"
+
+msgid "{n}h ago"
+msgstr "hace {n} h"
+
+msgid "yesterday"
+msgstr "ayer"
+
+msgid "{n}d ago"
+msgstr "hace {n} días"
+
+msgid "{body} ×{n}"
+msgstr "{body} ×{n}"
+
+msgid "Untitled session"
+msgstr "Sesión sin título"
+
+msgid "Mark all read"
+msgstr "Marcar todo como leído"
+
+msgid "Mark every notification read"
+msgstr "Marcar todas las notificaciones como leídas"
+
+msgid "Clear"
+msgstr "Vaciar"
+
+msgid "Remove every notification"
+msgstr "Quitar todas las notificaciones"
+
+msgid "Unread"
+msgstr "Sin leer"
+
+msgid "Earlier"
+msgstr "Anteriores"
+
+msgid "No notifications"
+msgstr "No hay notificaciones"
+
+msgid "Messages from sessions you aren't looking at, and bells, land here."
+msgstr "Aquí llegan los mensajes de las sesiones que no estás mirando, y las campanas."
+
+msgid "Mark read"
+msgstr "Marcar como leída"
+
+msgid "Remove"
+msgstr "Quitar"
+
+msgid "Sound: {name}"
+msgstr "Sonido: {name}"
+
+msgid "Preferences…"
+msgstr "Preferencias…"
+
+msgid "Show/hide notifications"
+msgstr "Mostrar/ocultar las notificaciones"
+
 msgid "You interrupted Claude here"
 msgstr "Interrumpiste a Claude aquí"
 

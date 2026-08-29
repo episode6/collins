@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-26. Full change history: git log for this file.
+fork. Last modified: 2026-08-29. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -36,6 +36,7 @@ These are the defaults. Every one of them can be changed — see
 | `Ctrl+S` (in the editor) | Save the current file |
 | `Ctrl+F` (in the editor) | Find in the current file |
 | `F9` | Toggle the sidebar |
+| `Ctrl+Shift+B` | Show/hide the notification history — the sheet the header bell opens; `Esc` closes it too |
 | `Ctrl+,` | Preferences |
 | `Ctrl+Q` | Quit |
 

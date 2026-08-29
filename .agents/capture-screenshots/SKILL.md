@@ -193,7 +193,9 @@ is the shim). Scenes: `main-window`, `hero` (also `data/screenshot.png`, and
 cropped to its sidebar column as `sidebar.png`), `quick-switcher`,
 `session-details`, `mcp-servers`, `preferences`, `terminal-panel`,
 `composer`, `pr-page` (a fabricated `prdetail.fetch` reply — nothing reaches
-GitHub), `editor-panel`, `attachments-panel`, `welcome` and `welcome-cli`
+GitHub), `editor-panel`, `attachments-panel`, `notifications` (rows staged
+straight through the app's notification center, the sheet opened from the
+bell — no real bell rings), `welcome` and `welcome-cli`
 (the first-launch dialog with the CLI found, and with it not found — the
 shot runs with `welcome_seen` set back to false, and the not-found one
 hides `claude` from clisetup and seeds `~/.local/bin/claude` for the

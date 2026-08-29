@@ -41,7 +41,7 @@ features:
     details: A code editor with the agent's latest edits one click away, shell panels under every tab, a gallery of everything the session has shown you, and the composer floating over the terminal or docked below it.
   - icon: 🔔
     title: Stays out of your way
-    details: Close the window and sessions keep running behind a status icon that counts what's waiting for you — reopen one and Collins re-attaches to the live process instead of resuming a copy. Sessions raise notifications when they need you, and Caffeine Mode keeps the machine awake while agents work.
+    details: Close the window and sessions keep running behind a status icon that counts what's waiting for you — reopen one and Collins re-attaches to the live process instead of resuming a copy. Sessions raise notifications when they need you, a bell in the header keeps the history, and Caffeine Mode keeps the machine awake while agents work.
 ---
 
 ## An opinionated, Claude-first workspace

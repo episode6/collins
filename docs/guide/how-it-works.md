@@ -266,6 +266,7 @@ collins/
 ├── statusicon.py     # the status icon: a StatusNotifierItem over D-Bus
 ├── traymodel.py      # what the icon shows (badge, menu) — toolkit-free
 ├── notifycenter.py   # the notification history and the badge's number — toolkit-free
+├── notifypanel.py    # the header bell and the history sheet it opens
 ├── caffeine.py       # Caffeine Mode: inhibit sleep while agents work
 ├── titles.py         # auto-generated session titles (local + claude)
 ├── usage.py          # Claude subscription usage fetch/parse
