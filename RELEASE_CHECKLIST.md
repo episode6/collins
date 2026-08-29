@@ -93,7 +93,8 @@ Create 2 PRs (as drafts, per repo convention):
       summarizing the release.
     - Mirror the outgoing release into the AUR files so main's copies stay
       current once it ships: set `pkgver` to `<VERSION>` in `PKGBUILD` +
-      `.SRCINFO` (sha256 gets refreshed after the tag exists — see
+      `.SRCINFO` (`sha256sums` stays `SKIP` in git; the release workflow's
+      `aur` job fills it in at publish time — see
       `packaging/aur/README.md`).
 - `[VERSION] Release v<VERSION>` points at the new release branch
     - Make the same outgoing-release edits as above: finalize all three
@@ -128,21 +129,24 @@ Create 2 PRs (as drafts, per repo convention):
    - publishes to PyPI via trusted publishing,
    - uploads a signed source package per Ubuntu series (noble, resolute) to
      `ppa:episode6/stable` — Launchpad then builds and publishes the binaries
-     (minutes to hours in the queue, plus ~20 minutes for the publisher).
-   CI's `ppa-source` job rehearses the source build unsigned on every PR, in
-   the same container images the `ppa` job uses, so a missing build-dep
-   should already have surfaced before the tag.
-   If a `ppa` job fails for a reason fixed in the workflow itself, the tag's
-   run cannot pick the fix up (it is frozen on the file as of the tag): land
-   the fix on the release branch and dispatch it for the tag —
-   `gh workflow run release.yml --ref release/v<X> -f tag=v<VERSION>`. The
-   already-in-the-PPA guard makes this safe to repeat.
+     (minutes to hours in the queue, plus ~20 minutes for the publisher),
+   - fills the tag tarball's hash into the AUR `PKGBUILD`, regenerates
+     `.SRCINFO`, test-builds the package, and pushes both files to the AUR
+     repo (`packaging/aur/README.md`).
+   CI's `ppa-source` and `aur-build` jobs rehearse the source build
+   (unsigned) and the AUR package build (unpublished, from the working tree)
+   on every PR, in the same container images the `ppa` and `aur` jobs use,
+   so a missing build-dep should already have surfaced before the tag.
+   If a `ppa` or `aur` job fails for a reason fixed in the workflow itself,
+   the tag's run cannot pick the fix up (it is frozen on the file as of the
+   tag): land the fix on the release branch and dispatch it for the tag —
+   `gh workflow run release.yml --ref release/v<X> -f tag=v<VERSION>`. Both
+   jobs' already-published guards make this safe to repeat.
 3. Verify: the `.deb` is attached and carries the right version; Launchpad
    sends an acceptance email per series and the builds go green; `apt install
-   collins` from the PPA on a covered series picks up the new version.
-4. AUR (once the package is published there): refresh `sha256sums` from the
-   now-existing tag tarball, regenerate `.SRCINFO`, and push to the AUR repo
-   (`packaging/aur/README.md`).
+   collins` from the PPA on a covered series picks up the new version; the
+   [AUR page](https://aur.archlinux.org/packages/collins) shows the new
+   `pkgver`.
 
 ## Hotfixes
 
