@@ -349,8 +349,9 @@ def _argb_bytes(pixbuf: GdkPixbuf.Pixbuf) -> bytes:
 
 def panel_icon_name(icon_name: str, working: bool = False) -> str:
     """The artwork to export: the panel variant of *icon_name* if the theme
-    has one, else *icon_name* itself — and with *working*, the panel
-    variant's working variant ahead of both.
+    has one, else *icon_name* itself. With *working*, the panel variant's
+    working variant is tried first, and the same two follow it in the same
+    order — `<app id>-panel-working`, `<app id>-panel`, `<app id>`.
 
     The app icon is drawn on a 128 grid for a launcher, and at the 22 pixels
     a panel asks for its strokes land on about one pixel and smear across
