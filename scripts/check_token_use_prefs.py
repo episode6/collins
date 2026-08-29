@@ -135,6 +135,7 @@ HEADINGS = {
     "token_use": "Token use",
     "mcp_tools": "Built-in MCP tools",
     "sessions": "Session behavior",
+    "notifications": "Notifications",
     "composer": "Composer",
     "terminal": "Terminal",
     "footer_apps": "Footer apps",
