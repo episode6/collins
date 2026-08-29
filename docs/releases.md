@@ -38,6 +38,11 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **The new-chat screen starts empty sessions again.** With nothing in
+  its box, the screen's Send button reads *Empty Session*; pressing it — or
+  Enter (`Ctrl+Enter`, if that is your send key) — launches the agent with
+  no prompt, waiting at its own input box the way a session opened before
+  the screen arrived. An empty Send used to do nothing.
 - **The composer always picks up at the end.** Every way into the composer
   now appends and leaves the cursor at the end of the box: the prompt cut
   out of the CLI's input box on open lands after a restored draft instead

@@ -7,7 +7,10 @@ The project's icon and name sit centered over the native composer (see
 composer.py), with a checkbox for the worktree launch in its Send row;
 nothing is running behind it yet. Send hands the text, the checkbox and
 the model pick up to the tab, which spawns the agent and types the prompt
-in once the CLI is at its input box (TerminalTab.begin_session).
+in once the CLI is at its input box (TerminalTab.begin_session). With
+nothing in the box the button reads *Empty Session* instead, and sends all
+the same: the agent starts with no prompt, sitting at its own input box,
+the way a console launch always opened.
 
 The model picker sits in the composer's own Send row too, where the
 running session's switch menu sits, and chooses the ``--model`` that
@@ -73,8 +76,9 @@ class NewChatView(Gtk.Box):
     """
 
     __gsignals__ = {
-        # The Send: the prompt, whether the worktree box is ticked, and the
-        # model to launch with ("" = the CLI's default, nothing passed).
+        # The Send: the prompt ("" = an empty session, nothing typed in),
+        # whether the worktree box is ticked, and the model to launch with
+        # ("" = the CLI's default, nothing passed).
         "send-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, str)),
         # The text, the checkbox or the model changed — what the draft's
         # keeper debounces.
@@ -157,8 +161,9 @@ class NewChatView(Gtk.Box):
         self.composer.add_css_class("new-chat-composer")
         self.composer.set_margin_top(24)
         self.composer.connect("send-requested", self._on_send)
-        self.composer.connect("text-changed", lambda *_a: self.emit("changed"))
+        self.composer.connect("text-changed", self._on_text_changed)
         self._name_model()
+        self._name_send()
         column.append(self.composer)
 
         # The checkbox rides at the left of the Send row, across from the
@@ -244,6 +249,21 @@ class NewChatView(Gtk.Box):
         self._worktree_touched = True
         self.emit("changed")
 
+    def _on_text_changed(self, *_a) -> None:
+        self._name_send()
+        self.emit("changed")
+
+    def _name_send(self) -> None:
+        """The Send button says what pressing it launches: *Send* with a
+        prompt in the box, *Empty Session* with nothing in it (whitespace
+        counts as nothing — see _on_send)."""
+        if self.text().strip():
+            self.composer.set_send_label(_("Send"))
+        else:
+            self.composer.set_send_label(
+                _("Empty Session"), _("Start the session with no prompt")
+            )
+
     def _on_model_picked(self, model: str) -> None:
         self.set_model(model)
 
@@ -260,10 +280,12 @@ class NewChatView(Gtk.Box):
             )
 
     def _on_send(self, _view, text: str) -> None:
-        # Nothing but whitespace sends nothing: there is no box to close, so
-        # the empty Send simply stays on the screen it was pressed on.
+        # Enter (or Ctrl+Enter, as the setting has it) and the button come
+        # through here alike. Nothing but whitespace is the empty session:
+        # the agent is launched with no prompt at all rather than sent a
+        # line of spaces.
         if not text.strip():
-            return
+            text = ""
         self.emit("send-requested", text, self.worktree(), self.model())
 
 

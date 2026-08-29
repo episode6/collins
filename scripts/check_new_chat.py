@@ -8,7 +8,9 @@ Send is what launches the CLI. Between those two moments the tab is a draft
 to state.json under a draft id, listed in the sidebar, survives the tab
 closing, and comes back — text, checkbox, model pick, dock and all — when
 the row is clicked. Send spends the draft, launches the CLI with the picked
-model as its --model, and types the prompt in once it is at its input box.
+model as its --model, and types the prompt in once it is at its input box;
+with nothing in the box it reads Empty Session and launches the CLI with no
+prompt at all.
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \
         python3 scripts/check_new_chat.py
@@ -313,6 +315,40 @@ def after_the_send() -> bool:
     check("the CLI received the prompt", PROMPT in log, repr(log[-300:]))
     check("the tab is a session now", tab.session_id is not None, tab.session_id)
     check("no draft row lingers", draft_id not in win.sidebar._placeholder_rows)
+
+    # An empty box's Send is an empty session.
+    win._start_new_session(PROJECT)
+    GLib.timeout_add(800, send_an_empty_screen)
+    return GLib.SOURCE_REMOVE
+
+
+def send_an_empty_screen() -> bool:
+    win = state["win"]
+    tab = win.tab_view.get_selected_page().get_child()
+    view = tab._new_chat
+    label = view.composer.send_label
+    empty, full = i18n._("Empty Session"), i18n._("Send")
+    check("an empty box's Send reads Empty Session", label() == empty, label())
+    view.set_text("a prompt")
+    check("…and Send once there is text", label() == full, label())
+    view.set_text("   ")
+    check("…whitespace counting as empty", label() == empty, label())
+    view.composer._send.emit("clicked")  # the button itself: the real path
+    check("Empty Session leaves the screen", not tab.is_new_chat)
+    check("…for the console", tab._stage.get_visible_child_name() == "terminal")
+    check("…with no prompt waiting to be typed", tab._new_chat_prompt is None)
+    GLib.timeout_add(3000, after_the_empty_send)
+    return GLib.SOURCE_REMOVE
+
+
+def after_the_empty_send() -> bool:
+    win = state["win"]
+    log = ""
+    if os.path.exists(os.environ["SPAWN_LOG"]):
+        with open(os.environ["SPAWN_LOG"], encoding="utf-8") as fh:
+            log = fh.read()
+    check("the CLI was launched a second time", log.count("<<<ARGV>>>") == 2, repr(log[-300:]))
+    check("…and sent no prompt", log.count("<<<PROMPT>>>") == 1, repr(log[-300:]))
 
     # An empty screen closed leaves nothing behind.
     win._start_new_session(PROJECT)

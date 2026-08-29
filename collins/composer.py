@@ -253,6 +253,7 @@ class ComposerView(Gtk.Box):
         send.add_css_class("suggested-action")
         send.connect("clicked", lambda *_a: self.emit("send-requested", self.peek_text()))
         row.append(send)
+        self._send = send
         self.append(row)
         self._docked = False
         self.set_docked(False)
@@ -267,6 +268,18 @@ class ComposerView(Gtk.Box):
         of its own."""
         self._row.insert_child_after(widget, self._last_option)
         self._last_option = widget
+
+    def set_send_label(self, label: str, tooltip: str | None = None) -> None:
+        """Rename the Send button, with a tooltip or none. The button does
+        the same thing under any name — announce the box's text — and the
+        host says what that means: the new-chat screen calls an empty box's
+        Send *Empty Session*, a launch with no first prompt (newchatview)."""
+        self._send.set_label(label)
+        self._send.set_tooltip_text(tooltip)
+
+    def send_label(self) -> str:
+        """What the Send button reads right now."""
+        return self._send.get_label() or ""
 
     # -- text ------------------------------------------------------------------
 
