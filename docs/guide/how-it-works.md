@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-27. Full change history: git log for this file.
+fork. Last modified: 2026-08-28. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -42,8 +42,10 @@ initial prompt) — no model call, so your backlog is never sent anywhere. Only
 sessions created while the app runs get a headless `claude -p` summarization
 (the model is the *Session title model* preference, defaulting to the newest
 Haiku; its **None** option keeps the local title for new sessions too),
-executed in a scratch directory so the title runs don't appear as sessions
-themselves.
+executed in a scratch directory, with none of your skills, MCP servers, or
+the CLI's tools loaded (see [What spends tokens](#what-spends-tokens)), so
+the title runs don't appear as sessions themselves and cost little more
+than the prompt.
 
 ## Model list
 
@@ -125,7 +127,17 @@ Collins runs Claude on your behalf — against your subscription's usage
 limits — in four places, each with its setting in **Preferences → Token
 use** (directly under General) or the **Built-in MCP tools** group right
 below it. Every headless run is a `claude -p` from a scratch directory, so
-none of them ever appears as a session. A fresh install is shown these
+none of them ever appears as a session, and each passes
+`--strict-mcp-config --tools ""`, so none carries your MCP servers, the
+CLI's built-in tools, or your skills (they ride in the Skill tool) — what
+an interactive session loads, and what a prompt that wants five words back
+has no use for. On CLI 2.1.251 that took a one-line prompt on Haiku from
+about 23k input tokens to 8k. Your global `~/.claude/CLAUDE.md` still
+loads: the one flag that drops it, `--bare`, also drops the OAuth login the
+repair run exists to renew. A project's `CLAUDE.md` and
+`.claude/settings.json` are read from the working directory and its
+parents, which the scratch directory under `~/.config/collins` keeps out
+of reach. A fresh install is shown these
 settings once, in the **Before you start** dialog on its first launch,
 before the first of the runs happens — and the login repair waits until
 that dialog has been answered.

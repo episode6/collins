@@ -43,7 +43,9 @@ TITLE = N_("Token use")
 DESCRIPTION = N_(
     "Each of these runs Claude on your behalf, against your subscription's "
     "usage limits, without a prompt from you. Every run is a headless "
-    "claude -p from a scratch directory, so it never appears as a session."
+    "claude -p from a scratch directory, carrying none of your skills, MCP "
+    "servers, or the CLI's tools, so it never appears as a session and "
+    "costs little more than its prompt."
 )
 SEARCH_TERMS = ("token", "tokens", "quota", "usage", "cost")
 

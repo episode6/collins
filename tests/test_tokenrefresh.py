@@ -106,6 +106,10 @@ def test_refresh_runs_cli_in_scratch_and_reads_the_file(
     assert tokenrefresh.refresh() is True
     assert calls["argv"][:2] == ["/usr/bin/claude", "-p"]
     assert "--model" in calls["argv"]
+    # A one-word prompt needs no tool schemas, skills, or MCP servers —
+    # the trimmed argv every headless run shares (titles.headless_argv).
+    assert calls["argv"][2:5] == ["--strict-mcp-config", "--tools", ""]
+    assert "--bare" not in calls["argv"]  # --bare would drop the OAuth login
     # The throwaway run lives in titles' scratch tree, so discovery skips it.
     assert Path(calls["cwd"]).parent == titles.scratch_dir()
 

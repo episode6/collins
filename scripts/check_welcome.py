@@ -113,7 +113,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from collins import claudemodels, ghwelcome, i18n, tokenrefresh, welcome  # noqa: E402
+from collins import claudemodels, ghwelcome, i18n, titles, tokenrefresh, welcome  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
@@ -177,7 +177,11 @@ def headless_runs() -> list[str]:
     return [line for line in lines if line.split()[:1] == ["-p"]]
 
 
-REPAIR_RUN = f"-p --model {tokenrefresh._MODEL}"  # the throwaway run's argv, as the shim logs it
+# The headless argvs as the shim logs them (sys.argv[1:] space-joined, so
+# the empty --tools value shows as two spaces): every run's prefix, and the
+# throwaway repair run in full.
+HEADLESS_PREFIX = " ".join(titles.headless_argv("claude", "")[1:])
+REPAIR_RUN = " ".join(titles.headless_argv("claude", tokenrefresh._MODEL)[1:])
 
 
 def repair_runs() -> list[str]:
@@ -390,7 +394,7 @@ def step_titled() -> bool:
         return later(step_titled, 500)
     runs = headless_runs()
     check("with a model back, both untitled sessions are titled", len(runs) == 2, runs)
-    check("by -p runs", all(run.startswith("-p --model ") for run in runs), runs)
+    check("by trimmed -p runs", all(run.startswith(HEADLESS_PREFIX) for run in runs), runs)
     return done()
 
 

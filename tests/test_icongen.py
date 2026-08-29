@@ -181,6 +181,15 @@ def test_run_asks_for_the_preference_by_default(monkeypatch):
     assert calls[0][calls[0].index("--model") + 1] == "claude-sonnet-5"
 
 
+def test_run_carries_the_trimmed_headless_flags(monkeypatch):
+    # An SVG prompt needs no tool schemas, skills, or MCP servers: the run
+    # is the same trimmed `claude -p` titles build (titles.headless_argv).
+    calls = _capture_popen(monkeypatch)
+    icongen.IconRun().run("brief")
+    assert calls[0][:5] == ["/usr/bin/claude", "-p", "--strict-mcp-config", "--tools", ""]
+    assert "--bare" not in calls[0]
+
+
 def test_run_honours_the_dialogs_own_pick(monkeypatch):
     # The dialog's drop-down overrides the preference for one run only: the
     # setting is read, not written, and an explicit id needs no catalog.
