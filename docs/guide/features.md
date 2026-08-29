@@ -201,13 +201,12 @@ belongs to its session, and it is there when you come back to it.
   arrives with the open — the keystroke that raised it, text already
   typed-but-unsent in the CLI's own box — goes in after the draft, and the
   cursor sits at the end, so you carry on from where the box now ends
-  rather than from where it began. The same holds when the agent
-  has left the terminal under an open composer — a bare shell, where pasting
-  a draft would run it as commands — so closing the composer keeps the draft
-  instead of typing it back. Drafts are saved to disk with the rest of the
-  session's state
-  (`~/.config/collins/state.json`), never to the agent's transcript, and a
-  draft that has been sent or taken back into the agent's input box is
+  rather than from where it began. The same holds when the agent has left
+  the terminal under an open composer — a bare shell, where pasting a draft
+  would run it as commands — so closing the composer keeps the draft instead
+  of typing it back. Drafts are saved to disk with the rest of the session's
+  state (`~/.config/collins/state.json`), never to the agent's transcript,
+  and a draft that has been sent or taken back into the agent's input box is
   spent — it won't turn up a second time. A **new session's** first prompt
   works the same way from the other end: it is written in this composer on
   the [new-chat screen](#starting-sessions), and until you send it the
