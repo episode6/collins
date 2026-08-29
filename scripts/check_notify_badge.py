@@ -50,10 +50,22 @@ STATE_FILE = f"{E2E}/config/collins/state.json"
 
 # One session in one project, named so the row's title is a known string.
 _encoded = re.sub(r"[^A-Za-z0-9]", "-", PROJECT_DIR)
-for path in (f"{E2E}/projects/{_encoded}", f"{E2E}/chats", f"{E2E}/config/collins", PROJECT_DIR):
+for path in (
+    f"{E2E}/projects/{_encoded}",
+    f"{E2E}/chats",
+    f"{E2E}/config/collins",
+    f"{E2E}/bin",
+    PROJECT_DIR,
+):
     os.makedirs(path, exist_ok=True)
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
+# A `claude` on PATH, never run: the store only lists sessions for providers
+# whose CLI it can find, and CI has none.
+with open(f"{E2E}/bin/claude", "w", encoding="utf-8") as fh:
+    fh.write("#!/bin/sh\nexit 0\n")
+os.chmod(f"{E2E}/bin/claude", 0o755)
+os.environ["PATH"] = f"{E2E}/bin:{os.environ['PATH']}"
 with open(f"{E2E}/projects/{_encoded}/{SESSION}.jsonl", "w", encoding="utf-8") as fh:
     fh.write(
         json.dumps(
