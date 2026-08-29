@@ -1535,6 +1535,11 @@ class App(Adw.Application):
         # notification_center.connect themselves; the App holds no list of
         # them.
         self.notification_center = NotificationCenter(records=self.state.get_notifications())
+        # The keys with an unread row standing, as of the last change — the
+        # desktop notifications still speaking for something (see
+        # _on_notifications_changed). Taken before the listener connects, so
+        # the first change has a baseline to differ from.
+        self._unread_sessions = self.notification_center.unread_sessions()
         self.notification_center.connect(self._on_notifications_changed)
 
         self._status_icon: statusicon.StatusIcon | None = None
@@ -1662,8 +1667,30 @@ class App(Adw.Application):
     def _on_notifications_changed(self) -> None:
         """The center moved: write the list back (the state skips the write
         when the persisted rows didn't change, which a synthetic row's coming
-        or going never does) and repaint the badge, which is idle-coalesced."""
+        or going never does), repaint the badge, which is idle-coalesced, and
+        take down the desktop notification of every session that has no
+        unread row left.
+
+        The last is _on_unread_changed's rule seen from the history's side.
+        A desktop notification speaks for the rows posted with it — a
+        message's, a bell's, a finished run's synthetic one — and it is
+        answered when nothing of that session is waiting any more: the user
+        went to the tab (which reads the rows), or said so in the sheet
+        (*Mark read*, *Mark all read*, *Remove*, *Clear*). A bell's
+        notification has no flag beside it, so without this a bell read from
+        the sheet would stand on the desktop until dismissed by hand — the
+        standing-notification badge _on_unread_changed exists to prevent.
+        A placeholder's key gets the same treatment, which nothing in the
+        store's edges covers: its synthetic row leaving (the tab visited, or
+        the handoff to the session's own row) is the moment. Withdrawing a
+        notification that was never sent is a no-op, so the set needs no
+        memory of which keys have one up.
+        """
         self.state.set_notifications(self.notification_center.to_records())
+        unread = self.notification_center.unread_sessions()
+        for key in self._unread_sessions - unread:
+            self.withdraw_notification(key)
+        self._unread_sessions = unread
         self.refresh_status_icon()
 
     def _on_session_archived(self, _store, session_id: str) -> None:

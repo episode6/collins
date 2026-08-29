@@ -404,6 +404,19 @@ class NotificationCenter:
         """The badge: how many rows nobody has gone to or waved off."""
         return sum(1 for row in self._rows if not row.read)
 
+    def unread_sessions(self) -> frozenset[str]:
+        """The keys with an unread row of any kind standing — what a desktop
+        notification is still speaking for (see App._on_notifications_changed,
+        which withdraws one the moment its key drops out of this set). A ""
+        key is nobody's and never listed."""
+        return frozenset(row.session_id for row in self._rows if not row.read and row.session_id)
+
+    def has_unread(self, session_id: str) -> bool:
+        """Whether *session_id* has any unread row standing."""
+        return bool(session_id) and any(
+            row.session_id == session_id and not row.read for row in self._rows
+        )
+
     def is_green(self, session_id: str) -> bool:
         return self.get(green_id(session_id)) is not None
 
@@ -507,6 +520,27 @@ class NotificationCenter:
         for row in self._rows:
             if row.session_id == session_id and not row.read:
                 row.read = True
+                moved += 1
+        if moved:
+            self._changed()
+        return moved
+
+    def rekey_session(self, old: str, new: str) -> int:
+        """Move every message and bell row filed under *old* to *new*: the
+        placeholder → real-row handoff, for the rows a tab posted before the
+        store discovered its session (MainWindow._apply_resolved_sessions).
+        Without it the rows keep a key nothing answers to any more — the
+        sheet's click would go nowhere and visiting the tab would read
+        nothing. Synthetic rows are left alone: the handoff takes the
+        placeholder's down and raises the session's through set_green, whose
+        ids the keys are part of. Returns how many rows moved; a rekey to
+        the same key, or from or to "", moves none."""
+        if not old or not new or old == new:
+            return 0
+        moved = 0
+        for row in self._rows:
+            if row.session_id == old and row.kind != KIND_FINISHED:
+                row.session_id = new
                 moved += 1
         if moved:
             self._changed()

@@ -353,8 +353,9 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   notification** titled with the session, so clicking it jumps straight to
   that tab. Looking at that very session already, nothing pops up at all —
   the message goes straight into the history, and the tool tells the agent
-  so. Either way the session's sidebar row is flagged, and it wears the
-  project's own `project-icon.svg` where the project ships one. Nothing is
+  so. The card and the desktop notification both flag the session's sidebar
+  row until you visit it, and both wear the project's own `project-icon.svg`
+  where the project ships one. Nothing is
   guessed from a quiet terminal: a notification means the agent asked for
   you — unless you turn on *Announce finished runs*, which notifies on
   every finish too.
@@ -408,7 +409,9 @@ watched — and reached — without the window:
 - The icon **wears an unread badge**: it counts unread notifications — the
   same number as the bell in the header bar. Every session that finished a
   run nobody has looked at yet is one (the sidebar's green pulse, counted),
-  and so is every message or bell in the history nobody has gone to. A
+  and so is every message or bell in the history nobody has gone to — so a
+  session that called for you from another tab counts twice until you visit
+  it, once for the message and once for the flag it put on the row. A
   flagged session that goes back to work drops out of the count while the
   run lasts (it isn't waiting on you) and comes back the moment the turn
   ends. Sessions that are merely *working* never light the badge, but the

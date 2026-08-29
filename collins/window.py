@@ -368,6 +368,12 @@ class MainWindow(Adw.ApplicationWindow):
         # New-session tabs shown as "New Thread" placeholder rows in the
         # sidebar until the store discovers their session: page -> placeholder id.
         self._placeholder_pages: dict[Adw.TabPage, str] = {}
+        # The keys this window has sent a desktop notification under (see
+        # _send_desktop_notification) — read by the placeholder → real-row
+        # handoff, which is the one place a notification has to be re-sent
+        # under a new name (_rekey_notifications). Never pruned on withdraw:
+        # a stale key costs nothing but a set entry.
+        self._desktop_keys: set[str] = set()
         self._placeholder_seq = 0
         # Tabs renamed locally before their session was bound: never auto-sync
         # their titles from the store.
@@ -2851,8 +2857,13 @@ class MainWindow(Adw.ApplicationWindow):
             # placeholder's key, and the set_unread below raises the one
             # under the session's (see App._sync_green) — two synchronous
             # edges no idle-coalesced badge can see between.
-            unread = self.sidebar.placeholder_unread(self._placeholder_pages.get(page, ""))
+            placeholder_id = self._placeholder_pages.get(page, "")
+            unread = self.sidebar.placeholder_unread(placeholder_id)
             self._remove_placeholder(page)  # the real sidebar row exists now
+            # The message and bell rows the tab posted under the placeholder
+            # id move to the session's, so a click on them and a visit to
+            # the tab still find each other (see _rekey_notifications).
+            self._rekey_notifications(placeholder_id, session_id, page, flagged=unread)
             if page.get_title() == title:  # keep any manual rename/emoji
                 page.set_title(self._tab_title(session))
             else:
@@ -2869,6 +2880,64 @@ class MainWindow(Adw.ApplicationWindow):
             if unread:
                 self.store.set_unread(session_id, True)
         self._update_active_row()  # hand the highlight from placeholder to real row
+
+    def _rekey_notifications(
+        self, placeholder_id: str, session_id: str, page: Adw.TabPage, *, flagged: bool = False
+    ) -> None:
+        """The placeholder → real-row handoff, for the notification history
+        and the desktop: every message and bell row *page*'s tab posted
+        under *placeholder_id* is re-filed under *session_id*
+        (NotificationCenter.rekey_session), and a desktop notification sent
+        under the placeholder's key is taken down and, while the rows it
+        spoke for are still unread, sent again under the session's.
+
+        Left keyed by the placeholder, the rows would answer to nothing
+        once the store's rescan lands: visiting the tab reads rows by the
+        session id (_clear_unread), the sheet's click looks the session up
+        by it (_open_notification), and the desktop notification is
+        withdrawn by it (App._on_notifications_changed) — so a message from
+        a brand-new tab would stay unread, its row a dead end and its
+        banner standing, until marked read by hand. The card needs no
+        rekey: it holds the page (see notifyoverlay.NotificationCard), and
+        its row is the very object the center re-files.
+
+        The re-send is what makes the banner's click land: sent under the
+        placeholder, its action carried an empty session id (the tab had
+        none), and the desktop shows a replacement under a new id as a new
+        banner — a second one for the same message, but with a tab behind
+        it, which for a user still away from Collins beats a banner whose
+        click goes nowhere. It is only re-sent when one was sent in the
+        first place (_desktop_keys) and the rows are still unread; one the
+        user already read from the sheet was withdrawn then and stays down.
+        A banner that spoke for the placeholder's *flag* rather than a row
+        (*Announce finished runs*, see _announce_finished) is re-sent while
+        the flag is still up (*flagged*: the handoff carries it to the
+        session's row next) and the setting still on.
+        """
+        if not placeholder_id or not session_id:
+            return
+        center = self.notify_center
+        center.rekey_session(placeholder_id, session_id)
+        if placeholder_id not in self._desktop_keys:
+            return
+        self._desktop_keys.discard(placeholder_id)
+        app = self.get_application()
+        if app is not None:
+            app.withdraw_notification(placeholder_id)
+        latest = next(
+            (
+                row
+                for row in center.rows()
+                if row.session_id == session_id and not row.read and row.kind != notifycenter.KIND_FINISHED
+            ),
+            None,
+        )
+        if latest is not None:
+            self._send_desktop_notification(
+                page, session_id, latest.title or page.get_title(), notifycenter.row_body(latest)
+            )
+        elif flagged and self.state.get_setting("announce_finished_runs"):
+            self._send_desktop_notification(page, session_id, page.get_title(), _("Finished a run"))
 
     def _refresh_tab_titles(self) -> None:
         """Keep tab titles in sync with the store: auto-generated titles arrive
@@ -4050,10 +4119,14 @@ class MainWindow(Adw.ApplicationWindow):
         finished in it has been seen, on every row standing for it — and so
         has everything the session said. Its rows in the notification
         history are marked read (notifycenter.mark_session_read: visiting
-        the session is reading), any card still up for it comes down, and
-        the desktop notification it may have left standing is withdrawn.
-        Those three only when a row actually moved: this runs on every
-        keystroke into the terminal, and a withdraw is a bus message."""
+        the session is reading) and any card still up for it, in any
+        window, comes down. The desktop notification it may have left
+        standing goes with the rows: the app withdraws a session's the
+        moment its last unread row leaves (App._on_notifications_changed),
+        this path's included — and one whose rows were read from the sheet
+        earlier came down then, so nothing here has to remember. This runs
+        on every keystroke into the terminal; what it does is a flag check
+        and a walk over at most three cards per window."""
         placeholder_id = self._placeholder_pages.get(page)
         if placeholder_id is not None:
             self._set_placeholder_unread(placeholder_id, False)
@@ -4061,14 +4134,12 @@ class MainWindow(Adw.ApplicationWindow):
         if session_id:
             for row_id in self.store.rows_representing(session_id):
                 self.store.set_unread(row_id, False)
-        app = self.get_application()
         for key in (placeholder_id, session_id):
-            if not key or not self.notify_center.mark_session_read(key):
+            if not key:
                 continue
+            self.notify_center.mark_session_read(key)
             for window in self._main_windows():
                 window.notify_cards.dismiss_session(key)
-            if app is not None:
-                app.withdraw_notification(key)
 
     def _sync_process_poll(self) -> None:
         """Run the process-tree poll only while some session has an open tab.
@@ -4841,11 +4912,14 @@ class MainWindow(Adw.ApplicationWindow):
         id the sidebar knows it by: refusing because Collins is mid-scan
         would defeat the point. Its flag goes on the placeholder row and
         hands over to the real row when the store's scan lands
-        (_apply_resolved_sessions); its card holds the page besides, so a
-        click finds the tab even after the id resolves (see
-        notifyoverlay.NotificationCard); its desktop notification's click
-        lands on a Collins window rather than the tab, which for the first
-        seconds of a brand-new tab beats no notification at all.
+        (_apply_resolved_sessions), and its history rows are re-filed under
+        the session id in the same breath (_rekey_notifications); its card
+        holds the page besides, so a click finds the tab even before that
+        (see notifyoverlay.NotificationCard); its desktop notification's
+        click lands on a Collins window rather than the tab, which for the
+        first seconds of a brand-new tab beats no notification at all — and
+        the handoff sends it again with the tab behind it if it is still
+        unread then.
         """
         page = self.tab_view.get_page(tab)
         if page is None:
@@ -4970,23 +5044,25 @@ class MainWindow(Adw.ApplicationWindow):
         notification.set_default_action_and_target(
             "app.focus-session", GLib.Variant("s", session_id)
         )
+        self._desktop_keys.add(key or title)
         app.send_notification(key or title, notification)
 
     def _open_card(self, card: notifyoverlay.NotificationCard) -> None:
         """A card was clicked: go to its session, and mark the row read.
 
         The card's page comes first — a tab that spoke under a placeholder
-        id may have resolved since, and then the key the row was posted
-        under names nothing any more, while the page is still the tab. The
-        window holding the page is presented and the tab selected, which
-        clears the flag and reads the rows (_clear_unread). A page no window
-        holds any more falls back to the row's key, the sheet's way
-        (_open_notification). A finished run's row is the green flag's to
-        remove: it is marked read only when the click reached the tab, the
-        sheet's rule (NotificationSheet._on_row_activated).
+        id may have resolved since, and while the row is re-filed under the
+        session id then (_rekey_notifications), the page is the tab itself
+        and needs no lookup. The window holding the page is presented and
+        the tab selected, which clears the flag and reads the rows
+        (_clear_unread). A page no window holds any more falls back to the
+        row's key, the sheet's way (_open_notification). A finished run's
+        row is the green flag's to remove: it is marked read only when the
+        click reached the tab, the sheet's rule
+        (NotificationSheet._on_row_activated).
         """
         notification = card.notification
-        card.hide()
+        card.slide_out()
         opened = False
         if card.page is not None:
             owner = next((w for w in self._main_windows() if w._holds_page(card.page)), None)

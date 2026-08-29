@@ -21,7 +21,10 @@ row and no card, an unfocused window gets the desktop notification, a bell
 from another tab is a card and a coalesced row while the selected tab's bell
 is a beep and no row, the three switches (in-app, bells, announce finished
 runs) do what their subtitles say, a placeholder tab's card still finds its
-page, a fourth card evicts the oldest, the × leaves the row unread, the
+page and the handoff re-files its rows under the session id (re-sending the
+desktop notification with the tab behind it), a bell read from the sheet
+takes its desktop notification down, a fourth card evicts the oldest, the ×
+leaves the row unread, the
 notify_user tool's reply names where the message went, and the Preferences
 group's sound picker writes the setting the sheet's footer reads. Focus is
 the harness's to declare — is_active is read per window instance — so
@@ -413,6 +416,7 @@ def steps(app: App):
     # -- the delivery table ------------------------------------------------------
     cards = win.notify_cards
     played = []
+    withdrawn = []
 
     def wait():
         pass
@@ -428,8 +432,11 @@ def steps(app: App):
               second in (notifysound.DEBOUNCED, notifysound.BUSY), second)
         check("silence is silence", notifysound.play("none", force=True) == notifysound.SILENT)
         check("GStreamer's absence is a fact, not an error", isinstance(notifysound.available(), bool))
-        # From here the sound is recorded, not played.
+        # From here the sound is recorded, not played, and every withdraw
+        # of a desktop notification is noted on its way to the bus.
         notifysound.play = lambda value, **_kw: played.append(value) or notifysound.PLAYED
+        real_withdraw = app.withdraw_notification
+        app.withdraw_notification = lambda key: withdrawn.append(key) or real_withdraw(key)
         # Focus is declared: this window is the active one.
         win.is_active = lambda: True
         center.clear()
@@ -564,6 +571,22 @@ def steps(app: App):
         win.state.set_setting("bell_notifications", True)
     yield bell_card
 
+    def bell_read_from_sheet():
+        # An unfocused bell is a desktop notification with no flag beside
+        # it; reading its row from the sheet is what takes the banner down.
+        win.is_active = lambda: False
+        win._on_bell(shared["tab_b"])
+        win.is_active = lambda: True
+        row = center.rows()[0]  # a fresh row: the visit above read the coalesced one
+        check("an unfocused bell is a desktop notification and an unread bell row",
+              row.kind == notifycenter.KIND_BELL and not row.read and row.session_id == SESSION_B
+              and SESSION_B in win._desktop_keys, f"{row.kind} read={row.read}")
+        before = len(withdrawn)
+        center.mark_read(row.id)
+        check("marking the bell row read withdraws the session's desktop notification",
+              withdrawn[before:] == [SESSION_B], str(withdrawn[before:]))
+    yield bell_read_from_sheet
+
     def inapp_off():
         cards.dismiss_all()
         win.state.set_setting("inapp_notifications", False)
@@ -644,6 +667,35 @@ def steps(app: App):
     yield placeholder_card_click
     yield wait
     yield wait
+
+    def placeholder_handoff():
+        # The tab spoke again while no window was active, then the store
+        # discovered its session: the rows move to the session id, and the
+        # banner sent under the placeholder is replaced by one with a tab
+        # behind it.
+        page = shared["page_p"]
+        win.is_active = lambda: False
+        win.notify_session(page.get_child(), "Away, from a tab with no id yet")
+        win.is_active = lambda: True
+        row = center.rows()[0]
+        check("an unfocused placeholder message is a desktop notification under the placeholder id",
+              "placeholder-90" in win._desktop_keys and row.session_id == "placeholder-90" and not row.read)
+        win._set_placeholder_unread("placeholder-90", False)  # the handoff takes the green row down first
+        before = len(withdrawn)
+        win._rekey_notifications("placeholder-90", "session-resolved-90", page)
+        check("the handoff re-files the rows under the session id",
+              row.session_id == "session-resolved-90"
+              and not any(r.session_id == "placeholder-90" for r in center.rows()))
+        check("withdraws the placeholder's desktop notification",
+              "placeholder-90" in withdrawn[before:] and "placeholder-90" not in win._desktop_keys,
+              str(withdrawn[before:]))
+        check("and sends it again under the session id while the row is unread",
+              "session-resolved-90" in win._desktop_keys)
+        before = len(withdrawn)
+        center.mark_session_read("session-resolved-90")
+        check("which the session's read then withdraws",
+              withdrawn[before:] == ["session-resolved-90"], str(withdrawn[before:]))
+    yield placeholder_handoff
 
     def four_cards():
         for n in range(4):

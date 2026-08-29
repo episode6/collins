@@ -108,6 +108,7 @@ class NotificationCard(Gtk.Revealer):
         self._remaining_ms = AUTO_HIDE_MS
         self._paused = False
         self._shown = False
+        self._leaving = False
 
         body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         body.add_css_class("card")
@@ -147,10 +148,12 @@ class NotificationCard(Gtk.Revealer):
         )
         title.add_css_class("notification-card-title")
         head.append(title)
-        self._when = Gtk.Label(label=notifycenter.relative_time(notification.when))
-        self._when.add_css_class("caption")
-        self._when.add_css_class("dim-label")
-        head.append(self._when)
+        # The age at the moment the card goes up; a card lives seconds, so
+        # it is never refreshed (the sheet's rows are, on their own clock).
+        when = Gtk.Label(label=notifycenter.relative_time(notification.when))
+        when.add_css_class("caption")
+        when.add_css_class("dim-label")
+        head.append(when)
         column.append(head)
         text = Gtk.Label(
             label=notifycenter.row_body(notification),
@@ -254,23 +257,32 @@ class NotificationCard(Gtk.Revealer):
 
     def _on_timeout(self) -> bool:
         self._timeout = None
-        self.hide()
+        self.slide_out()
         return GLib.SOURCE_REMOVE
 
-    def hide(self) -> None:
+    def slide_out(self) -> None:
         """Slide out; the widget is dropped when the slide ends (the
         child-revealed notify). A card that never got its reveal has no
         transition to end, so it goes at once — and one caught mid-slide-in
         has no child-revealed edge to come (the property is still False),
         so a timeout the length of the slide drops it instead. The drop is
-        idempotent, so the notify and the timeout can both fire."""
+        idempotent, so the notify and the timeout can both fire. Named for
+        what it does rather than `hide`, which is Gtk.Widget's and means
+        something else."""
         self._cancel()
         self._paused = False
+        self._leaving = True
         if not self._shown or not self.get_reveal_child():
             self._on_gone(self)
             return
         self.set_reveal_child(False)
         GLib.timeout_add(SLIDE_MS + 50, self._on_slide_out_ended)
+
+    @property
+    def leaving(self) -> bool:
+        """Whether the card is on its way out (slide_out was called) — still
+        a child until its slide ends, but standing for nothing."""
+        return self._leaving
 
     def _on_slide_out_ended(self) -> bool:
         if not self.get_reveal_child():
@@ -280,9 +292,6 @@ class NotificationCard(Gtk.Revealer):
     def _on_child_revealed(self, *_args) -> None:
         if not self.get_child_revealed() and not self.get_reveal_child():
             self._on_gone(self)
-
-    def refresh_age(self) -> None:
-        self._when.set_label(notifycenter.relative_time(self.notification.when))
 
 
 class NotificationCards(Gtk.Box):
@@ -342,19 +351,25 @@ class NotificationCards(Gtk.Box):
         # the new count, and two cards for one row would be one thing twice.
         standing = self.card_for(notification.id)
         if standing is not None:
-            standing.hide()
+            standing.slide_out()
         card = NotificationCard(
             notification,
             self._project_icon(notification, 20),
             self._fallback_icon_name,
             page,
             on_open=self._on_open,
-            on_dismiss=lambda c: c.hide(),
+            on_dismiss=lambda c: c.slide_out(),
             on_gone=self._remove,
         )
         self.prepend(card)
-        for stale in self.cards()[MAX_CARDS:]:
-            stale.hide()
+        # Only the cards actually standing count towards the three: one
+        # sliding out is still a child until its slide ends, and pushing a
+        # standing card out for its sake would leave two on screen. (Not
+        # "revealed": a burst of cards in one main-loop turn are all still
+        # waiting on their reveal, and every one of them stands.)
+        standing_cards = [c for c in self.cards() if not c.leaving]
+        for stale in standing_cards[MAX_CARDS:]:
+            stale.slide_out()
 
         def reveal() -> bool:
             if card.get_parent() is self:
@@ -403,7 +418,7 @@ class NotificationCards(Gtk.Box):
         already read would be the banner nobody asked for."""
         card = self.card_for(notification_id)
         if card is not None:
-            card.hide()
+            card.slide_out()
 
     def dismiss_session(self, session_id: str) -> None:
         """Take down every card for *session_id* — the user is at the tab
@@ -413,11 +428,11 @@ class NotificationCards(Gtk.Box):
             return
         for card in self.cards():
             if card.notification.session_id == session_id:
-                card.hide()
+                card.slide_out()
 
     def dismiss_all(self) -> None:
         for card in self.cards():
-            card.hide()
+            card.slide_out()
 
     def pause_all(self) -> None:
         for card in self.cards():

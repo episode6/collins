@@ -216,6 +216,51 @@ def test_placeholder_to_real_row_handoff_leaves_the_count_steady():
     assert calls == [1, 0, 1]  # the dip lives between two synchronous calls
 
 
+def test_rekey_session_moves_the_placeholders_rows_to_the_session():
+    # A tab spoke twice under its placeholder id before the store discovered
+    # its session; the handoff moves both rows so a click and a visit find
+    # them, and the synthetic row is left to set_green.
+    c, calls = center()
+    msg = message(c, "placeholder-1")
+    rung = bell(c, "placeholder-1")
+    other = message(c, "s2")
+    c.set_green("placeholder-1", True)
+    assert c.rekey_session("placeholder-1", "sess-1") == 2
+    assert msg.session_id == "sess-1" and rung.session_id == "sess-1"
+    assert other.session_id == "s2"
+    assert c.green_sessions() == ["placeholder-1"]
+    assert calls[-1] == 4  # announced once, the count unmoved
+    assert c.mark_session_read("sess-1") == 2
+    assert c.unread_sessions() == {"s2", "placeholder-1"}
+
+
+def test_rekey_session_moves_nothing_for_no_op_keys():
+    c, calls = center()
+    message(c, "placeholder-1")
+    announced = len(calls)
+    assert c.rekey_session("placeholder-1", "placeholder-1") == 0
+    assert c.rekey_session("", "sess-1") == 0
+    assert c.rekey_session("placeholder-1", "") == 0
+    assert c.rekey_session("nobody", "sess-1") == 0
+    assert len(calls) == announced
+
+
+def test_unread_sessions_and_has_unread_follow_the_unread_rows():
+    c, _ = center()
+    msg = message(c, "s1")
+    bell(c, "s2")
+    c.set_green("s3", True)
+    c.post(c.make(KIND_MESSAGE, "", "Untitled", "", "no session"))
+    assert c.unread_sessions() == {"s1", "s2", "s3"}
+    assert c.has_unread("s1") and c.has_unread("s3") and not c.has_unread("")
+    c.mark_read(msg.id)
+    assert c.unread_sessions() == {"s2", "s3"}
+    assert not c.has_unread("s1")
+    c.set_green("s3", False)
+    c.mark_all_read()
+    assert c.unread_sessions() == frozenset()
+
+
 def test_green_sessions_lists_the_keys_standing():
     c, _ = center()
     message(c, "s1")
