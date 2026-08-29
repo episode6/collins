@@ -427,6 +427,14 @@ is running in:
 - **`run_in_terminal(command, terminal?)`** — type a command into an idle
   panel shell and run it, visibly, where you can watch it, interact with
   it, and keep the shell afterwards — a dev server, a REPL, a long build.
+- **`archive_session()`** — the session **archives itself**: the same
+  archive as the sidebar row's button, so it leaves the list (resumable
+  under *Show archived*) and its tab closes. It lands when the turn that
+  asked ends — the agent's closing words are on the transcript first — and
+  a running session then closes the way your *Archiving a running session*
+  setting says: the dialog, a clean exit, or a handoff to the background.
+  For an agent that finished for good — a merged PR, a done job — rather
+  than a "tidy up" mid-task.
 
 Each tool asks for permission the first time a session calls it, like any
 other MCP tool, and **each has its own switch** in Preferences → *Built-in

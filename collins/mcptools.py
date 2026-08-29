@@ -373,6 +373,36 @@ TOOLS: list[dict] = [
             "additionalProperties": False,
         },
     },
+    {
+        # The one tool that ends the session calling it. It never lands
+        # mid-call: the archive waits for the run to finish (the window's
+        # finish edge, the same one that flags a row unread), so the reply
+        # and the agent's own closing words get written first. What closing
+        # a running session then does is the user's own setting, exactly as
+        # for the sidebar's Archive button — the agent asks, it never
+        # decides.
+        "name": "archive_session",
+        "description": (
+            "Archive this session in Collins — what the user's own Archive "
+            "on its sidebar row does: the session leaves the sidebar (it "
+            "stays resumable under 'Show archived') and its tab closes. "
+            "Reach for it only when the user asked for it, or the work here "
+            "is finished for good and won't be picked up again — a merged "
+            "PR, a done job — never mid-task. Nothing happens until this "
+            "turn ends: Collins waits for you to finish your reply, then "
+            "archives, so say your goodbyes in that reply and make this the "
+            "last tool call of the session — anything you start after it "
+            "can be cut short. Closing a running session follows the user's "
+            "own preference (Preferences → Archiving a running session — "
+            "it may ask them first), so the archive isn't guaranteed to "
+            "land."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    },
 ]
 
 

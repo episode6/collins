@@ -1843,8 +1843,25 @@ class App(Adw.Application):
                 "start_session": self._mcp_start_session,
                 "read_terminal": self._mcp_read_terminal,
                 "run_in_terminal": self._mcp_run_in_terminal,
+                "archive_session": self._mcp_archive_session,
             },
             is_enabled=self._mcp_tool_enabled,
+        )
+
+    def _mcp_archive_session(self, found, args: dict) -> tuple[bool, str]:
+        """Arm the archive; the window lands it on the session's finish edge
+        (see MainWindow.archive_session_when_finished). Nothing closes here:
+        the caller is mid-turn — this very call — and the reply has to get
+        back to it before its tab does anything about going away."""
+        window, tab = found
+        if not tab.session_id:
+            return False, (
+                "The session isn't resolved in Collins yet — try again in a moment"
+            )
+        window.archive_session_when_finished(tab.session_id)
+        return True, (
+            "Collins will archive this session once this turn ends — finish "
+            "your reply; don't start anything else."
         )
 
     def _mcp_set_session_title(self, found, args: dict) -> tuple[bool, str]:

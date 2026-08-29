@@ -106,6 +106,13 @@ _MCP_TOOL_LABELS = {
         N_("Run commands in the terminal panel"),
         N_("run_in_terminal — type a command into an idle panel tab (or a new one) and run it"),
     ),
+    "archive_session": (
+        N_("Archive its own session"),
+        # "once its turn ends" is the contract worth stating: the tab closes
+        # with the archive, and a running session closes the way the
+        # Archiving a running session setting says.
+        N_("archive_session — the session puts itself away once its turn ends; its tab closes with it"),
+    ),
 }
 
 

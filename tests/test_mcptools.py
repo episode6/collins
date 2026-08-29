@@ -23,6 +23,7 @@ def test_serves_exactly_the_landed_tools():
         "start_session",
         "read_terminal",
         "run_in_terminal",
+        "archive_session",
     ]
 
 
@@ -68,6 +69,7 @@ def test_enabled_tools_serves_only_what_is_switched_on():
         "start_session",
         "read_terminal",
         "run_in_terminal",
+        "archive_session",
     ]
 
 
@@ -77,6 +79,35 @@ def test_enabled_tools_can_serve_nothing_at_all():
 
 
 # ---- validation --------------------------------------------------------------
+
+
+def test_archive_session_takes_no_arguments():
+    """The one argument-less tool: an empty object is the whole call, and
+    anything in it is a mistake worth naming rather than ignoring."""
+    assert mcptools.validate_args("archive_session", {}) is None
+    assert "session_id" in mcptools.validate_args("archive_session", {"session_id": "x"})
+    assert mcptools.validate_args("archive_session", None) is not None
+
+
+def test_archive_session_waits_for_its_handler_like_any_tool():
+    """The tool's skeleton is the shared one: switched off it is refused
+    before identity is even asked for, and from no tab it gets the common
+    identity error."""
+    assert mcptools.run_tool_call(
+        "archive_session", {}, find_tab=lambda: None, handlers={}, is_enabled=lambda _n: False
+    ) == (False, mcptools.disabled_error("archive_session"))
+    assert mcptools.run_tool_call("archive_session", {}, find_tab=lambda: None, handlers={}) == (
+        False,
+        mcptools.NOT_FROM_TAB_ERROR,
+    )
+    seen = []
+    assert mcptools.run_tool_call(
+        "archive_session",
+        {},
+        find_tab=lambda: ("win", "tab"),
+        handlers={"archive_session": lambda found, args: seen.append((found, args)) or (True, "ok")},
+    ) == (True, "ok")
+    assert seen == [(("win", "tab"), {})]
 
 
 def test_valid_title_passes():

@@ -140,6 +140,12 @@ _NEW_CHAT_SAVE_MS = 600
 # works until the next archive replaces it.
 _UNDO_TOAST_SECONDS = 4
 
+# An archive_session tool call from a session the activity tracker already
+# reads as idle has no finish edge coming: the archive lands after this beat
+# instead (see archive_session_when_finished) — enough for the tool's reply
+# to clear the socket before the tab it came from starts closing.
+_ARCHIVE_REPLY_SETTLE_MS = 500
+
 # The project row's git actions ("Git pull", "Checkout main"): long enough
 # for a fetch over a slow link, short enough that a pull hung on a dead remote
 # or a credential prompt (there's no terminal here to answer one) ends in an
@@ -327,6 +333,10 @@ class MainWindow(Adw.ApplicationWindow):
         # Archive requested for an open session: applied only once its tab
         # really closes (page -> session id).
         self._archive_on_close: dict[Adw.TabPage, str] = {}
+        # Sessions whose agent asked to be archived (the archive_session MCP
+        # tool), waiting for the run that asked to end — see
+        # archive_session_when_finished.
+        self._archive_when_finished: set[str] = set()
         # What Undo (the snackbar's button, and Ctrl+Shift+Z) would restore:
         # the session ids of the last archive that landed. Replaced by the
         # next archive, emptied when the sessions come back — by Undo itself,
@@ -3791,6 +3801,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.sidebar.set_placeholder_unread(session_id, True)
             return
         self._refresh_prs_after_run(session_id)
+        self._archive_after_run(session_id)
         for row_id in self.store.rows_representing(session_id):
             # A row whose conversation still runs under another of its ids —
             # a /bg fork mid-turn, say — hasn't finished; its own edge comes.
@@ -5088,6 +5099,10 @@ class MainWindow(Adw.ApplicationWindow):
             # no tab there is no activity source left, so stop it now rather
             # than letting the idle window read the silence as a finish.
             self._activity.clear(session_id)
+            # An archive the agent asked for and never got to: the tab went
+            # some other way. Reopened later, the session's next finish
+            # is its own turn, not the one that asked.
+            self._archive_when_finished.discard(session_id)
         view.close_page_finish(page, True)
         self._refresh_background_affordances()  # a row without a tab can't be backgrounded
         if view.get_n_pages() == 0:
@@ -5612,6 +5627,44 @@ class MainWindow(Adw.ApplicationWindow):
         a session somebody is looking at with "Show archived" on.
         """
         self._set_archived(session_id, True)
+
+    def archive_session_when_finished(self, session_id: str) -> None:
+        """Archive *session_id* once the run it is in ends — the agent's own
+        ask, through the archive_session MCP tool.
+
+        Not now: the call arrives from inside the agent's turn, and archiving
+        a session with a tab open closes that tab. Landing it at once would
+        take the tab out from under the reply the tool call is waiting for
+        and cut off whatever the agent meant to say last. So the archive
+        rides the session's finish edge instead (see _on_session_finished —
+        the same output-stopped moment that flags the row unread and re-asks
+        GitHub about its pull requests), by which time the reply is in and
+        the closing words are on the transcript. From there it is
+        `archive_session`, the archiving half of the sidebar's toggle, with
+        every gate that implies: the agent is still running at its prompt,
+        so the close goes the way the Archiving a running session setting
+        says — the dialog, a clean exit, or a handoff to the background.
+
+        A session with no run to wait out — the tracker reads it idle
+        already, which a tool call from a tab whose activity sources are
+        all held can look like — is archived after a beat, long enough for
+        the reply to reach the shim before the tab starts closing.
+        """
+        self._archive_when_finished.add(session_id)
+        if not self._activity.is_busy(session_id):
+            GLib.timeout_add(_ARCHIVE_REPLY_SETTLE_MS, self._archive_after_run, session_id)
+
+    def _archive_after_run(self, session_id: str) -> bool:
+        """Land an armed archive_session on its finish edge. A finish that
+        isn't the conversation's — another id of its chain still running, or
+        a /bg handoff's parting progress clear — leaves it armed for the edge
+        that is; a tab closed some other way disarms it in _on_close_page."""
+        if session_id in self._archive_when_finished and not (
+            self._chain(session_id) & self._activity.busy() or self._detaching_now(session_id)
+        ):
+            self._archive_when_finished.discard(session_id)
+            self.archive_session(session_id)
+        return GLib.SOURCE_REMOVE
 
     def _archive_session(self, session_id: str) -> None:
         """The sidebar's toggle: archive a visible session, restore an

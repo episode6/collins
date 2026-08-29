@@ -38,6 +38,15 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **A session can archive itself.** `archive_session` joins the built-in
+  MCP tools: the agent puts its own session away — the same archive as the
+  sidebar row's button, so the session leaves the list (resumable under
+  *Show archived*) and its tab closes. It lands when the turn that asked
+  ends, never mid-call, so the reply and the agent's closing words reach
+  the transcript first; a running session then closes the way *Archiving a
+  running session* says (the dialog, a clean exit, or a handoff to the
+  background). Its own switch sits with the others under Preferences →
+  *Built-in MCP tools*.
 - **The status icon shows when agents are working.** While any session is
   busy, the drink in the panel icon's glass turns into the sidebar's blue
   barber pole — the busy row's guide line, standing still — and the coral
