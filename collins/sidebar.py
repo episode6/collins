@@ -2341,25 +2341,27 @@ class SessionSidebar(Gtk.Box):
     def placeholder_unread(self, placeholder_id: str) -> bool:
         return placeholder_id in self._unread_placeholders
 
-    def placeholder_counts(self) -> tuple[int, int]:
-        """How many placeholder rows there are and how many are unread — what
-        the status icon adds to the store's own totals (see traymodel). Counts
-        rather than a list because a placeholder has no session id to jump to:
-        the whole reason its flag lives here and not on a session item.
+    def placeholder_busy(self, placeholder_id: str) -> bool:
+        """Whether a "New Thread" row is showing the barber pole. Read beside
+        placeholder_unread by the window's green-row sync: a working
+        placeholder's flag is under its pole, the way traymodel's
+        session_marker leaves a working session out of the badge, and comes
+        out again the moment the turn ends."""
+        return placeholder_id in self._busy_placeholders
 
-        A working placeholder is left out of the unread half, the way
-        traymodel's session_marker leaves a working session out: the row is
-        showing a barber pole, not a green pulse, and the badge counts what is
-        waiting for the user. Its flag stays put, so it is counted again the
-        moment the turn ends.
+    def placeholder_project(self, placeholder_id: str) -> str:
+        """The project name a placeholder row sits under, "" for none."""
+        cwd = self._placeholders.get(placeholder_id)
+        return project_name_for_cwd(cwd) if cwd else ""
 
-        The unread half is clamped to the rows it belongs to: a placeholder is
-        dropped by remove_placeholder, which clears its busy and unread flags
-        along with it, but the pair is read a window at a time and the two
-        numbers must not be able to disagree on the way past.
-        """
-        waiting = self._unread_placeholders & (set(self._placeholders) - self._busy_placeholders)
-        return len(self._placeholders), len(waiting)
+    def placeholder_count(self) -> int:
+        """How many placeholder rows there are — what the status icon adds to
+        the store's own session total (see traymodel). A count rather than a
+        list because a placeholder has no session id to jump to: the whole
+        reason its flags live here and not on a session item. Its unread flag
+        reaches the badge by another road, the notification center's
+        synthetic row (see MainWindow._sync_placeholder_green)."""
+        return len(self._placeholders)
 
     def remove_placeholder(self, placeholder_id: str) -> None:
         """Drop a live placeholder. A new-chat draft's row outlives this —

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-29. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -17,7 +17,7 @@ import shutil
 from collections.abc import Iterable
 from pathlib import Path
 
-from . import mcptools, newchat, panelhistory, panellayout
+from . import mcptools, newchat, notifycenter, panelhistory, panellayout
 from .claudemodels import NO_MODEL
 
 _CONFIG_BASE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
@@ -396,6 +396,13 @@ class AppState:
         # evidence needed to finish the pairing after a restart (see
         # MainWindow._replay_pending_detaches).
         self.pending_detaches: dict[str, dict] = {}
+        # The notification history, newest first, as notifycenter records
+        # ({id, session_id, title, project, kind, body, when, read, count}).
+        # Messages and bells only — a finished run's synthetic row stands for
+        # an in-memory flag and never lands here. Cleaned on load (garbage,
+        # rows past their fortnight and rows past the cap all go; see
+        # notifycenter.clean_records) and written back whole by the center.
+        self.notifications: list[dict] = []
         self.settings: dict = dict(DEFAULT_SETTINGS)
         self._load()
 
@@ -471,6 +478,7 @@ class AppState:
         self.pending_detaches = {
             k: v for k, v in (data.get("pending_detaches") or {}).items() if isinstance(v, dict)
         }
+        self.notifications = notifycenter.clean_records(data.get("notifications"))
         settings = dict(data.get("settings") or {})
         # Read-time, one-way migration of the auto_title_sessions switch the
         # title model's None item replaced: off becomes None, on is just the
@@ -502,6 +510,7 @@ class AppState:
             "process_baselines": self.process_baselines,
             "session_forwards": self.session_forwards,
             "pending_detaches": self.pending_detaches,
+            "notifications": self.notifications,  # newest first; never sort
             "settings": self.settings,
         }
         tmp = _STATE_FILE.with_suffix(".json.tmp")
@@ -947,6 +956,27 @@ class AppState:
         if draft_id not in self.new_chat_drafts:
             return
         del self.new_chat_drafts[draft_id]
+        self.save()
+
+    # -- notification history ------------------------------------------------
+
+    def get_notifications(self) -> list[dict]:
+        """The saved notification rows, newest first (see notifycenter)."""
+        return list(self.notifications)
+
+    def set_notifications(self, records: list[dict]) -> None:
+        """Persist the notification history whole — what the center's
+        to_records() says it is now.
+
+        The center announces every change it makes, and most of those don't
+        touch the list on disk at all: a finished run's synthetic row coming
+        and going is the commonest change of all and is never persisted. So
+        the unchanged case — which save() would otherwise rewrite in full,
+        synchronously, on every green edge — is deliberately not written.
+        """
+        if self.notifications == records:
+            return
+        self.notifications = list(records)
         self.save()
 
     # -- settings ------------------------------------------------------------

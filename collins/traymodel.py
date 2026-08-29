@@ -17,8 +17,12 @@ window — this returns the four things the StatusNotifierItem exports:
 - **The menu layout** as plain data — labels, markers, actions and the
   separators that survive — which the DBusMenu export walks.
 
-**The badge counts unread sessions only** — runs that finished and nobody has
-looked at yet, the sidebar's green pulse. Never unread + working: a number
+**The badge counts unread notifications**: every unlooked-at finished run is
+one (the notification center's synthetic row, which tracks the sidebar's
+green pulse one-for-one), plus every message and bell nobody has gone to.
+The number arrives here ready-made (`unread`) from notifycenter.py — the one
+place it is decided, so the tray, the dock and the header's bell can never
+disagree — and this module only draws it. Never unread + working: a number
 that climbs because an agent *started* tells the user something they cannot
 act on and that will resolve itself. The badge means "n things are waiting for
 you", so a badge reading `0` while three agents work is correct, and the
@@ -29,7 +33,9 @@ to work drops out of the count for as long as the run lasts, because it is no
 longer waiting for anyone — exactly what its row says, where the barber pole
 takes the guide line off the green pulse (see the `.unread` CSS in app.py).
 The flag itself is untouched, so the badge comes back the moment the turn
-ends, alongside the pulse.
+ends, alongside the pulse. The rule is session_marker's, applied by the app
+where it feeds the center (see App._sync_green), so a menu row and the badge
+read the same answer.
 
 Only sessions with an open tab are passed in, which is not a narrowing: an
 unread flag never outlives the tab it spoke for (MainWindow._sync_status
@@ -38,9 +44,8 @@ and every menu row leads somewhere — `app.focus-session` can only raise a tab
 that exists. Nor does it outlive the *row*: archiving clears it (see the
 store's `_put_away`), so the badge can never count a session the user has put
 out of sight and has no way left to clear. Tabs whose session id hasn't
-resolved yet have no id to jump to, so they arrive as bare counts
-(`placeholders`) instead: they hold the item `Active` and can carry unread,
-but get no row.
+resolved yet have no id to jump to, so they arrive as a bare count
+(`placeholders`) instead: they hold the item `Active`, but get no row.
 """
 
 from __future__ import annotations
@@ -181,8 +186,9 @@ def session_marker(session: TraySession) -> str:
     """Working outranks unread on a row that is somehow both: the run the flag
     was raised for has been overtaken by another that is still going.
 
-    The badge is counted through this same answer (see tray_view), so what a
-    menu row says and what the icon counts can never disagree.
+    The badge is counted through this same answer — the app asks it before
+    it tells the notification center a session is green (see App._sync_green)
+    — so what a menu row says and what the icon counts can never disagree.
     """
     if session.busy:
         return MARKER_WORKING
@@ -261,16 +267,23 @@ def menu_entries(sessions: list[TraySession], hidden_windows: bool = False) -> l
 def tray_view(
     sessions: list[TraySession],
     placeholders: int = 0,
-    placeholder_unread: int = 0,
+    unread: int = 0,
     name: str = APP_NAME,
     hidden_windows: bool = False,
 ) -> TrayView:
-    """Everything the item exports, from the open session tabs.
+    """Everything the item exports, from the open session tabs and the
+    notification center's count.
 
-    `placeholders` is how many open tabs have no session id yet (their unread
-    flags live in their window's sidebar, hence `placeholder_unread`, which
-    the sidebar has already taken its working rows out of): they count towards
-    the totals but cannot be jumped to, so they get no row.
+    `placeholders` is how many open tabs have no session id yet: they count
+    towards the totals but cannot be jumped to, so they get no row.
+
+    `unread` is the badge's number, taken as given: the notification center's
+    unread_count() (see notifycenter and the module docstring). It is not
+    recomputed from the sessions' flags here — a session's `unread` decides
+    its menu marker only — because the count includes rows no session list
+    can see: a message or a bell from a session whose tab has since closed,
+    or a finished run on a tab still waiting for its id. A negative number is
+    read as none.
 
     `hidden_windows` is whether any main window is hidden right now — windows
     that closed to the panel with their sessions running. Their tabs arrive
@@ -279,20 +292,11 @@ def tray_view(
     two things a count can't say: the first menu row names the hidden state,
     and the item stays Active while the icon is the only way back (see
     status_for).
-
-    The unread half is clamped to the tabs it counts rather than trusted. The
-    aggregate reads the two numbers from each window in turn, and a
-    placeholder that resolves between the reads leaves the pair briefly
-    disagreeing — a badge counting more sessions than the tooltip beside it
-    admits to having is worse than a badge one short for one repaint.
     """
     placeholders = max(placeholders, 0)
-    placeholder_unread = min(max(placeholder_unread, 0), placeholders)
+    unread = max(unread, 0)
     open_count = len(sessions) + placeholders
     working = sum(1 for session in sessions if session.busy)
-    # Through session_marker, so a session that is both only counts once and
-    # counts as the thing its row shows: working, until the run ends.
-    unread = sum(1 for s in sessions if session_marker(s) == MARKER_UNREAD) + placeholder_unread
     return TrayView(
         status=status_for(open_count, unread, hidden_windows),
         badge=badge_text(unread),

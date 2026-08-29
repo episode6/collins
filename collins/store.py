@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-28. Full change history: git log for this file.
+# fork. Last modified: 2026-08-29. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -96,6 +96,12 @@ class SessionStore(GObject.Object):
         # Emitted from set_unread itself so no caller has to remember to
         # announce it — the status icon's badge repaints off this edge.
         "unread-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, bool)),
+        # A session's busy flag actually flipped (session id, new value), from
+        # set_busy itself for the same reason. The badge's "unread and not
+        # working" rule needs both edges: a flagged row going back to work
+        # leaves the count, and comes back when the turn ends (see
+        # App._sync_green).
+        "busy-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, bool)),
         # A session was archived (session id) — one emission per session, from
         # every path that puts one away. Archiving is the user saying they are
         # done with it, so anything still asking for their attention on its
@@ -834,6 +840,7 @@ class SessionStore(GObject.Object):
         item = self._items.get(session_id)
         if item is not None and item.busy != flag:
             item.busy = flag
+            self.emit("busy-changed", session_id, flag)
 
     def set_unread(self, session_id: str, flag: bool) -> None:
         item = self._items.get(session_id)

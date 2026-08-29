@@ -54,7 +54,8 @@ def test_unread_always_wins_the_status():
 def test_view_status_counts_placeholder_tabs():
     # A tab whose session id hasn't resolved is still a session on screen.
     assert tray_view([], placeholders=1).status == STATUS_ACTIVE
-    assert tray_view([], placeholders=1, placeholder_unread=1).status == STATUS_ATTENTION
+    # Its unread flag reaches the badge as the center's synthetic row.
+    assert tray_view([], placeholders=1, unread=1).status == STATUS_ATTENTION
 
 
 # -- the badge ----------------------------------------------------------------
@@ -72,43 +73,58 @@ def test_badge_counts_up_to_nine_then_says_more():
     assert badge_text(999) == "9+"
 
 
-def test_badge_counts_unread_only_never_working():
-    view = tray_view([session("a", busy=True), session("b", busy=True), session("c", unread=True)])
-    # Three sessions, two of them working: the badge means "waiting for you",
-    # so starting a run must never move it.
+def test_badge_is_the_number_it_is_given_never_the_sessions_flags():
+    # The count is the notification center's (see notifycenter): a session's
+    # unread flag decides its menu marker, never the badge. Three sessions,
+    # two of them working: the badge means "waiting for you", so starting a
+    # run must never move it — and it can't, since the app only reports a
+    # green row for a session that isn't working.
+    view = tray_view(
+        [session("a", busy=True), session("b", busy=True), session("c", unread=True)], unread=1
+    )
     assert view.badge == "1"
     assert (view.sessions, view.working, view.unread) == (3, 2, 1)
+    # The flags alone light nothing.
+    assert tray_view([session("c", unread=True)]).badge == ""
 
 
-def test_badge_drops_a_flagged_session_that_goes_back_to_work():
+def test_badge_counts_what_no_session_list_can_see():
+    # A message from a session whose tab has since closed still waits in the
+    # history; the badge says so even with nothing open.
+    view = tray_view([], unread=2)
+    assert (view.badge, view.sessions, view.unread) == ("2", 0, 2)
+    assert view.status == STATUS_ATTENTION
+    assert view.tooltip == "Collins — no sessions open"
+
+
+def test_flagged_session_that_goes_back_to_work_reads_as_working():
     # The flag itself stays up — the row keeps it, under the barber pole that
     # outranks the green pulse — but a session mid-turn is not waiting for
-    # anyone, so it leaves the badge until the run ends.
-    view = tray_view([session("a", unread=True, busy=True), session("b", unread=True)])
+    # anyone, so the app reports no green for it until the run ends (see
+    # App._sync_green, which asks session_marker).
+    view = tray_view([session("a", unread=True, busy=True), session("b", unread=True)], unread=1)
     assert (view.badge, view.working, view.unread) == ("1", 1, 1)
     assert view.tooltip == "Collins — 2 sessions, 1 working, 1 unread"
     assert view.status == STATUS_ATTENTION
+    assert [e.marker for e in view.menu if e.action == ACTION_FOCUS] == [MARKER_WORKING, MARKER_UNREAD]
 
 
 def test_badge_and_status_clear_when_every_flag_is_under_a_pole():
-    view = tray_view([session("a", unread=True, busy=True)])
+    view = tray_view([session("a", unread=True, busy=True)], unread=0)
     assert (view.badge, view.unread, view.working) == ("", 0, 1)
     assert view.status == STATUS_ACTIVE
 
 
-def test_badge_sums_placeholder_unread():
-    view = tray_view([session("a", unread=True)], placeholders=2, placeholder_unread=2)
+def test_badge_counts_placeholder_rows_through_the_same_number():
+    view = tray_view([session("a", unread=True)], placeholders=2, unread=3)
     assert view.badge == "3"
     assert view.sessions == 3
 
 
-def test_placeholder_unread_cannot_outrun_the_placeholders():
-    # The two numbers are read window by window, so a placeholder resolving
-    # between the reads can leave them disagreeing for a repaint. The badge
-    # must never claim more sessions than the tooltip beside it admits to.
-    view = tray_view([], placeholders=1, placeholder_unread=3)
-    assert (view.badge, view.sessions, view.unread) == ("1", 1, 1)
-    assert tray_view([], placeholders=0, placeholder_unread=2).status == STATUS_PASSIVE
+def test_a_negative_unread_reads_as_none():
+    view = tray_view([session("a")], unread=-2)
+    assert (view.badge, view.unread, view.status) == ("", 0, STATUS_ACTIVE)
+    assert tray_view([], unread=-1).status == STATUS_PASSIVE
 
 
 # -- hidden windows -----------------------------------------------------------
@@ -124,7 +140,7 @@ def test_hidden_windows_hold_the_item_active():
 
 def test_hidden_windows_never_downgrade_attention():
     assert status_for(0, 1, hidden_windows=True) == STATUS_ATTENTION
-    assert tray_view([session("a", unread=True)], hidden_windows=True).status == STATUS_ATTENTION
+    assert tray_view([session("a", unread=True)], unread=1, hidden_windows=True).status == STATUS_ATTENTION
 
 
 def test_a_hidden_window_reads_active_by_its_session_count_alone():
@@ -179,7 +195,7 @@ def test_tooltip_names_the_instance_it_was_given():
 
 
 def test_view_tooltip_carries_both_numbers():
-    view = tray_view([session("a", busy=True), session("b", unread=True)])
+    view = tray_view([session("a", busy=True), session("b", unread=True)], unread=1)
     assert view.tooltip == "Collins — 2 sessions, 1 working, 1 unread"
 
 
@@ -257,7 +273,7 @@ def test_a_working_row_that_is_also_unread_reads_as_working():
 
 def test_placeholder_tabs_get_no_row():
     # There is no session id to jump to yet, so a row for one would go nowhere.
-    view = tray_view([], placeholders=2, placeholder_unread=1)
+    view = tray_view([], placeholders=2, unread=1)
     assert targets(view.menu) == []
     assert view.sessions == 2
 
