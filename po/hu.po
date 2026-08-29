@@ -920,6 +920,18 @@ msgstr "{project} frissítve — {summary}"
 msgid "Pulled {project}"
 msgstr "{project} frissítve"
 
+msgid "Checkout {branch}"
+msgstr "{branch} ág kivétele"
+
+msgid "Checkout default branch"
+msgstr "Az alapértelmezett ág kivétele"
+
+msgid "Git checkout failed"
+msgstr "A git checkout sikertelen"
+
+msgid "Checked out {branch} in {project}"
+msgstr "{branch} kivéve itt: {project}"
+
 msgid "Rebase / resolve conflicts"
 msgstr "Rebase / konfliktusok feloldása"
 

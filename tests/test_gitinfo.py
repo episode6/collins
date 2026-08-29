@@ -1,5 +1,5 @@
-"""Tests for gitinfo: current_branch and github_url, which are pure filesystem
-parsing and need no git, and has_changes/ignored_names, the calls that shell
+"""Tests for gitinfo: current_branch, default_branch and github_url, which are
+pure filesystem parsing and need no git, and has_changes/ignored_names, the calls that shell
 out to it."""
 
 import shutil
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from collins.gitinfo import current_branch, github_url, has_changes, ignored_names
+from collins.gitinfo import current_branch, default_branch, github_url, has_changes, ignored_names
 
 
 def make_repo(root: Path, head: str = "ref: refs/heads/main\n") -> Path:
@@ -204,6 +204,124 @@ def test_a_worktree_reads_the_main_checkouts_config(tmp_path):
     worktree.mkdir()
     (worktree / ".git").write_text(f"gitdir: {wt_git_dir}\n")
     assert github_url(worktree) == "https://github.com/e6/c"
+
+
+# -- default_branch -----------------------------------------------------------
+
+
+def with_remote_head(repo: Path, remote: str, head: str) -> None:
+    """What a clone records about *remote*'s default branch: its
+    `refs/remotes/<remote>/HEAD`, a symbolic ref in the usual case."""
+    ref_dir = repo / ".git" / "refs" / "remotes" / remote
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    (ref_dir / "HEAD").write_text(head)
+
+
+def with_local_branch(repo: Path, name: str) -> None:
+    ref = repo / ".git" / "refs" / "heads" / name
+    ref.parent.mkdir(parents=True, exist_ok=True)
+    ref.write_text("0123456789abcdef0123456789abcdef01234567\n")
+
+
+UPSTREAM = '[remote "upstream"]\n\turl = {url}\n\tfetch = +refs/heads/*:refs/remotes/upstream/*\n'
+
+
+def test_default_branch_is_the_remote_head(tmp_path):
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url="git@github.com:e6/c.git"))
+    with_remote_head(repo, "origin", "ref: refs/remotes/origin/main\n")
+    assert default_branch(repo) == "main"
+
+
+def test_default_branch_named_anything(tmp_path):
+    """The remote's word is taken as-is: a trunk called `develop` or
+    `release/2.0` is what the checkout item should offer."""
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url="git@github.com:e6/c.git"))
+    with_remote_head(repo, "origin", "ref: refs/remotes/origin/release/2.0\n")
+    with_local_branch(repo, "main")
+    assert default_branch(repo) == "release/2.0"
+
+
+def test_default_branch_origin_outranks_upstream(tmp_path):
+    repo = with_remotes(
+        tmp_path / "repo",
+        UPSTREAM.format(url="git@github.com:up/c.git") + ORIGIN.format(url="git@github.com:e6/c.git"),
+    )
+    with_remote_head(repo, "upstream", "ref: refs/remotes/upstream/master\n")
+    with_remote_head(repo, "origin", "ref: refs/remotes/origin/main\n")
+    assert default_branch(repo) == "main"
+
+
+def test_default_branch_falls_through_a_remote_without_a_head(tmp_path):
+    """`git remote add` writes no HEAD ref; the next remote that has one
+    answers."""
+    repo = with_remotes(
+        tmp_path / "repo",
+        UPSTREAM.format(url="git@github.com:up/c.git") + ORIGIN.format(url="git@github.com:e6/c.git"),
+    )
+    with_remote_head(repo, "upstream", "ref: refs/remotes/upstream/trunk\n")
+    assert default_branch(repo) == "trunk"
+
+
+def test_default_branch_ignores_a_detached_remote_head(tmp_path):
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url="git@github.com:e6/c.git"))
+    with_remote_head(repo, "origin", "0123456789abcdef0123456789abcdef01234567\n")
+    with_local_branch(repo, "master")
+    assert default_branch(repo) == "master"
+
+
+def test_default_branch_ignores_a_remote_head_pointing_elsewhere(tmp_path):
+    """A symbolic ref outside the remote's own namespace isn't a default
+    branch of that remote, whatever wrote it."""
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url="git@github.com:e6/c.git"))
+    with_remote_head(repo, "origin", "ref: refs/heads/main\n")
+    assert default_branch(repo) is None
+
+
+def test_default_branch_without_remotes_is_main_or_master(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    with_local_branch(repo, "master")
+    assert default_branch(repo) == "master"
+    with_local_branch(repo, "main")
+    assert default_branch(repo) == "main"
+
+
+def test_default_branch_packed(tmp_path):
+    """After `git gc` the loose ref is gone and `packed-refs` holds it —
+    with its header line and the peeled `^` lines tags carry."""
+    repo = make_repo(tmp_path / "repo")
+    (repo / ".git" / "packed-refs").write_text(
+        "# pack-refs with: peeled fully-peeled sorted\n"
+        "0123456789abcdef0123456789abcdef01234567 refs/heads/master\n"
+        "89abcdef0123456789abcdef0123456789abcdef refs/tags/v1\n"
+        "^0123456789abcdef0123456789abcdef01234567\n"
+    )
+    assert default_branch(repo) == "master"
+
+
+def test_default_branch_nowhere_to_be_found(tmp_path):
+    repo = make_repo(tmp_path / "repo", head="ref: refs/heads/feature\n")
+    with_local_branch(repo, "feature")
+    assert default_branch(repo) is None
+
+
+def test_default_branch_outside_a_repository(tmp_path):
+    assert default_branch(tmp_path) is None
+    assert default_branch(tmp_path / "gone") is None
+    assert default_branch(None) is None
+
+
+def test_default_branch_in_a_worktree_reads_the_main_checkouts_refs(tmp_path):
+    main = with_remotes(tmp_path / "main", ORIGIN.format(url="git@github.com:e6/c.git"))
+    with_remote_head(main, "origin", "ref: refs/remotes/origin/main\n")
+    wt_git_dir = main / ".git" / "worktrees" / "wt"
+    wt_git_dir.mkdir(parents=True)
+    (wt_git_dir / "HEAD").write_text("ref: refs/heads/wt-branch\n")
+    (wt_git_dir / "commondir").write_text("../..\n")
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / ".git").write_text(f"gitdir: {wt_git_dir}\n")
+    assert default_branch(worktree) == "main"
+    assert current_branch(worktree) == "wt-branch"
 
 
 # -- has_changes ------------------------------------------------------------

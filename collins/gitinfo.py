@@ -2,7 +2,8 @@
 
 """Best-effort git repository info, read straight from `.git` where it can be.
 
-Finding the branch (`current_branch`) or the repository's page on GitHub
+Finding the branch (`current_branch`), the branch the repository treats as
+its trunk (`default_branch`) or the repository's page on GitHub
 (`github_url`) is a couple of stat calls and one small file read, with no
 `git` processes spawned — cheap enough for the tab footer's 2s poll, and for
 a context menu that asks on every right-click. Asking whether the tree is
@@ -53,6 +54,14 @@ _SCP_LIKE = re.compile(r"^(?:[^/@]+@)?(?P<host>[^/:]+):(?P<path>.+)$")
 # out too.
 _REPO_NAME = re.compile(r"^(?!\.+$)[A-Za-z0-9._-]+$")
 
+# Where a clone records which branch its remote considers the main one:
+# `refs/remotes/<remote>/HEAD` is a symbolic ref to it (`ref:
+# refs/remotes/origin/main`). Only a clone writes one — `git remote add` and
+# `git init` don't — so the names git and GitHub mint by default stand in
+# where there is none, in the order GitHub's own default came to be.
+_REMOTE_HEAD_FILE = "HEAD"
+_DEFAULT_BRANCH_NAMES = ("main", "master")
+
 # Long enough for `git status` in a repository of any size worth working in,
 # short enough that a menu built on the answer doesn't visibly stall waiting
 # for it. A repository slower than this is treated as clean.
@@ -75,6 +84,37 @@ def current_branch(cwd: str | Path | None) -> str | None:
     """
     git_dir = _git_dir(cwd)
     return _read_head(git_dir) if git_dir else None
+
+
+def default_branch(cwd: str | Path | None) -> str | None:
+    """The branch the repository enclosing *cwd* treats as its trunk, or None.
+
+    What the remote says first — `refs/remotes/<remote>/HEAD`, a clone's
+    record of the remote's default branch, remotes ranked the way
+    `github_url` ranks them — and, for a repository that was never cloned
+    (no remote HEAD at all), whichever of `main` and `master` exists as a
+    local branch. Read off the repository's files like `current_branch`, so
+    a context menu can ask on every right-click; in a worktree the refs are
+    the main checkout's (`commondir`), which is where every worktree's
+    branches live.
+
+    None outside a repository and for one whose trunk can't be named. The
+    caller offers to check the branch out, so a guess would be worse than
+    no answer.
+    """
+    git_dir = _git_dir(cwd)
+    if git_dir is None:
+        return None
+    common = _common_dir(git_dir)
+    remotes = _remote_urls(common / "config")
+    for name in sorted(remotes, key=_remote_rank):
+        branch = _remote_head(common, name)
+        if branch:
+            return branch
+    for name in _DEFAULT_BRANCH_NAMES:
+        if _has_local_branch(common, name):
+            return name
+    return None
 
 
 def github_url(cwd: str | Path | None) -> str | None:
@@ -304,6 +344,45 @@ def _resolve_gitdir_pointer(git_file: Path) -> Path | None:
             if target:  # Path("/a") / "/abs" keeps the absolute target as-is
                 return git_file.parent / target
     return None
+
+
+def _remote_head(common_dir: Path, remote: str) -> str | None:
+    """The branch `refs/remotes/<remote>/HEAD` points at, or None — for a
+    remote that has no HEAD ref (never cloned from, or pruned), or one whose
+    HEAD is detached (`git remote set-head --delete` leaves none; a bare
+    commit hash in there is a remote with no default to speak of)."""
+    ref_file = common_dir / "refs" / "remotes" / remote / _REMOTE_HEAD_FILE
+    try:
+        head = ref_file.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    if not head.startswith(_REF_PREFIX):
+        return None
+    prefix = f"refs/remotes/{remote}/"
+    ref = head[len(_REF_PREFIX) :].strip()
+    if not ref.startswith(prefix):
+        return None
+    return ref[len(prefix) :] or None
+
+
+def _has_local_branch(common_dir: Path, name: str) -> bool:
+    """Whether `refs/heads/<name>` exists — as a loose ref file, or packed
+    into `packed-refs` (`<hash> refs/heads/<name>` per line), which is where
+    `git gc` moves it."""
+    if (common_dir / "refs" / "heads" / name).is_file():
+        return True
+    try:
+        packed = (common_dir / "packed-refs").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    wanted = f"{_BRANCH_REF_PREFIX}{name}"
+    for line in packed.splitlines():
+        if line.startswith(("#", "^")):
+            continue
+        parts = line.split(" ", 1)
+        if len(parts) == 2 and parts[1].strip() == wanted:
+            return True
+    return False
 
 
 def _read_head(git_dir: Path) -> str | None:

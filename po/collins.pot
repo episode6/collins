@@ -163,8 +163,24 @@ msgstr ""
 msgid "Git pull"
 msgstr ""
 
+#: collins/sidebar.py:2782
+msgid "Checkout {branch}"
+msgstr ""
+
+#: collins/sidebar.py:2782
+msgid "Checkout default branch"
+msgstr ""
+
 #: collins/window.py:4800
 msgid "Git pull failed"
+msgstr ""
+
+#: collins/window.py:5280
+msgid "Git checkout failed"
+msgstr ""
+
+#: collins/window.py:5280
+msgid "Checked out {branch} in {project}"
 msgstr ""
 
 #: collins/window.py:4800
