@@ -839,6 +839,39 @@ msgstr "Alapértelmezett: az asztal üzenethangja"
 msgid "Silent"
 msgstr "Néma"
 
+msgid "Bell"
+msgstr "Csengő"
+
+msgid "Complete"
+msgstr "Kész"
+
+msgid "Message"
+msgstr "Üzenet"
+
+msgid "Information"
+msgstr "Információ"
+
+msgid "Zen"
+msgstr "Zen"
+
+msgid "Soft"
+msgstr "Lágy"
+
+msgid "Glass"
+msgstr "Üveg"
+
+msgid "Confirmation"
+msgstr "Megerősítés"
+
+msgid "Pluck"
+msgstr "Pendítés"
+
+msgid "The desktop's “{event}” sound"
+msgstr "Az asztal „{event}” hangja"
+
+msgid "Ships with Collins: {source} (CC0)"
+msgstr "A Collins része: {source} (CC0)"
+
 msgid "Rang the bell"
 msgstr "Csengetett"
 

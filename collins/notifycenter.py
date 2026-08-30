@@ -43,11 +43,12 @@ for a user who turned the in-app cards off) are decided here too, as is what
 the `notify_user` tool is told about it all (`tool_reply`).
 
 **What the sound is** is also worked out here, short of playing it: the
-notification_sound setting's three shapes (SOUND_DEFAULT, SOUND_NONE, a
-path), which file "default" means on this desktop (`sound_file`, walking the
-desktop's sound theme for its message sound), and what the preferences row
-and the sheet's footer call the choice. notifysound.py plays whatever this
-resolves to.
+notification_sound setting's five shapes (SOUND_DEFAULT, SOUND_NONE, one of
+the desktop theme's events, one of the sounds Collins ships, a path), which
+file each means on this desktop (`sound_file`, walking the desktop's sound
+theme for its events), what the picker offers (`sound_choices`), and what
+the preferences row and the sheet's footer call the choice. notifysound.py
+plays whatever this resolves to.
 
 **What the widgets say** is decided here too, where it is string work: the
 bell's tooltip, a row's relative time, a coalesced bell's "×3", the split of
@@ -63,7 +64,7 @@ import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from .i18n import _
+from .i18n import N_, _
 
 # What raised the notification. A `finished` row is synthetic — the green
 # flag's row, owned by set_green — and never persisted.
@@ -107,21 +108,74 @@ DELIVERIES = frozenset(
 # row it owns without a search and nothing else can collide with it.
 GREEN_PREFIX = "green:"
 
-# The notification_sound setting: the desktop's own message sound, silence,
-# or an absolute path to a file of the user's. Anything else is a path.
+# The notification_sound setting's five shapes: the desktop's own message
+# sound, silence, another of the desktop theme's events ("theme:bell"), one
+# of the sounds Collins ships ("bundled:zen"), or an absolute path to a file
+# of the user's. Anything else is a path — the prefixes carry a colon and no
+# leading slash, so neither can be mistaken for one.
 SOUND_DEFAULT = "default"
 SOUND_NONE = "none"
+SOUND_THEME_PREFIX = "theme:"
+SOUND_BUNDLED_PREFIX = "bundled:"
 
-# Where "default" looks: the freedesktop sound-theme layout, under the
-# desktop's chosen theme first (GNOME's org.gnome.desktop.sound theme-name —
-# Yaru on Ubuntu, whose message sound is its own) and the freedesktop theme
-# second, which sound-theme-freedesktop installs on Ubuntu and Fedora desktops
-# alike. The event is the one a desktop plays for a new message. Collins
-# ships no sound of its own: nothing to license, and the theme's sound is
-# what the desktop already plays for exactly this.
+# Where "default" and "theme:…" look: the freedesktop sound-theme layout,
+# under the desktop's chosen theme first (GNOME's org.gnome.desktop.sound
+# theme-name — Yaru on Ubuntu, whose sounds are its own) and the freedesktop
+# theme second, which sound-theme-freedesktop installs on Ubuntu and Fedora
+# desktops alike. "default" is the event a desktop plays for a new message;
+# the theme's other events are offered by name, so a user who would rather
+# hear the desktop's bell or its "complete" needs no file chooser to find
+# them. Nothing of the desktop's is shipped: the theme's sound is what the
+# desktop already plays for exactly this, and its files are its own.
 SOUND_THEME_ROOT = "/usr/share/sounds"
 SOUND_FALLBACK_THEME = "freedesktop"
-SOUND_EVENT = "stereo/message-new-instant.oga"
+SOUND_DEFAULT_EVENT = "message-new-instant"
+# The theme events the picker names, in its order: event id → what the row
+# calls it. Every one is in sound-theme-freedesktop's stereo/ directory, so
+# the fallback theme answers for any the desktop's own theme leaves out
+# (Yaru has no dialog-information).
+SOUND_THEME_EVENTS: tuple[tuple[str, str], ...] = (
+    ("bell", N_("Bell")),
+    ("complete", N_("Complete")),
+    ("message", N_("Message")),
+    ("dialog-information", N_("Information")),
+)
+
+# The sounds Collins ships, in the picker's order: name → (label, source).
+# The files are data/sounds/<name>.oga, reached through the package's
+# sounds/ symlink (package data, like the icons), and every one is CC0 —
+# see THIRD_PARTY_LICENSES.md, which the source strings here must agree
+# with. They exist so the picker is the same on every desktop, theme or no
+# theme: four desktops, four different "Default"s, one "Zen".
+SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
+SOUND_BUNDLED: tuple[tuple[str, str, str], ...] = (
+    ("zen", N_("Zen"), "UI SFX, zen/notification"),
+    ("soft", N_("Soft"), "UI SFX, soft/mention"),
+    ("glass", N_("Glass"), "UI SFX, glass/complete"),
+    ("confirmation", N_("Confirmation"), "Kenney Interface Sounds, confirmation_001"),
+    ("pluck", N_("Pluck"), "Kenney Interface Sounds, pluck_002"),
+)
+
+
+def theme_sound_value(event: str) -> str:
+    """The setting's value for one of the desktop theme's events."""
+    return SOUND_THEME_PREFIX + event
+
+
+def bundled_sound_value(name: str) -> str:
+    """The setting's value for one of the sounds Collins ships."""
+    return SOUND_BUNDLED_PREFIX + name
+
+
+def sound_choices() -> list[tuple[str, str]]:
+    """Every named choice the picker offers, in its order, as (value,
+    label): the default, silence, the desktop theme's events, the bundled
+    sounds. A file of the user's is the one choice with no fixed value, so
+    it isn't here — the picker adds its own "Custom…" row after these."""
+    choices = [(SOUND_DEFAULT, _("Default")), (SOUND_NONE, _("None"))]
+    choices += [(theme_sound_value(event), _(label)) for event, label in SOUND_THEME_EVENTS]
+    choices += [(bundled_sound_value(name), _(label)) for name, label, _src in SOUND_BUNDLED]
+    return choices
 
 # The in-app card's own light/dark (the notification_color_scheme setting,
 # and the Card theme row's three choices, in its order): CARD_SCHEME_APP
@@ -761,15 +815,41 @@ def split_rows(rows: Iterable[Notification]) -> tuple[list[Notification], list[N
     return unread, earlier
 
 
+def sound_theme_event(value) -> str | None:
+    """The theme event a "theme:…" value names, None for any other shape —
+    including a "theme:" of an event the picker doesn't offer, which is
+    treated like a file that isn't there."""
+    if isinstance(value, str) and value.startswith(SOUND_THEME_PREFIX):
+        event = value[len(SOUND_THEME_PREFIX):]
+        if any(event == known for known, _label in SOUND_THEME_EVENTS):
+            return event
+    return None
+
+
+def sound_bundled_name(value) -> str | None:
+    """The bundled sound a "bundled:…" value names, None for any other
+    shape or a name Collins doesn't ship (a setting from a build that had
+    one more)."""
+    if isinstance(value, str) and value.startswith(SOUND_BUNDLED_PREFIX):
+        name = value[len(SOUND_BUNDLED_PREFIX):]
+        if any(name == known for known, _label, _src in SOUND_BUNDLED):
+            return name
+    return None
+
+
 def sound_display_name(value: str | None) -> str:
     """What the sheet's footer calls the notification_sound setting: "Default"
-    for an unset or default value, "None" for silence, else the chosen file's
-    name. The sound's own module reads the same setting for playback; the
-    two must agree on the words, so the words live here."""
+    for an unset or default value, "None" for silence, a theme event's or a
+    bundled sound's label, else the chosen file's name. The sound's own
+    module reads the same setting for playback; the two must agree on the
+    words, so the words live here."""
     if not value or value == SOUND_DEFAULT:
         return _("Default")
     if value == SOUND_NONE:
         return _("None")
+    labels = dict(sound_choices())
+    if value in labels:
+        return labels[value]
     return os.path.basename(str(value))
 
 
@@ -783,12 +863,20 @@ def card_scheme_class(value) -> str:
 def sound_subtitle(value, home: str | None = None) -> str:
     """The preferences row's line under "Sound": what the choice means.
     "Default" is described rather than named (the file it resolves to is
-    the desktop's business, and differs per theme), silence says so, and a
-    file of the user's shows its path with the home directory as ~."""
+    the desktop's business, and differs per theme), silence says so, a
+    theme event says whose it is, a bundled sound says where it came from,
+    and a file of the user's shows its path with the home directory as ~."""
     if not value or value == SOUND_DEFAULT:
         return _("Default: the desktop's message sound")
     if value == SOUND_NONE:
         return _("Silent")
+    event = sound_theme_event(value)
+    if event is not None:
+        return _("The desktop's “{event}” sound").format(event=event)
+    name = sound_bundled_name(value)
+    if name is not None:
+        source = next(src for known, _label, src in SOUND_BUNDLED if known == name)
+        return _("Ships with Collins: {source} (CC0)").format(source=source)
     path = str(value)
     home = home if home is not None else os.path.expanduser("~")
     if home and path.startswith(home.rstrip("/") + "/"):
@@ -801,32 +889,47 @@ def sound_is_silent(value) -> bool:
     return value == SOUND_NONE
 
 
-def sound_candidates(theme_name: str = "") -> list[str]:
-    """Where "default" looks, in order: the desktop's theme (when it names
-    one that isn't the fallback itself), then the freedesktop theme."""
+def sound_candidates(theme_name: str = "", event: str = SOUND_DEFAULT_EVENT) -> list[str]:
+    """Where "default" (and a "theme:…" choice, for its own event) looks,
+    in order: the desktop's theme (when it names one that isn't the
+    fallback itself), then the freedesktop theme."""
     themes: list[str] = []
     theme_name = (theme_name or "").strip()
     if theme_name and theme_name != SOUND_FALLBACK_THEME and "/" not in theme_name:
         themes.append(theme_name)
     themes.append(SOUND_FALLBACK_THEME)
-    return [os.path.join(SOUND_THEME_ROOT, theme, SOUND_EVENT) for theme in themes]
+    return [os.path.join(SOUND_THEME_ROOT, theme, "stereo", f"{event}.oga") for theme in themes]
+
+
+def bundled_sound_file(name: str) -> str:
+    """Where a bundled sound lives, whether or not it is there."""
+    return os.path.join(SOUNDS_DIR, f"{name}.oga")
 
 
 def sound_file(value, theme_name: str = "", exists: Callable[[str], bool] = os.path.isfile) -> str:
     """The file to play for the notification_sound setting, resolved now
     rather than when it was chosen: "default" is the first of the theme
-    candidates that exists on this machine today, a path is itself if it
-    still exists, and "" means there is nothing to play and the beep is the
-    fallback. Silence (SOUND_NONE) is sound_is_silent's to notice first;
-    here it resolves like an absent file.
+    candidates that exists on this machine today, a theme event the same
+    for its own event, a bundled sound is its file in the package, a path
+    is itself if it still exists, and "" means there is nothing to play and
+    the beep is the fallback. Silence (SOUND_NONE) is sound_is_silent's to
+    notice first; here it resolves like an absent file.
 
     `exists` is os.path.isfile unless a test says otherwise."""
     if not value or value == SOUND_DEFAULT:
-        for candidate in sound_candidates(theme_name):
+        event = SOUND_DEFAULT_EVENT
+    elif value == SOUND_NONE:
+        return ""
+    else:
+        event = sound_theme_event(value)
+    if event is not None:
+        for candidate in sound_candidates(theme_name, event):
             if exists(candidate):
                 return candidate
         return ""
-    if value == SOUND_NONE:
-        return ""
+    name = sound_bundled_name(value)
+    if name is not None:
+        path = bundled_sound_file(name)
+        return path if exists(path) else ""
     path = str(value)
     return path if os.path.isabs(path) and exists(path) else ""

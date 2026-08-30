@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 [project]
 # The distribution name, the installed command and the import package are all
@@ -61,6 +61,7 @@ collins = [
     "icons/com.episode6.Collins-panel.svg",
     "icons/com.episode6.Collins-panel-working.svg",
     "icons/hicolor/scalable/actions/*.svg",
+    "sounds/*.oga",
     "com.episode6.Collins.desktop",
     "com.episode6.Collins.metainfo.xml",
 ]

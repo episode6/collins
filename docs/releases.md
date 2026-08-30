@@ -46,6 +46,14 @@ downloads of each version, see the
   side, the tree at the width you left it. The threshold is *Single column
   when narrow* in Preferences → *Editor* (0 keeps the two columns at any
   width).
+- **More notification sounds to choose from.** The *Sound* picker in
+  Preferences → *Notifications* names the desktop theme's other sounds —
+  *Bell*, *Complete*, *Message*, *Information*, resolved from the desktop's
+  own theme the way *Default* is — and five short chimes Collins now
+  ships, so the choice is the same on every desktop: *Zen*, *Soft* and
+  *Glass* from UI SFX, *Confirmation* and *Pluck* from Kenney's Interface
+  Sounds, all public domain (CC0). *Default*, *None* and *Custom…* are as
+  before.
 - **Collins tells you when a newer Collins is out.** Once a day the app
   asks GitHub for the latest release — through your `gh` login when it
   has one, anonymously over the public API otherwise — and when that

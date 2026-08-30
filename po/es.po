@@ -839,6 +839,39 @@ msgstr "Predeterminado: el sonido de mensaje del escritorio"
 msgid "Silent"
 msgstr "Silencio"
 
+msgid "Bell"
+msgstr "Campana"
+
+msgid "Complete"
+msgstr "Completado"
+
+msgid "Message"
+msgstr "Mensaje"
+
+msgid "Information"
+msgstr "Información"
+
+msgid "Zen"
+msgstr "Zen"
+
+msgid "Soft"
+msgstr "Suave"
+
+msgid "Glass"
+msgstr "Cristal"
+
+msgid "Confirmation"
+msgstr "Confirmación"
+
+msgid "Pluck"
+msgstr "Punteo"
+
+msgid "The desktop's “{event}” sound"
+msgstr "El sonido «{event}» del escritorio"
+
+msgid "Ships with Collins: {source} (CC0)"
+msgstr "Incluido con Collins: {source} (CC0)"
+
 msgid "Rang the bell"
 msgstr "Sonó la campana"
 

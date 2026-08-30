@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 import pytest
 
 from collins import notifycenter
@@ -27,6 +30,7 @@ from collins.notifycenter import (
 )
 
 NOW = 1_800_000_000.0
+ROOT = Path(__file__).resolve().parent.parent
 
 
 class Clock:
@@ -676,6 +680,77 @@ def test_sound_file_for_a_custom_path_and_silence():
     assert notifycenter.sound_file("/home/me/gone.ogg", "", exists) == ""  # deleted: the beep
     assert notifycenter.sound_file("chime.ogg", "", lambda _p: True) == ""  # relative: refused
     assert notifycenter.sound_file("none", "Yaru", lambda _p: True) == ""
+
+
+def test_sound_choices_are_the_pickers_rows_in_order():
+    values = [value for value, _label in notifycenter.sound_choices()]
+    assert values[:2] == ["default", "none"]
+    assert values[2:6] == ["theme:bell", "theme:complete", "theme:message", "theme:dialog-information"]
+    assert values[6:] == [
+        "bundled:zen",
+        "bundled:soft",
+        "bundled:glass",
+        "bundled:confirmation",
+        "bundled:pluck",
+    ]
+    labels = [label for _value, label in notifycenter.sound_choices()]
+    assert labels == [
+        "Default", "None", "Bell", "Complete", "Message", "Information",
+        "Zen", "Soft", "Glass", "Confirmation", "Pluck",
+    ]  # fmt: skip
+    # No two rows can read the same, or the combo can't tell them apart.
+    assert len(set(labels)) == len(labels)
+
+
+def test_theme_and_bundled_values_are_named_and_described():
+    assert notifycenter.sound_display_name("theme:bell") == "Bell"
+    assert notifycenter.sound_display_name("bundled:zen") == "Zen"
+    assert notifycenter.sound_subtitle("theme:complete") == "The desktop's “complete” sound"
+    assert notifycenter.sound_subtitle("bundled:pluck") == (
+        "Ships with Collins: Kenney Interface Sounds, pluck_002 (CC0)"
+    )
+    # An event or a name Collins doesn't know (a setting from another build)
+    # is neither: it reads like a file, and resolves like a missing one.
+    assert notifycenter.sound_theme_event("theme:trash-empty") is None
+    assert notifycenter.sound_bundled_name("bundled:gong") is None
+    assert notifycenter.sound_display_name("theme:trash-empty") == "theme:trash-empty"
+    assert notifycenter.sound_file("theme:trash-empty", "Yaru", lambda _p: True) == ""
+    assert notifycenter.sound_file("bundled:gong", "Yaru", lambda _p: True) == ""
+    assert not notifycenter.sound_is_silent("theme:bell")
+    assert not notifycenter.sound_is_silent("bundled:zen")
+
+
+def test_a_theme_event_walks_the_themes_like_default_does():
+    assert notifycenter.sound_candidates("Yaru", "bell") == [
+        "/usr/share/sounds/Yaru/stereo/bell.oga",
+        "/usr/share/sounds/freedesktop/stereo/bell.oga",
+    ]
+    # Yaru has no dialog-information: the freedesktop theme answers.
+    present = {"/usr/share/sounds/freedesktop/stereo/dialog-information.oga"}
+    assert notifycenter.sound_file("theme:dialog-information", "Yaru", present.__contains__) == (
+        "/usr/share/sounds/freedesktop/stereo/dialog-information.oga"
+    )
+    assert notifycenter.sound_file("theme:bell", "Yaru", present.__contains__) == ""
+
+
+def test_a_bundled_sound_is_the_packages_file():
+    path = notifycenter.sound_file("bundled:zen", "Yaru", lambda _p: True)
+    assert path == os.path.join(notifycenter.SOUNDS_DIR, "zen.oga")
+    assert notifycenter.sound_file("bundled:zen", "Yaru", lambda _p: False) == ""  # not shipped: the beep
+
+
+def test_every_bundled_sound_ships_and_is_accounted_for():
+    # The files are package data (pyproject.toml's sounds/*.oga glob, guarded
+    # by scripts/verify_wheel_data.py); each has to exist, be small enough
+    # to be a chime, and be named in the third-party notices with the source
+    # the subtitle credits.
+    notices = (ROOT / "collins" / "THIRD_PARTY_LICENSES.md").read_text()
+    for name, _label, source in notifycenter.SOUND_BUNDLED:
+        path = notifycenter.bundled_sound_file(name)
+        assert os.path.isfile(path), path
+        assert os.path.getsize(path) < 16_000, path
+        assert f"`{name}.oga`" in notices, name
+        assert source.split(", ")[1] in notices, source
 
 
 # -- the update row (see updatecheck) ------------------------------------------

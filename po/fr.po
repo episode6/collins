@@ -839,6 +839,39 @@ msgstr "Par défaut : le son de message du bureau"
 msgid "Silent"
 msgstr "Silencieux"
 
+msgid "Bell"
+msgstr "Cloche"
+
+msgid "Complete"
+msgstr "Terminé"
+
+msgid "Message"
+msgstr "Message"
+
+msgid "Information"
+msgstr "Information"
+
+msgid "Zen"
+msgstr "Zen"
+
+msgid "Soft"
+msgstr "Doux"
+
+msgid "Glass"
+msgstr "Verre"
+
+msgid "Confirmation"
+msgstr "Confirmation"
+
+msgid "Pluck"
+msgstr "Pincement"
+
+msgid "The desktop's “{event}” sound"
+msgstr "Le son « {event} » du bureau"
+
+msgid "Ships with Collins: {source} (CC0)"
+msgstr "Fourni avec Collins : {source} (CC0)"
+
 msgid "Rang the bell"
 msgstr "A sonné la cloche"
 

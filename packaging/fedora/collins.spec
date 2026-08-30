@@ -18,7 +18,7 @@ Name:           collins
 Version:        0.1.2
 Release:        1%{?dist}
 Summary:        Native GTK4 desktop app to manage Claude Code sessions
-License:        GPL-3.0-or-later
+License:        GPL-3.0-or-later AND CC0-1.0
 URL:            https://github.com/episode6/collins
 # The tag tarball's URL, for the record and for rpmlint; only the basename is
 # looked up, and build-copr-srpm.sh writes that file from git HEAD -- the same

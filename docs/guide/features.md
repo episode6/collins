@@ -360,7 +360,9 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   slides in** at the top-right of the window, under the header bar: the
   project's icon, the session's name, two lines of the message, and the
   **notification sound** (the desktop's own message sound by default —
-  Preferences → *Notifications* picks another file, or none). The card
+  Preferences → *Notifications* offers the desktop's other sounds too,
+  its *Bell*, *Complete*, *Message* and *Information*; five short chimes
+  Collins ships, all public domain; any file of yours; or none). The card
   follows the app's light or dark unless *Card theme* pins it — a dark
   card over a light window reads the way a desktop notification does.
   Click anywhere on it to go there; the × dismisses the card and leaves the row

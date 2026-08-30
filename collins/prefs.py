@@ -573,7 +573,13 @@ class PreferencesDialog(Adw.Dialog):
         )
 
         self._sound_row = Adw.ComboRow(title=_("Sound"))
-        self._sound_row.set_model(Gtk.StringList.new([_("Default"), _("None"), _("Custom…")]))
+        # The named choices (see notifycenter.sound_choices), then Custom…:
+        # the combo's rows are the values' positions, and the file chooser
+        # is the one row past them.
+        choices = notifycenter.sound_choices()
+        self._sound_choices = [value for value, _label in choices]
+        labels = [label for _value, label in choices]
+        self._sound_row.set_model(Gtk.StringList.new(labels + [_("Custom…")]))
         self._sound_value = str(state.get_setting("notification_sound") or notifycenter.SOUND_DEFAULT)
         self._sound_row.set_selected(self._sound_index(self._sound_value))
         self._sound_row.connect("notify::selected", self._on_sound_selected)
@@ -599,7 +605,7 @@ class PreferencesDialog(Adw.Dialog):
         self._sound_row.add_suffix(self._sound_play)
         self._refresh_sound_row()
         group.add(
-            _searchable(self._sound_row, _("Default"), _("None"), _("Custom…"), "file", "gstreamer", "mute")
+            _searchable(self._sound_row, *labels, _("Custom…"), "file", "gstreamer", "mute", "chime")
         )
 
         self._bell_row = Adw.SwitchRow(
@@ -622,19 +628,26 @@ class PreferencesDialog(Adw.Dialog):
         group.add(_searchable(self._announce_row, "finished", "done", "complete", "green"))
         return group
 
-    @staticmethod
-    def _sound_index(value: str) -> int:
-        """Which of the combo's three rows the setting's value is."""
-        if not value or value == notifycenter.SOUND_DEFAULT:
-            return 0
-        if value == notifycenter.SOUND_NONE:
-            return 1
-        return 2
+    def _sound_index(self, value: str) -> int:
+        """Which of the combo's rows the setting's value is: a named
+        choice's own, or the Custom… row past them for a file."""
+        if not value:
+            value = notifycenter.SOUND_DEFAULT
+        if value in self._sound_choices:
+            return self._sound_choices.index(value)
+        return self._sound_custom_index
+
+    @property
+    def _sound_custom_index(self) -> int:
+        return len(self._sound_choices)
+
+    def _sound_is_custom(self) -> bool:
+        return self._sound_index(self._sound_value) == self._sound_custom_index
 
     def _refresh_sound_row(self) -> None:
         """The subtitle says what the choice means — or, with no GStreamer,
         why the row is greyed and what a card gets instead."""
-        self._sound_browse.set_visible(self._sound_index(self._sound_value) == 2)
+        self._sound_browse.set_visible(self._sound_is_custom())
         if notifysound.available():
             self._sound_row.set_subtitle(notifycenter.sound_subtitle(self._sound_value))
             self._sound_row.set_sensitive(True)
@@ -1375,7 +1388,7 @@ class PreferencesDialog(Adw.Dialog):
         self._on_change()
 
     def _on_sound_selected(self, row: Adw.ComboRow, _pspec) -> None:
-        """Default and None are written at once; Custom… asks for the file
+        """A named choice is written at once; Custom… asks for the file
         first and writes on the pick, falling back to the row's previous
         choice when the picker is dismissed — a "Custom" with no file behind
         it would be a setting that means nothing. Changing one file for
@@ -1384,10 +1397,8 @@ class PreferencesDialog(Adw.Dialog):
         selected = row.get_selected()
         if selected == self._sound_index(self._sound_value):
             return
-        if selected == 0:
-            self._set_sound(notifycenter.SOUND_DEFAULT)
-        elif selected == 1:
-            self._set_sound(notifycenter.SOUND_NONE)
+        if selected < self._sound_custom_index:
+            self._set_sound(self._sound_choices[selected])
         else:
             self._browse_sound()
 
@@ -1407,7 +1418,7 @@ class PreferencesDialog(Adw.Dialog):
         filters.append(audio)
         picker.set_filters(filters)
         picker.set_default_filter(audio)
-        if self._sound_index(self._sound_value) == 2:
+        if self._sound_is_custom():
             picker.set_initial_file(Gio.File.new_for_path(self._sound_value))
 
         def picked(picker: Gtk.FileDialog, result) -> None:
