@@ -26,7 +26,11 @@
 #
 # --rebuild also builds the binary RPM from the SRPM, the way a COPR chroot
 # would (rpmbuild --rebuild, with the BuildRequires installed locally) --
-# what CI's rpm job does to prove the package installs and %check passes.
+# what CI's rpm job does to prove the package installs and %check passes,
+# and what release.yml's rpm job attaches to the GitHub Release. %{?dist}
+# stays empty here too: the binary is noarch and not tied to the building
+# image's Fedora, and the fixed collins-<VER>-<REL>.noarch.rpm name is what
+# CI and the release upload glob for.
 set -euo pipefail
 
 rebuild=false
@@ -84,6 +88,7 @@ if $rebuild; then
         --define "_topdir $out" \
         --define "_rpmdir $out" \
         --define '_build_name_fmt %%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm' \
+        --define 'dist %{nil}' \
         "$out"/*.src.rpm
     rpmlint "$out"/*.noarch.rpm
 fi
