@@ -15,7 +15,7 @@
 # build bumps it to 2, and the next version bump resets it.
 
 Name:           collins
-Version:        0.1.2
+Version:        0.1.3
 Release:        1%{?dist}
 Summary:        Native GTK4 desktop app to manage Claude Code sessions
 License:        GPL-3.0-or-later AND CC0-1.0
@@ -112,6 +112,9 @@ appstreamcli validate --no-net --override releases-not-in-order=info \
 # docs/releases.md. Dates are the release branch's cut date, like
 # debian/changelog's.
 %changelog
+* Sun Aug 30 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.3-1
+- Development series after the 0.1.2 release.
+
 * Sat Aug 22 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.2-1
 - Collins is now published to the episode6/stable COPR, for every maintained
   Fedora and for RHEL 10 and its rebuilds.

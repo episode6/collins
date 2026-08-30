@@ -36,6 +36,8 @@ downloads of each version, see the
 
 ## Changelog
 
+### v0.1.3 — UNRELEASED
+
 ### v0.1.2 — 2026-08-30
 
 - **The editor shows one column when it's narrow.** An editor column
