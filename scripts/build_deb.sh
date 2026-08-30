@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 # Build a Debian package: dist/collins_<version>_all.deb
 set -euo pipefail
 
@@ -61,6 +61,16 @@ cp "$ROOT/data/icons/hicolor/scalable/actions/"*.svg \
     "$BUILD/usr/share/$PKG/icons/hicolor/scalable/actions/"
 cp "$ROOT/data/$APP_ID.metainfo.xml" "$BUILD/usr/share/metainfo/"
 cp "$ROOT/LICENSE" "$BUILD/usr/share/doc/$PKG/copyright"
+
+# Validate the staged desktop entry and metainfo, mirroring the RPM spec's
+# %check (same releases-not-in-order override: the metainfo lists the
+# upstream agent-session-manager releases below the fork's own, so its
+# versions don't descend end to end -- history, not a mistake). This runs on
+# every PR via ci.yml's packaging job, so a broken metainfo fails there, not
+# in a software center after a release.
+desktop-file-validate "$BUILD/usr/share/applications/$APP_ID.desktop"
+appstreamcli validate --no-net --override releases-not-in-order=info \
+  "$BUILD/usr/share/metainfo/$APP_ID.metainfo.xml"
 
 # -- control ------------------------------------------------------------------
 mkdir -p "$BUILD/DEBIAN"

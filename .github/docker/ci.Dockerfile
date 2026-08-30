@@ -41,6 +41,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # which is how v0.1.1's upload died.
     build-essential devscripts dput debhelper dh-python \
     pybuild-plugin-pyproject python3-all gnupg curl \
+    # build_deb.sh and debian/rules validate the desktop entry and the
+    # AppStream metainfo (packaging job, and dpkg-checkbuilddeps in the
+    # source builds once debian/control names them)
+    desktop-file-utils appstream \
   && rm -rf /var/lib/apt/lists/*
 # Container jobs run as root unless the image says otherwise, and root ignores
 # file modes — one unit test chmods a directory 0o500 and expects the copy into

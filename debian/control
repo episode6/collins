@@ -1,12 +1,16 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 Source: collins
 Section: utils
 Priority: optional
 Maintainer: episode6 <support@episode6.com>
-Build-Depends: debhelper-compat (= 13),
+# appstream + desktop-file-utils: debian/rules validates the installed
+# metainfo and desktop entry at build time, mirroring the RPM spec's %check.
+Build-Depends: appstream,
+               debhelper-compat (= 13),
+               desktop-file-utils,
                dh-python,
                pybuild-plugin-pyproject,
                python3-all,
