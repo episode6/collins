@@ -769,3 +769,24 @@ def test_update_rows_go_with_mark_all_read_and_clear():
     assert c.unread_count() == 0
     assert c.clear() == 1
     assert c.rows() == []
+# -- the card's own light/dark ----------------------------------------------
+
+
+def test_the_card_schemes_are_the_setting_values_in_the_rows_order():
+    assert notifycenter.CARD_SCHEMES == ("app", "light", "dark")
+    assert notifycenter.CARD_SCHEME_APP == "app"
+
+
+def test_a_pinned_scheme_is_a_class_on_the_card():
+    assert notifycenter.card_scheme_class("light") == "notification-card-light"
+    assert notifycenter.card_scheme_class("dark") == "notification-card-dark"
+    assert notifycenter.card_scheme_class("light") != notifycenter.card_scheme_class("dark")
+
+
+def test_following_the_app_is_no_class_at_all():
+    assert notifycenter.card_scheme_class("app") == ""
+
+
+def test_a_value_the_setting_does_not_take_follows_the_app():
+    for stray in (None, "", "system", "DARK", 3):
+        assert notifycenter.card_scheme_class(stray) == ""

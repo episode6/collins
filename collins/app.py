@@ -443,6 +443,24 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
 .notification-card-title { font-weight: 600; }
 .notification-card-body { opacity: 0.85; }
 .notification-card-close { min-width: 24px; min-height: 24px; padding: 0; }
+/* the card pinned light or dark whatever the app is (the Card theme row in
+   Preferences; notifycenter.card_scheme_class puts the class on the body).
+   Adwaita paints .card from these custom properties and everything inside
+   the card colors itself from the fg it inherits (the tile's wash, the flat
+   close button, the dim labels), so re-pinning the three here is the whole
+   swap. The values are Adwaita's own light and dark card colors, except the
+   dark background: Adwaita's is white at 8% over the dark window, which over
+   a light window would be no card at all, so it is that blend flattened. */
+.notification-card.notification-card-light {
+  --card-bg-color: #ffffff;
+  --card-fg-color: rgb(0 0 6 / 80%);
+  --card-shade-color: rgb(0 0 6 / 7%);
+}
+.notification-card.notification-card-dark {
+  --card-bg-color: #333337;
+  --card-fg-color: #ffffff;
+  --card-shade-color: rgb(0 0 6 / 36%);
+}
 
 /* a session with something going on -- a tab open, or running detached -- is
    drawn as an outlined card with a left guide line; what a running one adds

@@ -355,8 +355,10 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   slides in** at the top-right of the window, under the header bar: the
   project's icon, the session's name, two lines of the message, and the
   **notification sound** (the desktop's own message sound by default —
-  Preferences → *Notifications* picks another file, or none). Click
-  anywhere on it to go there; the × dismisses the card and leaves the row
+  Preferences → *Notifications* picks another file, or none). The card
+  follows the app's light or dark unless *Card theme* pins it — a dark
+  card over a light window reads the way a desktop notification does.
+  Click anywhere on it to go there; the × dismisses the card and leaves the row
   waiting in the history. Away from Collins, it is a **desktop
   notification** titled with the session, so clicking it jumps straight to
   that tab. Looking at that very session already, nothing pops up at all —
@@ -628,7 +630,8 @@ a **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin,
 Tokyo Night, Monokai, One Dark…), the **composer's** switches (the typing
 trigger, Enter behavior, the floating button, auto-open in new sessions),
 the editor's **color scheme**, **font**, and **line numbers**/**hidden
-files** toggles, the app's **Dark / Light Mode** (system / light / dark), the
+files** toggles, the app's **Dark / Light Mode** (system / light / dark) and
+the notification card's own **Card theme** (follow app / light / dark), the
 **language** (English, Magyar, Deutsch, Español, Français), the sidebar's
 **Show folder paths in sidebar** and **Show Claude usage** toggles, a
 **Token use** group directly under General that gathers everything that runs

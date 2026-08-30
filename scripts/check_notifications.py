@@ -20,7 +20,8 @@ selects the tab and reads the row, a message to the selected tab is a read
 row and no card, an unfocused window gets the desktop notification, a bell
 from another tab is a card and a coalesced row while the selected tab's bell
 is a beep and no row, the three switches (in-app, bells, announce finished
-runs) do what their subtitles say, a placeholder tab's card still finds its
+runs) do what their subtitles say, the Card theme row writes the card
+stack's light/dark, a placeholder tab's card still finds its
 page and the handoff re-files its rows under the session id (re-sending the
 desktop notification with the tab behind it), a bell read from the sheet
 takes its desktop notification down, a fourth card evicts the oldest, the ×
@@ -777,9 +778,22 @@ def steps(app: App):
               dialog is not None and dialog._search_entry.get_text() == "Notifications")
         if dialog is None:
             return
-        check("the group is visible and holds the four rows",
-              dialog._inapp_row.get_visible() and dialog._sound_row.get_visible()
+        check("the group is visible and holds the five rows",
+              dialog._inapp_row.get_visible() and dialog._card_scheme_row.get_visible()
+              and dialog._sound_row.get_visible()
               and dialog._bell_row.get_visible() and dialog._announce_row.get_visible())
+        # The card theme row: picking Dark writes the setting, and the
+        # window's card stack wears the class from then on (a card standing
+        # at the time would change with it — see NotificationCards.apply_settings).
+        dialog._card_scheme_row.set_selected(2)
+        check("picking Dark writes the card scheme",
+              win.state.get_setting("notification_color_scheme") == "dark")
+        check("and the card stack wears its class",
+              win.notify_cards._scheme_class == "notification-card-dark")
+        dialog._card_scheme_row.set_selected(0)
+        check("Follow app clears both",
+              win.state.get_setting("notification_color_scheme") == "app"
+              and win.notify_cards._scheme_class == "")
         check("the sound row says what Default means",
               dialog._sound_row.get_subtitle() == (
                   "Default: the desktop's message sound" if notifysound.available()

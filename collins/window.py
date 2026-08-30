@@ -704,6 +704,7 @@ class MainWindow(Adw.ApplicationWindow):
             fallback_icon_name=_app_icon_name(self),
         )
         self.notify_cards.attach(self.lightbox_overlay)
+        self.notify_cards.apply_settings(self.state.settings)
 
         # Toggle button reflects (and controls) sidebar visibility.
         self._sidebar_width_save_source: int | None = None
@@ -6579,6 +6580,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.refresh_project_icon_size()
         # The sheet's footer names the sound; the picker may have moved it.
         self.notify_sheet.schedule_refresh()
+        # The cards' own light/dark; any card standing changes with it.
+        self.notify_cards.apply_settings(self.state.settings)
         self._bg_status.set_polling(bool(self.state.get_setting("background_status_poll")))
         self.store.apply_pr_titles()
         self.store.apply_cli_titles()

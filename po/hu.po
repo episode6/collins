@@ -845,6 +845,15 @@ msgstr "Csengetett"
 msgid "In-app notifications"
 msgstr "Alkalmazáson belüli értesítések"
 
+msgid "Card theme"
+msgstr "Kártya témája"
+
+msgid "The in-app card's own light or dark, whatever the app is"
+msgstr "A kártya saját világos vagy sötét módja, bármilyen is az alkalmazás"
+
+msgid "Follow app"
+msgstr "Alkalmazás követése"
+
 msgid "Show a message from another session inside the window while Collins is focused. Off sends every notification to the desktop"
 msgstr "Másik munkamenet üzenetének megjelenítése az ablakban, amíg a Collins fókuszban van. Kikapcsolva minden értesítés az asztalra megy"
 
