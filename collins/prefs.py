@@ -1010,6 +1010,19 @@ class PreferencesDialog(Adw.Dialog):
         pop_out_row.set_value(int(state.get_setting("editor_pop_out_screen_width") or 0))
         pop_out_row.connect("notify::value", self._on_editor_pop_out_width_changed)
         editor_group.add(pop_out_row)
+
+        narrow_row = Adw.SpinRow.new_with_range(0, 5_000, 20)
+        narrow_row.set_title(_("Single column when narrow"))
+        narrow_row.set_subtitle(
+            _(
+                "An editor column this many pixels wide or narrower shows the "
+                "file tree and the open file one at a time, with a back button "
+                "beside the tabs (0 = always side by side)"
+            )
+        )
+        narrow_row.set_value(int(state.get_setting("editor_narrow_width") or 0))
+        narrow_row.connect("notify::value", self._on_editor_narrow_width_changed)
+        editor_group.add(narrow_row)
         return editor_group
 
     def _build_status_icon_row(self, state: AppState, group: _SearchableGroup) -> None:
@@ -1243,6 +1256,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_editor_pop_out_width_changed(self, row: Adw.SpinRow, _pspec) -> None:
         self._state.set_setting("editor_pop_out_screen_width", int(row.get_value()))
+        self._on_change()
+
+    def _on_editor_narrow_width_changed(self, row: Adw.SpinRow, _pspec) -> None:
+        self._state.set_setting("editor_narrow_width", int(row.get_value()))
         self._on_change()
 
     def _on_font_changed(self, button: Gtk.FontDialogButton, _pspec) -> None:

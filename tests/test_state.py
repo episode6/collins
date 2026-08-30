@@ -660,6 +660,11 @@ def test_editor_pop_out_threshold_default(app_state):
     assert state.get_setting("editor_pop_out_screen_width") == 1600
 
 
+def test_editor_narrow_width_default(app_state):
+    state = app_state.AppState()
+    assert state.get_setting("editor_narrow_width") == 500
+
+
 def test_editor_pops_out_at_or_below_threshold():
     assert editor_pops_out(1280, 1536)
     assert editor_pops_out(1536, 1536)

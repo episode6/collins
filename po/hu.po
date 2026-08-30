@@ -1190,6 +1190,15 @@ msgstr "Rejtett fájlok megjelenítése"
 msgid "Show dotfiles in the editor's file tree"
 msgstr "Rejtett fájlok megjelenítése a szerkesztő fájlfájában"
 
+msgid "Back to files"
+msgstr "Vissza a fájlokhoz"
+
+msgid "Single column when narrow"
+msgstr "Egy oszlop, ha keskeny"
+
+msgid "An editor column this many pixels wide or narrower shows the file tree and the open file one at a time, with a back button beside the tabs (0 = always side by side)"
+msgstr "Egy ennyi képpont széles vagy keskenyebb szerkesztőoszlop a fájlfát és a megnyitott fájlt felváltva mutatja, a lapok mellett egy vissza gombbal (0 = mindig egymás mellett)"
+
 msgid "Open File"
 msgstr "Fájl megnyitása"
 

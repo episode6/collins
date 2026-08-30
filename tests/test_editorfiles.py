@@ -12,6 +12,7 @@ from collins.editorfiles import (
     LIGHTBOX_SHADOW_PAD,
     FollowScope,
     LoadGuard,
+    PaneLayout,
     PasteError,
     RenameError,
     RerootAction,
@@ -27,6 +28,7 @@ from collins.editorfiles import (
     lightbox_zoombar_inside,
     list_dir,
     load_guard,
+    pane_layout,
     parse_copied_files,
     paste_entries,
     paste_target,
@@ -1075,3 +1077,25 @@ def test_plan_reroot_leaves_a_directory_counterpart_alone(tmp_path):
     (entry,) = plan_reroot(repo, worktree, [str(repo / "docs")])
     assert entry.target is None
     assert entry.default is RerootAction.LEAVE
+
+
+# -- pane_layout ---------------------------------------------------------------
+
+
+def test_pane_layout_wide_is_always_split():
+    assert pane_layout(False, 0, False) is PaneLayout.SPLIT
+    assert pane_layout(False, 3, False) is PaneLayout.SPLIT
+    assert pane_layout(False, 3, True) is PaneLayout.SPLIT
+
+
+def test_pane_layout_narrow_shows_the_open_file():
+    assert pane_layout(True, 1, False) is PaneLayout.FILES
+
+
+def test_pane_layout_narrow_with_nothing_open_shows_the_picker():
+    assert pane_layout(True, 0, False) is PaneLayout.PICKER
+    assert pane_layout(True, 0, True) is PaneLayout.PICKER
+
+
+def test_pane_layout_narrow_back_button_shows_the_picker():
+    assert pane_layout(True, 2, True) is PaneLayout.PICKER

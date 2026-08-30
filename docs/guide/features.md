@@ -343,6 +343,11 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 - Each session remembers which files were open, the cursor in each, and the
   panel's width — and the whole editor can **pop out** into a window of its
   own on a second monitor, then dock back with one click.
+- **One column when narrow.** Drag the editor column below 500 px (the
+  *Single column when narrow* preference) and it shows the file tree and the
+  open file one at a time: pick a file to see it, with a back button beside
+  the tabs to return to the tree; widen it again and both come back side by
+  side, the tree at the width you left it.
 
 ![The editor panel beside an agent session](/img/editor-panel.png)
 
@@ -629,9 +634,10 @@ Terminal **font**, **scrollback** size, **easy copy & paste** (on by default),
 a **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin,
 Tokyo Night, Monokai, One Dark…), the **composer's** switches (the typing
 trigger, Enter behavior, the floating button, auto-open in new sessions),
-the editor's **color scheme**, **font**, and **line numbers**/**hidden
-files** toggles, the app's **Dark / Light Mode** (system / light / dark) and
-the notification card's own **Card theme** (follow app / light / dark), the
+the editor's **color scheme**, **font**, **line numbers**/**hidden
+files** toggles and the width below which it shows a **single column**, the
+app's **Dark / Light Mode** (system / light / dark) and the notification
+card's own **Card theme** (follow app / light / dark), the
 **language** (English, Magyar, Deutsch, Español, Français), the sidebar's
 **Show folder paths in sidebar** and **Show Claude usage** toggles, a
 **Token use** group directly under General that gathers everything that runs

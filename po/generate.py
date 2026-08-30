@@ -507,6 +507,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show hidden files": "Rejtett fájlok megjelenítése",
         "Show dotfiles in the editor's file tree":
             "Rejtett fájlok megjelenítése a szerkesztő fájlfájában",
+        "Back to files": "Vissza a fájlokhoz",
+        "Single column when narrow": "Egy oszlop, ha keskeny",
+        "An editor column this many pixels wide or narrower shows the file tree and the open file one at a time, with a back button beside the tabs (0 = always side by side)":
+            "Egy ennyi képpont széles vagy keskenyebb szerkesztőoszlop a fájlfát és a megnyitott fájlt felváltva mutatja, a lapok mellett egy vissza gombbal (0 = mindig egymás mellett)",
         "Open File": "Fájl megnyitása",
         "Open a file…": "Fájl megnyitása…",
         "Indexing project files…": "Projektfájlok indexelése…",
@@ -1142,6 +1146,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show hidden files": "Versteckte Dateien anzeigen",
         "Show dotfiles in the editor's file tree":
             "Versteckte Dateien im Dateibaum des Editors anzeigen",
+        "Back to files": "Zurück zu den Dateien",
+        "Single column when narrow": "Eine Spalte, wenn schmal",
+        "An editor column this many pixels wide or narrower shows the file tree and the open file one at a time, with a back button beside the tabs (0 = always side by side)":
+            "Eine Editorspalte, die so viele Pixel breit oder schmaler ist, zeigt den Dateibaum und die geöffnete Datei abwechselnd, mit einem Zurück-Knopf neben den Reitern (0 = immer nebeneinander)",
         "Open File": "Datei öffnen",
         "Open a file…": "Datei öffnen…",
         "Indexing project files…": "Projektdateien werden indiziert…",
@@ -1777,6 +1785,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show hidden files": "Mostrar archivos ocultos",
         "Show dotfiles in the editor's file tree":
             "Mostrar archivos ocultos en el árbol de archivos del editor",
+        "Back to files": "Volver a los archivos",
+        "Single column when narrow": "Una columna cuando es estrecho",
+        "An editor column this many pixels wide or narrower shows the file tree and the open file one at a time, with a back button beside the tabs (0 = always side by side)":
+            "Una columna del editor de este ancho en píxeles o más estrecha muestra el árbol de archivos y el archivo abierto de uno en uno, con un botón de volver junto a las pestañas (0 = siempre lado a lado)",
         "Open File": "Abrir archivo",
         "Open a file…": "Abrir un archivo…",
         "Indexing project files…": "Indexando archivos del proyecto…",
@@ -2410,6 +2422,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show hidden files": "Afficher les fichiers cachés",
         "Show dotfiles in the editor's file tree":
             "Afficher les fichiers cachés dans l’arborescence de l’éditeur",
+        "Back to files": "Retour aux fichiers",
+        "Single column when narrow": "Une seule colonne quand c’est étroit",
+        "An editor column this many pixels wide or narrower shows the file tree and the open file one at a time, with a back button beside the tabs (0 = always side by side)":
+            "Une colonne d’éditeur de cette largeur en pixels ou moins affiche l’arborescence et le fichier ouvert l’un après l’autre, avec un bouton de retour à côté des onglets (0 = toujours côte à côte)",
         "Open File": "Ouvrir un fichier",
         "Open a file…": "Ouvrir un fichier…",
         "Indexing project files…": "Indexation des fichiers du projet…",
