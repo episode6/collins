@@ -46,6 +46,12 @@ def expected() -> set[str]:
     paths |= {f"collins/icons/hicolor/scalable/actions/{p.name}" for p in actions}
     catalogs = sorted((ROOT / "collins" / "locale").glob("*/LC_MESSAGES/*.mo"))
     paths |= {f"collins/locale/{p.parent.parent.name}/LC_MESSAGES/{p.name}" for p in catalogs}
+    # The bundled notification sounds (notifycenter.SOUND_BUNDLED): a
+    # "bundled:" choice with no file behind it is silently the beep.
+    sounds = sorted((ROOT / "data" / "sounds").glob("*.oga"))
+    if not sounds:
+        sys.exit(f"error: no sounds under {ROOT / 'data' / 'sounds'} — is this a full checkout?")
+    paths |= {f"collins/sounds/{p.name}" for p in sounds}
     return paths
 
 

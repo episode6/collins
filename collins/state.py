@@ -155,7 +155,9 @@ DEFAULT_SETTINGS = {
     "inapp_notifications": True,
     # What the card plays (see notifysound.py): "default" is the desktop's
     # own message sound, resolved at play time (notifycenter.sound_file),
-    # "none" is silence, anything else an absolute path to a sound file.
+    # "none" is silence, "theme:<event>" another of the desktop theme's
+    # sounds, "bundled:<name>" one of the sounds Collins ships, and anything
+    # else an absolute path to a sound file.
     "notification_sound": "default",
     # A terminal bell from a session the user isn't looking at posts a
     # notification (card or desktop, by focus) and plays the sound; off

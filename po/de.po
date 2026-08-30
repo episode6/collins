@@ -839,6 +839,39 @@ msgstr "Standard: der Nachrichtenton des Desktops"
 msgid "Silent"
 msgstr "Stumm"
 
+msgid "Bell"
+msgstr "Glocke"
+
+msgid "Complete"
+msgstr "Fertig"
+
+msgid "Message"
+msgstr "Nachricht"
+
+msgid "Information"
+msgstr "Information"
+
+msgid "Zen"
+msgstr "Zen"
+
+msgid "Soft"
+msgstr "Sanft"
+
+msgid "Glass"
+msgstr "Glas"
+
+msgid "Confirmation"
+msgstr "Bestätigung"
+
+msgid "Pluck"
+msgstr "Zupfen"
+
+msgid "The desktop's “{event}” sound"
+msgstr "Der Ton „{event}“ des Desktops"
+
+msgid "Ships with Collins: {source} (CC0)"
+msgstr "Mit Collins geliefert: {source} (CC0)"
+
 msgid "Rang the bell"
 msgstr "Hat geklingelt"
 

@@ -50,6 +50,22 @@ here as on the site they came from; and the file tree's
 file-type set, `ft-*-symbolic` (each SVG names its source Octicon in its header
 comment). The Collins app icon is original artwork.
 
+## Sounds
+
+The notification sound is the desktop's own by default, played from its sound theme under
+`/usr/share/sounds` and never copied. The alternatives bundled under `data/sounds` (the
+*Zen*, *Soft*, *Glass*, *Confirmation* and *Pluck* choices in Preferences → Notifications)
+are all in the public domain under the **CC0 1.0 Universal** dedication, so nothing here
+is required — but here is where they came from:
+
+- `zen.oga`, `soft.oga` and `glass.oga` are the `zen/notification`, `soft/mention` and
+  `glass/complete` cues of **UI SFX** — Romain Simon — CC0-1.0 —
+  [romainsimon/uisfx](https://github.com/romainsimon/uisfx), copied unchanged (Ogg/Opus).
+- `confirmation.oga` and `pluck.oga` are `confirmation_001` and `pluck_002` from
+  **Interface Sounds** — Kenney — CC0-1.0 —
+  [kenney.nl](https://kenney.nl/assets/interface-sounds), re-encoded from WAV to
+  Ogg/Vorbis.
+
 ## Terminal color schemes
 
 The built-in terminal palettes reproduce color values from the schemes below. No code is

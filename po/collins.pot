@@ -2904,3 +2904,47 @@ msgstr ""
 #: collins/updatecheck.py:391
 msgid "You're running {version}. Click to open the release on GitHub"
 msgstr ""
+
+#: collins/notifycenter.py:    ("bell", N_("Bell")),
+msgid "Bell"
+msgstr ""
+
+#: collins/notifycenter.py:    ("complete", N_("Complete")),
+msgid "Complete"
+msgstr ""
+
+#: collins/notifycenter.py:    ("message", N_("Message")),
+msgid "Message"
+msgstr ""
+
+#: collins/notifycenter.py:    ("dialog-information", N_("Information")),
+msgid "Information"
+msgstr ""
+
+#: collins/notifycenter.py:# theme
+msgid "Zen"
+msgstr ""
+
+#: collins/notifycenter.py:    ("soft", N_("Soft"), "UI SFX, soft/mention"),
+msgid "Soft"
+msgstr ""
+
+#: collins/notifycenter.py:    ("glass", N_("Glass"), "UI SFX, glass/complete"),
+msgid "Glass"
+msgstr ""
+
+#: collins/notifycenter.py:    ("confirmation", N_("Confirmation"), "Kenney Interface Sounds, confirmation_001"),
+msgid "Confirmation"
+msgstr ""
+
+#: collins/notifycenter.py:    ("pluck", N_("Pluck"), "Kenney Interface Sounds, pluck_002"),
+msgid "Pluck"
+msgstr ""
+
+#: collins/notifycenter.py:        return _("The desktop's “{event}” sound").format(event=event)
+msgid "The desktop's “{event}” sound"
+msgstr ""
+
+#: collins/notifycenter.py:        return _("Ships with Collins
+msgid "Ships with Collins: {source} (CC0)"
+msgstr ""
