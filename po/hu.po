@@ -152,20 +152,8 @@ msgstr "Egyéni név"
 msgid "Cancel"
 msgstr "Mégse"
 
-msgid "Session list"
-msgstr "Munkamenet-lista"
-
-msgid "Show folder path"
-msgstr "Mappa elérési útjának megjelenítése"
-
 msgid "Show folder paths in sidebar"
 msgstr "Mappák elérési útja az oldalsávban"
-
-msgid "Show each session's project folder path in the sidebar"
-msgstr "Az egyes munkamenetek projektmappájának elérési útja az oldalsávon"
-
-msgid "Startup"
-msgstr "Indítás"
 
 msgid "Reopen the last session"
 msgstr "Utolsó munkamenet újranyitása"
@@ -356,9 +344,6 @@ msgstr "Legutóbbi tevékenység"
 msgid "You"
 msgstr "Te"
 
-msgid "Claude"
-msgstr "Claude"
-
 msgid "Follow system"
 msgstr "Rendszer követése"
 
@@ -416,9 +401,6 @@ msgstr "Összes kijelölése"
 msgid "Color theme"
 msgstr "Színtéma"
 
-msgid "Appearance"
-msgstr "Megjelenés"
-
 msgid "Color scheme"
 msgstr "Színséma"
 
@@ -427,15 +409,6 @@ msgstr "Sötét / világos mód"
 
 msgid "Language"
 msgstr "Nyelv"
-
-msgid "Restart to apply"
-msgstr "Újraindítás szükséges"
-
-msgid "Running sessions"
-msgstr "Futó munkamenetek"
-
-msgid "Ask keeps the confirmation dialog; the other choices skip it and exit the session(s) cleanly or keep them running detached"
-msgstr "A „Rákérdezés” megtartja a megerősítő párbeszédablakot; a többi lehetőség kihagyja, és tisztán kilép a munkamenet(ek)ből, vagy leválasztva futni hagyja őket"
 
 msgid "When archiving a running session"
 msgstr "Futó munkamenet archiválásakor"
@@ -448,9 +421,6 @@ msgstr "Kilépéskor futó munkamenetekkel"
 
 msgid "Closing a window while agent sessions are still running"
 msgstr "Ablak bezárása, miközben ügynök-munkamenetek még futnak"
-
-msgid "Archiving"
-msgstr "Archiválás"
 
 msgid "Archive on claude.ai too"
 msgstr "Archiválás a claude.ai-n is"
@@ -482,9 +452,6 @@ msgstr "MCP-kiszolgálók"
 msgid "About Collins"
 msgstr "A Collins névjegye"
 
-msgid "Refresh session list"
-msgstr "Munkamenetlista frissítése"
-
 msgid "Search sessions…"
 msgstr "Munkamenetek keresése…"
 
@@ -502,9 +469,6 @@ msgstr "Összes csoport összecsukása"
 
 msgid "Expand all groups"
 msgstr "Összes csoport kibontása"
-
-msgid "No sessions found"
-msgstr "Nincs találat"
 
 msgid "{n} sessions"
 msgstr "{n} munkamenet"
@@ -815,21 +779,6 @@ msgstr "Nyisd meg újra a Collins elindításával vagy egy munkamenet értesít
 msgid "no sessions open"
 msgstr "nincs nyitott munkamenet"
 
-msgid "1 session"
-msgstr "1 munkamenet"
-
-msgid "1 working"
-msgstr "1 dolgozik"
-
-msgid "{n} working"
-msgstr "{n} dolgozik"
-
-msgid "1 unread"
-msgstr "1 olvasatlan"
-
-msgid "{n} unread"
-msgstr "{n} olvasatlan"
-
 msgid "Finished a run"
 msgstr "Befejezett egy futást"
 
@@ -1006,9 +955,6 @@ msgstr "Beállítások…"
 
 msgid "Show/hide notifications"
 msgstr "Értesítések megjelenítése/elrejtése"
-
-msgid "You interrupted Claude here"
-msgstr "Itt szakítottad meg a Claude-ot"
 
 msgid "Restart now"
 msgstr "Újraindítás most"
@@ -1253,9 +1199,6 @@ msgstr "Ügynökfájlok"
 msgid "Open {name} in the editor"
 msgstr "A(z) {name} megnyitása a szerkesztőben"
 
-msgid "Session tools"
-msgstr "Munkamenet-eszközök"
-
 msgid "Session behavior"
 msgstr "Munkamenetek viselkedése"
 
@@ -1309,9 +1252,6 @@ msgstr "A mellékletek panel automatikus megjelenítése"
 
 msgid "Dock a session's attachments panel beside it the first time it shows an image — only in a tab wide enough to spare the column, past the terminal's maximum width. Once per session tab, so one you close again stays closed"
 msgstr "A munkamenet mellékletek paneljének dokkolása a munkamenet mellé, amint az először mutat képet — de csak akkor, ha a lap elég széles egy külön oszlophoz a terminál legnagyobb szélességén túl. Munkamenetlaponként egyszer, így a bezárt panel zárva marad"
-
-msgid "Open composer (Ctrl+.)"
-msgstr "Üzenetszerkesztő megnyitása (Ctrl+.)"
 
 msgid "Attach file"
 msgstr "Fájl csatolása"
@@ -1450,4 +1390,1345 @@ msgstr "Nem sikerült telepíteni az asztali ikont"
 
 msgid "Collins is in your applications now"
 msgstr "A Collins mostantól megtalálható az alkalmazások között"
+
+msgid "Add application"
+msgstr "Alkalmazás hozzáadása"
+
+msgid "Search applications…"
+msgstr "Alkalmazások keresése…"
+
+msgid "Caffeine Mode is on"
+msgstr "A Caffeine Mode be van kapcsolva"
+
+msgid "That file isn't an image Collins can display."
+msgstr "Ez a fájl nem olyan kép, amelyet a Collins meg tud jeleníteni."
+
+msgid "Until idle"
+msgstr "Tétlenségig"
+
+msgid "Indefinitely"
+msgstr "Korlátlan ideig"
+
+msgid "1 hour"
+msgstr "1 óra"
+
+msgid "{n} hours"
+msgstr "{n} óra"
+
+msgid "Caffeine Mode is dozing until a session works again — then the computer and screen will stay awake"
+msgstr "A Caffeine Mode szunnyad, amíg egy munkamenet újra dolgozni nem kezd — akkor a számítógép és a képernyő ébren marad"
+
+msgid "Caffeine Mode is dozing until a session works again — then the computer will stay awake, the screen may turn off"
+msgstr "A Caffeine Mode szunnyad, amíg egy munkamenet újra dolgozni nem kezd — akkor a számítógép ébren marad, a képernyő kikapcsolhat"
+
+msgid "Caffeine Mode is on while sessions are working — the computer and screen will stay awake"
+msgstr "A Caffeine Mode aktív, amíg munkamenetek dolgoznak — a számítógép és a képernyő ébren marad"
+
+msgid "Caffeine Mode is on while sessions are working — the computer will stay awake, the screen may turn off"
+msgstr "A Caffeine Mode aktív, amíg munkamenetek dolgoznak — a számítógép ébren marad, a képernyő kikapcsolhat"
+
+msgid "Caffeine Mode is on — the computer and screen will stay awake"
+msgstr "A Caffeine Mode be van kapcsolva — a számítógép és a képernyő ébren marad"
+
+msgid "Caffeine Mode is on — the computer will stay awake, the screen may turn off"
+msgstr "A Caffeine Mode be van kapcsolva — a számítógép ébren marad, a képernyő kikapcsolhat"
+
+msgid "Caffeine Mode: keep the computer awake and the screen on"
+msgstr "Caffeine Mode: a számítógép ébren, a képernyő bekapcsolva marad"
+
+msgid "Caffeine Mode: keep the computer awake, letting the screen turn off"
+msgstr "Caffeine Mode: a számítógép ébren marad, a képernyő kikapcsolhat"
+
+msgid "Caffeine Mode turns off in {time} — computer and screen stay awake"
+msgstr "A Caffeine Mode {time} múlva kikapcsol — a számítógép és a képernyő ébren marad"
+
+msgid "Caffeine Mode turns off in {time} — computer stays awake, screen may turn off"
+msgstr "A Caffeine Mode {time} múlva kikapcsol — a számítógép ébren marad, a képernyő kikapcsolhat"
+
+msgid "Send"
+msgstr "Küldés"
+
+msgid "The user declined this action."
+msgstr "A felhasználó elutasította ezt a műveletet."
+
+msgid "Switch the effort level for this session"
+msgstr "Erőfeszítési szint váltása ehhez a munkamenethez"
+
+msgid "couldn't save a copy of the dropped image"
+msgstr "nem sikerült másolatot menteni a bedobott képről"
+
+msgid "skipped {n} item that isn't a local file"
+msgstr "{n} elem kihagyva, amely nem helyi fájl"
+
+msgid "couldn't reference {n} dropped file name"
+msgstr "nem sikerült hivatkozni {n} bedobott fájlnévre"
+
+msgid "couldn't save a copy of the pasted image"
+msgstr "nem sikerült másolatot menteni a beillesztett képről"
+
+msgid "Effort"
+msgstr "Erőfeszítés"
+
+msgid "Copied to clipboard"
+msgstr "Vágólapra másolva"
+
+msgid "Rename folder"
+msgstr "Mappa átnevezése"
+
+msgid "Rename file"
+msgstr "Fájl átnevezése"
+
+msgid "Enter a new name for “{name}”."
+msgstr "Adjon meg új nevet ennek: „{name}”."
+
+msgid "Rename"
+msgstr "Átnevezés"
+
+msgid "Move editor to {name}?"
+msgstr "Áthelyezi a szerkesztőt ide: {name}?"
+
+msgid "This session is now working in {path}. One open file has unsaved changes and also exists there — choose what happens to it."
+msgstr "Ez a munkamenet mostantól itt dolgozik: {path}. Egy megnyitott fájlban mentetlen módosítások vannak, és a fájl ott is létezik — válassza ki, mi történjen vele."
+
+msgid "Stay"
+msgstr "Maradás"
+
+msgid "Go on editing this file, where your unsaved changes belong"
+msgstr "E fájl szerkesztésének folytatása ott, ahová a mentetlen módosításai tartoznak"
+
+msgid "Take edits"
+msgstr "Módosítások átvitele"
+
+msgid "Move this tab to the new copy, keeping your unsaved changes — saving will write them over whatever that copy holds"
+msgstr "A lap áthelyezése az új másolatra a mentetlen módosítások megtartásával — a mentés felülírja velük azt, ami abban a másolatban van"
+
+msgid "Use new"
+msgstr "Új használata"
+
+msgid "Open the new copy and discard your unsaved changes"
+msgstr "Az új másolat megnyitása és a mentetlen módosítások elvetése"
+
+msgid "Don't Move"
+msgstr "Ne helyezze át"
+
+msgid "Move Editor"
+msgstr "Szerkesztő áthelyezése"
+
+msgid "Do you trust this folder?"
+msgstr "Megbízik ebben a mappában?"
+
+msgid "{agent} will be able to read, edit and execute files in\n\n{path}\n\nand everything inside it, including any worktrees it creates there. Open it only if this is a project you created or otherwise trust — like your own code, a well-known open source project, or work from your team."
+msgstr "A(z) {agent} olvashatja, szerkesztheti és futtathatja a fájlokat itt:\n\n{path}\n\nés mindent, ami benne van, az ott létrehozott munkafákat is beleértve. Csak akkor nyissa meg, ha ez egy Ön által létrehozott vagy egyébként megbízható projekt — például a saját kódja, egy jól ismert nyílt forráskódú projekt vagy a csapata munkája."
+
+msgid "Trust and open"
+msgstr "Megbízom benne, megnyitás"
+
+msgid "Generating icon…"
+msgstr "Ikon generálása…"
+
+msgid "At sidebar size"
+msgstr "Oldalsávméretben"
+
+msgid "Optional adjustments, e.g. “make it blue”"
+msgstr "Opcionális igazítások, pl. „legyen kék”"
+
+msgid "Regenerate"
+msgstr "Újragenerálás"
+
+msgid "Default model"
+msgstr "Alapértelmezett modell"
+
+msgid "Model for this dialog's runs; Preferences sets the default"
+msgstr "A párbeszédablak futtatásainak modellje; az alapértelmezettet a Beállítások adja meg"
+
+msgid "Default ({model})"
+msgstr "Alapértelmezett ({model})"
+
+msgid "Generate Icon"
+msgstr "Ikon generálása"
+
+msgid "the generated SVG could not be rendered"
+msgstr "a generált SVG nem renderelhető"
+
+msgid "Icon generation failed: {error}"
+msgstr "Az ikongenerálás sikertelen: {error}"
+
+msgid "Saving failed: {error}"
+msgstr "A mentés sikertelen: {error}"
+
+msgid "Close other tabs"
+msgstr "Többi lap bezárása"
+
+msgid "Close tabs to the right"
+msgstr "Jobbra lévő lapok bezárása"
+
+msgid "Close all tabs"
+msgstr "Összes lap bezárása"
+
+msgid "Add to chat"
+msgstr "Hozzáadás a csevegéshez"
+
+msgid "Couldn't rename {name}: {message}"
+msgstr "A(z) „{name}” nem nevezhető át: {message}"
+
+msgid "A name is needed to rename {name}."
+msgstr "A(z) „{name}” átnevezéséhez név szükséges."
+
+msgid "“{new_name}” isn't a name — renaming can't move things elsewhere."
+msgstr "A(z) „{new_name}” nem név — az átnevezés nem helyezhet át semmit máshová."
+
+msgid "“{new_name}” already exists here."
+msgstr "A(z) „{new_name}” már létezik itt."
+
+msgid "{name} is no longer there."
+msgstr "A(z) „{name}” már nincs ott."
+
+msgid "{name} can't be renamed to something outside this project."
+msgstr "A(z) „{name}” nem nevezhető át a projekten kívülre."
+
+msgid "There's nothing on the clipboard to paste here."
+msgstr "Nincs a vágólapon semmi, amit ide be lehetne illeszteni."
+
+msgid "{count} item couldn't be pasted."
+msgstr "{count} elemet nem sikerült beilleszteni."
+
+msgid "{name} can't be pasted into itself."
+msgstr "A(z) „{name}” nem illeszthető be önmagába."
+
+msgid "That folder is no longer there."
+msgstr "Ez a mappa már nincs ott."
+
+msgid "{name} can't be pasted outside this project."
+msgstr "A(z) „{name}” nem illeszthető be a projekten kívülre."
+
+msgid "There are already too many copies of {name} here."
+msgstr "Már túl sok másolat van itt a(z) „{name}” elemből."
+
+msgid "Couldn't paste {name}: {message}"
+msgstr "A(z) „{name}” nem illeszthető be: {message}"
+
+msgid "{name} couldn't be decoded as an image."
+msgstr "A(z) „{name}” nem dekódolható képként."
+
+msgid "Session moved to {name}"
+msgstr "Munkamenet áthelyezve ide: {name}"
+
+msgid "Follow"
+msgstr "Követés"
+
+msgid "Image"
+msgstr "Kép"
+
+msgid "Cut"
+msgstr "Kivágás"
+
+msgid "{n} session(s) in {p} project(s) have their transcripts moved to the trash, where they can be restored. Sessions archived with their whole project — and originals a backgrounded fork replaced — are included."
+msgstr "{n} munkamenet átirata {p} projektben a kukába kerül, ahonnan visszaállítható. Az egész projektjükkel együtt archivált munkamenetek — és a háttérbe küldött elágazás által lecserélt eredetik — szintén beleszámítanak."
+
+msgid "{project} — {n} of {total}"
+msgstr "{project} — {n} / {total}"
+
+msgid "…and {p} other project(s) — {n} session(s)"
+msgstr "…és {p} további projekt — {n} munkamenet"
+
+msgid "{p} of these project(s) lose every session they have."
+msgstr "E projektek közül {p} minden munkamenetét elveszíti."
+
+msgid "Open, every check passed"
+msgstr "Nyitott, minden ellenőrzés sikeres"
+
+msgid "Checks still running"
+msgstr "Az ellenőrzések még futnak"
+
+msgid "A check failed"
+msgstr "Egy ellenőrzés sikertelen"
+
+msgid "A reviewer is waiting on a reply"
+msgstr "Egy véleményező válaszra vár"
+
+msgid "Draft, and the branch conflicts"
+msgstr "Piszkozat, és az ág konfliktusban van"
+
+msgid "Merged"
+msgstr "Egyesítve"
+
+msgid "Collins is better with the GitHub CLI"
+msgstr "A Collins jobb a GitHub CLI-vel"
+
+msgid "Collins follows the pull requests your sessions open — and acts on them — through gh, GitHub's own command-line tool, which isn't installed here."
+msgstr "A Collins a gh-val, a GitHub saját parancssori eszközével követi a munkamenetei által nyitott pull requesteket — és cselekszik is velük —, de az itt nincs telepítve."
+
+msgid "Collins follows the pull requests your sessions open — and acts on them — through gh, GitHub's own command-line tool, which is installed here but never signed in."
+msgstr "A Collins a gh-val, a GitHub saját parancssori eszközével követi a munkamenetei által nyitott pull requesteket — és cselekszik is velük —, de az telepítve van ugyan, ám sosem jelentkezett be."
+
+msgid "Not now"
+msgstr "Most nem"
+
+msgid "Get the GitHub CLI"
+msgstr "GitHub CLI beszerzése"
+
+msgid "Copy command"
+msgstr "Parancs másolása"
+
+msgid "With it, every session's pull requests carry their status:"
+msgstr "Vele minden munkamenet pull requestjei magukon hordják az állapotukat:"
+
+msgid "…and a click on one does something about it:"
+msgstr "…és egy rájuk kattintás tesz is valamit:"
+
+msgid "Don't show this again"
+msgstr "Ne jelenjen meg többé"
+
+msgid "Install it from cli.github.com — Collins picks it up the next time it starts."
+msgstr "Telepítse a cli.github.com oldalról — a Collins a következő indításakor felveszi."
+
+msgid "Run this once in any terminal. Collins asks for no login of its own."
+msgstr "Futtassa ezt egyszer bármelyik terminálban. A Collins saját bejelentkezést nem kér."
+
+msgid "Keyboard Bindings"
+msgstr "Billentyűparancsok"
+
+msgid "Reset All"
+msgstr "Összes visszaállítása"
+
+msgid "Put every shortcut back to its default"
+msgstr "Minden gyorsbillentyű visszaállítása az alapértelmezettre"
+
+msgid "Click a row to change its shortcut"
+msgstr "Kattintson egy sorra a gyorsbillentyűje módosításához"
+
+msgid "Also bound to: {actions}"
+msgstr "Ehhez is hozzárendelve: {actions}"
+
+msgid "Unbound"
+msgstr "Nincs hozzárendelve"
+
+msgid "Reset to default"
+msgstr "Visszaállítás alapértelmezettre"
+
+msgid "Reset every shortcut?"
+msgstr "Minden gyorsbillentyű visszaállítása?"
+
+msgid "All of your custom keyboard bindings are replaced by the defaults."
+msgstr "Minden egyéni billentyűparancsát az alapértelmezettek váltják fel."
+
+msgid "{chord} is already in use"
+msgstr "A(z) {chord} már használatban van"
+
+msgid "It is bound to {actions}. Move it to {action}?"
+msgstr "Ehhez van hozzárendelve: {actions}. Áthelyezi ide: {action}?"
+
+msgid "Move Shortcut"
+msgstr "Gyorsbillentyű áthelyezése"
+
+msgid "unbound"
+msgstr "nincs hozzárendelve"
+
+msgid "Set shortcut for “{action}”"
+msgstr "Gyorsbillentyű beállítása: „{action}”"
+
+msgid "Press the new key combination. Currently: {current}.\nBackspace removes the binding; Escape keeps it."
+msgstr "Nyomja le az új billentyűkombinációt. Jelenleg: {current}.\nA Backspace törli a hozzárendelést; az Escape megtartja."
+
+msgid "Tabs and windows"
+msgstr "Lapok és ablakok"
+
+msgid "Panels"
+msgstr "Panelek"
+
+msgid "Application"
+msgstr "Alkalmazás"
+
+msgid "New session"
+msgstr "Új munkamenet"
+
+msgid "Quick switcher"
+msgstr "Gyorsváltó"
+
+msgid "Archive the current session"
+msgstr "A jelenlegi munkamenet archiválása"
+
+msgid "Undo the last archive"
+msgstr "Az utolsó archiválás visszavonása"
+
+msgid "Open the pull request page"
+msgstr "A pull request oldalának megnyitása"
+
+msgid "Unbound by default; the sidebar's search button does the same."
+msgstr "Alapértelmezetten nincs hozzárendelve; az oldalsáv keresőgombja ugyanezt teszi."
+
+msgid "Close tab"
+msgstr "Lap bezárása"
+
+msgid "Next tab"
+msgstr "Következő lap"
+
+msgid "Previous tab"
+msgstr "Előző lap"
+
+msgid "Toggle the tab marker"
+msgstr "A lapjelölő ki/be kapcsolása"
+
+msgid "Show/hide the sidebar"
+msgstr "Oldalsáv megjelenítése/elrejtése"
+
+msgid "Show/hide the terminal panel"
+msgstr "Terminálpanel megjelenítése/elrejtése"
+
+msgid "Clear the terminal panel"
+msgstr "Terminálpanel törlése"
+
+msgid "Move the panel tab to the other side"
+msgstr "A panellap áthelyezése a másik oldalra"
+
+msgid "Show/hide the composer"
+msgstr "Üzenetszerkesztő megjelenítése/elrejtése"
+
+msgid "Show/hide the attachments gallery"
+msgstr "Mellékletgaléria megjelenítése/elrejtése"
+
+msgid "Swap the panel's sides"
+msgstr "A panel oldalainak felcserélése"
+
+msgid "Unbound by default."
+msgstr "Alapértelmezetten nincs hozzárendelve."
+
+msgid "Move the panel tab to the other strip"
+msgstr "A panellap áthelyezése a másik sávra"
+
+msgid "Show/hide the editor"
+msgstr "Szerkesztő megjelenítése/elrejtése"
+
+msgid "Quick open a file"
+msgstr "Fájl gyors megnyitása"
+
+msgid "Focus the editor"
+msgstr "Fókusz a szerkesztőre"
+
+msgid "Save the file"
+msgstr "Fájl mentése"
+
+msgid "In the editor."
+msgstr "A szerkesztőben."
+
+msgid "Find in the file"
+msgstr "Keresés a fájlban"
+
+msgid "Copy the selection"
+msgstr "Kijelölés másolása"
+
+msgid "With easy copy and paste on; without a selection the key reaches the terminal."
+msgstr "Az egyszerű másolás és beillesztés bekapcsolt állapotában; kijelölés nélkül a billentyű a terminálba jut."
+
+msgid "With easy copy and paste on."
+msgstr "Az egyszerű másolás és beillesztés bekapcsolt állapotában."
+
+msgid "Copy (terminal-style)"
+msgstr "Másolás (terminál módra)"
+
+msgid "Paste (terminal-style)"
+msgstr "Beillesztés (terminál módra)"
+
+msgid "Find in the terminal"
+msgstr "Keresés a terminálban"
+
+msgid "Insert a newline in the prompt"
+msgstr "Új sor beszúrása a promptba"
+
+msgid "Zoom in"
+msgstr "Nagyítás"
+
+msgid "Zoom out"
+msgstr "Kicsinyítés"
+
+msgid "Reset zoom"
+msgstr "Nagyítás visszaállítása"
+
+msgid "Keyboard bindings"
+msgstr "Billentyűparancsok"
+
+msgid "Couldn't display image"
+msgstr "A kép nem jeleníthető meg"
+
+msgid "Open in Editor"
+msgstr "Megnyitás a szerkesztőben"
+
+msgid "Low"
+msgstr "Alacsony"
+
+msgid "Medium"
+msgstr "Közepes"
+
+msgid "High"
+msgstr "Magas"
+
+msgid "Extra high"
+msgstr "Extra magas"
+
+msgid "Max"
+msgstr "Maximális"
+
+msgid "This model has no effort setting"
+msgstr "Ennek a modellnek nincs erőfeszítés-beállítása"
+
+msgid "New chat"
+msgstr "Új csevegés"
+
+msgid "Model to start this session on"
+msgstr "A modell, amellyel ez a munkamenet indul"
+
+msgid "Effort level to start this session at"
+msgstr "Az erőfeszítési szint, amellyel ez a munkamenet indul"
+
+msgid "New git worktree"
+msgstr "Új git munkafa"
+
+msgid "Work in a fresh worktree of this project, apart from its uncommitted changes"
+msgstr "Munka a projekt friss munkafájában, elkülönítve a nem véglegesített módosításaitól"
+
+msgid "Empty Session"
+msgstr "Üres munkamenet"
+
+msgid "Start the session with no prompt"
+msgstr "Munkamenet indítása prompt nélkül"
+
+msgid "Drag to move this tab: drop on an edge to split, on a strip to join"
+msgstr "Húzással áthelyezheti a lapot: élre ejtve feloszt, sávra ejtve csatlakozik"
+
+msgid "Restore this tab to its size and place in the panel"
+msgstr "A lap visszaállítása a panelbeli méretére és helyére"
+
+msgid "Close Tab"
+msgstr "Lap bezárása"
+
+msgid "Overlay this tab over the whole session"
+msgstr "A lap ráterítése az egész munkamenetre"
+
+msgid "Move this tab to the other side"
+msgstr "A lap áthelyezése a másik oldalra"
+
+msgid "Close tab with a running command?"
+msgstr "Bezárja a lapot, amelyen parancs fut?"
+
+msgid "Move to"
+msgstr "Áthelyezés ide"
+
+msgid "Split Left"
+msgstr "Felosztás balra"
+
+msgid "Split Right"
+msgstr "Felosztás jobbra"
+
+msgid "Split Up"
+msgstr "Felosztás felfelé"
+
+msgid "Split Down"
+msgstr "Felosztás lefelé"
+
+msgid "Close tabs with running commands?"
+msgstr "Bezárja a lapokat, amelyeken parancsok futnak?"
+
+msgid "A command is still running in one of these tabs and will be terminated."
+msgstr "Az egyik lapon még fut egy parancs, amely le lesz állítva."
+
+msgid "Close Tabs"
+msgstr "Lapok bezárása"
+
+msgid "Address unresolved comments"
+msgstr "Megválaszolatlan hozzászólások kezelése"
+
+msgid "Send “{prompt}” to this session"
+msgstr "„{prompt}” küldése ennek a munkamenetnek"
+
+msgid "Open a pull request"
+msgstr "Pull request nyitása"
+
+msgid "Fix errors & resolve conflicts"
+msgstr "Hibák javítása és konfliktusok feloldása"
+
+msgid "Address the CI errors"
+msgstr "A CI-hibák kezelése"
+
+msgid "Fix errors"
+msgstr "Hibák javítása"
+
+msgid "Resolve conflicts"
+msgstr "Konfliktusok feloldása"
+
+msgid "Mark ready for review"
+msgstr "Megjelölés véleményezésre késznek"
+
+msgid "Take {slug} out of draft"
+msgstr "A(z) {slug} kivétele piszkozatból"
+
+msgid "Ready"
+msgstr "Kész"
+
+msgid "Ask Claude for a review"
+msgstr "Véleményezés kérése a Claude-tól"
+
+msgid "Comment “{comment}” on {slug}"
+msgstr "„{comment}” hozzászólás a(z) {slug} pull requesthez"
+
+msgid "Merge when checks pass"
+msgstr "Egyesítés, ha az ellenőrzések sikeresek"
+
+msgid "Turn on auto-merge for {slug}"
+msgstr "Automatikus egyesítés bekapcsolása a(z) {slug} pull requesthez"
+
+msgid "Merge {slug} when its checks pass?"
+msgstr "Egyesíti a(z) {slug} pull requestet, amint az ellenőrzései sikeresek?"
+
+msgid "GitHub merges it as soon as every required check has passed. You can still cancel auto-merge on the pull request page."
+msgstr "A GitHub egyesíti, amint minden kötelező ellenőrzés sikeres. Az automatikus egyesítést a pull request oldalán továbbra is lemondhatja."
+
+msgid "Enable auto-merge"
+msgstr "Automatikus egyesítés bekapcsolása"
+
+msgid "Auto-Merge"
+msgstr "Automatikus egyesítés"
+
+msgid "Merge pull request"
+msgstr "Pull request egyesítése"
+
+msgid "Merge {slug} now"
+msgstr "A(z) {slug} egyesítése most"
+
+msgid "Merge {slug}?"
+msgstr "Egyesíti a(z) {slug} pull requestet?"
+
+msgid "Merge"
+msgstr "Egyesítés"
+
+msgid "Disable auto-merge"
+msgstr "Automatikus egyesítés kikapcsolása"
+
+msgid "Stop GitHub from merging {slug} when its checks pass"
+msgstr "A GitHub ne egyesítse a(z) {slug} pull requestet, amikor az ellenőrzései sikeresek"
+
+msgid "Disable Auto-Merge"
+msgstr "Automatikus egyesítés kikapcsolása"
+
+msgid "Its checks have passed. This merges the pull request on GitHub now."
+msgstr "Az ellenőrzései sikeresek. Ez most egyesíti a pull requestet a GitHubon."
+
+msgid "Its checks haven't all passed. This merges the pull request on GitHub now, if the repository lets it."
+msgstr "Nem minden ellenőrzése sikeres. Ez most egyesíti a pull requestet a GitHubon, ha a tároló engedi."
+
+msgid "Merge and archive session"
+msgstr "Egyesítés és a munkamenet archiválása"
+
+msgid "Merge {slug} now, then archive this session"
+msgstr "A(z) {slug} egyesítése most, majd a munkamenet archiválása"
+
+msgid "Merge {slug} and archive this session?"
+msgstr "Egyesíti a(z) {slug} pull requestet, és archiválja ezt a munkamenetet?"
+
+msgid "The session is archived once the merge lands — you can bring it back with Undo, or from “Show archived”."
+msgstr "A munkamenet az egyesítés megtörténtekor archiválódik — a Visszavonással vagy az „Archivált munkamenetek megjelenítése” alól hozható vissza."
+
+msgid "Merge & archive"
+msgstr "Egyesítés és archiválás"
+
+msgid "Mark ready & merge when checks pass"
+msgstr "Késznek jelölés és egyesítés, ha az ellenőrzések sikeresek"
+
+msgid "Take {slug} out of draft, then turn on auto-merge"
+msgstr "A(z) {slug} kivétele piszkozatból, majd az automatikus egyesítés bekapcsolása"
+
+msgid "Mark {slug} ready and merge it when its checks pass?"
+msgstr "Késznek jelöli a(z) {slug} pull requestet, és egyesíti, amint az ellenőrzései sikeresek?"
+
+msgid "Ready & auto-merge"
+msgstr "Kész és automatikus egyesítés"
+
+msgid "Ready & Auto-Merge"
+msgstr "Kész és automatikus egyesítés"
+
+msgid "Mark ready & merge"
+msgstr "Késznek jelölés és egyesítés"
+
+msgid "Take {slug} out of draft, then merge it now"
+msgstr "A(z) {slug} kivétele piszkozatból, majd egyesítése most"
+
+msgid "Mark {slug} ready and merge it?"
+msgstr "Késznek jelöli a(z) {slug} pull requestet, és egyesíti?"
+
+msgid "Ready & merge"
+msgstr "Kész és egyesítés"
+
+msgid "Ready & Merge"
+msgstr "Kész és egyesítés"
+
+msgid "Mark ready, merge & archive session"
+msgstr "Késznek jelölés, egyesítés és a munkamenet archiválása"
+
+msgid "Take {slug} out of draft, merge it now, then archive this session"
+msgstr "A(z) {slug} kivétele piszkozatból, egyesítése most, majd a munkamenet archiválása"
+
+msgid "Mark {slug} ready, merge it and archive this session?"
+msgstr "Késznek jelöli a(z) {slug} pull requestet, egyesíti, és archiválja ezt a munkamenetet?"
+
+msgid "Ready, merge & archive"
+msgstr "Kész, egyesítés és archiválás"
+
+msgid "The pull request is marked ready for review first."
+msgstr "A pull request előbb véleményezésre késznek lesz jelölve."
+
+msgid "Close pull request"
+msgstr "Pull request lezárása"
+
+msgid "Close {slug} without merging"
+msgstr "A(z) {slug} lezárása egyesítés nélkül"
+
+msgid "Close {slug}?"
+msgstr "Lezárja a(z) {slug} pull requestet?"
+
+msgid "The pull request is closed without merging. Its branch and its comments stay, and it can be reopened on GitHub."
+msgstr "A pull request egyesítés nélkül lesz lezárva. Az ága és a hozzászólásai megmaradnak, és a GitHubon újranyitható."
+
+msgid "{url} doesn't look like a pull request."
+msgstr "A(z) {url} nem tűnik pull requestnek."
+
+msgid "Collins doesn't know how to do that."
+msgstr "A Collins ezt nem tudja megtenni."
+
+msgid "Merge conflicts"
+msgstr "Beolvasztási konfliktusok"
+
+msgid "Refresh"
+msgstr "Frissítés"
+
+msgid "Search settings…"
+msgstr "Keresés a beállításokban…"
+
+msgid "Search settings"
+msgstr "Keresés a beállításokban"
+
+msgid "No settings found"
+msgstr "Nincs találat a beállításokban"
+
+msgid "Try a different search."
+msgstr "Próbáljon másik keresőkifejezést."
+
+msgid "Tab drag handles"
+msgstr "Lapok húzófogantyúi"
+
+msgid "Drag any panel tab by its handle to move, reorder, or split it. Relies on GTK internals — turn off to fall back to plain tab dragging plus a drag grip on each panel"
+msgstr "Bármely panellap a fogantyújánál fogva húzható áthelyezéshez, átrendezéshez vagy felosztáshoz. GTK-belsőkre támaszkodik — kikapcsolva sima laphúzás marad, panelenkénti húzófüllel"
+
+msgid "Project icon size"
+msgstr "Projektikonok mérete"
+
+msgid "Size of the project and folder icons in the sidebar"
+msgstr "A projekt- és mappaikonok mérete az oldalsávban"
+
+msgid "Start new sessions in a git worktree"
+msgstr "Új munkamenetek indítása git munkafában"
+
+msgid "Git projects only; each new session works in its own fresh worktree, so it won't see uncommitted local changes. Right-click a project header to override per project"
+msgstr "Csak git projektekre; minden új munkamenet a saját friss munkafájában dolgozik, így nem látja a nem véglegesített helyi módosításokat. Projektenkénti felülbíráláshoz kattintson jobb gombbal a projekt fejlécére"
+
+msgid "Follow Claude's own session names"
+msgstr "A Claude saját munkamenetneveinek követése"
+
+msgid "Rename sessions whenever Claude names or renames them — /rename and its automatic titles; manually renamed sessions keep their name"
+msgstr "Munkamenetek átnevezése, valahányszor a Claude elnevezi vagy átnevezi őket — a /rename és az automatikus címei; a kézzel átnevezett munkamenetek megtartják a nevüket"
+
+msgid "Exact busy tracking from the agent"
+msgstr "Pontos elfoglaltságkövetés az ügynöktől"
+
+msgid "Read Claude Code's own progress announcements for the sidebar's working indicator, instead of only inferring from terminal output (fully applies to newly opened tabs)"
+msgstr "A Claude Code saját haladásjelzéseinek olvasása az oldalsáv dolgozik-jelzőjéhez, a pusztán terminálkimenetből való következtetés helyett (teljesen csak az újonnan megnyitott lapokra érvényes)"
+
+msgid "Poll for background sessions"
+msgstr "Háttér-munkamenetek lekérdezése"
+
+msgid "Fallback: check the agent CLI every 20 seconds in case the yellow guide lines stop updating on their own"
+msgstr "Tartalék: az ügynök CLI ellenőrzése 20 másodpercenként, arra az esetre, ha a sárga jelzővonalak maguktól már nem frissülnének"
+
+msgid "Typing opens the composer"
+msgstr "A gépelés megnyitja az üzenetszerkesztőt"
+
+msgid "Start typing at an agent's empty prompt and the composer opens with what you typed. A dialog, a menu and the CLI's own /, !, # and @ keep their keys"
+msgstr "Kezdjen gépelni az ügynök üres promptjánál, és az üzenetszerkesztő megnyílik a beírtakkal. A párbeszédablakok, a menük és a CLI saját /, !, # és @ jelei megtartják a billentyűiket"
+
+msgid "Right-click aims spell-check"
+msgstr "A jobb kattintás irányítja a helyesírás-ellenőrzést"
+
+msgid "Right-clicking a misspelled word in the composer offers corrections for that word. Off: corrections follow the text cursor instead, and a right-click never moves it"
+msgstr "Az üzenetszerkesztőben egy hibásan írt szóra jobb gombbal kattintva ahhoz a szóhoz kap javításokat. Kikapcsolva: a javítások a szövegkurzort követik, és a jobb kattintás sosem mozdítja azt"
+
+msgid "Max width"
+msgstr "Legnagyobb szélesség"
+
+msgid "Stop growing past this width and center in the tab instead (0 = no limit)"
+msgstr "Ennél a szélességnél ne nőjön tovább, hanem igazodjon a lap közepére (0 = nincs korlát)"
+
+msgid "Footer apps"
+msgstr "Lábléc-alkalmazások"
+
+msgid "Buttons in each tab's footer that open the tab's directory"
+msgstr "Gombok az egyes lapok láblécén, amelyek a lap könyvtárát nyitják meg"
+
+msgid "Add application…"
+msgstr "Alkalmazás hozzáadása…"
+
+msgid "Pull requests"
+msgstr "Pull requestek"
+
+msgid "Text size"
+msgstr "Szövegméret"
+
+msgid "Reading-text size in the pull request panel, as a percentage of the app font; buttons and menus keep the app size"
+msgstr "Az olvasószöveg mérete a pull request panelen, az alkalmazás betűméretének százalékában; a gombok és a menük az alkalmazás méretén maradnak"
+
+msgid "Show embedded images"
+msgstr "Beágyazott képek megjelenítése"
+
+msgid "Render the images a description or comment embeds, and the changed image files, as pictures; click one to open it full size. Off, they stay links and patches, and opening a pull request downloads nothing"
+msgstr "A leírásba vagy hozzászólásba ágyazott képek és a módosult képfájlok megjelenítése képként; kattintásra teljes méretben nyílnak meg. Kikapcsolva hivatkozások és patchek maradnak, és a pull request megnyitása semmit sem tölt le"
+
+msgid "Confirm before merging"
+msgstr "Megerősítés egyesítés előtt"
+
+msgid "Ask before merging a pull request, enabling auto-merge, or merging and archiving the session. Off, the click merges; closing a pull request unmerged still asks either way"
+msgstr "Rákérdezés pull request egyesítése, automatikus egyesítés bekapcsolása, vagy egyesítés és a munkamenet archiválása előtt. Kikapcsolva a kattintás egyesít; a pull request egyesítés nélküli lezárása így is, úgy is rákérdez"
+
+msgid "Attach pull requests named in prompts"
+msgstr "A promptokban említett pull requestek csatolása"
+
+msgid "Put every pull request a new session's first prompt mentions on that session's row, without waiting for the agent to touch it"
+msgstr "Az új munkamenet első promptjában említett minden pull request felkerül a munkamenet sorára, meg sem várva, hogy az ügynök hozzányúljon"
+
+msgid "Rename sessions after their pull requests"
+msgstr "Munkamenetek átnevezése a pull requestjeik után"
+
+msgid "Retitle a session to match the newest pull request opened in it; manually renamed sessions keep their name"
+msgstr "A munkamenet címének igazítása a benne nyitott legújabb pull requesthez; a kézzel átnevezett munkamenetek megtartják a nevüket"
+
+msgid "Refresh pull requests at launch"
+msgstr "Pull requestek frissítése indításkor"
+
+msgid "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left"
+msgstr "Induláskor egyszer megkérdezi a GitHubot minden listázott munkamenet pull requestjeiről, hogy az oldalsáv jelölései frissen induljanak, ne úgy, ahogy maradtak"
+
+msgid "Caffeine Mode"
+msgstr "Caffeine Mode"
+
+msgid "Keep screen on"
+msgstr "Képernyő bekapcsolva tartása"
+
+msgid "Hold the screen on as well as keeping the computer awake. Off lets the screen turn off as usual, while an unattended agent still keeps the computer from sleeping"
+msgstr "A képernyőt is bekapcsolva tartja, nem csak a számítógépet ébren. Kikapcsolva a képernyő szokás szerint kikapcsolhat, miközben a felügyelet nélküli ügynök továbbra sem hagyja elaludni a számítógépet"
+
+msgid "Until idle grace period"
+msgstr "Tétlenségig türelmi ideje"
+
+msgid "How many minutes Until idle keeps the computer awake after the last session stops working; any session picking work back up restarts the wait"
+msgstr "Hány percig tartja ébren a Tétlenségig a számítógépet, miután az utolsó munkamenet abbahagyta a munkát; ha bármely munkamenet újra dolgozni kezd, a várakozás újraindul"
+
+msgid "Turn on at launch"
+msgstr "Bekapcsolás indításkor"
+
+msgid "Start with Caffeine Mode already on, keeping the computer awake until you turn it off from the header"
+msgstr "Indulás már bekapcsolt Caffeine Mode-dal, ébren tartva a számítógépet, amíg a fejlécből ki nem kapcsolja"
+
+msgid "Turn off after"
+msgstr "Kikapcsolás ennyi idő után"
+
+msgid "Open in a window on small screens"
+msgstr "Megnyitás ablakban kis képernyőn"
+
+msgid "On screens this many pixels wide or narrower (after display scaling), the editor opens in its own window instead of a panel (0 = always open as a panel)"
+msgstr "Az ennyi képpont széles vagy keskenyebb képernyőkön (a kijelzőskálázás után) a szerkesztő saját ablakban nyílik meg panel helyett (0 = mindig panelként nyíljon)"
+
+msgid "Show status icon"
+msgstr "Állapotikon megjelenítése"
+
+msgid "Shows Collins in the top bar, with a menu that jumps to any open session"
+msgstr "Megjeleníti a Collinst a felső sávban, egy menüvel, amely bármelyik nyitott munkamenetre ugrik"
+
+msgid "No status-icon support was found in this desktop — GNOME needs an AppIndicator extension"
+msgstr "Ezen az asztali környezetben nincs állapotikon-támogatás — a GNOME-hoz AppIndicator-kiterjesztés kell"
+
+msgid "Nothing on this desktop can show a status icon"
+msgstr "Ezen az asztali környezetben semmi sem tud állapotikont megjeleníteni"
+
+msgid "Using the claude found on PATH at {path}."
+msgstr "A PATH-on talált claude használata innen: {path}."
+
+msgid "claude isn't on PATH — Collins will ask where it is at the next launch."
+msgstr "A claude nincs a PATH-on — a Collins a következő indításkor megkérdezi, hol van."
+
+msgid "How long that launch-time Caffeine Mode runs before it turns itself off. Until idle never does: it holds the computer awake while any session is working (and {n} minute past), dozing in between"
+msgstr "Meddig fut az indításkori Caffeine Mode, mielőtt magától kikapcsol. A Tétlenségig sosem kapcsol ki: ébren tartja a számítógépet, amíg bármely munkamenet dolgozik (és utána {n} percig), közben szunnyad"
+
+msgid "Move up"
+msgstr "Mozgatás fel"
+
+msgid "Move down"
+msgstr "Mozgatás le"
+
+msgid "No apps configured"
+msgstr "Nincs beállított alkalmazás"
+
+msgid "Before"
+msgstr "Előtte"
+
+msgid "After"
+msgstr "Utána"
+
+msgid "Back to the pull requests"
+msgstr "Vissza a pull requestekhez"
+
+msgid "View in Collins"
+msgstr "Megtekintés a Collinsban"
+
+msgid "Open this pull request's page beside the session"
+msgstr "A pull request oldalának megnyitása a munkamenet mellett"
+
+msgid "View unresolved comments"
+msgstr "Megválaszolatlan hozzászólások megtekintése"
+
+msgid "Open this pull request's page at its first unresolved thread"
+msgstr "A pull request oldalának megnyitása az első megválaszolatlan szálnál"
+
+msgid "Collins couldn't run that action."
+msgstr "A Collins nem tudta futtatni ezt a műveletet."
+
+msgid "{action} failed"
+msgstr "A(z) {action} sikertelen"
+
+msgid "Pull request"
+msgstr "Pull request"
+
+msgid "Merging when checks pass"
+msgstr "Egyesítés, amint az ellenőrzések sikeresek"
+
+msgid "The GitHub CLI (gh) isn't installed, or isn't on PATH."
+msgstr "A GitHub CLI (gh) nincs telepítve, vagy nincs a PATH-on."
+
+msgid "Collins couldn't run gh."
+msgstr "A Collins nem tudta futtatni a gh-t."
+
+msgid "gh exited with status {code}."
+msgstr "A gh {code} státuszkóddal lépett ki."
+
+msgid "and {n} more"
+msgstr "és még {n} további"
+
+msgid "Approved"
+msgstr "Jóváhagyva"
+
+msgid "Changes requested"
+msgstr "Módosítások kérve"
+
+msgid "Review dismissed"
+msgstr "Vélemény elvetve"
+
+msgid "Commented"
+msgstr "Hozzászólt"
+
+msgid "Reload this pull request"
+msgstr "A pull request újratöltése"
+
+msgid "Conversation"
+msgstr "Beszélgetés"
+
+msgid "Files"
+msgstr "Fájlok"
+
+msgid "Couldn't load this pull request — is the GitHub CLI signed in?"
+msgstr "A pull request nem tölthető be — be van jelentkezve a GitHub CLI?"
+
+msgid "Nothing loaded yet."
+msgstr "Még semmi sincs betöltve."
+
+msgid "Merges {head} into {base}"
+msgstr "A(z) {head} egyesítése ebbe: {base}"
+
+msgid "{n} file"
+msgstr "{n} fájl"
+
+msgid "No comments yet."
+msgstr "Még nincs hozzászólás."
+
+msgid "No description provided."
+msgstr "Nincs leírás."
+
+msgid "No changed files."
+msgstr "Nincsenek módosult fájlok."
+
+msgid "Checks ({n})"
+msgstr "Ellenőrzések ({n})"
+
+msgid "Checks"
+msgstr "Ellenőrzések"
+
+msgid "More actions"
+msgstr "További műveletek"
+
+msgid "Right-click for more actions"
+msgstr "Jobb kattintás a további műveletekhez"
+
+msgid "Add a comment"
+msgstr "Hozzászólás írása"
+
+msgid "Request changes"
+msgstr "Módosítások kérése"
+
+msgid "Approve"
+msgstr "Jóváhagyás"
+
+msgid "Comment"
+msgstr "Hozzászólás"
+
+msgid "Comment on {slug}"
+msgstr "Hozzászólás a(z) {slug} pull requesthez"
+
+msgid "Approve {slug}"
+msgstr "A(z) {slug} jóváhagyása"
+
+msgid "Request changes on {slug}"
+msgstr "Módosítások kérése a(z) {slug} pull requesthez"
+
+msgid "Address comments"
+msgstr "Hozzászólások kezelése"
+
+msgid "Request review"
+msgstr "Véleményezés kérése"
+
+msgid "Outdated"
+msgstr "Elavult"
+
+msgid "The code this thread commented on has changed"
+msgstr "A kód, amelyhez ez a szál hozzászólt, azóta megváltozott"
+
+msgid "Resolved"
+msgstr "Megoldva"
+
+msgid "Reply"
+msgstr "Válasz"
+
+msgid "Reply in this thread"
+msgstr "Válasz ebben a szálban"
+
+msgid "Unresolve"
+msgstr "Megoldás visszavonása"
+
+msgid "Resolve"
+msgstr "Megoldás"
+
+msgid "Reopen this thread"
+msgstr "A szál újranyitása"
+
+msgid "Mark this thread resolved"
+msgstr "A szál megjelölése megoldottként"
+
+msgid "Post reply"
+msgstr "Válasz elküldése"
+
+msgid "no diff — binary or too large"
+msgstr "nincs diff — bináris vagy túl nagy"
+
+msgid "{n} line"
+msgstr "{n} sor"
+
+msgid "Show more"
+msgstr "Több megjelenítése"
+
+msgid "Show less"
+msgstr "Kevesebb megjelenítése"
+
+msgid "New session in {path}"
+msgstr "Új munkamenet itt: {path}"
+
+msgid "Expand"
+msgstr "Kibontás"
+
+msgid "Collapse"
+msgstr "Összecsukás"
+
+msgid "New Thread"
+msgstr "Új szál"
+
+msgid "Discard draft and close tab"
+msgstr "Piszkozat elvetése és a lap bezárása"
+
+msgid "Discard draft"
+msgstr "Piszkozat elvetése"
+
+msgid "Backgrounding is unavailable until this session is registered and any handoff in progress finishes"
+msgstr "A háttérbe küldés nem érhető el, amíg ez a munkamenet nincs regisztrálva, és a folyamatban lévő átadás be nem fejeződik"
+
+msgid "This session has no tab open."
+msgstr "Ennek a munkamenetnek nincs nyitott lapja."
+
+msgid "Delete archived sessions…"
+msgstr "Archivált munkamenetek törlése…"
+
+msgid "Add project"
+msgstr "Projekt hozzáadása"
+
+msgid "Refresh session list and pull requests"
+msgstr "Munkamenetlista és pull requestek frissítése"
+
+msgid "Chats"
+msgstr "Csevegések"
+
+msgid "Draft"
+msgstr "Piszkozat"
+
+msgid "Refreshing pull requests…"
+msgstr "Pull requestek frissítése…"
+
+msgid "Open in new window"
+msgstr "Megnyitás új ablakban"
+
+msgid "Move to new window"
+msgstr "Áthelyezés új ablakba"
+
+msgid "Rename to match PR"
+msgstr "Átnevezés a PR-hoz igazítva"
+
+msgid "Rename to match PR #{number}"
+msgstr "Átnevezés a(z) #{number} PR-hoz igazítva"
+
+msgid "Repair session link"
+msgstr "Munkamenet-kapcsolat javítása"
+
+msgid "New session in new window"
+msgstr "Új munkamenet új ablakban"
+
+msgid "New session here (no worktree)"
+msgstr "Új munkamenet itt (munkafa nélkül)"
+
+msgid "New session here (in a worktree)"
+msgstr "Új munkamenet itt (munkafában)"
+
+msgid "New sessions use a worktree"
+msgstr "Az új munkamenetek munkafát használnak"
+
+msgid "Git pull ({branch})"
+msgstr "Git pull ({branch})"
+
+msgid "Git pull"
+msgstr "Git pull"
+
+msgid "Remove project from sidebar"
+msgstr "Projekt eltávolítása az oldalsávból"
+
+msgid "replaced"
+msgstr "lecserélve"
+
+msgid "Open composer"
+msgstr "Üzenetszerkesztő megnyitása"
+
+msgid "the agent didn't start — your prompt is kept in the composer"
+msgstr "az ügynök nem indult el — a prompt az üzenetszerkesztőben megmaradt"
+
+msgid "Every pull request this session has opened"
+msgstr "A munkamenet által nyitott összes pull request"
+
+msgid "Show/hide terminal panel"
+msgstr "Terminálpanel megjelenítése/elrejtése"
+
+msgid "Move terminals to {name}?"
+msgstr "Áthelyezi a terminálokat ide: {name}?"
+
+msgid "This session started in a worktree at {path}. The terminal open beside it is still in the project directory — change its directory to the worktree? A terminal running a command is left alone."
+msgstr "Ez a munkamenet munkafában indult itt: {path}. A mellette nyitott terminál még a projektkönyvtárban van — átállítja a könyvtárát a munkafára? A parancsot futtató terminál békén marad."
+
+msgid "Change Directory"
+msgstr "Könyvtárváltás"
+
+msgid "{n} terminal is running a command and stayed where it was"
+msgstr "{n} terminál parancsot futtat, és ott maradt, ahol volt"
+
+msgid "Effort: {level}"
+msgstr "Erőfeszítés: {level}"
+
+msgid "Click to switch the effort level"
+msgstr "Kattintson az erőfeszítési szint váltásához"
+
+msgid "No pull request found for this branch"
+msgstr "Nem található pull request ehhez az ághoz"
+
+msgid "Re-check this branch's pull requests"
+msgstr "Az ág pull requestjeinek újraellenőrzése"
+
+msgid "Look for this branch's pull request"
+msgstr "Az ág pull requestjének megkeresése"
+
+msgid "Add to chat: the agent isn't running in this tab"
+msgstr "Hozzáadás a csevegéshez: ezen a lapon nem fut az ügynök"
+
+msgid "Add to chat isn't available for this file"
+msgstr "A Hozzáadás a csevegéshez nem érhető el ehhez a fájlhoz"
+
+msgid "skipped {n} dropped item that isn't a local file"
+msgstr "{n} bedobott elem kihagyva, amely nem helyi fájl"
+
+msgid "Composer: the input box holds a paste Collins can't read"
+msgstr "Üzenetszerkesztő: a beviteli mezőben olyan beillesztés van, amelyet a Collins nem tud beolvasni"
+
+msgid "Effort switch: the agent isn't running in this tab"
+msgstr "Erőfeszítés-váltás: ezen a lapon nem fut az ügynök"
+
+msgid "This session isn't at an empty prompt."
+msgstr "Ez a munkamenet nem üres promptnál áll."
+
+msgid "Start sessions in the background"
+msgstr "Munkamenetek indítása a háttérben"
+
+msgid "start_session — spawn a sibling agent in a new background tab, with a prompt"
+msgstr "start_session — testvérügynök indítása új háttérlapon, prompttal"
+
+msgid "Read the terminal panel"
+msgstr "A terminálpanel olvasása"
+
+msgid "read_terminal — the panel tabs' text and scrollback, your own typing included"
+msgstr "read_terminal — a panellapok szövege és visszagörgetése, a saját gépelését is beleértve"
+
+msgid "Run commands in the terminal panel"
+msgstr "Parancsok futtatása a terminálpanelen"
+
+msgid "run_in_terminal — type a command into an idle panel tab (or a new one) and run it"
+msgstr "run_in_terminal — parancs beírása egy tétlen panellapra (vagy egy újra) és futtatása"
+
+msgid "Default (latest Haiku)"
+msgstr "Alapértelmezett (legújabb Haiku)"
+
+msgid "Default (latest Sonnet)"
+msgstr "Alapértelmezett (legújabb Sonnet)"
+
+msgid "Session title model"
+msgstr "Munkamenetcímek modellje"
+
+msgid "Icon generation model"
+msgstr "Ikongenerálás modellje"
+
+msgid "Model list"
+msgstr "Modellista"
+
+msgid "Checking…"
+msgstr "Ellenőrzés…"
+
+msgid "Ask Anthropic for the model list now, rather than waiting for the saved one to age out"
+msgstr "A modellista lekérése az Anthropictól most, nem várva a mentett lista elavulására"
+
+msgid "Couldn't reach Anthropic — offering the CLI's aliases (opus, sonnet, haiku)"
+msgstr "Az Anthropic nem érhető el — a CLI aliasai érhetők el (opus, sonnet, haiku)"
+
+msgid "Couldn't reach Anthropic — still showing the list fetched {when}"
+msgstr "Az Anthropic nem érhető el — továbbra is a(z) {when} lekért lista látható"
+
+msgid "{count} models, updated {when}"
+msgstr "{count} modell, frissítve {when}"
+
+msgid "Waiting for this session to be registered — backgrounding it now would leave the agent with no way back to it"
+msgstr "Várakozás a munkamenet regisztrálására — ha most háttérbe kerülne, az ügynöknek nem lenne útja vissza hozzá"
+
+msgid "Another session is still being handed to the background — one at a time"
+msgstr "Egy másik munkamenet átadása a háttérnek még tart — egyszerre csak egy"
+
+msgid "New chat (scratch folder)"
+msgstr "Új csevegés (ideiglenes mappa)"
+
+msgid "Close window with {n} active session(s)?"
+msgstr "Bezárja az ablakot {n} aktív munkamenettel?"
+
+msgid "Agents are asked to exit cleanly first; other running commands will be terminated."
+msgstr "Az ügynököket először tiszta kilépésre kérjük; a többi futó parancs leáll."
+
+msgid "Backgrounding sessions…"
+msgstr "Munkamenetek háttérbe küldése…"
+
+msgid "Quit Now"
+msgstr "Kilépés most"
+
+msgid "Handing each session to a background agent, one at a time, so every one is paired with the agent it becomes. {done} of {total} done."
+msgstr "Minden munkamenet átadása egy-egy háttérügynöknek, egyenként, hogy mindegyik azzal az ügynökkel párosuljon, amellyé válik. {done} / {total} kész."
+
+msgid "New session in {project} (no worktree)"
+msgstr "Új munkamenet itt: {project} (munkafa nélkül)"
+
+msgid "New session in {project} (in a worktree)"
+msgstr "Új munkamenet itt: {project} (munkafában)"
+
+msgid "Could not create chat directory"
+msgstr "Nem sikerült létrehozni a csevegéskönyvtárat"
+
+msgid "Trust and add"
+msgstr "Megbízom benne, hozzáadás"
+
+msgid "Discard draft?"
+msgstr "Elveti a piszkozatot?"
+
+msgid "“{label}” will be forgotten, along with any terminal panel it kept."
+msgstr "A(z) „{label}” el lesz felejtve, a megtartott terminálpaneljével együtt."
+
+msgid "Discard"
+msgstr "Elvetés"
+
+msgid "Couldn't send that to the session"
+msgstr "Nem sikerült elküldeni a munkamenetnek"
+
+msgid "Close tab with an active session?"
+msgstr "Bezárja a lapot aktív munkamenettel?"
+
+msgid "The agent is asked to exit cleanly first; the command running in this tab's terminal panel will be terminated."
+msgstr "Az ügynököt először tiszta kilépésre kérjük; a lap terminálpaneljén futó parancs leáll."
+
+msgid "The agent is asked to exit cleanly first."
+msgstr "Az ügynököt először tiszta kilépésre kérjük."
+
+msgid "A command is still running in this tab's terminal panel and will be terminated."
+msgstr "A lap terminálpaneljén még fut egy parancs, amely le lesz állítva."
+
+msgid "Backgrounding isn't available yet: this session hasn't been registered, so a detached agent would have no way back to it."
+msgstr "A háttérbe küldés még nem érhető el: ez a munkamenet nincs regisztrálva, így a leválasztott ügynöknek nem lenne útja vissza hozzá."
+
+msgid "Backgrounding isn't available right now: another session is still being handed to the background."
+msgstr "A háttérbe küldés most nem érhető el: egy másik munkamenet átadása a háttérnek még tart."
+
+msgid "No matching agent"
+msgstr "Nincs egyező ügynök"
+
+msgid "No background agent matches this session — either its agent is gone, or more than one candidate matched and guessing would link the wrong one. The transcript itself is intact."
+msgstr "Egyik háttérügynök sem illik ehhez a munkamenethez — vagy eltűnt az ügynöke, vagy több jelölt is egyezett, és a találgatás rosszat kapcsolna hozzá. Maga az átirat sértetlen."
+
+msgid "Session linked"
+msgstr "Munkamenet összekapcsolva"
+
+msgid "Linked to its running background agent."
+msgstr "Összekapcsolva a futó háttérügynökével."
+
+msgid "Nothing to repair"
+msgstr "Nincs mit javítani"
+
+msgid "This session is already its own background agent. Opening it attaches to that agent."
+msgstr "Ez a munkamenet már a saját háttérügynöke. Megnyitása ahhoz az ügynökhöz csatlakozik."
+
+msgid "No pull request is linked to this session yet"
+msgstr "Ehhez a munkamenethez még nincs pull request kapcsolva"
+
+msgid "Undo"
+msgstr "Visszavonás"
+
+msgid "Archived “{name}”"
+msgstr "A(z) „{name}” archiválva"
+
+msgid "Archived {n} sessions"
+msgstr "{n} munkamenet archiválva"
+
+msgid "Delete {n} archived session(s)?"
+msgstr "Töröl {n} archivált munkamenetet?"
+
+msgid "Keep the {p} emptied project(s) in the sidebar"
+msgstr "A(z) {p} kiürült projekt megtartása az oldalsávban"
+
+msgid "Manage and resume your AI coding agent sessions.\n\nUnofficial community tool — not affiliated with or endorsed by Anthropic."
+msgstr "Kezelje és folytassa AI kódolóügynök-munkameneteit.\n\nNem hivatalos közösségi eszköz — nem áll kapcsolatban az Anthropickal, és az nem is támogatja."
 

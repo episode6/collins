@@ -22,7 +22,7 @@ downloads of each version, see the
 - ✅ **Editor** — a per-tab code editor beside the terminal: file tree, quick open, an agent-files list of what the session just wrote, pop-out to a second monitor
 - ✅ **Composer** — a spell-checked, multi-line prompt box that opens the moment you start typing, floating or docked, with dropped or pasted image attachments; an unsent prompt is a **draft** kept with its session across tab close and quit — or a sidebar Draft row, for a session not started yet
 - ✅ **Session tools** — an in-app MCP server every launched session can call: rename itself, open a file or an image on your screen, notify you when it needs you, attach a pull request to its own row, spawn a sibling session, and read or drive the terminal panel
-- ✅ **Desktop presence** — a status icon with an unread badge, close-to-hide (sessions keep running without a window), notifications wearing each project's own icon, Caffeine Mode
+- ✅ **Desktop presence** — a status icon with an unread badge, close-to-hide (sessions keep running without a window), notifications wearing each project's own icon, an in-app notification center (cards, a header bell, a history sheet, a choice of sounds), a daily update check, Caffeine Mode
 - ✅ **Theming** — light/dark plus selectable terminal color palettes
 - ✅ **Localization** — English, Hungarian, German, Spanish, French
 - ✅ **Multi-window**
@@ -36,7 +36,7 @@ downloads of each version, see the
 
 ## Changelog
 
-### v0.1.2 — UNRELEASED
+### v0.1.2 — 2026-08-30
 
 - **The editor shows one column when it's narrow.** An editor column
   dragged to 500 px or narrower shows the file tree and the open file one
@@ -54,6 +54,11 @@ downloads of each version, see the
   *Glass* from UI SFX, *Confirmation* and *Pluck* from Kenney's Interface
   Sounds, all public domain (CC0). *Default*, *None* and *Custom…* are as
   before.
+- **The notification card can be pinned light or dark.** A *Card theme*
+  row in Preferences → *Notifications* — *Follow app*, *Light*, *Dark* —
+  pins the in-app card's colors whatever theme the app wears, so a dark
+  card over a light window can read the way a desktop notification does.
+  Only the in-app card changes; desktop notifications stay the desktop's.
 - **Collins tells you when a newer Collins is out.** Once a day the app
   asks GitHub for the latest release — through your `gh` login when it
   has one, anonymously over the public API otherwise — and when that
@@ -96,6 +101,33 @@ downloads of each version, see the
   that names a new session passes `--effort low`: a five-word summary
   gains nothing from thinking, and the pin keeps an `/effort xhigh` saved
   in your settings from being spent on every title.
+- **In-app notifications: a card, a bell, and a history.** A session that
+  speaks up from a tab you aren't looking at — a `notify_user` message or
+  a terminal bell — now shows a **card** at the window's top right and
+  plays the notification sound while Collins is focused; the desktop
+  notification of old now covers the times no Collins window is active,
+  and the tab on screen still gets nothing but its flash. Cards stack
+  three deep, wait while the pointer is over them, and click through to
+  their session; the × takes down just the card. A **bell** in the header
+  bar wears the same unread count as the tray icon and the dock badge,
+  and clicking it — or `Ctrl+Shift+B` — opens the **notification
+  history**: a sheet sliding in from the right edge, every notification
+  newest first under *Unread* and *Earlier*, each row wearing its
+  project's icon, its kind's mark and its age, with a bell rung again
+  coalescing onto its row. A click goes to the session and marks the row
+  read (clearing the matching desktop notification with it), right-click
+  offers *Mark read* and *Remove*, and *Mark all read* / *Clear* sit in
+  the sheet's header; the history survives restarts, capped at 200 rows
+  and two weeks. Finished runs land there as rows too — the sidebar's
+  green pulses, counted — and **Announce finished runs** (off by default)
+  sends them out as cards, the sound, and desktop notifications like the
+  rest. Preferences gains a **Notifications** group for all of it: the
+  in-app switch, the *Sound* picker, *Bells from other sessions*, and the
+  announce switch. The `notify_user` tool's reply now tells the agent
+  which of the three the user got — a card, a desktop notification, or
+  nothing because they were already looking. The sound plays through
+  GStreamer (`gir1.2-gstreamer-1.0`, a Recommends on every package);
+  without it, the desktop's beep stands in.
 - **The status icon shows when agents are working.** While any session is
   busy, the drink in the panel icon's glass turns into the sidebar's blue
   barber pole — the busy row's guide line, standing still — and the coral
@@ -266,6 +298,13 @@ downloads of each version, see the
   group now, and ←/→ on a focused header do the same from the keyboard.
   Favorites, with nowhere to start a session, still folds on a click
   anywhere.
+- **Mark ready & merge, one right-click away.** A right-click on a draft
+  PR's *Ready* button offers the stops past it: *Mark ready & merge* when
+  the checks are green, *Mark ready & merge when checks pass* while they
+  are pending or red, and — beside the immediate merge, when there is a
+  session to put away — *Mark ready, merge & archive session*. A
+  conflicting draft is offered no shortcut at all, exactly as an open
+  conflicting PR is offered no merge.
 - **The PR page's tabs link back to GitHub.** A right-click on
   *Conversation* or *Files* opens that view of the pull request on
   github.com in your browser — the escape hatch for whatever the native

@@ -115,6 +115,9 @@ appstreamcli validate --no-net --override releases-not-in-order=info \
 * Sat Aug 22 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.2-1
 - Collins is now published to the episode6/stable COPR, for every maintained
   Fedora and for RHEL 10 and its rebuilds.
+- In-app notifications (cards, a header bell, a history sheet, sounds via
+  GStreamer), an effort picker beside the model picker, a new-chat screen
+  with drafts, a daily update check, and a Token use preferences group.
 
 * Tue Aug 18 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.1-1
 - Published to ppa:episode6/stable and PyPI; installs alongside

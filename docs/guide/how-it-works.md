@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-29. Full change history: git log for this file.
+fork. Last modified: 2026-08-30. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -42,6 +42,8 @@ initial prompt) — no model call, so your backlog is never sent anywhere. Only
 sessions created while the app runs get a headless `claude -p` summarization
 (the model is the *Session title model* preference, defaulting to the newest
 Haiku; its **None** option keeps the local title for new sessions too),
+pinned to the lowest effort level so a saved `/effort xhigh` is never spent
+on a five-word summary,
 executed in a scratch directory, with none of your skills, MCP servers, or
 the CLI's tools loaded (see [What spends tokens](#what-spends-tokens)), so
 the title runs don't appear as sessions themselves and cost little more
@@ -218,7 +220,9 @@ never a crash.
 
 Three features call Anthropic directly, on the OAuth token the CLI stores in
 `~/.claude/.credentials.json` (read, never written — an expired token is
-refreshed by the CLI itself, via a throwaway headless run at launch) and the
+refreshed by the CLI itself, via a throwaway headless run at launch or when
+a poll comes back refused; see [Claude usage](#claude-usage) for the backoff
+and the switch that turns it off) and the
 same beta header the CLI sends:
 
 | Feature | Endpoint | When it breaks |
@@ -256,6 +260,8 @@ collins/
 ├── state.py          # app-side persistence
 ├── terminal.py       # VTE terminal tab + its panels' wiring
 ├── composer.py       # the prompt composer text box
+├── newchat.py        # the new-chat screen's state: drafts, picks, launch
+├── newchatview.py    # the new-chat screen itself
 ├── editor.py         # the editor panel (GtkSourceView)
 ├── docktree.py       # the panel docking tree: strips, splits, moves
 ├── mcpserver.py      # the in-app MCP server sessions can call
@@ -272,6 +278,7 @@ collins/
 ├── caffeine.py       # Caffeine Mode: inhibit sleep while agents work
 ├── titles.py         # auto-generated session titles (local + claude)
 ├── usage.py          # Claude subscription usage fetch/parse
+├── updatecheck.py    # the once-a-day look at GitHub's latest release
 ├── tokensettings.py  # the Token use rows: what runs Claude for you
 ├── welcome.py        # the first-launch dialog: those rows, and where claude is
 ├── gitinfo.py        # git branch for the tab footer; is the tree dirty?

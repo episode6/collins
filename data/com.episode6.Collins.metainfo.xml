@@ -2,7 +2,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-22. Full change history: git log for this file.
+fork. Last modified: 2026-08-30. Full change history: git log for this file.
 -->
 <component type="desktop-application">
   <id>com.episode6.Collins</id>
@@ -48,6 +48,21 @@ fork. Last modified: 2026-08-22. Full change history: git log for this file.
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.1.2" date="2026-08-30">
+      <description>
+        <p>In-app notifications, an effort picker, and Collins on Fedora.</p>
+        <ul>
+          <li>Install from the episode6/stable COPR on Fedora and RHEL 10</li>
+          <li>A session that wants you shows a card in the window with a sound; a header bell opens the notification history, with a choice of sounds and a light/dark card pin</li>
+          <li>Collins checks once a day for a newer release and says so</li>
+          <li>New sessions open onto a new-chat screen with model and effort pickers; unsent screens are kept as drafts</li>
+          <li>A Token use preferences group and a first-launch dialog disclose everything that runs Claude on your behalf; an expired login repairs itself</li>
+          <li>Paste images into the composer; big drafts survive the round trip</li>
+          <li>A narrow editor column shows the file tree and the file one at a time</li>
+          <li>The status icon shows when agents are working; PR drafts offer mark-ready-and-merge</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-08-22">
       <description>
         <p>Available from the episode6 Ubuntu PPA and from PyPI, with every keyboard shortcut rebindable.</p>

@@ -46,6 +46,12 @@ the app reads, are in
   **None** by default: it opens waiting for you to pick a model from its
   drop-down and click **Generate**. With a model set, it generates the
   moment it opens.
+- **Repository upkeep from the project header**: the right-click menu's
+  **Git pull** pulls the project folder's checkout, and **Checkout main**
+  (or whatever the remote calls its trunk) switches it back to the default
+  branch — offered only while some other branch is checked out, with git's
+  own refusal (local changes, a branch held by a worktree) shown in an
+  error dialog.
 - **Live updates** — new sessions appear the moment they're created, via a
   filesystem watch, and existing rows update in place without jumping
   around. A just-started session shows a **"New Thread"** placeholder row
@@ -118,7 +124,13 @@ Enter opens, Esc closes.
   opened, each with its CI or merge mark, and each opening that PR's **page
   beside the session** on click — a native view of the description, checks,
   timeline, and diff, whose *Conversation* and *Files* tabs each open their
-  github.com counterpart on a right-click. The caret beside them lists every
+  github.com counterpart on a right-click. The description and the checks
+  list each fold behind **Show more** — the description showing the start
+  of its first paragraph, the checks keeping failing and pending rows on
+  top — and the page carries its own action button: **Ready** on a draft,
+  **Merge** or **Auto-Merge** on an open PR. Right-clicking a draft's
+  *Ready* offers the stops past it: *Mark ready & merge* (or *…when checks
+  pass*), and *Mark ready, merge & archive session*. The caret beside them lists every
   PR with its title,
   `F7` opens the newest one's page, and *Open new pull requests
   automatically* (Preferences) opens the page by itself — once per PR — the
@@ -509,8 +521,8 @@ flipped the switch is refused if it calls it anyway.
 
 ## Starting sessions
 
-- **New session** (tab icon in the header, or `Ctrl+Shift+T`) starts a
-  fresh agent session in the **visible session's project** — no dialog
+- **New session** (tab icon in the header, or `Ctrl+Shift+T`) opens a
+  new-chat screen in the **visible session's project** — no dialog
   needed; with no session visible, it asks for a folder. **Continue**, in
   the same menu, resumes the most recent session in a folder
   (`claude --continue`).
@@ -638,8 +650,11 @@ Tokyo Night, Monokai, One Dark…), the **composer's** switches (the typing
 trigger, Enter behavior, the floating button, auto-open in new sessions),
 the editor's **color scheme**, **font**, **line numbers**/**hidden
 files** toggles and the width below which it shows a **single column**, the
-app's **Dark / Light Mode** (system / light / dark) and the notification
-card's own **Card theme** (follow app / light / dark), the
+app's **Dark / Light Mode** (system / light / dark), the **Notifications**
+group — the **In-app notifications** switch, the **Sound** picker (the
+desktop theme's sounds, five bundled chimes, or a file of your own), the
+card's **Card theme** pin (follow app / light / dark), **Bells from other
+sessions**, and **Announce finished runs** — the
 **language** (English, Magyar, Deutsch, Español, Français), the sidebar's
 **Show folder paths in sidebar** and **Show Claude usage** toggles, a
 **Token use** group directly under General that gathers everything that runs
