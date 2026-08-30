@@ -266,38 +266,14 @@ msgstr "« {name} » et son fichier de transcription seront définitivement supp
 msgid "Delete permanently"
 msgstr "Supprimer définitivement"
 
-msgid "New {name} session (advanced)…"
-msgstr "Nouvelle session {name} (avancé)…"
-
 msgid "Continue last {name} session…"
 msgstr "Continuer la dernière session {name}…"
-
-msgid "New {name} session"
-msgstr "Nouvelle session {name}"
-
-msgid "Optional flags for this session."
-msgstr "Options facultatives pour cette session."
 
 msgid "Model"
 msgstr "Modèle"
 
 msgid "Default"
 msgstr "Par défaut"
-
-msgid "Permission mode"
-msgstr "Mode d'autorisation"
-
-msgid "Extra directory"
-msgstr "Répertoire supplémentaire"
-
-msgid "Choose…"
-msgstr "Choisir…"
-
-msgid "Choose a directory"
-msgstr "Choisir un répertoire"
-
-msgid "Start"
-msgstr "Démarrer"
 
 msgid "Save"
 msgstr "Enregistrer"

@@ -1734,8 +1734,8 @@ class TerminalTab(Gtk.Box):
 
     @property
     def launch_options(self):
-        """The SessionOptions the tab was opened with (the Advanced dialog's
-        model, permission mode and extra directory), or None."""
+        """The SessionOptions the tab was opened with (a start_session
+        caller's model and permission mode), or None."""
         return self._options
 
     def new_chat_text(self) -> str:

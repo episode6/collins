@@ -38,6 +38,12 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **The Advanced new-session dialog is gone.** Its *New … session
+  (advanced)…* entry left the New Session menu along with the dialog it
+  opened: the model and effort it offered are picked on the new-chat
+  screen now, and a permission mode or an extra directory (`--add-dir`)
+  is a `claude` flag to type in the tab's terminal. *Continue last …
+  session…* stays.
 - **An effort picker beside the model picker.** The composer's Send row
   and the new-chat screen's both carry a second menu for the CLI's effort
   level (*Low* to *Max*, the `--effort` / `/effort` dial); the footer's

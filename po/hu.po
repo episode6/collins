@@ -266,38 +266,14 @@ msgstr "A(z) „{name}” és az átiratfájlja véglegesen törlődik. Ez nem v
 msgid "Delete permanently"
 msgstr "Végleges törlés"
 
-msgid "New {name} session (advanced)…"
-msgstr "Új {name} munkamenet (haladó)…"
-
 msgid "Continue last {name} session…"
 msgstr "Utolsó {name} munkamenet folytatása…"
-
-msgid "New {name} session"
-msgstr "Új {name} munkamenet"
-
-msgid "Optional flags for this session."
-msgstr "Választható kapcsolók ehhez a munkamenethez."
 
 msgid "Model"
 msgstr "Modell"
 
 msgid "Default"
 msgstr "Alapértelmezett"
-
-msgid "Permission mode"
-msgstr "Engedélyezési mód"
-
-msgid "Extra directory"
-msgstr "További könyvtár"
-
-msgid "Choose…"
-msgstr "Választás…"
-
-msgid "Choose a directory"
-msgstr "Válassz egy könyvtárat"
-
-msgid "Start"
-msgstr "Indítás"
 
 msgid "Save"
 msgstr "Mentés"

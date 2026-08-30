@@ -266,38 +266,14 @@ msgstr "„{name}“ und die zugehörige Protokolldatei werden endgültig gelös
 msgid "Delete permanently"
 msgstr "Endgültig löschen"
 
-msgid "New {name} session (advanced)…"
-msgstr "Neue {name}-Sitzung (erweitert)…"
-
 msgid "Continue last {name} session…"
 msgstr "Letzte {name}-Sitzung fortsetzen…"
-
-msgid "New {name} session"
-msgstr "Neue {name}-Sitzung"
-
-msgid "Optional flags for this session."
-msgstr "Optionale Flags für diese Sitzung."
 
 msgid "Model"
 msgstr "Modell"
 
 msgid "Default"
 msgstr "Standard"
-
-msgid "Permission mode"
-msgstr "Berechtigungsmodus"
-
-msgid "Extra directory"
-msgstr "Zusätzliches Verzeichnis"
-
-msgid "Choose…"
-msgstr "Auswählen…"
-
-msgid "Choose a directory"
-msgstr "Verzeichnis auswählen"
-
-msgid "Start"
-msgstr "Starten"
 
 msgid "Save"
 msgstr "Speichern"
