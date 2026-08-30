@@ -572,7 +572,7 @@ def split_rows(rows: Iterable[Notification]) -> tuple[list[Notification], list[N
     return unread, earlier
 
 
-def sound_display_name(value) -> str:
+def sound_display_name(value: str | None) -> str:
     """What the sheet's footer calls the notification_sound setting: "Default"
     for an unset or default value, "None" for silence, else the chosen file's
     name. The sound's own module reads the same setting for playback; the

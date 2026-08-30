@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -4900,11 +4900,15 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _notification_texture(self, notification: Notification) -> Gdk.Texture | None:
         """The project icon a row wears: the same project-icon.svg the
-        sidebar's group header draws, rasterized at the row's 16px, found the
-        way the desktop notification finds its own (see _notification_icon):
-        the session's cwd mapped back to the repository. None — the generic
-        app icon — for a row whose session the store no longer lists, whose
-        project ships no icon, or whose bytes the loader won't take."""
+        sidebar's group header draws, rasterized at the row's 16px, found as
+        the desktop notification finds its own (see _notification_icon) —
+        the session's cwd mapped back to the repository — minus that path's
+        brand-new-tab fallback: a bare Notification carries no tab to ask
+        where it is running, so a row for a session the store hasn't
+        discovered yet wears the generic icon until it has. None — the
+        generic app icon — for that row, for one whose session the store no
+        longer lists, whose project ships no icon, or whose bytes the loader
+        won't take."""
         session = self.store.get_session(notification.session_id) if notification.session_id else None
         cwd = session.cwd if session is not None else ""
         if not cwd:
