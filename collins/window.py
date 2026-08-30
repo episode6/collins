@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -335,7 +335,16 @@ class MainWindow(Adw.ApplicationWindow):
         self._archive_on_close: dict[Adw.TabPage, str] = {}
         # Sessions whose agent asked to be archived (the archive_session MCP
         # tool), waiting for the run that asked to end — see
-        # archive_session_when_finished.
+        # archive_session_when_finished. Keyed by the id the call came from,
+        # on purpose: a /bg handoff before that run ends carries the
+        # conversation on under a fork id this set never learns, and the
+        # arm dies with the tab (see _on_close_page). That is the user
+        # overruling the agent, not a lost request — backgrounding a session
+        # mid-turn says "keep this running", and an archive re-armed under
+        # the fork would put away exactly the session they just chose to
+        # keep. (The Archiving a running session = background path is
+        # different: there the archive is already decided and rides
+        # _archive_on_close with the close itself.)
         self._archive_when_finished: set[str] = set()
         # What Undo (the snackbar's button, and Ctrl+Shift+Z) would restore:
         # the session ids of the last archive that landed. Replaced by the
@@ -5100,8 +5109,11 @@ class MainWindow(Adw.ApplicationWindow):
             # than letting the idle window read the silence as a finish.
             self._activity.clear(session_id)
             # An archive the agent asked for and never got to: the tab went
-            # some other way. Reopened later, the session's next finish
-            # is its own turn, not the one that asked.
+            # some other way — closed by hand, or handed to the background,
+            # where the conversation goes on under a fork id and the user's
+            # "keep this running" outranks the agent's ask (see the set's
+            # declaration). Reopened later, the session's next finish is its
+            # own turn, not the one that asked.
             self._archive_when_finished.discard(session_id)
         view.close_page_finish(page, True)
         self._refresh_background_affordances()  # a row without a tab can't be backgrounded
