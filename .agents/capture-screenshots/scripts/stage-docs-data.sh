@@ -309,7 +309,8 @@ chmod +x "$E2E/bin/claude"
 
 echo "staged in $E2E"
 
-# The CLI settings the new-chat screen reads its pickers' defaults from:
-# an effort pinned by /effort, so the effort picker reads Default (High).
+# The CLI settings the new-chat screen reads its pickers' defaults from: a
+# model saved by /model and an effort by /effort, so the pickers open
+# pre-selected — the buttons read Opus 5 and High.
 mkdir -p "$E2E/.claude"
-echo '{"effortLevel": "high"}' > "$E2E/.claude/settings.json"
+echo '{"model": "claude-opus-5", "effortLevel": "high"}' > "$E2E/.claude/settings.json"

@@ -680,6 +680,31 @@ def default_model(models: list[ClaudeModel], prefer: str = "sonnet") -> str:
     return prefer
 
 
+def catalog_id(model_id: str | None, models: list[ClaudeModel]) -> str | None:
+    """The row of *models* that *model_id* — a setting's value, as written —
+    names: the id itself when the list carries it (a ``[1m]`` context-window
+    suffix read past, as model_efforts reads it), else the newest model of
+    the tier a bare alias (``opus``, ``sonnet``, ``opusplan``) stands for.
+    None when the list has no such row: a full id it doesn't list, an alias
+    naming no tier of its, or no id at all. What the new-chat screen's
+    picker marks for the CLI's default when nothing is picked."""
+    ident = (model_id or "").strip().removesuffix("[1m]")
+    if not ident:
+        return None
+    for model in models:
+        if model.id == ident:
+            return model.id
+    if any(ch.isdigit() for ch in ident):
+        # A versioned id the list doesn't carry names one model, not a
+        # tier: the newest of its kind would be a different one.
+        return None
+    rank = _tier(ident)
+    pool = [m for m in models if _tier(m.id) == rank]
+    if rank == len(_TIERS) or not pool:
+        return None
+    return max(pool, key=lambda m: m.created_at).id
+
+
 def _refuse_no_model(setting: str) -> None:
     """NO_MODEL is not a model. A caller that gets here with it has skipped
     the decision the sentinel exists for, and answering with any model at all

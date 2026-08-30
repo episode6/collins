@@ -14,21 +14,20 @@ the way a console launch always opened.
 
 The model picker sits in the composer's own Send row too, where the
 running session's switch menu sits, and chooses the ``--model`` that
-launch passes.
-It opens on
-*Default* — the CLI's own default, named after what the CLI's settings
-resolve it to (claudemodels.cli_default_model), so the screen says what a
-plain launch would run on — and a pick here is for this launch alone: the
-default is left as it was, and the tab is on the CLI's configured model
-with nothing passed. A model the tab was opened with (a start_session
-caller's) seeds the picker instead of the default. The effort picker
-beside it chooses the
-``--effort`` on the same terms (claudemodels.cli_default_effort names its
-*Default*), and lists only the levels the model the launch will run on
-takes. The screen owns no launch plumbing and no
-persistence — it announces ``send-requested`` and ``changed`` and its host
-(the tab, then the window) decides what those mean, the same division the
-composer itself draws.
+launch passes. It opens pre-selected on the CLI's own default — the model
+the CLI's settings resolve it to (claudemodels.cli_default_model), marked
+on the catalog and named on the button, so the screen says what a plain
+launch would run on; *Default*, bare and unmarked, when the settings name
+none. Until something is picked nothing is passed, and the tab is on
+whatever the CLI resolves at launch; a pick here is for this launch alone,
+and the default is left as it was. A model the tab was opened with (a
+start_session caller's) seeds the picker instead of the default. The
+effort picker beside it chooses the ``--effort`` on the same terms
+(claudemodels.cli_default_effort is what it opens on), and lists only the
+levels the model the launch will run on takes. The screen owns no launch
+plumbing and no persistence — it announces ``send-requested`` and
+``changed`` and its host (the tab, then the window) decides what those
+mean, the same division the composer itself draws.
 
 The composer here is built without its chrome (no close, no dock button):
 on this screen it is the page rather than a stand-in raised over one.
@@ -324,26 +323,18 @@ class NewChatView(Gtk.Box):
 
     def _name_effort(self) -> None:
         """The effort button reads what the launch will run at: the picked
-        level's name, or Default with the CLI's own in brackets when the
-        settings name one — re-read like the model's, for the same reason."""
-        if self._effort:
-            self.composer.set_effort_name(modelmenu.effort_label(self._effort))
-        else:
-            self.composer.set_effort_name(
-                modelmenu.default_effort_label(claudemodels.cli_default_effort(self._cwd))
-            )
+        level's name, else the CLI's own default's when the settings name
+        one — re-read like the model's, for the same reason — else *Default*."""
+        effort = self._effort or claudemodels.cli_default_effort(self._cwd)
+        self.composer.set_effort_name(modelmenu.effort_label(effort) if effort else _("Default"))
 
     def _name_model(self) -> None:
         """The picker button reads what the launch will run on: the picked
-        model's name, or Default with the CLI's own default in brackets when
-        the settings name one (re-read here, so a screen coming back from a
-        draft shows today's default, not the one it was opened over)."""
-        if self._model:
-            self.composer.set_model_name(modelmenu.model_label(self._model))
-        else:
-            self.composer.set_model_name(
-                modelmenu.default_label(claudemodels.cli_default_model(self._cwd))
-            )
+        model's name, else the CLI's own default's when the settings name
+        one (re-read here, so a screen coming back from a draft shows
+        today's default, not the one it was opened over), else *Default*."""
+        model = self._launch_model()
+        self.composer.set_model_name(modelmenu.model_label(model) if model else _("Default"))
 
     def _on_send(self, _view, text: str) -> None:
         # Enter (or Ctrl+Enter, as the setting has it) and the button come
