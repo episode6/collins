@@ -165,6 +165,8 @@ def run(root: str) -> int:
         pane._tab_view.get_n_pages() == 0 and columns(pane) == (True, False, False),
         columns(pane),
     )
+    focus = window.get_focus()
+    check("closing the last tab focuses the tree", focus is not None and focus.is_ancestor(pane._tree), focus)
 
     # -- back to wide: both columns, the tree width intact -------------------
     pane.open_file(first)

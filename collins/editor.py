@@ -218,7 +218,7 @@ class EditorPane(Gtk.Box):
         # n-pages rather than close-page: that handler runs before the page
         # is actually gone (and may hold it open to ask about unsaved
         # changes), so counting there would be one too many.
-        self._tab_view.connect("notify::n-pages", lambda *_a: self._sync_layout())
+        self._tab_view.connect("notify::n-pages", lambda *_a: self._on_n_pages_changed())
 
         # Below editor_narrow_width the paned shows one child at a time —
         # a Gtk.Paned hands its whole allocation to its only visible child,
@@ -257,6 +257,15 @@ class EditorPane(Gtk.Box):
         self._left.set_visible(layout is not editorfiles.PaneLayout.FILES)
         self._editors.set_visible(layout is not editorfiles.PaneLayout.PICKER)
         self._back_btn.set_visible(layout is editorfiles.PaneLayout.FILES)
+
+    def _on_n_pages_changed(self) -> None:
+        self._sync_layout()
+        # Closing the last tab in a narrow pane lands on the picker with the
+        # view that had focus freshly hidden — hand focus to the tree, the
+        # way the back button does, rather than letting it fall wherever
+        # GTK drops it. Opens (0 -> 1) leave focus to the load path.
+        if self._narrow and self._tab_view.get_n_pages() == 0:
+            self._tree.grab_focus()
 
     def _show_picker(self) -> None:
         """The back button: the picker instead of the open file, until the
