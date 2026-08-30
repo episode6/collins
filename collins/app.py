@@ -35,6 +35,8 @@ from . import (
     mcpserver,
     mcptools,
     notifycenter,
+    notifypanel,
+    notifysound,
     proctree,
     providers,
     remoteimages,
@@ -42,9 +44,11 @@ from . import (
     tokenrefresh,
     tooltipmute,
     traymodel,
+    updatecheck,
     welcome,
 )
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
+from .copylabel import open_uri
 from .i18n import _
 from .lightbox import present_image_lightbox
 from .notifycenter import NotificationCenter
@@ -418,6 +422,7 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
 .notification-row.unread .notification-title { font-weight: 600; }
 .notification-kind-bell { color: #e5a50a; }
 .notification-kind-finished { color: #2ec27e; }
+.notification-kind-update { color: @accent_color; }
 .notification-footer { padding: 4px 4px 4px 12px; }
 
 /* the in-app notification card (notifyoverlay.NotificationCard): Adwaita's
@@ -1527,6 +1532,13 @@ class App(Adw.Application):
         show_windows.connect("activate", lambda *_: self._present_main_window())
         self.add_action(show_windows)
 
+        # The update notification's click, away from Collins: the desktop
+        # notification carries the release page's URL, and the action opens
+        # it and reads the row (see _on_open_update).
+        open_update = Gio.SimpleAction.new("open-update", GLib.VariantType("s"))
+        open_update.connect("activate", self._on_open_update)
+        self.add_action(open_update)
+
         # Every notification Collins has raised, and the badges' number (see
         # notifycenter). One per app, shared by every window, loaded from and
         # written back to state.json through the listener below — connected
@@ -1540,6 +1552,10 @@ class App(Adw.Application):
         # _on_notifications_changed). Taken before the listener connects, so
         # the first change has a baseline to differ from.
         self._unread_sessions = self.notification_center.unread_sessions()
+        # Whether an update's desktop notification is up, for the withdraw
+        # when its row is read (the update has no session key to be
+        # withdrawn under; see _on_notifications_changed).
+        self._update_desktop_sent = False
         self.notification_center.connect(self._on_notifications_changed)
 
         self._status_icon: statusicon.StatusIcon | None = None
@@ -1558,6 +1574,11 @@ class App(Adw.Application):
         self.store.connect("unread-changed", self._on_unread_changed)
         self.store.connect("busy-changed", self._on_busy_changed)
         self.store.connect("archived", self._on_session_archived)
+        # An update row for a version this launch is running (or newer)
+        # is news no longer: the user installed it. Dropped before anything
+        # paints the history — and after the status icon's fields above,
+        # which the center's listener reaches through refresh_status_icon.
+        updatecheck.retire(self.notification_center)
         # Whether a tray host is on the bus, followed live from launch so the
         # close confirmation can pick its default response without a
         # synchronous bus round trip on the close path (see _confirm_quit).
@@ -1710,6 +1731,13 @@ class App(Adw.Application):
         for key in self._unread_sessions - unread:
             self.withdraw_notification(key)
         self._unread_sessions = unread
+        # The update's notification has no session key: it comes down when
+        # no unread update row is left — clicked, read, removed or cleared.
+        if self._update_desktop_sent and not self.notification_center.has_unread_kind(
+            notifycenter.KIND_UPDATE
+        ):
+            self._update_desktop_sent = False
+            self.withdraw_notification(updatecheck.DESKTOP_KEY)
         self.refresh_status_icon()
 
     def _on_session_archived(self, _store, session_id: str) -> None:
@@ -2657,6 +2685,12 @@ class App(Adw.Application):
         def then() -> None:
             ghwelcome.maybe_show(window, self.state)
             tokenrefresh.maybe_start(self._on_claude_token_refreshed)
+            # The update check waits on the welcome too — not for a switch
+            # on the dialog, but so a card never slides in over it — and
+            # then asks again every hour, which updatecheck turns into one
+            # query a day.
+            self._check_for_updates()
+            GLib.timeout_add_seconds(updatecheck.POLL_S, self._check_for_updates)
 
         return then
 
@@ -2671,6 +2705,69 @@ class App(Adw.Application):
             if isinstance(window, MainWindow):
                 window.sidebar.usage_panel.refetch()
         return GLib.SOURCE_REMOVE
+
+    # -- a newer Collins ---------------------------------------------------------
+
+    def _check_for_updates(self) -> bool:
+        """Ask updatecheck whether a query is due (the switch, the harness
+        gates and the once-a-day file are all its to weigh); a release worth
+        announcing comes back on the worker thread. True, so the hourly
+        timer that calls this keeps going."""
+        updatecheck.maybe_start(self._on_update_available)
+        return GLib.SOURCE_CONTINUE
+
+    def _on_update_available(self, release: updatecheck.Release) -> None:
+        # Worker-thread callback (updatecheck.maybe_start): the widgets are
+        # the main loop's.
+        GLib.idle_add(self.announce_update, release)
+
+    def announce_update(self, release: updatecheck.Release) -> bool:
+        """A newer Collins is out: the row, and — by where the user is —
+        the card and the sound, or the desktop notification (see
+        notifycenter.delivery for the update's cells). The row goes in
+        first, so the card holds the row the center will find when it is
+        clicked, and a click on either opens the release's page (see
+        MainWindow._open_notification and _on_open_update). Where the
+        user is: in Collins when any main window is active, away from it
+        otherwise — the tab-level distinction of a session's notification
+        has no meaning for a thing no session raised. The *In-app
+        notifications* switch has its say the way it does for every card
+        (notifycenter.without_cards). Public for the e2e check, which
+        hands in a release rather than asking GitHub for one."""
+        center = self.notification_center
+        row = updatecheck.notification(center, release)
+        windows = [w for w in self.get_windows() if isinstance(w, MainWindow)]
+        active = next((w for w in windows if w.is_active()), None)
+        focus = notifycenter.FOCUS_ELSEWHERE if active is not None else notifycenter.FOCUS_UNFOCUSED
+        deliveries = notifycenter.delivery(notifycenter.KIND_UPDATE, focus)
+        if not self.state.get_setting("inapp_notifications"):
+            deliveries = notifycenter.without_cards(deliveries)
+        if notifycenter.DELIVER_ROW in deliveries:
+            row = center.post(row)
+        if notifycenter.DELIVER_CARD in deliveries and active is not None:
+            active.notify_cards.show(row)
+        if notifycenter.DELIVER_SOUND in deliveries:
+            notifysound.play(self.state.get_setting(notifypanel.SOUND_SETTING))
+        if notifycenter.DELIVER_DESKTOP in deliveries:
+            notification = Gio.Notification.new(row.title)
+            notification.set_body(row.body)
+            notification.set_icon(Gio.ThemedIcon.new(self.get_application_id() or APP_ID))
+            notification.set_default_action_and_target("app.open-update", GLib.Variant("s", row.url))
+            self._update_desktop_sent = True
+            self.send_notification(updatecheck.DESKTOP_KEY, notification)
+        return GLib.SOURCE_REMOVE
+
+    def _on_open_update(self, _action, param: GLib.Variant) -> None:
+        """The desktop notification's click: open the release's page from
+        a main window (the browser launch wants a parent), and read every
+        update row — the user has gone where they all point."""
+        url = param.get_string() or updatecheck.RELEASES_URL
+        window = self._main_window()
+        if window is not None:
+            open_uri(window, url)
+        for row in self.notification_center.rows():
+            if row.kind == notifycenter.KIND_UPDATE:
+                self.notification_center.mark_read(row.id)
 
 
 def main() -> int:

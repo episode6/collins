@@ -45,6 +45,7 @@ from . import (
     panelhistory,
     pkgrepos,
     trust,
+    updatecheck,
     welcome,
 )
 from .activity import (
@@ -5212,8 +5213,14 @@ class MainWindow(Adw.ApplicationWindow):
         open-placeholder path and is presented; a draft id with no page
         anywhere reopens its kept draft here, if the draft still exists. An
         empty id (a message from such a tab, once those are posted) lands on
-        the window, as the desktop notification's click does today.
+        the window, as the desktop notification's click does today. An
+        update row (a newer Collins, see updatecheck) has no session to go
+        to: its click opens the release's page in the browser, and counts
+        as opened.
         """
+        if notification.kind == notifycenter.KIND_UPDATE:
+            open_uri(self, notification.url or updatecheck.RELEASES_URL)
+            return True
         session_id = notification.session_id
         app = self.get_application()
         windows = self._main_windows()

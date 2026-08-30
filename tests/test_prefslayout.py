@@ -57,3 +57,10 @@ def test_notifications_sit_between_sessions_and_composer():
 def test_every_notification_setting_has_a_default():
     for key in ("inapp_notifications", "notification_sound", "bell_notifications", "announce_finished_runs"):
         assert key in DEFAULT_SETTINGS, key
+
+
+def test_the_update_check_setting_has_a_default():
+    from collins import updatecheck
+
+    assert updatecheck.SETTING == "check_for_updates"
+    assert DEFAULT_SETTINGS[updatecheck.SETTING] is True

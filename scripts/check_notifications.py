@@ -26,7 +26,12 @@ desktop notification with the tab behind it), a bell read from the sheet
 takes its desktop notification down, a fourth card evicts the oldest, the ×
 leaves the row unread, the
 notify_user tool's reply names where the message went, and the Preferences
-group's sound picker writes the setting the sheet's footer reads. Focus is
+group's sound picker writes the setting the sheet's footer reads. Then the
+update check's notification (updatecheck), fed a release rather than asking
+GitHub: a card and a row in Collins whose click opens the release page, the
+desktop notification away from it (its action opening the page and reading
+the row, which withdraws it), a newer release replacing the row, a launch
+that caught up retiring it, and the General group's switch. Focus is
 the harness's to declare — is_active is read per window instance — so
 nothing here depends on what the headless compositor decides to focus.
 
@@ -108,6 +113,14 @@ with open(STATE_FILE, "w", encoding="utf-8") as fh:
     json.dump({
         "names": {SESSION_A: "Fix spinner animation", SESSION_B: "Router profiling"},
         "settings": {"welcome_seen": True},
+        # An update row from a last run that announced a version this launch
+        # has since caught up with: retired at startup (updatecheck.retire),
+        # which runs the center's listener before any window exists.
+        "notifications": [{
+            "id": "update:0.0.1", "session_id": "", "title": "Collins 0.0.1 is available",
+            "project": "", "kind": "update", "body": "You're running 0.0.0", "when": 1_800_000_000,
+            "read": True, "count": 1, "url": "https://github.com/episode6/collins/releases/tag/v0.0.1",
+        }],
     }, fh)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -118,7 +131,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import GLib, Gtk  # noqa: E402
 
-from collins import i18n, notifycenter, notifysound  # noqa: E402
+from collins import app as app_mod  # noqa: E402
+from collins import i18n, notifycenter, notifypanel, notifysound, updatecheck  # noqa: E402
+from collins import window as window_mod  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.terminal import TerminalTab  # noqa: E402
 from collins.window import MainWindow  # noqa: E402
@@ -182,6 +197,9 @@ def steps(app: App):
         check("the bell starts with no badge", bell.badge_text() == "", repr(bell.badge_text()))
         check("its tooltip names the sheet", bell.button.get_tooltip_text() == "Notifications")
         check("the sheet shows its empty state", sheet_page(win) == "empty")
+        check("the last run's update row, caught up with, was retired at launch",
+              center.rows() == [] and not any(
+                  r.get("kind") == "update" for r in win.state.get_notifications()))
         check("the sheet is closed and the bell is off",
               not split.get_show_sidebar() and not bell.button.get_active())
         check("the split holds the content stack",
@@ -797,6 +815,115 @@ def steps(app: App):
               sheet._sound_label.get_label() == expected, sheet._sound_label.get_label())
         win.state.set_setting("notification_sound", "default")
     yield footer_after_prefs
+
+    # -- a newer Collins (updatecheck) -------------------------------------------------
+    opened = []
+    newer = updatecheck.Release("9.9.9", "v9.9.9", "https://github.com/episode6/collins/releases/tag/v9.9.9")
+    newest = updatecheck.Release("9.9.10", "v9.9.10", "https://github.com/episode6/collins/releases/tag/v9.9.10")
+
+    def update_in_collins():
+        # The browser launch is recorded, not made: both the window's row
+        # click and the app's desktop-notification action go through the
+        # one open_uri, imported by name into each.
+        window_mod.open_uri = lambda widget, uri: opened.append(uri)
+        app_mod.open_uri = window_mod.open_uri
+        played.clear()
+        center.clear()
+        win.is_active = lambda: True
+        check("no card stands before the update", cards.cards() == [], str(len(cards.cards())))
+        app.announce_update(newer)
+        rows = [r for r in center.rows() if r.kind == notifycenter.KIND_UPDATE]
+        check("an update in Collins is one unread row, keyed by the version, with the page's url",
+              len(rows) == 1 and not rows[0].read and rows[0].id == "update:9.9.9"
+              and rows[0].url == newer.url and rows[0].session_id == "",
+              str([(r.id, r.url, r.read) for r in rows]))
+        check("titled with the version, its body naming the one running",
+              rows[0].title == "Collins 9.9.9 is available"
+              and updatecheck.running_version() in rows[0].body,
+              f"{rows[0].title!r} {rows[0].body!r}")
+        check("and the sound was asked for", played == ["default"], str(played))
+        check("no desktop notification while Collins is focused", not app._update_desktop_sent)
+        shared["update_row"] = rows[0]
+    yield update_in_collins
+
+    def update_card():
+        up = cards.cards()
+        check("its card stands", len(up) == 1 and up[0].notification is shared["update_row"], str(len(up)))
+        if not up:
+            return
+        card = up[0]
+        check("with no page behind it", card.page is None)
+        check("wearing the update mark", any(
+            isinstance(w, Gtk.Image) and w.get_icon_name() == notifypanel.UPDATE_MARK_ICON
+            for w in _descendants(card)))
+        card.activate()
+        check("clicking the card opens the release page", opened == [newer.url], str(opened))
+        check("reads the row", shared["update_row"].read)
+        check("and the card is on its way out", not card.get_reveal_child())
+    yield update_card
+    yield wait
+    yield wait
+
+    def update_away():
+        check("the update card is gone", cards.cards() == [], str(len(cards.cards())))
+        win.is_active = lambda: False
+        before = len(withdrawn)
+        app.announce_update(newest)
+        win.is_active = lambda: True
+        rows = [r for r in center.rows() if r.kind == notifycenter.KIND_UPDATE]
+        check("a newer release away from Collins replaces the row: one update row, the new version's",
+              [r.id for r in rows] == ["update:9.9.10"] and not rows[0].read, str([r.id for r in rows]))
+        check("no card, and the desktop notification is up",
+              cards.cards() == [] and app._update_desktop_sent)
+        app.activate_action("open-update", GLib.Variant("s", rows[0].url))
+        check("the desktop notification's click opens the page and reads the row",
+              opened[-1] == newest.url and rows[0].read, str(opened))
+        check("which takes the desktop notification down",
+              updatecheck.DESKTOP_KEY in withdrawn[before:] and not app._update_desktop_sent,
+              str(withdrawn[before:]))
+        # The sheet's row click goes the same way.
+        opened.clear()
+        check("the sheet's row click opens the page too",
+              win._open_notification(rows[0]) is True and opened == [newest.url], str(opened))
+        # A launch running the announced version (or newer) retires the row.
+        check("a launch that caught up retires the row",
+              updatecheck.retire(center, "9.9.10") == 1
+              and not any(r.kind == notifycenter.KIND_UPDATE for r in center.rows()))
+    yield update_away
+
+    def update_inapp_off():
+        win.state.set_setting("inapp_notifications", False)
+        app.announce_update(newer)
+        check("with in-app cards off, an update in Collins is the desktop notification and the row",
+              cards.cards() == [] and app._update_desktop_sent
+              and center.has_unread_kind(notifycenter.KIND_UPDATE))
+        win.state.set_setting("inapp_notifications", True)
+        center.clear()
+        check("clearing the history takes it down", not app._update_desktop_sent)
+    yield update_inapp_off
+
+    def update_preference():
+        win._show_preferences()
+        dialog = win.get_visible_dialog()
+        check("the General group holds the Check for updates switch, on by default",
+              dialog is not None and dialog._update_check_row.get_visible()
+              and dialog._update_check_row.get_active())
+        if dialog is None:
+            return
+        dialog._update_check_row.set_active(False)
+        check("turning it off writes the setting", win.state.get_setting("check_for_updates") is False)
+        check("which updatecheck reads as disabled", not updatecheck.enabled())
+        dialog._update_check_row.set_active(True)
+        dialog.force_close()
+    yield update_preference
+
+
+def _descendants(widget):
+    child = widget.get_first_child()
+    while child is not None:
+        yield child
+        yield from _descendants(child)
+        child = child.get_next_sibling()
 
 
 def main() -> int:

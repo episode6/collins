@@ -38,6 +38,16 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **Collins tells you when a newer Collins is out.** Once a day the app
+  asks GitHub for the latest release — through your `gh` login when it
+  has one, anonymously over the public API otherwise — and when that
+  release is newer than the one running, says so once: a card and the
+  sound in Collins, a desktop notification away from it, and a row in the
+  notification history either way, titled with the version. Clicking any
+  of them opens the release page in your browser. The same release is
+  never announced twice, and the launch that installed it retires the
+  row. *Check for updates* in Preferences → *General* (on by default)
+  turns the check off.
 - **The new-chat pickers pre-select the CLI's default.** The model and
   effort menus on the new-chat screen no longer head their lists with a
   *Default (…)* row: the model the CLI's settings resolve to (`model` in

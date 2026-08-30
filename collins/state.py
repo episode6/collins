@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -168,6 +168,12 @@ DEFAULT_SETTINGS = {
     # Off by default: the docs promise nothing is guessed from a quiet
     # terminal, and this is the switch for whoever wants a chime anyway.
     "announce_finished_runs": False,
+    # Once a day, ask GitHub's public releases API (anonymously — no token,
+    # no gh login) whether a newer Collins is out, and notify about it once:
+    # a card in Collins, a desktop notification away from it, and a history
+    # row whose click opens the release page (see updatecheck.py). On by
+    # default; off asks nothing.
+    "check_for_updates": True,
     # The floating composer button over each agent terminal's bottom-left
     # corner (see terminal.py; it was the attach-file button once, and keeps
     # that key so saved preferences carry over). Off hides it everywhere;

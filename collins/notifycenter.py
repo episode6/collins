@@ -24,9 +24,12 @@ own — a tab attached to a /bg fork the store hasn't discovered pulses the
 row it forked from, and the badge now counts that pulse where the tab list
 skipped it (see App._sync_green).
 
-**What survives a restart**: message and bell rows, read flags included — a
-notification you missed before quitting is the kind of thing the history
-exists for. Synthetic rows are never persisted: the unread flag they stand
+**What survives a restart**: message, bell and update rows, read flags
+included — a notification you missed before quitting is the kind of thing
+the history exists for. (An update row — a newer Collins is out, see
+updatecheck — is the one kind with no session behind it: its click opens
+the release's page, and the launch that installed it retires the row.)
+Synthetic rows are never persisted: the unread flag they stand
 for is in-memory only, so green doesn't survive a restart and neither does
 its row. The persisted list is newest first, capped at ROW_CAP rows and
 pruned of anything older than KEEP_DAYS on load (see clean_records).
@@ -67,7 +70,8 @@ from .i18n import _
 KIND_MESSAGE = "message"  # the notify_user tool
 KIND_BELL = "bell"  # a terminal's BEL
 KIND_FINISHED = "finished"  # a run finished and nobody has looked
-KINDS = frozenset({KIND_MESSAGE, KIND_BELL, KIND_FINISHED})
+KIND_UPDATE = "update"  # a newer Collins is out (see updatecheck)
+KINDS = frozenset({KIND_MESSAGE, KIND_BELL, KIND_FINISHED, KIND_UPDATE})
 
 # Where the user is, relative to the session that spoke up. "Active" is
 # Gtk.Window.is_active(); the app-level answer is "any main window is active".
@@ -147,6 +151,12 @@ _TABLE: dict[tuple[str, str], frozenset[str]] = {
     (KIND_FINISHED, FOCUS_SELECTED): frozenset(),
     (KIND_FINISHED, FOCUS_ELSEWHERE): frozenset({DELIVER_ROW}),
     (KIND_FINISHED, FOCUS_UNFOCUSED): frozenset({DELIVER_ROW}),
+    # An update has no session: nothing to flag or flash, no tab to be
+    # looking at — in Collins it is a card and the sound, away from it the
+    # desktop notification, and a row either way.
+    (KIND_UPDATE, FOCUS_SELECTED): frozenset({DELIVER_CARD, DELIVER_SOUND, DELIVER_ROW}),
+    (KIND_UPDATE, FOCUS_ELSEWHERE): frozenset({DELIVER_CARD, DELIVER_SOUND, DELIVER_ROW}),
+    (KIND_UPDATE, FOCUS_UNFOCUSED): frozenset({DELIVER_DESKTOP, DELIVER_ROW}),
 }
 
 
@@ -168,6 +178,11 @@ def delivery(kind: str, focus: str, announce_finished_runs: bool = False) -> fro
     it goes out exactly as a message would: a card and the sound when the
     user is elsewhere in Collins, a desktop notification when they are not.
     A selected tab never goes green, so that cell stays empty either way.
+
+    An `update` (a newer Collins, see updatecheck) has no session, so
+    nothing is flagged or flashed and there is no tab to be looking at:
+    a card and the sound while any window is active, the desktop
+    notification while none is, and a row either way.
 
     Unknown kinds and focuses raise rather than deliver nothing: a typo in a
     caller must not read as "the table said to stay quiet".
@@ -234,6 +249,25 @@ def is_green_id(notification_id: str) -> bool:
     return notification_id.startswith(GREEN_PREFIX)
 
 
+# An update row's id is its version, prefixed, the way a synthetic row's is
+# its session's: the check can tell whether the row it is about to post is
+# already there, and the launch-time retire can read the version back off
+# a row that has no other place for it (see updatecheck).
+UPDATE_PREFIX = "update:"
+
+
+def update_id(version: str) -> str:
+    """The id of the row announcing Collins *version*."""
+    return UPDATE_PREFIX + version
+
+
+def update_version(notification_id: str) -> str:
+    """The version an update row's id names, "" for any other id."""
+    if notification_id.startswith(UPDATE_PREFIX):
+        return notification_id[len(UPDATE_PREFIX) :]
+    return ""
+
+
 @dataclass
 class Notification:
     """One thing Collins told the user about.
@@ -244,22 +278,26 @@ class Notification:
     For a synthetic row it is whatever key the green was set under: the
     session id, or, for a tab still waiting on its id, the placeholder id
     the sidebar knows the row by (`placeholder-N`, or a new-chat draft id),
-    which the owning window can select a tab by.
+    which the owning window can select a tab by. An update row has no
+    session at all: its `session_id` is "" and a click opens its `url`
+    (the release's page on GitHub) instead.
     """
 
-    id: str  # uuid4; synthetic rows use "green:" + session_id
+    id: str  # uuid4; synthetic rows use "green:" + session_id, update rows "update:" + version
     session_id: str
     title: str  # the session title at raise time
     project: str  # project name, for the row's footer / eyebrow
-    kind: str  # KIND_MESSAGE | KIND_BELL | KIND_FINISHED
+    kind: str  # KIND_MESSAGE | KIND_BELL | KIND_FINISHED | KIND_UPDATE
     body: str  # the message; bell_body() / "Finished a run"
     when: float  # time.time()
     read: bool = False
     count: int = 1  # bells coalesce: "Rang the bell ×3"
+    url: str = ""  # where an update row's click goes; "" for every other kind
 
     def to_record(self) -> dict:
-        """The row as state.json holds it."""
-        return {
+        """The row as state.json holds it. The url rides only on a row that
+        has one, so every other kind's record is what it always was."""
+        record = {
             "id": self.id,
             "session_id": self.session_id,
             "title": self.title,
@@ -270,6 +308,9 @@ class Notification:
             "read": self.read,
             "count": self.count,
         }
+        if self.url:
+            record["url"] = self.url
+        return record
 
     @classmethod
     def from_record(cls, raw) -> Notification | None:
@@ -306,6 +347,7 @@ class Notification:
             when=float(when),
             read=bool(raw.get("read", False)),
             count=count,
+            url=text("url"),
         )
 
 
@@ -417,6 +459,12 @@ class NotificationCenter:
             row.session_id == session_id and not row.read for row in self._rows
         )
 
+    def has_unread_kind(self, kind: str) -> bool:
+        """Whether any unread row of *kind* is standing — what the update's
+        desktop notification, which no session key speaks for, is withdrawn
+        on (see App._on_notifications_changed)."""
+        return any(row.kind == kind and not row.read for row in self._rows)
+
     def is_green(self, session_id: str) -> bool:
         return self.get(green_id(session_id)) is not None
 
@@ -441,12 +489,18 @@ class NotificationCenter:
         resolved) never coalesce either — there is no session to say they
         are the same.
 
+        An update row replaces every update row standing, read or not: the
+        newest release is the only one worth a row, and a row for a version
+        that is no longer the latest would be a click to the wrong page.
+
         Synthetic rows are set_green's to add, never post's.
         """
         if notification.kind not in KINDS:
             raise ValueError(f"unknown notification kind: {notification.kind!r}")
         if notification.kind == KIND_FINISHED or is_green_id(notification.id):
             raise ValueError("finished rows are set_green's to add")
+        if notification.kind == KIND_UPDATE:
+            self._rows = [row for row in self._rows if row.kind != KIND_UPDATE]
         if notification.kind == KIND_BELL and notification.session_id:
             for row in self._rows:
                 if row.kind == KIND_BELL and not row.read and row.session_id == notification.session_id:
