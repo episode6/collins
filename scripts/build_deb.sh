@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-29. Full change history: git log for this file.
 # Build a Debian package: dist/collins_<version>_all.deb
 set -euo pipefail
 
@@ -43,8 +43,10 @@ mkdir -p "$BUILD/usr/share/applications" \
 # system-wide desktop entry: binary on PATH, no hardcoded working directory
 sed -e "s|^Exec=.*|Exec=$PKG|" -e "/^Path=/d" \
     "$ROOT/data/$APP_ID.desktop" > "$BUILD/usr/share/applications/$APP_ID.desktop"
-# ...-panel.svg is the status icon's artwork, drawn for 22px (see statusicon.py);
-# the Debug variants are a source-checkout thing and stay out of the package.
+# ...-panel.svg is the status icon's artwork, drawn for 22px, and
+# ...-panel-working.svg the same glass while a session is busy (see
+# statusicon.py); the Debug variants are a source-checkout thing and stay out
+# of the package.
 cp "$ROOT/data/icons/$APP_ID.svg" \
    "$BUILD/usr/share/icons/hicolor/scalable/apps/"
 # The action icons are app-private artwork on generic names, so they go in a
@@ -53,6 +55,7 @@ cp "$ROOT/data/icons/$APP_ID.svg" \
 # agent-session-manager does. app.py finds this root; the tray gets it as
 # IconThemePath, which is why -panel.svg belongs here rather than in apps/.
 cp "$ROOT/data/icons/$APP_ID.svg" "$ROOT/data/icons/$APP_ID-panel.svg" \
+   "$ROOT/data/icons/$APP_ID-panel-working.svg" \
    "$BUILD/usr/share/$PKG/icons/"
 cp "$ROOT/data/icons/hicolor/scalable/actions/"*.svg \
     "$BUILD/usr/share/$PKG/icons/hicolor/scalable/actions/"

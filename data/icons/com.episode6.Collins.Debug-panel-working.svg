@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
+  <!--
+  Working variant of com.episode6.Collins.Debug-panel.svg (original artwork
+  for the ghackett fork): the debug build's 22-grid glass and rim bug, with
+  the lime pour swapped for the sidebar's barber pole while any session is
+  busy. Same stripes as com.episode6.Collins-panel-working.svg — see there
+  for the geometry and for why the pole stands still.
+
+  Keep this comment INSIDE the root element: gdk-pixbuf only recognizes an
+  SVG when the <svg> tag appears within its sniff buffer, and a long pre-root
+  comment pushes it out, leaving the icon blank.
+  -->
+
+  <!-- keylines: the same shapes, a shade wider, under everything -->
+  <g stroke="#262320" fill="none" opacity="0.5" stroke-linecap="round">
+    <line x1="14.3" y1="2.2" x2="11.6" y2="8" stroke-width="2.6"/>
+    <rect x="6" y="3" width="10" height="16" rx="2" stroke-width="3"/>
+  </g>
+
+  <!-- straw: clears the rim by a hair, no more — at 22px a longer overhang
+       is a horn on the corner rather than a straw -->
+  <line x1="14.3" y1="2.2" x2="11.6" y2="8" stroke="#EDE9E1" stroke-width="1.8"
+        stroke-linecap="round"/>
+
+  <!-- drink: the barber pole -->
+  <clipPath id="drink">
+    <rect x="7" y="9" width="8" height="9" rx="1"/>
+  </clipPath>
+  <rect x="7" y="9" width="8" height="9" rx="1" fill="#99c1f1"/>
+  <g clip-path="url(#drink)" stroke="#1c71d8" stroke-width="2">
+    <line x1="-6" y1="19" x2="5" y2="8"/>
+    <line x1="-0.343" y1="19" x2="10.657" y2="8"/>
+    <line x1="5.314" y1="19" x2="16.314" y2="8"/>
+    <line x1="10.971" y1="19" x2="21.971" y2="8"/>
+    <line x1="16.628" y1="19" x2="27.628" y2="8"/>
+  </g>
+
+  <!-- cursor-block ice cube -->
+  <rect x="8" y="10.2" width="3.6" height="2.6" rx="0.6" fill="#EDE9E1"/>
+
+  <!-- glass: 2 wide on whole-pixel edges, so 5..17 and 2..20 stay crisp -->
+  <rect x="6" y="3" width="10" height="16" rx="2" fill="none" stroke="#EDE9E1"
+        stroke-width="2"/>
+
+  <!-- the bug, astride the rim: centred on the top edge so it reads as
+       perched on the glass rather than floating beside it, and left of the
+       straw so the two marks do not merge -->
+  <ellipse cx="8.6" cy="3" rx="2.1" ry="1.5" fill="#D97757"/>
+</svg>

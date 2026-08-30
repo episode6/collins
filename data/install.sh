@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-18. Full change history: git log for this file.
+# fork. Last modified: 2026-08-29. Full change history: git log for this file.
 
 # Install the desktop launcher and icon for the current user.
 set -euo pipefail
@@ -40,9 +40,12 @@ if [ -d "$OLD_ACTION_ICON_DIR" ]; then
   rmdir --ignore-fail-on-non-empty "$OLD_ACTION_ICON_DIR" 2>/dev/null || true
 fi
 
-# ...-panel.svg is the status icon's artwork, drawn for 22px (see statusicon.py)
+# ...-panel.svg is the status icon's artwork, drawn for 22px, and
+# ...-panel-working.svg the same glass while a session is busy (see statusicon.py)
 cp "$DATA_DIR/icons/$APP_ID.svg" "$DATA_DIR/icons/$APP_ID.Debug.svg" \
    "$DATA_DIR/icons/$APP_ID-panel.svg" "$DATA_DIR/icons/$APP_ID.Debug-panel.svg" \
+   "$DATA_DIR/icons/$APP_ID-panel-working.svg" \
+   "$DATA_DIR/icons/$APP_ID.Debug-panel-working.svg" \
    "$ICON_DIR/"
 cp "$DATA_DIR/icons/hicolor/scalable/actions/"*.svg "$ACTION_ICON_DIR/"
 cp "$DATA_DIR/$APP_ID.metainfo.xml" "$METAINFO_DIR/"

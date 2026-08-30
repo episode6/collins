@@ -378,6 +378,12 @@ watched — and reached — without the window:
   run lasts (it isn't waiting on you) and comes back the moment the turn
   ends. Sessions that are merely *working* never light the badge, but the
   tooltip carries both counts for the curious.
+- While any session is **working**, the drink in the glass turns into the
+  sidebar's blue **barber pole** — the same stripes as a busy row's guide
+  line, standing still — and goes back to the coral pour the moment the
+  last run stops. It's a change of picture, not an animation: the tray
+  protocol has none, and re-sending frames would cost the desktop a
+  round trip per frame.
 - With no session tabs open anywhere the icon goes passive, and the desktop
   may hide it entirely.
 - It's a StatusNotifierItem — the modern tray protocol — so on GNOME it

@@ -35,6 +35,7 @@ def expected() -> set[str]:
     paths = {
         f"collins/icons/{APP_ID}.svg",
         f"collins/icons/{APP_ID}-panel.svg",
+        f"collins/icons/{APP_ID}-panel-working.svg",
         f"collins/{APP_ID}.desktop",
         f"collins/{APP_ID}.metainfo.xml",
         "collins/THIRD_PARTY_LICENSES.md",

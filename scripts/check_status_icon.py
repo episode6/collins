@@ -237,6 +237,15 @@ def main():
     check("an app with no panel variant keeps its own icon",
           statusicon.panel_icon_name("com.episode6.Collins.NotAnIcon")
           == "com.episode6.Collins.NotAnIcon")
+    # Busy is a second drawing — the glass with the barber pole poured in —
+    # looked up ahead of the plain panel variant, which stays the fallback.
+    check("working picks the pole",
+          statusicon.panel_icon_name("com.episode6.Collins", working=True)
+          == "com.episode6.Collins-panel-working",
+          statusicon.panel_icon_name("com.episode6.Collins", working=True))
+    check("working falls back to the plain panel variant",
+          statusicon.panel_icon_name("com.episode6.Collins.NotAnIcon", working=True)
+          == "com.episode6.Collins.NotAnIcon")
 
     pixmaps = item_prop("IconPixmap")
     check("icon exports a pixmap per size", len(pixmaps) == len(statusicon.ICON_SIZES),
@@ -360,7 +369,40 @@ def main():
     bus.signal_subscribe(BUS_NAME, statusicon.LAUNCHER_INTERFACE, "Update",
                          statusicon.LAUNCHER_PATH, None, Gio.DBusSignalFlags.NONE,
                          lambda *a: dock.append(a[-1].unpack()))
+
+    # -- the pole ----------------------------------------------------------
+
+    # s-alpha has been working since the item started, so what the host has
+    # been painting all along is the working artwork: the glass with the
+    # barber pole poured in.
+    working_pixmaps = item_prop("IconPixmap")
+    idle_alpha = traymodel.TraySession("s-alpha", "alpha-widgets", "refactor store",
+                                       last_active=200.0)
+    state["sessions"] = [idle_alpha, sessions[1]]
+    icon.refresh()
+    check("the last session stopping announces NewIcon", spin(lambda: bool(icons)))
     plain_pixmaps = item_prop("IconPixmap")
+    check("idle restores the coral pour", plain_pixmaps != working_pixmaps)
+    check("attention artwork follows the pole",
+          item_prop("AttentionIconPixmap") == plain_pixmaps)
+    icons.clear()
+    state["sessions"] = list(sessions)
+    icon.refresh()
+    check("the first session working announces NewIcon", spin(lambda: bool(icons)))
+    check("working pours the pole back", item_prop("IconPixmap") == working_pixmaps)
+    icons.clear()
+    # The pole is one drawing however many sessions pour it, so a second
+    # worker is not a new icon: every NewIcon costs the host a round trip.
+    state["sessions"] = [
+        sessions[0],
+        traymodel.TraySession("s-beta", "podcast-hacker", "fix CI", busy=True,
+                              last_active=100.0),
+    ]
+    icon.refresh()
+    spin(lambda: bool(icons), 0.5)
+    check("a second working session announces no NewIcon", not icons)
+    check("a second working session keeps the pole", item_prop("IconPixmap") == working_pixmaps)
+
     state["sessions"] = [
         sessions[0],
         traymodel.TraySession("s-beta", "podcast-hacker", "fix CI", unread=True,
@@ -381,7 +423,9 @@ def main():
 
     check("the badge announces NewIcon", spin(lambda: bool(icons)))
     badged_pixmaps = item_prop("IconPixmap")
-    check("the badge is drawn into the artwork", badged_pixmaps != plain_pixmaps)
+    # s-alpha is still working, so the badge lands on the pole.
+    check("the badge is drawn into the artwork",
+          badged_pixmaps not in (plain_pixmaps, working_pixmaps))
     check("attention artwork carries the same badge",
           item_prop("AttentionIconPixmap") == badged_pixmaps)
     check("IconName stays empty under a badge", item_prop("IconName") == "",
