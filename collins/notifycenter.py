@@ -640,7 +640,6 @@ def bell_body() -> str:
     return _("Rang the bell")
 
 
-
 def bell_tooltip(unread: int) -> str:
     """The header bell's tooltip: what it is when quiet, how many are waiting
     otherwise. Two plain strings rather than a plural form — po/generate.py

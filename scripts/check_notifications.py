@@ -741,6 +741,16 @@ def steps(app: App):
             check("picking None writes the setting", win.state.get_setting("notification_sound") == "none")
             check("and the subtitle says Silent", dialog._sound_row.get_subtitle() == "Silent")
             check("the ▶ is greyed for silence", not dialog._sound_play.get_sensitive())
+            check("no folder button while no file is the choice", not dialog._sound_browse.get_visible())
+            # A chosen file can be swapped for another: re-picking "Custom…"
+            # in the combo emits nothing, so the folder button stands in.
+            dialog._set_sound("/nonexistent/chime.ogg")
+            check("a chosen file shows the folder button", dialog._sound_browse.get_visible())
+            check("and the combo sits on Custom…", dialog._sound_row.get_selected() == 2)
+            dialog._sound_row.set_selected(1)  # None again, for the footer check below
+            check("leaving the file hides the folder button again",
+                  not dialog._sound_browse.get_visible()
+                  and win.state.get_setting("notification_sound") == "none")
         dialog._announce_row.set_active(True)
         check("the announce switch writes its setting",
               win.state.get_setting("announce_finished_runs") is True)

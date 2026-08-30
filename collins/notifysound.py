@@ -36,6 +36,7 @@ import time
 
 import gi
 
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, GLib  # noqa: E402
 
@@ -162,7 +163,11 @@ class _Player:
             bus.connect("message", self._on_message)
             self._pipeline = pipeline
         # A restart (the ▶ button mid-chime) has to pass through NULL: a
-        # playbin's uri can only be set while it is stopped.
+        # playbin's uri can only be set while it is stopped. NULL also
+        # flushes the bus (GstPipeline's auto-flush-bus, on by default), so
+        # the interrupted play's EOS or ERROR, if it was still queued, cannot
+        # land on the new one and stop it early — five forced restarts 20 ms
+        # apart play through to their own EOS.
         self._pipeline.set_state(Gst.State.NULL)
         self._pipeline.set_property("uri", Gst.filename_to_uri(path))
         if self._pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:

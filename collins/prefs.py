@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -15,7 +15,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import (  # noqa: E402
     apppicker,
@@ -537,6 +537,18 @@ class PreferencesDialog(Adw.Dialog):
         self._sound_value = str(state.get_setting("notification_sound") or notifycenter.SOUND_DEFAULT)
         self._sound_row.set_selected(self._sound_index(self._sound_value))
         self._sound_row.connect("notify::selected", self._on_sound_selected)
+        # Re-picking the combo's "Custom…" while it is already the selection
+        # emits nothing (GtkSingleSelection is silent when the position stands
+        # still), so a chosen file would be a dead end without a second way
+        # in: the folder button, shown only while a file is the choice.
+        self._sound_browse = Gtk.Button(
+            icon_name="document-open-symbolic",
+            valign=Gtk.Align.CENTER,
+            tooltip_text=_("Choose a different sound file"),
+        )
+        self._sound_browse.add_css_class("flat")
+        self._sound_browse.connect("clicked", lambda *_: self._browse_sound())
+        self._sound_row.add_suffix(self._sound_browse)
         self._sound_play = Gtk.Button(
             icon_name="media-playback-start-symbolic",
             valign=Gtk.Align.CENTER,
@@ -582,6 +594,7 @@ class PreferencesDialog(Adw.Dialog):
     def _refresh_sound_row(self) -> None:
         """The subtitle says what the choice means — or, with no GStreamer,
         why the row is greyed and what a card gets instead."""
+        self._sound_browse.set_visible(self._sound_index(self._sound_value) == 2)
         if notifysound.available():
             self._sound_row.set_subtitle(notifycenter.sound_subtitle(self._sound_value))
             self._sound_row.set_sensitive(True)
@@ -1300,7 +1313,9 @@ class PreferencesDialog(Adw.Dialog):
         """Default and None are written at once; Custom… asks for the file
         first and writes on the pick, falling back to the row's previous
         choice when the picker is dismissed — a "Custom" with no file behind
-        it would be a setting that means nothing."""
+        it would be a setting that means nothing. Changing one file for
+        another is the folder button's job (see _build_notifications_group):
+        this never fires for a row that is already the selection."""
         selected = row.get_selected()
         if selected == self._sound_index(self._sound_value):
             return
@@ -1333,7 +1348,7 @@ class PreferencesDialog(Adw.Dialog):
         def picked(picker: Gtk.FileDialog, result) -> None:
             try:
                 file = picker.open_finish(result)
-            except Exception:
+            except GLib.Error:
                 file = None  # dismissed
             path = file.get_path() if file is not None else None
             if path:
