@@ -205,11 +205,11 @@ it.
 Shipping runs `./scripts/ship-release.py` from the release branch: it creates
 the GitHub Release (tag `v<VERSION>`, notes extracted from
 [docs/releases.md](docs/releases.md)), and the tag push runs
-`.github/workflows/release.yml` — build the wheel/sdist and the `.deb`,
-attach the `.deb` to the release, publish to PyPI (trusted publishing /
-OIDC), upload a source package per Ubuntu series to `ppa:episode6/stable`,
-and an SRPM to the `episode6/stable` COPR, which builds it for every Fedora
-and for RHEL 10.
+`.github/workflows/release.yml` — build the wheel/sdist, the `.deb` and a
+binary `.rpm`, attach the `.deb` and `.rpm` to the release, publish to PyPI
+(trusted publishing / OIDC), upload a source package per Ubuntu series to
+`ppa:episode6/stable`, and an SRPM to the `episode6/stable` COPR, which
+builds it for every Fedora and for RHEL 10.
 
 ## Credits & license
 
