@@ -257,6 +257,7 @@ DEFAULT_SETTINGS = {
     "editor_show_line_numbers": True,
     "editor_show_hidden_files": True,
     "editor_pop_out_screen_width": 1600,  # scaled px; this wide or narrower opens popped out (0 = never)
+    "editor_narrow_width": 500,  # px; a column this wide or narrower shows one column at a time (0 = never)
     # The native PR page's reading-text size, % of the app font. Buttons and
     # menus keep the app size (see prview._apply_font_scale).
     "pr_font_scale": 120,

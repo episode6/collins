@@ -154,6 +154,14 @@ class FileTree(Gtk.Box):
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self.append(scrolled)
 
+    def do_grab_focus(self) -> bool:
+        """Focus means the list. A plain Gtk.Box hands grab_focus to its
+        children in turn, and the ScrolledWindow in between isn't focusable
+        and doesn't pass it on — so without this, focusing the tree quietly
+        did nothing (the editor's focus_default and the narrow pane's back
+        button both rely on it)."""
+        return self._list_view.grab_focus()
+
     # -- population ----------------------------------------------------------
 
     def _fill_store(self, store: Gio.ListStore, directory: Path) -> None:

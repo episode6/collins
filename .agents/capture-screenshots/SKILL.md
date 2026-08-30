@@ -193,7 +193,11 @@ is the shim). Scenes: `main-window`, `hero` (also `data/screenshot.png`, and
 cropped to its sidebar column as `sidebar.png`), `quick-switcher`,
 `session-details`, `mcp-servers`, `preferences`, `terminal-panel`,
 `composer`, `pr-page` (a fabricated `prdetail.fetch` reply — nothing reaches
-GitHub), `editor-panel`, `attachments-panel`, `notifications` (rows staged
+GitHub), `editor-panel`, `editor-picker` (a PR shot: the editor with nothing
+opened — with `--set editor_width=380`, below the `editor_narrow_width`
+setting, that's the narrow pane's picker column; `editor-panel` at the same
+width is its file view with the back button), `attachments-panel`,
+`notifications` (rows staged
 straight through the app's notification center, the sheet opened from the
 bell — no real bell rings), `notification-card` (the same rows, two of them
 shown as in-app cards over the session through the window's card stack,

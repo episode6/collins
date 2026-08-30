@@ -48,6 +48,18 @@ _MAX_AGENT_FILES = 8  # rows in the "agent files" list pinned above the tree
 # check, short enough that "the editor matches disk" still feels immediate.
 _EXTERNAL_CHANGE_DEBOUNCE_MS = 300
 _TREE_INITIAL_WIDTH = 180
+# The pane's own floor once it can show one column at a time. The breakpoint
+# bin doesn't report its child's minimum (see __init__), so this is the
+# narrowest the editor column can be dragged — MIN_SPLIT_SIZE's twin.
+_PANE_MIN_WIDTH = 240
+_PANE_MIN_HEIGHT = 120  # the bin wants a floor on both axes, or it warns
+
+
+def _narrow_condition(width: int) -> Adw.BreakpointCondition:
+    """The breakpoint below which the pane shows one column at a time.
+    `max-width: 0px` never matches (a mapped pane is at least a pixel
+    wide), which is what the setting's `0 = never` means."""
+    return Adw.BreakpointCondition.parse(f"max-width: {max(0, width)}px")
 
 
 def style_scheme(setting: str, dark: bool) -> GtkSource.StyleScheme | None:
@@ -115,6 +127,12 @@ class EditorPane(Gtk.Box):
         self._reroot_queued: Path | None = None  # a move that arrived while it was
         self._active_search_context: GtkSource.SearchContext | None = None
         self._last_match: tuple[int, int] | None = None  # (start, end) char offsets
+        # One column at a time (see _sync_layout): whether the pane is
+        # currently narrower than the editor_narrow_width setting, and
+        # whether the back button beside the tabs asked for the picker
+        # since a file was last opened.
+        self._narrow = False
+        self._picker_requested = False
 
         style_manager = Adw.StyleManager.get_default()
         self._dark = style_manager.get_dark()
@@ -149,6 +167,7 @@ class EditorPane(Gtk.Box):
         left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         left.append(self._build_agent_files())
         left.append(self._tree)
+        self._left = left
         paned.set_start_child(left)
         paned.set_resize_start_child(False)
         paned.set_shrink_start_child(False)
@@ -174,6 +193,14 @@ class EditorPane(Gtk.Box):
         paneldnd.guard_view(self._tab_view, self)
         tab_bar = Adw.TabBar(view=self._tab_view, autohide=False)
         self._tab_bar = tab_bar
+        # Narrow pane, file on show: the way back to the picker, in the
+        # tab bar's own slot for "a widget left of the tabs". Hidden while
+        # both columns are up (see _sync_layout).
+        self._back_btn = Gtk.Button(icon_name="go-previous-symbolic", visible=False)
+        self._back_btn.add_css_class("flat")
+        self._back_btn.set_tooltip_text(_("Back to files"))
+        self._back_btn.connect("clicked", lambda *_a: self._show_picker())
+        tab_bar.set_start_action_widget(self._back_btn)
         double_click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
         double_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         double_click.connect("pressed", self._on_tab_bar_pressed)
@@ -182,13 +209,80 @@ class EditorPane(Gtk.Box):
         self._search_bar = self._build_search_bar()
         editors.append(self._search_bar)
         editors.append(self._tab_view)
+        self._editors = editors
         paned.set_end_child(editors)
         paned.set_resize_end_child(True)
         paned.set_shrink_end_child(False)
+        # Closing the last tab in a narrow pane leaves nothing to look at
+        # but an empty tab bar, so it goes back to the picker. Watched on
+        # n-pages rather than close-page: that handler runs before the page
+        # is actually gone (and may hold it open to ask about unsaved
+        # changes), so counting there would be one too many.
+        self._tab_view.connect("notify::n-pages", lambda *_a: self._on_n_pages_changed())
 
-        self.append(paned)
+        # Below editor_narrow_width the paned shows one child at a time —
+        # a Gtk.Paned hands its whole allocation to its only visible child,
+        # handle and all, and leaves `position` alone, so the tree width the
+        # user dragged survives a trip through the narrow layout. The width
+        # is judged by an Adw.BreakpointBin around the paned: its
+        # apply/unapply arrive from the bin's own allocation, the one place
+        # a layout switch can be made without a size-allocate hack or a
+        # settle timer. The bin reports the size request as its minimum
+        # rather than its child's, which is also what lets the column be
+        # dragged below what two side-by-side columns would demand.
+        self._breakpoint_bin = Adw.BreakpointBin(child=paned, vexpand=True)
+        self._breakpoint_bin.set_size_request(_PANE_MIN_WIDTH, _PANE_MIN_HEIGHT)
+        self._breakpoint = Adw.Breakpoint.new(_narrow_condition(0))
+        self._breakpoint.connect("apply", lambda *_a: self._on_narrow(True))
+        self._breakpoint.connect("unapply", lambda *_a: self._on_narrow(False))
+        self._breakpoint_bin.add_breakpoint(self._breakpoint)
+
+        self.append(self._breakpoint_bin)
         self.append(self._build_status_row())
         self._install_actions()
+
+    # -- one column at a time ------------------------------------------------
+
+    def _on_narrow(self, narrow: bool) -> None:
+        self._narrow = narrow
+        self._sync_layout()
+
+    def _sync_layout(self) -> None:
+        """Show the columns `editorfiles.pane_layout` says this pane has
+        room for. Idempotent, and cheap when nothing changes: GTK ignores a
+        visibility set to what it already is."""
+        layout = editorfiles.pane_layout(
+            self._narrow, self._tab_view.get_n_pages(), self._picker_requested
+        )
+        self._left.set_visible(layout is not editorfiles.PaneLayout.FILES)
+        self._editors.set_visible(layout is not editorfiles.PaneLayout.PICKER)
+        self._back_btn.set_visible(layout is editorfiles.PaneLayout.FILES)
+
+    def _on_n_pages_changed(self) -> None:
+        self._sync_layout()
+        # Closing the last tab in a narrow pane lands on the picker with the
+        # view that had focus freshly hidden — hand focus to the tree, the
+        # way the back button does, rather than letting it fall wherever
+        # GTK drops it. Opens (0 -> 1) leave focus to the load path.
+        if self._narrow and self._tab_view.get_n_pages() == 0:
+            self._tree.grab_focus()
+
+    def _show_picker(self) -> None:
+        """The back button: the picker instead of the open file, until the
+        next file is opened. Focus goes with it — the view that had it is
+        about to be hidden."""
+        self._picker_requested = True
+        self._sync_layout()
+        self._tree.grab_focus()
+
+    def _select_page(self, page: Adw.TabPage) -> None:
+        """Bring *page* to the front — and, in a narrow pane, the editor
+        column with it. Every successful open lands here; the guards that
+        refuse a file (outside the project, binary, undecodable) don't, so a
+        refused open leaves the picker where it was."""
+        self._tab_view.set_selected_page(page)
+        self._picker_requested = False
+        self._sync_layout()
 
     # -- widget-local actions ------------------------------------------------
 
@@ -259,6 +353,8 @@ class EditorPane(Gtk.Box):
         page = self._tab_page_at(x, y)
         key = self._page_key.get(page) if page is not None else None
         if key is not None:
+            if self._narrow:
+                self._show_picker()  # a reveal in a hidden tree shows nothing
             self._tree.reveal(key)
 
     def _tab_page_at(self, x: float, y: float) -> Adw.TabPage | None:
@@ -615,7 +711,7 @@ class EditorPane(Gtk.Box):
         key = str(path)
         existing = self._pages.get(key)
         if existing is not None:
-            self._tab_view.set_selected_page(existing)
+            self._select_page(existing)
             if restore_cursor:
                 # A clicked `path:line` reference re-targets a page that is
                 # already open (image pages have no buffer and stay put).
@@ -682,7 +778,7 @@ class EditorPane(Gtk.Box):
 
         self._start_load(opened, restore_cursor)
 
-        self._tab_view.set_selected_page(page)
+        self._select_page(page)
 
     def _start_load(self, opened: _OpenFile, restore_cursor: list | None) -> None:
         """(Re)fill the buffer from wherever its `GtkSource.File` now points.
@@ -727,7 +823,7 @@ class EditorPane(Gtk.Box):
         page.set_icon(Gio.ThemedIcon.new("image-x-generic-symbolic"))
         self._pages[key] = page
         self._page_key[page] = key
-        self._tab_view.set_selected_page(page)
+        self._select_page(page)
 
     def _on_loaded(self, loader: GtkSource.FileLoader, result: Gio.AsyncResult, data: tuple) -> None:
         opened, load_id = data
@@ -1346,6 +1442,14 @@ class EditorPane(Gtk.Box):
         self._show_line_numbers = bool(settings.get("editor_show_line_numbers", True))
         self._font = settings.get("editor_font") or ""
         self._tree.set_show_hidden(bool(settings.get("editor_show_hidden_files", True)))
+        try:
+            narrow_width = int(settings.get("editor_narrow_width") or 0)
+        except (TypeError, ValueError):
+            narrow_width = 0
+        self._breakpoint.set_condition(_narrow_condition(narrow_width))
+        # The bin judges its breakpoints when it allocates; a changed
+        # condition on its own doesn't make it look again.
+        self._breakpoint_bin.queue_resize()
         for opened in self._open.values():
             self._apply_scheme(opened.buffer)
             opened.view.set_show_line_numbers(self._show_line_numbers)
@@ -1378,13 +1482,15 @@ class EditorPane(Gtk.Box):
         for key in files[:_MAX_RECENT_FILES]:
             self.open_file(key, restore_cursor=cursors.get(key))
         if active and active in self._pages:
-            self._tab_view.set_selected_page(self._pages[active])
+            self._select_page(self._pages[active])
 
     # -- focus -------------------------------------------------------------
 
     def focus_default(self) -> None:
         opened = self._active_open()
-        if opened is not None:
+        # A narrow pane showing the picker has its view hidden; focus can't
+        # land there, so the tree takes it even with a file active.
+        if opened is not None and self._editors.get_visible():
             opened.view.grab_focus()
         else:
             self._tree.grab_focus()

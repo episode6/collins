@@ -38,6 +38,14 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **The editor shows one column when it's narrow.** An editor column
+  dragged to 500 px or narrower shows the file tree and the open file one
+  at a time instead of squeezing both: picking a file shows it, a back
+  button beside the tabs returns to the tree, and closing the last tab
+  returns there on its own. Widen the column and both come back side by
+  side, the tree at the width you left it. The threshold is *Single column
+  when narrow* in Preferences → *Editor* (0 keeps the two columns at any
+  width).
 - **Collins tells you when a newer Collins is out.** Once a day the app
   asks GitHub for the latest release — through your `gh` login when it
   has one, anonymously over the public API otherwise — and when that

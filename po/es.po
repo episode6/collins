@@ -1190,6 +1190,15 @@ msgstr "Mostrar archivos ocultos"
 msgid "Show dotfiles in the editor's file tree"
 msgstr "Mostrar archivos ocultos en el árbol de archivos del editor"
 
+msgid "Back to files"
+msgstr "Volver a los archivos"
+
+msgid "Single column when narrow"
+msgstr "Una columna cuando es estrecho"
+
+msgid "An editor column this many pixels wide or narrower shows the file tree and the open file one at a time, with a back button beside the tabs (0 = always side by side)"
+msgstr "Una columna del editor de este ancho en píxeles o más estrecha muestra el árbol de archivos y el archivo abierto de uno en uno, con un botón de volver junto a las pestañas (0 = siempre lado a lado)"
+
 msgid "Open File"
 msgstr "Abrir archivo"
 

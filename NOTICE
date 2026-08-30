@@ -6,10 +6,10 @@ formats):
 - claude_session_manager/locale/es/LC_MESSAGES/claude-session-manager.mo: deleted in this fork (renamed to collins/locale/es/LC_MESSAGES/collins.mo), 2026-07-26
 - claude_session_manager/locale/fr/LC_MESSAGES/claude-session-manager.mo: deleted in this fork (renamed to collins/locale/fr/LC_MESSAGES/collins.mo), 2026-07-26
 - claude_session_manager/locale/hu/LC_MESSAGES/claude-session-manager.mo: deleted in this fork (renamed to collins/locale/hu/LC_MESSAGES/collins.mo), 2026-07-26
-- collins/locale/de/LC_MESSAGES/collins.mo: modified in this fork, 2026-08-29
-- collins/locale/es/LC_MESSAGES/collins.mo: modified in this fork, 2026-08-29
-- collins/locale/fr/LC_MESSAGES/collins.mo: modified in this fork, 2026-08-29
-- collins/locale/hu/LC_MESSAGES/collins.mo: modified in this fork, 2026-08-29
+- collins/locale/de/LC_MESSAGES/collins.mo: modified in this fork, 2026-08-30
+- collins/locale/es/LC_MESSAGES/collins.mo: modified in this fork, 2026-08-30
+- collins/locale/fr/LC_MESSAGES/collins.mo: modified in this fork, 2026-08-30
+- collins/locale/hu/LC_MESSAGES/collins.mo: modified in this fork, 2026-08-30
 - collins/promptcard.py: deleted in this fork, 2026-08-08
 - data/banner.png: modified in this fork, 2026-07-26
 - data/icons/hicolor/scalable/actions/agent-cursor-symbolic.svg: deleted in this fork, 2026-07-26

@@ -5,7 +5,7 @@ Usage: python3 capture-docs.py <repo-root> <output.png> --scene NAME
 
 Scenes: main-window, hero, quick-switcher, session-details, mcp-servers,
 preferences, terminal-panel, new-chat, composer, pr-page, editor-panel,
-attachments-panel, notifications, notification-card,
+editor-picker, attachments-panel, notifications, notification-card,
 preferences-notifications, welcome, welcome-cli.
 
 notifications opens a session, stages a few rows straight through the
@@ -54,8 +54,8 @@ args = parser.parse_args()
 SCENES = (
     "main-window", "hero", "quick-switcher", "session-details", "mcp-servers",
     "preferences", "terminal-panel", "new-chat", "composer", "pr-page",
-    "editor-panel", "attachments-panel", "notifications", "notification-card",
-    "preferences-notifications", "welcome", "welcome-cli",
+    "editor-panel", "editor-picker", "attachments-panel", "notifications",
+    "notification-card", "preferences-notifications", "welcome", "welcome-cli",
 )
 if args.scene not in SCENES:
     parser.error(f"unknown scene {args.scene}")
@@ -272,6 +272,12 @@ def stage(win) -> list[tuple[int, callable]]:
             (800, lambda: tab._editor._status_path.set_text(
                 tab._editor._status_path.get_text().replace(os.path.expanduser("~"), "~", 1))),
         ]
+    elif scene == "editor-picker":
+        # A PR shot, not a docs one: the editor with nothing opened — with
+        # --set editor_width below editor_narrow_width, that's the narrow
+        # pane's picker column on its own.
+        tab = open_tab(win, U1)
+        return [(1500, tab.show_editor)]
     elif scene == "attachments-panel":
         tab = open_tab(win, U1)
         return [(1500, lambda: tab.dock_attachments(focus=False))]

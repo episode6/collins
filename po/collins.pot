@@ -1664,6 +1664,10 @@ msgstr ""
 msgid "Hide editor panel"
 msgstr ""
 
+#: collins/editor.py:197
+msgid "Back to files"
+msgstr ""
+
 #: collins/editor.py:538
 msgid "Move editor to its own window"
 msgstr ""
@@ -1719,6 +1723,17 @@ msgid ""
 "On screens this many pixels wide or narrower (after display scaling), the "
 "editor opens in its own window instead of a panel (0 = always open as a "
 "panel)"
+msgstr ""
+
+#: collins/prefs.py:989
+msgid "Single column when narrow"
+msgstr ""
+
+#: collins/prefs.py:990
+msgid ""
+"An editor column this many pixels wide or narrower shows the file tree and "
+"the open file one at a time, with a back button beside the tabs (0 = always "
+"side by side)"
 msgstr ""
 
 #: collins/quickopen.py:66

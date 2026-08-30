@@ -97,6 +97,26 @@ class RerootAction(enum.Enum):
     LEAVE = "leave"  # the tab stays on the file it was already showing
 
 
+class PaneLayout(enum.Enum):
+    """Which of the editor pane's two columns are on show."""
+
+    SPLIT = "split"  # picker and open file side by side, the usual layout
+    PICKER = "picker"  # narrow: the file tree (and agent files) alone
+    FILES = "files"  # narrow: the open file with its tabs alone
+
+
+def pane_layout(narrow: bool, n_pages: int, picker_requested: bool) -> PaneLayout:
+    """What a pane *narrow* enough for one column shows: the open file while
+    there is one, unless the user asked for the picker back (the back button
+    beside the tabs). A pane with nothing open has nothing but the picker to
+    show, whatever was asked for last; a wide pane always shows both."""
+    if not narrow:
+        return PaneLayout.SPLIT
+    if n_pages <= 0 or picker_requested:
+        return PaneLayout.PICKER
+    return PaneLayout.FILES
+
+
 class PasteError(enum.Enum):
     """Why something on the clipboard can't be pasted where it was asked for.
     One entry per rule, for the same reason `RenameError` has them: "that
