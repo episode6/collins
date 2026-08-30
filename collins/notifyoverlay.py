@@ -125,15 +125,20 @@ class NotificationCard(Gtk.Revealer):
 
         tile = Gtk.Box(valign=Gtk.Align.START, halign=Gtk.Align.START)
         tile.add_css_class("notification-card-tile")
-        icon = Gtk.Image(
-            pixel_size=20, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, hexpand=True, vexpand=True
-        )
+        # The tile's size is the CSS's (32px min); the icon sits centred in
+        # it by alignment alone. It must not expand: a child's expand flag
+        # climbs to every ancestor that hasn't set its own, so an expanding
+        # icon would make the tile a second expander beside the text column,
+        # and a Box splits its slack equally between expanders — a short
+        # message's card would then start its text half a card to the right.
+        icon = Gtk.Image(pixel_size=20, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
         if texture is not None:
             icon.set_from_paintable(texture)  # the project's own artwork, its own colours
         else:
             icon.set_from_icon_name(fallback_icon_name)
         tile.append(icon)
         body.append(tile)
+        self._tile = tile
 
         column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
         head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -171,6 +176,7 @@ class NotificationCard(Gtk.Revealer):
             footer.add_css_class("dim-label")
             column.append(footer)
         body.append(column)
+        self._column = column
 
         self.close_button = Gtk.Button(
             icon_name="window-close-symbolic",
