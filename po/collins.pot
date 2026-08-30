@@ -12,7 +12,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: collins\n"
 "Report-Msgid-Bugs-To: matemiller992@gmail.com\n"
-"POT-Creation-Date: 2026-08-01 12:00-0400\n"
+"POT-Creation-Date: 2026-08-30 15:39-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -20,383 +20,458 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#: collins/chatsessionview.py:82
+#: collins/apppicker.py:33
+msgid "Add application"
+msgstr ""
+
+#: collins/apppicker.py:39
+msgid "Search applications…"
+msgstr ""
+
+#: collins/app.py:1442
+msgid "Install the desktop entry, app icon and metainfo for the current user"
+msgstr ""
+
+#: collins/app.py:2510
+msgid "Caffeine Mode is on"
+msgstr ""
+
+#: collins/attachpanel.py:117 collins/attachpanel.py:653
+msgid "Attachments"
+msgstr ""
+
+#: collins/attachpanel.py:126
+msgid "Close the attachments panel"
+msgstr ""
+
+#: collins/attachpanel.py:206
+msgid "Float the attachments panel over the terminal"
+msgstr ""
+
+#: collins/attachpanel.py:212
+msgid "Dock the attachments panel beside the terminal"
+msgstr ""
+
+#: collins/attachpanel.py:392
+#, python-brace-format
+msgid "couldn't download that image: {reason}"
+msgstr ""
+
+#: collins/attachpanel.py:406 collins/lightbox.py:267
+msgid "Open With…"
+msgstr ""
+
+#: collins/attachpanel.py:410
+msgid "Show in Folder"
+msgstr ""
+
+#: collins/attachpanel.py:413
+msgid "Copy Address"
+msgstr ""
+
+#: collins/attachpanel.py:413
+msgid "Copy Path"
+msgstr ""
+
+#: collins/attachpanel.py:421
+msgid "Remove From List"
+msgstr ""
+
+#: collins/attachpanel.py:690
+#, python-brace-format
+msgid "that image isn't on disk any more: {path}"
+msgstr ""
+
+#: collins/attachpanel.py:691
+#, python-brace-format
+msgid "that file isn't on disk any more: {path}"
+msgstr ""
+
+#: collins/attachpanel.py:703
+msgid "Couldn't be downloaded"
+msgstr ""
+
+#: collins/attachpanel.py:703
+msgid "No longer on disk"
+msgstr ""
+
+#: collins/attachpanel.py:729
+msgid "No attachments yet"
+msgstr ""
+
+#: collins/attachpanel.py:732
+msgid "Pictures and files this session shares collect here."
+msgstr ""
+
+#: collins/bodyimages.py:122 collins/prfileimages.py:145
+msgid "That file isn't an image Collins can display."
+msgstr ""
+
+#: collins/caffeine.py:134
+msgid "Until idle"
+msgstr ""
+
+#: collins/caffeine.py:137
+msgid "Indefinitely"
+msgstr ""
+
+#: collins/caffeine.py:139
+msgid "1 hour"
+msgstr ""
+
+#: collins/caffeine.py:139
+#, python-brace-format
+msgid "{n} hours"
+msgstr ""
+
+#: collins/caffeine.py:164
+msgid ""
+"Caffeine Mode is dozing until a session works again — then the computer and "
+"screen will stay awake"
+msgstr ""
+
+#: collins/caffeine.py:168
+msgid ""
+"Caffeine Mode is dozing until a session works again — then the computer will "
+"stay awake, the screen may turn off"
+msgstr ""
+
+#: collins/caffeine.py:174
+msgid ""
+"Caffeine Mode is on while sessions are working — the computer and screen "
+"will stay awake"
+msgstr ""
+
+#: collins/caffeine.py:178
+msgid ""
+"Caffeine Mode is on while sessions are working — the computer will stay "
+"awake, the screen may turn off"
+msgstr ""
+
+#: collins/caffeine.py:182
+msgid "Caffeine Mode is on — the computer and screen will stay awake"
+msgstr ""
+
+#: collins/caffeine.py:183
+msgid ""
+"Caffeine Mode is on — the computer will stay awake, the screen may turn off"
+msgstr ""
+
+#: collins/caffeine.py:185
+msgid "Caffeine Mode: keep the computer awake and the screen on"
+msgstr ""
+
+#: collins/caffeine.py:186
+msgid "Caffeine Mode: keep the computer awake, letting the screen turn off"
+msgstr ""
+
+#: collins/caffeine.py:194
+#, python-brace-format
+msgid "Caffeine Mode turns off in {time} — computer and screen stay awake"
+msgstr ""
+
+#: collins/caffeine.py:197
+#, python-brace-format
+msgid ""
+"Caffeine Mode turns off in {time} — computer stays awake, screen may turn off"
+msgstr ""
+
+#: collins/chatbubbles.py:73
+#, python-brace-format
+msgid "Open {name} in the editor"
+msgstr ""
+
+#: collins/chatsessionview.py:93
 msgid "Continuing the previous session — earlier messages aren't shown here."
 msgstr ""
 
-#: collins/chatsessionview.py:101
+#: collins/chatsessionview.py:112
 #, python-brace-format
 msgid "Read-only chat with {name} — analyses and answers, never edits."
 msgstr ""
 
-#: collins/chatsessionview.py:103
+#: collins/chatsessionview.py:114
 #, python-brace-format
 msgid ""
 "Chat with {name} — every file edit and command asks your permission first."
 msgstr ""
 
-#: collins/chatsessionview.py:106
+#: collins/chatsessionview.py:117
 #, python-brace-format
 msgid ""
 "Chat with {name} — ⚠ runs edits and commands automatically, without asking."
 msgstr ""
 
-#: collins/chatsessionview.py:146
+#: collins/chatsessionview.py:157
 #, python-brace-format
 msgid "Ask {name}…"
 msgstr ""
 
-#: collins/chatsessionview.py:149
+#: collins/chatsessionview.py:160 collins/composer.py:271
+#: collins/newchatview.py:301
 msgid "Send"
 msgstr ""
 
-#: collins/chatsessionview.py:152
+#: collins/chatsessionview.py:163
 msgid "Stop"
 msgstr ""
 
-#: collins/chatsessionview.py:203
+#: collins/chatsessionview.py:219
 msgid "Rate limited — try again later."
 msgstr ""
 
-#: collins/chatsessionview.py:207
+#: collins/chatsessionview.py:223
 #, python-brace-format
 msgid "Error: {msg}"
 msgstr ""
 
-#: collins/chatsessionview.py:213
+#: collins/chatsessionview.py:229
 msgid "Session ended."
 msgstr ""
 
-#: collins/chatsessionview.py:236
+#: collins/chatsessionview.py:280
 #, python-brace-format
 msgid "Auto-allowed {tool}"
 msgstr ""
 
-#: collins/chatsessionview.py:249
+#: collins/chatsessionview.py:293
 #, python-brace-format
 msgid "{name} wants to use {tool}"
 msgstr ""
 
-#: collins/chatsessionview.py:264
+#: collins/chatsessionview.py:308
 msgid "Deny"
 msgstr ""
 
-#: collins/chatsessionview.py:266
+#: collins/chatsessionview.py:310
 #, python-brace-format
 msgid "Always allow {tool}"
 msgstr ""
 
-#: collins/chatsessionview.py:268
+#: collins/chatsessionview.py:312
 msgid "Allow once"
 msgstr ""
 
-#: collins/chatsessionview.py:284
+#: collins/chatsessionview.py:328
 msgid "The user declined this action."
 msgstr ""
 
-#: collins/chatsessionview.py:292
+#: collins/chatsessionview.py:336
 #, python-brace-format
 msgid "Always allowing {tool}."
 msgstr ""
 
-#: collins/chatsessionview.py:294
+#: collins/chatsessionview.py:338
 #, python-brace-format
 msgid "Allowed {tool}."
 msgstr ""
 
-#: collins/chatsessionview.py:296
+#: collins/chatsessionview.py:340
 #, python-brace-format
 msgid "Denied {tool}."
 msgstr ""
 
-#: collins/chatsessionview.py:331
+#: collins/chatsessionview.py:375
 #, python-brace-format
 msgid "{name} is thinking…"
 msgstr ""
 
-#: collins/copylabel.py:22
-msgid "Click to copy"
+#: collins/composer.py:220
+msgid "Close composer and keep the text in the terminal"
 msgstr ""
 
-#: collins/copylabel.py:27
-msgid "Click to open"
+#: collins/composer.py:248
+msgid "Switch the model for this session"
 msgstr ""
 
-#: collins/copylabel.py:80
-msgid "Copied to clipboard"
+#: collins/composer.py:260
+msgid "Switch the effort level for this session"
 msgstr ""
 
-#: collins/copylabel.py
-msgid "Right-click to copy the link"
+#: collins/composer.py:266 collins/terminal.py:4549
+msgid "Attach file"
 msgstr ""
 
-#: collins/prview.py
-msgid "Right-click to open on GitHub"
+#: collins/composer.py:398 collins/terminal.py:3654
+msgid "couldn't save a copy of the dropped image"
 msgstr ""
 
-#: collins/prmenu.py:206 collins/terminal.py:1045
-msgid "Click for actions"
+#: collins/composer.py:413
+#, python-brace-format
+msgid "skipped {n} item that isn't a local file"
+msgid_plural "skipped {n} items that aren't local files"
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/composer.py:444 collins/terminal.py:3691
+#, python-brace-format
+msgid "couldn't reference {n} dropped file name"
+msgid_plural "couldn't reference {n} dropped file names"
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/composer.py:484
+msgid "Remove image"
 msgstr ""
 
-#: collins/prmenu.py:299 collins/sidebar.py:753
-msgid "Right-click to open"
+#: collins/composer.py:566
+msgid "couldn't save a copy of the pasted image"
 msgstr ""
 
-#: collins/sidebar.py:1126 collins/terminal.py:1605
-msgid "Click to view in Collins"
-msgstr ""
-
-#: collins/sidebar.py:1132 collins/terminal.py:1605
-msgid "Right-click for actions"
-msgstr ""
-
-#: collins/prmenu.py:390 collins/sidebar.py:2336
-msgid "Open on GitHub"
-msgstr ""
-
-#: collins/sidebar.py:2452
-msgid "Git pull ({branch})"
-msgstr ""
-
-#: collins/sidebar.py:2452
-msgid "Git pull"
-msgstr ""
-
-#: collins/sidebar.py:2782
-msgid "Checkout {branch}"
-msgstr ""
-
-#: collins/sidebar.py:2782
-msgid "Checkout default branch"
-msgstr ""
-
-#: collins/window.py:4800
-msgid "Git pull failed"
-msgstr ""
-
-#: collins/window.py:5280
-msgid "Git checkout failed"
-msgstr ""
-
-#: collins/window.py:5280
-msgid "Checked out {branch} in {project}"
-msgstr ""
-
-#: collins/window.py:4800
-msgid "git was not found on PATH."
-msgstr ""
-
-#: collins/window.py:4825
-msgid "git exited with status {code}"
-msgstr ""
-
-#: collins/window.py:4833
-msgid "Pulled {project} — {summary}"
-msgstr ""
-
-#: collins/window.py:4835
-msgid "Pulled {project}"
-msgstr ""
-
-#: collins/practions.py:158
-msgid "Rebase / resolve conflicts"
-msgstr ""
-
-#: collins/practions.py:298
-msgid "Fix errors & resolve conflicts"
-msgstr ""
-
-#: collins/practions.py:319
-msgid "Fix errors"
-msgstr ""
-
-#: collins/practions.py:332
-msgid "Resolve conflicts"
-msgstr ""
-
-#: collins/prdetail.py:502
-msgid "Merge conflicts"
-msgstr ""
-
-#: collins/terminal.py:2017
-msgid "This session isn't at an empty prompt."
-msgstr ""
-
-#: collins/sidebar.py:860 collins/window.py:2073
-msgid "This session has no tab open."
-msgstr ""
-
-#: collins/window.py:2129
-msgid "Couldn't send that to the session"
-msgstr ""
-
-#: collins/prstatus.py:239
-msgid "Has merge conflicts"
-msgstr ""
-
-#: collins/prstatus.py:241
-msgid "Has unresolved comments"
-msgstr ""
-
-#: collins/dialogs.py:30
-msgid "Rename session"
-msgstr ""
-
-#: collins/dialogs.py:31
-msgid "Custom name"
-msgstr ""
-
-#: collins/dialogs.py:34 collins/dialogs.py:55 collins/dialogs.py:87
-#: collins/dialogs.py:120 collins/dialogs.py:211
-msgid "Cancel"
-msgstr ""
-
-#: collins/dialogs.py:35 collins/dialogs.py:56
-msgid "Save"
-msgstr ""
-
-#: collins/dialogs.py:57
-msgid "Rename folder"
-msgstr ""
-
-#: collins/dialogs.py:57
-msgid "Rename file"
-msgstr ""
-
-#: collins/dialogs.py:58
-msgid "Enter a new name for “{name}”."
-msgstr ""
-
-#: collins/dialogs.py:64
-msgid "Rename"
-msgstr ""
-
-#: collins/dialogs.py:47
-msgid "Set tab emoji"
-msgstr ""
-
-#: collins/dialogs.py:48
-msgid "Shown before the tab title. Leave empty to remove."
-msgstr ""
-
-#: collins/dialogs.py:50
-msgid "e.g. 🚀"
-msgstr ""
-
-#: collins/dialogs.py:161
-msgid "OK"
-msgstr ""
-
-#: collins/dialogs.py:178
+#: collins/composer.py:594
 msgid "Model"
 msgstr ""
 
-#: collins/dialogs.py:179 collins/dialogs.py:185
-msgid "Default"
+#: collins/composer.py:601
+msgid "Effort"
 msgstr ""
 
-#: collins/dialogs.py:190 collins/sidebar.py:867
-msgid "None"
+#: collins/composer.py:628
+msgid "Float the composer over the terminal"
+msgstr ""
+
+#: collins/composer.py:634
+msgid "Dock the composer below the terminal"
+msgstr ""
+
+#: collins/composer.py:758 collins/prefs.py:664
+msgid "Composer"
+msgstr ""
+
+#: collins/copylabel.py:27 collins/ghwelcome.py:368
+msgid "Click to copy"
+msgstr ""
+
+#: collins/copylabel.py:32
+msgid "Click to open"
+msgstr ""
+
+#: collins/copylabel.py:41
+msgid "Right-click to copy the link"
+msgstr ""
+
+#: collins/copylabel.py:142
+msgid "Copied to clipboard"
+msgstr ""
+
+#: collins/dialogs.py:50
+msgid "Rename session"
+msgstr ""
+
+#: collins/dialogs.py:51
+msgid "Custom name"
+msgstr ""
+
+#: collins/dialogs.py:72 collins/dialogs.py:100 collins/dialogs.py:252
+#: collins/dialogs.py:301 collins/dialogs.py:341 collins/dialogs.py:397
+#: collins/dialogs.py:833 collins/keybindingsdialog.py:242
+#: collins/window.py:5994
+msgid "Cancel"
+msgstr ""
+
+#: collins/dialogs.py:73 collins/dialogs.py:253 collins/dialogs.py:400
+#: collins/dialogs.py:834
+msgid "Save"
+msgstr ""
+
+#: collins/dialogs.py:94
+msgid "Rename folder"
+msgstr ""
+
+#: collins/dialogs.py:94
+msgid "Rename file"
+msgstr ""
+
+#: collins/dialogs.py:95
+#, python-brace-format
+msgid "Enter a new name for “{name}”."
+msgstr ""
+
+#: collins/dialogs.py:101
+msgid "Rename"
+msgstr ""
+
+#: collins/dialogs.py:147
+#, python-brace-format
+msgid "Move editor to {name}?"
+msgstr ""
+
+#: collins/dialogs.py:149
+#, python-brace-format
+msgid ""
+"This session is now working in {path}. One open file has unsaved changes and "
+"also exists there — choose what happens to it."
+msgid_plural ""
+"This session is now working in {path}. {count} open files have unsaved "
+"changes and also exist there — choose what happens to each."
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/dialogs.py:175
+msgid "Stay"
+msgstr ""
+
+#: collins/dialogs.py:176
+msgid "Go on editing this file, where your unsaved changes belong"
+msgstr ""
+
+#: collins/dialogs.py:180
+msgid "Take edits"
+msgstr ""
+
+#: collins/dialogs.py:182
+msgid ""
+"Move this tab to the new copy, keeping your unsaved changes — saving will "
+"write them over whatever that copy holds"
+msgstr ""
+
+#: collins/dialogs.py:188
+msgid "Use new"
+msgstr ""
+
+#: collins/dialogs.py:189
+msgid "Open the new copy and discard your unsaved changes"
+msgstr ""
+
+#: collins/dialogs.py:223
+msgid "Don't Move"
+msgstr ""
+
+#: collins/dialogs.py:224
+msgid "Move Editor"
+msgstr ""
+
+#: collins/dialogs.py:244
+msgid "Set tab emoji"
+msgstr ""
+
+#: collins/dialogs.py:245
+msgid "Shown before the tab title. Leave empty to remove."
 msgstr ""
 
 #: collins/dialogs.py:247
-msgid "No MCP servers configured"
+msgid "e.g. 🚀"
 msgstr ""
 
-#: collins/dialogs.py:252
-msgid "Global"
+#: collins/dialogs.py:396
+msgid "Save Changes?"
 msgstr ""
 
-#: collins/dialogs.py:252
-msgid "Available to every project"
+#: collins/dialogs.py:398
+msgid "Don't Save"
 msgstr ""
 
-#: collins/dialogs.py:264 collins/dialogs.py:269
-msgid "MCP Servers"
+#: collins/dialogs.py:442
+msgid "OK"
 msgstr ""
 
-#: collins/dialogs.py:264
-msgid "Read-only"
-msgstr ""
-
-#: collins/dialogs.py:282
-msgid "Reading transcript…"
-msgstr ""
-
-#: collins/dialogs.py:296
-msgid "Session details"
-msgstr ""
-
-#: collins/dialogs.py:311
-msgid "Agent"
-msgstr ""
-
-#: collins/dialogs.py:312
-msgid "Session ID"
-msgstr ""
-
-#: collins/dialogs.py:313
-msgid "Directory"
-msgstr ""
-
-#: collins/dialogs.py:313
-msgid "unknown"
-msgstr ""
-
-#: collins/dialogs.py:316
-msgid "Created"
-msgstr ""
-
-#: collins/dialogs.py:318
-msgid "Last activity"
-msgstr ""
-
-#: collins/dialogs.py:319
-msgid "Messages"
-msgstr ""
-
-#: collins/dialogs.py:321
-msgid "Tool calls"
-msgstr ""
-
-#: collins/dialogs.py:323
-msgid "Models"
-msgstr ""
-
-#: collins/dialogs.py:326
-msgid "Tokens"
-msgstr ""
-
-#: collins/dialogs.py:331
-msgid "Transcript size"
-msgstr ""
-
-#: collins/dialogs.py:335
-msgid "MCP"
-msgstr ""
-
-#: collins/dialogs.py:343
-msgid "Available to this project"
-msgstr ""
-
-#: collins/dialogs.py:348
-msgid "Tools used in this session"
-msgstr ""
-
-#: collins/dialogs.py:352
-msgid "Recent activity"
-msgstr ""
-
-#: collins/dialogs.py:355
-msgid "You"
-msgstr ""
-
-#: collins/dialogs.py:250
+#: collins/dialogs.py:473
 msgid "Do you trust this folder?"
 msgstr ""
 
-#: collins/dialogs.py:251
+#: collins/dialogs.py:475
 #, python-brace-format
 msgid ""
 "{agent} will be able to read, edit and execute files in\n"
@@ -408,19 +483,407 @@ msgid ""
 "code, a well-known open source project, or work from your team."
 msgstr ""
 
-#: collins/dialogs.py:258
+#: collins/dialogs.py:481
 msgid "Trust and open"
 msgstr ""
 
-#: collins/window.py:1516
-msgid "Trust and add"
+#: collins/dialogs.py:503
+msgid "No MCP servers configured"
 msgstr ""
 
-#: collins/sidebar.py:1186
-msgid "Add project"
+#: collins/dialogs.py:508
+msgid "Global"
 msgstr ""
 
-#: collins/formatting.py:79
+#: collins/dialogs.py:508
+msgid "Available to every project"
+msgstr ""
+
+#: collins/dialogs.py:520 collins/dialogs.py:525
+msgid "MCP Servers"
+msgstr ""
+
+#: collins/dialogs.py:520
+msgid "Read-only"
+msgstr ""
+
+#: collins/dialogs.py:538
+msgid "Reading transcript…"
+msgstr ""
+
+#: collins/dialogs.py:557
+msgid "Session details"
+msgstr ""
+
+#: collins/dialogs.py:572
+msgid "Agent"
+msgstr ""
+
+#: collins/dialogs.py:573
+msgid "Session ID"
+msgstr ""
+
+#: collins/dialogs.py:574
+msgid "Directory"
+msgstr ""
+
+#: collins/dialogs.py:574 collins/prview.py:2733
+msgid "unknown"
+msgstr ""
+
+#: collins/dialogs.py:577
+msgid "Created"
+msgstr ""
+
+#: collins/dialogs.py:579
+msgid "Last activity"
+msgstr ""
+
+#: collins/dialogs.py:580
+msgid "Messages"
+msgstr ""
+
+#: collins/dialogs.py:582
+msgid "Tool calls"
+msgstr ""
+
+#: collins/dialogs.py:584
+msgid "Models"
+msgstr ""
+
+#: collins/dialogs.py:587
+msgid "Tokens"
+msgstr ""
+
+#: collins/dialogs.py:592
+msgid "Transcript size"
+msgstr ""
+
+#: collins/dialogs.py:596
+msgid "MCP"
+msgstr ""
+
+#: collins/dialogs.py:604
+msgid "Available to this project"
+msgstr ""
+
+#: collins/dialogs.py:609
+msgid "Tools used in this session"
+msgstr ""
+
+#: collins/dialogs.py:613
+msgid "Recent activity"
+msgstr ""
+
+#: collins/dialogs.py:616
+msgid "You"
+msgstr ""
+
+#: collins/dialogs.py:677
+msgid "Generating icon…"
+msgstr ""
+
+#: collins/dialogs.py:681
+msgid "At sidebar size"
+msgstr ""
+
+#: collins/dialogs.py:696
+msgid "Pick a model to generate an icon"
+msgstr ""
+
+#: collins/dialogs.py:719
+msgid "Optional adjustments, e.g. “make it blue”"
+msgstr ""
+
+#: collins/dialogs.py:757
+msgid "Generate"
+msgstr ""
+
+#: collins/dialogs.py:757 collins/dialogs.py:862
+msgid "Regenerate"
+msgstr ""
+
+#: collins/dialogs.py:768
+msgid "Choose a model…"
+msgstr ""
+
+#: collins/dialogs.py:768
+msgid "Default model"
+msgstr ""
+
+#: collins/dialogs.py:771
+msgid "Model for this dialog's runs; Preferences sets the default"
+msgstr ""
+
+#: collins/dialogs.py:798
+#, python-brace-format
+msgid "Default ({model})"
+msgstr ""
+
+#: collins/dialogs.py:837 collins/dialogs.py:845 collins/sidebar.py:2821
+msgid "Generate Icon"
+msgstr ""
+
+#: collins/dialogs.py:893
+msgid "the generated SVG could not be rendered"
+msgstr ""
+
+#: collins/dialogs.py:907
+#, python-brace-format
+msgid "Icon generation failed: {error}"
+msgstr ""
+
+#: collins/dialogs.py:926
+#, python-brace-format
+msgid "Saving failed: {error}"
+msgstr ""
+
+#: collins/editor.py:185 collins/panelstrip.py:109
+msgid "Close other tabs"
+msgstr ""
+
+#: collins/editor.py:186
+msgid "Close tabs to the right"
+msgstr ""
+
+#: collins/editor.py:187
+msgid "Close all tabs"
+msgstr ""
+
+#: collins/editor.py:201
+msgid "Back to files"
+msgstr ""
+
+#: collins/editor.py:328 collins/editor.py:692 collins/filetree.py:411
+msgid "Add to chat"
+msgstr ""
+
+#: collins/editor.py:442
+#, python-brace-format
+msgid "Couldn't rename {name}: {message}"
+msgstr ""
+
+#: collins/editor.py:457
+#, python-brace-format
+msgid "A name is needed to rename {name}."
+msgstr ""
+
+#: collins/editor.py:459
+#, python-brace-format
+msgid "“{new_name}” isn't a name — renaming can't move things elsewhere."
+msgstr ""
+
+#: collins/editor.py:463
+#, python-brace-format
+msgid "“{new_name}” already exists here."
+msgstr ""
+
+#: collins/editor.py:465 collins/editor.py:540
+#, python-brace-format
+msgid "{name} is no longer there."
+msgstr ""
+
+#: collins/editor.py:466
+#, python-brace-format
+msgid "{name} can't be renamed to something outside this project."
+msgstr ""
+
+#: collins/editor.py:484
+msgid "There's nothing on the clipboard to paste here."
+msgstr ""
+
+#: collins/editor.py:532
+#, python-brace-format
+msgid "{count} item couldn't be pasted."
+msgid_plural "{count} items couldn't be pasted."
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/editor.py:542
+#, python-brace-format
+msgid "{name} can't be pasted into itself."
+msgstr ""
+
+#: collins/editor.py:546
+msgid "That folder is no longer there."
+msgstr ""
+
+#: collins/editor.py:548
+#, python-brace-format
+msgid "{name} can't be pasted outside this project."
+msgstr ""
+
+#: collins/editor.py:550
+#, python-brace-format
+msgid "There are already too many copies of {name} here."
+msgstr ""
+
+#: collins/editor.py:551
+#, python-brace-format
+msgid "Couldn't paste {name}: {message}"
+msgstr ""
+
+#: collins/editor.py:625
+msgid "Agent files"
+msgstr ""
+
+#: collins/editor.py:728
+#, python-brace-format
+msgid "{name} is outside this project and can't be opened here."
+msgstr ""
+
+#: collins/editor.py:813
+#, python-brace-format
+msgid "{name} couldn't be decoded as an image."
+msgstr ""
+
+#: collins/editor.py:843
+#, python-brace-format
+msgid "Couldn't open {name}: {message}"
+msgstr ""
+
+#: collins/editor.py:868
+#, python-brace-format
+msgid "{name} is too large to open in the editor."
+msgstr ""
+
+#: collins/editor.py:870
+#, python-brace-format
+msgid "{name} looks like a binary file and can't be opened here."
+msgstr ""
+
+#: collins/editor.py:872
+#, python-brace-format
+msgid "{name} is not a file."
+msgstr ""
+
+#: collins/editor.py:873
+#, python-brace-format
+msgid "Couldn't open {name}."
+msgstr ""
+
+#: collins/editor.py:887
+#, python-brace-format
+msgid "{name} changed on disk"
+msgstr ""
+
+#: collins/editor.py:888
+msgid "Overwrite it with the changes you made here?"
+msgstr ""
+
+#: collins/editor.py:889
+msgid "Overwrite"
+msgstr ""
+
+#: collins/editor.py:910
+#, python-brace-format
+msgid "Couldn't save {name}: {message}"
+msgstr ""
+
+#: collins/editor.py:978
+#, python-brace-format
+msgid "{name} was deleted."
+msgstr ""
+
+#: collins/editor.py:982
+#, python-brace-format
+msgid "{name} changed on disk."
+msgstr ""
+
+#: collins/editor.py:983
+msgid "Reload"
+msgstr ""
+
+#: collins/editor.py:1002
+#, python-brace-format
+msgid "Couldn't reload {name}: {message}"
+msgstr ""
+
+#: collins/editor.py:1126
+#, python-brace-format
+msgid "Session moved to {name}"
+msgstr ""
+
+#: collins/editor.py:1127
+msgid "Follow"
+msgstr ""
+
+#: collins/editor.py:1215 collins/window.py:1017
+#, python-brace-format
+msgid ""
+"“{name}” contains unsaved changes. Changes which are not saved will be "
+"permanently lost."
+msgstr ""
+
+#: collins/editor.py:1239
+msgid "Find in file…"
+msgstr ""
+
+#: collins/editor.py:1249 collins/terminal.py:2105
+msgid "Previous match"
+msgstr ""
+
+#: collins/editor.py:1251 collins/terminal.py:2107
+msgid "Next match"
+msgstr ""
+
+#: collins/editor.py:1351
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: collins/editor.py:1358
+msgid "Move editor to its own window"
+msgstr ""
+
+#: collins/editor.py:1381
+msgid "Image"
+msgstr ""
+
+#: collins/editor.py:1387
+msgid "Plain Text"
+msgstr ""
+
+#: collins/editorwindow.py:76
+msgid "Move editor back into its tab"
+msgstr ""
+
+#: collins/filetree.py:401 collins/filetree.py:414 collins/keybindings.py:144
+#: collins/terminal.py:2082
+msgid "Paste"
+msgstr ""
+
+#: collins/filetree.py:412 collins/terminal.py:2081
+msgid "Copy"
+msgstr ""
+
+#: collins/filetree.py:412
+msgid "Cut"
+msgstr ""
+
+#: collins/filetree.py:415 collins/sidebar.py:2650 collins/window.py:498
+msgid "Rename…"
+msgstr ""
+
+#: collins/formatting.py:424 collins/notifycenter.py:786
+msgid "just now"
+msgstr ""
+
+#: collins/formatting.py:426 collins/notifycenter.py:790
+#, python-brace-format
+msgid "{n}m ago"
+msgstr ""
+
+#: collins/formatting.py:428 collins/notifycenter.py:792
+#, python-brace-format
+msgid "{n}h ago"
+msgstr ""
+
+#: collins/formatting.py:430 collins/notifycenter.py:796
+#, python-brace-format
+msgid "{n}d ago"
+msgstr ""
+
+#: collins/formatting.py:462
 #, python-brace-format
 msgid ""
 "{n} session(s) in {p} project(s) have their transcripts moved to the trash, "
@@ -428,426 +891,1838 @@ msgid ""
 "originals a backgrounded fork replaced — are included."
 msgstr ""
 
-#: collins/formatting.py:89
+#: collins/formatting.py:473
 #, python-brace-format
 msgid "{project} — {n} of {total}"
 msgstr ""
 
-#: collins/formatting.py:97
+#: collins/formatting.py:481
 #, python-brace-format
 msgid "…and {p} other project(s) — {n} session(s)"
 msgstr ""
 
-#: collins/formatting.py:105
+#: collins/formatting.py:488
 #, python-brace-format
 msgid "{p} of these project(s) lose every session they have."
 msgstr ""
 
-#: collins/prefs.py:64
-msgid "Follow system"
+#: collins/ghwelcome.py:87
+msgid "Open, every check passed"
 msgstr ""
 
-#: collins/prefs.py:65
-msgid "Light"
+#: collins/ghwelcome.py:91
+msgid "Checks still running"
 msgstr ""
 
-#: collins/prefs.py:66
-msgid "Dark"
+#: collins/ghwelcome.py:95
+msgid "A check failed"
 msgstr ""
 
-#: collins/prefs.py:82 collins/sidebar.py:372
-msgid "Preferences"
+#: collins/ghwelcome.py:99
+msgid "A reviewer is waiting on a reply"
 msgstr ""
 
-#: collins/prefs.py:171
-msgid "Search settings…"
+#: collins/ghwelcome.py:103
+msgid "Draft, and the branch conflicts"
 msgstr ""
 
-#: collins/prefs.py:182
-msgid "Search settings"
+#: collins/ghwelcome.py:105
+msgid "Merged"
 msgstr ""
 
-#: collins/prefs.py:471
-msgid "No settings found"
+#: collins/ghwelcome.py:181
+msgid "Collins is better with the GitHub CLI"
 msgstr ""
 
-#: collins/prefs.py:472
-msgid "Try a different search."
-msgstr ""
-
-#: collins/prefs.py:86
-msgid "General"
-msgstr ""
-
-#: collins/prefs.py:88
-msgid "Terminal"
-msgstr ""
-
-#: collins/prefs.py:90
-msgid "Font"
-msgstr ""
-
-#: collins/prefs.py:90
-msgid "Applies to all terminal tabs"
-msgstr ""
-
-#: collins/prefs.py:100
-msgid "Reset to default font"
-msgstr ""
-
-#: collins/prefs.py:106
-msgid "Scrollback lines"
-msgstr ""
-
-#: collins/prefs.py:114
-msgid "Easy copy & paste"
-msgstr ""
-
-#: collins/prefs.py:117
+#: collins/ghwelcome.py:184
 msgid ""
-"Ctrl+C copies selected text (otherwise interrupts as usual), Ctrl+V pastes, "
-"and right-click opens a copy/paste menu"
+"Collins follows the pull requests your sessions open — and acts on them — "
+"through gh, GitHub's own command-line tool, which isn't installed here."
 msgstr ""
 
-#: collins/prefs.py:145
-msgid "Floating composer button"
-msgstr ""
-
-#: collins/prefs.py:147
+#: collins/ghwelcome.py:189
 msgid ""
-"Overlay a semi-transparent button on the corner of each agent terminal "
-"that opens the composer, a spell-checked prompt box"
+"Collins follows the pull requests your sessions open — and acts on them — "
+"through gh, GitHub's own command-line tool, which is installed here but "
+"never signed in."
 msgstr ""
 
-#: collins/prefs.py:309
-msgid "Typing opens the composer"
+#: collins/ghwelcome.py:197
+msgid "Not now"
 msgstr ""
 
-#: collins/prefs.py:311
+#: collins/ghwelcome.py:204
+msgid "Get the GitHub CLI"
+msgstr ""
+
+#: collins/ghwelcome.py:204
+msgid "Copy command"
+msgstr ""
+
+#: collins/ghwelcome.py:243
+msgid "With it, every session's pull requests carry their status:"
+msgstr ""
+
+#: collins/ghwelcome.py:245
+msgid "…and a click on one does something about it:"
+msgstr ""
+
+#: collins/ghwelcome.py:259
+msgid "Don't show this again"
+msgstr ""
+
+#: collins/ghwelcome.py:333
 msgid ""
-"Start typing at an agent's empty prompt and the composer opens with what "
-"you typed. A dialog, a menu and the CLI's own /, !, # and @ keep their keys"
+"Install it from cli.github.com — Collins picks it up the next time it starts."
 msgstr ""
 
-#: collins/prefs.py:158
-msgid "Enter sends composer text"
+#: collins/ghwelcome.py:338
+msgid "Run this once in any terminal. Collins asks for no login of its own."
 msgstr ""
 
-#: collins/prefs.py:160
+#: collins/keybindingsdialog.py:43 collins/keybindingsdialog.py:58
+#: collins/sidebar.py:1569
+msgid "Keyboard Bindings"
+msgstr ""
+
+#: collins/keybindingsdialog.py:50 collins/keybindingsdialog.py:146
+msgid "Reset All"
+msgstr ""
+
+#: collins/keybindingsdialog.py:52
+msgid "Put every shortcut back to its default"
+msgstr ""
+
+#: collins/keybindingsdialog.py:58
+msgid "Click a row to change its shortcut"
+msgstr ""
+
+#: collins/keybindingsdialog.py:117
+#, python-brace-format
+msgid "Also bound to: {actions}"
+msgstr ""
+
+#: collins/keybindingsdialog.py:123
+msgid "Unbound"
+msgstr ""
+
+#: collins/keybindingsdialog.py:129
+msgid "Reset to default"
+msgstr ""
+
+#: collins/keybindingsdialog.py:144
+msgid "Reset every shortcut?"
+msgstr ""
+
+#: collins/keybindingsdialog.py:145
+msgid "All of your custom keyboard bindings are replaced by the defaults."
+msgstr ""
+
+#: collins/keybindingsdialog.py:178
+#, python-brace-format
+msgid "{chord} is already in use"
+msgstr ""
+
+#: collins/keybindingsdialog.py:179
+#, python-brace-format
+msgid "It is bound to {actions}. Move it to {action}?"
+msgstr ""
+
+#: collins/keybindingsdialog.py:182
+msgid "Move Shortcut"
+msgstr ""
+
+#: collins/keybindingsdialog.py:231
+msgid "unbound"
+msgstr ""
+
+#: collins/keybindingsdialog.py:234
+#, python-brace-format
+msgid "Set shortcut for “{action}”"
+msgstr ""
+
+#: collins/keybindingsdialog.py:238
+#, python-brace-format
 msgid ""
-"Off: Enter inserts a newline and Ctrl+Enter sends. Shift+Enter always "
-"inserts a newline"
+"Press the new key combination. Currently: {current}.\n"
+"Backspace removes the binding; Escape keeps it."
 msgstr ""
 
-#: collins/prefs.py:320
-msgid "Composer in new sessions"
+#: collins/keybindings.py:46 collins/sidebar.py:1543
+msgid "Sessions"
 msgstr ""
 
-#: collins/prefs.py:322
-msgid ""
-"Open the composer as soon as a new session starts — floating over the agent "
-"terminal, or docked as a panel below it, where it stays for the session's "
-"later visits"
+#: collins/keybindings.py:47
+msgid "Tabs and windows"
 msgstr ""
 
-#: collins/prefs.py:87
-msgid "Never"
-msgstr ""
-
-#: collins/prefs.py:88
-msgid "Floating"
-msgstr ""
-
-#: collins/prefs.py:89
-msgid "Docked"
-msgstr ""
-
-#: collins/prefs.py:309
+#: collins/keybindings.py:48
 msgid "Panels"
 msgstr ""
 
-#: collins/prefs.py:311
+#: collins/keybindings.py:49 collins/prefs.py:956
+msgid "Editor"
+msgstr ""
+
+#: collins/keybindings.py:50 collins/prefs.py:733 collins/sidebar.py:2944
+msgid "Terminal"
+msgstr ""
+
+#: collins/keybindings.py:51
+msgid "Application"
+msgstr ""
+
+#: collins/keybindings.py:72
+msgid "New session"
+msgstr ""
+
+#: collins/keybindings.py:73
+msgid "Quick switcher"
+msgstr ""
+
+#: collins/keybindings.py:76
+msgid "Archive the current session"
+msgstr ""
+
+#: collins/keybindings.py:80
+msgid "Undo the last archive"
+msgstr ""
+
+#: collins/keybindings.py:81
+msgid "Open the pull request page"
+msgstr ""
+
+#: collins/keybindings.py:84 collins/sidebar.py:1598 collins/sidebar.py:2406
+msgid "Search sessions"
+msgstr ""
+
+#: collins/keybindings.py:87
+msgid "Unbound by default; the sidebar's search button does the same."
+msgstr ""
+
+#: collins/keybindings.py:89 collins/sidebar.py:598
+msgid "Close tab"
+msgstr ""
+
+#: collins/keybindings.py:90
+msgid "Next tab"
+msgstr ""
+
+#: collins/keybindings.py:91
+msgid "Previous tab"
+msgstr ""
+
+#: collins/keybindings.py:92
+msgid "Toggle the tab marker"
+msgstr ""
+
+#: collins/keybindings.py:93
+msgid "Show/hide the sidebar"
+msgstr ""
+
+#: collins/keybindings.py:94 collins/traymodel.py:262 collins/window.py:545
+msgid "New window"
+msgstr ""
+
+#: collins/keybindings.py:95
+msgid "Show/hide the terminal panel"
+msgstr ""
+
+#: collins/keybindings.py:96
+msgid "Clear the terminal panel"
+msgstr ""
+
+#: collins/keybindings.py:99
+msgid "Move the panel tab to the other side"
+msgstr ""
+
+#: collins/keybindings.py:103
+msgid "Show/hide the composer"
+msgstr ""
+
+#: collins/keybindings.py:106
+msgid "Show/hide the attachments gallery"
+msgstr ""
+
+#: collins/keybindings.py:112
+msgid "Swap the panel's sides"
+msgstr ""
+
+#: collins/keybindings.py:115 collins/keybindings.py:122
+#: collins/keybindings.py:131 collins/keybindings.py:183
+msgid "Unbound by default."
+msgstr ""
+
+#: collins/keybindings.py:119
+msgid "Move the panel tab to the other strip"
+msgstr ""
+
+#: collins/keybindings.py:124
+msgid "Show/hide the editor"
+msgstr ""
+
+#: collins/keybindings.py:125
+msgid "Quick open a file"
+msgstr ""
+
+#: collins/keybindings.py:128
+msgid "Focus the editor"
+msgstr ""
+
+#: collins/keybindings.py:133
+msgid "Save the file"
+msgstr ""
+
+#: collins/keybindings.py:133 collins/keybindings.py:134
+msgid "In the editor."
+msgstr ""
+
+#: collins/keybindings.py:134
+msgid "Find in the file"
+msgstr ""
+
+#: collins/keybindings.py:137
+msgid "Copy the selection"
+msgstr ""
+
+#: collins/keybindings.py:140
+msgid ""
+"With easy copy and paste on; without a selection the key reaches the "
+"terminal."
+msgstr ""
+
+#: collins/keybindings.py:147
+msgid "With easy copy and paste on."
+msgstr ""
+
+#: collins/keybindings.py:149
+msgid "Copy (terminal-style)"
+msgstr ""
+
+#: collins/keybindings.py:150
+msgid "Paste (terminal-style)"
+msgstr ""
+
+#: collins/keybindings.py:151
+msgid "Find in the terminal"
+msgstr ""
+
+#: collins/keybindings.py:154
+msgid "Insert a newline in the prompt"
+msgstr ""
+
+#: collins/keybindings.py:162 collins/lightbox.py:239
+msgid "Zoom in"
+msgstr ""
+
+#: collins/keybindings.py:168 collins/lightbox.py:238
+msgid "Zoom out"
+msgstr ""
+
+#: collins/keybindings.py:172
+msgid "Reset zoom"
+msgstr ""
+
+#: collins/keybindings.py:173 collins/prefs.py:227 collins/prefs.py:240
+#: collins/sidebar.py:1570
+msgid "Preferences"
+msgstr ""
+
+#: collins/keybindings.py:179
+msgid "Show/hide notifications"
+msgstr ""
+
+#: collins/keybindings.py:183
+msgid "Keyboard bindings"
+msgstr ""
+
+#: collins/keybindings.py:184 collins/sidebar.py:1590 collins/traymodel.py:263
+#: collins/welcome.py:184
+msgid "Quit"
+msgstr ""
+
+#: collins/lightbox.py:185
+msgid "Couldn't display image"
+msgstr ""
+
+#: collins/lightbox.py:262
+msgid "Open in Editor"
+msgstr ""
+
+#: collins/modelmenu.py:132
+msgid "Copy model id"
+msgstr ""
+
+#: collins/modelmenu.py:141
+msgid "Loading models…"
+msgstr ""
+
+#: collins/modelmenu.py:246
+msgid "Low"
+msgstr ""
+
+#: collins/modelmenu.py:247
+msgid "Medium"
+msgstr ""
+
+#: collins/modelmenu.py:248
+msgid "High"
+msgstr ""
+
+#: collins/modelmenu.py:249
+msgid "Extra high"
+msgstr ""
+
+#: collins/modelmenu.py:250
+msgid "Max"
+msgstr ""
+
+#: collins/modelmenu.py:263
+msgid "This model has no effort setting"
+msgstr ""
+
+#: collins/newchatview.py:135 collins/sidebar.py:335 collins/sidebar.py:356
+#: collins/sidebar.py:674 collins/sidebar.py:2723 collins/window.py:2005
+#: collins/window.py:2028 collins/window.py:2294
+msgid "New chat"
+msgstr ""
+
+#: collins/newchatview.py:180
+msgid "Model to start this session on"
+msgstr ""
+
+#: collins/newchatview.py:182
+msgid "Effort level to start this session at"
+msgstr ""
+
+#: collins/newchatview.py:197
+msgid "New git worktree"
+msgstr ""
+
+#: collins/newchatview.py:200
+msgid ""
+"Work in a fresh worktree of this project, apart from its uncommitted changes"
+msgstr ""
+
+#: collins/newchatview.py:304
+msgid "Empty Session"
+msgstr ""
+
+#: collins/newchatview.py:304
+msgid "Start the session with no prompt"
+msgstr ""
+
+#: collins/newchatview.py:329 collins/newchatview.py:337
+#: collins/notifycenter.py:175 collins/notifycenter.py:847
+msgid "Default"
+msgstr ""
+
+#: collins/notifycenter.py:138
+msgid "Bell"
+msgstr ""
+
+#: collins/notifycenter.py:139
+msgid "Complete"
+msgstr ""
+
+#: collins/notifycenter.py:140
+msgid "Message"
+msgstr ""
+
+#: collins/notifycenter.py:141
+msgid "Information"
+msgstr ""
+
+#: collins/notifycenter.py:152
+msgid "Zen"
+msgstr ""
+
+#: collins/notifycenter.py:153
+msgid "Soft"
+msgstr ""
+
+#: collins/notifycenter.py:154
+msgid "Glass"
+msgstr ""
+
+#: collins/notifycenter.py:155
+msgid "Confirmation"
+msgstr ""
+
+#: collins/notifycenter.py:156
+msgid "Pluck"
+msgstr ""
+
+#: collins/notifycenter.py:175 collins/notifycenter.py:849 collins/prefs.py:126
+#: collins/prefs.py:127 collins/sidebar.py:2982 collins/tokensettings.py:235
+msgid "None"
+msgstr ""
+
+#: collins/notifycenter.py:738
+msgid "Finished a run"
+msgstr ""
+
+#: collins/notifycenter.py:763
+msgid "Rang the bell"
+msgstr ""
+
+#: collins/notifycenter.py:771 collins/notifypanel.py:294 collins/prefs.py:543
+msgid "Notifications"
+msgstr ""
+
+#: collins/notifycenter.py:773
+msgid "1 unread notification"
+msgstr ""
+
+#: collins/notifycenter.py:774
+#, python-brace-format
+msgid "{n} unread notifications"
+msgstr ""
+
+#: collins/notifycenter.py:788
+#, python-brace-format
+msgid "{n}s ago"
+msgstr ""
+
+#: collins/notifycenter.py:794
+msgid "yesterday"
+msgstr ""
+
+#: collins/notifycenter.py:804
+#, python-brace-format
+msgid "{body} ×{n}"
+msgstr ""
+
+#: collins/notifycenter.py:870
+msgid "Default: the desktop's message sound"
+msgstr ""
+
+#: collins/notifycenter.py:872
+msgid "Silent"
+msgstr ""
+
+#: collins/notifycenter.py:875
+#, python-brace-format
+msgid "The desktop's “{event}” sound"
+msgstr ""
+
+#: collins/notifycenter.py:879
+#, python-brace-format
+msgid "Ships with Collins: {source} (CC0)"
+msgstr ""
+
+#: collins/notifyoverlay.py:152 collins/notifypanel.py:191
+msgid "Untitled session"
+msgstr ""
+
+#: collins/notifyoverlay.py:187 collins/usagepanel.py:378
+msgid "Dismiss"
+msgstr ""
+
+#: collins/notifypanel.py:298
+msgid "Mark every notification read"
+msgstr ""
+
+#: collins/notifypanel.py:300
+msgid "Mark all read"
+msgstr ""
+
+#: collins/notifypanel.py:305
+msgid "Remove every notification"
+msgstr ""
+
+#: collins/notifypanel.py:307
+msgid "Clear"
+msgstr ""
+
+#: collins/notifypanel.py:312 collins/practions.py:714 collins/practions.py:717
+#: collins/window.py:501
+msgid "Close"
+msgstr ""
+
+#: collins/notifypanel.py:332
+msgid "No notifications"
+msgstr ""
+
+#: collins/notifypanel.py:333
+msgid "Messages from sessions you aren't looking at, and bells, land here."
+msgstr ""
+
+#: collins/notifypanel.py:350
+msgid "Preferences…"
+msgstr ""
+
+#: collins/notifypanel.py:397
+msgid "Unread"
+msgstr ""
+
+#: collins/notifypanel.py:401
+msgid "Earlier"
+msgstr ""
+
+#: collins/notifypanel.py:408
+#, python-brace-format
+msgid "Sound: {name}"
+msgstr ""
+
+#: collins/notifypanel.py:503
+msgid "Mark read"
+msgstr ""
+
+#: collins/notifypanel.py:507 collins/prefs.py:1568
+msgid "Remove"
+msgstr ""
+
+#: collins/paneldnd.py:211
+msgid "Drag to move this tab: drop on an edge to split, on a strip to join"
+msgstr ""
+
+#: collins/paneldock.py:106
+msgid "Restore this tab to its size and place in the panel"
+msgstr ""
+
+#: collins/panelstrip.py:108 collins/panelstrip.py:434 collins/window.py:3488
+msgid "Close Tab"
+msgstr ""
+
+#: collins/panelstrip.py:140
+msgid "New terminal tab"
+msgstr ""
+
+#: collins/panelstrip.py:144
+msgid "Overlay this tab over the whole session"
+msgstr ""
+
+#: collins/panelstrip.py:149
+msgid "Move this tab to the other side"
+msgstr ""
+
+#: collins/panelstrip.py:432 collins/window.py:3474
+msgid "Close tab with a running command?"
+msgstr ""
+
+#: collins/panelstrip.py:433
+msgid "A command is still running in this terminal tab and will be terminated."
+msgstr ""
+
+#: collins/panelstrip.py:498
+msgid "Move to"
+msgstr ""
+
+#: collins/panelstrip.py:500
+msgid "Split Left"
+msgstr ""
+
+#: collins/panelstrip.py:501
+msgid "Split Right"
+msgstr ""
+
+#: collins/panelstrip.py:502
+msgid "Split Up"
+msgstr ""
+
+#: collins/panelstrip.py:503
+msgid "Split Down"
+msgstr ""
+
+#: collins/panelstrip.py:565
+msgid "Close tabs with running commands?"
+msgstr ""
+
+#: collins/panelstrip.py:567
+#, python-brace-format
+msgid "A command is still running in one of these tabs and will be terminated."
+msgid_plural ""
+"Commands are still running in {count} of these tabs and will be terminated."
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/panelstrip.py:571
+msgid "Close Tabs"
+msgstr ""
+
+#: collins/practions.py:309
+msgid "Address unresolved comments"
+msgstr ""
+
+#: collins/practions.py:310 collins/practions.py:331 collins/practions.py:462
+#: collins/practions.py:479 collins/practions.py:492 collins/prview.py:2134
+#, python-brace-format
+msgid "Send “{prompt}” to this session"
+msgstr ""
+
+#: collins/practions.py:330
+msgid "Open a pull request"
+msgstr ""
+
+#: collins/practions.py:461
+msgid "Fix errors & resolve conflicts"
+msgstr ""
+
+#: collins/practions.py:478
+msgid "Address the CI errors"
+msgstr ""
+
+#: collins/practions.py:482
+msgid "Fix errors"
+msgstr ""
+
+#: collins/practions.py:491
+msgid "Rebase / resolve conflicts"
+msgstr ""
+
+#: collins/practions.py:495
+msgid "Resolve conflicts"
+msgstr ""
+
+#: collins/practions.py:504
+msgid "Mark ready for review"
+msgstr ""
+
+#: collins/practions.py:505
+#, python-brace-format
+msgid "Take {slug} out of draft"
+msgstr ""
+
+#: collins/practions.py:506
+msgid "Ready"
+msgstr ""
+
+#: collins/practions.py:515
+msgid "Ask Claude for a review"
+msgstr ""
+
+#: collins/practions.py:516
+#, python-brace-format
+msgid "Comment “{comment}” on {slug}"
+msgstr ""
+
+#: collins/practions.py:536
+msgid "Merge when checks pass"
+msgstr ""
+
+#: collins/practions.py:537
+#, python-brace-format
+msgid "Turn on auto-merge for {slug}"
+msgstr ""
+
+#: collins/practions.py:539
+#, python-brace-format
+msgid "Merge {slug} when its checks pass?"
+msgstr ""
+
+#: collins/practions.py:541 collins/practions.py:637
+msgid ""
+"GitHub merges it as soon as every required check has passed. You can still "
+"cancel auto-merge on the pull request page."
+msgstr ""
+
+#: collins/practions.py:544
+msgid "Enable auto-merge"
+msgstr ""
+
+#: collins/practions.py:546
+msgid "Auto-Merge"
+msgstr ""
+
+#: collins/practions.py:550
+msgid "Merge pull request"
+msgstr ""
+
+#: collins/practions.py:551
+#, python-brace-format
+msgid "Merge {slug} now"
+msgstr ""
+
+#: collins/practions.py:552
+#, python-brace-format
+msgid "Merge {slug}?"
+msgstr ""
+
+#: collins/practions.py:552 collins/practions.py:553
+msgid "Merge"
+msgstr ""
+
+#: collins/practions.py:568
+msgid "Disable auto-merge"
+msgstr ""
+
+#: collins/practions.py:569
+#, python-brace-format
+msgid "Stop GitHub from merging {slug} when its checks pass"
+msgstr ""
+
+#: collins/practions.py:570
+msgid "Disable Auto-Merge"
+msgstr ""
+
+#: collins/practions.py:580
+msgid "Its checks have passed. This merges the pull request on GitHub now."
+msgstr ""
+
+#: collins/practions.py:582
+msgid ""
+"Its checks haven't all passed. This merges the pull request on GitHub now, "
+"if the repository lets it."
+msgstr ""
+
+#: collins/practions.py:599
+msgid "Merge and archive session"
+msgstr ""
+
+#: collins/practions.py:600
+#, python-brace-format
+msgid "Merge {slug} now, then archive this session"
+msgstr ""
+
+#: collins/practions.py:602
+#, python-brace-format
+msgid "Merge {slug} and archive this session?"
+msgstr ""
+
+#: collins/practions.py:606 collins/practions.py:681
+msgid ""
+"The session is archived once the merge lands — you can bring it back with "
+"Undo, or from “Show archived”."
+msgstr ""
+
+#: collins/practions.py:609 collins/practions.py:611
+msgid "Merge & archive"
+msgstr ""
+
+#: collins/practions.py:629
+msgid "Mark ready & merge when checks pass"
+msgstr ""
+
+#: collins/practions.py:630
+#, python-brace-format
+msgid "Take {slug} out of draft, then turn on auto-merge"
+msgstr ""
+
+#: collins/practions.py:632
+#, python-brace-format
+msgid "Mark {slug} ready and merge it when its checks pass?"
+msgstr ""
+
+#: collins/practions.py:642
+msgid "Ready & auto-merge"
+msgstr ""
+
+#: collins/practions.py:644
+msgid "Ready & Auto-Merge"
+msgstr ""
+
+#: collins/practions.py:648
+msgid "Mark ready & merge"
+msgstr ""
+
+#: collins/practions.py:649
+#, python-brace-format
+msgid "Take {slug} out of draft, then merge it now"
+msgstr ""
+
+#: collins/practions.py:651
+#, python-brace-format
+msgid "Mark {slug} ready and merge it?"
+msgstr ""
+
+#: collins/practions.py:653
+msgid "Ready & merge"
+msgstr ""
+
+#: collins/practions.py:655
+msgid "Ready & Merge"
+msgstr ""
+
+#: collins/practions.py:670
+msgid "Mark ready, merge & archive session"
+msgstr ""
+
+#: collins/practions.py:671
+#, python-brace-format
+msgid "Take {slug} out of draft, merge it now, then archive this session"
+msgstr ""
+
+#: collins/practions.py:675
+#, python-brace-format
+msgid "Mark {slug} ready, merge it and archive this session?"
+msgstr ""
+
+#: collins/practions.py:684 collins/practions.py:686
+msgid "Ready, merge & archive"
+msgstr ""
+
+#: collins/practions.py:693
+msgid "The pull request is marked ready for review first."
+msgstr ""
+
+#: collins/practions.py:706
+msgid "Close pull request"
+msgstr ""
+
+#: collins/practions.py:707
+#, python-brace-format
+msgid "Close {slug} without merging"
+msgstr ""
+
+#: collins/practions.py:709
+#, python-brace-format
+msgid "Close {slug}?"
+msgstr ""
+
+#: collins/practions.py:711
+msgid ""
+"The pull request is closed without merging. Its branch and its comments "
+"stay, and it can be reopened on GitHub."
+msgstr ""
+
+#: collins/practions.py:731 collins/practions.py:868
+#, python-brace-format
+msgid "{url} doesn't look like a pull request."
+msgstr ""
+
+#: collins/practions.py:757 collins/practions.py:789 collins/practions.py:860
+msgid "Collins doesn't know how to do that."
+msgstr ""
+
+#: collins/prdetail.py:564
+msgid "Merge conflicts"
+msgstr ""
+
+#: collins/prefs.py:80
+msgid "Follow system"
+msgstr ""
+
+#: collins/prefs.py:81 collins/prefs.py:89
+msgid "Light"
+msgstr ""
+
+#: collins/prefs.py:82 collins/prefs.py:90
+msgid "Dark"
+msgstr ""
+
+#: collins/prefs.py:88
+msgid "Follow app"
+msgstr ""
+
+#: collins/prefs.py:100
+msgid "Never"
+msgstr ""
+
+#: collins/prefs.py:101
+msgid "Floating"
+msgstr ""
+
+#: collins/prefs.py:102
+msgid "Docked"
+msgstr ""
+
+#: collins/prefs.py:108
+msgid "Ask"
+msgstr ""
+
+#: collins/prefs.py:109 collins/window.py:3488
+msgid "Exit Session"
+msgstr ""
+
+#: collins/prefs.py:110 collins/window.py:3501
+msgid "Background Session"
+msgstr ""
+
+#: collins/prefs.py:117
+msgid "Hide Window"
+msgstr ""
+
+#: collins/prefs.py:129 collins/tokensettings.py:177
+msgid "Refresh"
+msgstr ""
+
+#: collins/prefs.py:231
+msgid "Search settings…"
+msgstr ""
+
+#: collins/prefs.py:235
+msgid "Search settings"
+msgstr ""
+
+#: collins/prefs.py:266
+msgid "No settings found"
+msgstr ""
+
+#: collins/prefs.py:267
+msgid "Try a different search."
+msgstr ""
+
+#: collins/prefs.py:307
+msgid "General"
+msgstr ""
+
+#: collins/prefs.py:315 collins/prefs.py:336
+msgid "Restart now"
+msgstr ""
+
+#: collins/prefs.py:319
+msgid "Language"
+msgstr ""
+
+#: collins/prefs.py:339
+msgid "Dark / Light Mode"
+msgstr ""
+
+#: collins/prefs.py:350
 msgid "Tab drag handles"
 msgstr ""
 
-#: collins/prefs.py:313
+#: collins/prefs.py:352
 msgid ""
 "Drag any panel tab by its handle to move, reorder, or split it. Relies on "
-"GTK internals — turn off to fall back to plain tab dragging plus a drag "
-"grip on each panel"
+"GTK internals — turn off to fall back to plain tab dragging plus a drag grip "
+"on each panel"
 msgstr ""
 
-#: collins/prefs.py:394
+#: collins/prefs.py:361
+msgid "Show folder paths in sidebar"
+msgstr ""
+
+#: collins/prefs.py:367
+msgid "Project icon size"
+msgstr ""
+
+#: collins/prefs.py:368
+msgid "Size of the project and folder icons in the sidebar"
+msgstr ""
+
+#: collins/prefs.py:373
+msgid "Show Claude usage"
+msgstr ""
+
+#: collins/prefs.py:374
+msgid "Show subscription usage limits below the session list"
+msgstr ""
+
+#: collins/prefs.py:380
+msgid "Check for updates"
+msgstr ""
+
+#: collins/prefs.py:382
+msgid ""
+"Ask GitHub once a day whether a newer Collins is out, and notify you when "
+"one is. Through your gh login, or anonymously"
+msgstr ""
+
+#: collins/prefs.py:424
+msgid "Session behavior"
+msgstr ""
+
+#: collins/prefs.py:426
+msgid "Reopen the last session"
+msgstr ""
+
+#: collins/prefs.py:428
+msgid ""
+"Open the session that was active when the app was last closed. Off, the app "
+"launches with no session open"
+msgstr ""
+
+#: collins/prefs.py:438
+msgid "Start new sessions in a git worktree"
+msgstr ""
+
+#: collins/prefs.py:440
+msgid ""
+"Git projects only; each new session works in its own fresh worktree, so it "
+"won't see uncommitted local changes. Right-click a project header to "
+"override per project"
+msgstr ""
+
+#: collins/prefs.py:449
+msgid "Follow Claude's own session names"
+msgstr ""
+
+#: collins/prefs.py:451
+msgid ""
+"Rename sessions whenever Claude names or renames them — /rename and its "
+"automatic titles; manually renamed sessions keep their name"
+msgstr ""
+
+#: collins/prefs.py:461
+msgid "When archiving a running session"
+msgstr ""
+
+#: collins/prefs.py:462
+msgid "Archiving a session that is still running also closes its tab"
+msgstr ""
+
+#: collins/prefs.py:467
+msgid "When quitting with running sessions"
+msgstr ""
+
+#: collins/prefs.py:468 collins/prefs.py:1093
+msgid "Closing a window while agent sessions are still running"
+msgstr ""
+
+#: collins/prefs.py:478
+msgid "Archive on claude.ai too"
+msgstr ""
+
+#: collins/prefs.py:480
+msgid ""
+"A session that also appears on claude.ai is archived and restored there "
+"along with the toggle here; best-effort, archiving locally never waits on it"
+msgstr ""
+
+#: collins/prefs.py:491
 msgid "Show the attachments panel automatically"
 msgstr ""
 
-#: collins/prefs.py:395
+#: collins/prefs.py:493
 msgid ""
 "Dock a session's attachments panel beside it the first time it shows an "
 "image — only in a tab wide enough to spare the column, past the terminal's "
 "maximum width. Once per session tab, so one you close again stays closed"
 msgstr ""
 
-#: collins/prefs.py:128
-msgid "Color theme"
+#: collins/prefs.py:507
+msgid "Exact busy tracking from the agent"
 msgstr ""
 
-#: collins/prefs.py:146
-msgid "Appearance"
-msgstr ""
-
-#: collins/prefs.py:147
-msgid "Color scheme"
-msgstr ""
-
-#: collins/prefs.py:157
-msgid "Session list"
-msgstr ""
-
-#: collins/prefs.py:159
-msgid "Show folder path"
-msgstr ""
-
-#: collins/prefs.py:160
-msgid "Show each session's project folder path in the sidebar"
-msgstr ""
-
-#: collins/prefs.py:166
-msgid "Show Claude usage"
-msgstr ""
-
-#: collins/prefs.py:167
-msgid "Show subscription usage limits below the session list"
-msgstr ""
-
-#: collins/prefs.py:438
-msgid "Follow Claude's own session names"
-msgstr ""
-
-#: collins/prefs.py:439
+#: collins/prefs.py:509
 msgid ""
-"Rename sessions whenever Claude names or renames them — /rename and its "
-"automatic titles; manually renamed sessions keep their name"
+"Read Claude Code's own progress announcements for the sidebar's working "
+"indicator, instead of only inferring from terminal output (fully applies to "
+"newly opened tabs)"
 msgstr ""
 
-#: collins/prefs.py:369
-msgid "Claude models"
-msgstr ""
-
-#: collins/prefs.py:370
-msgid "Models the app's own headless claude runs ask for"
-msgstr ""
-
-#: collins/tokensettings.py:143
-msgid "Session title model"
-msgstr ""
-
-#: collins/tokensettings.py:145
-msgid ""
-"Names each new session from its first prompt — every session Collins sees "
-"under ~/.claude/projects, including ones an agent or a terminal started. "
-"None: sessions keep the first words of their prompt, which costs nothing"
-msgstr ""
-
-#: collins/tokensettings.py:153
-msgid "Icon generation model"
-msgstr ""
-
-#: collins/tokensettings.py:155
-msgid ""
-"Model the sidebar's Generate Icon dialog starts with. None: the dialog "
-"waits for you to pick a model and click Generate"
-msgstr ""
-
-#: collins/tokensettings.py:127
-msgid "Default (latest Haiku)"
-msgstr ""
-
-#: collins/tokensettings.py:128
-msgid "Default (latest Sonnet)"
-msgstr ""
-
-#: collins/tokensettings.py:169
-msgid "Model list"
-msgstr ""
-
-#: collins/tokensettings.py:170
-msgid "Checking…"
-msgstr ""
-
-#: collins/tokensettings.py:171
-msgid "Refresh"
-msgstr ""
-
-#: collins/tokensettings.py:174
-msgid ""
-"Ask Anthropic for the model list now, rather than waiting for the saved one "
-"to age out"
-msgstr ""
-
-#: collins/tokensettings.py:268
-msgid ""
-"Couldn't reach Anthropic — offering the CLI's aliases (opus, sonnet, haiku)"
-msgstr ""
-
-#: collins/tokensettings.py:276
-#, python-brace-format
-msgid "Couldn't reach Anthropic — still showing the list fetched {when}"
-msgstr ""
-
-#: collins/tokensettings.py:279
-#, python-brace-format
-msgid "{count} models, updated {when}"
-msgstr ""
-
-#: collins/prefs.py:424
-msgid "Attach pull requests named in prompts"
-msgstr ""
-
-#: collins/prefs.py:426
-msgid ""
-"Put every pull request a new session's first prompt mentions on that "
-"session's row, without waiting for the agent to touch it"
-msgstr ""
-
-#: collins/prefs.py:253
-msgid "Rename sessions after their pull requests"
-msgstr ""
-
-#: collins/prefs.py:255
-msgid ""
-"Retitle a session to match the newest pull request opened in it; manually "
-"renamed sessions keep their name"
-msgstr ""
-
-#: collins/prefs.py:263
-msgid "Refresh pull requests at launch"
-msgstr ""
-
-#: collins/prefs.py:265
-msgid ""
-"Ask GitHub about every listed session's pull requests once on startup, so "
-"the marks in the sidebar start out current rather than as they were left"
-msgstr ""
-
-#: collins/prefs.py:190 collins/prefs.py:196
-msgid "Language"
-msgstr ""
-
-#: collins/prefs.py:190
-msgid "Restart to apply"
-msgstr ""
-
-#: collins/prefs.py:191
-msgid "Restart now"
-msgstr ""
-
-#: collins/prefs.py:74
-msgid "Ask"
-msgstr ""
-
-#: collins/prefs.py:285
-msgid "Running sessions"
-msgstr ""
-
-#: collins/prefs.py:287
-msgid ""
-"Ask keeps the confirmation dialog; the other choices skip it and exit the "
-"session(s) cleanly or keep them running detached"
-msgstr ""
-
-#: collins/prefs.py:293
-msgid "When archiving a running session"
-msgstr ""
-
-#: collins/prefs.py:294
-msgid "Archiving a session that is still running also closes its tab"
-msgstr ""
-
-#: collins/prefs.py:299
-msgid "When quitting with running sessions"
-msgstr ""
-
-#: collins/prefs.py:300
-msgid "Closing a window while agent sessions are still running"
-msgstr ""
-
-#: collins/prefs.py:748
-msgid "Archiving"
-msgstr ""
-
-#: collins/prefs.py:750
-msgid "Archive on claude.ai too"
-msgstr ""
-
-#: collins/prefs.py:751
-msgid ""
-"A session that also appears on claude.ai is archived and restored there "
-"along with the toggle here; best-effort, archiving locally never waits on it"
-msgstr ""
-
-#: collins/prefs.py:223
-msgid "Background sessions"
-msgstr ""
-
-#: collins/prefs.py:225
+#: collins/prefs.py:518
 msgid "Poll for background sessions"
 msgstr ""
 
-#: collins/prefs.py:227
+#: collins/prefs.py:520
 msgid ""
 "Fallback: check the agent CLI every 20 seconds in case the yellow guide "
 "lines stop updating on their own"
 msgstr ""
 
-#: collins/prefs.py:299
-msgid "Experimental"
+#: collins/prefs.py:547
+msgid "In-app notifications"
 msgstr ""
 
-#: collins/prefs.py:301
-msgid "Exact busy tracking from the agent"
-msgstr ""
-
-#: collins/prefs.py:303
+#: collins/prefs.py:549
 msgid ""
-"Read Claude Code's own progress announcements for the sidebar's working "
-"indicator, instead of only inferring from terminal output (fully applies "
-"to newly opened tabs)"
+"Show a message from another session inside the window while Collins is "
+"focused. Off sends every notification to the desktop"
 msgstr ""
 
-#: collins/replayview.py:92
-msgid "Question"
+#: collins/prefs.py:561
+msgid "Card theme"
 msgstr ""
 
-#: collins/prstatus.py:90
+#: collins/prefs.py:562
+msgid "The in-app card's own light or dark, whatever the app is"
+msgstr ""
+
+#: collins/prefs.py:575
+msgid "Sound"
+msgstr ""
+
+#: collins/prefs.py:582 collins/prefs.py:608
+msgid "Custom…"
+msgstr ""
+
+#: collins/prefs.py:593
+msgid "Choose a different sound file"
+msgstr ""
+
+#: collins/prefs.py:601
+msgid "Play the notification sound"
+msgstr ""
+
+#: collins/prefs.py:612
+msgid "Bells from other sessions"
+msgstr ""
+
+#: collins/prefs.py:614
+msgid ""
+"A terminal bell from a session you aren't looking at posts a notification "
+"and plays the sound. Off keeps the desktop's beep"
+msgstr ""
+
+#: collins/prefs.py:623
+msgid "Announce finished runs"
+msgstr ""
+
+#: collins/prefs.py:624
+msgid ""
+"Also notify when a session's run finishes, not only when it asks for you"
+msgstr ""
+
+#: collins/prefs.py:657
+#, python-brace-format
+msgid "Sound needs GStreamer ({package}); the desktop's beep is used instead"
+msgstr ""
+
+#: collins/prefs.py:666
+msgid "Composer in new sessions"
+msgstr ""
+
+#: collins/prefs.py:668
+msgid ""
+"Open the composer as soon as a new session starts — floating over the agent "
+"terminal, or docked as a panel below it, where it stays for the session's "
+"later visits"
+msgstr ""
+
+#: collins/prefs.py:686
+msgid "Typing opens the composer"
+msgstr ""
+
+#: collins/prefs.py:688
+msgid ""
+"Start typing at an agent's empty prompt and the composer opens with what you "
+"typed. A dialog, a menu and the CLI's own /, !, # and @ keep their keys"
+msgstr ""
+
+#: collins/prefs.py:697
+msgid "Floating composer button"
+msgstr ""
+
+#: collins/prefs.py:699
+msgid ""
+"Overlay a semi-transparent button on the corner of each agent terminal that "
+"opens the composer, a spell-checked prompt box"
+msgstr ""
+
+#: collins/prefs.py:708
+msgid "Enter sends composer text"
+msgstr ""
+
+#: collins/prefs.py:710
+msgid ""
+"Off: Enter inserts a newline and Ctrl+Enter sends. Shift+Enter always "
+"inserts a newline"
+msgstr ""
+
+#: collins/prefs.py:720
+msgid "Right-click aims spell-check"
+msgstr ""
+
+#: collins/prefs.py:722
+msgid ""
+"Right-clicking a misspelled word in the composer offers corrections for that "
+"word. Off: corrections follow the text cursor instead, and a right-click "
+"never moves it"
+msgstr ""
+
+#: collins/prefs.py:737
+msgid "Color theme"
+msgstr ""
+
+#: collins/prefs.py:754 collins/prefs.py:986
+msgid "Font"
+msgstr ""
+
+#: collins/prefs.py:754
+msgid "Applies to all terminal tabs"
+msgstr ""
+
+#: collins/prefs.py:764
+msgid "Reset to default font"
+msgstr ""
+
+#: collins/prefs.py:770
+msgid "Scrollback lines"
+msgstr ""
+
+#: collins/prefs.py:776
+msgid "Max width"
+msgstr ""
+
+#: collins/prefs.py:778
+msgid ""
+"Stop growing past this width and center in the tab instead (0 = no limit)"
+msgstr ""
+
+#: collins/prefs.py:787
+msgid "Easy copy & paste"
+msgstr ""
+
+#: collins/prefs.py:790
+msgid ""
+"Ctrl+C copies selected text (otherwise interrupts as usual), Ctrl+V pastes, "
+"and right-click opens a copy/paste menu"
+msgstr ""
+
+#: collins/prefs.py:801
+msgid "Footer apps"
+msgstr ""
+
+#: collins/prefs.py:802
+msgid "Buttons in each tab's footer that open the tab's directory"
+msgstr ""
+
+#: collins/prefs.py:806 collins/prefs.py:809
+msgid "Add application…"
+msgstr ""
+
+#: collins/prefs.py:815
+msgid "Pull requests"
+msgstr ""
+
+#: collins/prefs.py:817
+msgid "Text size"
+msgstr ""
+
+#: collins/prefs.py:820
+msgid ""
+"Reading-text size in the pull request panel, as a percentage of the app "
+"font; buttons and menus keep the app size"
+msgstr ""
+
+#: collins/prefs.py:831
+msgid "Show embedded images"
+msgstr ""
+
+#: collins/prefs.py:833
+msgid ""
+"Render the images a description or comment embeds, and the changed image "
+"files, as pictures; click one to open it full size. Off, they stay links and "
+"patches, and opening a pull request downloads nothing"
+msgstr ""
+
+#: collins/prefs.py:843
+msgid "Open new pull requests automatically"
+msgstr ""
+
+#: collins/prefs.py:845
+msgid ""
+"Open a pull request's panel beside its session as soon as the session picks "
+"the PR up. Once per pull request, so one you close again stays closed"
+msgstr ""
+
+#: collins/prefs.py:854
+msgid "Confirm before merging"
+msgstr ""
+
+#: collins/prefs.py:856
+msgid ""
+"Ask before merging a pull request, enabling auto-merge, or merging and "
+"archiving the session. Off, the click merges; closing a pull request "
+"unmerged still asks either way"
+msgstr ""
+
+#: collins/prefs.py:865
+msgid "Attach pull requests named in prompts"
+msgstr ""
+
+#: collins/prefs.py:867
+msgid ""
+"Put every pull request a new session's first prompt mentions on that "
+"session's row, without waiting for the agent to touch it"
+msgstr ""
+
+#: collins/prefs.py:876
+msgid "Rename sessions after their pull requests"
+msgstr ""
+
+#: collins/prefs.py:878
+msgid ""
+"Retitle a session to match the newest pull request opened in it; manually "
+"renamed sessions keep their name"
+msgstr ""
+
+#: collins/prefs.py:886
+msgid "Refresh pull requests at launch"
+msgstr ""
+
+#: collins/prefs.py:888
+msgid ""
+"Ask GitHub about every listed session's pull requests once on startup, so "
+"the marks in the sidebar start out current rather than as they were left"
+msgstr ""
+
+#: collins/prefs.py:899
+msgid "Caffeine Mode"
+msgstr ""
+
+#: collins/prefs.py:901 collins/window.py:3131
+msgid "Keep screen on"
+msgstr ""
+
+#: collins/prefs.py:903
+msgid ""
+"Hold the screen on as well as keeping the computer awake. Off lets the "
+"screen turn off as usual, while an unattended agent still keeps the computer "
+"from sleeping"
+msgstr ""
+
+#: collins/prefs.py:914
+msgid "Until idle grace period"
+msgstr ""
+
+#: collins/prefs.py:917
+msgid ""
+"How many minutes Until idle keeps the computer awake after the last session "
+"stops working; any session picking work back up restarts the wait"
+msgstr ""
+
+#: collins/prefs.py:928
+msgid "Turn on at launch"
+msgstr ""
+
+#: collins/prefs.py:930
+msgid ""
+"Start with Caffeine Mode already on, keeping the computer awake until you "
+"turn it off from the header"
+msgstr ""
+
+#: collins/prefs.py:940
+msgid "Turn off after"
+msgstr ""
+
+#: collins/prefs.py:964 collins/prefs.py:1249
+msgid "Follow app theme"
+msgstr ""
+
+#: collins/prefs.py:967
+msgid "Color scheme"
+msgstr ""
+
+#: collins/prefs.py:986
+msgid "Applies to the editor panel"
+msgstr ""
+
+#: collins/prefs.py:996
+msgid "Reset to system monospace"
+msgstr ""
+
+#: collins/prefs.py:1001
+msgid "Show line numbers"
+msgstr ""
+
+#: collins/prefs.py:1007
+msgid "Show hidden files"
+msgstr ""
+
+#: collins/prefs.py:1008
+msgid "Show dotfiles in the editor's file tree"
+msgstr ""
+
+#: collins/prefs.py:1015
+msgid "Open in a window on small screens"
+msgstr ""
+
+#: collins/prefs.py:1018
+msgid ""
+"On screens this many pixels wide or narrower (after display scaling), the "
+"editor opens in its own window instead of a panel (0 = always open as a "
+"panel)"
+msgstr ""
+
+#: collins/prefs.py:1028
+msgid "Single column when narrow"
+msgstr ""
+
+#: collins/prefs.py:1031
+msgid ""
+"An editor column this many pixels wide or narrower shows the file tree and "
+"the open file one at a time, with a back button beside the tabs (0 = always "
+"side by side)"
+msgstr ""
+
+#: collins/prefs.py:1052
+msgid "Show status icon"
+msgstr ""
+
+#: collins/prefs.py:1076
+msgid ""
+"Shows Collins in the top bar, with a menu that jumps to any open session"
+msgstr ""
+
+#: collins/prefs.py:1079
+msgid ""
+"No status-icon support was found in this desktop — GNOME needs an "
+"AppIndicator extension"
+msgstr ""
+
+#: collins/prefs.py:1084
+msgid "Nothing on this desktop can show a status icon"
+msgstr ""
+
+#: collins/prefs.py:1096
+msgid ""
+"Without a status icon, a hidden window comes back by relaunching Collins or "
+"clicking a session notification"
+msgstr ""
+
+#: collins/prefs.py:1111 collins/welcome.py:233
+msgid "Path to the claude executable"
+msgstr ""
+
+#: collins/prefs.py:1113 collins/prefs.py:1120 collins/prefs.py:1127
+#: collins/welcome.py:235
+msgid "Browse…"
+msgstr ""
+
+#: collins/prefs.py:1157
+#, python-brace-format
+msgid "Using the claude found on PATH at {path}."
+msgstr ""
+
+#: collins/prefs.py:1163
+msgid "claude isn't on PATH — Collins will ask where it is at the next launch."
+msgstr ""
+
+#: collins/prefs.py:1175 collins/welcome.py:294
+msgid "Choose the claude executable"
+msgstr ""
+
+#: collins/prefs.py:1341
+#, python-brace-format
+msgid ""
+"How long that launch-time Caffeine Mode runs before it turns itself off. "
+"Until idle never does: it holds the computer awake while any session is "
+"working (and {n} minute past), dozing in between"
+msgid_plural ""
+"How long that launch-time Caffeine Mode runs before it turns itself off. "
+"Until idle never does: it holds the computer awake while any session is "
+"working (and {n} minutes past), dozing in between"
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/prefs.py:1413
+msgid "Choose a notification sound"
+msgstr ""
+
+#: collins/prefs.py:1415
+msgid "Sound files"
+msgstr ""
+
+#: collins/prefs.py:1560
+msgid "Move up"
+msgstr ""
+
+#: collins/prefs.py:1564
+msgid "Move down"
+msgstr ""
+
+#: collins/prefs.py:1576
+msgid "No apps configured"
+msgstr ""
+
+#: collins/prfileimages.py:90
+msgid "Before"
+msgstr ""
+
+#: collins/prfileimages.py:90
+msgid "After"
+msgstr ""
+
+#: collins/prmenu.py:383
+msgid "Click for actions"
+msgstr ""
+
+#: collins/prmenu.py:383
+msgid "Right-click to open"
+msgstr ""
+
+#: collins/prmenu.py:593
+msgid "Back to the pull requests"
+msgstr ""
+
+#: collins/prmenu.py:608
+msgid "View in Collins"
+msgstr ""
+
+#: collins/prmenu.py:612
+msgid "Open this pull request's page beside the session"
+msgstr ""
+
+#: collins/prmenu.py:635
+msgid "View unresolved comments"
+msgstr ""
+
+#: collins/prmenu.py:640
+msgid "Open this pull request's page at its first unresolved thread"
+msgstr ""
+
+#: collins/prmenu.py:665 collins/sidebar.py:2860
+msgid "Open on GitHub"
+msgstr ""
+
+#: collins/prmenu.py:832 collins/prview.py:1932 collins/prview.py:2212
+#: collins/prview.py:2480
+msgid "Collins couldn't run that action."
+msgstr ""
+
+#: collins/prmenu.py:856 collins/prview.py:1943 collins/prview.py:2222
+#: collins/prview.py:2496
+#, python-brace-format
+msgid "{action} failed"
+msgstr ""
+
+#: collins/prstatus.py:386
 msgid "Open pull request"
 msgstr ""
 
-#: collins/prstatus.py:91
+#: collins/prstatus.py:387
 msgid "Draft pull request"
 msgstr ""
 
-#: collins/prstatus.py:92
+#: collins/prstatus.py:388
 msgid "Merged pull request"
 msgstr ""
 
-#: collins/prstatus.py:93
+#: collins/prstatus.py:389
 msgid "Closed pull request"
 msgstr ""
 
-#: collins/prstatus.py:109
+#: collins/prstatus.py:403 collins/prview.py:730
+msgid "Pull request"
+msgstr ""
+
+#: collins/prstatus.py:418
+msgid "Has merge conflicts"
+msgstr ""
+
+#: collins/prstatus.py:420
+msgid "Merging when checks pass"
+msgstr ""
+
+#: collins/prstatus.py:422
+msgid "Has unresolved comments"
+msgstr ""
+
+#: collins/prstatus.py:424
 #, python-brace-format
 msgid "{n} passed"
 msgstr ""
 
-#: collins/prstatus.py:110
+#: collins/prstatus.py:425
 #, python-brace-format
 msgid "{n} failed"
 msgstr ""
 
-#: collins/prstatus.py:111
+#: collins/prstatus.py:426
 #, python-brace-format
 msgid "{n} pending"
+msgstr ""
+
+#: collins/prstatus.py:832
+msgid "The GitHub CLI (gh) isn't installed, or isn't on PATH."
+msgstr ""
+
+#: collins/prstatus.py:835
+msgid "Collins couldn't run gh."
+msgstr ""
+
+#: collins/prstatus.py:840
+#, python-brace-format
+msgid "gh exited with status {code}."
+msgstr ""
+
+#: collins/prstatus.py:1618
+#, python-brace-format
+msgid "and {n} more"
+msgstr ""
+
+#: collins/prview.py:207
+msgid "Approved"
+msgstr ""
+
+#: collins/prview.py:211
+msgid "Changes requested"
+msgstr ""
+
+#: collins/prview.py:213
+msgid "Review dismissed"
+msgstr ""
+
+#: collins/prview.py:215
+msgid "Commented"
+msgstr ""
+
+#: collins/prview.py:332
+msgid "Reload this pull request"
+msgstr ""
+
+#: collins/prview.py:457 collins/prview.py:864
+msgid "Conversation"
+msgstr ""
+
+#: collins/prview.py:459
+msgid "Files"
+msgstr ""
+
+#: collins/prview.py:514
+msgid "Right-click to open on GitHub"
+msgstr ""
+
+#: collins/prview.py:695
+msgid "Couldn't load this pull request — is the GitHub CLI signed in?"
+msgstr ""
+
+#: collins/prview.py:700 collins/prview.py:773
+msgid "Nothing loaded yet."
+msgstr ""
+
+#: collins/prview.py:740
+#, python-brace-format
+msgid "Merges {head} into {base}"
+msgstr ""
+
+#: collins/prview.py:745
+#, python-brace-format
+msgid "{n} file"
+msgid_plural "{n} files"
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/prview.py:876
+msgid "No comments yet."
+msgstr ""
+
+#: collins/prview.py:912
+msgid "No description provided."
+msgstr ""
+
+#: collins/prview.py:1069
+msgid "No changed files."
+msgstr ""
+
+#: collins/prview.py:1468
+#, python-brace-format
+msgid "Checks ({n})"
+msgstr ""
+
+#: collins/prview.py:1468
+msgid "Checks"
+msgstr ""
+
+#: collins/prview.py:1785
+msgid "More actions"
+msgstr ""
+
+#: collins/prview.py:1817
+msgid "Right-click for more actions"
+msgstr ""
+
+#: collins/prview.py:2016
+msgid "Add a comment"
+msgstr ""
+
+#: collins/prview.py:2059 collins/prview.py:2064
+msgid "Request changes"
+msgstr ""
+
+#: collins/prview.py:2069 collins/prview.py:2074
+msgid "Approve"
+msgstr ""
+
+#: collins/prview.py:2079 collins/prview.py:2083 collins/prview.py:2163
+msgid "Comment"
+msgstr ""
+
+#: collins/prview.py:2099
+#, python-brace-format
+msgid "Comment on {slug}"
+msgstr ""
+
+#: collins/prview.py:2100
+#, python-brace-format
+msgid "Approve {slug}"
+msgstr ""
+
+#: collins/prview.py:2102
+#, python-brace-format
+msgid "Request changes on {slug}"
+msgstr ""
+
+#: collins/prview.py:2132
+msgid "Address comments"
+msgstr ""
+
+#: collins/prview.py:2145 collins/prview.py:2176
+msgid "Request review"
+msgstr ""
+
+#: collins/prview.py:2304
+msgid "Outdated"
+msgstr ""
+
+#: collins/prview.py:2307
+msgid "The code this thread commented on has changed"
+msgstr ""
+
+#: collins/prview.py:2323
+msgid "Resolved"
+msgstr ""
+
+#: collins/prview.py:2367 collins/prview.py:2444
+msgid "Reply"
+msgstr ""
+
+#: collins/prview.py:2369
+msgid "Reply in this thread"
+msgstr ""
+
+#: collins/prview.py:2374 collins/prview.py:2452
+msgid "Unresolve"
+msgstr ""
+
+#: collins/prview.py:2374 collins/prview.py:2452
+msgid "Resolve"
+msgstr ""
+
+#: collins/prview.py:2377
+msgid "Reopen this thread"
+msgstr ""
+
+#: collins/prview.py:2377
+msgid "Mark this thread resolved"
+msgstr ""
+
+#: collins/prview.py:2400
+msgid "Post reply"
+msgstr ""
+
+#: collins/prview.py:2581
+msgid "no diff — binary or too large"
+msgstr ""
+
+#: collins/prview.py:2660
+#, python-brace-format
+msgid "{n} line"
+msgid_plural "{n} lines"
+msgstr[0] ""
+msgstr[1] ""
+
+#: collins/prview.py:2811 collins/prview.py:2832 collins/prview.py:2858
+msgid "Show more"
+msgstr ""
+
+#: collins/prview.py:2832
+msgid "Show less"
+msgstr ""
+
+#: collins/quickopen.py:65
+msgid "Open File"
+msgstr ""
+
+#: collins/quickopen.py:76
+msgid "Open a file…"
+msgstr ""
+
+#: collins/quickopen.py:159
+msgid "Indexing project files…"
+msgstr ""
+
+#: collins/quickopen.py:161
+msgid "No files found in this project."
+msgstr ""
+
+#: collins/quickopen.py:164
+#, python-brace-format
+msgid "Project is large — only the first {count} files are searchable."
 msgstr ""
 
 #: collins/replayview.py:64
@@ -866,1364 +2741,534 @@ msgstr ""
 msgid "Show all"
 msgstr ""
 
+#: collins/replayview.py:92
+msgid "Question"
+msgstr ""
+
 #: collins/replayview.py:150
 msgid "Nothing to replay yet."
 msgstr ""
 
-#: collins/sidebar.py:123
+#: collins/sidebar.py:69
+msgid "Add the Ubuntu PPA…"
+msgstr ""
+
+#: collins/sidebar.py:70
+msgid "Add the Fedora COPR…"
+msgstr ""
+
+#: collins/sidebar.py:71
+msgid "Add the package repository…"
+msgstr ""
+
+#: collins/sidebar.py:344 collins/sidebar.py:358 collins/sidebar.py:676
 #, python-brace-format
 msgid "New session in {path}"
 msgstr ""
 
-#: collins/sidebar.py:165
+#: collins/sidebar.py:401
+msgid "Expand"
+msgstr ""
+
+#: collins/sidebar.py:401
+msgid "Collapse"
+msgstr ""
+
+#: collins/sidebar.py:579 collins/sidebar.py:664
 msgid "New Thread"
 msgstr ""
 
-#: collins/sidebar.py:176
-msgid "Close tab"
+#: collins/sidebar.py:602
+msgid "Discard draft and close tab"
 msgstr ""
 
-#: collins/sidebar.py:230 collins/sidebar.py:792
+#: collins/sidebar.py:602
+msgid "Discard draft"
+msgstr ""
+
+#: collins/sidebar.py:781 collins/window.py:566
+msgid "Exit session and close tab"
+msgstr ""
+
+#: collins/sidebar.py:790 collins/sidebar.py:1217 collins/window.py:201
+#: collins/window.py:570
+msgid "Background session and close tab"
+msgstr ""
+
+#: collins/sidebar.py:809 collins/sidebar.py:2705
 msgid "Restore session"
 msgstr ""
 
-#: collins/sidebar.py:230 collins/sidebar.py:792
+#: collins/sidebar.py:809 collins/sidebar.py:2707
 msgid "Archive session"
 msgstr ""
 
-#: collins/sidebar.py:312
-msgid "You interrupted Claude here"
+#: collins/sidebar.py:1219
+msgid ""
+"Backgrounding is unavailable until this session is registered and any "
+"handoff in progress finishes"
 msgstr ""
 
-#: collins/sidebar.py:360
-msgid "Sessions"
+#: collins/sidebar.py:1363 collins/terminal.py:2611
+msgid "Click to view in Collins"
 msgstr ""
 
-#: collins/sidebar.py:534
-msgid "Search sessions"
-msgstr ""
-
-#: collins/sidebar.py:534
-msgid "Close search"
-msgstr ""
-
-#: collins/sidebar.py:1375
-msgid "A session is working"
-msgstr ""
-
-#: collins/sidebar.py:541
-msgid "Select multiple sessions"
-msgstr ""
-
-#: collins/sidebar.py:1128
+#: collins/sidebar.py:1365
 #, python-brace-format
 msgid "Click to view #{number} in Collins"
 msgstr ""
 
-#: collins/sidebar.py:368
-msgid "Open session file…"
+#: collins/sidebar.py:1369 collins/terminal.py:2611
+msgid "Right-click for actions"
 msgstr ""
 
-#: collins/sidebar.py:369
-msgid "Show archived sessions"
+#: collins/sidebar.py:1460 collins/window.py:3301
+msgid "This session has no tab open."
 msgstr ""
 
-#: collins/sidebar.py:370
-msgid "Delete archived sessions…"
-msgstr ""
-
-#: collins/sidebar.py:371
-msgid "MCP servers"
-msgstr ""
-
-#: collins/sidebar.py:373
-msgid "About Collins"
-msgstr ""
-
-#: collins/sidebar.py:930 collins/sidebar.py:1261
-msgid "Refresh session list and pull requests"
-msgstr ""
-
-#: collins/sidebar.py:1258
-msgid "Refreshing pull requests…"
-msgstr ""
-
-#: collins/prstatus.py:923
-msgid "and {n} more"
-msgstr ""
-
-#: collins/sidebar.py:383
+#: collins/sidebar.py:1558
 msgid "Search sessions…"
 msgstr ""
 
-#: collins/sidebar.py:388
-msgid "Collapse all groups"
+#: collins/sidebar.py:1564
+msgid "Select multiple sessions"
 msgstr ""
 
-#: collins/sidebar.py:393
-msgid "Expand all groups"
+#: collins/sidebar.py:1565
+msgid "Open session file…"
 msgstr ""
 
-#: collins/sidebar.py:425
-msgid "No sessions found"
+#: collins/sidebar.py:1566
+msgid "Show archived sessions"
 msgstr ""
 
-#: collins/sidebar.py:426
-msgid ""
-"Run claude in a project directory first — sessions will appear here "
-"automatically."
+#: collins/sidebar.py:1567
+msgid "Delete archived sessions…"
 msgstr ""
 
-#: collins/sidebar.py:479 collins/traymodel.py:132
+#: collins/sidebar.py:1568
+msgid "MCP servers"
+msgstr ""
+
+#: collins/sidebar.py:1579
+msgid "Install desktop icon"
+msgstr ""
+
+#: collins/sidebar.py:1586
+msgid "About Collins"
+msgstr ""
+
+#: collins/sidebar.py:1605
+msgid "Add project"
+msgstr ""
+
+#: collins/sidebar.py:1610 collins/sidebar.py:2013
+msgid "Refresh session list and pull requests"
+msgstr ""
+
+#: collins/sidebar.py:1691
 #, python-brace-format
 msgid "{n} sessions"
 msgstr ""
 
-#: collins/sidebar.py:480
+#: collins/sidebar.py:1692
 #, python-brace-format
 msgid "{n} projects"
 msgstr ""
 
-#: collins/sidebar.py:484
+#: collins/sidebar.py:1696
 #, python-brace-format
 msgid "{n} open"
 msgstr ""
 
-#: collins/sidebar.py:521
+#: collins/sidebar.py:1781
 msgid "Favorites"
 msgstr ""
 
-#: collins/sidebar.py:761
+#: collins/sidebar.py:1784
+msgid "Chats"
+msgstr ""
+
+#: collins/sidebar.py:1856 collins/window.py:2350
+msgid "Draft"
+msgstr ""
+
+#: collins/sidebar.py:2010
+msgid "Refreshing pull requests…"
+msgstr ""
+
+#: collins/sidebar.py:2108
+msgid "A session is working"
+msgstr ""
+
+#: collins/sidebar.py:2406
+msgid "Close search"
+msgstr ""
+
+#: collins/sidebar.py:2486
+msgid "Expand all groups"
+msgstr ""
+
+#: collins/sidebar.py:2486
+msgid "Collapse all groups"
+msgstr ""
+
+#: collins/sidebar.py:2610
 msgid "Open"
 msgstr ""
 
-#: collins/sidebar.py:2239
+#: collins/sidebar.py:2618
+msgid "Open in new window"
+msgstr ""
+
+#: collins/sidebar.py:2623
 msgid "Move to new window"
 msgstr ""
 
-#: collins/sidebar.py:763
+#: collins/sidebar.py:2625
 msgid "Open in Ghostty"
 msgstr ""
 
-#: collins/sidebar.py:765
+#: collins/sidebar.py:2627
 msgid "Fork session"
 msgstr ""
 
-#: collins/sidebar.py:768
+#: collins/sidebar.py:2630
 #, python-brace-format
 msgid "Continue in native chat ({mode}) (experimental)"
 msgstr ""
 
-#: collins/sidebar.py:770
+#: collins/sidebar.py:2632
 msgid "Continue in native chat (experimental)"
 msgstr ""
 
-#: collins/sidebar.py:778 collins/window.py:152 collins/filetree.py:378
-msgid "Rename…"
+#: collins/sidebar.py:2647 collins/sidebar.py:2864
+msgid "Open In…"
 msgstr ""
 
-#: collins/titles.py:143
-#, python-brace-format
-msgid "Regenerate name ({model})"
-msgstr ""
-
-#: collins/sidebar.py:2047
+#: collins/sidebar.py:2681
 msgid "Rename to match PR"
 msgstr ""
 
-#: collins/sidebar.py:2049
+#: collins/sidebar.py:2683
+#, python-brace-format
 msgid "Rename to match PR #{number}"
 msgstr ""
 
-#: collins/sidebar.py:781
+#: collins/sidebar.py:2687
 msgid "Remove from favorites"
 msgstr ""
 
-#: collins/sidebar.py:781
+#: collins/sidebar.py:2687
 msgid "Add to favorites"
 msgstr ""
 
-#: collins/sidebar.py:784
+#: collins/sidebar.py:2690
 msgid "Details…"
 msgstr ""
 
-#: collins/sidebar.py:785
+#: collins/sidebar.py:2691
 msgid "Replay…"
 msgstr ""
 
-#: collins/sidebar.py:786 collins/window.py:154
+#: collins/sidebar.py:2692 collins/window.py:500
 msgid "Copy session ID"
 msgstr ""
 
-#: collins/sidebar.py:787
+#: collins/sidebar.py:2693
 msgid "Export as Markdown…"
 msgstr ""
 
-#: collins/sidebar.py:788
+#: collins/sidebar.py:2694
 msgid "Reveal transcript"
 msgstr ""
 
-#: collins/sidebar.py:795
+#: collins/sidebar.py:2697
+msgid "Repair session link"
+msgstr ""
+
+#: collins/sidebar.py:2710
 msgid "Move transcript to trash…"
 msgstr ""
 
-#: collins/sidebar.py:796
+#: collins/sidebar.py:2711
 msgid "Delete permanently…"
 msgstr ""
 
-#: collins/sidebar.py:809
+#: collins/sidebar.py:2732
 msgid "New session here"
 msgstr ""
 
-#: collins/sidebar.py:817
+#: collins/sidebar.py:2738
+msgid "New session in new window"
+msgstr ""
+
+#: collins/sidebar.py:2749
+msgid "New session here (no worktree)"
+msgstr ""
+
+#: collins/sidebar.py:2751
+msgid "New session here (in a worktree)"
+msgstr ""
+
+#: collins/sidebar.py:2772
+msgid "New sessions use a worktree"
+msgstr ""
+
+#: collins/sidebar.py:2785
+#, python-brace-format
+msgid "Git pull ({branch})"
+msgstr ""
+
+#: collins/sidebar.py:2785
+msgid "Git pull"
+msgstr ""
+
+#: collins/sidebar.py:2805
+#, python-brace-format
+msgid "Checkout {branch}"
+msgstr ""
+
+#: collins/sidebar.py:2807
+msgid "Checkout default branch"
+msgstr ""
+
+#: collins/sidebar.py:2829
 msgid "Restore project"
 msgstr ""
 
-#: collins/sidebar.py:819
+#: collins/sidebar.py:2831
 msgid "Archive project"
 msgstr ""
 
-#: collins/sidebar.py:830
+#: collins/sidebar.py:2842
 msgid "Remove project from sidebar"
 msgstr ""
 
-#: collins/sidebar.py:861
+#: collins/sidebar.py:2939
+msgid "File Manager"
+msgstr ""
+
+#: collins/sidebar.py:2976
 msgid "All"
 msgstr ""
 
-#: collins/sidebar.py:863
+#: collins/sidebar.py:2978
 msgid "Select all (filtered) sessions"
 msgstr ""
 
-#: collins/sidebar.py:869
+#: collins/sidebar.py:2984
 msgid "Clear selection"
 msgstr ""
 
-#: collins/sidebar.py:874
+#: collins/sidebar.py:2989
 msgid "Move selected transcripts to trash…"
 msgstr ""
 
-#: collins/sidebar.py:875
+#: collins/sidebar.py:2990
 msgid "Archive selected"
 msgstr ""
 
-#: collins/sidebar.py:876
+#: collins/sidebar.py:2991
 msgid "Remove selected from favorites"
 msgstr ""
 
-#: collins/sidebar.py:877
+#: collins/sidebar.py:2992
 msgid "Add selected to favorites"
 msgstr ""
 
-#: collins/sidebar.py:878
+#: collins/sidebar.py:2993
 msgid "Open selected in tabs"
 msgstr ""
 
-#: collins/terminal.py:122
+#: collins/store.py:496
+msgid "replaced"
+msgstr ""
+
+#: collins/terminal.py:1034
 msgid "── restored panel history ──"
 msgstr ""
 
-#: collins/terminal.py:143 collins/terminal.py:382
+#: collins/terminal.py:1056 collins/terminal.py:1978
 #, python-brace-format
 msgid "failed to start shell: {msg}"
 msgstr ""
 
-#: collins/terminal.py:340
-#, python-brace-format
-msgid "warning: project dir {cwd} no longer exists, starting in {fallback}"
-msgstr ""
-
-#: collins/terminal.py:1139
-#, python-brace-format
-msgid "recreating removed worktree {path}"
-msgstr ""
-
-#: collins/terminal.py:1635
-#, python-brace-format
-msgid "couldn't create a worktree — starting the session in {cwd} instead"
-msgstr ""
-
-#: collins/terminal.py:357
-#, python-brace-format
-msgid "warning: `{cli}` not found in PATH — starting a plain shell"
-msgstr ""
-
-#: collins/terminal.py:422 collins/filetree.py:374
-msgid "Copy"
-msgstr ""
-
-#: collins/terminal.py:423 collins/filetree.py:361 collins/filetree.py:376
-msgid "Paste"
-msgstr ""
-
-#: collins/terminal.py:424
-msgid "Select All"
-msgstr ""
-
-#: collins/terminal.py:439
-msgid "Find in terminal…"
-msgstr ""
-
-#: collins/terminal.py:446
-msgid "Previous match"
-msgstr ""
-
-#: collins/terminal.py:448
-msgid "Next match"
-msgstr ""
-
-#: collins/terminal.py:541
-msgid "Show/hide terminal panel (Ctrl+J)"
-msgstr ""
-
-#: collins/panelstrip.py:137
-msgid "Move this tab to the other side (Ctrl+;)"
-msgstr ""
-
-#: collins/panelstrip.py:138
-msgid "Overlay this tab over the whole session"
-msgstr ""
-
-#: collins/paneldock.py:80
-msgid "Restore this tab to its size and place in the panel"
-msgstr ""
-
-#: collins/terminal.py:633
-msgid "A command is still running in this terminal tab and will be terminated."
-msgstr ""
-
-#: collins/terminal.py:521
-msgid "New terminal tab"
-msgstr ""
-
-#: collins/terminal.py:576
+#: collins/terminal.py:1151
 #, python-brace-format
 msgid "Terminal {number}"
 msgstr ""
 
-#: collins/usagepanel.py:35
-msgid "Not logged in to Claude"
+#: collins/terminal.py:1387
+msgid "Open composer"
 msgstr ""
 
-#: collins/usagepanel.py:36 collins/usagepanel.py:37
-msgid "Claude login expired — run claude to refresh"
+#: collins/terminal.py:1468 collins/terminal.py:3111
+msgid "Images and files this session has seen"
 msgstr ""
 
-#: collins/usagepanel.py:38
-msgid "Usage unavailable (offline)"
+#: collins/terminal.py:1867
+msgid "the agent didn't start — your prompt is kept in the composer"
 msgstr ""
 
-#: collins/usagepanel.py:44
-msgid "Session (5h)"
-msgstr ""
-
-#: collins/usagepanel.py:46
-msgid "Week — all models"
-msgstr ""
-
-#: collins/usagepanel.py:49
+#: collins/terminal.py:1894
 #, python-brace-format
-msgid "Week — {model}"
+msgid "recreating removed worktree {path}"
 msgstr ""
 
-#: collins/usagepanel.py:50
-msgid "Week — model"
-msgstr ""
-
-#: collins/usagepanel.py:115
+#: collins/terminal.py:1921
 #, python-brace-format
-msgid "Resets in {t}"
+msgid "warning: project dir {cwd} no longer exists, starting in {fallback}"
 msgstr ""
 
-#: collins/usagepanel.py:126
-msgid "Claude usage"
-msgstr ""
-
-#: collins/usagepanel.py:131
-msgid "Refresh usage"
-msgstr ""
-
-#: collins/usagepanel.py:164
-msgid "Checking usage…"
-msgstr ""
-
-#: collins/usagepanel.py:275
+#: collins/terminal.py:1942
 #, python-brace-format
-msgid "As of {n}m ago"
+msgid "warning: `{cli}` not found in PATH — starting a plain shell"
 msgstr ""
 
-#: collins/usagepanel.py:279 collins/usagepanel.py:295
-msgid "Usage unavailable"
-msgstr ""
-
-#: collins/usagepanel.py:346
-msgid "Couldn't refresh usage"
-msgstr ""
-
-#: collins/usagepanel.py:347
-msgid "Dismiss"
-msgstr ""
-
-#: collins/usagepanel.py:304
+#: collins/terminal.py:2034
 #, python-brace-format
-msgid "{used} of {limit}"
+msgid "couldn't create a worktree — starting the session in {cwd} instead"
 msgstr ""
 
-#: collins/usagepanel.py:308 collins/usagepanel.py:319
-msgid " — limit reached"
+#: collins/terminal.py:2083
+msgid "Select All"
 msgstr ""
 
-#: collins/usagepanel.py:310
-msgid "Extra usage"
+#: collins/terminal.py:2098
+msgid "Find in terminal…"
 msgstr ""
 
-#: collins/usagepanel.py:317
-#, python-brace-format
-msgid "Extra usage: {used}"
+#: collins/terminal.py:2268
+msgid "Every pull request this session has opened"
 msgstr ""
 
-#: collins/window.py:153
-msgid "Set emoji…"
+#: collins/terminal.py:2299
+msgid "Open this folder in your file manager"
 msgstr ""
 
-#: collins/window.py:155
-msgid "Close"
+#: collins/terminal.py:2306
+msgid "Show/hide terminal panel"
 msgstr ""
 
-#: collins/window.py:164
-msgid "Toggle sidebar (F9)"
+#: collins/terminal.py:2308
+msgid "Right-click to open this folder in your terminal"
 msgstr ""
 
-#: collins/window.py:170
-#, python-brace-format
-msgid "New {name} session…"
-msgstr ""
-
-#: collins/window.py:179
-#, python-brace-format
-msgid "Continue last {name} session…"
-msgstr ""
-
-#: collins/window.py:185
-#, python-brace-format
-msgid "New {name} native chat ({mode}) (experimental)"
-msgstr ""
-
-#: collins/window.py:189
-#, python-brace-format
-msgid "New {name} native chat (experimental)…"
-msgstr ""
-
-#: collins/window.py:191
-msgid "New window"
-msgstr ""
-
-#: collins/window.py:193
-msgid "New session (Ctrl+Shift+T)"
-msgstr ""
-
-#: collins/window.py:199
-msgid "Show or hide the tab bar"
-msgstr ""
-
-#: collins/window.py:207
-msgid "Exit session and close tab"
-msgstr ""
-
-#: collins/window.py:211
-msgid "Background session and close tab"
-msgstr ""
-
-#: collins/window.py:3705
-msgid "Archived “{name}”"
-msgstr ""
-
-#: collins/window.py:3707
-msgid "Archived {n} sessions"
-msgstr ""
-
-#: collins/window.py:3709
-msgid "Undo"
-msgstr ""
-
-#: collins/window.py:217
-msgid "No session open"
-msgstr ""
-
-#: collins/window.py:218
-msgid "Pick a session from the sidebar, or start a new one."
-msgstr ""
-
-#: collins/window.py:395
-msgid ""
-"Agents are asked to exit cleanly first; other running commands will be "
-"terminated."
-msgstr ""
-
-#: collins/window.py:398
-msgid ""
-"Agents are asked to exit cleanly first; other running commands will be "
-"terminated. Backgrounding instead keeps the agents running detached — reopen "
-"a session later to re-attach."
-msgstr ""
-
-#: collins/window.py:404
-#, python-brace-format
-msgid "Close window with {n} active session(s)?"
-msgstr ""
-
-#: collins/window.py:406
-msgid "Exit Sessions"
-msgstr ""
-
-#: collins/window.py:410
-msgid "Background Sessions"
-msgstr ""
-
-#: collins/window.py:551 collins/window.py:1633
-msgid "Some transcripts could not be trashed"
-msgstr ""
-
-#: collins/window.py:555
-#, python-brace-format
-msgid "Move {n} transcript(s) to trash?"
-msgstr ""
-
-#: collins/window.py:556
-msgid "The files are moved to the trash and can be restored."
-msgstr ""
-
-#: collins/window.py:557 collins/window.py:1645 collins/window.py:1711
-msgid "Move to Trash"
-msgstr ""
-
-#: collins/window.py:677 collins/window.py:740 collins/window.py:759
-#: collins/window.py:873
-msgid "Choose project directory"
-msgstr ""
-
-#: collins/window.py:899
-#, python-brace-format
-msgid "Chat — {dir}"
-msgstr ""
-
-#: collins/window.py:920
-#, python-brace-format
-msgid "Chat — {name}"
-msgstr ""
-
-#: collins/window.py:936
-#, python-brace-format
-msgid "Replay — {name}"
-msgstr ""
-
-#: collins/window.py:1009 collins/window.py:1013
-msgid "Close tab with an active session?"
-msgstr ""
-
-#: collins/window.py:1010
-msgid ""
-"The agent is asked to exit cleanly first; the command running in this tab's "
-"terminal panel will be terminated."
-msgstr ""
-
-#: collins/window.py:1014
-msgid "The agent is asked to exit cleanly first."
-msgstr ""
-
-#: collins/window.py:1016
-msgid "Close tab with a running command?"
-msgstr ""
-
-#: collins/window.py:1017
-msgid ""
-"A command is still running in this tab's terminal panel and will be "
-"terminated."
-msgstr ""
-
-#: collins/window.py:1020
-msgid ""
-"Backgrounding instead keeps the agent running detached — reopen the session "
-"later to re-attach."
-msgstr ""
-
-#: collins/window.py:1023
-msgid "Exit Session"
-msgstr ""
-
-#: collins/window.py:1023
-msgid "Close Tab"
-msgstr ""
-
-#: collins/panelstrip.py:290
-msgid "Close tabs with running commands?"
-msgstr ""
-
-#: collins/panelstrip.py:291
-msgid "A command is still running in one of these tabs and will be terminated."
-msgid_plural ""
-"Commands are still running in {count} of these tabs and will be terminated."
-msgstr[0] ""
-msgstr[1] ""
-
-#: collins/panelstrip.py:296
-msgid "Close Tabs"
-msgstr ""
-
-#: collins/window.py:1036
-msgid "Background Session"
-msgstr ""
-
-#: collins/window.py:1383
-msgid "Tab name"
-msgstr ""
-
-#: collins/window.py:1557
-msgid "Export session as Markdown"
-msgstr ""
-
-#: collins/window.py:1575
-msgid "Export failed"
-msgstr ""
-
-#: collins/window.py:1643
-#, python-brace-format
-msgid "Delete {n} archived session(s)?"
-msgstr ""
-
-#: collins/window.py:1667
-#, python-brace-format
-msgid "Keep the {p} emptied project(s) in the sidebar"
-msgstr ""
-
-#: collins/window.py:1699
-msgid "Could not trash transcript"
-msgstr ""
-
-#: collins/window.py:1705
-msgid "Move transcript to trash?"
-msgstr ""
-
-#: collins/window.py:1706
-#, python-brace-format
-msgid "“{name}” will be removed from Claude's history."
-msgstr ""
-
-#: collins/window.py:1710
-msgid "The file is moved to the trash and can be restored."
-msgstr ""
-
-#: collins/window.py:1726
-msgid "Could not delete transcript"
-msgstr ""
-
-#: collins/window.py:1732
-msgid "Delete session permanently?"
-msgstr ""
-
-#: collins/window.py:1733
-#, python-brace-format
-msgid ""
-"“{name}” and its transcript file will be permanently deleted. This cannot be "
-"undone."
-msgstr ""
-
-#: collins/window.py:1735
-msgid "Delete permanently"
-msgstr ""
-
-#: collins/window.py:1743
-msgid "Open session transcript"
-msgstr ""
-
-#: collins/window.py:1745
-msgid "Session transcripts (*.jsonl)"
-msgstr ""
-
-#: collins/window.py:1765
-msgid "Could not open transcript"
-msgstr ""
-
-#: collins/window.py:1766
-msgid "The file couldn't be read as a session transcript."
-msgstr ""
-
-#: collins/window.py:1781
-msgid ""
-"Manage and resume your AI coding agent sessions.\n"
-"\n"
-"Unofficial community tool — not affiliated with or endorsed by Anthropic."
-msgstr ""
-
-#: collins/editor.py:151
-#, python-brace-format
-msgid "{name} is outside this project and can't be opened here."
-msgstr ""
-
-#: collins/editor.py:207
-#, python-brace-format
-msgid "Couldn't open {name}: {message}"
-msgstr ""
-
-#: collins/editor.py:230
-#, python-brace-format
-msgid "{name} is too large to open in the editor."
-msgstr ""
-
-#: collins/editor.py:232
-#, python-brace-format
-msgid "{name} looks like a binary file and can't be opened here."
-msgstr ""
-
-#: collins/editor.py:234
-#, python-brace-format
-msgid "{name} is not a file."
-msgstr ""
-
-#: collins/editor.py:235
-#, python-brace-format
-msgid "Couldn't open {name}."
-msgstr ""
-
-#: collins/editor.py:249
-#, python-brace-format
-msgid "{name} changed on disk"
-msgstr ""
-
-#: collins/editor.py:250
-msgid "Overwrite it with the changes you made here?"
-msgstr ""
-
-#: collins/editor.py:251
-msgid "Overwrite"
-msgstr ""
-
-#: collins/editor.py:267
-#, python-brace-format
-msgid "Couldn't save {name}: {message}"
-msgstr ""
-
-#: collins/editor.py:300
-#, python-brace-format
-msgid "{name} was deleted."
-msgstr ""
-
-#: collins/editor.py:304
-#, python-brace-format
-msgid "{name} changed on disk."
-msgstr ""
-
-#: collins/editor.py:305
-msgid "Reload"
-msgstr ""
-
-#: collins/editor.py:324
-#, python-brace-format
-msgid "Couldn't reload {name}: {message}"
-msgstr ""
-
-#: collins/dialogs.py:180
-msgid "Save Changes?"
-msgstr ""
-
-#: collins/dialogs.py:182
-msgid "Don't Save"
-msgstr ""
-
-#: collins/editor.py:432 collins/window.py:610
-#, python-brace-format
-msgid ""
-"“{name}” contains unsaved changes. Changes which are not saved will be "
-"permanently lost."
-msgstr ""
-
-#: collins/window.py:615
-#, python-brace-format
-msgid ""
-"{n} files contain unsaved changes. Changes which are not saved will be "
-"permanently lost."
-msgstr ""
-
-#: collins/editor.py:402
-msgid "Find in file…"
-msgstr ""
-
-#: collins/editor.py:514
-msgid "Save (Ctrl+S)"
-msgstr ""
-
-#: collins/editor.py:534
-msgid "Plain Text"
-msgstr ""
-
-#: collins/terminal.py:896 collins/terminal.py:1643
+#: collins/terminal.py:2347 collins/terminal.py:5539 collins/terminal.py:5574
 msgid "Show editor panel"
 msgstr ""
 
-#: collins/terminal.py:1636
-msgid "Hide editor panel"
+#: collins/terminal.py:2453
+#, python-brace-format
+msgid "Move terminals to {name}?"
 msgstr ""
 
-#: collins/editor.py:197
-msgid "Back to files"
-msgstr ""
-
-#: collins/editor.py:538
-msgid "Move editor to its own window"
-msgstr ""
-
-#: collins/terminal.py:1699
-msgid "Bring editor back into this tab"
-msgstr ""
-
-#: collins/editorwindow.py:73
-msgid "Move editor back into its tab"
-msgstr ""
-
-#: collins/terminal.py:905
+#: collins/terminal.py:2455
+#, python-brace-format
 msgid ""
-"Editor unavailable — install GtkSourceView 5 (gir1.2-gtksource-5) and "
-"restart Collins"
-msgstr ""
-
-#: collins/prefs.py:302
-msgid "Editor"
-msgstr ""
-
-#: collins/prefs.py:310 collins/prefs.py:364
-msgid "Follow app theme"
-msgstr ""
-
-#: collins/prefs.py:330
-msgid "Applies to the editor panel"
-msgstr ""
-
-#: collins/prefs.py:340
-msgid "Reset to system monospace"
-msgstr ""
-
-#: collins/prefs.py:345
-msgid "Show line numbers"
-msgstr ""
-
-#: collins/prefs.py:351
-msgid "Show hidden files"
-msgstr ""
-
-#: collins/prefs.py:352
-msgid "Show dotfiles in the editor's file tree"
-msgstr ""
-
-#: collins/prefs.py:359
-msgid "Open in a window on small screens"
-msgstr ""
-
-#: collins/prefs.py:360
-msgid ""
-"On screens this many pixels wide or narrower (after display scaling), the "
-"editor opens in its own window instead of a panel (0 = always open as a "
-"panel)"
-msgstr ""
-
-#: collins/prefs.py:989
-msgid "Single column when narrow"
-msgstr ""
-
-#: collins/prefs.py:990
-msgid ""
-"An editor column this many pixels wide or narrower shows the file tree and "
-"the open file one at a time, with a back button beside the tabs (0 = always "
-"side by side)"
-msgstr ""
-
-#: collins/quickopen.py:66
-msgid "Open File"
-msgstr ""
-
-#: collins/quickopen.py:76
-msgid "Open a file…"
-msgstr ""
-
-#: collins/quickopen.py:160
-msgid "Indexing project files…"
-msgstr ""
-
-#: collins/quickopen.py:162
-msgid "No files found in this project."
-msgstr ""
-
-#: collins/quickopen.py:165
-msgid "Project is large — only the first {count} files are searchable."
-msgstr ""
-
-#: collins/editor.py:168
-msgid "Agent files"
-msgstr ""
-
-#: collins/chatbubbles.py:73
-msgid "Open {name} in the editor"
-msgstr ""
-
-#: collins/sidebar.py:1439
-msgid "Repair session link"
-msgstr ""
-
-#: collins/window.py:2137
-msgid "No matching agent"
-msgstr ""
-
-#: collins/window.py:2138
-msgid ""
-"No background agent matches this session — either its agent is gone, or "
-"more than one candidate matched and guessing would link the wrong one. The "
-"transcript itself is intact."
-msgstr ""
-
-#: collins/window.py:2158
-msgid "Session linked"
-msgstr ""
-
-#: collins/window.py:2159
-msgid "Linked to its running background agent."
-msgstr ""
-
-#: collins/window.py:2164
-msgid "Nothing to repair"
-msgstr ""
-
-#: collins/window.py:2165
-msgid ""
-"This session is already its own background agent. Opening it attaches to "
-"that agent."
-msgstr ""
-
-#: collins/editor.py:164 collins/editor.py:281 collins/filetree.py:373
-msgid "Add to chat"
-msgstr ""
-
-#: collins/editor.py:143
-msgid "Close other tabs"
-msgstr ""
-
-#: collins/editor.py:144
-msgid "Close tabs to the right"
-msgstr ""
-
-#: collins/editor.py:145
-msgid "Close all tabs"
-msgstr ""
-
-#: collins/editor.py:314
-msgid "Couldn't rename {name}: {message}"
-msgstr ""
-
-#: collins/editor.py:326
-msgid "A name is needed to rename {name}."
-msgstr ""
-
-#: collins/editor.py:328
-msgid "“{new_name}” isn't a name — renaming can't move things elsewhere."
-msgstr ""
-
-#: collins/editor.py:332
-msgid "“{new_name}” already exists here."
-msgstr ""
-
-#: collins/editor.py:334
-msgid "{name} is no longer there."
-msgstr ""
-
-#: collins/editor.py:335
-msgid "{name} can't be renamed to something outside this project."
-msgstr ""
-
-#: collins/filetree.py:374
-msgid "Cut"
-msgstr ""
-
-#: collins/editor.py:363
-msgid "There's nothing on the clipboard to paste here."
-msgstr ""
-
-#: collins/editor.py:393
-msgid "{count} item couldn't be pasted."
-msgid_plural "{count} items couldn't be pasted."
+"This session started in a worktree at {path}. The terminal open beside it is "
+"still in the project directory — change its directory to the worktree? A "
+"terminal running a command is left alone."
+msgid_plural ""
+"This session started in a worktree at {path}. The {count} terminals open "
+"beside it are still in the project directory — change their directory to the "
+"worktree? A terminal running a command is left alone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: collins/editor.py:404
-msgid "{name} can't be pasted into itself."
+#: collins/terminal.py:2465
+msgid "Change Directory"
 msgstr ""
 
-#: collins/editor.py:406
-msgid "That folder is no longer there."
-msgstr ""
+#: collins/terminal.py:2481
+#, python-brace-format
+msgid "{n} terminal is running a command and stayed where it was"
+msgid_plural "{n} terminals are running commands and stayed where they were"
+msgstr[0] ""
+msgstr[1] ""
 
-#: collins/editor.py:408
-msgid "{name} can't be pasted outside this project."
-msgstr ""
-
-#: collins/editor.py:410
-msgid "There are already too many copies of {name} here."
-msgstr ""
-
-#: collins/editor.py:411
-msgid "Couldn't paste {name}: {message}"
-msgstr ""
-
-#: collins/terminal.py:1199
-msgid "Add to chat: the agent isn't running in this tab"
-msgstr ""
-
-#: collins/terminal.py:2050
-msgid "Composer: the agent isn't running in this tab"
-msgstr ""
-
-#: collins/terminal.py
-msgid "Model switch: the agent isn't running in this tab"
-msgstr ""
-
-#: collins/terminal.py
+#: collins/terminal.py:2520
 msgid "Click to switch the model"
 msgstr ""
 
-#: collins/composer.py
-msgid "Switch the model for this session"
+#: collins/terminal.py:2542 collins/terminal.py:2546
+#, python-brace-format
+msgid "Effort: {level}"
 msgstr ""
 
-#: collins/modelmenu.py
-msgid "Loading models…"
+#: collins/terminal.py:2543
+msgid "Click to switch the effort level"
 msgstr ""
 
-#: collins/modelmenu.py
-msgid "Copy model id"
+#: collins/terminal.py:3109
+#, python-brace-format
+msgid "Images and files this session has seen ({n} new)"
 msgstr ""
 
-#: collins/terminal.py:997
-msgid "Open composer (Ctrl+.)"
+#: collins/terminal.py:3430
+msgid "No pull request found for this branch"
 msgstr ""
 
-#: collins/composer.py:110 collins/terminal.py:2135
-msgid "Attach file"
+#: collins/terminal.py:3432
+msgid "Re-check this branch's pull requests"
 msgstr ""
 
-#: collins/composer.py
-msgid "Remove image"
+#: collins/terminal.py:3434
+msgid "Look for this branch's pull request"
 msgstr ""
 
-#: collins/composer.py
-msgid "Composer"
+#: collins/terminal.py:3528
+msgid "Add to chat: the agent isn't running in this tab"
 msgstr ""
 
-#: collins/composer.py
-msgid "Dock the composer below the terminal"
-msgstr ""
-
-#: collins/composer.py
-msgid "Float the composer over the terminal"
-msgstr ""
-
-#: collins/composer.py:118
-msgid "Close composer and keep the text in the terminal"
-msgstr ""
-
-#: collins/terminal.py:1205
+#: collins/terminal.py:3534 collins/terminal.py:4578
 msgid "Add to chat isn't available for this file"
 msgstr ""
 
-#: collins/terminal.py:1472
-msgid "couldn't save a copy of the dropped image"
-msgstr ""
-
-#: collins/composer.py
-msgid "couldn't save a copy of the pasted image"
-msgstr ""
-
-#: collins/composer.py
-msgid "skipped {n} item that isn't a local file"
-msgid_plural "skipped {n} items that aren't local files"
-msgstr[0] ""
-msgstr[1] ""
-
-#: collins/terminal.py:1485
+#: collins/terminal.py:3668
+#, python-brace-format
 msgid "skipped {n} dropped item that isn't a local file"
 msgid_plural "skipped {n} dropped items that aren't local files"
 msgstr[0] ""
 msgstr[1] ""
 
-#: collins/terminal.py:1508
-msgid "couldn't reference {n} dropped file name"
-msgid_plural "couldn't reference {n} dropped file names"
-msgstr[0] ""
-msgstr[1] ""
-
-#: collins/terminal.py:1112
-msgid "Open this folder in your file manager"
+#: collins/terminal.py:3846 collins/terminal.py:4248
+msgid "Composer: the agent isn't running in this tab"
 msgstr ""
 
-#: collins/prefs.py:686
-msgid "Startup"
+#: collins/terminal.py:3860 collins/terminal.py:4480
+msgid "Composer: the input box holds a paste Collins can't read"
 msgstr ""
 
-#: collins/prefs.py:688
-msgid "Reopen the last session"
+#: collins/terminal.py:4636
+msgid "Model switch: the agent isn't running in this tab"
 msgstr ""
 
-#: collins/prefs.py:690
-msgid ""
-"Open the session that was active when the app was last closed. Off, the app "
-"launches with no session open"
+#: collins/terminal.py:4646
+msgid "Effort switch: the agent isn't running in this tab"
 msgstr ""
 
-#: collins/prefs.py:284
-msgid "New sessions"
+#: collins/terminal.py:4750
+msgid "This session isn't at an empty prompt."
 msgstr ""
 
-#: collins/prefs.py:286
-msgid "Start new sessions in a git worktree"
+#: collins/terminal.py:5532
+msgid "Hide editor panel"
 msgstr ""
 
-#: collins/prefs.py:288
-msgid ""
-"Git projects only; each new session works in its own fresh worktree, so it "
-"won't see uncommitted local changes. Right-click a project header to "
-"override per project"
+#: collins/terminal.py:5553
+msgid "Bring editor back into this tab"
 msgstr ""
 
-#: collins/sidebar.py:1549
-msgid "New sessions use a worktree"
-msgstr ""
-
-#: collins/sidebar.py:1541
-msgid "New session here (no worktree)"
-msgstr ""
-
-#: collins/sidebar.py:1542
-msgid "New session here (in a worktree)"
-msgstr ""
-
-#: collins/window.py:1230
+#: collins/terminal.py:5830
 #, python-brace-format
-msgid "New session in {project} (no worktree)"
+msgid "Open in {name}"
 msgstr ""
 
-#: collins/window.py:1232
+#: collins/titles.py:155
 #, python-brace-format
-msgid "New session in {project} (in a worktree)"
-msgstr ""
-
-#: collins/window.py:3789
-msgid "No pull request is linked to this session yet"
-msgstr ""
-
-#: collins/editor.py:376
-msgid "{name} couldn't be decoded as an image."
-msgstr ""
-
-#: collins/editor.py:774
-msgid "Image"
-msgstr ""
-
-#: collins/lightbox.py:67
-msgid "Open in Editor"
-msgstr ""
-
-#: collins/lightbox.py:77
-msgid "Open With…"
-msgstr ""
-
-#: collins/lightbox.py:88
-msgid "Couldn't display image"
-msgstr ""
-
-#: collins/lightbox.py:107
-msgid "Zoom out"
-msgstr ""
-
-#: collins/lightbox.py:108
-msgid "Zoom in"
-msgstr ""
-
-#: collins/dialogs.py:112
-#, python-brace-format
-msgid "Move editor to {name}?"
-msgstr ""
-
-#: collins/dialogs.py:113
-#, python-brace-format
-msgid ""
-"This session is now working in {path}. One open file has unsaved changes and "
-"also exists there — choose what happens to it."
-msgid_plural ""
-"This session is now working in {path}. {count} open files have unsaved "
-"changes and also exist there — choose what happens to each."
-msgstr[0] ""
-msgstr[1] ""
-
-#: collins/dialogs.py:140
-msgid "Stay"
-msgstr ""
-
-#: collins/dialogs.py:141
-msgid "Go on editing this file, where your unsaved changes belong"
-msgstr ""
-
-#: collins/dialogs.py:145
-msgid "Take edits"
-msgstr ""
-
-#: collins/dialogs.py:146
-msgid ""
-"Move this tab to the new copy, keeping your unsaved changes — saving will "
-"write them over whatever that copy holds"
-msgstr ""
-
-#: collins/dialogs.py:153
-msgid "Use new"
-msgstr ""
-
-#: collins/dialogs.py:154
-msgid "Open the new copy and discard your unsaved changes"
-msgstr ""
-
-#: collins/dialogs.py:188
-msgid "Don't Move"
-msgstr ""
-
-#: collins/dialogs.py:189
-msgid "Move Editor"
-msgstr ""
-
-#: collins/dialogs.py:687
-msgid "Generating icon…"
-msgstr ""
-
-#: collins/dialogs.py:816
-msgid "Pick a model to generate an icon"
-msgstr ""
-
-#: collins/dialogs.py:824
-msgid "Generate"
-msgstr ""
-
-#: collins/dialogs.py:836
-msgid "Choose a model…"
-msgstr ""
-
-#: collins/dialogs.py:691
-msgid "At sidebar size"
-msgstr ""
-
-#: collins/dialogs.py:709
-msgid "Optional adjustments, e.g. “make it blue”"
-msgstr ""
-
-#: collins/dialogs.py:710
-msgid "Regenerate"
-msgstr ""
-
-#: collins/dialogs.py:736 collins/dialogs.py:744 collins/sidebar.py:1815
-msgid "Generate Icon"
-msgstr ""
-
-#: collins/dialogs.py:782
-msgid "the generated SVG could not be rendered"
-msgstr ""
-
-#: collins/dialogs.py:796
-#, python-brace-format
-msgid "Icon generation failed: {error}"
-msgstr ""
-
-#: collins/dialogs.py:815
-#, python-brace-format
-msgid "Saving failed: {error}"
-msgstr ""
-
-#: collins/editor.py:979
-#, python-brace-format
-msgid "Session moved to {name}"
-msgstr ""
-
-#: collins/editor.py:980
-msgid "Follow"
-msgstr ""
-
-#: collins/ghwelcome.py:74
-msgid "Open, every check passed"
-msgstr ""
-
-#: collins/ghwelcome.py:78
-msgid "Checks still running"
-msgstr ""
-
-#: collins/ghwelcome.py:82
-msgid "A check failed"
-msgstr ""
-
-#: collins/ghwelcome.py:86
-msgid "A reviewer is waiting on a reply"
-msgstr ""
-
-#: collins/ghwelcome.py:90
-msgid "Draft, and the branch conflicts"
-msgstr ""
-
-#: collins/ghwelcome.py:92
-msgid "Merged"
-msgstr ""
-
-#: collins/ghwelcome.py:170
-msgid "Collins is better with the GitHub CLI"
-msgstr ""
-
-#: collins/ghwelcome.py:173
-msgid ""
-"Collins follows the pull requests your sessions open — and acts on them — "
-"through gh, GitHub's own command-line tool, which isn't installed here."
-msgstr ""
-
-#: collins/ghwelcome.py:178
-msgid ""
-"Collins follows the pull requests your sessions open — and acts on them — "
-"through gh, GitHub's own command-line tool, which is installed here but "
-"never signed in."
-msgstr ""
-
-#: collins/ghwelcome.py:185
-msgid "Not now"
-msgstr ""
-
-#: collins/ghwelcome.py:192
-msgid "Get the GitHub CLI"
-msgstr ""
-
-#: collins/ghwelcome.py:192
-msgid "Copy command"
-msgstr ""
-
-#: collins/ghwelcome.py:217
-msgid "With it, every session's pull requests carry their status:"
-msgstr ""
-
-#: collins/ghwelcome.py:219
-msgid "…and a click on one does something about it:"
-msgstr ""
-
-#: collins/ghwelcome.py:271
-msgid "Install it from cli.github.com — Collins picks it up the next time it starts."
-msgstr ""
-
-#: collins/ghwelcome.py:276
-msgid "Run this once in any terminal. Collins asks for no login of its own."
-msgstr ""
-
-#: collins/ghwelcome.py:254
-msgid "Don't show this again"
-msgstr ""
-
-#: collins/prefs.py:661
-msgid "Session tools"
+msgid "Regenerate name ({model})"
 msgstr ""
 
 #: collins/tokensettings.py:42
@@ -2239,712 +3284,803 @@ msgid ""
 "prompt."
 msgstr ""
 
-#: collins/tokensettings.py:323
-msgid "Auto-renew the Claude login"
-msgstr ""
-
-#: collins/tokensettings.py:325
-msgid ""
-"When the login the usage panel and model list are fetched with has expired "
-"— at launch, or when a fetch is refused later — run one throwaway claude -p "
-"(a one-word prompt on Haiku) so the CLI renews it; off, the panel says to "
-"run claude yourself"
-msgstr ""
-
-#: collins/tokensettings.py:252
-#, python-brace-format
-msgid "{status} · free, no tokens"
-msgstr ""
-
 #: collins/tokensettings.py:56
+msgid "Built-in MCP tools"
+msgstr ""
+
+#: collins/tokensettings.py:58
 msgid ""
 "Every enabled tool's definition rides in each session's context, "
 "read_terminal sends the panel's text into the conversation, and a session "
-"start_session starts is titled like any other. Turning one off takes "
-"effect immediately; sessions already running are only offered the tool "
-"again once they restart"
+"start_session starts is titled like any other. Turning one off takes effect "
+"immediately; sessions already running are only offered the tool again once "
+"they restart"
 msgstr ""
 
-#: collins/tokensettings.py:71
+#: collins/tokensettings.py:73
 msgid "Name its own session"
 msgstr ""
 
-#: collins/tokensettings.py:72
+#: collins/tokensettings.py:74
 msgid "set_session_title — the session titles its own tab and sidebar row"
 msgstr ""
 
-#: collins/tokensettings.py:75
+#: collins/tokensettings.py:77
 msgid "Open files in the editor"
 msgstr ""
 
-#: collins/tokensettings.py:76
+#: collins/tokensettings.py:78
 msgid "open_in_editor — put a file from the project on screen, at a line"
 msgstr ""
 
-#: collins/tokensettings.py:79
+#: collins/tokensettings.py:81
 msgid "Show images"
 msgstr ""
 
-#: collins/tokensettings.py:83
-msgid "show_image — a screenshot, plot, render, or image URL in the in-app lightbox"
-msgstr ""
-
-#: collins/tokensettings.py:86
-msgid "Send desktop notifications"
-msgstr ""
-
-#: collins/tokensettings.py:87
+#: collins/tokensettings.py:85
 msgid ""
-"notify_user — a notification titled with the session; clicking it opens the "
-"tab"
+"show_image — a screenshot, plot, render, or image URL in the in-app lightbox"
+msgstr ""
+
+#: collins/tokensettings.py:88
+msgid "Send notifications"
 msgstr ""
 
 #: collins/tokensettings.py:90
+msgid ""
+"notify_user — a card in the window or a desktop notification, titled with "
+"the session; clicking it opens the tab"
+msgstr ""
+
+#: collins/tokensettings.py:95
 msgid "Attach pull requests"
 msgstr ""
 
-#: collins/tokensettings.py:91
+#: collins/tokensettings.py:96
 msgid ""
 "attach_pr — put a pull request on the session's own footer and sidebar row"
 msgstr ""
 
-#: collins/tokensettings.py:94
+#: collins/tokensettings.py:99
 msgid "Start sessions in the background"
 msgstr ""
 
-#: collins/tokensettings.py:95
+#: collins/tokensettings.py:100
 msgid ""
 "start_session — spawn a sibling agent in a new background tab, with a prompt"
 msgstr ""
 
-#: collins/tokensettings.py:98
+#: collins/tokensettings.py:103
 msgid "Read the terminal panel"
 msgstr ""
 
-#: collins/tokensettings.py:101
+#: collins/tokensettings.py:106
 msgid ""
 "read_terminal — the panel tabs' text and scrollback, your own typing included"
 msgstr ""
 
-#: collins/tokensettings.py:104
+#: collins/tokensettings.py:109
 msgid "Run commands in the terminal panel"
 msgstr ""
 
-#: collins/tokensettings.py:105
+#: collins/tokensettings.py:110
 msgid ""
 "run_in_terminal — type a command into an idle panel tab (or a new one) and "
 "run it"
 msgstr ""
 
-#: collins/welcome.py:127
+#: collins/tokensettings.py:132
+msgid "Default (latest Haiku)"
+msgstr ""
+
+#: collins/tokensettings.py:133
+msgid "Default (latest Sonnet)"
+msgstr ""
+
+#: collins/tokensettings.py:148
+msgid "Session title model"
+msgstr ""
+
+#: collins/tokensettings.py:150
+msgid ""
+"Names each new session from its first prompt — every session Collins sees "
+"under ~/.claude/projects, including ones an agent or a terminal started. "
+"None: sessions keep the first words of their prompt, which costs nothing"
+msgstr ""
+
+#: collins/tokensettings.py:158
+msgid "Icon generation model"
+msgstr ""
+
+#: collins/tokensettings.py:160
+msgid ""
+"Model the sidebar's Generate Icon dialog starts with. None: the dialog waits "
+"for you to pick a model and click Generate"
+msgstr ""
+
+#: collins/tokensettings.py:175
+msgid "Model list"
+msgstr ""
+
+#: collins/tokensettings.py:176 collins/tokensettings.py:290
+msgid "Checking…"
+msgstr ""
+
+#: collins/tokensettings.py:180
+msgid ""
+"Ask Anthropic for the model list now, rather than waiting for the saved one "
+"to age out"
+msgstr ""
+
+#: collins/tokensettings.py:258
+#, python-brace-format
+msgid "{status} · free, no tokens"
+msgstr ""
+
+#: collins/tokensettings.py:274
+msgid ""
+"Couldn't reach Anthropic — offering the CLI's aliases (opus, sonnet, haiku)"
+msgstr ""
+
+#: collins/tokensettings.py:282
+#, python-brace-format
+msgid "Couldn't reach Anthropic — still showing the list fetched {when}"
+msgstr ""
+
+#: collins/tokensettings.py:285
+#, python-brace-format
+msgid "{count} models, updated {when}"
+msgstr ""
+
+#: collins/tokensettings.py:364
+msgid "Auto-renew the Claude login"
+msgstr ""
+
+#: collins/tokensettings.py:366
+msgid ""
+"When the login the usage panel and model list are fetched with has expired — "
+"at launch, or when a fetch is refused later — run one throwaway claude -p (a "
+"one-word prompt on Haiku) so the CLI renews it; off, the panel says to run "
+"claude yourself"
+msgstr ""
+
+#: collins/traymodel.py:169
+msgid "no sessions open"
+msgstr ""
+
+#: collins/traymodel.py:245
+msgid "Show Collins (Hidden)"
+msgstr ""
+
+#: collins/traymodel.py:245
+msgid "Show Collins"
+msgstr ""
+
+#: collins/updatecheck.py:418
+#, python-brace-format
+msgid "Collins {version} is available"
+msgstr ""
+
+#: collins/updatecheck.py:420
+#, python-brace-format
+msgid "You're running {version}. Click to open the release on GitHub"
+msgstr ""
+
+#: collins/usagepanel.py:38
+msgid "Not logged in to Claude"
+msgstr ""
+
+#: collins/usagepanel.py:39 collins/usagepanel.py:40
+msgid "Claude login expired — run claude to refresh"
+msgstr ""
+
+#: collins/usagepanel.py:41
+msgid "Usage unavailable (offline)"
+msgstr ""
+
+#: collins/usagepanel.py:47
+msgid "Session (5h)"
+msgstr ""
+
+#: collins/usagepanel.py:49
+msgid "Week — all models"
+msgstr ""
+
+#: collins/usagepanel.py:52
+#, python-brace-format
+msgid "Week — {model}"
+msgstr ""
+
+#: collins/usagepanel.py:53
+msgid "Week — model"
+msgstr ""
+
+#: collins/usagepanel.py:118
+#, python-brace-format
+msgid "Resets in {t}"
+msgstr ""
+
+#: collins/usagepanel.py:136
+msgid "Claude usage"
+msgstr ""
+
+#: collins/usagepanel.py:150
+msgid "Refresh usage"
+msgstr ""
+
+#: collins/usagepanel.py:183
+msgid "Checking usage…"
+msgstr ""
+
+#: collins/usagepanel.py:353
+#, python-brace-format
+msgid "As of {n}m ago"
+msgstr ""
+
+#: collins/usagepanel.py:356 collins/usagepanel.py:404
+msgid "Usage unavailable"
+msgstr ""
+
+#: collins/usagepanel.py:377
+msgid "Couldn't refresh usage"
+msgstr ""
+
+#: collins/usagepanel.py:413
+#, python-brace-format
+msgid "{used} of {limit}"
+msgstr ""
+
+#: collins/usagepanel.py:417 collins/usagepanel.py:428
+msgid " — limit reached"
+msgstr ""
+
+#: collins/usagepanel.py:419
+msgid "Extra usage"
+msgstr ""
+
+#: collins/usagepanel.py:426
+#, python-brace-format
+msgid "Extra usage: {used}"
+msgstr ""
+
+#: collins/welcome.py:144
 msgid "Before you start"
 msgstr ""
 
-#: collins/welcome.py:147
+#: collins/welcome.py:164
 msgid ""
 "Collins runs Claude for you in a few places. Here's where, and the switches "
 "for each."
 msgstr ""
 
-#: collins/welcome.py:172
+#: collins/welcome.py:189 collins/welcome.py:291
 msgid "Continue"
 msgstr ""
 
-#: collins/welcome.py:194
+#: collins/welcome.py:209
+msgid "Claude Code CLI"
+msgstr ""
+
+#: collins/welcome.py:211
+#, python-brace-format
 msgid "Using claude at {path}"
 msgstr ""
 
-#: collins/welcome.py:195
+#: collins/welcome.py:212
 msgid "Change it later in Preferences"
 msgstr ""
 
-#: collins/welcome.py:208
+#: collins/welcome.py:225
 msgid "Collins needs the Claude Code CLI"
 msgstr ""
 
-#: collins/welcome.py:210
+#: collins/welcome.py:227
 msgid ""
-"Every session runs through the claude command, and it isn't on the PATH "
-"that launches from the desktop are given — that PATH doesn't include the "
-"folders your shell adds. Point Collins at the CLI once; the location is "
-"remembered from then on."
+"Every session runs through the claude command, and it isn't on the PATH that "
+"launches from the desktop are given — that PATH doesn't include the folders "
+"your shell adds. Point Collins at the CLI once; the location is remembered "
+"from then on."
 msgstr ""
 
-#: collins/welcome.py:216
-msgid "Path to the claude executable"
-msgstr ""
-
-#: collins/welcome.py:218
-msgid "Browse…"
-msgstr ""
-
-#: collins/welcome.py:167
-msgid "Quit"
-msgstr ""
-
-#: collins/welcome.py:274
+#: collins/welcome.py:291
 msgid "Use This CLI"
 msgstr ""
 
-#: collins/welcome.py:350
+#: collins/welcome.py:371
 msgid "Found it — Collins will remember this location."
 msgstr ""
 
-#: collins/welcome.py:353
+#: collins/welcome.py:374
 msgid ""
-"This path has a version number in it, so it would break the next time "
-"Claude Code updates itself. Point at a stable launcher instead — usually "
-"~/.local/bin/claude."
+"This path has a version number in it, so it would break the next time Claude "
+"Code updates itself. Point at a stable launcher instead — usually ~/.local/"
+"bin/claude."
 msgstr ""
 
-#: collins/welcome.py:364
-msgid ""
-"That's an executable, but not one named “claude” — pick the claude launcher "
-"itself."
-msgstr ""
-
-#: collins/welcome.py:366
-msgid ""
-"It wasn't in any of the usual places — enter or browse to where it's "
-"installed."
-msgstr ""
-
-#: collins/welcome.py:367
-msgid "There's no executable file at this path."
-msgstr ""
-
-#: collins/welcome.py:382
-msgid "No Claude Code yet? Get it at {link}, then come back."
-msgstr ""
-
-#: collins/welcome.py:277
-msgid "Choose the claude executable"
-msgstr ""
-
-#: collins/welcome.py:359
+#: collins/welcome.py:380
 msgid ""
 "This is inside a version manager's tree, so Collins can't validate a stable "
 "path — it will work until that tool updates, and then this question comes "
 "back."
 msgstr ""
 
-#: collins/welcome.py:192
-msgid "Claude Code CLI"
-msgstr ""
-
-#: collins/prefs.py:663
+#: collins/welcome.py:385
 msgid ""
-"The claude command every session runs through. Leave empty to use the one "
-"on PATH. Tabs already open keep the CLI they started with"
+"That's an executable, but not one named “claude” — pick the claude launcher "
+"itself."
 msgstr ""
 
-#: collins/prefs.py:721
-msgid "Using the claude found on PATH at {path}."
-msgstr ""
-
-#: collins/prefs.py:726
+#: collins/welcome.py:387
 msgid ""
-"claude isn't on PATH — Collins will ask where it is at the next launch."
+"It wasn't in any of the usual places — enter or browse to where it's "
+"installed."
 msgstr ""
 
-#: collins/panelstrip.py:307
-msgid "Move to"
+#: collins/welcome.py:388
+msgid "There's no executable file at this path."
 msgstr ""
 
-#: collins/panelstrip.py:309
-msgid "Split Left"
-msgstr ""
-
-#: collins/panelstrip.py:310
-msgid "Split Right"
-msgstr ""
-
-#: collins/panelstrip.py:311
-msgid "Split Up"
-msgstr ""
-
-#: collins/panelstrip.py:312
-msgid "Split Down"
-msgstr ""
-
-#: collins/paneldnd.py:59
-msgid "Drag to move this tab: drop on an edge to split, on a strip to join"
-msgstr ""
-
-#: collins/formatting.py:120
-msgid "just now"
-msgstr ""
-
-#: collins/formatting.py:122
-msgid "{n}m ago"
-msgstr ""
-
-#: collins/formatting.py:124
-msgid "{n}h ago"
-msgstr ""
-
-#: collins/formatting.py:126
-msgid "{n}d ago"
-msgstr ""
-
-#: collins/prmenu.py:531
-msgid "View in Collins"
-msgstr ""
-
-#: collins/prmenu.py:535
-msgid "Open this pull request's page beside the session"
-msgstr ""
-
-#: collins/prview.py:59
-msgid "Approved"
-msgstr ""
-
-#: collins/prview.py:63
-msgid "Changes requested"
-msgstr ""
-
-#: collins/prview.py:65
-msgid "Review dismissed"
-msgstr ""
-
-#: collins/prview.py:67
-msgid "Commented"
-msgstr ""
-
-#: collins/prview.py:117
-msgid "Reload this pull request"
-msgstr ""
-
-#: collins/prview.py:262
-msgid "Couldn't load this pull request — is the GitHub CLI signed in?"
-msgstr ""
-
-#: collins/prview.py:311
-msgid "Merges {head} into {base}"
-msgstr ""
-
-#: collins/prview.py:316
-msgid "{n} file"
-msgid_plural "{n} files"
-msgstr[0] ""
-msgstr[1] ""
-
-#: collins/prview.py:363
-msgid "Conversation"
-msgstr ""
-
-#: collins/prview.py:373
-msgid "No comments yet."
-msgstr ""
-
-#: collins/prview.py:382
-msgid "No description provided."
-msgstr ""
-
-#: collins/prview.py:389
-msgid "Checks"
-msgstr ""
-
-#: collins/prview.py:704
-msgid "Checks ({n})"
-msgstr ""
-
-#: collins/prview.py:475
-msgid "Show more"
-msgstr ""
-
-#: collins/prview.py:243
-msgid "Nothing loaded yet."
-msgstr ""
-
-#: collins/prview.py:449
-msgid "Pull request"
-msgstr ""
-
-#: collins/prview.py:230
-msgid "Files"
-msgstr ""
-
-#: collins/prview.py:596
-msgid "No changed files."
-msgstr ""
-
-#: collins/prview.py:692
-msgid "no diff — binary or too large"
-msgstr ""
-
-#: collins/prview.py:703
-msgid "{n} line"
-msgid_plural "{n} lines"
-msgstr[0] ""
-msgstr[1] ""
-
-#: collins/prview.py:723
-msgid "Add a comment"
-msgstr ""
-
-#: collins/prview.py:1218
-msgid "Address comments"
-msgstr ""
-
-#: collins/prview.py:1231
-msgid "Request review"
-msgstr ""
-
-#: collins/prview.py:764
-msgid "Request changes"
-msgstr ""
-
-#: collins/prview.py:773
-msgid "Approve"
-msgstr ""
-
-#: collins/prview.py:782
-msgid "Comment"
-msgstr ""
-
-#: collins/prview.py:799
-msgid "Comment on {slug}"
-msgstr ""
-
-#: collins/prview.py:800
-msgid "Approve {slug}"
-msgstr ""
-
-#: collins/prview.py:802
-msgid "Request changes on {slug}"
-msgstr ""
-
-#: collins/practions.py:176 collins/prview.py:807
-msgid "Send “{prompt}” to this session"
-msgstr ""
-
-#: collins/prmenu.py:699 collins/prview.py:855
-msgid "Collins couldn't run that action."
-msgstr ""
-
-#: collins/prmenu.py:723 collins/prview.py:868
-msgid "{action} failed"
-msgstr ""
-
-#: collins/prmenu.py:563
-msgid "View unresolved comments"
-msgstr ""
-
-#: collins/prmenu.py:568
-msgid "Open this pull request's page at its first unresolved thread"
-msgstr ""
-
-#: collins/prview.py:925
-msgid "Outdated"
-msgstr ""
-
-#: collins/prview.py:928
-msgid "The code this thread commented on has changed"
-msgstr ""
-
-#: collins/prview.py:944
-msgid "Resolved"
-msgstr ""
-
-#: collins/prview.py:968 collins/prview.py:1047
-msgid "Reply"
-msgstr ""
-
-#: collins/prview.py:970
-msgid "Reply in this thread"
-msgstr ""
-
-#: collins/prview.py:978 collins/prview.py:1054
-msgid "Unresolve"
-msgstr ""
-
-#: collins/prview.py:978 collins/prview.py:1054
-msgid "Resolve"
-msgstr ""
-
-#: collins/prview.py:981
-msgid "Reopen this thread"
-msgstr ""
-
-#: collins/prview.py:981
-msgid "Mark this thread resolved"
-msgstr ""
-
-#: collins/prview.py:1004
-msgid "Post reply"
-msgstr ""
-
-#: collins/prview.py:1330
-msgid "Show less"
-msgstr ""
-
-#: collins/prefs.py:325
-msgid "Pull requests"
-msgstr ""
-
-#: collins/prefs.py:327
-msgid "Text size"
-msgstr ""
-
-#: collins/prefs.py:328
-msgid ""
-"Reading-text size in the pull request panel, as a percentage of the app "
-"font; buttons and menus keep the app size"
-msgstr ""
-
-#: collins/prefs.py:340
-msgid "Show embedded images"
-msgstr ""
-
-#: collins/prefs.py:341
-msgid ""
-"Render the images a description or comment embeds, in place; click one to "
-"open it full size. Off, they stay links and opening a pull request "
-"downloads nothing"
-msgstr ""
-
-#: collins/prefs.py:352
-msgid "Open new pull requests automatically"
-msgstr ""
-
-#: collins/prefs.py:353
-msgid ""
-"Open a pull request's panel beside its session as soon as the session picks "
-"the PR up. Once per pull request, so one you close again stays closed"
-msgstr ""
-
-#: collins/prefs.py:438
-msgid "Confirm before merging"
-msgstr ""
-
-#: collins/prefs.py:440
-msgid ""
-"Ask before merging a pull request, enabling auto-merge, or merging and "
-"archiving the session. Off, the click merges; closing a pull request "
-"unmerged still asks either way"
-msgstr ""
-
-#: collins/bodyimages.py:122
-msgid "That file isn't an image Collins can display."
-msgstr ""
-
-#: collins/attachpanel.py:88
-msgid "Attachments"
-msgstr ""
-
-#: collins/attachpanel.py:93
-msgid "Close the attachments panel"
-msgstr ""
-
-#: collins/attachpanel.py
-msgid "Dock the attachments panel beside the terminal"
-msgstr ""
-
-#: collins/attachpanel.py
-msgid "Float the attachments panel over the terminal"
-msgstr ""
-
-#: collins/terminal.py:1183
-msgid "Images and files this session has seen"
-msgstr ""
-
-#: collins/terminal.py
-msgid "Images and files this session has seen ({n} new)"
-msgstr ""
-
-#: collins/attachpanel.py:241
-msgid "Show in Folder"
-msgstr ""
-
-#: collins/attachpanel.py:245
-msgid "Copy Path"
-msgstr ""
-
-#: collins/attachpanel.py:244
-msgid "Copy Address"
-msgstr ""
-
-#: collins/attachpanel.py:252
-msgid "Remove From List"
-msgstr ""
-
-#: collins/attachpanel.py:383
-msgid "No longer on disk"
-msgstr ""
-
-#: collins/attachpanel.py:383
-msgid "Couldn't be downloaded"
-msgstr ""
-
-#: collins/attachpanel.py:409
-msgid "No attachments yet"
-msgstr ""
-
-#: collins/attachpanel.py:412
-msgid "Pictures and files this session shares collect here."
-msgstr ""
-
-#: collins/attachpanel.py:213
+#: collins/welcome.py:403
 #, python-brace-format
-msgid "that image isn't on disk any more: {path}"
+msgid "No Claude Code yet? Get it at {link}, then come back."
 msgstr ""
 
-#: collins/attachpanel.py:213
+#: collins/window.py:202
+msgid ""
+"Waiting for this session to be registered — backgrounding it now would leave "
+"the agent with no way back to it"
+msgstr ""
+
+#: collins/window.py:205
+msgid "Another session is still being handed to the background — one at a time"
+msgstr ""
+
+#: collins/window.py:499
+msgid "Set emoji…"
+msgstr ""
+
+#: collins/window.py:512
+msgid "Toggle sidebar (F9)"
+msgstr ""
+
+#: collins/window.py:518
 #, python-brace-format
-msgid "that file isn't on disk any more: {path}"
+msgid "New {name} session…"
 msgstr ""
 
-#: collins/attachpanel.py:223
+#: collins/window.py:530
+msgid "New chat (scratch folder)"
+msgstr ""
+
+#: collins/window.py:533
 #, python-brace-format
-msgid "couldn't download that image: {reason}"
+msgid "Continue last {name} session…"
 msgstr ""
 
-#: collins/traymodel.py:142
-msgid "no sessions open"
-msgstr ""
-
-#: collins/traymodel.py:132
-msgid "1 session"
-msgstr ""
-
-#: collins/traymodel.py:132
-msgid "1 working"
-msgstr ""
-
-#: collins/traymodel.py:132
+#: collins/window.py:539
 #, python-brace-format
-msgid "{n} working"
+msgid "New {name} native chat ({mode}) (experimental)"
 msgstr ""
 
-#: collins/traymodel.py:132
-msgid "1 unread"
-msgstr ""
-
-#: collins/traymodel.py:132
+#: collins/window.py:543
 #, python-brace-format
-msgid "{n} unread"
+msgid "New {name} native chat (experimental)…"
 msgstr ""
 
-#: collins/traymodel.py:231
-msgid "Show Collins"
+#: collins/window.py:547
+msgid "New session (Ctrl+Shift+T)"
 msgstr ""
 
-#: collins/traymodel.py:231
-msgid "Show Collins (Hidden)"
+#: collins/window.py:556
+msgid "Show or hide the tab bar"
 msgstr ""
 
-#: collins/window.py:782
-msgid "Collins is still running"
+#: collins/window.py:602
+msgid "No session open"
 msgstr ""
 
-#: collins/window.py:779
+#: collins/window.py:603
+msgid "Pick a session from the sidebar, or start a new one."
+msgstr ""
+
+#: collins/window.py:907
 msgid "Find it in the top bar."
 msgstr ""
 
-#: collins/window.py:781
+#: collins/window.py:909
 msgid "Reopen it by relaunching Collins, or from a session's notification."
 msgstr ""
 
-#: collins/prefs.py:852
-msgid "Status icon"
+#: collins/window.py:910
+msgid "Collins is still running"
 msgstr ""
 
-#: collins/prefs.py:853
-msgid "Show status icon"
-msgstr ""
-
-#: collins/prefs.py:875
-msgid "Shows Collins in the top bar, with a menu that jumps to any open session"
-msgstr ""
-
-#: collins/prefs.py:877
+#: collins/window.py:1022
+#, python-brace-format
 msgid ""
-"No status-icon support was found in this desktop — GNOME needs an "
-"AppIndicator extension"
+"{n} files contain unsaved changes. Changes which are not saved will be "
+"permanently lost."
 msgstr ""
 
-#: collins/prefs.py:883
-msgid "Nothing on this desktop can show a status icon"
+#: collins/window.py:1112
+#, python-brace-format
+msgid "Close window with {n} active session(s)?"
 msgstr ""
 
-#: collins/window.py:942
+#: collins/window.py:1113
+msgid ""
+"Agents are asked to exit cleanly first; other running commands will be "
+"terminated."
+msgstr ""
+
+#: collins/window.py:1116
+msgid ""
+"Agents are asked to exit cleanly first; other running commands will be "
+"terminated. Backgrounding instead keeps the agents running detached — reopen "
+"a session later to re-attach."
+msgstr ""
+
+#: collins/window.py:1120
 msgid ""
 "Keep Running hides the window and leaves every session exactly as it is."
 msgstr ""
 
-#: collins/window.py:958
+#: collins/window.py:1135
+msgid "Exit Sessions"
+msgstr ""
+
+#: collins/window.py:1139
+msgid "Background Sessions"
+msgstr ""
+
+#: collins/window.py:1141
 msgid "Keep Running (Hide Window)"
 msgstr ""
 
-#: collins/prefs.py:107
-msgid "Hide Window"
+#: collins/window.py:1189
+msgid "Backgrounding sessions…"
 msgstr ""
 
-#: collins/prefs.py:964
+#: collins/window.py:1191
+msgid "Quit Now"
+msgstr ""
+
+#: collins/window.py:1197
+#, python-brace-format
 msgid ""
-"Without a status icon, a hidden window comes back by relaunching Collins or "
-"clicking a session notification"
+"Handing each session to a background agent, one at a time, so every one is "
+"paired with the agent it becomes. {done} of {total} done."
 msgstr ""
 
-#: collins/prefs.py:373
-msgid "Check for updates"
+#: collins/window.py:1606 collins/window.py:6372
+msgid "Some transcripts could not be trashed"
 msgstr ""
 
-#: collins/prefs.py:374
+#: collins/window.py:1610
+#, python-brace-format
+msgid "Move {n} transcript(s) to trash?"
+msgstr ""
+
+#: collins/window.py:1611
+msgid "The files are moved to the trash and can be restored."
+msgstr ""
+
+#: collins/window.py:1612 collins/window.py:6384 collins/window.py:6451
+msgid "Move to Trash"
+msgstr ""
+
+#: collins/window.py:1810
+#, python-brace-format
+msgid "New session in {project} (no worktree)"
+msgstr ""
+
+#: collins/window.py:1812
+#, python-brace-format
+msgid "New session in {project} (in a worktree)"
+msgstr ""
+
+#: collins/window.py:1827
+msgid "Could not create chat directory"
+msgstr ""
+
+#: collins/window.py:1840 collins/window.py:1855 collins/window.py:2369
+#: collins/window.py:2979
+msgid "Choose project directory"
+msgstr ""
+
+#: collins/window.py:1873
+msgid "Trust and add"
+msgstr ""
+
+#: collins/window.py:2348
+msgid "Discard draft?"
+msgstr ""
+
+#: collins/window.py:2349
+#, python-brace-format
+msgid "“{label}” will be forgotten, along with any terminal panel it kept."
+msgstr ""
+
+#: collins/window.py:2352
+msgid "Discard"
+msgstr ""
+
+#: collins/window.py:3014
+#, python-brace-format
+msgid "Chat — {dir}"
+msgstr ""
+
+#: collins/window.py:3034
+#, python-brace-format
+msgid "Chat — {name}"
+msgstr ""
+
+#: collins/window.py:3049
+#, python-brace-format
+msgid "Replay — {name}"
+msgstr ""
+
+#: collins/window.py:3340
+msgid "Couldn't send that to the session"
+msgstr ""
+
+#: collins/window.py:3467 collins/window.py:3471
+msgid "Close tab with an active session?"
+msgstr ""
+
+#: collins/window.py:3468
 msgid ""
-"Ask GitHub once a day whether a newer Collins is out, and notify you when "
-"one is. Through your gh login, or anonymously"
+"The agent is asked to exit cleanly first; the command running in this tab's "
+"terminal panel will be terminated."
 msgstr ""
 
-#: collins/updatecheck.py:389
-msgid "Collins {version} is available"
+#: collins/window.py:3472
+msgid "The agent is asked to exit cleanly first."
 msgstr ""
 
-#: collins/updatecheck.py:391
-msgid "You're running {version}. Click to open the release on GitHub"
+#: collins/window.py:3475
+msgid ""
+"A command is still running in this tab's terminal panel and will be "
+"terminated."
 msgstr ""
 
-#: collins/notifycenter.py:    ("bell", N_("Bell")),
-msgid "Bell"
+#: collins/window.py:3478
+msgid ""
+"Backgrounding instead keeps the agent running detached — reopen the session "
+"later to re-attach."
 msgstr ""
 
-#: collins/notifycenter.py:    ("complete", N_("Complete")),
-msgid "Complete"
+#: collins/window.py:3481
+msgid ""
+"Backgrounding isn't available yet: this session hasn't been registered, so a "
+"detached agent would have no way back to it."
 msgstr ""
 
-#: collins/notifycenter.py:    ("message", N_("Message")),
-msgid "Message"
+#: collins/window.py:3485
+msgid ""
+"Backgrounding isn't available right now: another session is still being "
+"handed to the background."
 msgstr ""
 
-#: collins/notifycenter.py:    ("dialog-information", N_("Information")),
-msgid "Information"
+#: collins/window.py:3724
+msgid "No matching agent"
 msgstr ""
 
-#: collins/notifycenter.py:# theme
-msgid "Zen"
+#: collins/window.py:3726
+msgid ""
+"No background agent matches this session — either its agent is gone, or more "
+"than one candidate matched and guessing would link the wrong one. The "
+"transcript itself is intact."
 msgstr ""
 
-#: collins/notifycenter.py:    ("soft", N_("Soft"), "UI SFX, soft/mention"),
-msgid "Soft"
+#: collins/window.py:3745
+msgid "Session linked"
 msgstr ""
 
-#: collins/notifycenter.py:    ("glass", N_("Glass"), "UI SFX, glass/complete"),
-msgid "Glass"
+#: collins/window.py:3746
+msgid "Linked to its running background agent."
 msgstr ""
 
-#: collins/notifycenter.py:    ("confirmation", N_("Confirmation"), "Kenney Interface Sounds, confirmation_001"),
-msgid "Confirmation"
+#: collins/window.py:3751
+msgid "Nothing to repair"
 msgstr ""
 
-#: collins/notifycenter.py:    ("pluck", N_("Pluck"), "Kenney Interface Sounds, pluck_002"),
-msgid "Pluck"
+#: collins/window.py:3753
+msgid ""
+"This session is already its own background agent. Opening it attaches to "
+"that agent."
 msgstr ""
 
-#: collins/notifycenter.py:        return _("The desktop's “{event}” sound").format(event=event)
-msgid "The desktop's “{event}” sound"
+#: collins/window.py:4717
+msgid "No pull request is linked to this session yet"
 msgstr ""
 
-#: collins/notifycenter.py:        return _("Ships with Collins
-msgid "Ships with Collins: {source} (CC0)"
+#: collins/window.py:5513
+msgid "Tab name"
+msgstr ""
+
+#: collins/window.py:5822
+msgid "No terminal application found"
+msgstr ""
+
+#: collins/window.py:5823
+msgid "Set $TERMINAL, or install a terminal emulator, to open folders here."
+msgstr ""
+
+#: collins/window.py:5860
+msgid "Git pull failed"
+msgstr ""
+
+#: collins/window.py:5880
+msgid "Git checkout failed"
+msgstr ""
+
+#: collins/window.py:5883
+#, python-brace-format
+msgid "Checked out {branch} in {project}"
+msgstr ""
+
+#: collins/window.py:5907
+msgid "git was not found on PATH."
+msgstr ""
+
+#: collins/window.py:5929
+#, python-brace-format
+msgid "git exited with status {code}"
+msgstr ""
+
+#: collins/window.py:5958
+msgid "Couldn't install the desktop icon"
+msgstr ""
+
+#: collins/window.py:5996
+msgid "Run in Terminal"
+msgstr ""
+
+#: collins/window.py:6032
+msgid "Add the Ubuntu PPA?"
+msgstr ""
+
+#: collins/window.py:6034
+msgid ""
+"Collins isn't installed from ppa:episode6/stable yet. The PPA keeps it "
+"updated with the rest of the system: apt upgrade and the software updater "
+"both pick up new releases."
+msgstr ""
+
+#: collins/window.py:6039
+msgid "Add the Fedora COPR?"
+msgstr ""
+
+#: collins/window.py:6041
+msgid ""
+"Collins isn't installed from the episode6/stable COPR yet. The COPR keeps it "
+"updated with the rest of the system: dnf upgrade and the software updater "
+"both pick up new releases."
+msgstr ""
+
+#: collins/window.py:6047
+msgid "Collins isn't installed from its package repository yet."
+msgstr ""
+
+#: collins/window.py:6049
+msgid ""
+"These commands ask for your password; they run in a terminal in this session."
+msgstr ""
+
+#: collins/window.py:6051
+msgid "Run these in a terminal — they ask for your password."
+msgstr ""
+
+#: collins/window.py:6070
+msgid "Couldn't open a terminal"
+msgstr ""
+
+#: collins/window.py:6071
+msgid "Run the commands in a terminal of your own instead."
+msgstr ""
+
+#: collins/window.py:6083
+msgid "Collins is in your applications now"
+msgstr ""
+
+#: collins/window.py:6088
+#, python-brace-format
+msgid "Pulled {project} — {summary}"
+msgstr ""
+
+#: collins/window.py:6090
+#, python-brace-format
+msgid "Pulled {project}"
+msgstr ""
+
+#: collins/window.py:6113
+msgid "Export session as Markdown"
+msgstr ""
+
+#: collins/window.py:6131
+msgid "Export failed"
+msgstr ""
+
+#: collins/window.py:6261
+msgid "Undo"
+msgstr ""
+
+#: collins/window.py:6274
+#, python-brace-format
+msgid "Archived “{name}”"
+msgstr ""
+
+#: collins/window.py:6275
+#, python-brace-format
+msgid "Archived {n} sessions"
+msgstr ""
+
+#: collins/window.py:6382
+#, python-brace-format
+msgid "Delete {n} archived session(s)?"
+msgstr ""
+
+#: collins/window.py:6400
+#, python-brace-format
+msgid "Keep the {p} emptied project(s) in the sidebar"
+msgstr ""
+
+#: collins/window.py:6438
+msgid "Could not trash transcript"
+msgstr ""
+
+#: collins/window.py:6445
+msgid "Move transcript to trash?"
+msgstr ""
+
+#: collins/window.py:6446
+#, python-brace-format
+msgid "“{name}” will be removed from Claude's history."
+msgstr ""
+
+#: collins/window.py:6450
+msgid "The file is moved to the trash and can be restored."
+msgstr ""
+
+#: collins/window.py:6466
+msgid "Could not delete transcript"
+msgstr ""
+
+#: collins/window.py:6473
+msgid "Delete session permanently?"
+msgstr ""
+
+#: collins/window.py:6474
+#, python-brace-format
+msgid ""
+"“{name}” and its transcript file will be permanently deleted. This cannot be "
+"undone."
+msgstr ""
+
+#: collins/window.py:6476
+msgid "Delete permanently"
+msgstr ""
+
+#: collins/window.py:6484
+msgid "Open session transcript"
+msgstr ""
+
+#: collins/window.py:6486
+msgid "Session transcripts (*.jsonl)"
+msgstr ""
+
+#: collins/window.py:6506
+msgid "Could not open transcript"
+msgstr ""
+
+#: collins/window.py:6507
+msgid "The file couldn't be read as a session transcript."
+msgstr ""
+
+#: collins/window.py:6522
+msgid ""
+"Manage and resume your AI coding agent sessions.\n"
+"\n"
+"Unofficial community tool — not affiliated with or endorsed by Anthropic."
 msgstr ""

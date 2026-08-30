@@ -152,20 +152,8 @@ msgstr "Nombre personalizado"
 msgid "Cancel"
 msgstr "Cancelar"
 
-msgid "Session list"
-msgstr "Lista de sesiones"
-
-msgid "Show folder path"
-msgstr "Mostrar ruta de carpeta"
-
 msgid "Show folder paths in sidebar"
 msgstr "Mostrar rutas de carpeta en la barra lateral"
-
-msgid "Show each session's project folder path in the sidebar"
-msgstr "Mostrar la ruta de la carpeta del proyecto de cada sesión en la barra lateral"
-
-msgid "Startup"
-msgstr "Inicio"
 
 msgid "Reopen the last session"
 msgstr "Reabrir la última sesión"
@@ -356,9 +344,6 @@ msgstr "Actividad reciente"
 msgid "You"
 msgstr "Tú"
 
-msgid "Claude"
-msgstr "Claude"
-
 msgid "Follow system"
 msgstr "Seguir el sistema"
 
@@ -416,9 +401,6 @@ msgstr "Seleccionar todo"
 msgid "Color theme"
 msgstr "Tema de color"
 
-msgid "Appearance"
-msgstr "Apariencia"
-
 msgid "Color scheme"
 msgstr "Esquema de color"
 
@@ -427,15 +409,6 @@ msgstr "Modo oscuro / claro"
 
 msgid "Language"
 msgstr "Idioma"
-
-msgid "Restart to apply"
-msgstr "Reinicia para aplicar"
-
-msgid "Running sessions"
-msgstr "Sesiones en ejecución"
-
-msgid "Ask keeps the confirmation dialog; the other choices skip it and exit the session(s) cleanly or keep them running detached"
-msgstr "«Preguntar» mantiene el diálogo de confirmación; las demás opciones lo omiten y salen limpiamente de las sesiones o las mantienen en ejecución desacopladas"
 
 msgid "When archiving a running session"
 msgstr "Al archivar una sesión en ejecución"
@@ -448,9 +421,6 @@ msgstr "Al salir con sesiones en ejecución"
 
 msgid "Closing a window while agent sessions are still running"
 msgstr "Cerrar una ventana mientras las sesiones del agente siguen en ejecución"
-
-msgid "Archiving"
-msgstr "Archivado"
 
 msgid "Archive on claude.ai too"
 msgstr "Archivar también en claude.ai"
@@ -482,9 +452,6 @@ msgstr "Servidores MCP"
 msgid "About Collins"
 msgstr "Acerca de Collins"
 
-msgid "Refresh session list"
-msgstr "Actualizar la lista de sesiones"
-
 msgid "Search sessions…"
 msgstr "Buscar sesiones…"
 
@@ -502,9 +469,6 @@ msgstr "Contraer todos los grupos"
 
 msgid "Expand all groups"
 msgstr "Expandir todos los grupos"
-
-msgid "No sessions found"
-msgstr "No se encontraron sesiones"
 
 msgid "{n} sessions"
 msgstr "{n} sesiones"
@@ -815,21 +779,6 @@ msgstr "Vuelve a abrirlo iniciando Collins de nuevo o desde la notificación de 
 msgid "no sessions open"
 msgstr "no hay sesiones abiertas"
 
-msgid "1 session"
-msgstr "1 sesión"
-
-msgid "1 working"
-msgstr "1 trabajando"
-
-msgid "{n} working"
-msgstr "{n} trabajando"
-
-msgid "1 unread"
-msgstr "1 sin leer"
-
-msgid "{n} unread"
-msgstr "{n} sin leer"
-
 msgid "Finished a run"
 msgstr "Terminó una ejecución"
 
@@ -1006,9 +955,6 @@ msgstr "Preferencias…"
 
 msgid "Show/hide notifications"
 msgstr "Mostrar/ocultar las notificaciones"
-
-msgid "You interrupted Claude here"
-msgstr "Interrumpiste a Claude aquí"
 
 msgid "Restart now"
 msgstr "Reiniciar ahora"
@@ -1253,9 +1199,6 @@ msgstr "Archivos del agente"
 msgid "Open {name} in the editor"
 msgstr "Abrir {name} en el editor"
 
-msgid "Session tools"
-msgstr "Herramientas de sesión"
-
 msgid "Session behavior"
 msgstr "Comportamiento de las sesiones"
 
@@ -1309,9 +1252,6 @@ msgstr "Mostrar automáticamente el panel de adjuntos"
 
 msgid "Dock a session's attachments panel beside it the first time it shows an image — only in a tab wide enough to spare the column, past the terminal's maximum width. Once per session tab, so one you close again stays closed"
 msgstr "Acopla el panel de adjuntos de una sesión junto a ella la primera vez que muestra una imagen — solo en una pestaña lo bastante ancha para ceder la columna, más allá del ancho máximo de la terminal. Una vez por pestaña de sesión, así que el que cierres seguirá cerrado"
-
-msgid "Open composer (Ctrl+.)"
-msgstr "Abrir el redactor (Ctrl+.)"
 
 msgid "Attach file"
 msgstr "Adjuntar archivo"
@@ -1450,4 +1390,1345 @@ msgstr "No se pudo instalar el icono de escritorio"
 
 msgid "Collins is in your applications now"
 msgstr "Collins ya está en tus aplicaciones"
+
+msgid "Add application"
+msgstr "Añadir aplicación"
+
+msgid "Search applications…"
+msgstr "Buscar aplicaciones…"
+
+msgid "Caffeine Mode is on"
+msgstr "Caffeine Mode está activado"
+
+msgid "That file isn't an image Collins can display."
+msgstr "Ese archivo no es una imagen que Collins pueda mostrar."
+
+msgid "Until idle"
+msgstr "Hasta inactividad"
+
+msgid "Indefinitely"
+msgstr "Indefinidamente"
+
+msgid "1 hour"
+msgstr "1 hora"
+
+msgid "{n} hours"
+msgstr "{n} horas"
+
+msgid "Caffeine Mode is dozing until a session works again — then the computer and screen will stay awake"
+msgstr "Caffeine Mode dormita hasta que una sesión vuelva a trabajar — entonces el equipo y la pantalla se mantendrán despiertos"
+
+msgid "Caffeine Mode is dozing until a session works again — then the computer will stay awake, the screen may turn off"
+msgstr "Caffeine Mode dormita hasta que una sesión vuelva a trabajar — entonces el equipo se mantendrá despierto, la pantalla puede apagarse"
+
+msgid "Caffeine Mode is on while sessions are working — the computer and screen will stay awake"
+msgstr "Caffeine Mode está activado mientras las sesiones trabajan — el equipo y la pantalla se mantendrán despiertos"
+
+msgid "Caffeine Mode is on while sessions are working — the computer will stay awake, the screen may turn off"
+msgstr "Caffeine Mode está activado mientras las sesiones trabajan — el equipo se mantendrá despierto, la pantalla puede apagarse"
+
+msgid "Caffeine Mode is on — the computer and screen will stay awake"
+msgstr "Caffeine Mode está activado — el equipo y la pantalla se mantendrán despiertos"
+
+msgid "Caffeine Mode is on — the computer will stay awake, the screen may turn off"
+msgstr "Caffeine Mode está activado — el equipo se mantendrá despierto, la pantalla puede apagarse"
+
+msgid "Caffeine Mode: keep the computer awake and the screen on"
+msgstr "Caffeine Mode: mantener el equipo despierto y la pantalla encendida"
+
+msgid "Caffeine Mode: keep the computer awake, letting the screen turn off"
+msgstr "Caffeine Mode: mantener el equipo despierto, dejando que la pantalla se apague"
+
+msgid "Caffeine Mode turns off in {time} — computer and screen stay awake"
+msgstr "Caffeine Mode se apaga en {time} — el equipo y la pantalla siguen despiertos"
+
+msgid "Caffeine Mode turns off in {time} — computer stays awake, screen may turn off"
+msgstr "Caffeine Mode se apaga en {time} — el equipo sigue despierto, la pantalla puede apagarse"
+
+msgid "Send"
+msgstr "Enviar"
+
+msgid "The user declined this action."
+msgstr "El usuario rechazó esta acción."
+
+msgid "Switch the effort level for this session"
+msgstr "Cambiar el nivel de esfuerzo de esta sesión"
+
+msgid "couldn't save a copy of the dropped image"
+msgstr "no se pudo guardar una copia de la imagen soltada"
+
+msgid "skipped {n} item that isn't a local file"
+msgstr "se omitió {n} elemento que no es un archivo local"
+
+msgid "couldn't reference {n} dropped file name"
+msgstr "no se pudo referenciar {n} nombre de archivo soltado"
+
+msgid "couldn't save a copy of the pasted image"
+msgstr "no se pudo guardar una copia de la imagen pegada"
+
+msgid "Effort"
+msgstr "Esfuerzo"
+
+msgid "Copied to clipboard"
+msgstr "Copiado al portapapeles"
+
+msgid "Rename folder"
+msgstr "Renombrar carpeta"
+
+msgid "Rename file"
+msgstr "Renombrar archivo"
+
+msgid "Enter a new name for “{name}”."
+msgstr "Escribe un nombre nuevo para «{name}»."
+
+msgid "Rename"
+msgstr "Renombrar"
+
+msgid "Move editor to {name}?"
+msgstr "¿Mover el editor a {name}?"
+
+msgid "This session is now working in {path}. One open file has unsaved changes and also exists there — choose what happens to it."
+msgstr "Esta sesión ahora trabaja en {path}. Un archivo abierto tiene cambios sin guardar y también existe allí — elige qué pasa con él."
+
+msgid "Stay"
+msgstr "Quedarse"
+
+msgid "Go on editing this file, where your unsaved changes belong"
+msgstr "Seguir editando este archivo, donde están tus cambios sin guardar"
+
+msgid "Take edits"
+msgstr "Llevar los cambios"
+
+msgid "Move this tab to the new copy, keeping your unsaved changes — saving will write them over whatever that copy holds"
+msgstr "Mover esta pestaña a la copia nueva conservando tus cambios sin guardar — al guardar se escribirán sobre lo que esa copia contenga"
+
+msgid "Use new"
+msgstr "Usar la nueva"
+
+msgid "Open the new copy and discard your unsaved changes"
+msgstr "Abrir la copia nueva y descartar tus cambios sin guardar"
+
+msgid "Don't Move"
+msgstr "No mover"
+
+msgid "Move Editor"
+msgstr "Mover el editor"
+
+msgid "Do you trust this folder?"
+msgstr "¿Confías en esta carpeta?"
+
+msgid "{agent} will be able to read, edit and execute files in\n\n{path}\n\nand everything inside it, including any worktrees it creates there. Open it only if this is a project you created or otherwise trust — like your own code, a well-known open source project, or work from your team."
+msgstr "{agent} podrá leer, editar y ejecutar archivos en\n\n{path}\n\ny todo lo que contiene, incluidos los worktrees que cree ahí. Ábrela solo si es un proyecto que creaste o en el que confías — como tu propio código, un proyecto de código abierto conocido o trabajo de tu equipo."
+
+msgid "Trust and open"
+msgstr "Confiar y abrir"
+
+msgid "Generating icon…"
+msgstr "Generando el icono…"
+
+msgid "At sidebar size"
+msgstr "A tamaño de barra lateral"
+
+msgid "Optional adjustments, e.g. “make it blue”"
+msgstr "Ajustes opcionales, p. ej. «hazlo azul»"
+
+msgid "Regenerate"
+msgstr "Regenerar"
+
+msgid "Default model"
+msgstr "Modelo predeterminado"
+
+msgid "Model for this dialog's runs; Preferences sets the default"
+msgstr "Modelo para las ejecuciones de este diálogo; Preferencias establece el predeterminado"
+
+msgid "Default ({model})"
+msgstr "Predeterminado ({model})"
+
+msgid "Generate Icon"
+msgstr "Generar icono"
+
+msgid "the generated SVG could not be rendered"
+msgstr "no se pudo renderizar el SVG generado"
+
+msgid "Icon generation failed: {error}"
+msgstr "Falló la generación del icono: {error}"
+
+msgid "Saving failed: {error}"
+msgstr "Falló el guardado: {error}"
+
+msgid "Close other tabs"
+msgstr "Cerrar las otras pestañas"
+
+msgid "Close tabs to the right"
+msgstr "Cerrar las pestañas a la derecha"
+
+msgid "Close all tabs"
+msgstr "Cerrar todas las pestañas"
+
+msgid "Add to chat"
+msgstr "Añadir al chat"
+
+msgid "Couldn't rename {name}: {message}"
+msgstr "No se pudo renombrar «{name}»: {message}"
+
+msgid "A name is needed to rename {name}."
+msgstr "Se necesita un nombre para renombrar «{name}»."
+
+msgid "“{new_name}” isn't a name — renaming can't move things elsewhere."
+msgstr "«{new_name}» no es un nombre — renombrar no puede mover cosas a otro lugar."
+
+msgid "“{new_name}” already exists here."
+msgstr "«{new_name}» ya existe aquí."
+
+msgid "{name} is no longer there."
+msgstr "«{name}» ya no está ahí."
+
+msgid "{name} can't be renamed to something outside this project."
+msgstr "«{name}» no se puede renombrar a algo fuera de este proyecto."
+
+msgid "There's nothing on the clipboard to paste here."
+msgstr "No hay nada en el portapapeles que pegar aquí."
+
+msgid "{count} item couldn't be pasted."
+msgstr "No se pudo pegar {count} elemento."
+
+msgid "{name} can't be pasted into itself."
+msgstr "«{name}» no se puede pegar dentro de sí mismo."
+
+msgid "That folder is no longer there."
+msgstr "Esa carpeta ya no está ahí."
+
+msgid "{name} can't be pasted outside this project."
+msgstr "«{name}» no se puede pegar fuera de este proyecto."
+
+msgid "There are already too many copies of {name} here."
+msgstr "Ya hay demasiadas copias de «{name}» aquí."
+
+msgid "Couldn't paste {name}: {message}"
+msgstr "No se pudo pegar «{name}»: {message}"
+
+msgid "{name} couldn't be decoded as an image."
+msgstr "«{name}» no se pudo decodificar como imagen."
+
+msgid "Session moved to {name}"
+msgstr "Sesión movida a {name}"
+
+msgid "Follow"
+msgstr "Seguir"
+
+msgid "Image"
+msgstr "Imagen"
+
+msgid "Cut"
+msgstr "Cortar"
+
+msgid "{n} session(s) in {p} project(s) have their transcripts moved to the trash, where they can be restored. Sessions archived with their whole project — and originals a backgrounded fork replaced — are included."
+msgstr "Las transcripciones de {n} sesión(es) de {p} proyecto(s) se mueven a la papelera, donde se pueden restaurar. Se incluyen las sesiones archivadas con todo su proyecto — y los originales que un fork en segundo plano reemplazó."
+
+msgid "{project} — {n} of {total}"
+msgstr "{project} — {n} de {total}"
+
+msgid "…and {p} other project(s) — {n} session(s)"
+msgstr "…y {p} proyecto(s) más — {n} sesión(es)"
+
+msgid "{p} of these project(s) lose every session they have."
+msgstr "{p} de estos proyecto(s) pierden todas las sesiones que tienen."
+
+msgid "Open, every check passed"
+msgstr "Abierto, todas las comprobaciones superadas"
+
+msgid "Checks still running"
+msgstr "Comprobaciones aún en ejecución"
+
+msgid "A check failed"
+msgstr "Falló una comprobación"
+
+msgid "A reviewer is waiting on a reply"
+msgstr "Un revisor espera una respuesta"
+
+msgid "Draft, and the branch conflicts"
+msgstr "Borrador, y la rama tiene conflictos"
+
+msgid "Merged"
+msgstr "Fusionado"
+
+msgid "Collins is better with the GitHub CLI"
+msgstr "Collins es mejor con la CLI de GitHub"
+
+msgid "Collins follows the pull requests your sessions open — and acts on them — through gh, GitHub's own command-line tool, which isn't installed here."
+msgstr "Collins sigue los pull requests que abren tus sesiones — y actúa sobre ellos — a través de gh, la herramienta de línea de comandos de GitHub, que no está instalada aquí."
+
+msgid "Collins follows the pull requests your sessions open — and acts on them — through gh, GitHub's own command-line tool, which is installed here but never signed in."
+msgstr "Collins sigue los pull requests que abren tus sesiones — y actúa sobre ellos — a través de gh, la herramienta de línea de comandos de GitHub, que está instalada aquí pero nunca ha iniciado sesión."
+
+msgid "Not now"
+msgstr "Ahora no"
+
+msgid "Get the GitHub CLI"
+msgstr "Obtener la CLI de GitHub"
+
+msgid "Copy command"
+msgstr "Copiar el comando"
+
+msgid "With it, every session's pull requests carry their status:"
+msgstr "Con ella, los pull requests de cada sesión llevan su estado:"
+
+msgid "…and a click on one does something about it:"
+msgstr "…y un clic en uno hace algo al respecto:"
+
+msgid "Don't show this again"
+msgstr "No volver a mostrar esto"
+
+msgid "Install it from cli.github.com — Collins picks it up the next time it starts."
+msgstr "Instálala desde cli.github.com — Collins la detecta la próxima vez que arranque."
+
+msgid "Run this once in any terminal. Collins asks for no login of its own."
+msgstr "Ejecuta esto una vez en cualquier terminal. Collins no pide ningún inicio de sesión propio."
+
+msgid "Keyboard Bindings"
+msgstr "Combinaciones de teclado"
+
+msgid "Reset All"
+msgstr "Restablecer todo"
+
+msgid "Put every shortcut back to its default"
+msgstr "Devolver cada atajo a su valor predeterminado"
+
+msgid "Click a row to change its shortcut"
+msgstr "Haz clic en una fila para cambiar su atajo"
+
+msgid "Also bound to: {actions}"
+msgstr "También asignado a: {actions}"
+
+msgid "Unbound"
+msgstr "Sin asignar"
+
+msgid "Reset to default"
+msgstr "Restablecer el predeterminado"
+
+msgid "Reset every shortcut?"
+msgstr "¿Restablecer todos los atajos?"
+
+msgid "All of your custom keyboard bindings are replaced by the defaults."
+msgstr "Todas tus combinaciones de teclado personalizadas se reemplazan por las predeterminadas."
+
+msgid "{chord} is already in use"
+msgstr "{chord} ya está en uso"
+
+msgid "It is bound to {actions}. Move it to {action}?"
+msgstr "Está asignado a {actions}. ¿Moverlo a {action}?"
+
+msgid "Move Shortcut"
+msgstr "Mover el atajo"
+
+msgid "unbound"
+msgstr "sin asignar"
+
+msgid "Set shortcut for “{action}”"
+msgstr "Establecer el atajo de «{action}»"
+
+msgid "Press the new key combination. Currently: {current}.\nBackspace removes the binding; Escape keeps it."
+msgstr "Pulsa la nueva combinación de teclas. Actual: {current}.\nRetroceso quita la asignación; Escape la conserva."
+
+msgid "Tabs and windows"
+msgstr "Pestañas y ventanas"
+
+msgid "Panels"
+msgstr "Paneles"
+
+msgid "Application"
+msgstr "Aplicación"
+
+msgid "New session"
+msgstr "Nueva sesión"
+
+msgid "Quick switcher"
+msgstr "Selector rápido"
+
+msgid "Archive the current session"
+msgstr "Archivar la sesión actual"
+
+msgid "Undo the last archive"
+msgstr "Deshacer el último archivado"
+
+msgid "Open the pull request page"
+msgstr "Abrir la página del pull request"
+
+msgid "Unbound by default; the sidebar's search button does the same."
+msgstr "Sin asignar de forma predeterminada; el botón de búsqueda de la barra lateral hace lo mismo."
+
+msgid "Close tab"
+msgstr "Cerrar la pestaña"
+
+msgid "Next tab"
+msgstr "Pestaña siguiente"
+
+msgid "Previous tab"
+msgstr "Pestaña anterior"
+
+msgid "Toggle the tab marker"
+msgstr "Alternar el marcador de la pestaña"
+
+msgid "Show/hide the sidebar"
+msgstr "Mostrar/ocultar la barra lateral"
+
+msgid "Show/hide the terminal panel"
+msgstr "Mostrar/ocultar el panel de terminal"
+
+msgid "Clear the terminal panel"
+msgstr "Limpiar el panel de terminal"
+
+msgid "Move the panel tab to the other side"
+msgstr "Mover la pestaña del panel al otro lado"
+
+msgid "Show/hide the composer"
+msgstr "Mostrar/ocultar el redactor"
+
+msgid "Show/hide the attachments gallery"
+msgstr "Mostrar/ocultar la galería de adjuntos"
+
+msgid "Swap the panel's sides"
+msgstr "Intercambiar los lados del panel"
+
+msgid "Unbound by default."
+msgstr "Sin asignar de forma predeterminada."
+
+msgid "Move the panel tab to the other strip"
+msgstr "Mover la pestaña del panel a la otra franja"
+
+msgid "Show/hide the editor"
+msgstr "Mostrar/ocultar el editor"
+
+msgid "Quick open a file"
+msgstr "Apertura rápida de un archivo"
+
+msgid "Focus the editor"
+msgstr "Enfocar el editor"
+
+msgid "Save the file"
+msgstr "Guardar el archivo"
+
+msgid "In the editor."
+msgstr "En el editor."
+
+msgid "Find in the file"
+msgstr "Buscar en el archivo"
+
+msgid "Copy the selection"
+msgstr "Copiar la selección"
+
+msgid "With easy copy and paste on; without a selection the key reaches the terminal."
+msgstr "Con «Copiado y pegado fáciles» activado; sin selección, la tecla llega a la terminal."
+
+msgid "With easy copy and paste on."
+msgstr "Con «Copiado y pegado fáciles» activado."
+
+msgid "Copy (terminal-style)"
+msgstr "Copiar (estilo terminal)"
+
+msgid "Paste (terminal-style)"
+msgstr "Pegar (estilo terminal)"
+
+msgid "Find in the terminal"
+msgstr "Buscar en la terminal"
+
+msgid "Insert a newline in the prompt"
+msgstr "Insertar una línea nueva en el prompt"
+
+msgid "Zoom in"
+msgstr "Ampliar"
+
+msgid "Zoom out"
+msgstr "Reducir"
+
+msgid "Reset zoom"
+msgstr "Restablecer el zoom"
+
+msgid "Keyboard bindings"
+msgstr "Combinaciones de teclado"
+
+msgid "Couldn't display image"
+msgstr "No se pudo mostrar la imagen"
+
+msgid "Open in Editor"
+msgstr "Abrir en el editor"
+
+msgid "Low"
+msgstr "Bajo"
+
+msgid "Medium"
+msgstr "Medio"
+
+msgid "High"
+msgstr "Alto"
+
+msgid "Extra high"
+msgstr "Muy alto"
+
+msgid "Max"
+msgstr "Máximo"
+
+msgid "This model has no effort setting"
+msgstr "Este modelo no tiene ajuste de esfuerzo"
+
+msgid "New chat"
+msgstr "Nuevo chat"
+
+msgid "Model to start this session on"
+msgstr "Modelo con el que iniciar esta sesión"
+
+msgid "Effort level to start this session at"
+msgstr "Nivel de esfuerzo con el que iniciar esta sesión"
+
+msgid "New git worktree"
+msgstr "Nuevo worktree de git"
+
+msgid "Work in a fresh worktree of this project, apart from its uncommitted changes"
+msgstr "Trabajar en un worktree nuevo de este proyecto, aparte de sus cambios sin confirmar"
+
+msgid "Empty Session"
+msgstr "Sesión vacía"
+
+msgid "Start the session with no prompt"
+msgstr "Iniciar la sesión sin prompt"
+
+msgid "Drag to move this tab: drop on an edge to split, on a strip to join"
+msgstr "Arrastra para mover esta pestaña: suéltala en un borde para dividir, en una franja para unir"
+
+msgid "Restore this tab to its size and place in the panel"
+msgstr "Restaurar esta pestaña a su tamaño y lugar en el panel"
+
+msgid "Close Tab"
+msgstr "Cerrar la pestaña"
+
+msgid "Overlay this tab over the whole session"
+msgstr "Superponer esta pestaña sobre toda la sesión"
+
+msgid "Move this tab to the other side"
+msgstr "Mover esta pestaña al otro lado"
+
+msgid "Close tab with a running command?"
+msgstr "¿Cerrar la pestaña con un comando en ejecución?"
+
+msgid "Move to"
+msgstr "Mover a"
+
+msgid "Split Left"
+msgstr "Dividir a la izquierda"
+
+msgid "Split Right"
+msgstr "Dividir a la derecha"
+
+msgid "Split Up"
+msgstr "Dividir arriba"
+
+msgid "Split Down"
+msgstr "Dividir abajo"
+
+msgid "Close tabs with running commands?"
+msgstr "¿Cerrar pestañas con comandos en ejecución?"
+
+msgid "A command is still running in one of these tabs and will be terminated."
+msgstr "Todavía se está ejecutando un comando en una de estas pestañas y se terminará."
+
+msgid "Close Tabs"
+msgstr "Cerrar las pestañas"
+
+msgid "Address unresolved comments"
+msgstr "Atender los comentarios sin resolver"
+
+msgid "Send “{prompt}” to this session"
+msgstr "Enviar «{prompt}» a esta sesión"
+
+msgid "Open a pull request"
+msgstr "Abrir un pull request"
+
+msgid "Fix errors & resolve conflicts"
+msgstr "Corregir errores y resolver conflictos"
+
+msgid "Address the CI errors"
+msgstr "Atender los errores de CI"
+
+msgid "Fix errors"
+msgstr "Corregir errores"
+
+msgid "Resolve conflicts"
+msgstr "Resolver conflictos"
+
+msgid "Mark ready for review"
+msgstr "Marcar como listo para revisión"
+
+msgid "Take {slug} out of draft"
+msgstr "Sacar {slug} de borrador"
+
+msgid "Ready"
+msgstr "Listo"
+
+msgid "Ask Claude for a review"
+msgstr "Pedir una revisión a Claude"
+
+msgid "Comment “{comment}” on {slug}"
+msgstr "Comentar «{comment}» en {slug}"
+
+msgid "Merge when checks pass"
+msgstr "Fusionar cuando pasen las comprobaciones"
+
+msgid "Turn on auto-merge for {slug}"
+msgstr "Activar la fusión automática para {slug}"
+
+msgid "Merge {slug} when its checks pass?"
+msgstr "¿Fusionar {slug} cuando pasen sus comprobaciones?"
+
+msgid "GitHub merges it as soon as every required check has passed. You can still cancel auto-merge on the pull request page."
+msgstr "GitHub lo fusiona en cuanto todas las comprobaciones requeridas hayan pasado. Aún puedes cancelar la fusión automática en la página del pull request."
+
+msgid "Enable auto-merge"
+msgstr "Activar la fusión automática"
+
+msgid "Auto-Merge"
+msgstr "Fusión automática"
+
+msgid "Merge pull request"
+msgstr "Fusionar el pull request"
+
+msgid "Merge {slug} now"
+msgstr "Fusionar {slug} ahora"
+
+msgid "Merge {slug}?"
+msgstr "¿Fusionar {slug}?"
+
+msgid "Merge"
+msgstr "Fusionar"
+
+msgid "Disable auto-merge"
+msgstr "Desactivar la fusión automática"
+
+msgid "Stop GitHub from merging {slug} when its checks pass"
+msgstr "Impedir que GitHub fusione {slug} cuando pasen sus comprobaciones"
+
+msgid "Disable Auto-Merge"
+msgstr "Desactivar la fusión automática"
+
+msgid "Its checks have passed. This merges the pull request on GitHub now."
+msgstr "Sus comprobaciones han pasado. Esto fusiona el pull request en GitHub ahora."
+
+msgid "Its checks haven't all passed. This merges the pull request on GitHub now, if the repository lets it."
+msgstr "No todas sus comprobaciones han pasado. Esto fusiona el pull request en GitHub ahora, si el repositorio lo permite."
+
+msgid "Merge and archive session"
+msgstr "Fusionar y archivar la sesión"
+
+msgid "Merge {slug} now, then archive this session"
+msgstr "Fusionar {slug} ahora y luego archivar esta sesión"
+
+msgid "Merge {slug} and archive this session?"
+msgstr "¿Fusionar {slug} y archivar esta sesión?"
+
+msgid "The session is archived once the merge lands — you can bring it back with Undo, or from “Show archived”."
+msgstr "La sesión se archiva en cuanto la fusión se completa — puedes recuperarla con Deshacer o desde «Mostrar archivadas»."
+
+msgid "Merge & archive"
+msgstr "Fusionar y archivar"
+
+msgid "Mark ready & merge when checks pass"
+msgstr "Marcar como listo y fusionar cuando pasen las comprobaciones"
+
+msgid "Take {slug} out of draft, then turn on auto-merge"
+msgstr "Sacar {slug} de borrador y luego activar la fusión automática"
+
+msgid "Mark {slug} ready and merge it when its checks pass?"
+msgstr "¿Marcar {slug} como listo y fusionarlo cuando pasen sus comprobaciones?"
+
+msgid "Ready & auto-merge"
+msgstr "Listo y fusión automática"
+
+msgid "Ready & Auto-Merge"
+msgstr "Listo y fusión automática"
+
+msgid "Mark ready & merge"
+msgstr "Marcar como listo y fusionar"
+
+msgid "Take {slug} out of draft, then merge it now"
+msgstr "Sacar {slug} de borrador y luego fusionarlo ahora"
+
+msgid "Mark {slug} ready and merge it?"
+msgstr "¿Marcar {slug} como listo y fusionarlo?"
+
+msgid "Ready & merge"
+msgstr "Listo y fusionar"
+
+msgid "Ready & Merge"
+msgstr "Listo y fusionar"
+
+msgid "Mark ready, merge & archive session"
+msgstr "Marcar como listo, fusionar y archivar la sesión"
+
+msgid "Take {slug} out of draft, merge it now, then archive this session"
+msgstr "Sacar {slug} de borrador, fusionarlo ahora y luego archivar esta sesión"
+
+msgid "Mark {slug} ready, merge it and archive this session?"
+msgstr "¿Marcar {slug} como listo, fusionarlo y archivar esta sesión?"
+
+msgid "Ready, merge & archive"
+msgstr "Listo, fusionar y archivar"
+
+msgid "The pull request is marked ready for review first."
+msgstr "El pull request se marca primero como listo para revisión."
+
+msgid "Close pull request"
+msgstr "Cerrar el pull request"
+
+msgid "Close {slug} without merging"
+msgstr "Cerrar {slug} sin fusionar"
+
+msgid "Close {slug}?"
+msgstr "¿Cerrar {slug}?"
+
+msgid "The pull request is closed without merging. Its branch and its comments stay, and it can be reopened on GitHub."
+msgstr "El pull request se cierra sin fusionar. Su rama y sus comentarios se conservan, y puede reabrirse en GitHub."
+
+msgid "{url} doesn't look like a pull request."
+msgstr "{url} no parece un pull request."
+
+msgid "Collins doesn't know how to do that."
+msgstr "Collins no sabe cómo hacer eso."
+
+msgid "Merge conflicts"
+msgstr "Conflictos de fusión"
+
+msgid "Refresh"
+msgstr "Actualizar"
+
+msgid "Search settings…"
+msgstr "Buscar ajustes…"
+
+msgid "Search settings"
+msgstr "Buscar ajustes"
+
+msgid "No settings found"
+msgstr "No se encontraron ajustes"
+
+msgid "Try a different search."
+msgstr "Prueba otra búsqueda."
+
+msgid "Tab drag handles"
+msgstr "Asas de arrastre de pestañas"
+
+msgid "Drag any panel tab by its handle to move, reorder, or split it. Relies on GTK internals — turn off to fall back to plain tab dragging plus a drag grip on each panel"
+msgstr "Arrastra cualquier pestaña de panel por su asa para moverla, reordenarla o dividirla. Depende de detalles internos de GTK — desactívalo para volver al arrastre simple de pestañas más un agarre de arrastre en cada panel"
+
+msgid "Project icon size"
+msgstr "Tamaño del icono de proyecto"
+
+msgid "Size of the project and folder icons in the sidebar"
+msgstr "Tamaño de los iconos de proyecto y carpeta en la barra lateral"
+
+msgid "Start new sessions in a git worktree"
+msgstr "Iniciar las sesiones nuevas en un worktree de git"
+
+msgid "Git projects only; each new session works in its own fresh worktree, so it won't see uncommitted local changes. Right-click a project header to override per project"
+msgstr "Solo proyectos git; cada sesión nueva trabaja en su propio worktree nuevo, así que no verá cambios locales sin confirmar. Haz clic derecho en la cabecera de un proyecto para cambiarlo por proyecto"
+
+msgid "Follow Claude's own session names"
+msgstr "Seguir los nombres de sesión del propio Claude"
+
+msgid "Rename sessions whenever Claude names or renames them — /rename and its automatic titles; manually renamed sessions keep their name"
+msgstr "Renombrar las sesiones cuando Claude las nombra o renombra — /rename y sus títulos automáticos; las sesiones renombradas a mano conservan su nombre"
+
+msgid "Exact busy tracking from the agent"
+msgstr "Seguimiento exacto de actividad desde el agente"
+
+msgid "Read Claude Code's own progress announcements for the sidebar's working indicator, instead of only inferring from terminal output (fully applies to newly opened tabs)"
+msgstr "Leer los propios anuncios de progreso de Claude Code para el indicador de trabajo de la barra lateral, en lugar de inferirlo solo de la salida de la terminal (se aplica del todo a las pestañas recién abiertas)"
+
+msgid "Poll for background sessions"
+msgstr "Sondear las sesiones en segundo plano"
+
+msgid "Fallback: check the agent CLI every 20 seconds in case the yellow guide lines stop updating on their own"
+msgstr "Respaldo: consultar la CLI del agente cada 20 segundos por si las líneas guía amarillas dejan de actualizarse solas"
+
+msgid "Typing opens the composer"
+msgstr "Escribir abre el redactor"
+
+msgid "Start typing at an agent's empty prompt and the composer opens with what you typed. A dialog, a menu and the CLI's own /, !, # and @ keep their keys"
+msgstr "Empieza a escribir en el prompt vacío de un agente y el redactor se abre con lo que escribiste. Un diálogo, un menú y los /, !, # y @ propios de la CLI conservan sus teclas"
+
+msgid "Right-click aims spell-check"
+msgstr "El clic derecho apunta el corrector"
+
+msgid "Right-clicking a misspelled word in the composer offers corrections for that word. Off: corrections follow the text cursor instead, and a right-click never moves it"
+msgstr "Hacer clic derecho en una palabra mal escrita del redactor ofrece correcciones para esa palabra. Desactivado: las correcciones siguen al cursor de texto y el clic derecho nunca lo mueve"
+
+msgid "Max width"
+msgstr "Ancho máximo"
+
+msgid "Stop growing past this width and center in the tab instead (0 = no limit)"
+msgstr "Dejar de crecer más allá de este ancho y centrarse en la pestaña (0 = sin límite)"
+
+msgid "Footer apps"
+msgstr "Aplicaciones del pie"
+
+msgid "Buttons in each tab's footer that open the tab's directory"
+msgstr "Botones en el pie de cada pestaña que abren el directorio de la pestaña"
+
+msgid "Add application…"
+msgstr "Añadir aplicación…"
+
+msgid "Pull requests"
+msgstr "Pull requests"
+
+msgid "Text size"
+msgstr "Tamaño del texto"
+
+msgid "Reading-text size in the pull request panel, as a percentage of the app font; buttons and menus keep the app size"
+msgstr "Tamaño del texto de lectura en el panel de pull requests, como porcentaje de la fuente de la aplicación; botones y menús conservan el tamaño de la aplicación"
+
+msgid "Show embedded images"
+msgstr "Mostrar imágenes incrustadas"
+
+msgid "Render the images a description or comment embeds, and the changed image files, as pictures; click one to open it full size. Off, they stay links and patches, and opening a pull request downloads nothing"
+msgstr "Mostrar como imágenes las que incrusta una descripción o un comentario, y los archivos de imagen cambiados; haz clic en una para abrirla a tamaño completo. Desactivado, se quedan como enlaces y parches, y abrir un pull request no descarga nada"
+
+msgid "Confirm before merging"
+msgstr "Confirmar antes de fusionar"
+
+msgid "Ask before merging a pull request, enabling auto-merge, or merging and archiving the session. Off, the click merges; closing a pull request unmerged still asks either way"
+msgstr "Preguntar antes de fusionar un pull request, activar la fusión automática o fusionar y archivar la sesión. Desactivado, el clic fusiona; cerrar un pull request sin fusionar pregunta igualmente"
+
+msgid "Attach pull requests named in prompts"
+msgstr "Adjuntar los pull requests mencionados en los prompts"
+
+msgid "Put every pull request a new session's first prompt mentions on that session's row, without waiting for the agent to touch it"
+msgstr "Poner cada pull request que mencione el primer prompt de una sesión nueva en la fila de esa sesión, sin esperar a que el agente lo toque"
+
+msgid "Rename sessions after their pull requests"
+msgstr "Renombrar las sesiones según sus pull requests"
+
+msgid "Retitle a session to match the newest pull request opened in it; manually renamed sessions keep their name"
+msgstr "Retitular una sesión para que coincida con el pull request más reciente abierto en ella; las sesiones renombradas a mano conservan su nombre"
+
+msgid "Refresh pull requests at launch"
+msgstr "Actualizar los pull requests al arrancar"
+
+msgid "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left"
+msgstr "Preguntar a GitHub por los pull requests de cada sesión listada una vez al inicio, para que las marcas de la barra lateral empiecen al día en lugar de como quedaron"
+
+msgid "Caffeine Mode"
+msgstr "Caffeine Mode"
+
+msgid "Keep screen on"
+msgstr "Mantener la pantalla encendida"
+
+msgid "Hold the screen on as well as keeping the computer awake. Off lets the screen turn off as usual, while an unattended agent still keeps the computer from sleeping"
+msgstr "Mantener la pantalla encendida además de mantener el equipo despierto. Desactivado, la pantalla se apaga como de costumbre, mientras un agente desatendido sigue impidiendo que el equipo se duerma"
+
+msgid "Until idle grace period"
+msgstr "Periodo de gracia de «Hasta inactividad»"
+
+msgid "How many minutes Until idle keeps the computer awake after the last session stops working; any session picking work back up restarts the wait"
+msgstr "Cuántos minutos mantiene «Hasta inactividad» el equipo despierto después de que la última sesión deje de trabajar; cualquier sesión que retome el trabajo reinicia la espera"
+
+msgid "Turn on at launch"
+msgstr "Activar al arrancar"
+
+msgid "Start with Caffeine Mode already on, keeping the computer awake until you turn it off from the header"
+msgstr "Arrancar con Caffeine Mode ya activado, manteniendo el equipo despierto hasta que lo apagues desde la cabecera"
+
+msgid "Turn off after"
+msgstr "Apagar después de"
+
+msgid "Open in a window on small screens"
+msgstr "Abrir en una ventana en pantallas pequeñas"
+
+msgid "On screens this many pixels wide or narrower (after display scaling), the editor opens in its own window instead of a panel (0 = always open as a panel)"
+msgstr "En pantallas de este ancho en píxeles o más estrechas (tras el escalado de pantalla), el editor se abre en su propia ventana en lugar de en un panel (0 = abrir siempre como panel)"
+
+msgid "Show status icon"
+msgstr "Mostrar el icono de estado"
+
+msgid "Shows Collins in the top bar, with a menu that jumps to any open session"
+msgstr "Muestra Collins en la barra superior, con un menú que salta a cualquier sesión abierta"
+
+msgid "No status-icon support was found in this desktop — GNOME needs an AppIndicator extension"
+msgstr "No se encontró soporte de icono de estado en este escritorio — GNOME necesita una extensión AppIndicator"
+
+msgid "Nothing on this desktop can show a status icon"
+msgstr "Nada en este escritorio puede mostrar un icono de estado"
+
+msgid "Using the claude found on PATH at {path}."
+msgstr "Usando el claude encontrado en el PATH, en {path}."
+
+msgid "claude isn't on PATH — Collins will ask where it is at the next launch."
+msgstr "claude no está en el PATH — Collins preguntará dónde está en el próximo arranque."
+
+msgid "How long that launch-time Caffeine Mode runs before it turns itself off. Until idle never does: it holds the computer awake while any session is working (and {n} minute past), dozing in between"
+msgstr "Cuánto dura ese Caffeine Mode de arranque antes de apagarse solo. «Hasta inactividad» nunca lo hace: mantiene el equipo despierto mientras alguna sesión trabaja (y {n} minuto más), dormitando entre tanto"
+
+msgid "Move up"
+msgstr "Subir"
+
+msgid "Move down"
+msgstr "Bajar"
+
+msgid "No apps configured"
+msgstr "No hay aplicaciones configuradas"
+
+msgid "Before"
+msgstr "Antes"
+
+msgid "After"
+msgstr "Después"
+
+msgid "Back to the pull requests"
+msgstr "Volver a los pull requests"
+
+msgid "View in Collins"
+msgstr "Ver en Collins"
+
+msgid "Open this pull request's page beside the session"
+msgstr "Abrir la página de este pull request junto a la sesión"
+
+msgid "View unresolved comments"
+msgstr "Ver los comentarios sin resolver"
+
+msgid "Open this pull request's page at its first unresolved thread"
+msgstr "Abrir la página de este pull request en su primer hilo sin resolver"
+
+msgid "Collins couldn't run that action."
+msgstr "Collins no pudo ejecutar esa acción."
+
+msgid "{action} failed"
+msgstr "Falló {action}"
+
+msgid "Pull request"
+msgstr "Pull request"
+
+msgid "Merging when checks pass"
+msgstr "Se fusionará cuando pasen las comprobaciones"
+
+msgid "The GitHub CLI (gh) isn't installed, or isn't on PATH."
+msgstr "La CLI de GitHub (gh) no está instalada o no está en el PATH."
+
+msgid "Collins couldn't run gh."
+msgstr "Collins no pudo ejecutar gh."
+
+msgid "gh exited with status {code}."
+msgstr "gh terminó con estado {code}."
+
+msgid "and {n} more"
+msgstr "y {n} más"
+
+msgid "Approved"
+msgstr "Aprobado"
+
+msgid "Changes requested"
+msgstr "Cambios solicitados"
+
+msgid "Review dismissed"
+msgstr "Revisión descartada"
+
+msgid "Commented"
+msgstr "Comentado"
+
+msgid "Reload this pull request"
+msgstr "Recargar este pull request"
+
+msgid "Conversation"
+msgstr "Conversación"
+
+msgid "Files"
+msgstr "Archivos"
+
+msgid "Couldn't load this pull request — is the GitHub CLI signed in?"
+msgstr "No se pudo cargar este pull request — ¿ha iniciado sesión la CLI de GitHub?"
+
+msgid "Nothing loaded yet."
+msgstr "Aún no se ha cargado nada."
+
+msgid "Merges {head} into {base}"
+msgstr "Fusiona {head} en {base}"
+
+msgid "{n} file"
+msgstr "{n} archivo"
+
+msgid "No comments yet."
+msgstr "Aún no hay comentarios."
+
+msgid "No description provided."
+msgstr "No se dio ninguna descripción."
+
+msgid "No changed files."
+msgstr "No hay archivos cambiados."
+
+msgid "Checks ({n})"
+msgstr "Comprobaciones ({n})"
+
+msgid "Checks"
+msgstr "Comprobaciones"
+
+msgid "More actions"
+msgstr "Más acciones"
+
+msgid "Right-click for more actions"
+msgstr "Haz clic derecho para más acciones"
+
+msgid "Add a comment"
+msgstr "Añadir un comentario"
+
+msgid "Request changes"
+msgstr "Solicitar cambios"
+
+msgid "Approve"
+msgstr "Aprobar"
+
+msgid "Comment"
+msgstr "Comentar"
+
+msgid "Comment on {slug}"
+msgstr "Comentar en {slug}"
+
+msgid "Approve {slug}"
+msgstr "Aprobar {slug}"
+
+msgid "Request changes on {slug}"
+msgstr "Solicitar cambios en {slug}"
+
+msgid "Address comments"
+msgstr "Atender los comentarios"
+
+msgid "Request review"
+msgstr "Solicitar revisión"
+
+msgid "Outdated"
+msgstr "Desactualizado"
+
+msgid "The code this thread commented on has changed"
+msgstr "El código que comentaba este hilo ha cambiado"
+
+msgid "Resolved"
+msgstr "Resuelto"
+
+msgid "Reply"
+msgstr "Responder"
+
+msgid "Reply in this thread"
+msgstr "Responder en este hilo"
+
+msgid "Unresolve"
+msgstr "Reabrir"
+
+msgid "Resolve"
+msgstr "Resolver"
+
+msgid "Reopen this thread"
+msgstr "Reabrir este hilo"
+
+msgid "Mark this thread resolved"
+msgstr "Marcar este hilo como resuelto"
+
+msgid "Post reply"
+msgstr "Publicar la respuesta"
+
+msgid "no diff — binary or too large"
+msgstr "sin diff — binario o demasiado grande"
+
+msgid "{n} line"
+msgstr "{n} línea"
+
+msgid "Show more"
+msgstr "Mostrar más"
+
+msgid "Show less"
+msgstr "Mostrar menos"
+
+msgid "New session in {path}"
+msgstr "Nueva sesión en {path}"
+
+msgid "Expand"
+msgstr "Expandir"
+
+msgid "Collapse"
+msgstr "Contraer"
+
+msgid "New Thread"
+msgstr "Nuevo hilo"
+
+msgid "Discard draft and close tab"
+msgstr "Descartar el borrador y cerrar la pestaña"
+
+msgid "Discard draft"
+msgstr "Descartar el borrador"
+
+msgid "Backgrounding is unavailable until this session is registered and any handoff in progress finishes"
+msgstr "Pasar a segundo plano no está disponible hasta que esta sesión esté registrada y termine cualquier traspaso en curso"
+
+msgid "This session has no tab open."
+msgstr "Esta sesión no tiene ninguna pestaña abierta."
+
+msgid "Delete archived sessions…"
+msgstr "Eliminar sesiones archivadas…"
+
+msgid "Add project"
+msgstr "Añadir proyecto"
+
+msgid "Refresh session list and pull requests"
+msgstr "Actualizar la lista de sesiones y los pull requests"
+
+msgid "Chats"
+msgstr "Chats"
+
+msgid "Draft"
+msgstr "Borrador"
+
+msgid "Refreshing pull requests…"
+msgstr "Actualizando los pull requests…"
+
+msgid "Open in new window"
+msgstr "Abrir en una ventana nueva"
+
+msgid "Move to new window"
+msgstr "Mover a una ventana nueva"
+
+msgid "Rename to match PR"
+msgstr "Renombrar según el PR"
+
+msgid "Rename to match PR #{number}"
+msgstr "Renombrar según el PR #{number}"
+
+msgid "Repair session link"
+msgstr "Reparar el vínculo de la sesión"
+
+msgid "New session in new window"
+msgstr "Nueva sesión en una ventana nueva"
+
+msgid "New session here (no worktree)"
+msgstr "Nueva sesión aquí (sin worktree)"
+
+msgid "New session here (in a worktree)"
+msgstr "Nueva sesión aquí (en un worktree)"
+
+msgid "New sessions use a worktree"
+msgstr "Las sesiones nuevas usan un worktree"
+
+msgid "Git pull ({branch})"
+msgstr "Git pull ({branch})"
+
+msgid "Git pull"
+msgstr "Git pull"
+
+msgid "Remove project from sidebar"
+msgstr "Quitar el proyecto de la barra lateral"
+
+msgid "replaced"
+msgstr "reemplazada"
+
+msgid "Open composer"
+msgstr "Abrir el redactor"
+
+msgid "the agent didn't start — your prompt is kept in the composer"
+msgstr "el agente no arrancó — tu prompt se conserva en el redactor"
+
+msgid "Every pull request this session has opened"
+msgstr "Todos los pull requests que ha abierto esta sesión"
+
+msgid "Show/hide terminal panel"
+msgstr "Mostrar/ocultar el panel de terminal"
+
+msgid "Move terminals to {name}?"
+msgstr "¿Mover las terminales a {name}?"
+
+msgid "This session started in a worktree at {path}. The terminal open beside it is still in the project directory — change its directory to the worktree? A terminal running a command is left alone."
+msgstr "Esta sesión empezó en un worktree en {path}. La terminal abierta a su lado sigue en el directorio del proyecto — ¿cambiar su directorio al worktree? Una terminal con un comando en ejecución no se toca."
+
+msgid "Change Directory"
+msgstr "Cambiar el directorio"
+
+msgid "{n} terminal is running a command and stayed where it was"
+msgstr "{n} terminal está ejecutando un comando y se quedó donde estaba"
+
+msgid "Effort: {level}"
+msgstr "Esfuerzo: {level}"
+
+msgid "Click to switch the effort level"
+msgstr "Haz clic para cambiar el nivel de esfuerzo"
+
+msgid "No pull request found for this branch"
+msgstr "No se encontró ningún pull request para esta rama"
+
+msgid "Re-check this branch's pull requests"
+msgstr "Volver a comprobar los pull requests de esta rama"
+
+msgid "Look for this branch's pull request"
+msgstr "Buscar el pull request de esta rama"
+
+msgid "Add to chat: the agent isn't running in this tab"
+msgstr "Añadir al chat: el agente no se está ejecutando en esta pestaña"
+
+msgid "Add to chat isn't available for this file"
+msgstr "Añadir al chat no está disponible para este archivo"
+
+msgid "skipped {n} dropped item that isn't a local file"
+msgstr "se omitió {n} elemento soltado que no es un archivo local"
+
+msgid "Composer: the input box holds a paste Collins can't read"
+msgstr "Redactor: el cuadro de entrada contiene un pegado que Collins no puede leer"
+
+msgid "Effort switch: the agent isn't running in this tab"
+msgstr "Cambio de esfuerzo: el agente no se está ejecutando en esta pestaña"
+
+msgid "This session isn't at an empty prompt."
+msgstr "Esta sesión no está en un prompt vacío."
+
+msgid "Start sessions in the background"
+msgstr "Iniciar sesiones en segundo plano"
+
+msgid "start_session — spawn a sibling agent in a new background tab, with a prompt"
+msgstr "start_session — lanza un agente hermano en una pestaña nueva en segundo plano, con un prompt"
+
+msgid "Read the terminal panel"
+msgstr "Leer el panel de terminal"
+
+msgid "read_terminal — the panel tabs' text and scrollback, your own typing included"
+msgstr "read_terminal — el texto y el historial de las pestañas del panel, incluido lo que tú mismo escribes"
+
+msgid "Run commands in the terminal panel"
+msgstr "Ejecutar comandos en el panel de terminal"
+
+msgid "run_in_terminal — type a command into an idle panel tab (or a new one) and run it"
+msgstr "run_in_terminal — escribe un comando en una pestaña del panel inactiva (o una nueva) y lo ejecuta"
+
+msgid "Default (latest Haiku)"
+msgstr "Predeterminado (último Haiku)"
+
+msgid "Default (latest Sonnet)"
+msgstr "Predeterminado (último Sonnet)"
+
+msgid "Session title model"
+msgstr "Modelo de títulos de sesión"
+
+msgid "Icon generation model"
+msgstr "Modelo de generación de iconos"
+
+msgid "Model list"
+msgstr "Lista de modelos"
+
+msgid "Checking…"
+msgstr "Comprobando…"
+
+msgid "Ask Anthropic for the model list now, rather than waiting for the saved one to age out"
+msgstr "Pedir a Anthropic la lista de modelos ahora, en lugar de esperar a que caduque la guardada"
+
+msgid "Couldn't reach Anthropic — offering the CLI's aliases (opus, sonnet, haiku)"
+msgstr "No se pudo contactar con Anthropic — se ofrecen los alias de la CLI (opus, sonnet, haiku)"
+
+msgid "Couldn't reach Anthropic — still showing the list fetched {when}"
+msgstr "No se pudo contactar con Anthropic — se sigue mostrando la lista obtenida {when}"
+
+msgid "{count} models, updated {when}"
+msgstr "{count} modelos, actualizada {when}"
+
+msgid "Waiting for this session to be registered — backgrounding it now would leave the agent with no way back to it"
+msgstr "Esperando a que esta sesión se registre — pasarla ahora a segundo plano dejaría al agente sin camino de vuelta a ella"
+
+msgid "Another session is still being handed to the background — one at a time"
+msgstr "Otra sesión aún se está traspasando al segundo plano — de una en una"
+
+msgid "New chat (scratch folder)"
+msgstr "Nuevo chat (carpeta temporal)"
+
+msgid "Close window with {n} active session(s)?"
+msgstr "¿Cerrar la ventana con {n} sesión(es) activa(s)?"
+
+msgid "Agents are asked to exit cleanly first; other running commands will be terminated."
+msgstr "Primero se pide a los agentes que salgan limpiamente; los demás comandos en ejecución se terminarán."
+
+msgid "Backgrounding sessions…"
+msgstr "Pasando sesiones a segundo plano…"
+
+msgid "Quit Now"
+msgstr "Salir ahora"
+
+msgid "Handing each session to a background agent, one at a time, so every one is paired with the agent it becomes. {done} of {total} done."
+msgstr "Traspasando cada sesión a un agente en segundo plano, de una en una, para que cada una quede emparejada con el agente en que se convierte. {done} de {total} hechas."
+
+msgid "New session in {project} (no worktree)"
+msgstr "Nueva sesión en {project} (sin worktree)"
+
+msgid "New session in {project} (in a worktree)"
+msgstr "Nueva sesión en {project} (en un worktree)"
+
+msgid "Could not create chat directory"
+msgstr "No se pudo crear el directorio del chat"
+
+msgid "Trust and add"
+msgstr "Confiar y añadir"
+
+msgid "Discard draft?"
+msgstr "¿Descartar el borrador?"
+
+msgid "“{label}” will be forgotten, along with any terminal panel it kept."
+msgstr "«{label}» se olvidará, junto con cualquier panel de terminal que conservara."
+
+msgid "Discard"
+msgstr "Descartar"
+
+msgid "Couldn't send that to the session"
+msgstr "No se pudo enviar eso a la sesión"
+
+msgid "Close tab with an active session?"
+msgstr "¿Cerrar la pestaña con una sesión activa?"
+
+msgid "The agent is asked to exit cleanly first; the command running in this tab's terminal panel will be terminated."
+msgstr "Primero se pide al agente que salga limpiamente; el comando en ejecución en el panel de terminal de esta pestaña se terminará."
+
+msgid "The agent is asked to exit cleanly first."
+msgstr "Primero se pide al agente que salga limpiamente."
+
+msgid "A command is still running in this tab's terminal panel and will be terminated."
+msgstr "Todavía se está ejecutando un comando en el panel de terminal de esta pestaña y se terminará."
+
+msgid "Backgrounding isn't available yet: this session hasn't been registered, so a detached agent would have no way back to it."
+msgstr "Pasar a segundo plano aún no está disponible: esta sesión no se ha registrado, así que un agente desacoplado no tendría camino de vuelta a ella."
+
+msgid "Backgrounding isn't available right now: another session is still being handed to the background."
+msgstr "Pasar a segundo plano no está disponible ahora mismo: otra sesión aún se está traspasando al segundo plano."
+
+msgid "No matching agent"
+msgstr "Ningún agente coincide"
+
+msgid "No background agent matches this session — either its agent is gone, or more than one candidate matched and guessing would link the wrong one. The transcript itself is intact."
+msgstr "Ningún agente en segundo plano coincide con esta sesión — o su agente ya no existe, o coincidió más de un candidato y adivinar vincularía el equivocado. La transcripción en sí está intacta."
+
+msgid "Session linked"
+msgstr "Sesión vinculada"
+
+msgid "Linked to its running background agent."
+msgstr "Vinculada a su agente en segundo plano en ejecución."
+
+msgid "Nothing to repair"
+msgstr "Nada que reparar"
+
+msgid "This session is already its own background agent. Opening it attaches to that agent."
+msgstr "Esta sesión ya es su propio agente en segundo plano. Al abrirla te conectas a ese agente."
+
+msgid "No pull request is linked to this session yet"
+msgstr "Aún no hay ningún pull request vinculado a esta sesión"
+
+msgid "Undo"
+msgstr "Deshacer"
+
+msgid "Archived “{name}”"
+msgstr "«{name}» archivada"
+
+msgid "Archived {n} sessions"
+msgstr "{n} sesiones archivadas"
+
+msgid "Delete {n} archived session(s)?"
+msgstr "¿Eliminar {n} sesión(es) archivada(s)?"
+
+msgid "Keep the {p} emptied project(s) in the sidebar"
+msgstr "Mantener en la barra lateral los {p} proyecto(s) vaciados"
+
+msgid "Manage and resume your AI coding agent sessions.\n\nUnofficial community tool — not affiliated with or endorsed by Anthropic."
+msgstr "Gestiona y reanuda tus sesiones de agente de programación con IA.\n\nHerramienta comunitaria no oficial — sin afiliación ni respaldo de Anthropic."
 
