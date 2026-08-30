@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-29. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -1030,6 +1030,26 @@ class PreferencesDialog(Adw.Dialog):
             self._search_entry.set_text("")
         else:
             self.close()
+
+    def show_group(self, name: str) -> bool:
+        """Open on one group: the search box is filled with the group's title,
+        so the page is filtered to that group — plus any other row that
+        happens to name it (see _apply_filter) — the way someone who typed
+        it would see it, and the one filter this dialog has (an
+        Adw.PreferencesPage can scroll to its top, not to a group).
+
+        *name* is a prefslayout.GROUPS entry. False, with the page left whole,
+        for a name the layout doesn't have or a group with no title to search
+        by (the untitled CLI rows) — a caller pointing at a group that isn't
+        built yet gets plain Preferences rather than an empty page.
+        """
+        if name not in prefslayout.GROUPS:
+            return False
+        title = self._page.groups[prefslayout.GROUPS.index(name)].get_title() or ""
+        if not title:
+            return False
+        self._search_entry.set_text(title)
+        return True
 
     def _apply_filter(self) -> None:
         """Hide every setting the search box doesn't name.

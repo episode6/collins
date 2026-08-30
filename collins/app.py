@@ -377,6 +377,48 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
   font-size: 0.8em;
 }
 
+/* the header bell's unread count (notifypanel.NotificationBell): an accent
+   pill over the button's top-right corner, haloed in the header's own
+   background so it reads as sitting on the bell rather than touching it. The
+   number is the tray's (traymodel.badge_text), so 9+ is the cap here too. */
+.notification-badge {
+  background-color: @accent_bg_color;
+  color: white;
+  font-size: 10.5px;
+  font-weight: 600;
+  min-height: 16px;
+  min-width: 8px;
+  padding: 0 4px;
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px @headerbar_bg_color;
+  margin-top: 1px;
+}
+
+/* the notification history (notifypanel.NotificationSheet): the sheet that
+   slides in from the right. A row's unread state borrows the sidebar's own
+   language -- the 2px green guide line breathing the same unread-pulse as
+   the session row it summarises (see row.session-child.unread above), over
+   a faint accent wash -- so the sheet reads as a list of the sidebar's
+   pulses, which is what it is. The kind marks are the guide line's colours:
+   the sidebar's finished green for a run, the detached yellow for a bell. */
+.notification-sheet .toolbar { padding: 6px 6px 6px 6px; }
+.notification-section { padding: 10px 12px 2px 12px; }
+.notification-section:first-child { padding-top: 4px; }
+.notification-row {
+  padding: 7px 10px 7px 10px;
+  border-left: 2px solid transparent;
+  margin-right: 6px;
+}
+.notification-row.unread {
+  border-left-color: #2ec27e;
+  background-color: alpha(@accent_bg_color, 0.06);
+  animation: unread-pulse 3s ease-in-out infinite;
+}
+.notification-row.unread .notification-title { font-weight: 600; }
+.notification-kind-bell { color: #e5a50a; }
+.notification-kind-finished { color: #2ec27e; }
+.notification-footer { padding: 4px 4px 4px 12px; }
+
 /* a session with something going on -- a tab open, or running detached -- is
    drawn as an outlined card with a left guide line; what a running one adds
    is a full-strength title (every other row's dims), and (for a detached one)

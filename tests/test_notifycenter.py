@@ -431,3 +431,88 @@ def test_delivery_refuses_unknown_inputs():
         delivery("shout", FOCUS_SELECTED)
     with pytest.raises(ValueError):
         delivery(KIND_BELL, "asleep")
+
+
+# -- what the bell and the sheet say ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "unread, text",
+    [
+        (0, "Notifications"),
+        (-1, "Notifications"),
+        (1, "1 unread notification"),
+        (3, "3 unread notifications"),
+    ],
+)
+def test_bell_tooltip(unread, text):
+    assert notifycenter.bell_tooltip(unread) == text
+
+
+@pytest.mark.parametrize(
+    "age, text",
+    [
+        (0, "just now"),
+        (9, "just now"),
+        (-30, "just now"),  # a clock that went backwards is not a negative age
+        (12, "12s ago"),
+        (59, "59s ago"),
+        (60, "1m ago"),
+        (6 * 60 + 30, "6m ago"),
+        (2 * 3600, "2h ago"),
+        (23 * 3600 + 59 * 60, "23h ago"),
+        (86400, "yesterday"),
+        (2 * 86400 - 1, "yesterday"),
+        (3 * 86400, "3d ago"),
+        (6 * 86400 + 3600, "6d ago"),
+    ],
+)
+def test_relative_time(age, text):
+    assert notifycenter.relative_time(NOW - age, now=NOW) == text
+
+
+def test_relative_time_past_a_week_is_the_date():
+    import time
+
+    when = NOW - 8 * 86400
+    assert notifycenter.relative_time(when, now=NOW) == time.strftime("%Y-%m-%d", time.localtime(when))
+
+
+def test_row_body_counts_a_coalesced_bell_only():
+    c, _ = center()
+    row = c.post(c.make(KIND_BELL, "s", "T", "P", "Rang the bell"))
+    assert notifycenter.row_body(row) == "Rang the bell"
+    c.post(c.make(KIND_BELL, "s", "T", "P", "Rang the bell"))
+    c.post(c.make(KIND_BELL, "s", "T", "P", "Rang the bell"))
+    assert notifycenter.row_body(row) == "Rang the bell ×3"
+    message = c.post(c.make(KIND_MESSAGE, "s", "T", "P", "Look at this"))
+    assert notifycenter.row_body(message) == "Look at this"
+
+
+def test_split_rows_keeps_each_half_in_order():
+    clock = Clock()
+    c, _ = center(clock=clock)
+    ids = []
+    for i in range(4):
+        clock.now += 1
+        ids.append(c.post(c.make(KIND_MESSAGE, f"s{i}", "T", "P", "m")).id)
+    c.mark_read(ids[1])
+    c.mark_read(ids[3])
+    unread, earlier = notifycenter.split_rows(c.rows())
+    assert [r.id for r in unread] == [ids[2], ids[0]]
+    assert [r.id for r in earlier] == [ids[3], ids[1]]
+    assert notifycenter.split_rows([]) == ([], [])
+
+
+@pytest.mark.parametrize(
+    "value, name",
+    [
+        (None, "Default"),
+        ("", "Default"),
+        ("default", "Default"),
+        ("none", "None"),
+        ("/home/me/sounds/chime.ogg", "chime.ogg"),
+    ],
+)
+def test_sound_display_name(value, name):
+    assert notifycenter.sound_display_name(value) == name

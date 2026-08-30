@@ -857,6 +857,78 @@ msgstr "{n} olvasatlan"
 msgid "Finished a run"
 msgstr "Befejezett egy futást"
 
+msgid "Notifications"
+msgstr "Értesítések"
+
+msgid "1 unread notification"
+msgstr "1 olvasatlan értesítés"
+
+msgid "{n} unread notifications"
+msgstr "{n} olvasatlan értesítés"
+
+msgid "just now"
+msgstr "épp most"
+
+msgid "{n}s ago"
+msgstr "{n} mp-e"
+
+msgid "{n}m ago"
+msgstr "{n} perce"
+
+msgid "{n}h ago"
+msgstr "{n} órája"
+
+msgid "yesterday"
+msgstr "tegnap"
+
+msgid "{n}d ago"
+msgstr "{n} napja"
+
+msgid "{body} ×{n}"
+msgstr "{body} ×{n}"
+
+msgid "Untitled session"
+msgstr "Névtelen munkamenet"
+
+msgid "Mark all read"
+msgstr "Mind olvasott"
+
+msgid "Mark every notification read"
+msgstr "Minden értesítés megjelölése olvasottként"
+
+msgid "Clear"
+msgstr "Törlés"
+
+msgid "Remove every notification"
+msgstr "Minden értesítés eltávolítása"
+
+msgid "Unread"
+msgstr "Olvasatlan"
+
+msgid "Earlier"
+msgstr "Korábban"
+
+msgid "No notifications"
+msgstr "Nincs értesítés"
+
+msgid "Messages from sessions you aren't looking at, and bells, land here."
+msgstr "Ide érkeznek az épp nem nézett munkamenetek üzenetei és a csengetések."
+
+msgid "Mark read"
+msgstr "Olvasottnak jelöl"
+
+msgid "Remove"
+msgstr "Eltávolítás"
+
+msgid "Sound: {name}"
+msgstr "Hang: {name}"
+
+msgid "Preferences…"
+msgstr "Beállítások…"
+
+msgid "Show/hide notifications"
+msgstr "Értesítések megjelenítése/elrejtése"
+
 msgid "You interrupted Claude here"
 msgstr "Itt szakítottad meg a Claude-ot"
 

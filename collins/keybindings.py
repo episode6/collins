@@ -171,6 +171,15 @@ BINDINGS: tuple[Binding, ...] = (
     ),
     Binding("terminal.zoom-reset", N_("Reset zoom"), ("<Control>0", "<Control>KP_0"), GROUP_TERMINAL),
     Binding("win.preferences", N_("Preferences"), ("<Control>comma",), GROUP_APP),
+    # B for bell. Neither VTE nor GtkSourceView claims Ctrl+Shift+B, and the
+    # window's controller runs in the capture phase regardless, so the chord
+    # opens the sheet over a terminal too.
+    Binding(
+        "win.toggle-notifications",
+        N_("Show/hide notifications"),
+        ("<Control><Shift>b",),
+        GROUP_APP,
+    ),
     Binding("win.keyboard-bindings", N_("Keyboard bindings"), (), GROUP_APP, N_("Unbound by default.")),
     Binding("app.quit", N_("Quit"), ("<Control>q",), GROUP_APP),
 )

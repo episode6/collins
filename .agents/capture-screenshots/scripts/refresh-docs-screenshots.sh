@@ -76,6 +76,7 @@ run_scene() {
                       --set page_panel_size_right=700 --settle-ms 6000 ;;
     editor-panel)   shoot editor-panel "$IMG/editor-panel.png" --size 1600x950 \
                       --set editor_width=620 ;;
+    notifications)  shoot notifications "$IMG/notifications.png" --size 1280x860 --settle-ms 4000 ;;
     attachments-panel) shoot attachments-panel "$IMG/attachments-panel.png" --size 1500x1100 \
                       --set page_panel_size_right=420 --settle-ms 5000 ;;
     welcome)        shoot welcome "$IMG/welcome.png" --size 1280x860 --set welcome_seen=false ;;
@@ -90,7 +91,7 @@ run_scene() {
 # a Draft row in every scene shot after it.
 SCENES=("$@")
 for s in main-window hero quick-switcher session-details mcp-servers preferences \
-         terminal-panel composer pr-page editor-panel attachments-panel \
+         terminal-panel composer pr-page editor-panel attachments-panel notifications \
          welcome welcome-cli new-chat; do
   run_scene "$s"
 done

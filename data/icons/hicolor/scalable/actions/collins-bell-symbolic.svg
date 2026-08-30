@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="16px" viewBox="0 0 16 16" width="16px" xmlns="http://www.w3.org/2000/svg">
+    <!-- Filled paths only: GTK recolors symbolic icons by overriding fill on
+         every shape, so stroked outlines collapse into silhouettes. The bell
+         is a 1.25px outline expanded into a ring (even-odd: the outer bell
+         minus the inner one), with a half-disc clapper under the rim — the
+         same weight as Adwaita's own symbolic set, and the weight of
+         caffeine-cup-*-symbolic beside it in the header bar. Namespaced
+         "collins-" because an installed icon theme's own bell would shadow a
+         bundled one of the same name (see installed-icons-shadow-bundled). -->
+    <g fill="#2e3436">
+        <path fill-rule="evenodd" d="M 8 0.75 C 8.414 0.75 8.75 1.086 8.75 1.5 V 2.313 C 10.99 2.66 12.5 4.62 12.5 7 V 9.85 L 13.9 11.45 C 14.2 11.8 14.02 12.5 13.45 12.5 H 2.55 C 1.98 12.5 1.8 11.8 2.1 11.45 L 3.5 9.85 V 7 C 3.5 4.62 5.01 2.66 7.25 2.313 V 1.5 C 7.25 1.086 7.586 0.75 8 0.75 Z M 8 3.5 C 6.03 3.5 4.75 5.03 4.75 7 V 10.32 L 3.92 11.25 H 12.08 L 11.25 10.32 V 7 C 11.25 5.03 9.97 3.5 8 3.5 Z"/>
+        <path d="M 6.25 13.25 H 9.75 C 9.75 14.22 8.97 15 8 15 C 7.03 15 6.25 14.22 6.25 13.25 Z"/>
+    </g>
+</svg>

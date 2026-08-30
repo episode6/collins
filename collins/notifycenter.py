@@ -35,10 +35,16 @@ pruned of anything older than KEEP_DAYS on load (see clean_records).
 of notification and where the user is, returning the set of things to do.
 The table is the spec's; the names it returns are the vocabulary the window
 wires to widgets (see the DELIVER_* constants).
+
+**What the widgets say** is decided here too, where it is string work: the
+bell's tooltip, a row's relative time, a coalesced bell's "×3", the split of
+the list into its unread and earlier halves (see the helpers after the
+class). notifypanel.py lays those out; it never works the words out itself.
 """
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from collections.abc import Callable, Iterable
@@ -509,3 +515,70 @@ class NotificationCenter:
         """The keys every synthetic row currently stands under, for a caller
         reconciling them against what still exists (see App)."""
         return [row.session_id for row in self._rows if row.kind == KIND_FINISHED]
+
+
+# -- what the bell and the sheet say -------------------------------------------
+
+
+def bell_tooltip(unread: int) -> str:
+    """The header bell's tooltip: what it is when quiet, how many are waiting
+    otherwise. Two plain strings rather than a plural form — po/generate.py
+    has no plurals (see po-generate-has-no-plurals)."""
+    if unread <= 0:
+        return _("Notifications")
+    if unread == 1:
+        return _("1 unread notification")
+    return _("{n} unread notifications").format(n=unread)
+
+
+def relative_time(when: float, now: float | None = None) -> str:
+    """How long ago a row happened, as the row's corner says it: "just now",
+    "12s ago", "6m ago", "2h ago", "yesterday", "3d ago", then the date. A
+    clock that reads earlier than the row (a machine whose time went back)
+    is "just now" rather than a negative age."""
+    if now is None:
+        now = time.time()
+    seconds = int(now - when)
+    if seconds < 10:
+        return _("just now")
+    if seconds < 60:
+        return _("{n}s ago").format(n=seconds)
+    if seconds < 3600:
+        return _("{n}m ago").format(n=seconds // 60)
+    if seconds < 86400:
+        return _("{n}h ago").format(n=seconds // 3600)
+    if seconds < 2 * 86400:
+        return _("yesterday")
+    if seconds < 7 * 86400:
+        return _("{n}d ago").format(n=seconds // 86400)
+    return time.strftime("%Y-%m-%d", time.localtime(when))
+
+
+def row_body(notification: Notification) -> str:
+    """The row's body line: the text, with a coalesced bell's count after it
+    ("Rang the bell ×3"). A count of one says nothing about itself."""
+    if notification.count > 1:
+        return _("{body} ×{n}").format(body=notification.body, n=notification.count)
+    return notification.body
+
+
+def split_rows(rows: Iterable[Notification]) -> tuple[list[Notification], list[Notification]]:
+    """The sheet's two sections, each in the order given (newest first):
+    the unread rows, then everything already read."""
+    unread: list[Notification] = []
+    earlier: list[Notification] = []
+    for row in rows:
+        (earlier if row.read else unread).append(row)
+    return unread, earlier
+
+
+def sound_display_name(value: str | None) -> str:
+    """What the sheet's footer calls the notification_sound setting: "Default"
+    for an unset or default value, "None" for silence, else the chosen file's
+    name. The sound's own module reads the same setting for playback; the
+    two must agree on the words, so the words live here."""
+    if not value or value == "default":
+        return _("Default")
+    if value == "none":
+        return _("None")
+    return os.path.basename(str(value))

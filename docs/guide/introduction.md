@@ -52,9 +52,9 @@ with respect to your agents' data — names, favorites, and all app state live i
 - **Work in parallel.** Open several sessions as tabs, each with its own
   shell panel, code editor, and prompt composer. Sidebar guide lines show
   what each one is doing, a session can raise a desktop notification when it
-  wants you back — and you can close the window entirely and let the
-  sessions keep running behind a status icon that counts what's waiting for
-  you.
+  wants you back, a bell in the header counts what's waiting and keeps the
+  history — and you can close the window entirely and let the sessions keep
+  running behind a status icon that shows the same number.
 - **Write prompts like a person, and park them.** A multi-line, spell-checked
   composer opens the moment you start typing at an agent's prompt, takes
   pasted images — and keeps whatever you haven't sent. Close the tab, quit
