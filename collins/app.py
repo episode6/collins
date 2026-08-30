@@ -1557,10 +1557,6 @@ class App(Adw.Application):
         # withdrawn under; see _on_notifications_changed).
         self._update_desktop_sent = False
         self.notification_center.connect(self._on_notifications_changed)
-        # An update row for a version this launch is running (or newer)
-        # is news no longer: the user installed it. Dropped before anything
-        # paints the history.
-        updatecheck.retire(self.notification_center)
 
         self._status_icon: statusicon.StatusIcon | None = None
         self._status_icon_source: int | None = None
@@ -1578,6 +1574,11 @@ class App(Adw.Application):
         self.store.connect("unread-changed", self._on_unread_changed)
         self.store.connect("busy-changed", self._on_busy_changed)
         self.store.connect("archived", self._on_session_archived)
+        # An update row for a version this launch is running (or newer)
+        # is news no longer: the user installed it. Dropped before anything
+        # paints the history — and after the status icon's fields above,
+        # which the center's listener reaches through refresh_status_icon.
+        updatecheck.retire(self.notification_center)
         # Whether a tray host is on the bus, followed live from launch so the
         # close confirmation can pick its default response without a
         # synchronous bus round trip on the close path (see _confirm_quit).

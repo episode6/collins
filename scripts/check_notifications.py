@@ -113,6 +113,14 @@ with open(STATE_FILE, "w", encoding="utf-8") as fh:
     json.dump({
         "names": {SESSION_A: "Fix spinner animation", SESSION_B: "Router profiling"},
         "settings": {"welcome_seen": True},
+        # An update row from a last run that announced a version this launch
+        # has since caught up with: retired at startup (updatecheck.retire),
+        # which runs the center's listener before any window exists.
+        "notifications": [{
+            "id": "update:0.0.1", "session_id": "", "title": "Collins 0.0.1 is available",
+            "project": "", "kind": "update", "body": "You're running 0.0.0", "when": 1_800_000_000,
+            "read": True, "count": 1, "url": "https://github.com/episode6/collins/releases/tag/v0.0.1",
+        }],
     }, fh)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -189,6 +197,9 @@ def steps(app: App):
         check("the bell starts with no badge", bell.badge_text() == "", repr(bell.badge_text()))
         check("its tooltip names the sheet", bell.button.get_tooltip_text() == "Notifications")
         check("the sheet shows its empty state", sheet_page(win) == "empty")
+        check("the last run's update row, caught up with, was retired at launch",
+              center.rows() == [] and not any(
+                  r.get("kind") == "update" for r in win.state.get_notifications()))
         check("the sheet is closed and the bell is off",
               not split.get_show_sidebar() and not bell.button.get_active())
         check("the split holds the content stack",
