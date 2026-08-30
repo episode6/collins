@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-29. Full change history: git log for this file.
+fork. Last modified: 2026-08-30. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,6 +38,24 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **An effort picker beside the model picker.** The composer's Send row
+  and the new-chat screen's both carry a second menu for the CLI's effort
+  level (*Low* to *Max*, the `--effort` / `/effort` dial); the footer's
+  model chip has the level beside it, and a click on either opens the same
+  menu. On a running session the chip and the button read the level the
+  transcript last answered at, and a pick posts `/effort` the way the model
+  menu posts `/model`; on the new-chat screen the pick is the launch's
+  `--effort`, with *Default* named after the `effortLevel` that `/effort`
+  saves to the CLI's settings (`CLAUDE_CODE_EFFORT_LEVEL` outranking it),
+  and it is kept with the draft like the model pick. The levels on offer
+  are the ones the model in question takes, as the Models API reports
+  them, so a level the CLI would refuse (*Extra high* on Opus 4.6, any on
+  Haiku 4.5) is greyed out rather than sent. The screen's worktree
+  checkbox reads *New git worktree* now, to make room.
+- **Session titles are generated at low effort.** The headless `claude -p`
+  that names a new session passes `--effort low`: a five-word summary
+  gains nothing from thinking, and the pin keeps an `/effort xhigh` saved
+  in your settings from being spent on every title.
 - **The status icon shows when agents are working.** While any session is
   busy, the drink in the panel icon's glass turns into the sidebar's blue
   barber pole — the busy row's guide line, standing still — and the coral
@@ -185,7 +203,7 @@ downloads of each version, see the
   sat on *Claude login expired — run claude to refresh* until you ran the
   CLI yourself.
 - **New sessions open onto a new-chat screen.** The project's icon and
-  name over the composer, with a *Start in a new git worktree* checkbox
+  name over the composer, with a *New git worktree* checkbox
   (seeded from the project's setting) at the left of the composer's Send
   row and a model picker at its right; the agent starts
   when the first prompt is sent, with that prompt as its first turn and

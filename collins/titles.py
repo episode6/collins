@@ -218,11 +218,21 @@ def scratch_workdir() -> Iterator[Path]:
 # ancestors, and nothing under ~/.config/collins carries either.
 HEADLESS_FLAGS = ("--strict-mcp-config", "--tools", "")
 
+# The effort a title run is pinned at. A five-word summary gains nothing
+# from a model thinking hard, and the pin keeps a `/effort xhigh` saved in
+# the user's settings from being spent on every new session's title.
+TITLE_EFFORT = "low"
 
-def headless_argv(cli: str, model: str) -> list[str]:
+
+def headless_argv(cli: str, model: str, effort: str = "") -> list[str]:
     """The argv of one headless `claude -p` on *model* — every trimmed-down
-    run Collins makes on the user's behalf builds its command line here."""
-    return [cli, "-p", *HEADLESS_FLAGS, "--model", model]
+    run Collins makes on the user's behalf builds its command line here.
+    *effort* pins the run's effort level (``--effort``); "" leaves the
+    CLI's default in charge."""
+    argv = [cli, "-p", *HEADLESS_FLAGS, "--model", model]
+    if effort:
+        argv += ["--effort", effort]
+    return argv
 
 
 def sanitize_title(text: str) -> str:
@@ -400,11 +410,12 @@ def _run_claude(prompt: str, setting: str | None = None) -> str:
         if not enabled(app_state):
             raise TitleError("session title model is None; nothing should be queued", fatal=True)
         setting = app_state.get_setting("title_model")
-    # Titles are five words on a prompt excerpt — the Haiku tier's job.
+    # Titles are five words on a prompt excerpt — the Haiku tier's job, at
+    # the lowest effort the CLI offers: nothing here rewards thinking.
     model = pick_model(setting, prefer="haiku")
     with scratch_workdir() as workdir:
         result = subprocess.run(
-            headless_argv(cli, model),
+            headless_argv(cli, model, effort=TITLE_EFFORT),
             input=prompt,
             capture_output=True,
             text=True,

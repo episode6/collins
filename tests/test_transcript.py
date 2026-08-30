@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 import json
 
@@ -329,6 +329,67 @@ def test_model_comes_from_the_latest_reply(tmp_path):
     m = TranscriptModel(p)
     m.update()
     assert m.model() == "claude-sonnet-5"
+
+
+def _effort_line(effort, model="claude-opus-5", sidechain=False):
+    # The CLI stamps the level on the line itself, beside the message.
+    line = _reply_line(model, sidechain=sidechain)
+    line["effort"] = effort
+    return line
+
+
+def test_no_reply_means_no_effort(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [{"type": "user", "message": {"role": "user", "content": "hi"}}])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.effort() is None
+    # A reply from a CLI old enough not to stamp it names none either.
+    _write(p, [_reply_line("claude-opus-5")])
+    m.update()
+    assert m.effort() is None
+
+
+def test_effort_comes_from_the_latest_reply(tmp_path):
+    """/effort moves it mid-run; the level the session answers at now is
+    what the footer chip says."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [_effort_line("high"), _effort_line("low")])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.effort() == "low"
+
+
+def test_an_effort_switch_is_a_change_but_the_same_level_is_not(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_effort_line("high")])
+    m = TranscriptModel(p)
+    assert m.update() is True
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_effort_line("high")) + "\n")
+    assert m.update() is False  # every turn repeats it; that is not news
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_effort_line("xhigh")) + "\n")
+    assert m.update() is True
+    assert m.effort() == "xhigh"
+
+
+def test_a_subagents_effort_is_not_the_sessions(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_effort_line("high"), _effort_line("low", sidechain=True)])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.effort() == "high"
+
+
+def test_set_path_clears_the_effort(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_effort_line("high")])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.effort() == "high"
+    m.set_path(None)
+    assert m.effort() is None
 
 
 def test_a_switch_is_a_change_but_the_same_model_is_not(tmp_path):

@@ -6,9 +6,10 @@ rather than the agent's console; the first prompt is written there, and its
 Send is what launches the CLI. Between those two moments the tab is a draft
 (newchat.py): text on the screen, or a terminal opened beside it, is written
 to state.json under a draft id, listed in the sidebar, survives the tab
-closing, and comes back — text, checkbox, model pick, dock and all — when
-the row is clicked. Send spends the draft, launches the CLI with the picked
-model as its --model, and types the prompt in once it is at its input box;
+closing, and comes back — text, checkbox, model and effort picks, dock and
+all — when the row is clicked. Send spends the draft, launches the CLI with
+the picked model as its --model and the picked effort as its --effort, and
+types the prompt in once it is at its input box;
 with nothing in the box it reads Empty Session and launches the CLI with no
 prompt at all.
 
@@ -110,6 +111,7 @@ PASSED = 0
 FAILED = 0
 PROMPT = "first prompt, from the screen"
 MODEL = "sonnet"  # the pick: an alias the CLI's --model takes
+EFFORT = "low"  # the effort pick: a level the CLI's --effort takes
 
 
 def check(label: str, ok: bool, detail: object = "") -> None:
@@ -185,6 +187,13 @@ def on_the_screen() -> bool:
     check("…following the project's default (off)", tab.new_chat_worktree_choice() is None)
     check("the model picker is in the composer's send row", tab._new_chat.composer._model_btn is not None)
     check("…standing on the CLI's default", tab.new_chat_model() == "", tab.new_chat_model())
+    check("the effort picker is beside it", tab._new_chat.composer._effort_btn is not None)
+    check("…standing on the CLI's default too", tab.new_chat_effort() == "", tab.new_chat_effort())
+    check(
+        "the worktree box wears its short label",
+        tab._new_chat._worktree.get_label() == i18n._("New git worktree"),
+        tab._new_chat._worktree.get_label(),
+    )
     check("the screen is an unstarted thread", tab.unstarted_thread())
 
     # Typing makes it a draft; the write is debounced.
@@ -204,6 +213,7 @@ def after_the_write() -> bool:
         check("…and the text", record.get("text", "").startswith(PROMPT), record)
         check("…and no worktree choice while the box is untouched", "worktree" not in record, record)
         check("…nor a model while the picker stands on the default", "model" not in record, record)
+        check("…nor an effort, likewise", "effort" not in record, record)
     row = win.sidebar._placeholder_rows.get(draft_id)
     check(
         "the sidebar row shows the draft's first line",
@@ -217,6 +227,12 @@ def after_the_write() -> bool:
     tab._new_chat._worktree.set_active(True)
     tab._new_chat.set_model(MODEL)
     check("a pick names the model on the button", tab._new_chat.composer._model_btn.get_label() != "Model")
+    tab._new_chat.set_effort(EFFORT)
+    check(
+        "a pick names the effort on its button",
+        tab._new_chat.composer._effort_btn.get_label() == i18n._("Low"),
+        tab._new_chat.composer._effort_btn.get_label(),
+    )
     tab.show_panel(focus=False)
     check("a terminal opened beside the screen starts in the project", tab.panel_shells() != [])
     GLib.timeout_add(1500, after_the_panel)
@@ -228,6 +244,7 @@ def after_the_panel() -> bool:
     record = saved_drafts().get(draft_id) or {}
     check("the ticked box is kept", record.get("worktree") is True, record)
     check("the model pick is kept", record.get("model") == MODEL, record)
+    check("the effort pick is kept", record.get("effort") == EFFORT, record)
     layout = record.get("layout")
     check("the dock layout is kept", isinstance(layout, dict) and layout.get("tree"), record)
     check(
@@ -268,6 +285,7 @@ def after_the_reopen() -> bool:
     check("…with the text back", tab.new_chat_text().startswith(PROMPT), tab.new_chat_text())
     check("…the worktree box ticked", tab.new_chat_worktree_choice() is True)
     check("…the model pick back", tab.new_chat_model() == MODEL, tab.new_chat_model())
+    check("…the effort pick back", tab.new_chat_effort() == EFFORT, tab.new_chat_effort())
     check("…and the terminal beside it again", tab.panel_shells() != [], tab.panel_shells())
 
     # A shell can be told to follow the session into a worktree (the offer's
@@ -290,11 +308,16 @@ def after_the_follow() -> bool:
 
     # Send: the draft is spent, the console appears, the prompt is typed in.
     tab, draft_id = state["tab"], state["draft_id"]
-    tab._new_chat.emit("send-requested", PROMPT, False, MODEL)
+    tab._new_chat.emit("send-requested", PROMPT, False, MODEL, EFFORT)
     check("Send leaves the screen", not tab.is_new_chat)
     check(
         "…launching on the picked model",
         tab.launch_options is not None and tab.launch_options.model == MODEL,
+        tab.launch_options,
+    )
+    check(
+        "…at the picked effort",
+        tab.launch_options is not None and tab.launch_options.effort == EFFORT,
         tab.launch_options,
     )
     check("…for the console", tab._stage.get_visible_child_name() == "terminal")
@@ -312,6 +335,7 @@ def after_the_send() -> bool:
         with open(os.environ["SPAWN_LOG"], encoding="utf-8") as fh:
             log = fh.read()
     check("the CLI was passed the picked model", f"--model {MODEL}" in log, repr(log[:300]))
+    check("…and the picked effort", f"--effort {EFFORT}" in log, repr(log[:300]))
     check("the CLI received the prompt", PROMPT in log, repr(log[-300:]))
     check("the tab is a session now", tab.session_id is not None, tab.session_id)
     check("no draft row lingers", draft_id not in win.sidebar._placeholder_rows)

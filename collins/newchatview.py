@@ -21,7 +21,10 @@ resolve it to (claudemodels.cli_default_model), so the screen says what a
 plain launch would run on — and a pick here is for this launch alone: the
 default is left as it was, and the tab is on the CLI's configured model
 with nothing passed. A model chosen in the Advanced dialog seeds the
-picker instead of the default. The screen owns no launch plumbing and no
+picker instead of the default. The effort picker beside it chooses the
+``--effort`` on the same terms (claudemodels.cli_default_effort names its
+*Default*), and lists only the levels the model the launch will run on
+takes. The screen owns no launch plumbing and no
 persistence — it announces ``send-requested`` and ``changed`` and its host
 (the tab, then the window) decides what those mean, the same division the
 composer itself draws.
@@ -72,16 +75,18 @@ class NewChatView(Gtk.Box):
     checkbox out — the flag has no meaning outside a checkout. *model* is
     the ``--model`` the tab was opened with (the Advanced dialog's pick, ""
     for none), which the picker starts on; *pick_model* False leaves the
-    picker out — the provider has no model flag.
+    picker out — the provider has no model flag. *effort* and *pick_effort*
+    are the effort picker's pair, on the same terms.
     """
 
     __gsignals__ = {
         # The Send: the prompt ("" = an empty session, nothing typed in),
-        # whether the worktree box is ticked, and the model to launch with
-        # ("" = the CLI's default, nothing passed).
-        "send-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, str)),
-        # The text, the checkbox or the model changed — what the draft's
-        # keeper debounces.
+        # whether the worktree box is ticked, the model to launch with
+        # ("" = the CLI's default, nothing passed), and the effort level
+        # likewise.
+        "send-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, str, str)),
+        # The text, the checkbox, the model or the effort changed — what the
+        # draft's keeper debounces.
         "changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
@@ -95,6 +100,8 @@ class NewChatView(Gtk.Box):
         is_git: bool,
         model: str = "",
         pick_model: bool = True,
+        effort: str = "",
+        pick_effort: bool = True,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.add_css_class("new-chat")
@@ -102,6 +109,8 @@ class NewChatView(Gtk.Box):
         self._worktree_touched = False
         self._model = (model or "").strip()
         self._pick_model = bool(pick_model)
+        self._effort = (effort or "").strip()
+        self._pick_effort = bool(pick_effort)
 
         column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         column.set_valign(Gtk.Align.CENTER)
@@ -150,6 +159,18 @@ class NewChatView(Gtk.Box):
             if self._pick_model
             else None
         )
+        # The effort picker's levels follow the model the launch will run
+        # on: the pick, or the CLI's default when nothing is picked.
+        effort_popover = (
+            modelmenu.new_launch_effort_popover(
+                default_effort=lambda: claudemodels.cli_default_effort(self._cwd),
+                choice=lambda: self._effort,
+                launch_model=self._launch_model,
+                on_pick=self._on_effort_picked,
+            )
+            if self._pick_effort
+            else None
+        )
         self.composer = ComposerView(
             pick_attach=pick_attach,
             file_reference=file_reference,
@@ -157,19 +178,23 @@ class NewChatView(Gtk.Box):
             model_popover=popover,
             chrome=False,
             model_tooltip=_("Model to start this session on"),
+            effort_popover=effort_popover,
+            effort_tooltip=_("Effort level to start this session at"),
         )
         self.composer.add_css_class("new-chat-composer")
         self.composer.set_margin_top(24)
         self.composer.connect("send-requested", self._on_send)
         self.composer.connect("text-changed", self._on_text_changed)
         self._name_model()
+        self._name_effort()
         self._name_send()
         column.append(self.composer)
 
         # The checkbox rides at the left of the Send row, across from the
-        # model picker and the buttons: one row holds everything the launch
-        # is sent with.
-        self._worktree = Gtk.CheckButton(label=_("Start in a new git worktree"))
+        # pickers and the buttons: one row holds everything the launch is
+        # sent with. Its label is short on purpose — two pickers' worth of
+        # names sit across from it, and the tooltip carries the rest.
+        self._worktree = Gtk.CheckButton(label=_("New git worktree"))
         self._worktree.set_valign(Gtk.Align.CENTER)
         self._worktree.set_tooltip_text(
             _("Work in a fresh worktree of this project, apart from its uncommitted changes")
@@ -237,6 +262,21 @@ class NewChatView(Gtk.Box):
         self._name_model()
         self.emit("changed")
 
+    def effort(self) -> str:
+        """The effort level the launch passes as --effort: a picked level,
+        or "" for the CLI's default (nothing passed) — also what the draft
+        record keeps. Always "" without a picker."""
+        return self._effort if self._pick_effort else ""
+
+    def set_effort(self, effort: str | None) -> None:
+        """Put a kept draft's pick back ("" or None = the default)."""
+        effort = (effort or "").strip()
+        if effort == self._effort:
+            return
+        self._effort = effort
+        self._name_effort()
+        self.emit("changed")
+
     # -- behaviour ------------------------------------------------------------
 
     def focus(self) -> None:
@@ -266,6 +306,31 @@ class NewChatView(Gtk.Box):
 
     def _on_model_picked(self, model: str) -> None:
         self.set_model(model)
+        # A level the new model can't take would be an --effort the CLI
+        # refuses: the pick falls back to the default rather than ride
+        # along. A model the catalog can't speak for keeps it.
+        allowed = claudemodels.model_efforts(self._launch_model() or "")
+        if self._effort and allowed is not None and self._effort not in allowed:
+            self.set_effort("")
+
+    def _launch_model(self) -> str | None:
+        """The model the launch will run on: the pick, else the CLI's own
+        default as its settings name it (None when they don't)."""
+        return self._model or claudemodels.cli_default_model(self._cwd)
+
+    def _on_effort_picked(self, effort: str) -> None:
+        self.set_effort(effort)
+
+    def _name_effort(self) -> None:
+        """The effort button reads what the launch will run at: the picked
+        level's name, or Default with the CLI's own in brackets when the
+        settings name one — re-read like the model's, for the same reason."""
+        if self._effort:
+            self.composer.set_effort_name(modelmenu.effort_label(self._effort))
+        else:
+            self.composer.set_effort_name(
+                modelmenu.default_effort_label(claudemodels.cli_default_effort(self._cwd))
+            )
 
     def _name_model(self) -> None:
         """The picker button reads what the launch will run on: the picked
@@ -286,7 +351,7 @@ class NewChatView(Gtk.Box):
         # line of spaces.
         if not text.strip():
             text = ""
-        self.emit("send-requested", text, self.worktree(), self.model())
+        self.emit("send-requested", text, self.worktree(), self.model(), self.effort())
 
 
 def is_git_checkout(cwd: str) -> bool:

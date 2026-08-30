@@ -64,6 +64,7 @@ def draft_record(
     layout: dict | None,
     created: float,
     model: str = "",
+    effort: str = "",
 ) -> dict:
     """The persisted shape of a draft (see valid_draft for the contract).
 
@@ -71,7 +72,8 @@ def draft_record(
     never touched -- an untouched box keeps following the project's default,
     which may change before the draft is picked up again. *model* is the
     picker's choice, "" while it stands on the CLI's default -- which,
-    likewise, is read afresh when the draft comes back rather than kept.
+    likewise, is read afresh when the draft comes back rather than kept;
+    *effort* is the effort picker's, on the same terms.
     """
     record = {
         "cwd": cwd,
@@ -83,6 +85,8 @@ def draft_record(
         record["worktree"] = bool(worktree)
     if model:
         record["model"] = model
+    if effort:
+        record["effort"] = effort
     if layout:
         record["layout"] = layout
     return record
@@ -115,6 +119,9 @@ def valid_draft(record: object) -> dict | None:
     model = record.get("model")
     if isinstance(model, str) and model.strip():
         clean["model"] = model.strip()
+    effort = record.get("effort")
+    if isinstance(effort, str) and effort.strip():
+        clean["effort"] = effort.strip()
     layout = record.get("layout")
     if isinstance(layout, dict) and layout:
         clean["layout"] = layout

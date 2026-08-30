@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -1233,11 +1233,12 @@ class TerminalTab(Gtk.Box):
         # the draft's parts moved: text typed, the worktree box toggled, a
         # panel page opened or closed — the window debounces it into a
         # persisted draft. "new-chat-send" is the screen's Send: the prompt,
-        # whether the worktree box is ticked, and the model picked ("" for
-        # the CLI's default); the window turns them into launch options
-        # (trust, the flags) and calls begin_session.
+        # whether the worktree box is ticked, the model picked ("" for the
+        # CLI's default) and the effort level likewise; the window turns
+        # them into launch options (trust, the flags) and calls
+        # begin_session.
         "new-chat-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
-        "new-chat-send": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, str)),
+        "new-chat-send": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, str, str)),
         # Emitted (debounced) when the editor panel's divider is moved: the
         # new panel px size, so the window can persist it as the app-wide
         # default. Mirrors panel-size-changed, minus the mode — the editor
@@ -1410,7 +1411,9 @@ class TerminalTab(Gtk.Box):
         self._send_after_settle = False
         # A model switch that arrived during the settle, same bargain as the
         # held send (see switch_model).
-        self._model_after_settle: str | None = None
+        # A /model or /effort switch (the command, and the chat's line for
+        # an agent that isn't running) held back by a cut still settling.
+        self._switch_after_settle: tuple[str, str] | None = None
         self._composer_enter_sends = True
         self._composer_spell_click = True
         self._composer_font = ""
@@ -1557,12 +1560,14 @@ class TerminalTab(Gtk.Box):
                 is_git=bool(cwd) and is_git_checkout(cwd),
                 model=(options.model if options else "") or "",
                 pick_model=bool(self.provider.session_models()),
+                effort=(options.effort if options else "") or "",
+                pick_effort=self._can_switch_effort(),
             )
             self._new_chat.connect("changed", lambda *_a: self.emit("new-chat-changed"))
             self._new_chat.connect(
                 "send-requested",
-                lambda _v, text, worktree, model: self.emit(
-                    "new-chat-send", text, worktree, model
+                lambda _v, text, worktree, model, effort: self.emit(
+                    "new-chat-send", text, worktree, model, effort
                 ),
             )
             self._stage = Gtk.Stack(vexpand=True, hexpand=True)
@@ -1653,6 +1658,7 @@ class TerminalTab(Gtk.Box):
         self._footer_cwd: str | None = None  # last value shown in the footer
         self._footer_branch: str | None = None
         self._footer_model: str | None = None  # model id, as the transcript writes it
+        self._footer_effort: str | None = None  # effort level, likewise
         # Every PR this session has opened, oldest first: url -> PR with the
         # last status known for it (see _collect_prs). Replaced wholesale,
         # never mutated in place — the update thread reads it while the main
@@ -1752,6 +1758,11 @@ class TerminalTab(Gtk.Box):
         (see NewChatView.model)."""
         return self._new_chat.model() if self._new_chat is not None else ""
 
+    def new_chat_effort(self) -> str:
+        """The screen's effort pick, "" while it stands on the CLI's default
+        (see NewChatView.effort)."""
+        return self._new_chat.effort() if self._new_chat is not None else ""
+
     def new_chat_worthy(self) -> bool:
         """Whether the screen holds anything worth keeping as a draft: text,
         or a panel page open beside it (see newchat.draft_worthy)."""
@@ -1766,17 +1777,19 @@ class TerminalTab(Gtk.Box):
         worktree: bool | None,
         layout: dict | None,
         model: str = "",
+        effort: str = "",
     ) -> None:
         """Put a kept draft back on the screen: its text, its checkbox, its
-        model pick, and the dock the way it was left — shells and their
-        scrollback included, which are filed under the draft id until the
-        session starts (see _history_id)."""
+        model and effort picks, and the dock the way it was left — shells
+        and their scrollback included, which are filed under the draft id
+        until the session starts (see _history_id)."""
         if self._new_chat is None:
             return
         self._history_key = draft_id
         self._new_chat.set_text(text)
         self._new_chat.set_worktree_choice(worktree)
         self._new_chat.set_model(model)
+        self._new_chat.set_effort(effort)
         if layout:
             self.restore_panel_layout(layout)
 
@@ -2187,6 +2200,27 @@ class TerminalTab(Gtk.Box):
             enable_copy_on_click(self._model_label, lambda: self._footer_model, short_name)
             self._model_chip = self._model_label
         self._model_chip.set_visible(False)
+        # The effort level rides beside the model — the other dial on what
+        # the session answers with, read off the same transcript lines — as
+        # a chip of the same make: a menu button over its switch menu when
+        # the provider has one, the bare label otherwise. The two share the
+        # model's divider; neither shows until the session has answered.
+        self._effort_label = Gtk.Label(xalign=0.0)
+        self._effort_label.add_css_class("caption")
+        self._effort_label.add_css_class("dim-label")
+        self._effort_chip: Gtk.Widget
+        if self._can_switch_effort():
+            effort_popover = modelmenu.new_effort_popover(
+                lambda: self._footer_effort, lambda: self._footer_model, self.switch_effort
+            )
+            effort_popover.set_position(Gtk.PositionType.TOP)
+            effort_btn = Gtk.MenuButton(popover=effort_popover)
+            effort_btn.set_child(self._effort_label)
+            effort_btn.add_css_class("flat")
+            self._effort_chip = effort_btn
+        else:
+            self._effort_chip = self._effort_label
+        self._effort_chip.set_visible(False)
         self._model_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
         self._model_sep.set_visible(False)
 
@@ -2282,11 +2316,12 @@ class TerminalTab(Gtk.Box):
         open_external.connect("pressed", self._on_open_external_terminal)
         toggle_btn.add_controller(open_external)
 
-        # model, cwd, branch and PRs sit together on the left; the wrapper box
-        # (not the cwd label) takes the slack so the buttons stay pinned right
-        # even while the model, branch and PR labels are hidden.
+        # model, effort, cwd, branch and PRs sit together on the left; the
+        # wrapper box (not the cwd label) takes the slack so the buttons stay
+        # pinned right even while the model, branch and PR labels are hidden.
         left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
         left.append(self._model_chip)
+        left.append(self._effort_chip)
         left.append(self._model_sep)
         left.append(self._cwd_label)
         left.append(self._branch_seps[0])
@@ -2491,11 +2526,41 @@ class TerminalTab(Gtk.Box):
             self._composer.set_model_name(short_name(model) if model else None)
         self._sync_footer_seps()
 
+    def _refresh_effort_label(self) -> None:
+        """Name the effort level the session last answered at, or hide the
+        chip until it has — the model label's twin, off the same read, and
+        pushed to the composer's effort button the same way."""
+        effort = self._transcript.effort()
+        if effort == self._footer_effort:
+            return
+        self._footer_effort = effort
+        name = modelmenu.effort_label(effort) if effort else ""
+        self._effort_label.set_text(name)
+        if effort is None:
+            tooltip = None
+        elif self._can_switch_effort():
+            tooltip = _("Effort: {level}").format(level=name) + "\n" + _(
+                "Click to switch the effort level"
+            )
+        else:
+            tooltip = _("Effort: {level}").format(level=name)
+        self._effort_chip.set_tooltip_text(tooltip)
+        self._effort_chip.set_visible(effort is not None)
+        if self._composer is not None:
+            self._composer.set_effort_name(name or None)
+        self._sync_footer_seps()
+
     def _can_switch_model(self) -> bool:
         """Whether this provider can switch a running session's model — the
         gate on the footer label's menu and the composer's picker alike,
         probed with an alias the way _provider_has_prompt_box probes."""
         return self.provider.model_switch_command("sonnet") is not None
+
+    def _can_switch_effort(self) -> bool:
+        """Whether this provider has an effort dial at all — the gate on the
+        footer chip's menu, the composer's picker and the new-chat screen's,
+        probed the way _can_switch_model probes."""
+        return self.provider.effort_switch_command("low") is not None
 
     def _sync_footer_seps(self) -> None:
         """Show only the dividers that separate two visible chips.
@@ -2508,7 +2573,9 @@ class TerminalTab(Gtk.Box):
         """
         branch = self._footer_branch is not None
         cwd = self._footer_cwd is not None
-        self._model_sep.set_visible(self._footer_model is not None)
+        self._model_sep.set_visible(
+            self._footer_model is not None or self._footer_effort is not None
+        )
         self._branch_seps[0].set_visible(cwd)
         self._branch_seps[1].set_visible(branch)
 
@@ -3707,12 +3774,23 @@ class TerminalTab(Gtk.Box):
                 if self._can_switch_model()
                 else None
             ),
+            # Its effort picker, on the same terms.
+            effort_popover=(
+                modelmenu.new_effort_popover(
+                    lambda: self._footer_effort, lambda: self._footer_model, self.switch_effort
+                )
+                if self._can_switch_effort()
+                else None
+            ),
         )
         self._composer.set_enter_sends(self._composer_enter_sends)
         self._composer.set_spell_click(self._composer_spell_click)
         self._composer.set_font(self._composer_font)
         self._composer.set_model_name(
             short_name(self._footer_model) if self._footer_model else None
+        )
+        self._composer.set_effort_name(
+            modelmenu.effort_label(self._footer_effort) if self._footer_effort else None
         )
         self._composer.connect("send-requested", self._on_composer_send)
         self._composer.connect("close-requested", lambda *_a: self.close_composer())
@@ -4351,19 +4429,20 @@ class TerminalTab(Gtk.Box):
         under it, in the order they were written, which is what the send
         would have carried had it come a moment later.
 
-        A model switch held the same way goes first — it was asked of the
-        session the prompt is about to be sent to — unless a send is waiting
-        too, in which case the switch yields the box and re-posts itself once
-        the send has typed and submitted (a beat past the send's slowest
-        path), through the ordinary "no composer over the box" road."""
+        A model or effort switch held the same way goes first — it was asked
+        of the session the prompt is about to be sent to — unless a send is
+        waiting too, in which case the switch yields the box and re-posts
+        itself once the send has typed and submitted (a beat past the
+        send's slowest path), through the ordinary "no composer over the
+        box" road."""
         self._cut_settling = False
-        model = self._model_after_settle
-        self._model_after_settle = None
-        if model is not None and not self._send_after_settle:
-            self.switch_model(model)
-        elif model is not None:
+        held = self._switch_after_settle
+        self._switch_after_settle = None
+        if held is not None and not self._send_after_settle:
+            self._post_switch(*held)
+        elif held is not None:
             GLib.timeout_add(
-                _CUT_VERIFY_MS[0] + 2 * _PROMPT_SUBMIT_MS, self._switch_after_send, model
+                _CUT_VERIFY_MS[0] + 2 * _PROMPT_SUBMIT_MS, self._switch_after_send, held
             )
         if not self._send_after_settle:
             return
@@ -4371,8 +4450,8 @@ class TerminalTab(Gtk.Box):
         if self._composer is not None and self.composer_open():
             self._on_composer_send(None, self._composer.peek_text())
 
-    def _switch_after_send(self, model_id: str) -> bool:
-        self.switch_model(model_id)
+    def _switch_after_send(self, held: tuple[str, str]) -> bool:
+        self._post_switch(*held)
         return GLib.SOURCE_REMOVE
 
     def _apply_cut(
@@ -4550,7 +4629,26 @@ class TerminalTab(Gtk.Box):
         pick in either model menu (the footer label's, the composer's)
         means. The command is a prompt like any other to the terminal; the
         CLI answers it in the transcript, and the footer label follows
-        within a poll.
+        within a poll. See _post_switch for how it reaches the box."""
+        command = self.provider.model_switch_command(model_id)
+        if command is None:
+            return
+        self._post_switch(command, _("Model switch: the agent isn't running in this tab"))
+
+    def switch_effort(self, effort: str) -> None:
+        """Post the provider's effort-switch command to the chat — what a
+        pick in either effort menu (the footer chip's, the composer's)
+        means, on the same terms as switch_model: the CLI answers in the
+        transcript, and the chip follows within a poll."""
+        command = self.provider.effort_switch_command(effort)
+        if command is None:
+            return
+        self._post_switch(command, _("Effort switch: the agent isn't running in this tab"))
+
+    def _post_switch(self, command: str, not_running: str) -> None:
+        """Type a switch *command* into the CLI's box — the road both
+        switch_model and switch_effort take. *not_running* is the chat's
+        line when there is no agent to type it to.
 
         With the composer up, the CLI's box is the composer's to manage —
         emptied by the open-cut — so the command types straight in and the
@@ -4565,15 +4663,12 @@ class TerminalTab(Gtk.Box):
         posted at an empty prompt — inject_prompt's own bargain — and the
         chat says why when it isn't.
         """
-        command = self.provider.model_switch_command(model_id)
-        if command is None:
-            return
         if not self._agent_is_running():
-            self.feed_message(_("Model switch: the agent isn't running in this tab"))
+            self.feed_message(not_running)
             return
         if self.composer_open():
             if self._cut_settling:
-                self._model_after_settle = model_id
+                self._switch_after_settle = (command, not_running)
                 return
             leftover = (
                 self._leftover_cut_keys(self._cut_pending)
@@ -4770,6 +4865,7 @@ class TerminalTab(Gtk.Box):
         self._restored_attachments = []
         self._refresh_pr_chips([])
         self._refresh_model_label()
+        self._refresh_effort_label()
         self._watch_transcript(jsonl_path)
 
     @property
@@ -4952,6 +5048,7 @@ class TerminalTab(Gtk.Box):
         self._editor.set_agent_files(self._transcript.touched_files())
         self._harvest_attachments()
         self._refresh_model_label()
+        self._refresh_effort_label()
         if tracked is not None:
             # The shown ones come back with status, and they keep it: it is
             # what the chips fall back to when a poll brings nothing new (a
