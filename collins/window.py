@@ -374,6 +374,10 @@ class MainWindow(Adw.ApplicationWindow):
         # under a new name (_rekey_notifications). Never pruned on withdraw:
         # a stale key costs nothing but a set entry.
         self._desktop_keys: set[str] = set()
+        # Session ids whose green is being re-raised under a new key by the
+        # placeholder → real-row handoff (see _reraise_green): a finish
+        # already announced under the placeholder's key, not a new one.
+        self._reraised_greens: set[str] = set()
         self._placeholder_seq = 0
         # Tabs renamed locally before their session was bound: never auto-sync
         # their titles from the store.
@@ -2102,12 +2106,14 @@ class MainWindow(Adw.ApplicationWindow):
             and not self.sidebar.placeholder_busy(placeholder_id)
         )
         page = self._placeholder_page(placeholder_id)
-        center.set_green(
+        raised = center.set_green(
             placeholder_id,
             green,
             title=page.get_title() if page is not None else "",
             project=self.sidebar.placeholder_project(placeholder_id),
         )
+        if raised and green and page is not None:
+            self._announce_finished(page, placeholder_id)
 
     def has_placeholder(self, placeholder_id: str) -> bool:
         """Whether this window's sidebar still holds this placeholder — asked
@@ -2854,16 +2860,17 @@ class MainWindow(Adw.ApplicationWindow):
             # placeholder unread; the flag must outlive the row it sat on. So
             # must its synthetic "finished" row in the notification center:
             # removing the placeholder takes down the row under the
-            # placeholder's key, and the set_unread below raises the one
+            # placeholder's key, and _reraise_green below raises the one
             # under the session's (see App._sync_green) — two synchronous
-            # edges no idle-coalesced badge can see between.
+            # edges no idle-coalesced badge can see between, and the second
+            # announced as the re-raise it is, not a new finish.
             placeholder_id = self._placeholder_pages.get(page, "")
             unread = self.sidebar.placeholder_unread(placeholder_id)
             self._remove_placeholder(page)  # the real sidebar row exists now
             # The message and bell rows the tab posted under the placeholder
             # id move to the session's, so a click on them and a visit to
             # the tab still find each other (see _rekey_notifications).
-            self._rekey_notifications(placeholder_id, session_id, page, flagged=unread)
+            self._rekey_notifications(placeholder_id, session_id, page)
             if page.get_title() == title:  # keep any manual rename/emoji
                 page.set_title(self._tab_title(session))
             else:
@@ -2878,12 +2885,29 @@ class MainWindow(Adw.ApplicationWindow):
             # stays down for the rest of the turn.
             self._sync_row_busy(session_id)
             if unread:
-                self.store.set_unread(session_id, True)
+                self._reraise_green(session_id)
         self._update_active_row()  # hand the highlight from placeholder to real row
 
-    def _rekey_notifications(
-        self, placeholder_id: str, session_id: str, page: Adw.TabPage, *, flagged: bool = False
-    ) -> None:
+    def _reraise_green(self, session_id: str) -> None:
+        """The handoff's half of a flag that outlives its placeholder: raise
+        it on the session's row, whose synthetic row comes up in the center
+        through the store's edge (App._sync_green) — and comes up quietly.
+
+        A fresh green is announced (App._announce_finished → announce_finished),
+        but this one is the placeholder's finish under a new name, announced
+        already under the old one; a second card and a second chime for one
+        finish would be one thing twice. The mark on _reraised_greens lasts
+        exactly as long as the edge: set_unread emits synchronously, so the
+        announcement runs, sees the mark, and keeps only the desktop banner
+        (see _announce_finished) before the mark comes off.
+        """
+        self._reraised_greens.add(session_id)
+        try:
+            self.store.set_unread(session_id, True)
+        finally:
+            self._reraised_greens.discard(session_id)
+
+    def _rekey_notifications(self, placeholder_id: str, session_id: str, page: Adw.TabPage) -> None:
         """The placeholder → real-row handoff, for the notification history
         and the desktop: every message and bell row *page*'s tab posted
         under *placeholder_id* is re-filed under *session_id*
@@ -2910,9 +2934,10 @@ class MainWindow(Adw.ApplicationWindow):
         first place (_desktop_keys) and the rows are still unread; one the
         user already read from the sheet was withdrawn then and stays down.
         A banner that spoke for the placeholder's *flag* rather than a row
-        (*Announce finished runs*, see _announce_finished) is re-sent while
-        the flag is still up (*flagged*: the handoff carries it to the
-        session's row next) and the setting still on.
+        (*Announce finished runs*) is not this method's to re-send: the
+        handoff carries the flag to the session's row next (_reraise_green),
+        and the synthetic row coming up under the session's key re-sends it
+        from there, with the tab behind it.
         """
         if not placeholder_id or not session_id:
             return
@@ -2936,8 +2961,6 @@ class MainWindow(Adw.ApplicationWindow):
             self._send_desktop_notification(
                 page, session_id, latest.title or page.get_title(), notifycenter.row_body(latest)
             )
-        elif flagged and self.state.get_setting("announce_finished_runs"):
-            self._send_desktop_notification(page, session_id, page.get_title(), _("Finished a run"))
 
     def _refresh_tab_titles(self) -> None:
         """Keep tab titles in sync with the store: auto-generated titles arrive
@@ -4011,10 +4034,8 @@ class MainWindow(Adw.ApplicationWindow):
         """
         if self.sidebar.has_placeholder(session_id):
             self._set_placeholder_unread(session_id, True)
-            self._announce_finished(self._placeholder_page(session_id))
             return
         self._refresh_prs_after_run(session_id)
-        flagged = False
         for row_id in self.store.rows_representing(session_id):
             # A row whose conversation still runs under another of its ids —
             # a /bg fork mid-turn, say — hasn't finished; its own edge comes.
@@ -4033,33 +4054,56 @@ class MainWindow(Adw.ApplicationWindow):
             if self._is_detached(row_id) and self._page_for(row_id) is None:
                 continue
             self.store.set_unread(row_id, True)
-            flagged = True
-        if flagged:
-            self._announce_finished(self._page_for(session_id))
 
-    def _announce_finished(self, page: Adw.TabPage | None) -> None:
-        """The *Announce finished runs* setting: a finish that just flagged
-        *page*'s row goes out the way a message would — a card and the
-        sound while the user is elsewhere in Collins, a desktop notification
-        while no window is active, nothing at all for the selected tab (see
-        notifycenter.delivery with announce_finished_runs). Off, which is the
-        default, this is nothing: the row's flag and the synthetic row in the
-        history are the whole of a finish, and the docs promise nothing is
-        guessed from a quiet terminal.
+    def announce_finished(self, session_id: str) -> bool:
+        """A synthetic row just came up under *session_id* (App._sync_green
+        saw the store's edge): announce it from the tab it stands for, if
+        this window holds one. Returns whether it did, so the app can stop
+        at the window that has the tab."""
+        page = self._page_for(session_id)
+        if page is None:
+            return False
+        self._announce_finished(page, session_id)
+        return True
 
-        Announced from the finish edge rather than the green flag's, which
-        the placeholder → real-row handoff re-raises under the session's key
-        for a finish already announced under the placeholder's. The table's
-        "row" is the synthetic row the flag just put in the history (or is
-        about to, once the barber pole comes off), so no row is posted here;
-        the flag is what got us here, so none is set.
+    def _announce_finished(self, page: Adw.TabPage, key: str) -> None:
+        """The synthetic row under *key* is up, standing for *page*'s tab:
+        send it out. With the *Announce finished runs* setting on, that is
+        the way a `notify_user` message goes — a card and the sound while
+        the user is elsewhere in Collins, a desktop notification while no
+        window is active, nothing at all for the selected tab (see
+        notifycenter.delivery with announce_finished_runs). Off, which is
+        the default, this is nothing: the row's flag and the synthetic row
+        in the history are the whole of a finish, and the docs promise
+        nothing is guessed from a quiet terminal.
+
+        This is the synthetic row's own edge, from wherever the green was
+        decided (App._sync_green for a real row, _sync_placeholder_green for
+        a placeholder's), so the row is always in the center to show and the
+        card's click always lands on it; the finish edge that flagged the
+        row (_on_session_finished) announces nothing itself. The exception
+        is the placeholder → real-row handoff, which re-raises a green under
+        the session's key that was announced already under the placeholder's
+        (_reraise_green): only the desktop banner goes out again then — the
+        placeholder's was withdrawn (its click carried no session id) and
+        this one has the tab behind it — never a second card or chime.
         """
-        if page is None or not self.state.get_setting("announce_finished_runs"):
+        if not self.state.get_setting("announce_finished_runs"):
+            return
+        row = self.notify_center.get(notifycenter.green_id(key))
+        if row is None:
             return
         deliveries = notifycenter.delivery(
             notifycenter.KIND_FINISHED, self._focus_state(page), announce_finished_runs=True
         )
-        self._deliver(page, notifycenter.KIND_FINISHED, _("Finished a run"), deliveries)
+        if key in self._reraised_greens:
+            # The in-app switch has its say first (as _deliver would give
+            # it), so a placeholder's finish that went to the desktop for
+            # want of cards is re-sent there too.
+            if not self.state.get_setting("inapp_notifications"):
+                deliveries = notifycenter.without_cards(deliveries)
+            deliveries &= {notifycenter.DELIVER_DESKTOP}
+        self._deliver(page, notifycenter.KIND_FINISHED, row.body, deliveries, notification=row)
 
     def _refresh_prs_after_run(self, session_id: str) -> None:
         """Hand the finish edge to the tab that just went quiet, so its pull
@@ -4952,7 +4996,13 @@ class MainWindow(Adw.ApplicationWindow):
         return [self, *windows]
 
     def _deliver(
-        self, page: Adw.TabPage | None, kind: str, body: str, deliveries: frozenset[str]
+        self,
+        page: Adw.TabPage | None,
+        kind: str,
+        body: str,
+        deliveries: frozenset[str],
+        *,
+        notification: Notification | None = None,
     ) -> frozenset[str]:
         """Do what the delivery table asked for a notification of *kind*
         from *page*'s tab, and return what was done — the set itself, after
@@ -4962,10 +5012,13 @@ class MainWindow(Adw.ApplicationWindow):
         One act per name. The flash and the beep need no page (a bell from
         a tab this window doesn't hold flashes the header and nothing else).
         The row goes into the center first, so the card that follows holds
-        the row the center will find when it is clicked; a `finished` row is
-        the synthetic one set_green already owns, so none is posted for it —
-        its card shows that row, or a stand-in when the pole hasn't come off
-        yet and the row isn't there to show. The card goes to the *active*
+        the row the center will find when it is clicked — unless the caller
+        hands the row in as *notification*: a `finished` run's synthetic
+        row, which set_green already owns and which is announced from its
+        own edge (_announce_finished), so it is there to show and none is
+        posted for it. Given a row, the desktop notification is keyed by the
+        row's session — the key the app withdraws it under when the row
+        goes (App._on_notifications_changed). The card goes to the *active*
         window, whichever window the tab lives in. The sound plays only
         beside a card (the desktop sounds its own notifications), debounced
         and single-flight in notifysound.
@@ -4984,17 +5037,8 @@ class MainWindow(Adw.ApplicationWindow):
         if notifycenter.DELIVER_FLAG in deliveries:
             self._flag_unread(page)
         key, title, project = self._notification_identity(page)
-        notification: Notification | None = None
-        if kind == notifycenter.KIND_FINISHED:
-            notification = self.notify_center.get(notifycenter.green_id(key)) or Notification(
-                id=notifycenter.green_id(key),
-                session_id=key,
-                title=title,
-                project=project,
-                kind=kind,
-                body=body,
-                when=time.time(),
-            )
+        if notification is not None:
+            key, title = notification.session_id or key, notification.title or title
         elif deliveries & {notifycenter.DELIVER_ROW, notifycenter.DELIVER_ROW_READ}:
             notification = self.notify_center.make(kind, key, title, project, body)
             notification.read = notifycenter.DELIVER_ROW_READ in deliveries

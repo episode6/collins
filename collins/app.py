@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1640,12 +1640,31 @@ class App(Adw.Application):
         marker = traymodel.session_marker(
             traymodel.TraySession(session_id=session_id, busy=item.busy, unread=item.unread)
         )
-        self.notification_center.set_green(
+        green = marker == traymodel.MARKER_UNREAD
+        raised = self.notification_center.set_green(
             session_id,
-            marker == traymodel.MARKER_UNREAD,
+            green,
             title=item.display_name,
             project=item.session.project_name,
         )
+        if raised and green:
+            self._announce_finished(session_id)
+
+    def _announce_finished(self, session_id: str) -> None:
+        """A synthetic row just came up: hand it to the window holding the
+        session's tab, which sends it out the way a `notify_user` message
+        goes — a card, the sound, a desktop notification — when the
+        *Announce finished runs* setting says to (MainWindow.announce_finished).
+
+        The row's own edge is the one place a finish is announced from, so
+        the row and its announcement can't disagree about whether there was
+        one: the announcement rides the row into being, and the flag that
+        raised the row is what the card and the banner speak for. A session
+        no window has a tab for (a bare sidebar row) has nothing to open and
+        is announced by nobody; its row still counts."""
+        for window in self.get_windows():
+            if isinstance(window, MainWindow) and window.announce_finished(session_id):
+                return
 
     def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
         """The list was rescanned: a session whose item went away without its

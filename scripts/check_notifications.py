@@ -636,6 +636,30 @@ def steps(app: App):
     yield wait
     yield wait
 
+    def reraised_green():
+        # The placeholder → real-row handoff raises a finish's green again
+        # under the session's key (_reraise_green). Announced already under
+        # the placeholder's, it is no second card and no second chime; only
+        # the desktop banner goes out again, with the tab behind it.
+        check("no card is standing before the re-raise", cards.cards() == [], str(len(cards.cards())))
+        win.state.set_setting("announce_finished_runs", True)
+        store.set_unread(SESSION_B, False)
+        played.clear()
+        win._reraise_green(SESSION_B)
+        check("a re-raised green puts the synthetic row back without a card or the sound",
+              center.is_green(SESSION_B) and cards.cards() == [] and played == [],
+              f"{len(cards.cards())} {played}")
+        store.set_unread(SESSION_B, False)
+        win._desktop_keys.discard(SESSION_B)
+        win.is_active = lambda: False
+        win._reraise_green(SESSION_B)
+        win.is_active = lambda: True
+        check("and, away from Collins, re-sends the desktop notification under the session id",
+              SESSION_B in win._desktop_keys and cards.cards() == [])
+        store.set_unread(SESSION_B, False)
+        win.state.set_setting("announce_finished_runs", False)
+    yield reraised_green
+
     def placeholder_card():
         # A tab with no session id yet: its message is filed under the
         # placeholder id, and its card holds the page.
