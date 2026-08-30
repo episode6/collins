@@ -697,17 +697,26 @@ def steps(app: App):
               withdrawn[before:] == ["session-resolved-90"], str(withdrawn[before:]))
     yield placeholder_handoff
 
+    LONG = "Message 2, the long one: it runs on past the card's width and wraps onto a second line"
+
     def four_cards():
         for n in range(4):
-            win.notify_session(shared["tab_b"], f"Message {n}")
+            win.notify_session(shared["tab_b"], LONG if n == 2 else f"Message {n}")
     yield four_cards
 
     def three_stand():
         up = cards.cards()
+        standing = [c for c in up if c.get_reveal_child()]
         check("a fourth card pushes the oldest out: three stand, newest on top",
-              [c.notification.body for c in up if c.get_reveal_child()]
-              == ["Message 3", "Message 2", "Message 1"],
+              [c.notification.body for c in standing] == ["Message 3", LONG, "Message 1"],
               str([c.notification.body for c in up]))
+        # A short message and a long one line up: the tile keeps to its 32px
+        # and the text column starts at the same x in every card. (An icon
+        # that expanded would hand the tile half of a short card's slack.)
+        check("every card's tile is its 32px", all(c._tile.get_width() == 32 for c in standing),
+              str([c._tile.get_width() for c in standing]))
+        starts = [c._column.compute_bounds(c._body)[1].get_x() for c in standing]
+        check("short and long cards start their text at the same x", len(set(starts)) == 1, str(starts))
         if up:
             top = up[0]
             top.close_button.emit("clicked")
