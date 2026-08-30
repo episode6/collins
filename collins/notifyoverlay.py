@@ -13,9 +13,11 @@ asking; this says, and clicking anywhere on it goes there.
 
 The anatomy is the design canvas's: a 32px tile wearing the project's icon,
 the session title in bold beside the kind's mark (the yellow bell for a
-bell, the green dot for a finished run, nothing for a message — the body
-is the message), the row's age dim at the right, two lines of body, the
-project's name as a dim footer, and a small circular × at the top right.
+bell, the green dot for a finished run, the update arrow for a newer
+Collins, nothing for a message — the body is the message), the row's age
+dim at the right, two lines of body, the project's name as a dim footer
+(none for an update, which has no project), and a small circular × at the
+top right.
 The × dismisses the card and nothing else: the history row stays unread and
 keeps counting, because the user chose not to go and the badge means
 "waiting for you", exactly as the sidebar's flag stays until the tab is
@@ -56,7 +58,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 from . import notifycenter  # noqa: E402
 from .i18n import _  # noqa: E402
 from .notifycenter import Notification  # noqa: E402
-from .notifypanel import BELL_ICON, FINISHED_MARK_ICON  # noqa: E402
+from .notifypanel import BELL_ICON, FINISHED_MARK_ICON, UPDATE_MARK_ICON  # noqa: E402
 
 # How many cards stand at once; a fourth pushes the oldest out.
 MAX_CARDS = 3
@@ -207,6 +209,10 @@ class NotificationCard(Gtk.Revealer):
         if kind == notifycenter.KIND_FINISHED:
             mark = Gtk.Image(icon_name=FINISHED_MARK_ICON, pixel_size=8, valign=Gtk.Align.CENTER)
             mark.add_css_class("notification-kind-finished")
+            return mark
+        if kind == notifycenter.KIND_UPDATE:
+            mark = Gtk.Image(icon_name=UPDATE_MARK_ICON, pixel_size=12, valign=Gtk.Align.CENTER)
+            mark.add_css_class("notification-kind-update")
             return mark
         return None
 

@@ -375,6 +375,15 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   session's bell stays the desktop's beep — a bell you were there for is
   not history — and *Bells from other sessions* in Preferences turns the
   rest back into beeps.
+- **A newer Collins** is announced the same way. Once a day the app asks
+  GitHub for the latest release — through your `gh` login when it has one,
+  anonymously over the public API otherwise (no token, no account) — and
+  when that release is newer than the one running, says so once: a card
+  and the sound in Collins, a desktop notification away from it, and a row
+  in the history either way, titled with the version. Clicking any of them
+  opens the release page in your browser. The same release is never
+  announced twice, a launch that has caught up retires the row, and
+  *Check for updates* in Preferences → *General* turns the whole check off.
 
 ![A notification card over a session](/img/notification-card.png)
 - **The bell in the header** wears the unread count — the same number the
@@ -631,8 +640,9 @@ an expired login (off, the usage panel says to run `claude` yourself), and
 the **Model list** row, which is free — followed by a switch for each of the
 **built-in MCP tools** the agent can call, the **status icon**, **Reopen the
 last session**, what to do **when quitting with running sessions** (ask /
-exit / background / hide), and **Archive on claude.ai too** — reachable from
-the sidebar menu or `Ctrl+,`.
+exit / background / hide), **Archive on claude.ai too**, and **Check for
+updates** (the once-a-day look at GitHub's latest release, through `gh` or
+anonymously) — reachable from the sidebar menu or `Ctrl+,`.
 
 A **search bar across the top** filters the whole screen as you type, and it
 has the focus the moment preferences opens, so the way to a setting is to

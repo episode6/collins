@@ -676,3 +676,96 @@ def test_sound_file_for_a_custom_path_and_silence():
     assert notifycenter.sound_file("/home/me/gone.ogg", "", exists) == ""  # deleted: the beep
     assert notifycenter.sound_file("chime.ogg", "", lambda _p: True) == ""  # relative: refused
     assert notifycenter.sound_file("none", "Yaru", lambda _p: True) == ""
+
+
+# -- the update row (see updatecheck) ------------------------------------------
+
+
+def update_row(c: NotificationCenter, version="0.1.3"):
+    row = c.make(notifycenter.KIND_UPDATE, "", f"Collins {version} is available", "", "You're running 0.1.2")
+    row.id = notifycenter.update_id(version)
+    row.url = f"https://github.com/episode6/collins/releases/tag/v{version}"
+    return row
+
+
+def test_update_delivery_is_a_card_in_collins_and_the_desktop_away():
+    in_collins = {DELIVER_CARD, DELIVER_SOUND, DELIVER_ROW}
+    assert delivery(notifycenter.KIND_UPDATE, FOCUS_SELECTED) == in_collins
+    assert delivery(notifycenter.KIND_UPDATE, FOCUS_ELSEWHERE) == in_collins
+    assert delivery(notifycenter.KIND_UPDATE, FOCUS_UNFOCUSED) == {DELIVER_DESKTOP, DELIVER_ROW}
+    # Nothing to flag or flash: no session raised it.
+    for focus in (FOCUS_SELECTED, FOCUS_ELSEWHERE, FOCUS_UNFOCUSED):
+        assert not delivery(notifycenter.KIND_UPDATE, focus) & {DELIVER_FLAG, DELIVER_FLASH}
+    assert notifycenter.without_cards(in_collins) == {DELIVER_DESKTOP, DELIVER_ROW}
+
+
+def test_update_ids_name_the_version():
+    assert notifycenter.update_id("0.1.3") == "update:0.1.3"
+    assert notifycenter.update_version("update:0.1.3") == "0.1.3"
+    assert notifycenter.update_version(green_id("s1")) == ""
+    assert notifycenter.update_version("abc") == ""
+
+
+def test_update_row_url_survives_the_record():
+    c, _calls = center()
+    row = c.post(update_row(c))
+    record = row.to_record()
+    assert record["url"] == row.url and record["kind"] == notifycenter.KIND_UPDATE
+    back = Notification.from_record(record)
+    assert back.url == row.url and back.id == "update:0.1.3"
+    # Every other kind's record is what it always was: no url in it, and
+    # "" read back.
+    plain = message(c).to_record()
+    assert "url" not in plain
+    assert Notification.from_record(plain).url == ""
+    assert Notification.from_record({**record, "url": 3}).url == ""
+
+
+def test_update_rows_persist_and_are_cleaned_like_any_other():
+    c, _calls = center()
+    c.post(update_row(c))
+    records = c.to_records()
+    assert [r["kind"] for r in records] == [notifycenter.KIND_UPDATE]
+    kept = clean_records(records, now=NOW + 60)
+    assert [r["id"] for r in kept] == ["update:0.1.3"]
+    assert clean_records(records, now=NOW + KEEP_SECONDS + 1) == []
+
+
+def test_posting_an_update_replaces_the_one_standing():
+    c, calls = center()
+    old = c.post(update_row(c, "0.1.3"))
+    c.mark_read(old.id)
+    message(c)
+    new = c.post(update_row(c, "0.1.4"))
+    kinds = [(r.kind, r.id) for r in c.rows()]
+    assert kinds == [(notifycenter.KIND_UPDATE, "update:0.1.4"), (KIND_MESSAGE, kinds[1][1])]
+    assert not new.read
+    assert c.get(old.id) is None
+    # Re-posting the same version is one row, not two.
+    c.post(update_row(c, "0.1.4"))
+    assert [r.id for r in c.rows() if r.kind == notifycenter.KIND_UPDATE] == ["update:0.1.4"]
+    assert calls[-1] == 2
+
+
+def test_has_unread_kind_follows_the_update_row():
+    c, _calls = center()
+    assert not c.has_unread_kind(notifycenter.KIND_UPDATE)
+    row = c.post(update_row(c))
+    assert c.has_unread_kind(notifycenter.KIND_UPDATE)
+    assert not c.has_unread_kind(KIND_BELL)
+    # No session key stands for it.
+    assert c.unread_sessions() == frozenset()
+    c.mark_read(row.id)
+    assert not c.has_unread_kind(notifycenter.KIND_UPDATE)
+    c.post(update_row(c, "0.1.4"))
+    c.remove("update:0.1.4")
+    assert not c.has_unread_kind(notifycenter.KIND_UPDATE)
+
+
+def test_update_rows_go_with_mark_all_read_and_clear():
+    c, _calls = center()
+    c.post(update_row(c))
+    assert c.mark_all_read() == 1
+    assert c.unread_count() == 0
+    assert c.clear() == 1
+    assert c.rows() == []

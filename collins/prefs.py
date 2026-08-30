@@ -29,6 +29,7 @@ from . import (  # noqa: E402
     prefssearch,
     statusicon,
     tokensettings,
+    updatecheck,
     welcome,
 )
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label, grace_seconds
@@ -367,6 +368,18 @@ class PreferencesDialog(Adw.Dialog):
         self._usage_panel_row.set_active(bool(state.get_setting("show_usage_panel")))
         self._usage_panel_row.connect("notify::active", self._on_usage_panel_changed)
         general_group.add(self._usage_panel_row)
+        self._update_check_row = Adw.SwitchRow(
+            title=_("Check for updates"),
+            subtitle=_(
+                "Ask GitHub once a day whether a newer Collins is out, and "
+                "notify you when one is. Through your gh login, or anonymously"
+            ),
+        )
+        self._update_check_row.set_active(bool(state.get_setting(updatecheck.SETTING)))
+        self._update_check_row.connect("notify::active", self._on_update_check_changed)
+        general_group.add(
+            _searchable(self._update_check_row, "update", "upgrade", "version", "release", "github")
+        )
         return general_group
 
     def _build_token_use_group(self, state: AppState) -> _SearchableGroup:
@@ -1307,6 +1320,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_announce_finished_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("announce_finished_runs", row.get_active())
+        self._on_change()
+
+    def _on_update_check_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting(updatecheck.SETTING, row.get_active())
         self._on_change()
 
     def _on_sound_selected(self, row: Adw.ComboRow, _pspec) -> None:

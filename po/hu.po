@@ -872,6 +872,18 @@ msgstr "Befejezett futások bejelentése"
 msgid "Also notify when a session's run finishes, not only when it asks for you"
 msgstr "Akkor is értesítsen, amikor egy munkamenet futása befejeződik, ne csak amikor Önt kéri"
 
+msgid "Check for updates"
+msgstr "Frissítések keresése"
+
+msgid "Ask GitHub once a day whether a newer Collins is out, and notify you when one is. Through your gh login, or anonymously"
+msgstr "Naponta egyszer megkérdezi a GitHubot, van-e újabb Collins, és értesít, ha van. A gh bejelentkezésén keresztül, vagy névtelenül"
+
+msgid "Collins {version} is available"
+msgstr "Elérhető a Collins {version}"
+
+msgid "You're running {version}. Click to open the release on GitHub"
+msgstr "Ön a(z) {version} verziót használja. Kattintson a kiadás megnyitásához a GitHubon"
+
 msgid "Sound needs GStreamer ({package}); the desktop's beep is used instead"
 msgstr "A hanghoz GStreamer ({package}) kell; helyette az asztal sípolása szól"
 

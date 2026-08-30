@@ -51,6 +51,9 @@ from .notifycenter import Notification, NotificationCenter  # noqa: E402
 BELL_ICON = "collins-bell-symbolic"
 # The synthetic row's mark: a dot, coloured the sidebar's finished-run green.
 FINISHED_MARK_ICON = "circle-fill-symbolic"
+# The update row's mark (a newer Collins is out): the desktop's own
+# software-update glyph, in the accent colour (.notification-kind-update).
+UPDATE_MARK_ICON = "software-update-available-symbolic"
 
 # The sheet's one width. Wide enough for a two-line body beside a 16px icon
 # and a time, narrow enough to leave the terminal's left two thirds alone at
@@ -216,8 +219,9 @@ class _NotificationRow(Gtk.ListBoxRow):
     @staticmethod
     def _kind_mark(kind: str) -> Gtk.Image | None:
         """The glyph that says what kind of thing this was: the bell for a
-        bell, the green dot for a finished run, nothing for a message (the
-        body is the message; it needs no announcing)."""
+        bell, the green dot for a finished run, the update arrow for a newer
+        Collins, nothing for a message (the body is the message; it needs
+        no announcing)."""
         if kind == notifycenter.KIND_BELL:
             mark = Gtk.Image(icon_name=BELL_ICON, pixel_size=12, valign=Gtk.Align.CENTER)
             mark.add_css_class("notification-kind-bell")
@@ -225,6 +229,10 @@ class _NotificationRow(Gtk.ListBoxRow):
         if kind == notifycenter.KIND_FINISHED:
             mark = Gtk.Image(icon_name=FINISHED_MARK_ICON, pixel_size=8, valign=Gtk.Align.CENTER)
             mark.add_css_class("notification-kind-finished")
+            return mark
+        if kind == notifycenter.KIND_UPDATE:
+            mark = Gtk.Image(icon_name=UPDATE_MARK_ICON, pixel_size=12, valign=Gtk.Align.CENTER)
+            mark.add_css_class("notification-kind-update")
             return mark
         return None
 
