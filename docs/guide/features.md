@@ -493,10 +493,9 @@ flipped the switch is refused if it calls it anyway.
 
 - **New session** (tab icon in the header, or `Ctrl+Shift+T`) starts a
   fresh agent session in the **visible session's project** — no dialog
-  needed; with no session visible, it asks for a folder. The **Advanced**
-  entry picks a model, a permission mode, or an extra directory
-  (`--add-dir`), and **Continue** resumes the most recent session in a
-  folder (`claude --continue`).
+  needed; with no session visible, it asks for a folder. **Continue**, in
+  the same menu, resumes the most recent session in a folder
+  (`claude --continue`).
 - **The first prompt is written on a new-chat screen**, not in the agent's
   console: the project's icon and name over the [composer](#prompt-composer),
   with a *New git worktree* checkbox at the left of its Send
@@ -510,8 +509,7 @@ flipped the switch is refused if it calls it anyway.
   when nothing sets one — over the same catalog the session's model menu
   lists. A pick is for this session alone: it is passed as `--model` on
   launch and the default is left as it was; *Default* passes nothing, so
-  the session runs on whatever the CLI resolves at that moment. A model
-  chosen in the **Advanced** dialog seeds the picker instead. The effort
+  the session runs on whatever the CLI resolves at that moment. The effort
   picker works the same way for `--effort`: *Default* is named after the
   `effortLevel` that `/effort` saves (or `CLAUDE_CODE_EFFORT_LEVEL`), and
   the levels on offer — *Low* to *Max* — are the ones the model the launch

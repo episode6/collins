@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 # SOME DESCRIPTIVE TITLE.
 # Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
@@ -288,15 +288,6 @@ msgstr ""
 msgid "OK"
 msgstr ""
 
-#: collins/dialogs.py:171
-#, python-brace-format
-msgid "New {name} session"
-msgstr ""
-
-#: collins/dialogs.py:172
-msgid "Optional flags for this session."
-msgstr ""
-
 #: collins/dialogs.py:178
 msgid "Model"
 msgstr ""
@@ -305,28 +296,8 @@ msgstr ""
 msgid "Default"
 msgstr ""
 
-#: collins/dialogs.py:184
-msgid "Permission mode"
-msgstr ""
-
-#: collins/dialogs.py:190
-msgid "Extra directory"
-msgstr ""
-
 #: collins/dialogs.py:190 collins/sidebar.py:867
 msgid "None"
-msgstr ""
-
-#: collins/dialogs.py:191
-msgid "Choose…"
-msgstr ""
-
-#: collins/dialogs.py:194
-msgid "Choose a directory"
-msgstr ""
-
-#: collins/dialogs.py:212
-msgid "Start"
 msgstr ""
 
 #: collins/dialogs.py:247
@@ -1326,11 +1297,6 @@ msgstr ""
 #: collins/window.py:170
 #, python-brace-format
 msgid "New {name} session…"
-msgstr ""
-
-#: collins/window.py:175
-#, python-brace-format
-msgid "New {name} session (advanced)…"
 msgstr ""
 
 #: collins/window.py:179

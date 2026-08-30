@@ -50,7 +50,7 @@ Features:
 - **Preferences** (menu → Preferences, or `Ctrl+,`): terminal font, scrollback, **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin, Tokyo Night, Monokai, One Dark…), color scheme, **language** (English, Magyar, Deutsch, Español, Français), **easy copy & paste**, plus **Show folder paths in sidebar** and **Show Claude usage** toggles for the sidebar, a **Token use** group directly under General for everything that runs Claude on your behalf — the **Session title model** and **Icon generation model** pickers (each with a **None** option; it is the icon picker's default, under which the Generate Icon dialog waits for a pick and a click instead of running on open), an **Auto-renew the Claude login** switch for the background login repair, and the Model list row, which is free — followed by a switch per **session tool**. A fresh install sees the Token use rows and the tool switches once before anything runs, in a **Before you start** dialog on its first launch — the same dialog that asks where `claude` is when a desktop launch can't find it on its `PATH`.
 - A sidebar status footer shows session, project, transcript-size, and open-tab counts.
 
-- **Advanced new session** (New Session menu): choose a **model**, **permission mode**, **extra directories** (`--add-dir`), or **continue** the last session in a folder.
+- **Continue last session** (New Session menu): resume the most recent session in a folder (`claude --continue`).
 - **Permanent delete** sits alongside *Move to trash*; `Ctrl+Shift+E` toggles a 😊 marker on the current tab.
 
 ### Keyboard shortcuts

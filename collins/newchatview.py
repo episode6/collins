@@ -20,8 +20,9 @@ It opens on
 resolve it to (claudemodels.cli_default_model), so the screen says what a
 plain launch would run on — and a pick here is for this launch alone: the
 default is left as it was, and the tab is on the CLI's configured model
-with nothing passed. A model chosen in the Advanced dialog seeds the
-picker instead of the default. The effort picker beside it chooses the
+with nothing passed. A model the tab was opened with (a start_session
+caller's) seeds the picker instead of the default. The effort picker
+beside it chooses the
 ``--effort`` on the same terms (claudemodels.cli_default_effort names its
 *Default*), and lists only the levels the model the launch will run on
 takes. The screen owns no launch plumbing and no
@@ -73,8 +74,8 @@ class NewChatView(Gtk.Box):
     *worktree_default* is the project's effective "new sessions use a
     worktree" value, which the checkbox starts on; *is_git* False leaves the
     checkbox out — the flag has no meaning outside a checkout. *model* is
-    the ``--model`` the tab was opened with (the Advanced dialog's pick, ""
-    for none), which the picker starts on; *pick_model* False leaves the
+    the ``--model`` the tab was opened with (a start_session caller's pick,
+    "" for none), which the picker starts on; *pick_model* False leaves the
     picker out — the provider has no model flag. *effort* and *pick_effort*
     are the effort picker's pair, on the same terms.
     """

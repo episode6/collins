@@ -212,9 +212,10 @@ MCP_CONFIG_PATH: str | None = None
 
 @dataclass(frozen=True)
 class SessionOptions:
-    """Optional CLI flags for a new session — chosen in the advanced new-session
-    dialog, plus the worktree launch decision the window resolves per project.
-    Each provider translates these into the flags it actually supports (unknowns
+    """Optional CLI flags for a new session — the new-chat screen's model and
+    effort picks, a start_session caller's model and permission mode, plus
+    the worktree launch decision the window resolves per project. Each
+    provider translates these into the flags it actually supports (unknowns
     are dropped)."""
 
     model: str = ""
@@ -338,8 +339,9 @@ class Provider:
         return cmd + self._mcp_config_flag()
 
     def new_command(self, options=None) -> str | None:
-        """Shell command to start a fresh session, optionally with advanced
-        CLI flags (model / permission-mode / extra dirs)."""
+        """Shell command to start a fresh session, optionally with the
+        SessionOptions' CLI flags (model / effort / permission-mode / extra
+        dirs / worktree)."""
         cli = shutil.which(self.cli)
         if cli is None:
             return None
@@ -355,8 +357,8 @@ class Provider:
         return f"{shlex.quote(cli)} --continue{self._mcp_config_flag()}" if cli else None
 
     def session_models(self) -> list[tuple[str, str]]:
-        """(flag value, label) model choices for the advanced dialog; the first
-        entry's empty value means 'don't pass --model'. Empty list = no picker."""
+        """(flag value, label) model aliases this agent's --model takes. Empty
+        list = no model flag, which leaves the new-chat screen's picker out."""
         return []
 
     def model_switch_command(self, model_id: str) -> str | None:
@@ -375,8 +377,6 @@ class Provider:
     def permission_modes(self) -> list[tuple[str, str]]:
         """(flag value, label) permission-mode choices; first empty = default."""
         return []
-
-    supports_add_dir: bool = False
 
     def chat_variants(self) -> list[ChatVariant]:
         """The native-chat options this agent offers (empty = no chat)."""
@@ -785,8 +785,6 @@ class ClaudeProvider(Provider):
                     )
                 )
         return found
-
-    supports_add_dir = True
 
     def session_models(self) -> list[tuple[str, str]]:
         # CLI aliases (version-agnostic; resolve to the current model of each tier).

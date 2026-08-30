@@ -525,10 +525,6 @@ class MainWindow(Adw.ApplicationWindow):
         new_menu.append(_("New chat (scratch folder)"), "win.new-session-in-chats")
         for provider in available_providers():
             new_menu.append(
-                _("New {name} session (advanced)…").format(name=provider.name),
-                f"win.new-session-advanced::{provider.id}",
-            )
-            new_menu.append(
                 _("Continue last {name} session…").format(name=provider.name),
                 f"win.continue-session::{provider.id}",
             )
@@ -1389,7 +1385,6 @@ class MainWindow(Adw.ApplicationWindow):
                 p.get_string(), worktree=not self._worktree_for_new_session(p.get_string())
             ),
             "new-chat-provider": lambda _a, p: self._new_chat_session_target(p.get_string()),
-            "new-session-advanced": lambda _a, p: self._new_session_advanced(get_provider(p.get_string())),
             "continue-session": lambda _a, p: self._continue_session(get_provider(p.get_string())),
             "open-session": self._on_open_action,
             "open-session-new-window": self._on_open_new_window,
@@ -2359,26 +2354,7 @@ class MainWindow(Adw.ApplicationWindow):
             if isinstance(window, MainWindow):
                 window.sidebar.refresh_drafts()
 
-    # -- advanced new session / continue -----------------------------------
-
-    def _new_session_advanced(self, provider) -> None:
-        self._adv_provider = provider or self._default_provider()
-        dialog = Gtk.FileDialog(title=_("Choose project directory"))
-        default = self._visible_project_dir()
-        if default:
-            dialog.set_initial_folder(Gio.File.new_for_path(default))
-        dialog.select_folder(self, None, self._on_advanced_folder)
-
-    def _on_advanced_folder(self, dialog: Gtk.FileDialog, result) -> None:
-        try:
-            folder = dialog.select_folder_finish(result)
-        except GLib.Error:
-            return
-        cwd = folder.get_path()
-        provider = getattr(self, "_adv_provider", None) or self._default_provider()
-        dialogs.new_session_options_dialog(
-            self, provider, lambda opts: self._start_new_session(cwd, provider, opts)
-        )
+    # -- continue the last session in a folder ------------------------------
 
     def _continue_session(self, provider) -> None:
         self._cont_provider = provider or self._default_provider()

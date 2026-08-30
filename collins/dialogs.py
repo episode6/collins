@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -20,7 +20,7 @@ from . import claudemodels, composerkeys, editorfiles, icongen
 from .chats import is_chat_cwd
 from .formatting import display_path, format_size, format_timestamp, format_tokens
 from .i18n import _, ngettext
-from .providers import SessionOptions, get_provider
+from .providers import get_provider
 from .sessions import (
     Session,
     SessionDetails,
@@ -483,73 +483,6 @@ def trust_folder_dialog(
         on_dismiss=on_decline,
         destructive=False,
     )
-
-
-def new_session_options_dialog(
-    parent: Gtk.Widget, provider, on_start: Callable[[SessionOptions], None]
-) -> None:
-    """Collect optional CLI flags (model / permission-mode / extra dir) for a new
-    session, then hand a SessionOptions to `on_start`."""
-    dialog = Adw.AlertDialog(
-        heading=_("New {name} session").format(name=provider.name),
-        body=_("Optional flags for this session."),
-    )
-    group = Adw.PreferencesGroup()
-
-    models = provider.session_models()
-    model_values = [""] + [v for v, _l in models]
-    model_row = Adw.ComboRow(title=_("Model"))
-    model_row.set_model(Gtk.StringList.new([_("Default")] + [label for _v, label in models]))
-    group.add(model_row)
-
-    modes = provider.permission_modes()
-    mode_values = [""] + [v for v, _l in modes]
-    mode_row = Adw.ComboRow(title=_("Permission mode"))
-    mode_row.set_model(Gtk.StringList.new([_("Default")] + [label for _v, label in modes]))
-    group.add(mode_row)
-
-    chosen_dir = {"path": ""}
-    if provider.supports_add_dir:
-        dir_row = Adw.ActionRow(title=_("Extra directory"), subtitle=_("None"))
-        choose = Gtk.Button(label=_("Choose…"), valign=Gtk.Align.CENTER)
-
-        def pick(*_a) -> None:
-            fd = Gtk.FileDialog(title=_("Choose a directory"))
-
-            def done(d: Gtk.FileDialog, res) -> None:
-                try:
-                    folder = d.select_folder_finish(res)
-                except GLib.Error:
-                    return
-                chosen_dir["path"] = folder.get_path()
-                dir_row.set_subtitle(folder.get_path())
-
-            fd.select_folder(parent.get_root(), None, done)
-
-        choose.connect("clicked", pick)
-        dir_row.add_suffix(choose)
-        group.add(dir_row)
-
-    dialog.set_extra_child(group)
-    dialog.add_response("cancel", _("Cancel"))
-    dialog.add_response("start", _("Start"))
-    dialog.set_response_appearance("start", Adw.ResponseAppearance.SUGGESTED)
-    dialog.set_default_response("start")
-
-    def on_response(_d, response: str) -> None:
-        if response != "start":
-            return
-        dirs = (chosen_dir["path"],) if chosen_dir["path"] else ()
-        on_start(
-            SessionOptions(
-                model=model_values[model_row.get_selected()],
-                permission_mode=mode_values[mode_row.get_selected()],
-                add_dirs=dirs,
-            )
-        )
-
-    dialog.connect("response", on_response)
-    _present(dialog, parent)
 
 
 # -- MCP servers browser -------------------------------------------------------

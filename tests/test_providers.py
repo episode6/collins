@@ -303,7 +303,6 @@ def test_effort_switch_command():
 
 
 def test_provider_option_lists():
-    assert ClaudeProvider().supports_add_dir is True
     assert ("opus", "Opus") in ClaudeProvider().session_models()
     assert any(v == "plan" for v, _l in ClaudeProvider().permission_modes())
 
