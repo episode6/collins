@@ -4,9 +4,10 @@
 Creates the GitHub release + tag ``v<VERSION>`` pointing at the tip of the
 release branch, with notes extracted from the matching section of
 ``docs/releases.md``. The tag push then triggers
-``.github/workflows/release.yml``, which builds the wheel/sdist + ``.deb``,
-attaches the ``.deb`` to the release created here, publishes to PyPI, and
-uploads a source package per Ubuntu series to ppa:episode6/stable.
+``.github/workflows/release.yml``, which builds the wheel/sdist + ``.deb`` +
+binary ``.rpm``, attaches the ``.deb`` and ``.rpm`` to the release created
+here, publishes to PyPI, uploads a source package per Ubuntu series to
+ppa:episode6/stable, and uploads an SRPM to the episode6/stable COPR.
 
 Mirrors scripts/ship-release.py in the sibling episode6 repos
 (podcast-hacker, the library repos); see RELEASE_CHECKLIST.md.
@@ -198,8 +199,9 @@ def run_gh_release(version, notes, target_branch, dry_run=False):
         release_url = result.stdout.strip()
         print(f"Success! Created release: {release_url}")
         print(
-            "The tag push now triggers release.yml: .deb attached to this "
-            "release, PyPI publish, and a PPA source upload per Ubuntu series."
+            "The tag push now triggers release.yml: .deb and .rpm attached "
+            "to this release, PyPI publish, a PPA source upload per Ubuntu "
+            "series, and an SRPM upload to the COPR."
         )
         return {
             "success": True,

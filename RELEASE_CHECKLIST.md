@@ -2,9 +2,9 @@
 
 This mirrors the episode6 library/app repos' release process — cut a release
 branch, harden it, ship from it — adapted to a Python/GTK app whose one tag
-push fans out to a GitHub release with a `.deb`, a PyPI publish, a source
-upload per Ubuntu series to `ppa:episode6/stable`, and an SRPM upload to the
-`episode6/stable` COPR. Agent skills in
+push fans out to a GitHub release with a `.deb` and a binary `.rpm`, a PyPI
+publish, a source upload per Ubuntu series to `ppa:episode6/stable`, and an
+SRPM upload to the `episode6/stable` COPR. Agent skills in
 [.agents/](./.agents) automate most of it (`release-branch-skill`,
 `ship-release-skill`).
 
@@ -130,7 +130,9 @@ Create 2 PRs (as drafts, per repo convention):
    GitHub release + tag `v<VERSION>` pointing at the release branch, with
    notes extracted from `docs/releases.md`.
 2. The tag push triggers `.github/workflows/release.yml`:
-   - builds the wheel/sdist + `.deb` and attaches the `.deb` to the release,
+   - builds the wheel/sdist + `.deb`, and a binary noarch `.rpm` (via
+     `packaging/fedora/build-copr-srpm.sh --rebuild`, in the Fedora CI
+     image), and attaches the `.deb` and `.rpm` to the release,
    - publishes to PyPI via trusted publishing,
    - uploads a signed source package per Ubuntu series (noble, resolute) to
      `ppa:episode6/stable` — Launchpad then builds and publishes the binaries
@@ -150,8 +152,8 @@ Create 2 PRs (as drafts, per repo convention):
    token (`COPR_API_CONFIG`) expires every 180 days; when it fails on that,
    mint a new one at <https://copr.fedorainfracloud.org/api/>, replace the
    secret, and dispatch the same way (`packaging/README.md`).
-3. Verify: the `.deb` is attached and carries the right version; Launchpad
-   sends an acceptance email per series and the builds go green; `apt install
+3. Verify: the `.deb` and `.rpm` are attached and carry the right version;
+   Launchpad sends an acceptance email per series and the builds go green; `apt install
    collins` from the PPA on a covered series picks up the new version; the
    COPR build is green in every chroot on
    <https://copr.fedorainfracloud.org/coprs/episode6/stable/builds/> and

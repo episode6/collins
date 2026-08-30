@@ -6,8 +6,8 @@ description: >-
   (or publish/finish a release): verifies every committed copy of the version
   agrees, extracts release notes from docs/releases.md, and creates the
   release + tag v<VERSION>; the tag push triggers release.yml to attach the
-  .deb, publish to PyPI, upload to ppa:episode6/stable, and upload the SRPM to
-  the episode6/stable COPR.
+  .deb and binary .rpm, publish to PyPI, upload to ppa:episode6/stable, and
+  upload the SRPM to the episode6/stable COPR.
 ---
 
 # Ship Release Branch Skill
@@ -28,10 +28,11 @@ The `./scripts/ship-release.py` script keeps it consistent:
 3. Publishes the GitHub release via `gh release create` with tag and title
    `v<VERSION>`, `--target` the release branch.
 4. The tag push triggers `.github/workflows/release.yml`: it builds the
-   wheel/sdist + `.deb`, attaches the `.deb` to the release created in step 3,
-   publishes to PyPI (trusted publishing), uploads a signed source package
-   per Ubuntu series (noble, resolute) to `ppa:episode6/stable`, and uploads
-   the SRPM to the `episode6/stable` COPR, waiting for every chroot to build.
+   wheel/sdist + `.deb` and a binary noarch `.rpm`, attaches the `.deb` and
+   `.rpm` to the release created in step 3, publishes to PyPI (trusted
+   publishing), uploads a signed source package per Ubuntu series (noble,
+   resolute) to `ppa:episode6/stable`, and uploads the SRPM to the
+   `episode6/stable` COPR, waiting for every chroot to build.
 
 ## Prerequisites
 - **Merge PRs via GitHub**: the release-finalization PR (and any hardening
@@ -65,8 +66,8 @@ Ship the current release branch:
 
 ## After Shipping
 - Watch the `release.yml` run triggered by the new tag; when it finishes,
-  verify the `.deb` is attached to the release with the right version and the
-  PyPI publish succeeded.
+  verify the `.deb` and `.rpm` are attached to the release with the right
+  version and the PyPI publish succeeded.
 - The PPA jobs only *upload*: Launchpad then emails an acceptance notice per
   series and builds/publishes the binaries (minutes to hours in the queue,
   plus ~20 minutes for the publisher). Confirm the builds go green on

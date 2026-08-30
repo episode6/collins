@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-28. Full change history: git log for this file.
+fork. Last modified: 2026-08-30. Full change history: git log for this file.
 -->
 # Packaging
 
@@ -13,6 +13,7 @@ exist once set up for it.)
 | Channel | Files | Notes |
 | --- | --- | --- |
 | **`.deb`** (GitHub releases) | `scripts/build_deb.sh` | Hand-rolled binary deb attached to each release. |
+| **`.rpm`** (GitHub releases) | `packaging/fedora/` | Binary noarch RPM built from the COPR spec (`build-copr-srpm.sh --rebuild`), attached next to the `.deb`. |
 | **AUR** | `packaging/aur/` | `PKGBUILD` + `.SRCINFO`; see `packaging/aur/README.md`. |
 | **PyPI** | `pyproject.toml` + `.github/workflows/release.yml` | Auto-published on tag via trusted publishing (once configured). |
 | **Ubuntu PPA** | `debian/` + `packaging/build-ppa-source.sh` | Source upload to Launchpad; see below. |
@@ -155,7 +156,7 @@ of the Dockerfile's hash:
 - `:<hash>-fedora-pkg` — the **Fedora packaging** image: `fedora:latest`
   with rpm-build, rpmlint, copr-cli, the spec's BuildRequires, and the
   package's runtime dependencies (so `dnf install` of the built RPM resolves
-  without a download). Runs `rpm` in CI and `copr` at release. Its own
+  without a download). Runs `rpm` in CI, and `rpm` + `copr` at release. Its own
   `FROM`, not a stage of the Ubuntu chain, and root throughout — installing
   the RPM needs it, and no unit test runs there.
 
@@ -295,6 +296,13 @@ tag beside `ppa`, in the Fedora stage of the CI image. It:
   already this version, so a re-run of a tag's workflow is harmless;
 - builds the SRPM and runs `copr-cli build` *without* `--nowait`, so a chroot
   that fails to build fails the job.
+
+The workflow's separate `rpm` job runs beside it in the same image: it
+rebuilds the SRPM into the binary noarch RPM (`build-copr-srpm.sh
+--rebuild`, dist tag left empty since the package is not tied to the
+building image's Fedora) and the `github-release` job attaches it to the
+release next to the `.deb`, for anyone installing straight from the
+releases page. The COPR remains the maintained Fedora channel.
 
 One secret:
 

@@ -1,14 +1,14 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-28. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 name: Release
 
 # Push a v* tag (scripts/ship-release.py, from a release branch) → build the
-# wheel/sdist + .deb, publish to PyPI (OIDC trusted publishing), attach the
-# .deb to the GitHub Release, upload a source package per Ubuntu series to
-# ppa:episode6/stable, and an SRPM to the episode6/stable COPR. See
-# RELEASE_CHECKLIST.md.
+# wheel/sdist + .deb + binary .rpm, publish to PyPI (OIDC trusted publishing),
+# attach the .deb and .rpm to the GitHub Release, upload a source package per
+# Ubuntu series to ppa:episode6/stable, and an SRPM to the episode6/stable
+# COPR. See RELEASE_CHECKLIST.md.
 on:
   push:
     tags: ['v*']
@@ -24,7 +24,7 @@ on:
         required: false
         type: string
 
-# build, ppa and copr run inside the prebuilt CI images
+# build, rpm, ppa and copr run inside the prebuilt CI images
 # (.github/docker/ci.Dockerfile, resolved or built by the image job) -- the
 # same images ci.yml's packaging, ppa-source and rpm jobs use, so a release
 # builds in exactly the environment every PR rehearsed. github-release and
@@ -61,8 +61,30 @@ jobs:
             dist/*.tar.gz
             dist/*.deb
 
+  # The binary noarch RPM for the GitHub Release -- the .deb's counterpart
+  # for anyone installing straight from the releases page. Built the way
+  # ci.yml's rpm job rehearses on every PR (build-copr-srpm.sh --rebuild:
+  # SRPM, rpmlint, rebuild with the spec's %check), in the same Fedora image.
+  # The COPR stays the maintained Fedora channel; its per-chroot builds are
+  # untouched by this. Gates on build like ppa and copr do, so a broken
+  # wheel stops the release everywhere.
+  rpm:
+    needs: [image, build]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.image.outputs.image_fedora_pkg }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the binary RPM
+        run: packaging/fedora/build-copr-srpm.sh --rebuild
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rpm
+          path: /tmp/collins-copr/*.noarch.rpm
+
   github-release:
-    needs: build
+    needs: [build, rpm]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -72,20 +94,24 @@ jobs:
         with:
           name: dist
           path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: rpm
+          path: dist
       # scripts/ship-release.py creates the release (with notes extracted
       # from docs/releases.md) before the tag ever reaches CI, so the normal
       # path is attaching to it. A bare tag pushed without a release still
       # works, as a fallback.
-      - name: Attach the .deb to the GitHub Release
+      - name: Attach the .deb and .rpm to the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" dist/*.deb \
+            gh release upload "${GITHUB_REF_NAME}" dist/*.deb dist/*.rpm \
               --repo "${GITHUB_REPOSITORY}" --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" dist/*.deb \
+            gh release create "${GITHUB_REF_NAME}" dist/*.deb dist/*.rpm \
               --repo "${GITHUB_REPOSITORY}" \
               --title "${GITHUB_REF_NAME}" \
               --generate-notes

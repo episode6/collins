@@ -26,7 +26,7 @@ downloads of each version, see the
 - ✅ **Theming** — light/dark plus selectable terminal color palettes
 - ✅ **Localization** — English, Hungarian, German, Spanish, French
 - ✅ **Multi-window**
-- ✅ **Distribution** — Ubuntu PPA (`ppa:episode6/stable`), Fedora COPR (`episode6/stable`, RHEL 10 included), `.deb`, PyPI (`pipx install collins`), one-step tag-driven releases
+- ✅ **Distribution** — Ubuntu PPA (`ppa:episode6/stable`), Fedora COPR (`episode6/stable`, RHEL 10 included), `.deb` + `.rpm` downloads, PyPI (`pipx install collins`), one-step tag-driven releases
 
 ### Exploring next
 
@@ -37,6 +37,12 @@ downloads of each version, see the
 ## Changelog
 
 ### v0.1.3 — UNRELEASED
+
+- **Releases now include an `.rpm` download.** Each GitHub release attaches
+  a binary noarch RPM next to the `.deb` — built from the same spec the
+  COPR publishes, for installing directly on an RPM-based distro without
+  enabling the `episode6/stable` COPR (which remains the maintained,
+  self-updating channel on Fedora and RHEL 10).
 
 ### v0.1.2 — 2026-08-30
 
