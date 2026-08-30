@@ -82,6 +82,14 @@ _SCHEMES = [
     ("dark", N_("Dark"), Adw.ColorScheme.FORCE_DARK),
 ]
 
+# The in-app notification card's own light/dark (notifycenter.CARD_SCHEMES,
+# in the drop-down's order): the app's, or pinned either way.
+_CARD_SCHEMES = [
+    (notifycenter.CARD_SCHEME_APP, N_("Follow app")),
+    (notifycenter.CARD_SCHEME_LIGHT, N_("Light")),
+    (notifycenter.CARD_SCHEME_DARK, N_("Dark")),
+]
+
 # What a new session opens its composer as (composerkeys.AUTOSHOW_MODES, in
 # the order the drop-down offers them). The labels stay short on purpose: a
 # ComboRow's selected value gets only what its subtitle leaves — under 100px
@@ -519,8 +527,9 @@ class PreferencesDialog(Adw.Dialog):
         return sessions_group
 
     def _build_notifications_group(self, state: AppState) -> _SearchableGroup:
-        """The four rows of the spec's Notifications group: the in-app card,
-        the sound it plays, bells from other sessions, and finished runs.
+        """The spec's Notifications group: the in-app card and its own
+        light/dark, the sound it plays, bells from other sessions, and
+        finished runs.
 
         The sound row is a combo of the three shapes the setting takes —
         Default (the desktop's message sound), None, and Custom…, which opens
@@ -544,6 +553,24 @@ class PreferencesDialog(Adw.Dialog):
         self._inapp_row.set_active(bool(state.get_setting("inapp_notifications")))
         self._inapp_row.connect("notify::active", self._on_inapp_changed)
         group.add(_searchable(self._inapp_row, "card", "banner", "desktop", "popup"))
+
+        # The subtitle is kept short for the same reason _COMPOSER_AUTOSHOW's
+        # labels are: the selected value gets what the subtitle leaves, and
+        # "Follow app" was coming back as "Follo…" behind a longer one.
+        self._card_scheme_row = Adw.ComboRow(
+            title=_("Card theme"),
+            subtitle=_("The in-app card's own light or dark, whatever the app is"),
+        )
+        card_scheme_labels = [_(label) for _k, label in _CARD_SCHEMES]
+        self._card_scheme_row.set_model(Gtk.StringList.new(card_scheme_labels))
+        current_card_scheme = state.get_setting("notification_color_scheme")
+        self._card_scheme_row.set_selected(
+            next((i for i, (k, _l) in enumerate(_CARD_SCHEMES) if k == current_card_scheme), 0)
+        )
+        self._card_scheme_row.connect("notify::selected", self._on_card_scheme_changed)
+        group.add(
+            _searchable(self._card_scheme_row, *card_scheme_labels, "theme", "color", "scheme", "mode")
+        )
 
         self._sound_row = Adw.ComboRow(title=_("Sound"))
         self._sound_row.set_model(Gtk.StringList.new([_("Default"), _("None"), _("Custom…")]))
@@ -1312,6 +1339,10 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_inapp_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("inapp_notifications", row.get_active())
+        self._on_change()
+
+    def _on_card_scheme_changed(self, row: Adw.ComboRow, _pspec) -> None:
+        self._state.set_setting("notification_color_scheme", _CARD_SCHEMES[row.get_selected()][0])
         self._on_change()
 
     def _on_bell_notifications_changed(self, row: Adw.SwitchRow, _pspec) -> None:

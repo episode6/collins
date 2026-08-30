@@ -845,6 +845,15 @@ msgstr "A sonné la cloche"
 msgid "In-app notifications"
 msgstr "Notifications dans l'application"
 
+msgid "Card theme"
+msgstr "Thème de la carte"
+
+msgid "The in-app card's own light or dark, whatever the app is"
+msgstr "Clair ou sombre pour la carte elle-même, quelle que soit l'application"
+
+msgid "Follow app"
+msgstr "Suivre l'application"
+
 msgid "Show a message from another session inside the window while Collins is focused. Off sends every notification to the desktop"
 msgstr "Afficher un message d'une autre session dans la fenêtre tant que Collins a le focus. Désactivé, chaque notification va au bureau"
 

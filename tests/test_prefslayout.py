@@ -55,7 +55,13 @@ def test_notifications_sit_between_sessions_and_composer():
 
 
 def test_every_notification_setting_has_a_default():
-    for key in ("inapp_notifications", "notification_sound", "bell_notifications", "announce_finished_runs"):
+    for key in (
+        "inapp_notifications",
+        "notification_color_scheme",
+        "notification_sound",
+        "bell_notifications",
+        "announce_finished_runs",
+    ):
         assert key in DEFAULT_SETTINGS, key
 
 

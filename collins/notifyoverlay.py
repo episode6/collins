@@ -111,6 +111,7 @@ class NotificationCard(Gtk.Revealer):
         self._paused = False
         self._shown = False
         self._leaving = False
+        self._scheme_class = ""
 
         body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         body.add_css_class("card")
@@ -197,6 +198,19 @@ class NotificationCard(Gtk.Revealer):
 
         self.set_child(clamp)
         self.connect("notify::child-revealed", self._on_child_revealed)
+
+    def set_scheme_class(self, css_class: str) -> None:
+        """Pin the card light or dark (*css_class* is one of
+        notifycenter.CARD_SCHEME_CLASSES' values), or "" to follow the app
+        again. The class goes on the body — the widget Adwaita's .card
+        paints — where the app's CSS re-pins the card colors under it."""
+        if css_class == self._scheme_class:
+            return
+        if self._scheme_class:
+            self._body.remove_css_class(self._scheme_class)
+        if css_class:
+            self._body.add_css_class(css_class)
+        self._scheme_class = css_class
 
     @staticmethod
     def _kind_mark(kind: str) -> Gtk.Image | None:
@@ -335,6 +349,9 @@ class NotificationCards(Gtk.Box):
         self._on_open = on_open
         self._project_icon = project_icon
         self._fallback_icon_name = fallback_icon_name
+        # The notification_color_scheme setting, as the class a card wears
+        # (see apply_settings); "" until the window pushes its settings in.
+        self._scheme_class = ""
         # The pointer over any card pauses every card's clock. The box is
         # sized to its cards, so "over the box" is "over a card" (or the
         # 8px between two), and GTK counts a descendant as inside.
@@ -349,6 +366,15 @@ class NotificationCards(Gtk.Box):
         so a lightbox — added later, and so above — still covers the
         cards."""
         overlay.add_overlay(self)
+
+    def apply_settings(self, settings: dict) -> None:
+        """The card's own light/dark (notification_color_scheme), pushed
+        in with the rest of the settings at build and on every Preferences
+        change: every card standing changes at once, and every card after
+        goes up wearing it."""
+        self._scheme_class = notifycenter.card_scheme_class(settings.get("notification_color_scheme"))
+        for card in self.cards():
+            card.set_scheme_class(self._scheme_class)
 
     # -- showing ----------------------------------------------------------------
 
@@ -373,6 +399,7 @@ class NotificationCards(Gtk.Box):
             on_dismiss=lambda c: c.slide_out(),
             on_gone=self._remove,
         )
+        card.set_scheme_class(self._scheme_class)
         self.prepend(card)
         # Only the cards actually standing count towards the three: one
         # sliding out is still a child until its slide ends, and pushing a

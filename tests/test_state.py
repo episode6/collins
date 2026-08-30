@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 import json
 import time
@@ -1150,6 +1150,7 @@ def test_notification_settings_have_their_defaults(app_state):
     assert app_state.DEFAULT_SETTINGS["notification_sound"] == "default"
     assert app_state.DEFAULT_SETTINGS["bell_notifications"] is True
     assert app_state.DEFAULT_SETTINGS["announce_finished_runs"] is False
+    assert app_state.DEFAULT_SETTINGS["notification_color_scheme"] == "app"
 
 
 def test_notification_settings_round_trip(app_state):

@@ -123,6 +123,21 @@ SOUND_THEME_ROOT = "/usr/share/sounds"
 SOUND_FALLBACK_THEME = "freedesktop"
 SOUND_EVENT = "stereo/message-new-instant.oga"
 
+# The in-app card's own light/dark (the notification_color_scheme setting,
+# and the Card theme row's three choices, in its order): CARD_SCHEME_APP
+# paints the card in whatever the app is; the other two pin it. Each pinned
+# one is a CSS class on the card's body, under which app.py's _CSS re-pins
+# Adwaita's card colors (--card-bg-color and friends) — the card is the one
+# widget under the class, so nothing else in the window changes.
+CARD_SCHEME_APP = "app"
+CARD_SCHEME_LIGHT = "light"
+CARD_SCHEME_DARK = "dark"
+CARD_SCHEMES = (CARD_SCHEME_APP, CARD_SCHEME_LIGHT, CARD_SCHEME_DARK)
+CARD_SCHEME_CLASSES = {
+    CARD_SCHEME_LIGHT: "notification-card-light",
+    CARD_SCHEME_DARK: "notification-card-dark",
+}
+
 # The `notify_user` tool's replies: what happened, since the model can only
 # know by asking. Plain English, not translated — they go to the agent.
 REPLY_IN_APP = "The user was notified in Collins."
@@ -756,6 +771,13 @@ def sound_display_name(value: str | None) -> str:
     if value == SOUND_NONE:
         return _("None")
     return os.path.basename(str(value))
+
+
+def card_scheme_class(value) -> str:
+    """The CSS class the setting's *value* puts on a card's body — "" for
+    a card that follows the app, which is what any value the setting does
+    not take (an old file, a hand edit) comes to as well."""
+    return CARD_SCHEME_CLASSES.get(str(value or ""), "")
 
 
 def sound_subtitle(value, home: str | None = None) -> str:

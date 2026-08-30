@@ -845,6 +845,15 @@ msgstr "Hat geklingelt"
 msgid "In-app notifications"
 msgstr "Benachrichtigungen in der App"
 
+msgid "Card theme"
+msgstr "Kartendesign"
+
+msgid "The in-app card's own light or dark, whatever the app is"
+msgstr "Hell oder dunkel für die Karte selbst, unabhängig von der App"
+
+msgid "Follow app"
+msgstr "App folgen"
+
 msgid "Show a message from another session inside the window while Collins is focused. Off sends every notification to the desktop"
 msgstr "Eine Nachricht aus einer anderen Sitzung im Fenster anzeigen, solange Collins den Fokus hat. Aus sendet jede Benachrichtigung an den Desktop"
 

@@ -174,6 +174,11 @@ DEFAULT_SETTINGS = {
     # row whose click opens the release page (see updatecheck.py). On by
     # default; off asks nothing.
     "check_for_updates": True,
+    # The in-app card's own light/dark (notifycenter.CARD_SCHEMES): "app"
+    # paints it in whatever the app is, "light" and "dark" pin it — a dark
+    # card over a light window reads the way a desktop notification does,
+    # and the other way round. Only the card; the desktop's are its own.
+    "notification_color_scheme": "app",  # app | light | dark
     # The floating composer button over each agent terminal's bottom-left
     # corner (see terminal.py; it was the attach-file button once, and keeps
     # that key so saved preferences carry over). Off hides it everywhere;
