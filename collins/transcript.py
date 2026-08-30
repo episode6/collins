@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-19. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 """Read what a session is doing by tailing its JSONL transcript.
 
@@ -58,6 +58,7 @@ class TranscriptModel:
         self._prs: dict[str, PullRequest] = {}  # url -> PR, first-seen order
         self._touched: list[str] = []  # files written by the agent, newest first
         self._model: str | None = None  # model id of the most recent reply
+        self._effort: str | None = None  # effort level of the most recent reply
         self._permission_mode: str | None = None  # last mode the CLI recorded
         self._images: dict[str, Attachment] = {}  # images named in the messages
         self._offset = 0
@@ -69,6 +70,7 @@ class TranscriptModel:
         self._prs = {}
         self._touched = []
         self._model = None
+        self._effort = None
         self._permission_mode = None
         self._images = {}
         self._offset = 0
@@ -101,6 +103,7 @@ class TranscriptModel:
             self._prs = {}
             self._touched = []
             self._model = None
+            self._effort = None
             self._permission_mode = None
             self._images = {}
             self._offset, self._buf = 0, b""
@@ -146,6 +149,8 @@ class TranscriptModel:
             return True
         message = entry.get("message") or {}
         changed = self._record_model(entry, message)
+        if self._record_effort(entry):
+            changed = True
         if self._record_images(entry, message):
             changed = True
         content = message.get("content")
@@ -178,6 +183,20 @@ class TranscriptModel:
         if model == self._model:
             return False
         self._model = model
+        return True
+
+    def _record_effort(self, entry: dict) -> bool:
+        """Remember the effort level this reply was answered at — the CLI
+        stamps it on the line itself (``"effort": "high"``), beside the
+        message rather than inside it. False when the line isn't a reply of
+        the session's own (a sidechain's is a subagent's, as _record_model
+        says), or when it repeats the level already recorded."""
+        if entry.get("type") != "assistant" or entry.get("isSidechain"):
+            return False
+        effort = entry.get("effort")
+        if not isinstance(effort, str) or not effort or effort == self._effort:
+            return False
+        self._effort = effort
         return True
 
     def _record_images(self, entry: dict, message: dict) -> bool:
@@ -261,6 +280,13 @@ class TranscriptModel:
         with now is the only interesting answer.
         """
         return self._model
+
+    def effort(self) -> str | None:
+        """The effort level the session's most recent reply was answered at
+        (``high``), as the CLI stamped it, or None until one has been — an
+        empty transcript, or a CLI old enough not to stamp it. The latest
+        for the same reason model() gives: ``/effort`` moves it mid-run."""
+        return self._effort
 
     def permission_mode(self) -> str | None:
         """The session's permission mode as of its last transcript line —

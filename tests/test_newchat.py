@@ -90,3 +90,17 @@ def test_valid_draft_repairs_the_model_slot():
     assert "model" not in newchat.valid_draft({"cwd": "/p", "model": 3})
     assert "model" not in newchat.valid_draft({"cwd": "/p", "model": "  "})
     assert newchat.valid_draft({"cwd": "/p", "model": " sonnet "})["model"] == "sonnet"
+
+
+def test_draft_record_keeps_an_effort_pick_only():
+    record = newchat.draft_record("/p", "claude", "hi", None, None, 1.0, effort="")
+    assert "effort" not in record  # the default is re-read, not kept
+    record = newchat.draft_record("/p", "claude", "hi", None, None, 1.0, effort="xhigh")
+    assert record["effort"] == "xhigh"
+    assert newchat.valid_draft(record)["effort"] == "xhigh"
+
+
+def test_valid_draft_repairs_the_effort_slot():
+    assert "effort" not in newchat.valid_draft({"cwd": "/p", "effort": 3})
+    assert "effort" not in newchat.valid_draft({"cwd": "/p", "effort": "  "})
+    assert newchat.valid_draft({"cwd": "/p", "effort": " low "})["effort"] == "low"

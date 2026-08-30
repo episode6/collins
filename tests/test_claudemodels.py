@@ -84,6 +84,67 @@ def test_parse_models_reads_api_shape():
     assert models[1].created_at == "2025-10-01"
 
 
+def _effort_block(**levels):
+    block = {"supported": True}
+    for level, supported in levels.items():
+        block[level] = {"supported": supported}
+    return {"effort": block}
+
+
+def test_parse_models_reads_the_effort_levels():
+    # The API names each level on its own; the model keeps the ones it takes,
+    # in the CLI's order, whatever order the API listed them in.
+    payload = {
+        "data": [
+            {
+                "id": "claude-opus-4-6",
+                "capabilities": _effort_block(max=True, low=True, medium=True, high=True, xhigh=False),
+            },
+            {"id": "claude-haiku-4-5", "capabilities": {"effort": {"supported": False}}},
+            {"id": "claude-opus-5", "capabilities": {"effort": {"supported": True}}},
+            {"id": "opus"},  # an entry with no capabilities block can't say
+            {"id": "claude-x", "capabilities": {"effort": "yes"}},  # junk block: can't say
+        ]
+    }
+    models = parse_models(payload)
+    assert models[0].efforts == ("low", "medium", "high", "max")
+    assert models[1].efforts == ()
+    assert models[2].efforts == claudemodels.EFFORT_LEVELS  # supported as a whole: all of them
+    assert models[3].efforts is None
+    assert models[4].efforts is None
+
+
+def test_saved_cache_keeps_the_effort_levels(monkeypatch):
+    catalog = [
+        ClaudeModel("claude-opus-5", "Claude Opus 5", "2026-02-01", claudemodels.EFFORT_LEVELS),
+        ClaudeModel("claude-opus-4-6", "Claude Opus 4.6", "2026-01-01", ("low", "medium", "high")),
+        ClaudeModel("claude-haiku-4-5", "Claude Haiku 4.5", "2025-10-01", ()),
+        ClaudeModel("claude-old", "Old", "2025-01-01", None),
+    ]
+    monkeypatch.setattr(claudemodels, "fetch_models", _fetches(catalog))
+    claudemodels.available_models()
+    _restart()
+    # (The list comes back sorted for display; the point is every model's
+    # levels — known, none, or unknown — survive the trip through the file.)
+    by_id = {m.id: m for m in claudemodels.cached_models()}
+    assert by_id == {m.id: m for m in catalog}
+
+
+def test_model_efforts_reads_the_saved_catalog(monkeypatch):
+    catalog = [
+        ClaudeModel("claude-opus-5", "Claude Opus 5", "2026-02-01", ("low", "high")),
+        ClaudeModel("claude-haiku-4-5", "Claude Haiku 4.5", "2025-10-01", ()),
+    ]
+    monkeypatch.setattr(claudemodels, "fetch_models", _fetches(catalog))
+    assert claudemodels.model_efforts("claude-opus-5") is None  # nothing cached yet
+    claudemodels.available_models()
+    assert claudemodels.model_efforts("claude-opus-5") == ("low", "high")
+    assert claudemodels.model_efforts("claude-opus-5[1m]") == ("low", "high")  # /model's suffix
+    assert claudemodels.model_efforts("claude-haiku-4-5") == ()
+    assert claudemodels.model_efforts("opus") is None  # an alias: the catalog can't say
+    assert claudemodels.model_efforts("") is None
+
+
 def test_parse_models_skips_junk():
     payload = {
         "data": [
@@ -371,8 +432,11 @@ def test_saved_cache_from_the_future_is_stale(monkeypatch):
     [
         "not json at all",
         json.dumps({"version": 999, "fetched_at": 0, "data": [{"id": "claude-opus-5"}]}),
-        json.dumps({"version": 1, "data": [{"id": "claude-opus-5"}]}),  # no fetched_at
-        json.dumps({"version": 1, "fetched_at": 0, "data": []}),
+        # no fetched_at
+        json.dumps({"version": claudemodels._CACHE_VERSION, "data": [{"id": "claude-opus-5"}]}),
+        json.dumps({"version": claudemodels._CACHE_VERSION, "fetched_at": 0, "data": []}),
+        # the shape saved before the effort levels were read
+        json.dumps({"version": 1, "fetched_at": 0, "data": [{"id": "claude-opus-5"}]}),
         json.dumps([1, 2, 3]),
     ],
 )
@@ -849,6 +913,37 @@ def test_cli_default_model_honours_claude_config_dir(monkeypatch, tmp_path):
     (other / "settings.json").write_text(json.dumps({"model": "elsewhere"}))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(other))
     assert claudemodels.cli_default_model(None) == "elsewhere"
+
+
+def test_cli_default_effort_reads_the_key_effort_saves(monkeypatch, tmp_path):
+    _settings_home(monkeypatch, tmp_path, {"model": "opus", "effortLevel": "xhigh"})
+    assert claudemodels.cli_default_effort(str(tmp_path / "proj")) == "xhigh"
+    assert claudemodels.cli_default_effort(None) == "xhigh"
+    _settings_home(monkeypatch, tmp_path, {"model": "opus"})
+    assert claudemodels.cli_default_effort(None) is None
+
+
+def test_cli_default_effort_walks_the_same_chain_as_the_model(monkeypatch, tmp_path):
+    _settings_home(monkeypatch, tmp_path, {"effortLevel": "user"})
+    proj = tmp_path / "proj"
+    (proj / ".claude").mkdir(parents=True)
+    (proj / ".claude" / "settings.json").write_text(json.dumps({"effortLevel": "project"}))
+    assert claudemodels.cli_default_effort(str(proj)) == "project"
+    # A file's env block counts after every file's own key.
+    (tmp_path / "managed.json").write_text(json.dumps({"env": {"CLAUDE_CODE_EFFORT_LEVEL": "env"}}))
+    assert claudemodels.cli_default_effort(str(proj)) == "project"
+    (tmp_path / "managed.json").write_text(json.dumps({"effortLevel": "managed"}))
+    assert claudemodels.cli_default_effort(str(proj)) == "managed"
+    # The environment's pin outranks them all — the CLI says as much in /effort.
+    monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "low")
+    assert claudemodels.cli_default_effort(str(proj)) == "low"
+
+
+def test_cli_default_effort_shrugs_off_junk(monkeypatch, tmp_path):
+    _settings_home(monkeypatch, tmp_path, {"effortLevel": 3, "env": "x"})
+    assert claudemodels.cli_default_effort(None) is None
+    _settings_home(monkeypatch, tmp_path, {"effortLevel": "  "})
+    assert claudemodels.cli_default_effort(None) is None
 
 
 def test_cli_default_model_shrugs_off_junk_files(monkeypatch, tmp_path):

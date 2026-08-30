@@ -2208,6 +2208,7 @@ class MainWindow(Adw.ApplicationWindow):
                 layout=tab.capture_panel_layout(),
                 created=existing["created"] if existing else time.time(),
                 model=tab.new_chat_model(),
+                effort=tab.new_chat_effort(),
             )
             if record == existing:
                 return
@@ -2220,13 +2221,19 @@ class MainWindow(Adw.ApplicationWindow):
         self._refresh_draft_rows()
 
     def _on_new_chat_send(
-        self, tab: TerminalTab, text: str, worktree: bool, model: str, page: Adw.TabPage
+        self,
+        tab: TerminalTab,
+        text: str,
+        worktree: bool,
+        model: str,
+        effort: str,
+        page: Adw.TabPage,
     ) -> None:
         """The screen's Send: settle the launch the way _launch_new_session
         settles a console launch — the worktree flag as the checkbox says
         (never outside a git checkout), trust written where the CLI's
-        worktree flag reads it, --model as the picker says ("" passes
-        nothing, and the CLI runs on its configured default) — then start
+        worktree flag reads it, --model and --effort as the pickers say
+        ("" passes nothing, and the CLI runs on its configured default) — then start
         the session with the prompt, or with none: an empty *text* is the
         screen's *Empty Session*, the agent started at its own input box.
         The draft is spent: the text is about to be the session's first
@@ -2236,7 +2243,10 @@ class MainWindow(Adw.ApplicationWindow):
         if worktree:
             trust.trust_launch_dir(cwd)  # see _launch_new_session
         options = replace(
-            tab.launch_options or SessionOptions(), worktree=worktree, model=model or ""
+            tab.launch_options or SessionOptions(),
+            worktree=worktree,
+            model=model or "",
+            effort=effort or "",
         )
         self._cancel_new_chat_save(page)
         draft_id = self._placeholder_pages.get(page)
@@ -2287,6 +2297,7 @@ class MainWindow(Adw.ApplicationWindow):
                 record.get("worktree"),
                 record.get("layout"),
                 record.get("model", ""),
+                record.get("effort", ""),
             )
 
         self._with_folder_trust(cwd, provider, proceed)

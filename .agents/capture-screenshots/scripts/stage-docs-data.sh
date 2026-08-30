@@ -137,7 +137,7 @@ mk() { # cwd uuid t1 t2 prompt reply
   mkdir -p "$dir"
   cat > "$dir/$2.jsonl" <<EOF
 {"type":"user","timestamp":"$3","cwd":"$1","message":{"role":"user","content":"$5"}}
-{"type":"assistant","timestamp":"$4","cwd":"$1","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"$6"}],"usage":{"input_tokens":18420,"output_tokens":2210}}}
+{"type":"assistant","timestamp":"$4","cwd":"$1","effort":"high","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"$6"}],"usage":{"input_tokens":18420,"output_tokens":2210}}}
 EOF
 }
 
@@ -167,16 +167,16 @@ mk "$C" $U6 2026-07-27T10:02:18Z 2026-07-27T10:09:46Z \
 DIR1="$E2E/projects/$(enc "$A")"
 cat > "$DIR1/$U1.jsonl" <<EOF
 {"type":"user","timestamp":"2026-07-27T09:12:03Z","cwd":"$A","message":{"role":"user","content":"Fix the flaky spinner animation on the dashboard"}}
-{"type":"assistant","timestamp":"2026-07-27T09:12:41Z","cwd":"$A","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"Looking at the dashboard spinner now."},{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"$A/src/dashboard/spinner.css"}}],"usage":{"input_tokens":9210,"output_tokens":410}}}
+{"type":"assistant","timestamp":"2026-07-27T09:12:41Z","cwd":"$A","effort":"high","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"Looking at the dashboard spinner now."},{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"$A/src/dashboard/spinner.css"}}],"usage":{"input_tokens":9210,"output_tokens":410}}}
 {"type":"user","timestamp":"2026-07-27T09:12:44Z","cwd":"$A","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"(file contents)"}]}}
-{"type":"assistant","timestamp":"2026-07-27T09:13:22Z","cwd":"$A","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"tool_use","id":"t2","name":"mcp__playwright__browser_snapshot","input":{}}],"usage":{"input_tokens":11020,"output_tokens":180}}}
+{"type":"assistant","timestamp":"2026-07-27T09:13:22Z","cwd":"$A","effort":"high","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"tool_use","id":"t2","name":"mcp__playwright__browser_snapshot","input":{}}],"usage":{"input_tokens":11020,"output_tokens":180}}}
 {"type":"user","timestamp":"2026-07-27T09:13:29Z","cwd":"$A","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":"(page snapshot)"}]}}
-{"type":"assistant","timestamp":"2026-07-27T09:14:05Z","cwd":"$A","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"tool_use","id":"t3","name":"Edit","input":{"file_path":"$A/src/dashboard/spinner.css"}}],"usage":{"input_tokens":12830,"output_tokens":640}}}
+{"type":"assistant","timestamp":"2026-07-27T09:14:05Z","cwd":"$A","effort":"high","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"tool_use","id":"t3","name":"Edit","input":{"file_path":"$A/src/dashboard/spinner.css"}}],"usage":{"input_tokens":12830,"output_tokens":640}}}
 {"type":"user","timestamp":"2026-07-27T09:14:08Z","cwd":"$A","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t3","content":"ok"}]}}
 {"type":"user","timestamp":"2026-07-27T09:16:40Z","cwd":"$A","message":{"role":"user","content":"Nice — add a regression test so it stays fixed"}}
-{"type":"assistant","timestamp":"2026-07-27T09:17:30Z","cwd":"$A","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"tool_use","id":"t4","name":"Write","input":{"file_path":"$A/tests/test_spinner.py"}}],"usage":{"input_tokens":13900,"output_tokens":520}}}
+{"type":"assistant","timestamp":"2026-07-27T09:17:30Z","cwd":"$A","effort":"high","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"tool_use","id":"t4","name":"Write","input":{"file_path":"$A/tests/test_spinner.py"}}],"usage":{"input_tokens":13900,"output_tokens":520}}}
 {"type":"user","timestamp":"2026-07-27T09:17:33Z","cwd":"$A","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t4","content":"ok"}]}}
-{"type":"assistant","timestamp":"2026-07-27T09:18:12Z","cwd":"$A","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"The flake came from animating width during layout; the animation is now transform-only and a regression test pins it."}],"usage":{"input_tokens":15110,"output_tokens":1890}}}
+{"type":"assistant","timestamp":"2026-07-27T09:18:12Z","cwd":"$A","effort":"high","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"The flake came from animating width during layout; the animation is now transform-only and a regression test pins it."}],"usage":{"input_tokens":15110,"output_tokens":1890}}}
 EOF
 
 # Attachment timestamps: a few minutes apart, all earlier today.
@@ -308,3 +308,8 @@ EOF
 chmod +x "$E2E/bin/claude"
 
 echo "staged in $E2E"
+
+# The CLI settings the new-chat screen reads its pickers' defaults from:
+# an effort pinned by /effort, so the effort picker reads Default (High).
+mkdir -p "$E2E/.claude"
+echo '{"effortLevel": "high"}' > "$E2E/.claude/settings.json"

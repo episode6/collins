@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-29. Full change history: git log for this file.
+fork. Last modified: 2026-08-30. Full change history: git log for this file.
 -->
 
 # Features
@@ -98,8 +98,9 @@ Enter opens, Esc closes.
   as you switch between them; the sidebar marks the ones with unread
   output.
 - A slim **session footer** shows the **model** the session last answered
-  with, the agent's live working directory (click to copy), and the current
-  **git branch** (⎇), plus the terminal-panel buttons.
+  with and the **effort level** it answered at, the agent's live working
+  directory (click to copy), and the current **git branch** (⎇), plus the
+  terminal-panel buttons.
 - **The model is one click from switching.** The footer's model name is a
   menu: every model your login can use, fetched from the Models API with
   the CLI's own token, the current one marked. Pick another and the
@@ -107,6 +108,12 @@ Enter opens, Esc closes.
   agent answers with it. The same menu sits in the composer's chrome, so
   you can change model halfway through writing a prompt without losing the
   draft. (Copying the full model id lives in the menu too.)
+- **So is the effort level.** The level beside the model name is a menu of
+  the CLI's effort levels (*Low*, *Medium*, *High*, *Extra high*, *Max*),
+  the current one marked; a pick sends `/effort`, and the footer follows
+  the agent's next answer. Levels the current model can't take — the
+  Models API says which — are greyed out. The same menu sits beside the
+  composer's model button.
 - **Pull request chips** trail the branch: one per PR the session has
   opened, each with its CI or merge mark, and each opening that PR's **page
   beside the session** on click — a native view of the description, checks,
@@ -234,13 +241,14 @@ belongs to its session, and it is there when you come back to it.
   instead, where it stays for that session's later visits. The *Composer in
   new sessions* preference can open it by itself the moment a session
   starts.
-- **Model button**: the composer names the model the session is answering
-  with, and clicking it opens the same switch menu as the footer's — pick a
-  different model mid-draft and carry on writing.
+- **Model and effort buttons**: the composer names the model the session
+  is answering with and the effort level it answers at, and clicking either
+  opens the same switch menu as the footer's — pick a different model or
+  level mid-draft and carry on writing.
 - **It's also where a session begins.** A new session's first prompt is
   written in this same composer, on the [new-chat screen](#starting-sessions)
-  that stands in for the console until Send — worktree checkbox and model
-  picker on its Send row.
+  that stands in for the console until Send — worktree checkbox, model
+  picker and effort picker on its Send row.
 
 ![The composer floating over an agent terminal](/img/composer.png)
 
@@ -491,10 +499,10 @@ flipped the switch is refused if it calls it anyway.
   folder (`claude --continue`).
 - **The first prompt is written on a new-chat screen**, not in the agent's
   console: the project's icon and name over the [composer](#prompt-composer),
-  with a *Start in a new git worktree* checkbox at the left of its Send
+  with a *New git worktree* checkbox at the left of its Send
   row (ticked or not as the project's setting says — see below) and a
-  **model picker** at its right, where a running session's model menu
-  sits. The
+  **model picker** and an **effort picker** at its right, where a running
+  session's model and effort menus sit. The model
   picker opens on *Default* — the CLI's own default, named after
   what its settings resolve it to (`~/.claude/settings.json`'s `model`,
   the key `/model` writes, with a project's `.claude/settings.json` or
@@ -503,7 +511,13 @@ flipped the switch is refused if it calls it anyway.
   lists. A pick is for this session alone: it is passed as `--model` on
   launch and the default is left as it was; *Default* passes nothing, so
   the session runs on whatever the CLI resolves at that moment. A model
-  chosen in the **Advanced** dialog seeds the picker instead. Nothing runs
+  chosen in the **Advanced** dialog seeds the picker instead. The effort
+  picker works the same way for `--effort`: *Default* is named after the
+  `effortLevel` that `/effort` saves (or `CLAUDE_CODE_EFFORT_LEVEL`), and
+  the levels on offer — *Low* to *Max* — are the ones the model the launch
+  will run on takes, as the Models API reports them; a level that model
+  can't take is greyed out, and one picked before a model switch that
+  rules it out falls back to *Default*. Nothing runs
   until you press Send; then the agent starts with your prompt as its
   first turn, and the tab is an ordinary session tab from there. With
   nothing written, the button reads **Empty Session** instead — press it
@@ -515,8 +529,8 @@ flipped the switch is refused if it calls it anyway.
   leaves a **Draft** row under the project in the sidebar (named after the
   prompt's first line, with a pencil mark; a screen kept only for its
   terminal is called *Draft* and keeps the agent's mark), and clicking that
-  row brings the screen back with the text, the checkbox, the model pick,
-  and the terminal panel as you left them. Send spends the draft; the row's
+  row brings the screen back with the text, the checkbox, the model and
+  effort picks, and the terminal panel as you left them. Send spends the draft; the row's
   trash button discards it. While the screen is still open, that same button
   closes the tab too — it is a close cross until something is written, and
   turns into the trash can with the pencil, since the click then throws the

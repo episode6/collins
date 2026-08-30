@@ -78,7 +78,7 @@ _MIN_TRUSTED_MODELS = 2
 # the full timeout. A forced refresh ignores it.
 _RETRY_AFTER_FAILURE_S = 300
 _MAX_PAGES = 5  # the catalog is ~a dozen models; more pages means something is wrong
-_CACHE_VERSION = 1  # bumped if the file's shape changes; a file from another version is ignored
+_CACHE_VERSION = 2  # bumped if the file's shape changes; a file from another version is ignored
 
 # The model pickers' "None": the feature stays off until a model is chosen.
 # A string rather than JSON null, so a setting holding it can't be mistaken
@@ -103,11 +103,21 @@ _TIERS = ("haiku", "sonnet", "opus", "fable", "mythos")
 _DISPLAY_ORDER = ("mythos", "fable", "opus", "sonnet", "haiku")
 
 
+# The effort levels the CLI's --effort (and /effort) take, weakest first.
+# The Models API reports which of these each model supports (see
+# `ClaudeModel.efforts`); the CLI is the one that names them.
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+
 @dataclass(frozen=True)
 class ClaudeModel:
     id: str
     display_name: str
     created_at: str = ""  # ISO 8601; "" sorts oldest
+    # The effort levels this model takes, in EFFORT_LEVELS order — () for a
+    # model with no effort control at all (Haiku 4.5), None when the answer
+    # isn't known: an alias, or a catalog saved before the field was read.
+    efforts: tuple[str, ...] | None = None
 
 
 # What the pickers fall back to when the API can't be asked: the CLI's
@@ -145,9 +155,52 @@ def parse_models(payload) -> list[ClaudeModel]:
                 model_id,
                 name if isinstance(name, str) and name else model_id,
                 created if isinstance(created, str) else "",
+                _parse_efforts(entry.get("capabilities")),
             )
         )
     return models
+
+
+def _parse_efforts(capabilities) -> tuple[str, ...] | None:
+    """The effort levels an entry's ``capabilities.effort`` block grants:
+    ``{"supported": true, "low": {"supported": true}, …}`` names each level
+    on its own, and a block that only says supported as a whole grants them
+    all. None when the entry carries no block (the cache written before
+    this was read, or an API that stopped saying)."""
+    effort = capabilities.get("effort") if isinstance(capabilities, dict) else None
+    if not isinstance(effort, dict):
+        return None
+    if not effort.get("supported"):
+        return ()
+    named = [level for level in EFFORT_LEVELS if isinstance(effort.get(level), dict)]
+    if not named:
+        return EFFORT_LEVELS
+    return tuple(level for level in named if effort[level].get("supported"))
+
+
+def _efforts_capability(efforts: tuple[str, ...] | None) -> dict | None:
+    """The ``capabilities`` block that _parse_efforts reads back to *efforts*
+    — the API's own shape, so the saved catalog is one more response page."""
+    if efforts is None:
+        return None
+    if not efforts:
+        return {"effort": {"supported": False}}
+    block: dict = {"supported": True}
+    for level in EFFORT_LEVELS:
+        block[level] = {"supported": level in efforts}
+    return {"effort": block}
+
+
+def model_efforts(model_id: str) -> tuple[str, ...] | None:
+    """The effort levels *model_id* takes, as the saved catalog has it, or
+    None when it can't say — an alias, an id the catalog doesn't list, or a
+    catalog that never carried the field. The ``[1m]`` context-window suffix
+    ``/model`` leaves behind is read past."""
+    model_id = (model_id or "").strip().removesuffix("[1m]")
+    for model in cached_models() or ():
+        if model.id == model_id:
+            return model.efforts
+    return None
 
 
 def fetch_models(timeout: float = _TIMEOUT_S) -> list[ClaudeModel]:
@@ -242,6 +295,19 @@ def _read_disk() -> tuple[list[ClaudeModel], float] | None:
     return models, float(fetched_at)
 
 
+def _entry(model: ClaudeModel) -> dict:
+    """One model the way the API lists it (see _write_disk)."""
+    entry = {
+        "id": model.id,
+        "display_name": model.display_name,
+        "created_at": model.created_at,
+    }
+    capabilities = _efforts_capability(model.efforts)
+    if capabilities is not None:
+        entry["capabilities"] = capabilities
+    return entry
+
+
 def _write_disk(models: list[ClaudeModel], fetched_at: float) -> None:
     """Save *models* for the next run. Best effort: a cache that can't be
     written costs a query next launch, not anything anyone need act on."""
@@ -251,10 +317,7 @@ def _write_disk(models: list[ClaudeModel], fetched_at: float) -> None:
         "fetched_at": fetched_at,
         # The API's own field names, so _read_disk hands the file straight to
         # parse_models and there is only one shape to keep in step.
-        "data": [
-            {"id": m.id, "display_name": m.display_name, "created_at": m.created_at}
-            for m in models
-        ],
+        "data": [_entry(m) for m in models],
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -644,6 +707,10 @@ def resolve_model(setting: str | None, models: list[ClaudeModel], prefer: str = 
 # CLAUDE_CONFIG_DIR when that is set, as the CLI's does.
 _MANAGED_SETTINGS = Path("/etc/claude-code/managed-settings.json")
 _MODEL_ENV = "ANTHROPIC_MODEL"
+# The effort's counterparts: the key /effort saves, and the variable that
+# pins a session's effort over it (the CLI says so in /effort's own copy).
+_EFFORT_KEY = "effortLevel"
+_EFFORT_ENV = "CLAUDE_CODE_EFFORT_LEVEL"
 
 
 def _cli_config_dir() -> Path:
@@ -695,6 +762,31 @@ def cli_default_model(cwd: str | None = None) -> str | None:
         model = env.get(_MODEL_ENV) if isinstance(env, dict) else None
         if isinstance(model, str) and model.strip():
             return model.strip()
+    return None
+
+
+def cli_default_effort(cwd: str | None = None) -> str | None:
+    """The effort a ``claude`` launched in *cwd* with no ``--effort`` runs
+    at, read the way cli_default_model reads the model: the environment's
+    ``CLAUDE_CODE_EFFORT_LEVEL`` first (a pin the CLI honours over every
+    file), then each settings file's ``effortLevel`` — the key ``/effort``
+    saves — most specific first, then the files' ``env`` blocks. None when
+    nothing sets one and the CLI's own built-in default applies. Handed
+    back as written, unchecked against EFFORT_LEVELS: it is a name to show,
+    never a value passed on."""
+    from_env = (os.environ.get(_EFFORT_ENV) or "").strip()
+    if from_env:
+        return from_env
+    settings = [_read_settings(path) for path in _settings_files(cwd)]
+    for data in settings:
+        effort = data.get(_EFFORT_KEY)
+        if isinstance(effort, str) and effort.strip():
+            return effort.strip()
+    for data in settings:
+        env = data.get("env")
+        effort = env.get(_EFFORT_ENV) if isinstance(env, dict) else None
+        if isinstance(effort, str) and effort.strip():
+            return effort.strip()
     return None
 
 

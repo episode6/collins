@@ -83,6 +83,11 @@ class ComposerView(Gtk.Box):
     transcript read as the footer's label); on the new-chat screen it is the
     launch picker, and the label is the pick. *model_tooltip* is the
     button's tooltip, the switch menu's wording by default.
+
+    *effort_popover* and *effort_tooltip* are the same pair for the effort
+    menu, on a button right after the model's: the level the session last
+    answered at (`set_effort_name`) over a running session, the launch pick
+    on the new-chat screen. None leaves the row without one.
     """
 
     __gsignals__ = {
@@ -105,6 +110,8 @@ class ComposerView(Gtk.Box):
         model_popover: Gtk.Popover | None = None,
         chrome: bool = True,
         model_tooltip: str | None = None,
+        effort_popover: Gtk.Popover | None = None,
+        effort_tooltip: str | None = None,
     ) -> None:
         """*chrome* is the close and dock/float pair at the row's left — the
         stand-in's controls, for a composer raised over a terminal it can
@@ -242,6 +249,18 @@ class ComposerView(Gtk.Box):
             )
             row.append(self._model_btn)
             self.set_model_name(None)
+        # The effort picker rides right after it: the two dials on what
+        # answers the prompt, side by side, as the footer shows them.
+        self._effort_btn: Gtk.MenuButton | None = None
+        if effort_popover is not None:
+            self._effort_btn = Gtk.MenuButton(popover=effort_popover)
+            self._effort_btn.set_always_show_arrow(True)
+            self._effort_btn.add_css_class("flat")
+            self._effort_btn.set_tooltip_text(
+                effort_tooltip or _("Switch the effort level for this session")
+            )
+            row.append(self._effort_btn)
+            self.set_effort_name(None)
         attach = Gtk.Button(
             icon_name="mail-attachment-symbolic",
             tooltip_text=_("Attach file"),
@@ -573,6 +592,13 @@ class ComposerView(Gtk.Box):
         first reply says which that is."""
         if self._model_btn is not None:
             self._model_btn.set_label(name or _("Model"))
+
+    def set_effort_name(self, name: str | None) -> None:
+        """Name the effort level on its picker button — the one the session
+        last answered at, pushed by the host — or the generic word before
+        the first reply says which that is."""
+        if self._effort_btn is not None:
+            self._effort_btn.set_label(name or _("Effort"))
 
     def set_enter_sends(self, enter_sends: bool) -> None:
         self._enter_sends = bool(enter_sends)

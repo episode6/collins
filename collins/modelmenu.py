@@ -1,27 +1,35 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
-"""The menu that switches a running session's model.
+"""The menus that switch a running session's model, and its effort.
 
-Two places open one — the footer's model chip and the composer chrome's
-model button, each a MenuButton hosting this popover — and both list the
-same catalog the Preferences pickers draw from: the Models API, asked with
-the CLI's own OAuth token (claudemodels), with the CLI's version-agnostic
-aliases standing in when the API can't be asked. The model the session last
-answered with wears the mark, read live off the same transcript-fed
-value the footer label shows. Picking one hands the id back to the host
-(terminal.switch_model), which posts the provider's switch command to
-the chat; the menu itself never touches a terminal.
+Two places open the model menu — the footer's model chip and the composer
+chrome's model button, each a MenuButton hosting this popover — and both
+list the same catalog the Preferences pickers draw from: the Models API,
+asked with the CLI's own OAuth token (claudemodels), with the CLI's
+version-agnostic aliases standing in when the API can't be asked. The
+model the session last answered with wears the mark, read live off the
+same transcript-fed value the footer label shows. Picking one hands the id
+back to the host (terminal.switch_model), which posts the provider's
+switch command to the chat; the menu itself never touches a terminal.
 
 The list arrives asynchronously: the menu pops at once — holding
 whatever the cache already has, or a placeholder on a cold start — and a
 worker thread swaps the live answer in underneath. A Gio.Menu is a live
 model, so an open popover follows the change.
 
-The new-chat screen's picker (new_launch_model_popover) is the same list
-with different semantics: it chooses the ``--model`` a session not yet
-started will launch with, so the mark follows the pick at once, and a
-*Default* row heads the list — the CLI's own default, named when the
-settings say what it is (claudemodels.cli_default_model).
+The effort menu (new_effort_popover) sits beside it in both places and
+lists the CLI's effort levels (claudemodels.EFFORT_LEVELS) the same way:
+the level the session last answered at wears the mark, and a pick posts
+``/effort`` (terminal.switch_effort). Levels the session's current model
+can't take — as the catalog's capabilities say — draw insensitive, so the
+menu never offers a ``/effort xhigh`` the CLI would refuse.
+
+The new-chat screen's pickers (new_launch_model_popover,
+new_launch_effort_popover) are the same lists with different semantics:
+they choose the ``--model`` and ``--effort`` a session not yet started
+will launch with, so the mark follows the pick at once, and a *Default*
+row heads each list — the CLI's own default, named when the settings say
+what it is (claudemodels.cli_default_model, cli_default_effort).
 """
 
 from __future__ import annotations
@@ -213,6 +221,123 @@ def new_launch_model_popover(
             return GLib.SOURCE_REMOVE
 
         threading.Thread(target=work, name="launch-model-menu", daemon=True).start()
+
+    popover.connect("show", refresh)
+    return popover
+
+
+# -- the effort menus ---------------------------------------------------------
+
+
+def effort_label(level: str) -> str:
+    """What the menus call an effort level: a word for each of the CLI's
+    own, and the CLI's spelling for one this build doesn't know."""
+    names = {
+        "low": _("Low"),
+        "medium": _("Medium"),
+        "high": _("High"),
+        "xhigh": _("Extra high"),
+        "max": _("Max"),
+    }
+    return names.get(level, level)
+
+
+def default_effort_label(default_effort: str | None) -> str:
+    """What the launch picker calls the CLI's default effort: named after
+    the level the settings resolve to, or bare when nothing sets one."""
+    if default_effort:
+        return _("Default ({effort})").format(effort=effort_label(default_effort))
+    return _("Default")
+
+
+def _append_efforts(menu: Gio.Menu, allowed: tuple[str, ...] | None) -> None:
+    """Every level, one section. *allowed* is what the model in question
+    takes (claudemodels.model_efforts): a level outside it gets no action,
+    which draws insensitive — a choice the CLI would refuse is shown for
+    what it is rather than hidden; None allows them all (an alias, or a
+    model the catalog doesn't list). A model that takes none says so."""
+    section = Gio.Menu()
+    if allowed is not None and not allowed:
+        section.append(_("This model has no effort setting"), None)
+        menu.append_section(None, section)
+        return
+    for level in claudemodels.EFFORT_LEVELS:
+        item = Gio.MenuItem.new(effort_label(level), None)
+        if allowed is None or level in allowed:
+            item.set_action_and_target_value(
+                f"{_GROUP}.pick-effort", GLib.Variant.new_string(level)
+            )
+        section.append_item(item)
+    menu.append_section(None, section)
+
+
+def new_effort_popover(
+    current_effort: Callable[[], str | None],
+    current_model: Callable[[], str | None],
+    on_pick: Callable[[str], None],
+) -> Gtk.PopoverMenu:
+    """A popover listing the effort levels *on_pick* can switch a running
+    session to, refilled on every show so the mark tracks *current_effort*
+    (the level the session last answered at — the pick itself never moves
+    it, for the reason new_model_popover gives) and the levels on offer
+    track *current_model*. Hand it to a MenuButton, as the model menu asks."""
+    menu = Gio.Menu()
+    popover = Gtk.PopoverMenu.new_from_model(menu)
+    pick = Gio.SimpleAction.new_stateful(
+        "pick-effort", GLib.VariantType.new("s"), GLib.Variant.new_string("")
+    )
+    pick.connect("activate", lambda _action, param: on_pick(param.get_string()))
+    group = Gio.SimpleActionGroup()
+    group.add_action(pick)
+    popover.insert_action_group(_GROUP, group)
+
+    def refresh(*_a) -> None:
+        pick.set_state(GLib.Variant.new_string(current_effort() or ""))
+        menu.remove_all()
+        _append_efforts(menu, claudemodels.model_efforts(current_model() or ""))
+
+    popover.connect("show", refresh)
+    return popover
+
+
+def new_launch_effort_popover(
+    default_effort: Callable[[], str | None],
+    choice: Callable[[], str],
+    launch_model: Callable[[], str | None],
+    on_pick: Callable[[str], None],
+) -> Gtk.PopoverMenu:
+    """A popover choosing the ``--effort`` a session not yet started launches
+    with: a *Default* row (the CLI's own default, *default_effort* naming it
+    when known — re-read on every show, since ``/effort`` in another session
+    can move it) over the levels *launch_model* — the ``--model`` the launch
+    will pass, or the CLI's default when it passes none — takes. *choice*
+    is the current pick, "" for the default; picking hands the level (or "")
+    to *on_pick* and moves the mark at once, as new_launch_model_popover
+    does. Hand it to a MenuButton, for the same reason."""
+    menu = Gio.Menu()
+    popover = Gtk.PopoverMenu.new_from_model(menu)
+    pick = Gio.SimpleAction.new_stateful(
+        "pick-effort", GLib.VariantType.new("s"), GLib.Variant.new_string("")
+    )
+
+    def on_activate(_action, param) -> None:
+        pick.set_state(param)
+        on_pick(param.get_string())
+
+    pick.connect("activate", on_activate)
+    group = Gio.SimpleActionGroup()
+    group.add_action(pick)
+    popover.insert_action_group(_GROUP, group)
+
+    def refresh(*_a) -> None:
+        pick.set_state(GLib.Variant.new_string(choice()))
+        menu.remove_all()
+        head = Gio.Menu()
+        item = Gio.MenuItem.new(default_effort_label(default_effort()), None)
+        item.set_action_and_target_value(f"{_GROUP}.pick-effort", GLib.Variant.new_string(""))
+        head.append_item(item)
+        menu.append_section(None, head)
+        _append_efforts(menu, claudemodels.model_efforts(launch_model() or ""))
 
     popover.connect("show", refresh)
     return popover

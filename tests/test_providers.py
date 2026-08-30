@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-16. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 import os
 import shutil
@@ -281,6 +281,25 @@ def test_new_command_options(monkeypatch):
     )
     assert claude.new_command() == "/usr/bin/claude"  # no options → bare command
     assert claude.continue_command() == "/usr/bin/claude --continue"
+
+
+def test_new_command_effort_flag(monkeypatch):
+    # The effort rides after the model; "" — the CLI's default — passes nothing.
+    from collins.providers import SessionOptions
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    claude = ClaudeProvider()
+    assert claude.new_command(SessionOptions(model="opus", effort="xhigh")) == (
+        "/usr/bin/claude --model opus --effort xhigh"
+    )
+    assert claude.new_command(SessionOptions(effort="low")) == "/usr/bin/claude --effort low"
+    assert claude.new_command(SessionOptions(effort="")) == "/usr/bin/claude"
+
+
+def test_effort_switch_command():
+    # The CLI's slash command takes what --effort does; the base provider
+    # answers None, which hides the effort menus entirely.
+    assert ClaudeProvider().effort_switch_command("low") == "/effort low"
+    assert providers.Provider().effort_switch_command("low") is None
 
 
 def test_provider_option_lists():

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-16. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -218,6 +218,7 @@ class SessionOptions:
     are dropped)."""
 
     model: str = ""
+    effort: str = ""  # an effort level (claudemodels.EFFORT_LEVELS); "" passes nothing
     permission_mode: str = ""
     add_dirs: tuple[str, ...] = ()
     worktree: bool = False  # start the session in a fresh git worktree
@@ -362,6 +363,13 @@ class Provider:
         """The line typed into a *running* session to switch it to *model_id*
         — posted like any prompt — or None when the CLI has no mid-session
         switch (which hides the model menus entirely)."""
+        return None
+
+    def effort_switch_command(self, effort: str) -> str | None:
+        """The line typed into a *running* session to move it to *effort*
+        (one of claudemodels.EFFORT_LEVELS), or None when the CLI has no
+        such dial — which hides the effort menus the way a missing model
+        switch hides the model ones."""
         return None
 
     def permission_modes(self) -> list[tuple[str, str]]:
@@ -789,6 +797,10 @@ class ClaudeProvider(Provider):
         # an alias or a full model id.
         return f"/model {model_id}"
 
+    def effort_switch_command(self, effort: str) -> str | None:
+        # The CLI's own slash command, which takes what --effort does.
+        return f"/effort {effort}"
+
     def permission_modes(self) -> list[tuple[str, str]]:
         return [
             ("plan", "Plan (read-only)"),
@@ -802,6 +814,8 @@ class ClaudeProvider(Provider):
         out: list[str] = []
         if options.model:
             out += ["--model", shlex.quote(options.model)]
+        if options.effort:
+            out += ["--effort", shlex.quote(options.effort)]
         if options.permission_mode:
             out += ["--permission-mode", shlex.quote(options.permission_mode)]
         for d in options.add_dirs:

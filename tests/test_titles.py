@@ -573,9 +573,31 @@ def test_run_claude_takes_an_explicit_setting_over_a_none_preference(app_state, 
     monkeypatch.setattr(titles.subprocess, "run", run)
     app_state.AppState().set_setting("title_model", NO_MODEL)
     assert titles._run_claude("prompt", setting="") == "A title"
-    assert argv[0][-2:] == ["--model", "haiku:''"]
+    assert argv[0][-4:] == ["--model", "haiku:''", "--effort", "low"]
     # Five words back need no tool schemas, skills, or MCP servers.
     assert argv[0][:5] == ["/usr/bin/claude", "-p", "--strict-mcp-config", "--tools", ""]
+
+
+def test_a_title_run_is_pinned_at_low_effort(monkeypatch, app_state):
+    # A five-word summary gains nothing from thinking, and the pin keeps
+    # whatever /effort saved in the user's settings out of every title.
+    monkeypatch.setattr(titles.shutil, "which", lambda _name: "/usr/bin/claude")
+    monkeypatch.setattr(titles, "pick_model", lambda setting, prefer: "haiku")
+    argv = []
+
+    class _Done:
+        returncode = 0
+        stdout = "A title"
+        stderr = ""
+
+    def run(cmd, **_kw):
+        argv.append(cmd)
+        return _Done()
+
+    monkeypatch.setattr(titles.subprocess, "run", run)
+    titles._run_claude("prompt", setting="haiku")
+    assert titles.TITLE_EFFORT == "low"
+    assert argv[0][-2:] == ["--effort", "low"]
 
 
 def test_headless_argv_is_a_trimmed_claude_p():
@@ -586,6 +608,14 @@ def test_headless_argv_is_a_trimmed_claude_p():
     argv = titles.headless_argv("/usr/bin/claude", "haiku")
     assert argv == ["/usr/bin/claude", "-p", "--strict-mcp-config", "--tools", "", "--model", "haiku"]
     assert "--bare" not in argv
+
+
+def test_headless_argv_pins_an_effort_only_when_asked():
+    # The effort rides after the model when a run names one; a run that
+    # doesn't leaves the CLI's default in charge, flag and all.
+    argv = titles.headless_argv("/usr/bin/claude", "haiku", effort="low")
+    assert argv[-4:] == ["--model", "haiku", "--effort", "low"]
+    assert "--effort" not in titles.headless_argv("/usr/bin/claude", "haiku", effort="")
 
 
 def test_a_title_queued_before_the_switch_to_none_is_dropped_not_fatal(app_state):
