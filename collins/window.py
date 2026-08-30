@@ -2233,11 +2233,12 @@ class MainWindow(Adw.ApplicationWindow):
         settles a console launch — the worktree flag as the checkbox says
         (never outside a git checkout), trust written where the CLI's
         worktree flag reads it, --model and --effort as the pickers say
-        ("" passes nothing, and the CLI runs on its configured default) — then start
-        the session with the prompt, or with none: an empty *text* is the
-        screen's *Empty Session*, the agent started at its own input box.
-        The draft is spent: the text is about to be the session's first
-        turn, and the dock's shells go on under the session id from here."""
+        ("" passes nothing, and the CLI runs on its configured default) —
+        then start the session with the prompt, or with none: an empty
+        *text* is the screen's *Empty Session*, the agent started at its
+        own input box. The draft is spent: the text is about to be the
+        session's first turn, and the dock's shells go on under the session
+        id from here."""
         cwd = tab.start_cwd or ""
         worktree = bool(worktree) and (Path(cwd) / ".git").exists()
         if worktree:
