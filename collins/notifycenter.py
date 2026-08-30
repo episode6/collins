@@ -34,7 +34,17 @@ pruned of anything older than KEEP_DAYS on load (see clean_records).
 **Where a notification goes** is `delivery()`: a pure function of the kind
 of notification and where the user is, returning the set of things to do.
 The table is the spec's; the names it returns are the vocabulary the window
-wires to widgets (see the DELIVER_* constants).
+wires to widgets (see the DELIVER_* constants). Where the user *is* —
+`focus_state()` — and what the two switches do to the table (`without_cards`
+for a user who turned the in-app cards off) are decided here too, as is what
+the `notify_user` tool is told about it all (`tool_reply`).
+
+**What the sound is** is also worked out here, short of playing it: the
+notification_sound setting's three shapes (SOUND_DEFAULT, SOUND_NONE, a
+path), which file "default" means on this desktop (`sound_file`, walking the
+desktop's sound theme for its message sound), and what the preferences row
+and the sheet's footer call the choice. notifysound.py plays whatever this
+resolves to.
 
 **What the widgets say** is decided here too, where it is string work: the
 bell's tooltip, a row's relative time, a coalesced bell's "×3", the split of
@@ -93,6 +103,30 @@ DELIVERIES = frozenset(
 # row it owns without a search and nothing else can collide with it.
 GREEN_PREFIX = "green:"
 
+# The notification_sound setting: the desktop's own message sound, silence,
+# or an absolute path to a file of the user's. Anything else is a path.
+SOUND_DEFAULT = "default"
+SOUND_NONE = "none"
+
+# Where "default" looks: the freedesktop sound-theme layout, under the
+# desktop's chosen theme first (GNOME's org.gnome.desktop.sound theme-name —
+# Yaru on Ubuntu, whose message sound is its own) and the freedesktop theme
+# second, which sound-theme-freedesktop installs on Ubuntu and Fedora desktops
+# alike. The event is the one a desktop plays for a new message. Collins
+# ships no sound of its own: nothing to license, and the theme's sound is
+# what the desktop already plays for exactly this.
+SOUND_THEME_ROOT = "/usr/share/sounds"
+SOUND_FALLBACK_THEME = "freedesktop"
+SOUND_EVENT = "stereo/message-new-instant.oga"
+
+# The `notify_user` tool's replies: what happened, since the model can only
+# know by asking. Plain English, not translated — they go to the agent.
+REPLY_IN_APP = "The user was notified in Collins."
+REPLY_DESKTOP = "The user was notified on their desktop."
+REPLY_SELECTED = (
+    "The user is looking at this session; the message is in their notification history."
+)
+
 # The persisted list's bounds. Two hundred rows is weeks of a busy fleet;
 # older than a fortnight, a notification is no longer news to anyone.
 ROW_CAP = 200
@@ -147,6 +181,50 @@ def delivery(kind: str, focus: str, announce_finished_runs: bool = False) -> fro
     return _TABLE[(kind, focus)]
 
 
+def focus_state(any_window_active: bool, tab_window_active: bool, tab_selected: bool) -> str:
+    """Where the user is, relative to a tab: one of the FOCUS_* values the
+    delivery table is indexed by.
+
+    `selected` needs both halves — the tab's own window is the active one
+    *and* the tab is its selected page. A selected tab in a window that
+    isn't active (a second window, a hidden one) is `elsewhere` while some
+    other Collins window is active, because a card in that window can
+    reach it, and `unfocused` when none is: nothing on screen is Collins,
+    so the desktop carries the notification. "Active" is
+    Gtk.Window.is_active, which a hidden window never is.
+    """
+    if not any_window_active:
+        return FOCUS_UNFOCUSED
+    if tab_window_active and tab_selected:
+        return FOCUS_SELECTED
+    return FOCUS_ELSEWHERE
+
+
+def without_cards(deliveries: Iterable[str]) -> frozenset[str]:
+    """The same delivery with the in-app card turned off (the
+    inapp_notifications switch): the card and the sound that only ever
+    plays beside it become a desktop notification — the desktop is where
+    every notification went before there were cards, and it sounds its own.
+    Everything else (the row, the flag, the flash) stays."""
+    deliveries = frozenset(deliveries)
+    if DELIVER_CARD not in deliveries:
+        return deliveries
+    return (deliveries - {DELIVER_CARD, DELIVER_SOUND}) | {DELIVER_DESKTOP}
+
+
+def tool_reply(deliveries: Iterable[str]) -> str:
+    """What `notify_user` is told: where the message went. A card is "in
+    Collins", a desktop notification is "on their desktop", and neither —
+    the user is looking at the very tab — says so and where the message
+    can still be found. Nothing silently did nothing."""
+    deliveries = frozenset(deliveries)
+    if DELIVER_CARD in deliveries:
+        return REPLY_IN_APP
+    if DELIVER_DESKTOP in deliveries:
+        return REPLY_DESKTOP
+    return REPLY_SELECTED
+
+
 def green_id(session_id: str) -> str:
     """The id of the synthetic row standing for *session_id*'s green flag."""
     return GREEN_PREFIX + session_id
@@ -174,7 +252,7 @@ class Notification:
     title: str  # the session title at raise time
     project: str  # project name, for the row's footer / eyebrow
     kind: str  # KIND_MESSAGE | KIND_BELL | KIND_FINISHED
-    body: str  # the message; "Rang the bell" / "Finished a run"
+    body: str  # the message; bell_body() / "Finished a run"
     when: float  # time.time()
     read: bool = False
     count: int = 1  # bells coalesce: "Rang the bell ×3"
@@ -326,6 +404,19 @@ class NotificationCenter:
         """The badge: how many rows nobody has gone to or waved off."""
         return sum(1 for row in self._rows if not row.read)
 
+    def unread_sessions(self) -> frozenset[str]:
+        """The keys with an unread row of any kind standing — what a desktop
+        notification is still speaking for (see App._on_notifications_changed,
+        which withdraws one the moment its key drops out of this set). A ""
+        key is nobody's and never listed."""
+        return frozenset(row.session_id for row in self._rows if not row.read and row.session_id)
+
+    def has_unread(self, session_id: str) -> bool:
+        """Whether *session_id* has any unread row standing."""
+        return bool(session_id) and any(
+            row.session_id == session_id and not row.read for row in self._rows
+        )
+
     def is_green(self, session_id: str) -> bool:
         return self.get(green_id(session_id)) is not None
 
@@ -434,6 +525,27 @@ class NotificationCenter:
             self._changed()
         return moved
 
+    def rekey_session(self, old: str, new: str) -> int:
+        """Move every message and bell row filed under *old* to *new*: the
+        placeholder → real-row handoff, for the rows a tab posted before the
+        store discovered its session (MainWindow._apply_resolved_sessions).
+        Without it the rows keep a key nothing answers to any more — the
+        sheet's click would go nowhere and visiting the tab would read
+        nothing. Synthetic rows are left alone: the handoff takes the
+        placeholder's down and raises the session's through set_green, whose
+        ids the keys are part of. Returns how many rows moved; a rekey to
+        the same key, or from or to "", moves none."""
+        if not old or not new or old == new:
+            return 0
+        moved = 0
+        for row in self._rows:
+            if row.session_id == old and row.kind != KIND_FINISHED:
+                row.session_id = new
+                moved += 1
+        if moved:
+            self._changed()
+        return moved
+
     def mark_all_read(self) -> int:
         """The sheet's button: everything read, synthetic rows included — the
         badge goes to zero because the user said so. A synthetic row still
@@ -520,6 +632,14 @@ class NotificationCenter:
 # -- what the bell and the sheet say -------------------------------------------
 
 
+def bell_body() -> str:
+    """A bell row's body. Translated when the row is posted and persisted as
+    such — a bell rung under one UI language is shown in it after a switch,
+    the way the row's title (the session's name at the time) is a record of
+    the moment rather than a live lookup."""
+    return _("Rang the bell")
+
+
 def bell_tooltip(unread: int) -> str:
     """The header bell's tooltip: what it is when quiet, how many are waiting
     otherwise. Two plain strings rather than a plural form — po/generate.py
@@ -577,8 +697,60 @@ def sound_display_name(value: str | None) -> str:
     for an unset or default value, "None" for silence, else the chosen file's
     name. The sound's own module reads the same setting for playback; the
     two must agree on the words, so the words live here."""
-    if not value or value == "default":
+    if not value or value == SOUND_DEFAULT:
         return _("Default")
-    if value == "none":
+    if value == SOUND_NONE:
         return _("None")
     return os.path.basename(str(value))
+
+
+def sound_subtitle(value, home: str | None = None) -> str:
+    """The preferences row's line under "Sound": what the choice means.
+    "Default" is described rather than named (the file it resolves to is
+    the desktop's business, and differs per theme), silence says so, and a
+    file of the user's shows its path with the home directory as ~."""
+    if not value or value == SOUND_DEFAULT:
+        return _("Default: the desktop's message sound")
+    if value == SOUND_NONE:
+        return _("Silent")
+    path = str(value)
+    home = home if home is not None else os.path.expanduser("~")
+    if home and path.startswith(home.rstrip("/") + "/"):
+        path = "~" + path[len(home.rstrip("/")):]
+    return path
+
+
+def sound_is_silent(value) -> bool:
+    """Whether the setting asks for no sound at all — not even the beep."""
+    return value == SOUND_NONE
+
+
+def sound_candidates(theme_name: str = "") -> list[str]:
+    """Where "default" looks, in order: the desktop's theme (when it names
+    one that isn't the fallback itself), then the freedesktop theme."""
+    themes: list[str] = []
+    theme_name = (theme_name or "").strip()
+    if theme_name and theme_name != SOUND_FALLBACK_THEME and "/" not in theme_name:
+        themes.append(theme_name)
+    themes.append(SOUND_FALLBACK_THEME)
+    return [os.path.join(SOUND_THEME_ROOT, theme, SOUND_EVENT) for theme in themes]
+
+
+def sound_file(value, theme_name: str = "", exists: Callable[[str], bool] = os.path.isfile) -> str:
+    """The file to play for the notification_sound setting, resolved now
+    rather than when it was chosen: "default" is the first of the theme
+    candidates that exists on this machine today, a path is itself if it
+    still exists, and "" means there is nothing to play and the beep is the
+    fallback. Silence (SOUND_NONE) is sound_is_silent's to notice first;
+    here it resolves like an absent file.
+
+    `exists` is os.path.isfile unless a test says otherwise."""
+    if not value or value == SOUND_DEFAULT:
+        for candidate in sound_candidates(theme_name):
+            if exists(candidate):
+                return candidate
+        return ""
+    if value == SOUND_NONE:
+        return ""
+    path = str(value)
+    return path if os.path.isabs(path) and exists(path) else ""

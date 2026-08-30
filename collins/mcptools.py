@@ -137,11 +137,15 @@ TOOLS: list[dict] = [
     {
         "name": "notify_user",
         "description": (
-            "Send the user a desktop notification from this session, for when "
-            "you need them back: a question you're blocked on, or the finish "
+            "Send the user a notification from this session, for when you "
+            "need them back: a question you're blocked on, or the finish "
             "they asked to be told about. Collins titles it with the session "
             "and clicking it opens this session's tab, so the message only "
-            "has to say the thing — 'Tests pass, ready to push?'. It "
+            "has to say the thing — 'Tests pass, ready to push?'. It shows "
+            "as a card inside Collins when the user is there but in another "
+            "session, as a desktop notification when they are away, and "
+            "goes straight into their notification history when they are "
+            "looking at this very session; the reply says which. It "
             "interrupts whatever they're doing, so don't narrate progress "
             "with it, and don't repeat one the user hasn't come back from."
         ),

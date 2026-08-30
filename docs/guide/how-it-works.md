@@ -265,8 +265,10 @@ collins/
 ├── practions.py      # what a PR offers (merge, review, …) and the gh calls
 ├── statusicon.py     # the status icon: a StatusNotifierItem over D-Bus
 ├── traymodel.py      # what the icon shows (badge, menu) — toolkit-free
-├── notifycenter.py   # the notification history and the badge's number — toolkit-free
+├── notifycenter.py   # the notification history, the badge's number, the delivery table — toolkit-free
 ├── notifypanel.py    # the header bell and the history sheet it opens
+├── notifyoverlay.py  # the in-app notification card
+├── notifysound.py    # the notification sound (GStreamer, with the beep as fallback)
 ├── caffeine.py       # Caffeine Mode: inhibit sleep while agents work
 ├── titles.py         # auto-generated session titles (local + claude)
 ├── usage.py          # Claude subscription usage fetch/parse

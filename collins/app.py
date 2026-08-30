@@ -34,6 +34,7 @@ from . import (
     keymap,
     mcpserver,
     mcptools,
+    notifycenter,
     proctree,
     providers,
     remoteimages,
@@ -418,6 +419,25 @@ tabbar tab:not(:selected) label { opacity: 0.6; }
 .notification-kind-bell { color: #e5a50a; }
 .notification-kind-finished { color: #2ec27e; }
 .notification-footer { padding: 4px 4px 4px 12px; }
+
+/* the in-app notification card (notifyoverlay.NotificationCard): Adwaita's
+   .card (its background and border; .activatable adds the hover wash), with
+   the canvas's 12px radius, the shadow that lifts it off a terminal, and a
+   32px tile for the project icon. The kind marks above are shared. */
+.notification-card {
+  padding: 10px 10px 10px 12px;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px alpha(black, 0.12), 0 8px 24px alpha(black, 0.10);
+}
+.notification-card-tile {
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: 8px;
+  background-color: alpha(currentColor, 0.05);
+}
+.notification-card-title { font-weight: 600; }
+.notification-card-body { opacity: 0.85; }
+.notification-card-close { min-width: 24px; min-height: 24px; padding: 0; }
 
 /* a session with something going on -- a tab open, or running detached -- is
    drawn as an outlined card with a left guide line; what a running one adds
@@ -1515,6 +1535,11 @@ class App(Adw.Application):
         # notification_center.connect themselves; the App holds no list of
         # them.
         self.notification_center = NotificationCenter(records=self.state.get_notifications())
+        # The keys with an unread row standing, as of the last change — the
+        # desktop notifications still speaking for something (see
+        # _on_notifications_changed). Taken before the listener connects, so
+        # the first change has a baseline to differ from.
+        self._unread_sessions = self.notification_center.unread_sessions()
         self.notification_center.connect(self._on_notifications_changed)
 
         self._status_icon: statusicon.StatusIcon | None = None
@@ -1642,8 +1667,30 @@ class App(Adw.Application):
     def _on_notifications_changed(self) -> None:
         """The center moved: write the list back (the state skips the write
         when the persisted rows didn't change, which a synthetic row's coming
-        or going never does) and repaint the badge, which is idle-coalesced."""
+        or going never does), repaint the badge, which is idle-coalesced, and
+        take down the desktop notification of every session that has no
+        unread row left.
+
+        The last is _on_unread_changed's rule seen from the history's side.
+        A desktop notification speaks for the rows posted with it — a
+        message's, a bell's, a finished run's synthetic one — and it is
+        answered when nothing of that session is waiting any more: the user
+        went to the tab (which reads the rows), or said so in the sheet
+        (*Mark read*, *Mark all read*, *Remove*, *Clear*). A bell's
+        notification has no flag beside it, so without this a bell read from
+        the sheet would stand on the desktop until dismissed by hand — the
+        standing-notification badge _on_unread_changed exists to prevent.
+        A placeholder's key gets the same treatment, which nothing in the
+        store's edges covers: its synthetic row leaving (the tab visited, or
+        the handoff to the session's own row) is the moment. Withdrawing a
+        notification that was never sent is a no-op, so the set needs no
+        memory of which keys have one up.
+        """
         self.state.set_notifications(self.notification_center.to_records())
+        unread = self.notification_center.unread_sessions()
+        for key in self._unread_sessions - unread:
+            self.withdraw_notification(key)
+        self._unread_sessions = unread
         self.refresh_status_icon()
 
     def _on_session_archived(self, _store, session_id: str) -> None:
@@ -2111,10 +2158,15 @@ class App(Adw.Application):
         return deferred
 
     def _mcp_notify_user(self, found, args: dict) -> tuple[bool, str]:
+        """The reply says where the message went — a card in Collins, the
+        desktop, or straight into the history because the user is looking
+        at this very session — since the model can only know by asking
+        (see MainWindow.notify_session and notifycenter.tool_reply)."""
         window, tab = found
-        if not window.notify_session(tab, args["message"]):
+        deliveries = window.notify_session(tab, args["message"])
+        if deliveries is None:
             return False, "Collins couldn't post a notification"
-        return True, "The user was notified."
+        return True, notifycenter.tool_reply(deliveries)
 
     def _mcp_attach_pr(self, found, args: dict) -> tuple[bool, str]:
         """Put a PR on the calling session's row without a gh call: the

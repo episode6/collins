@@ -195,7 +195,11 @@ cropped to its sidebar column as `sidebar.png`), `quick-switcher`,
 `composer`, `pr-page` (a fabricated `prdetail.fetch` reply — nothing reaches
 GitHub), `editor-panel`, `attachments-panel`, `notifications` (rows staged
 straight through the app's notification center, the sheet opened from the
-bell — no real bell rings), `welcome` and `welcome-cli`
+bell — no real bell rings), `notification-card` (the same rows, two of them
+shown as in-app cards over the session through the window's card stack,
+their auto-hide clocks stopped), `preferences-notifications` (a PR shot,
+not a docs one: the Preferences dialog filtered to the Notifications
+group), `welcome` and `welcome-cli`
 (the first-launch dialog with the CLI found, and with it not found — the
 shot runs with `welcome_seen` set back to false, and the not-found one
 hides `claude` from clisetup and seeds `~/.local/bin/claude` for the

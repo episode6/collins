@@ -36,7 +36,10 @@ from . import (
     keymap,
     mcptools,
     newchat,
+    notifycenter,
+    notifyoverlay,
     notifypanel,
+    notifysound,
     openwith,
     paneldnd,
     panelhistory,
@@ -365,6 +368,12 @@ class MainWindow(Adw.ApplicationWindow):
         # New-session tabs shown as "New Thread" placeholder rows in the
         # sidebar until the store discovers their session: page -> placeholder id.
         self._placeholder_pages: dict[Adw.TabPage, str] = {}
+        # The keys this window has sent a desktop notification under (see
+        # _send_desktop_notification) — read by the placeholder → real-row
+        # handoff, which is the one place a notification has to be re-sent
+        # under a new name (_rekey_notifications). Never pruned on withdraw:
+        # a stale key costs nothing but a set entry.
+        self._desktop_keys: set[str] = set()
         self._placeholder_seq = 0
         # Tabs renamed locally before their session was bound: never auto-sync
         # their titles from the store.
@@ -681,6 +690,19 @@ class MainWindow(Adw.ApplicationWindow):
         # root window by this attribute name.
         self.lightbox_overlay = Gtk.Overlay(child=self.split)
         self.set_content(self.lightbox_overlay)
+        # The in-app notification cards (notifyoverlay): a stack at the
+        # top-right of the content, in the same overlay — added before any
+        # lightbox is, so a lightbox floats over the cards. The header bar
+        # is inside this overlay too (it belongs to the toolbar view under
+        # the Paned), which is why the stack measures it to sit underneath
+        # rather than assuming a height.
+        self.notify_cards = notifyoverlay.NotificationCards(
+            self._content_header,
+            on_open=self._open_card,
+            project_icon=self._notification_texture,
+            fallback_icon_name=_app_icon_name(self),
+        )
+        self.notify_cards.attach(self.lightbox_overlay)
 
         # Toggle button reflects (and controls) sidebar visibility.
         self._sidebar_width_save_source: int | None = None
@@ -2557,24 +2579,42 @@ class MainWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _on_bell(self, tab: TerminalTab) -> None:
-        """Ring for a terminal's BEL, and flash where it came from.
+        """Ring for a terminal's BEL — how depends on where the user is.
 
-        The sound is the app's to make rather than VTE's (whose own audible
+        The bell goes through the delivery table (notifycenter.delivery), by
+        the user's focus relative to the ringing tab (_focus_state). From the
+        *selected* tab of the active window it is what it always was: the
+        display's beep and the flash, and no history row — a bell you were
+        there for is not history. So is every bell while the *Bells from
+        other sessions* setting is off. From any other tab the bell is a
+        notification: a card and the sound while some Collins window is
+        active (the beep never said which of six sessions rang), a desktop
+        notification titled with the session when none is, and a history
+        row either way, coalesced onto the session's unread bell row — five
+        bells from one shell are "Rang the bell ×5". The flash happens in
+        every branch.
+
+        The ringing is the app's to do rather than VTE's (whose own audible
         bell is switched off in TerminalTab), because VTE refuses to ring for
         a widget that was never realized — and a tab that has never been
         selected is exactly the one whose bell there is no other way to hear.
-        Every tab in a window today has been selected at least once, so this
-        rings the same as before; what it stops doing is going quiet for tabs
-        the user never opened.
-
-        Still the display's beep, not a sound of ours: it reaches the user
-        through the compositor, so the desktop's own alert-sound setting has
-        the last word on whether anything is heard.
+        The beep is still the display's, not a sound of ours: it reaches the
+        user through the compositor, so the desktop's own alert-sound setting
+        has the last word on whether anything is heard. Panel shells' bells
+        ride the same path (they re-emit through the dock), so a `make`
+        finishing in a session's panel rings that session's row: the row
+        names the session, not the terminal.
         """
-        display = self.get_display()
-        if display is not None:
-            display.beep()
-        self._flash_session(self.tab_view.get_page(tab))
+        page = self.tab_view.get_page(tab)
+        focus = self._focus_state(page) if page is not None else notifycenter.FOCUS_SELECTED
+        if focus != notifycenter.FOCUS_SELECTED and not self.state.get_setting("bell_notifications"):
+            focus = notifycenter.FOCUS_SELECTED  # the setting keeps every bell a beep
+        self._deliver(
+            page,
+            notifycenter.KIND_BELL,
+            notifycenter.bell_body(),
+            notifycenter.delivery(notifycenter.KIND_BELL, focus),
+        )
 
     def _flash_session(self, page: Adw.TabPage | None) -> None:
         """Flash the header bar, and the ringing session's tab header and
@@ -2817,8 +2857,13 @@ class MainWindow(Adw.ApplicationWindow):
             # placeholder's key, and the set_unread below raises the one
             # under the session's (see App._sync_green) — two synchronous
             # edges no idle-coalesced badge can see between.
-            unread = self.sidebar.placeholder_unread(self._placeholder_pages.get(page, ""))
+            placeholder_id = self._placeholder_pages.get(page, "")
+            unread = self.sidebar.placeholder_unread(placeholder_id)
             self._remove_placeholder(page)  # the real sidebar row exists now
+            # The message and bell rows the tab posted under the placeholder
+            # id move to the session's, so a click on them and a visit to
+            # the tab still find each other (see _rekey_notifications).
+            self._rekey_notifications(placeholder_id, session_id, page, flagged=unread)
             if page.get_title() == title:  # keep any manual rename/emoji
                 page.set_title(self._tab_title(session))
             else:
@@ -2835,6 +2880,64 @@ class MainWindow(Adw.ApplicationWindow):
             if unread:
                 self.store.set_unread(session_id, True)
         self._update_active_row()  # hand the highlight from placeholder to real row
+
+    def _rekey_notifications(
+        self, placeholder_id: str, session_id: str, page: Adw.TabPage, *, flagged: bool = False
+    ) -> None:
+        """The placeholder → real-row handoff, for the notification history
+        and the desktop: every message and bell row *page*'s tab posted
+        under *placeholder_id* is re-filed under *session_id*
+        (NotificationCenter.rekey_session), and a desktop notification sent
+        under the placeholder's key is taken down and, while the rows it
+        spoke for are still unread, sent again under the session's.
+
+        Left keyed by the placeholder, the rows would answer to nothing
+        once the store's rescan lands: visiting the tab reads rows by the
+        session id (_clear_unread), the sheet's click looks the session up
+        by it (_open_notification), and the desktop notification is
+        withdrawn by it (App._on_notifications_changed) — so a message from
+        a brand-new tab would stay unread, its row a dead end and its
+        banner standing, until marked read by hand. The card needs no
+        rekey: it holds the page (see notifyoverlay.NotificationCard), and
+        its row is the very object the center re-files.
+
+        The re-send is what makes the banner's click land: sent under the
+        placeholder, its action carried an empty session id (the tab had
+        none), and the desktop shows a replacement under a new id as a new
+        banner — a second one for the same message, but with a tab behind
+        it, which for a user still away from Collins beats a banner whose
+        click goes nowhere. It is only re-sent when one was sent in the
+        first place (_desktop_keys) and the rows are still unread; one the
+        user already read from the sheet was withdrawn then and stays down.
+        A banner that spoke for the placeholder's *flag* rather than a row
+        (*Announce finished runs*, see _announce_finished) is re-sent while
+        the flag is still up (*flagged*: the handoff carries it to the
+        session's row next) and the setting still on.
+        """
+        if not placeholder_id or not session_id:
+            return
+        center = self.notify_center
+        center.rekey_session(placeholder_id, session_id)
+        if placeholder_id not in self._desktop_keys:
+            return
+        self._desktop_keys.discard(placeholder_id)
+        app = self.get_application()
+        if app is not None:
+            app.withdraw_notification(placeholder_id)
+        latest = next(
+            (
+                row
+                for row in center.rows()
+                if row.session_id == session_id and not row.read and row.kind != notifycenter.KIND_FINISHED
+            ),
+            None,
+        )
+        if latest is not None:
+            self._send_desktop_notification(
+                page, session_id, latest.title or page.get_title(), notifycenter.row_body(latest)
+            )
+        elif flagged and self.state.get_setting("announce_finished_runs"):
+            self._send_desktop_notification(page, session_id, page.get_title(), _("Finished a run"))
 
     def _refresh_tab_titles(self) -> None:
         """Keep tab titles in sync with the store: auto-generated titles arrive
@@ -3908,8 +4011,10 @@ class MainWindow(Adw.ApplicationWindow):
         """
         if self.sidebar.has_placeholder(session_id):
             self._set_placeholder_unread(session_id, True)
+            self._announce_finished(self._placeholder_page(session_id))
             return
         self._refresh_prs_after_run(session_id)
+        flagged = False
         for row_id in self.store.rows_representing(session_id):
             # A row whose conversation still runs under another of its ids —
             # a /bg fork mid-turn, say — hasn't finished; its own edge comes.
@@ -3928,6 +4033,33 @@ class MainWindow(Adw.ApplicationWindow):
             if self._is_detached(row_id) and self._page_for(row_id) is None:
                 continue
             self.store.set_unread(row_id, True)
+            flagged = True
+        if flagged:
+            self._announce_finished(self._page_for(session_id))
+
+    def _announce_finished(self, page: Adw.TabPage | None) -> None:
+        """The *Announce finished runs* setting: a finish that just flagged
+        *page*'s row goes out the way a message would — a card and the
+        sound while the user is elsewhere in Collins, a desktop notification
+        while no window is active, nothing at all for the selected tab (see
+        notifycenter.delivery with announce_finished_runs). Off, which is the
+        default, this is nothing: the row's flag and the synthetic row in the
+        history are the whole of a finish, and the docs promise nothing is
+        guessed from a quiet terminal.
+
+        Announced from the finish edge rather than the green flag's, which
+        the placeholder → real-row handoff re-raises under the session's key
+        for a finish already announced under the placeholder's. The table's
+        "row" is the synthetic row the flag just put in the history (or is
+        about to, once the barber pole comes off), so no row is posted here;
+        the flag is what got us here, so none is set.
+        """
+        if page is None or not self.state.get_setting("announce_finished_runs"):
+            return
+        deliveries = notifycenter.delivery(
+            notifycenter.KIND_FINISHED, self._focus_state(page), announce_finished_runs=True
+        )
+        self._deliver(page, notifycenter.KIND_FINISHED, _("Finished a run"), deliveries)
 
     def _refresh_prs_after_run(self, session_id: str) -> None:
         """Hand the finish edge to the tab that just went quiet, so its pull
@@ -3984,7 +4116,17 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _clear_unread(self, page: Adw.TabPage) -> None:
         """The user is at this tab (selected it, or typed into it): whatever
-        finished in it has been seen, on every row standing for it."""
+        finished in it has been seen, on every row standing for it — and so
+        has everything the session said. Its rows in the notification
+        history are marked read (notifycenter.mark_session_read: visiting
+        the session is reading) and any card still up for it, in any
+        window, comes down. The desktop notification it may have left
+        standing goes with the rows: the app withdraws a session's the
+        moment its last unread row leaves (App._on_notifications_changed),
+        this path's included — and one whose rows were read from the sheet
+        earlier came down then, so nothing here has to remember. This runs
+        on every keystroke into the terminal; what it does is a flag check
+        and a walk over at most three cards per window."""
         placeholder_id = self._placeholder_pages.get(page)
         if placeholder_id is not None:
             self._set_placeholder_unread(placeholder_id, False)
@@ -3992,6 +4134,12 @@ class MainWindow(Adw.ApplicationWindow):
         if session_id:
             for row_id in self.store.rows_representing(session_id):
                 self.store.set_unread(row_id, False)
+        for key in (placeholder_id, session_id):
+            if not key:
+                continue
+            self.notify_center.mark_session_read(key)
+            for window in self._main_windows():
+                window.notify_cards.dismiss_session(key)
 
     def _sync_process_poll(self) -> None:
         """Run the process-tree poll only while some session has an open tab.
@@ -4719,69 +4867,221 @@ class MainWindow(Adw.ApplicationWindow):
 
     # -- session notifications -----------------------------------------------
 
-    def notify_session(self, tab: TerminalTab, message: str) -> bool:
-        """Raise a desktop notification for *tab*'s session, and flash the tab.
+    def notify_session(self, tab: TerminalTab, message: str) -> frozenset[str] | None:
+        """Tell the user *tab*'s session has something to say — the
+        `notify_user` tool's surface — and return what was done, in the
+        delivery table's names (notifycenter.DELIVER_*), so the tool can
+        tell the agent where the message went. None when the tab isn't in
+        this window's view, which the tool reports rather than claiming a
+        notification the user never got.
 
-        The `notify_user` tool's surface: the agent asked for the user, so the
-        notification always goes out — no quiet period to guess at, no setting
-        to second-guess the request, and no suppression when the tab happens
-        to be selected (a tool that silently does nothing would lie to the
-        model, and the agent can only know it is being watched by asking).
+        Focus-aware, but never silent: the agent asked for the user, so the
+        message always goes *somewhere* — no quiet period to guess at, no
+        setting to second-guess the request. Where is the table's answer
+        (notifycenter.delivery), by where the user is relative to the tab
+        (_focus_state), and _deliver does the rest:
 
-        Titled with the session, so several notified sessions read apart, and
-        clicking it lands on that session's tab through app.focus-session —
-        the same action the sidebar's cross-window handoff uses. The
-        notification id is the session id, so a session that notifies twice
-        replaces its own notification instead of stacking a queue nobody
-        reads — and so the app can take it down again when the unread flag it
-        posted alongside comes off (see App._on_unread_changed): a banner
-        the user has already answered in-app is one a desktop that counts
-        standing notifications would otherwise badge us for forever. The
-        exception is a tab whose session id hasn't resolved yet, below: keyed
-        by a title that can change under it, it is the desktop's to dismiss.
-        The bell-flash rides along for the user who is looking: it
-        marks the ringing tab and row in-app, where a desktop notification
-        says nothing. It wears the project's icon where the project ships one
-        (see _notification_icon), so a glance at the banner says which project
-        is asking before the title is read.
+        - In Collins, looking at another tab: a card in the active window
+          (see notifyoverlay) with the notification sound, a flag on the
+          session's row and the flash. With the in-app cards switched off,
+          the desktop notification below instead — as before there were
+          cards.
+        - No Collins window active: a desktop notification titled with the
+          session, so several notified sessions read apart. Clicking it
+          lands on the tab through app.focus-session, whichever window has
+          it. Its id is the session id, so a session that notifies twice
+          replaces its own notification instead of stacking a queue nobody
+          reads — and so the app can take it down again when the unread
+          flag posted alongside comes off (App._on_unread_changed): a banner
+          the user has answered in-app is one a desktop that counts standing
+          notifications would otherwise badge us for forever. It wears the
+          project's icon where the project ships one (_notification_icon),
+          so a glance says which project is asking before the title is read.
+        - Looking at this very tab: the flash, and a history row already
+          marked read. Nothing banners the user about the terminal in front
+          of them, and nothing is lost — the tool's reply says the message
+          is in the history.
 
-        The row is also flagged unread on the way through (_flag_unread). The
-        flash says "this session" for the second it lasts; the flag says it
-        until someone looks, which is the point of a notification the user was
-        away for. A tab still waiting on its session id gets the flag on its
-        placeholder row, and that hands over to the real row when the store's
-        scan lands (see _apply_resolved_sessions).
+        Every case lands a row in the notification history, so the sheet
+        keeps what a banner said after the banner is gone. The flash says
+        "this session" for the second it lasts; the flag says it until
+        someone looks, which is the point of a notification the user was
+        away for — and visiting the tab reads the rows too (_clear_unread).
 
-        A tab whose session the store hasn't discovered yet still notifies —
-        refusing because Collins is mid-scan would defeat the point — with
-        its own title as the notification id and an empty focus target,
-        which lands on a Collins window rather than this session's tab. The
-        window is the first seconds of a brand-new tab, and a notification
-        the user can't click beats no notification at all.
-
-        False when the window has no application to send through (a window
-        under test) — the tool reports that rather than claiming a
-        notification the user never got. The in-app cues are raised either
-        way: they are what a user in front of the app actually sees.
+        A tab still waiting on its session id notifies under the placeholder
+        id the sidebar knows it by: refusing because Collins is mid-scan
+        would defeat the point. Its flag goes on the placeholder row and
+        hands over to the real row when the store's scan lands
+        (_apply_resolved_sessions), and its history rows are re-filed under
+        the session id in the same breath (_rekey_notifications); its card
+        holds the page besides, so a click finds the tab even before that
+        (see notifyoverlay.NotificationCard); its desktop notification's
+        click lands on a Collins window rather than the tab, which for the
+        first seconds of a brand-new tab beats no notification at all — and
+        the handoff sends it again with the tab behind it if it is still
+        unread then.
         """
         page = self.tab_view.get_page(tab)
-        self._flash_session(page)
-        if page is not None:
-            self._flag_unread(page)
+        if page is None:
+            self._flash_session(None)
+            return None
+        deliveries = notifycenter.delivery(notifycenter.KIND_MESSAGE, self._focus_state(page))
+        return self._deliver(page, notifycenter.KIND_MESSAGE, message, deliveries)
+
+    def _focus_state(self, page: Adw.TabPage) -> str:
+        """Where the user is relative to *page* — notifycenter.focus_state's
+        answer: `selected` when this window is the active one and the page
+        is its selected tab, `elsewhere` when some Collins window is active
+        but that isn't so, `unfocused` when none is. "Active" is
+        Gtk.Window.is_active on every main window the app has — hidden
+        windows included, which are never active, so a tab in one is
+        `elsewhere` while another window has the focus and `unfocused`
+        otherwise."""
+        any_active = any(window.is_active() for window in self._main_windows())
+        return notifycenter.focus_state(
+            any_active, self.is_active(), self.tab_view.get_selected_page() is page
+        )
+
+    def _main_windows(self) -> list[MainWindow]:
+        """Every main window the app has, this one first — or just this
+        one, for a window with no App behind it (an e2e harness)."""
         app = self.get_application()
-        if app is None or page is None:
-            return False
+        windows = [w for w in (app.get_windows() if app is not None else []) if isinstance(w, MainWindow)]
+        if self in windows:
+            windows.remove(self)
+        return [self, *windows]
+
+    def _deliver(
+        self, page: Adw.TabPage | None, kind: str, body: str, deliveries: frozenset[str]
+    ) -> frozenset[str]:
+        """Do what the delivery table asked for a notification of *kind*
+        from *page*'s tab, and return what was done — the set itself, after
+        the *In-app notifications* switch has had its say (off, a card and
+        its sound become a desktop notification: notifycenter.without_cards).
+
+        One act per name. The flash and the beep need no page (a bell from
+        a tab this window doesn't hold flashes the header and nothing else).
+        The row goes into the center first, so the card that follows holds
+        the row the center will find when it is clicked; a `finished` row is
+        the synthetic one set_green already owns, so none is posted for it —
+        its card shows that row, or a stand-in when the pole hasn't come off
+        yet and the row isn't there to show. The card goes to the *active*
+        window, whichever window the tab lives in. The sound plays only
+        beside a card (the desktop sounds its own notifications), debounced
+        and single-flight in notifysound.
+        """
+        if not self.state.get_setting("inapp_notifications"):
+            deliveries = notifycenter.without_cards(deliveries)
+        deliveries = frozenset(deliveries)
+        if notifycenter.DELIVER_FLASH in deliveries:
+            self._flash_session(page)
+        if notifycenter.DELIVER_BEEP in deliveries:
+            display = self.get_display()
+            if display is not None:
+                display.beep()
+        if page is None:
+            return deliveries
+        if notifycenter.DELIVER_FLAG in deliveries:
+            self._flag_unread(page)
+        key, title, project = self._notification_identity(page)
+        notification: Notification | None = None
+        if kind == notifycenter.KIND_FINISHED:
+            notification = self.notify_center.get(notifycenter.green_id(key)) or Notification(
+                id=notifycenter.green_id(key),
+                session_id=key,
+                title=title,
+                project=project,
+                kind=kind,
+                body=body,
+                when=time.time(),
+            )
+        elif deliveries & {notifycenter.DELIVER_ROW, notifycenter.DELIVER_ROW_READ}:
+            notification = self.notify_center.make(kind, key, title, project, body)
+            notification.read = notifycenter.DELIVER_ROW_READ in deliveries
+            notification = self.notify_center.post(notification)
+        if notifycenter.DELIVER_CARD in deliveries and notification is not None:
+            self._card_window().notify_cards.show(notification, page=page)
+        if notifycenter.DELIVER_SOUND in deliveries:
+            notifysound.play(self.state.get_setting(notifypanel.SOUND_SETTING))
+        if notifycenter.DELIVER_DESKTOP in deliveries:
+            self._send_desktop_notification(page, key, title, body)
+        return deliveries
+
+    def _notification_identity(self, page: Adw.TabPage) -> tuple[str, str, str]:
+        """What a notification from *page*'s tab is filed under and shown
+        as: the key (the session id, else the placeholder id the sidebar
+        knows the tab by, else ""), the title (the row's name where the
+        store has a row, the page's otherwise) and the project's name."""
         session_id = self._session_id_of(page) or ""
-        notification = Gio.Notification.new(page.get_title())
-        notification.set_body(message)
-        notification.set_icon(self._notification_icon(tab, session_id))
+        placeholder_id = self._placeholder_pages.get(page) or ""
+        item = self.store.get_item(session_id) if session_id else None
+        if item is not None:
+            return session_id, item.display_name or page.get_title(), item.session.project_name
+        if placeholder_id:
+            return placeholder_id, page.get_title(), self.sidebar.placeholder_project(placeholder_id)
+        tab = page.get_child()
+        cwd = tab.current_agent_cwd() if isinstance(tab, TerminalTab) else None
+        return session_id, page.get_title(), project_name_for_cwd(cwd) if cwd else ""
+
+    def _card_window(self) -> MainWindow:
+        """Where a card shows: the active main window, whichever window the
+        session lives in — the card is for the user, who is there. This
+        window when none is active (a card is only ever asked for while one
+        is, but the check is cheap and the answer never wrong)."""
+        return next((w for w in self._main_windows() if w.is_active()), self)
+
+    def _send_desktop_notification(self, page: Adw.TabPage, key: str, title: str, body: str) -> None:
+        """The desktop notification of old (see notify_session for what its
+        id, action and icon are for). Nothing without an application to
+        send through — a window under test."""
+        app = self.get_application()
+        if app is None:
+            return
+        session_id = self._session_id_of(page) or ""
+        notification = Gio.Notification.new(title)
+        notification.set_body(body)
+        notification.set_icon(self._notification_icon(page.get_child(), session_id))
         notification.set_default_action_and_target(
             "app.focus-session", GLib.Variant("s", session_id)
         )
-        app.send_notification(session_id or page.get_title(), notification)
-        return True
+        self._desktop_keys.add(key or title)
+        app.send_notification(key or title, notification)
 
-    def _notification_icon(self, tab: TerminalTab, session_id: str) -> Gio.Icon:
+    def _open_card(self, card: notifyoverlay.NotificationCard) -> None:
+        """A card was clicked: go to its session, and mark the row read.
+
+        The card's page comes first — a tab that spoke under a placeholder
+        id may have resolved since, and while the row is re-filed under the
+        session id then (_rekey_notifications), the page is the tab itself
+        and needs no lookup. The window holding the page is presented and
+        the tab selected, which clears the flag and reads the rows
+        (_clear_unread). A page no window holds any more falls back to the
+        row's key, the sheet's way (_open_notification). A finished run's
+        row is the green flag's to remove: it is marked read only when the
+        click reached the tab, the sheet's rule
+        (NotificationSheet._on_row_activated).
+        """
+        notification = card.notification
+        card.slide_out()
+        opened = False
+        if card.page is not None:
+            owner = next((w for w in self._main_windows() if w._holds_page(card.page)), None)
+            if owner is not None:
+                if owner is not self:
+                    owner.present()
+                owner.tab_view.set_selected_page(card.page)
+                owner._clear_unread(card.page)  # already-selected tabs emit no switch
+                opened = True
+        if not opened:
+            opened = self._open_notification(notification)
+        if notification.kind != notifycenter.KIND_FINISHED or opened:
+            self.notify_center.mark_read(notification.id)
+
+    def _holds_page(self, page: Adw.TabPage) -> bool:
+        """Whether *page* is one of this window's tabs right now."""
+        return any(self.tab_view.get_nth_page(i) is page for i in range(self.tab_view.get_n_pages()))
+
+    def _notification_icon(self, tab: Gtk.Widget, session_id: str) -> Gio.Icon:
         """The icon a session's notification wears: the project's own
         project-icon.svg where it ships one, else the app icon.
 
@@ -4806,7 +5106,10 @@ class MainWindow(Adw.ApplicationWindow):
         two icons that instance wears.
         """
         session = self.store.get_session(session_id) if session_id else None
-        cwd = session.cwd if session is not None else tab.current_agent_cwd()
+        if session is not None:
+            cwd = session.cwd
+        else:
+            cwd = tab.current_agent_cwd() if isinstance(tab, TerminalTab) else None
         data = project_icon_data(worktree_project_root(cwd) or cwd) if cwd else None
         if data is not None:
             return Gio.BytesIcon.new(GLib.Bytes.new(data))
@@ -4881,9 +5184,7 @@ class MainWindow(Adw.ApplicationWindow):
         """
         session_id = notification.session_id
         app = self.get_application()
-        windows = [w for w in (app.get_windows() if app is not None else []) if isinstance(w, MainWindow)]
-        if self not in windows:
-            windows.insert(0, self)  # a window with no App behind it (an e2e harness)
+        windows = self._main_windows()
         if session_id:
             owner = next((w for w in windows if w._placeholder_page(session_id) is not None), None)
             if owner is not None:
@@ -4898,23 +5199,33 @@ class MainWindow(Adw.ApplicationWindow):
         app.activate_action("focus-session", GLib.Variant("s", session_id))
         return landed
 
-    def _notification_texture(self, notification: Notification) -> Gdk.Texture | None:
-        """The project icon a row wears: the same project-icon.svg the
-        sidebar's group header draws, rasterized at the row's 16px, found as
-        the desktop notification finds its own (see _notification_icon) —
-        the session's cwd mapped back to the repository — minus that path's
-        brand-new-tab fallback: a bare Notification carries no tab to ask
-        where it is running, so a row for a session the store hasn't
-        discovered yet wears the generic icon until it has. None — the
-        generic app icon — for that row, for one whose session the store no
+    def _notification_texture(self, notification: Notification, size: int = 16) -> Gdk.Texture | None:
+        """The project icon a row (or a card's tile) wears: the same
+        project-icon.svg the sidebar's group header draws, rasterized at
+        *size* — the sheet row's 16px, the card tile's 20 — found as the
+        desktop notification finds its own (see _notification_icon): the
+        session's cwd mapped back to the repository, or, for a tab still on
+        its placeholder id, the directory the sidebar filed the placeholder
+        under. What it lacks against that path is the live tab's own answer
+        — a bare Notification carries no tab to ask where it is running.
+        None — the generic app icon — for a row whose session the store no
         longer lists, whose project ships no icon, or whose bytes the loader
         won't take."""
-        session = self.store.get_session(notification.session_id) if notification.session_id else None
+        key = notification.session_id
+        session = self.store.get_session(key) if key else None
         cwd = session.cwd if session is not None else ""
+        if not cwd and key:
+            for window in self._main_windows():
+                # A window still being built (its own sheet's first refresh,
+                # with rows persisted from the last run) has no sidebar yet.
+                sidebar = getattr(window, "sidebar", None)
+                if sidebar is not None and sidebar.has_placeholder(key):
+                    cwd = sidebar.placeholder_cwd(key)
+                    break
         if not cwd:
             return None
         data = project_icon_data(worktree_project_root(cwd) or cwd)
-        return svg_texture(data, 16)
+        return svg_texture(data, size)
 
     # -- what the status icon shows ------------------------------------------
 
@@ -6227,6 +6538,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.refresh_folder_path()
         self.sidebar.refresh_usage_panel()
         self.sidebar.refresh_project_icon_size()
+        # The sheet's footer names the sound; the picker may have moved it.
+        self.notify_sheet.schedule_refresh()
         self._bg_status.set_polling(bool(self.state.get_setting("background_status_poll")))
         self.store.apply_pr_titles()
         self.store.apply_cli_titles()

@@ -340,14 +340,35 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 
 ## Knowing what's happening
 
-- **Desktop notifications the session raises itself** — the agent calls
-  Collins' `notify_user` tool when it wants you back (see [Tools a session
-  can call](#tools-a-session-can-call)), and the notification is titled with
-  the session, so clicking it jumps straight to that tab. It wears the
-  project's own `project-icon.svg` where the project ships one, and it flags
-  the session's sidebar row too, so a popup you miss is still waiting in the
-  list. Nothing is guessed from a quiet terminal: a notification means the
-  agent asked for you.
+- **Notifications the session raises itself** — the agent calls Collins'
+  `notify_user` tool when it wants you back (see [Tools a session can
+  call](#tools-a-session-can-call)), and where the notification lands
+  depends on where you are. In Collins but in another session, a **card
+  slides in** at the top-right of the window, under the header bar: the
+  project's icon, the session's name, two lines of the message, and the
+  **notification sound** (the desktop's own message sound by default —
+  Preferences → *Notifications* picks another file, or none). Click
+  anywhere on it to go there; the × dismisses the card and leaves the row
+  waiting in the history. Away from Collins, it is a **desktop
+  notification** titled with the session, so clicking it jumps straight to
+  that tab. Looking at that very session already, nothing pops up at all —
+  the message goes straight into the history, and the tool tells the agent
+  so. The card and the desktop notification both flag the session's sidebar
+  row until you visit it, and both wear the project's own `project-icon.svg`
+  where the project ships one. Nothing is
+  guessed from a quiet terminal: a notification means the agent asked for
+  you — unless you turn on *Announce finished runs*, which notifies on
+  every finish too.
+- **Bells from other sessions** ring the same way: a terminal bell (`\a`,
+  from the agent or from a `make` in a session's panel shell) in a session
+  you aren't looking at is a card and the sound in Collins, a desktop
+  notification saying *Rang the bell* when Collins isn't focused, and one
+  coalesced row in the history however many times it rings. The selected
+  session's bell stays the desktop's beep — a bell you were there for is
+  not history — and *Bells from other sessions* in Preferences turns the
+  rest back into beeps.
+
+![A notification card over a session](/img/notification-card.png)
 - **The bell in the header** wears the unread count — the same number the
   status icon and the dock badge show — and opens the **notification
   history**: a sheet that slides in over the session from the right edge
@@ -388,7 +409,9 @@ watched — and reached — without the window:
 - The icon **wears an unread badge**: it counts unread notifications — the
   same number as the bell in the header bar. Every session that finished a
   run nobody has looked at yet is one (the sidebar's green pulse, counted),
-  and so is every message or bell in the history nobody has gone to. A
+  and so is every message or bell in the history nobody has gone to — so a
+  session that called for you from another tab counts twice until you visit
+  it, once for the message and once for the flag it put on the row. A
   flagged session that goes back to work drops out of the count while the
   run lasts (it isn't waiting on you) and comes back the moment the turn
   ends. Sessions that are merely *working* never light the badge, but the
@@ -415,9 +438,15 @@ Every session Collins starts is offered a small MCP server of Collins' own —
 `collins` in the session's `/mcp` list — so the agent can drive the window it
 is running in:
 
-- **`notify_user(message)`** — a desktop notification titled with the
-  session; clicking it raises the tab, and the sidebar row stays flagged so
-  a notification you missed is still waiting when you get back.
+- **`notify_user(message)`** — a notification titled with the session:
+  a card inside the window while you're in Collins looking at another
+  session, a desktop notification while you're away, and straight into the
+  notification history when you're looking at that session already —
+  the reply tells the agent which of the three happened ("The user was
+  notified in Collins.", "…on their desktop.", or "The user is looking at
+  this session; the message is in their notification history."). Clicking
+  either raises the tab, and the sidebar row stays flagged so a
+  notification you missed is still waiting when you get back.
 - **`set_session_title(title)`** — the session names itself, in the tab and
   the sidebar, and renames itself again when the work pivots.
 - **`open_in_editor(path, line?)`** — put a file on your screen in the

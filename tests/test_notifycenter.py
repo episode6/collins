@@ -216,6 +216,51 @@ def test_placeholder_to_real_row_handoff_leaves_the_count_steady():
     assert calls == [1, 0, 1]  # the dip lives between two synchronous calls
 
 
+def test_rekey_session_moves_the_placeholders_rows_to_the_session():
+    # A tab spoke twice under its placeholder id before the store discovered
+    # its session; the handoff moves both rows so a click and a visit find
+    # them, and the synthetic row is left to set_green.
+    c, calls = center()
+    msg = message(c, "placeholder-1")
+    rung = bell(c, "placeholder-1")
+    other = message(c, "s2")
+    c.set_green("placeholder-1", True)
+    assert c.rekey_session("placeholder-1", "sess-1") == 2
+    assert msg.session_id == "sess-1" and rung.session_id == "sess-1"
+    assert other.session_id == "s2"
+    assert c.green_sessions() == ["placeholder-1"]
+    assert calls[-1] == 4  # announced once, the count unmoved
+    assert c.mark_session_read("sess-1") == 2
+    assert c.unread_sessions() == {"s2", "placeholder-1"}
+
+
+def test_rekey_session_moves_nothing_for_no_op_keys():
+    c, calls = center()
+    message(c, "placeholder-1")
+    announced = len(calls)
+    assert c.rekey_session("placeholder-1", "placeholder-1") == 0
+    assert c.rekey_session("", "sess-1") == 0
+    assert c.rekey_session("placeholder-1", "") == 0
+    assert c.rekey_session("nobody", "sess-1") == 0
+    assert len(calls) == announced
+
+
+def test_unread_sessions_and_has_unread_follow_the_unread_rows():
+    c, _ = center()
+    msg = message(c, "s1")
+    bell(c, "s2")
+    c.set_green("s3", True)
+    c.post(c.make(KIND_MESSAGE, "", "Untitled", "", "no session"))
+    assert c.unread_sessions() == {"s1", "s2", "s3"}
+    assert c.has_unread("s1") and c.has_unread("s3") and not c.has_unread("")
+    c.mark_read(msg.id)
+    assert c.unread_sessions() == {"s2", "s3"}
+    assert not c.has_unread("s1")
+    c.set_green("s3", False)
+    c.mark_all_read()
+    assert c.unread_sessions() == frozenset()
+
+
 def test_green_sessions_lists_the_keys_standing():
     c, _ = center()
     message(c, "s1")
@@ -516,3 +561,118 @@ def test_split_rows_keeps_each_half_in_order():
 )
 def test_sound_display_name(value, name):
     assert notifycenter.sound_display_name(value) == name
+
+
+# -- where the user is, and what the switches do ---------------------------------
+
+
+@pytest.mark.parametrize(
+    ("any_active", "tab_window_active", "tab_selected", "expected"),
+    [
+        (True, True, True, FOCUS_SELECTED),
+        (True, True, False, FOCUS_ELSEWHERE),  # another tab in the active window
+        (True, False, True, FOCUS_ELSEWHERE),  # the selected tab of a window that isn't active
+        (True, False, False, FOCUS_ELSEWHERE),
+        (False, False, True, FOCUS_UNFOCUSED),  # nothing on screen is Collins
+        (False, False, False, FOCUS_UNFOCUSED),
+    ],
+)
+def test_focus_state(any_active, tab_window_active, tab_selected, expected):
+    assert notifycenter.focus_state(any_active, tab_window_active, tab_selected) == expected
+
+
+def test_without_cards_turns_the_card_and_its_sound_into_a_desktop_notification():
+    elsewhere = delivery(KIND_MESSAGE, FOCUS_ELSEWHERE)
+    swapped = notifycenter.without_cards(elsewhere)
+    assert DELIVER_CARD not in swapped and DELIVER_SOUND not in swapped
+    assert DELIVER_DESKTOP in swapped
+    assert swapped - {DELIVER_DESKTOP} == elsewhere - {DELIVER_CARD, DELIVER_SOUND}
+
+
+def test_without_cards_leaves_a_delivery_with_no_card_alone():
+    for kind in (KIND_MESSAGE, KIND_BELL):
+        for focus in (FOCUS_SELECTED, FOCUS_UNFOCUSED):
+            assert notifycenter.without_cards(delivery(kind, focus)) == delivery(kind, focus)
+
+
+def test_tool_reply_names_where_the_message_went():
+    assert notifycenter.tool_reply(delivery(KIND_MESSAGE, FOCUS_ELSEWHERE)) == notifycenter.REPLY_IN_APP
+    assert notifycenter.tool_reply(delivery(KIND_MESSAGE, FOCUS_UNFOCUSED)) == notifycenter.REPLY_DESKTOP
+    assert notifycenter.tool_reply(delivery(KIND_MESSAGE, FOCUS_SELECTED)) == notifycenter.REPLY_SELECTED
+    # With cards off, "elsewhere" is a desktop notification and says so.
+    swapped = notifycenter.without_cards(delivery(KIND_MESSAGE, FOCUS_ELSEWHERE))
+    assert notifycenter.tool_reply(swapped) == notifycenter.REPLY_DESKTOP
+
+
+def test_tool_replies_are_the_three_the_spec_promises():
+    assert notifycenter.REPLY_IN_APP == "The user was notified in Collins."
+    assert notifycenter.REPLY_DESKTOP == "The user was notified on their desktop."
+    assert notifycenter.REPLY_SELECTED == (
+        "The user is looking at this session; the message is in their notification history."
+    )
+
+
+def test_bell_body_is_the_bell_rows_text():
+    assert notifycenter.bell_body() == "Rang the bell"
+
+
+# -- the sound ----------------------------------------------------------------
+
+
+def test_sound_display_names():
+    assert notifycenter.sound_display_name(None) == "Default"
+    assert notifycenter.sound_display_name("") == "Default"
+    assert notifycenter.sound_display_name(notifycenter.SOUND_DEFAULT) == "Default"
+    assert notifycenter.sound_display_name(notifycenter.SOUND_NONE) == "None"
+    assert notifycenter.sound_display_name("/home/me/sounds/chime.ogg") == "chime.ogg"
+
+
+def test_sound_subtitle_describes_the_choice():
+    assert notifycenter.sound_subtitle("default") == "Default: the desktop's message sound"
+    assert notifycenter.sound_subtitle("") == "Default: the desktop's message sound"
+    assert notifycenter.sound_subtitle("none") == "Silent"
+    assert notifycenter.sound_subtitle("/home/me/chime.ogg", home="/home/me") == "~/chime.ogg"
+    assert notifycenter.sound_subtitle("/usr/share/x.ogg", home="/home/me") == "/usr/share/x.ogg"
+    assert notifycenter.sound_subtitle("/home/meow/x.ogg", home="/home/me") == "/home/meow/x.ogg"
+
+
+def test_sound_is_silent_only_for_none():
+    assert notifycenter.sound_is_silent("none")
+    assert not notifycenter.sound_is_silent("default")
+    assert not notifycenter.sound_is_silent("")
+    assert not notifycenter.sound_is_silent("/x.ogg")
+
+
+def test_default_sound_walks_the_desktops_theme_then_freedesktop():
+    assert notifycenter.sound_candidates("Yaru") == [
+        "/usr/share/sounds/Yaru/stereo/message-new-instant.oga",
+        "/usr/share/sounds/freedesktop/stereo/message-new-instant.oga",
+    ]
+    # No theme, the fallback theme itself, or a theme name that is a path
+    # (a hand-edited key): the freedesktop theme alone.
+    for theme in ("", "freedesktop", "../etc"):
+        assert notifycenter.sound_candidates(theme) == [
+            "/usr/share/sounds/freedesktop/stereo/message-new-instant.oga"
+        ]
+
+
+def test_sound_file_resolves_default_at_play_time():
+    present = {"/usr/share/sounds/freedesktop/stereo/message-new-instant.oga"}
+    exists = present.__contains__
+    assert notifycenter.sound_file("default", "Yaru", exists) == (
+        "/usr/share/sounds/freedesktop/stereo/message-new-instant.oga"
+    )
+    present.add("/usr/share/sounds/Yaru/stereo/message-new-instant.oga")
+    assert notifycenter.sound_file("default", "Yaru", exists) == (
+        "/usr/share/sounds/Yaru/stereo/message-new-instant.oga"
+    )
+    # A minimal install with no theme at all: nothing to play, the beep.
+    assert notifycenter.sound_file("default", "Yaru", lambda _p: False) == ""
+
+
+def test_sound_file_for_a_custom_path_and_silence():
+    exists = {"/home/me/chime.ogg"}.__contains__
+    assert notifycenter.sound_file("/home/me/chime.ogg", "", exists) == "/home/me/chime.ogg"
+    assert notifycenter.sound_file("/home/me/gone.ogg", "", exists) == ""  # deleted: the beep
+    assert notifycenter.sound_file("chime.ogg", "", lambda _p: True) == ""  # relative: refused
+    assert notifycenter.sound_file("none", "Yaru", lambda _p: True) == ""

@@ -5,11 +5,15 @@ Usage: python3 capture-docs.py <repo-root> <output.png> --scene NAME
 
 Scenes: main-window, hero, quick-switcher, session-details, mcp-servers,
 preferences, terminal-panel, new-chat, composer, pr-page, editor-panel,
-attachments-panel, notifications, welcome, welcome-cli.
+attachments-panel, notifications, notification-card,
+preferences-notifications, welcome, welcome-cli.
 
 notifications opens a session, stages a few rows straight through the
 app's notification center (a message, a coalesced bell, a finished run —
 no real bell rings) and opens the history sheet from the header bell.
+notification-card stages the same rows and shows two of them as in-app
+cards over the session instead (a message and the bell), through the
+window's card stack directly, with their clocks stopped for the shot.
 
 The two welcome scenes shoot the first-launch dialog (collins/welcome.py),
 so they need the staged state's welcome_seen set back to false (--set
@@ -50,7 +54,8 @@ args = parser.parse_args()
 SCENES = (
     "main-window", "hero", "quick-switcher", "session-details", "mcp-servers",
     "preferences", "terminal-panel", "new-chat", "composer", "pr-page",
-    "editor-panel", "attachments-panel", "notifications", "welcome", "welcome-cli",
+    "editor-panel", "attachments-panel", "notifications", "notification-card",
+    "preferences-notifications", "welcome", "welcome-cli",
 )
 if args.scene not in SCENES:
     parser.error(f"unknown scene {args.scene}")
@@ -241,6 +246,10 @@ def stage(win) -> list[tuple[int, callable]]:
         dialogs.mcp_browser_dialog(win)
     elif scene == "preferences":
         win.activate_action("win.preferences")
+    elif scene == "preferences-notifications":
+        # The dialog filtered to the Notifications group, the way the
+        # sheet's Preferences… link opens it (not a docs shot: a PR's).
+        win._show_preferences("notifications")
     elif scene == "terminal-panel":
         open_tab(win, U1).show_panel()
     elif scene == "new-chat":
@@ -269,6 +278,9 @@ def stage(win) -> list[tuple[int, callable]]:
     elif scene == "notifications":
         open_tab(win, U1)
         return [(1500, stage_notifications), (300, lambda: win.notify_bell.button.set_active(True))]
+    elif scene == "notification-card":
+        open_tab(win, U1)
+        return [(1500, stage_notifications), (300, stage_cards)]
     elif scene == "welcome-cli":
         # The dialog is up already (do_activate presented it); the prefilled
         # path is the scratch HOME's absolute one, which reads as ~ here.
@@ -291,6 +303,7 @@ def stage_notifications() -> None:
     center = app.notification_center
     store = app.store
     now = time.time()
+    center.clear()  # the staged tree is shared: a scene shot before this one left its rows
 
     def row(kind, session, body, age, read=False, count=1):
         item = store.get_item(session)
@@ -316,6 +329,18 @@ def stage_notifications() -> None:
     store.set_unread(STAGED[4], True)  # the finished run: a green row, in the app's own way
     win = app.get_active_window()
     win.notify_sheet.refresh()
+
+
+def stage_cards() -> None:
+    """The two newest unread rows as cards — the bell first, so the message
+    lands on top as the newest — with their auto-hide clocks stopped, so
+    the shot's settle time can't outlast them."""
+    win = app.get_active_window()
+    unread = [r for r in app.notification_center.rows()
+              if not r.read and r.kind != notifycenter.KIND_FINISHED]
+    for row in reversed(unread[:2]):
+        card = win.notify_cards.show(row)
+        GLib.idle_add(card.pause, priority=GLib.PRIORITY_DEFAULT + 1)
 
 
 def _walk(widget):

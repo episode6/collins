@@ -46,3 +46,14 @@ def test_every_token_use_setting_has_a_default():
 
 def test_the_renew_row_writes_tokenrefreshs_setting():
     assert tokenrefresh.SETTING in prefslayout.TOKEN_USE_ROWS
+
+
+def test_notifications_sit_between_sessions_and_composer():
+    groups = prefslayout.GROUPS
+    assert groups.index("notifications") == groups.index("sessions") + 1
+    assert groups.index("composer") == groups.index("notifications") + 1
+
+
+def test_every_notification_setting_has_a_default():
+    for key in ("inapp_notifications", "notification_sound", "bell_notifications", "announce_finished_runs"):
+        assert key in DEFAULT_SETTINGS, key

@@ -12,6 +12,11 @@ The one promise worth a test: the settings that spend the user's Claude
 quota sit together, directly under General, where a first look at
 Preferences finds them — not scattered across three groups with one of
 them at the bottom of the page, which is where they used to live.
+
+The Notifications group's search words live here for the same reason: the
+words someone types for a notification setting ("chime", "badge") are not
+in any row's own text, and the unit suite can hold the list to the spec's
+without a dialog.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ GROUPS: tuple[str, ...] = (
     "token_use",
     "mcp_tools",
     "sessions",
+    "notifications",
     "composer",
     "terminal",
     "footer_apps",
@@ -41,4 +47,16 @@ TOKEN_USE_ROWS: tuple[str, ...] = (
     "icon_model",
     "auto_renew_login",
     "model_list",
+)
+
+# What the search bar matches the Notifications group on, beyond its rows'
+# own titles and subtitles: the names people have for the thing.
+NOTIFICATION_SEARCH_TERMS: tuple[str, ...] = (
+    "notification",
+    "notify",
+    "bell",
+    "sound",
+    "chime",
+    "badge",
+    "unread",
 )

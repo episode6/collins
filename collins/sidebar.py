@@ -2354,6 +2354,11 @@ class SessionSidebar(Gtk.Box):
         cwd = self._placeholders.get(placeholder_id)
         return project_name_for_cwd(cwd) if cwd else ""
 
+    def placeholder_cwd(self, placeholder_id: str) -> str:
+        """The directory a placeholder row was filed under, "" for none —
+        what a notification card from that tab finds its project icon by."""
+        return self._placeholders.get(placeholder_id) or ""
+
     def placeholder_count(self) -> int:
         """How many placeholder rows there are — what the status icon adds to
         the store's own session total (see traymodel). A count rather than a

@@ -148,6 +148,26 @@ DEFAULT_SETTINGS = {
     # knows to turn on isn't presence — and free on a desktop with no host for
     # one, where it never registers at all.
     "status_icon": True,
+    # The in-app notification card (see notifyoverlay.py): a message from a
+    # session that isn't the one on screen, shown inside the window while
+    # Collins is focused. Off sends every notification to the desktop, as
+    # before there were cards; the history and the badge are unaffected.
+    "inapp_notifications": True,
+    # What the card plays (see notifysound.py): "default" is the desktop's
+    # own message sound, resolved at play time (notifycenter.sound_file),
+    # "none" is silence, anything else an absolute path to a sound file.
+    "notification_sound": "default",
+    # A terminal bell from a session the user isn't looking at posts a
+    # notification (card or desktop, by focus) and plays the sound; off
+    # keeps the compositor's beep for every bell. The selected tab's bell
+    # is the beep either way — a bell you were there for is not history.
+    "bell_notifications": True,
+    # Also notify when a session's run finishes, not only when it asks:
+    # the finished run's synthetic row goes out as a message would (a card
+    # when elsewhere in Collins, a desktop notification when unfocused).
+    # Off by default: the docs promise nothing is guessed from a quiet
+    # terminal, and this is the switch for whoever wants a chime anyway.
+    "announce_finished_runs": False,
     # The floating composer button over each agent terminal's bottom-left
     # corner (see terminal.py; it was the attach-file button once, and keeps
     # that key so saved preferences carry over). Off hides it everywhere;
