@@ -576,8 +576,9 @@ class PreferencesDialog(Adw.Dialog):
         # The named choices (see notifycenter.sound_choices), then Custom…:
         # the combo's rows are the values' positions, and the file chooser
         # is the one row past them.
-        self._sound_choices = [value for value, _label in notifycenter.sound_choices()]
-        labels = [label for _value, label in notifycenter.sound_choices()]
+        choices = notifycenter.sound_choices()
+        self._sound_choices = [value for value, _label in choices]
+        labels = [label for _value, label in choices]
         self._sound_row.set_model(Gtk.StringList.new(labels + [_("Custom…")]))
         self._sound_value = str(state.get_setting("notification_sound") or notifycenter.SOUND_DEFAULT)
         self._sound_row.set_selected(self._sound_index(self._sound_value))
