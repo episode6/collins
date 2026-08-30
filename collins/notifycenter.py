@@ -225,31 +225,45 @@ class Notification:
         )
 
 
-def clean_records(raw, now: float | None = None) -> list[dict]:
+def clean_notifications(raw, now: float | None = None) -> list[Notification]:
     """The persisted list, made safe to load: garbage dropped, synthetic rows
     dropped (they never belong on disk, whatever wrote them), rows older than
     KEEP_DAYS pruned, newest first, at most ROW_CAP of them.
 
-    Idempotent, and used on both sides of the file — AppState runs it on
-    load, and the center runs it again on whatever it is handed — so neither
-    has to trust the other to have done it.
+    Two rows under one id — only a hand-edited or half-written file has them
+    — keep the newer one, whichever came first in the file: the file's order
+    is a claim, the timestamp is the row's own.
+
+    Idempotent, and used on both sides of the file — AppState runs it (as
+    clean_records) on load, and the center runs it again on whatever it is
+    handed — so neither has to trust the other to have done it.
     """
     if now is None:
         now = time.time()
     if not isinstance(raw, list):
         return []
-    rows: list[Notification] = []
-    seen: set[str] = set()
+    candidates: list[Notification] = []
     for entry in raw:
         row = Notification.from_record(entry)
         if row is None or row.kind == KIND_FINISHED or is_green_id(row.id):
             continue
-        if row.when < now - KEEP_SECONDS or row.id in seen:
+        if row.when < now - KEEP_SECONDS:
+            continue
+        candidates.append(row)
+    candidates.sort(key=lambda row: -row.when)  # stable: ties keep file order
+    rows: list[Notification] = []
+    seen: set[str] = set()
+    for row in candidates:
+        if row.id in seen:
             continue
         seen.add(row.id)
         rows.append(row)
-    rows.sort(key=lambda row: -row.when)
-    return [row.to_record() for row in rows[:ROW_CAP]]
+    return rows[:ROW_CAP]
+
+
+def clean_records(raw, now: float | None = None) -> list[dict]:
+    """clean_notifications, as the records AppState holds and writes back."""
+    return [row.to_record() for row in clean_notifications(raw, now=now)]
 
 
 class NotificationCenter:
@@ -270,10 +284,7 @@ class NotificationCenter:
         self._clock = clock
         self._rows: list[Notification] = []
         self._listeners: list[Callable[[], None]] = []
-        for record in clean_records(list(records or []), now=clock()):
-            row = Notification.from_record(record)
-            if row is not None:
-                self._rows.append(row)
+        self._rows.extend(clean_notifications(list(records or []), now=clock()))
 
     # -- listeners ------------------------------------------------------------
 

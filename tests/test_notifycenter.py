@@ -288,12 +288,13 @@ def test_clean_records_tolerates_garbage():
         {"id": "y", "kind": "message", "when": "yesterday"},  # bad time
         {"id": "z", "kind": "message", "when": True},  # bools are not times
         {"id": "green:s", "kind": "finished", "when": NOW},  # never persisted
+        {"id": "dup", "kind": "message", "when": NOW - 1},  # the older copy, first
         {"id": "dup", "kind": "message", "when": NOW},
-        {"id": "dup", "kind": "message", "when": NOW - 1},
-        {"id": "ok", "kind": "message", "when": NOW, "title": 7, "count": 0, "read": 1},
+        {"id": "ok", "kind": "message", "when": NOW - 2, "title": 7, "count": 0, "read": 1},
     ]
     cleaned = clean_records(raw, now=NOW)
     assert [row["id"] for row in cleaned] == ["dup", "ok"]
+    assert cleaned[0]["when"] == NOW  # two rows under one id: the newer wins, not the first
     ok = cleaned[1]
     assert (ok["title"], ok["count"], ok["read"], ok["session_id"]) == ("", 1, True, "")
     assert clean_records("nope") == []
