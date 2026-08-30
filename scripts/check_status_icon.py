@@ -10,8 +10,9 @@ nothing on that bus to register with.
     dbus-run-session -- python3 scripts/check_status_icon.py
 
 Asserts what a unit test can't: that the item registers, that its properties
-read back as the model computed them, that flipping a session to unread emits
-NewStatus and reports NeedsAttention, that the menu's GetLayout matches
+read back as the model computed them, that an unread count arriving (the
+notification center's, in the app) emits NewStatus and reports NeedsAttention,
+that the menu's GetLayout matches
 traymodel's layout, and that clicking a session row dispatches focus-session
 with the right id.
 
@@ -403,11 +404,14 @@ def main():
     check("a second working session announces no NewIcon", not icons)
     check("a second working session keeps the pole", item_prop("IconPixmap") == working_pixmaps)
 
+    # The session's flag marks its menu row; the badge's number is the
+    # notification center's and arrives separately (see traymodel.tray_view).
     state["sessions"] = [
         sessions[0],
         traymodel.TraySession("s-beta", "podcast-hacker", "fix CI", unread=True,
                               last_active=100.0),
     ]
+    state["unread"] = 1
     icon.refresh()
     check("unread announces NeedsAttention", spin(lambda: traymodel.STATUS_ATTENTION in seen),
           str(seen))
@@ -469,6 +473,7 @@ def main():
     # clears it for us when the item goes: stop() has to.
     state["sessions"] = [traymodel.TraySession("s-beta", "podcast-hacker", "fix CI",
                                                unread=True, last_active=100.0)]
+    state["unread"] = 1
     icon.refresh()
     spin(lambda: dock and dock[-1][1].get("count") == 1)
     dock.clear()

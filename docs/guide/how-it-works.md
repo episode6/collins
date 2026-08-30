@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-28. Full change history: git log for this file.
+fork. Last modified: 2026-08-29. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -265,6 +265,7 @@ collins/
 ├── practions.py      # what a PR offers (merge, review, …) and the gh calls
 ├── statusicon.py     # the status icon: a StatusNotifierItem over D-Bus
 ├── traymodel.py      # what the icon shows (badge, menu) — toolkit-free
+├── notifycenter.py   # the notification history and the badge's number — toolkit-free
 ├── caffeine.py       # Caffeine Mode: inhibit sleep while agents work
 ├── titles.py         # auto-generated session titles (local + claude)
 ├── usage.py          # Claude subscription usage fetch/parse

@@ -1994,6 +1994,57 @@ class MainWindow(Adw.ApplicationWindow):
             # session's own row has taken over), so nothing is left to time out.
             self._activity.clear(placeholder_id)
             self.sidebar.remove_placeholder(placeholder_id)
+            # And its synthetic "finished" row goes with its flag: the row
+            # the flag sat on no longer exists (see _sync_placeholder_green).
+            self._sync_placeholder_green(placeholder_id)
+
+    def _set_placeholder_unread(self, placeholder_id: str, unread: bool) -> None:
+        """Flag (or clear) a placeholder row, and everything that reads the
+        flag: the sidebar's pulse, the notification center's synthetic row,
+        and the status icon.
+
+        The one door for a placeholder's flag. A real row's flag announces
+        itself — set_unread emits unread-changed, and the app's listener
+        feeds the center and the badge from there — but a placeholder's lives
+        in the sidebar, where nothing is watching, so the three readers have
+        to be told here, every time, or one of them shows a stale pulse.
+        """
+        self.sidebar.set_placeholder_unread(placeholder_id, unread)
+        self._sync_placeholder_green(placeholder_id)
+        self._notify_tray()
+
+    def _sync_placeholder_green(self, placeholder_id: str) -> None:
+        """Tell the notification center whether a placeholder's row is green
+        right now — the placeholder half of App._sync_green, and the same
+        rule: a live row, flagged unread, not under the barber pole. Keyed by
+        the placeholder id, which is the only name the tab has yet; the
+        resolve handoff (_apply_resolved_sessions) takes this row down with
+        the placeholder and raises the session's own through the store.
+
+        The center is asked for by name and skipped when absent: a window
+        under an e2e harness has no App at all.
+        """
+        center = getattr(self.get_application(), "notification_center", None)
+        if center is None:
+            return
+        green = (
+            self.sidebar.has_placeholder(placeholder_id)
+            and self.sidebar.placeholder_unread(placeholder_id)
+            and not self.sidebar.placeholder_busy(placeholder_id)
+        )
+        page = self._placeholder_page(placeholder_id)
+        center.set_green(
+            placeholder_id,
+            green,
+            title=page.get_title() if page is not None else "",
+            project=self.sidebar.placeholder_project(placeholder_id),
+        )
+
+    def has_placeholder(self, placeholder_id: str) -> bool:
+        """Whether this window's sidebar still holds this placeholder — asked
+        across windows by the app when it reconciles the center's synthetic
+        rows against what exists (see App._on_store_refreshed)."""
+        return self.sidebar.has_placeholder(placeholder_id)
 
     def _placeholder_page(self, placeholder_id: str) -> Adw.TabPage | None:
         for page, pid in self._placeholder_pages.items():
@@ -2701,7 +2752,12 @@ class MainWindow(Adw.ApplicationWindow):
                 continue  # not scanned yet; retried on the next store refresh
             del self._pending_resolved[page]
             # A first turn that finished before this rescan landed flagged the
-            # placeholder unread; the flag must outlive the row it sat on.
+            # placeholder unread; the flag must outlive the row it sat on. So
+            # must its synthetic "finished" row in the notification center:
+            # removing the placeholder takes down the row under the
+            # placeholder's key, and the set_unread below raises the one
+            # under the session's (see App._sync_green) — two synchronous
+            # edges no idle-coalesced badge can see between.
             unread = self.sidebar.placeholder_unread(self._placeholder_pages.get(page, ""))
             self._remove_placeholder(page)  # the real sidebar row exists now
             if page.get_title() == title:  # keep any manual rename/emoji
@@ -3767,6 +3823,10 @@ class MainWindow(Adw.ApplicationWindow):
         if self.sidebar.has_placeholder(session_id):
             # A "New Thread" row has no session item to hang the flag on.
             self.sidebar.set_placeholder_busy(session_id, busy)
+            # The pole edge is the green's other edge: a flagged placeholder
+            # counts only while it isn't working (the store's busy-changed
+            # does this for real rows; see App._sync_green).
+            self._sync_placeholder_green(session_id)
             return
         self._sync_row_busy(session_id)
 
@@ -3788,7 +3848,7 @@ class MainWindow(Adw.ApplicationWindow):
         flag is below.
         """
         if self.sidebar.has_placeholder(session_id):
-            self.sidebar.set_placeholder_unread(session_id, True)
+            self._set_placeholder_unread(session_id, True)
             return
         self._refresh_prs_after_run(session_id)
         for row_id in self.store.rows_representing(session_id):
@@ -3855,10 +3915,9 @@ class MainWindow(Adw.ApplicationWindow):
         """
         placeholder_id = self._placeholder_pages.get(page)
         if placeholder_id is not None:
-            self.sidebar.set_placeholder_unread(placeholder_id, True)
             # A placeholder's flag lives in the sidebar, not the store, so the
             # store's unread-changed signal never speaks for it.
-            self._notify_tray()
+            self._set_placeholder_unread(placeholder_id, True)
         session_id = self._session_id_of(page)
         if session_id:
             for row_id in self.store.rows_representing(session_id):
@@ -3869,8 +3928,7 @@ class MainWindow(Adw.ApplicationWindow):
         finished in it has been seen, on every row standing for it."""
         placeholder_id = self._placeholder_pages.get(page)
         if placeholder_id is not None:
-            self.sidebar.set_placeholder_unread(placeholder_id, False)
-            self._notify_tray()  # the store's signal never speaks for these
+            self._set_placeholder_unread(placeholder_id, False)
         session_id = self._session_id_of(page)
         if session_id:
             for row_id in self.store.rows_representing(session_id):
@@ -4716,6 +4774,11 @@ class MainWindow(Adw.ApplicationWindow):
         window in turn (see App.tray_view). A tab whose session the store
         hasn't got a row for yet is skipped rather than guessed at — it has no
         name to show and no busy or unread flag to carry.
+
+        The badge is not counted here. It is the notification center's number
+        (see App._sync_green), counted per green *row* rather than per tab,
+        so a tab skipped here — one attached to a /bg fork the store never
+        discovered — still badges through the row standing in for it.
         """
         sessions = []
         for session_id in self._pages:
@@ -4734,15 +4797,15 @@ class MainWindow(Adw.ApplicationWindow):
             )
         return sessions
 
-    def tray_placeholders(self) -> tuple[int, int]:
-        """How many of this window's tabs are still waiting for a session id,
-        and how many of those are unread.
+    def tray_placeholders(self) -> int:
+        """How many of this window's tabs are still waiting for a session id.
 
-        Their flags live in the sidebar rather than the store — there is no
-        session item to hang one on until the id resolves — so they can only
-        be counted, never listed.
+        A count, never a list: there is no id to jump to until it resolves.
+        Their unread flags reach the badge by the same road a real row's do —
+        the notification center's synthetic row (see _sync_placeholder_green)
+        — so the icon needs nothing more from them than that they are open.
         """
-        return self.sidebar.placeholder_counts()
+        return self.sidebar.placeholder_count()
 
     def focus_session(self, session_id: str) -> bool:
         """Raise this session's tab, and this window with it: the caller may be

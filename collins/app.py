@@ -46,6 +46,7 @@ from . import (
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
 from .i18n import _
 from .lightbox import present_image_lightbox
+from .notifycenter import NotificationCenter
 from .prefs import apply_color_scheme
 from .providers import SessionOptions
 from .prstatus import parse_pr_url
@@ -1464,6 +1465,16 @@ class App(Adw.Application):
         show_windows.connect("activate", lambda *_: self._present_main_window())
         self.add_action(show_windows)
 
+        # Every notification Collins has raised, and the badges' number (see
+        # notifycenter). One per app, shared by every window, loaded from and
+        # written back to state.json through the listener below — connected
+        # first, so the list is on disk before anything paints it. Windows
+        # (their bells, once they have them) subscribe through
+        # notification_center.connect themselves; the App holds no list of
+        # them.
+        self.notification_center = NotificationCenter(records=self.state.get_notifications())
+        self.notification_center.connect(self._on_notifications_changed)
+
         self._status_icon: statusicon.StatusIcon | None = None
         self._status_icon_source: int | None = None
         # The tray host's activation token for the action it is about to
@@ -1471,12 +1482,14 @@ class App(Adw.Application):
         self._activation_token = ""
         self.connect("window-added", lambda *_: self.refresh_status_icon())
         self.connect("window-removed", lambda *_: self.refresh_status_icon())
-        self.store.connect("refreshed", lambda *_: self.refresh_status_icon())
-        # The badge's own edge: set_unread announces every actual flip, so the
-        # repaint no longer leans on each caller remembering to notify. The
-        # placeholder half still arrives through MainWindow._notify_tray —
-        # those flags live in a sidebar, not the store.
+        self.store.connect("refreshed", self._on_store_refreshed)
+        # The badge's own edges: set_unread and set_busy announce every actual
+        # flip, so the count no longer leans on each caller remembering to
+        # notify — both feed the center's synthetic row (_sync_green). The
+        # placeholder half arrives through MainWindow._sync_placeholder_green
+        # instead — those flags live in a sidebar, not the store.
         self.store.connect("unread-changed", self._on_unread_changed)
+        self.store.connect("busy-changed", self._on_busy_changed)
         self.store.connect("archived", self._on_session_archived)
         # Whether a tray host is on the bus, followed live from launch so the
         # close confirmation can pick its default response without a
@@ -1510,10 +1523,86 @@ class App(Adw.Application):
         Withdrawing a notification that was never posted, or that the desktop
         has already dismissed, is a no-op — so this needs no memory of which
         sessions have banners up.
+
+        The badge repaints through the center: the synthetic row this edge
+        sets or removes announces itself, and the icon hangs off that (see
+        _on_notifications_changed).
         """
-        self.refresh_status_icon()
+        self._sync_green(session_id)
         if session_id and not unread:
             self.withdraw_notification(session_id)
+
+    def _on_busy_changed(self, _store, session_id: str, _busy: bool) -> None:
+        """A row's busy flag moved: the flag it may be carrying underneath
+        counts only while the pole is off (see _sync_green)."""
+        self._sync_green(session_id)
+
+    def _sync_green(self, session_id: str) -> None:
+        """Tell the center whether a session's row is green right now — the
+        sidebar's pulse, which is the synthetic "finished" row's whole reason
+        to exist (see notifycenter.NotificationCenter.set_green).
+
+        Green is unread *and not working*, exactly traymodel.session_marker's
+        answer, asked through it so the badge and the menu's per-row marks
+        can never disagree: a flagged session that goes back to work is
+        showing the barber pole, not the pulse, and is no longer waiting for
+        anyone; its flag stays put and the row comes back the moment the turn
+        ends. Both edges land here (unread-changed and busy-changed), and
+        set_green is a no-op when nothing moves, so re-asserting on either is
+        free.
+
+        A session the store has no item for is not green: the flag lives on
+        the item, so there is nothing left to be on.
+
+        Rows, not tabs. The badge used to be counted off MainWindow's
+        tray_sessions — one per open tab with a store item — and this counts
+        one per flagged row instead, which is the sidebar's pulses exactly
+        and the old number almost always. They differ where a row stands in
+        for a tab it doesn't own (store.rows_representing): a tab attached
+        to a /bg fork the store never discovered is keyed by the fork's id,
+        which has no item, so the tab list skipped it while the row it forked
+        from pulsed on with nobody counting; here the pulse is the count. The
+        same goes for a legacy fork chain drawn with "Show archived sessions"
+        on, where a finish pulses both the moved row and its fork's and the
+        badge reads two for one tab — two pulses, two rows.
+        """
+        item = self.store.get_item(session_id) if session_id else None
+        if item is None:
+            self.notification_center.set_green(session_id, False)
+            return
+        marker = traymodel.session_marker(
+            traymodel.TraySession(session_id=session_id, busy=item.busy, unread=item.unread)
+        )
+        self.notification_center.set_green(
+            session_id,
+            marker == traymodel.MARKER_UNREAD,
+            title=item.display_name,
+            project=item.session.project_name,
+        )
+
+    def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
+        """The list was rescanned: a session whose item went away without its
+        flag being cleared first (a transcript deleted from under a tab, say)
+        must not leave its synthetic row standing — the flag it stood for is
+        gone with the item, and a badge counting it would answer to nothing.
+        A placeholder's key never has an item; its row stands as long as some
+        window's sidebar still has the placeholder (see
+        MainWindow._sync_placeholder_green, which takes it down otherwise)."""
+        windows = [w for w in self.get_windows() if isinstance(w, MainWindow)]
+        for key in self.notification_center.green_sessions():
+            if self.store.get_item(key) is not None:
+                continue
+            if any(window.has_placeholder(key) for window in windows):
+                continue
+            self.notification_center.set_green(key, False)
+        self.refresh_status_icon()
+
+    def _on_notifications_changed(self) -> None:
+        """The center moved: write the list back (the state skips the write
+        when the persisted rows didn't change, which a synthetic row's coming
+        or going never does) and repaint the badge, which is idle-coalesced."""
+        self.state.set_notifications(self.notification_center.to_records())
+        self.refresh_status_icon()
 
     def _on_session_archived(self, _store, session_id: str) -> None:
         """A session was put away: take down the desktop notification it left
@@ -1635,8 +1724,13 @@ class App(Adw.Application):
 
         Only tabs are asked, never the store's whole list: an unread flag
         never outlives the tab it spoke for, and a menu row has to lead
-        somewhere. Tabs whose session id hasn't resolved arrive as bare counts
-        — they have no id to jump to (see traymodel).
+        somewhere. Tabs whose session id hasn't resolved arrive as a bare
+        count — they have no id to jump to (see traymodel).
+
+        The badge's number is the notification center's, not the tabs': the
+        count of unread notifications, which the synthetic rows keep equal to
+        the count of green tabs for a user nothing else has spoken to (see
+        notifycenter).
 
         Hidden windows are windows: get_windows() keeps them, so their tabs
         stay in the aggregate and the counts can't lie while nothing is on
@@ -1645,7 +1739,7 @@ class App(Adw.Application):
         and for holding the item Active (see traymodel.tray_view).
         """
         sessions: list[traymodel.TraySession] = []
-        placeholders = placeholder_unread = 0
+        placeholders = 0
         hidden_windows = False
         for window in self.get_windows():
             if not isinstance(window, MainWindow):
@@ -1653,13 +1747,11 @@ class App(Adw.Application):
             if not window.get_visible():
                 hidden_windows = True
             sessions.extend(window.tray_sessions())
-            open_count, unread_count = window.tray_placeholders()
-            placeholders += open_count
-            placeholder_unread += unread_count
+            placeholders += window.tray_placeholders()
         return traymodel.tray_view(
             sessions,
             placeholders,
-            placeholder_unread,
+            self.notification_center.unread_count(),
             name=self._tray_name(),
             hidden_windows=hidden_windows,
         )

@@ -1,8 +1,9 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-08-29. Full change history: git log for this file.
 
 import json
+import time
 
 from collins.claudemodels import NO_MODEL
 from collins.state import (
@@ -1060,3 +1061,83 @@ def test_welcome_seen_defaults_off_and_an_old_state_file_loads_as_unseen(app_sta
     assert state.get_setting("welcome_seen") is False
     state.set_setting("welcome_seen", True)
     assert app_state.AppState().get_setting("welcome_seen") is True
+
+
+# -- notification history -----------------------------------------------------
+
+
+def _note(nid, when, kind="message", **fields):
+    record = {
+        "id": nid,
+        "session_id": "sid",
+        "title": "Fix it",
+        "project": "alpha",
+        "kind": kind,
+        "body": "Look",
+        "when": when,
+        "read": False,
+        "count": 1,
+    }
+    record.update(fields)
+    return record
+
+
+def test_notifications_roundtrip(app_state):
+    now = time.time()
+    state = app_state.AppState()
+    assert state.get_notifications() == []
+    rows = [_note("b", now - 1, kind="bell", count=3), _note("a", now - 2, read=True)]
+    state.set_notifications(rows)
+    fresh = app_state.AppState()
+    assert fresh.get_notifications() == rows  # order preserved, not sorted
+    # The getter hands out a copy: mutating it changes nothing.
+    fresh.get_notifications().clear()
+    assert fresh.get_notifications() == rows
+
+
+def test_notifications_unchanged_are_not_rewritten(app_state):
+    state = app_state.AppState()
+    rows = [_note("a", time.time())]
+    state.set_notifications(rows)
+    app_state._STATE_FILE.write_text("{}", encoding="utf-8")  # a rewrite would replace this
+    state.set_notifications(list(rows))
+    assert app_state._STATE_FILE.read_text(encoding="utf-8") == "{}"
+    state.set_notifications([])
+    assert app_state.AppState().get_notifications() == []
+
+
+def test_notifications_ignore_corrupt_entries(app_state):
+    now = time.time()
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps(
+            {
+                "notifications": [
+                    "junk",
+                    {"id": "no-kind", "when": now},
+                    {"id": "green:sid", "kind": "finished", "when": now},  # never persisted
+                    _note("ok", now),
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = app_state.AppState()
+    assert [row["id"] for row in state.get_notifications()] == ["ok"]
+    # A list that isn't one at all reads as empty.
+    app_state._STATE_FILE.write_text(json.dumps({"notifications": {"a": 1}}), encoding="utf-8")
+    assert app_state.AppState().get_notifications() == []
+
+
+def test_notifications_are_pruned_and_capped_on_load(app_state):
+    from collins.notifycenter import KEEP_SECONDS, ROW_CAP
+
+    now = time.time()
+    rows = [_note(str(i), now - i) for i in range(ROW_CAP + 20)]
+    rows.append(_note("stale", now - KEEP_SECONDS - 60))
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(json.dumps({"notifications": rows}), encoding="utf-8")
+    loaded = app_state.AppState().get_notifications()
+    assert len(loaded) == ROW_CAP
+    assert loaded[0]["id"] == "0"  # newest first
+    assert all(row["id"] != "stale" for row in loaded)
