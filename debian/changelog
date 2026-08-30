@@ -1,34 +1,67 @@
+collins (0.1.3) UNRELEASED; urgency=medium
+
+  * Development series after the 0.1.2 release.
+
+ -- Geoff Hackett <ghackett@episode6.com>  Sun, 30 Aug 2026 15:45:45 -0400
+
 collins (0.1.2) UNRELEASED; urgency=medium
 
+  * Collins is on Fedora: the episode6/stable COPR builds every release for
+    every current Fedora and for RHEL 10 and its rebuilds; the RPM carries
+    the same GTK 4.10 / libadwaita 1.5 floors as the .deb.
+  * Notification sound plays through GStreamer (gir1.2-gstreamer-1.0 and
+    gir1.2-gst-plugins-base-1.0, new Recommends); five CC0 chimes ship with
+    the app.
+  * In-app notifications: a session that speaks up from a tab you aren't
+    looking at shows a card in the window and plays a sound while Collins
+    is focused (the desktop notification now covers the times it isn't); a
+    header bell wears the unread count and opens a notification history
+    sheet (Ctrl+Shift+B); a Notifications preferences group holds the
+    switches, the Sound picker (desktop theme sounds, bundled chimes, or a
+    file), a Card theme row pinning the card light or dark, and Announce
+    finished runs.
+  * Collins checks GitHub once a day for a newer release and says so with a
+    notification; Check for updates in Preferences → General turns it off.
+  * New sessions open onto a new-chat screen with model and effort pickers
+    (pre-selecting the CLI's defaults) and a worktree checkbox; an unsent
+    screen is kept as a sidebar Draft row; an empty send launches an empty
+    session; the Advanced new-session dialog is gone.
+  * An effort picker rides beside the model picker (composer and new-chat
+    screen), the footer's model chip shows the level, and /effort follows
+    a pick on a running session; session titles are generated at low
+    effort.
+  * Token use: a preferences group gathers everything that runs Claude on
+    your behalf (with a login auto-renew switch), a first-launch dialog
+    discloses it, the headless runs pass --strict-mcp-config --tools "",
+    and the title/icon model pickers gain a None option; an expired Claude
+    login repairs itself with a throwaway claude -p, backing off
+    exponentially.
+  * Composer: paste an image from the clipboard; a big draft survives the
+    close/reopen round trip (typed back in pieces the CLI shows in full);
+    every way in appends at the end of the box.
+  * The editor shows one column at a time when its column is 500 px or
+    narrower; a back button beside the tabs returns to the file tree.
   * The status icon's drink turns into the sidebar's blue barber pole while
     any session is working, and back to the coral pour when the last run
-    stops — a change of picture, not an animation.
-  * Closing the floating composer pastes its draft back into the agent's
-    input box in pieces small enough to show in full, instead of one chunk
-    the CLI folded into a "[Pasted text]" stand-in that the next open then
-    cut in place of the draft; a stand-in that appears anyway is read back,
-    and one Collins didn't make keeps the composer from opening over it.
-  * The PR page's Checks list folds past four rows behind "Show more", like
-    the description does, instead of scrolling in place.
-  * Clicking a project header in the sidebar starts a session there (the
-    new-chat screen); the strip left of the header's title is what folds
-    the group now, as do Left/Right on a focused header.
-  * The PR page no longer selects its whole description by itself after a
-    click in it (or on "Show more" / a thread's Reply) is followed by a
-    background re-read; the comment box keeps its cursor across one too.
-  * Labels no longer select all their text when the keyboard reaches them
-    without a click (a tab switch, Tab): GTK's select-on-focus is off.
-  * Right-clicking the PR page's Conversation or Files tab opens that view
-    of the pull request on github.com.
-  * A panel page that opens itself in a background tab (an agent attaching
-    its pull request) no longer comes up squeezed to its minimum width when
-    that tab is next selected; the column takes its proper size the moment
-    the tab is first shown.
-
+    stops.
+  * PR page: refreshes patch the page in place instead of rebuilding it;
+    the Checks list folds past four rows behind "Show more"; a draft's
+    Ready button offers mark-ready-and-merge on right-click; right-clicking
+    the Conversation or Files tab opens that view on github.com; the folded
+    description shows the start of its first paragraph; the description no
+    longer selects itself after a background re-read; a page opened in a
+    background tab gets its full width.
+  * Project rows: clicking a header starts a session there (the icon strip
+    folds the group); the right-click menu gains Checkout main; headers
+    are centred in their rows.
   * The session tab bar under the header is hidden by default; the
     header's toggle shows it, and a window that had it showing keeps it.
+  * Bringing Collins back from the tray no longer leaves GNOME's busy
+    cursor up: the window is raised on the host's activation token.
+  * Labels no longer select all their text when the keyboard reaches them
+    without a click: GTK's select-on-focus is off across the app.
 
- -- Geoff Hackett <ghackett@episode6.com>  Sat, 22 Aug 2026 08:26:06 -0400
+ -- Geoff Hackett <ghackett@episode6.com>  Sun, 30 Aug 2026 15:45:45 -0400
 
 collins (0.1.1) UNRELEASED; urgency=medium
 

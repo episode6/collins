@@ -6,7 +6,7 @@
 # The distribution name, the installed command and the import package are all
 # "collins" -- the name was unregistered on PyPI when we claimed it.
 name = "collins"
-version = "0.1.2"
+version = "0.1.3"
 description = "Collins — native GTK4 GUI to manage and resume Claude Code sessions"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }

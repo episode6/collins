@@ -103,12 +103,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Rename session": "Munkamenet átnevezése",
         "Custom name": "Egyéni név",
         "Cancel": "Mégse",
-        "Session list": "Munkamenet-lista",
-        "Show folder path": "Mappa elérési útjának megjelenítése",
         "Show folder paths in sidebar": "Mappák elérési útja az oldalsávban",
-        "Show each session's project folder path in the sidebar":
-            "Az egyes munkamenetek projektmappájának elérési útja az oldalsávon",
-        "Startup": "Indítás",
         "Reopen the last session": "Utolsó munkamenet újranyitása",
         "Open the session that was active when the app was last closed. "
         "Off, the app launches with no session open":
@@ -180,7 +175,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Tools used in this session": "A munkamenetben használt eszközök",
         "Recent activity": "Legutóbbi tevékenység",
         "You": "Te",
-        "Claude": "Claude",
         "Follow system": "Rendszer követése",
         "Light": "Világos",
         "Dark": "Sötét",
@@ -202,23 +196,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Paste": "Beillesztés",
         "Select All": "Összes kijelölése",
         "Color theme": "Színtéma",
-        "Appearance": "Megjelenés",
         "Color scheme": "Színséma",
         "Dark / Light Mode": "Sötét / világos mód",
         "Language": "Nyelv",
-        "Restart to apply": "Újraindítás szükséges",
-        "Running sessions": "Futó munkamenetek",
-        "Ask keeps the confirmation dialog; the other choices skip it and exit the "
-        "session(s) cleanly or keep them running detached":
-            "A „Rákérdezés” megtartja a megerősítő párbeszédablakot; a többi lehetőség "
-            "kihagyja, és tisztán kilép a munkamenet(ek)ből, vagy leválasztva futni hagyja őket",
         "When archiving a running session": "Futó munkamenet archiválásakor",
         "Archiving a session that is still running also closes its tab":
             "A még futó munkamenet archiválása a lapját is bezárja",
         "When quitting with running sessions": "Kilépéskor futó munkamenetekkel",
         "Closing a window while agent sessions are still running":
             "Ablak bezárása, miközben ügynök-munkamenetek még futnak",
-        "Archiving": "Archiválás",
         "Archive on claude.ai too": "Archiválás a claude.ai-n is",
         "A session that also appears on claude.ai is archived and restored "
         "there along with the toggle here; best-effort, archiving locally "
@@ -234,14 +220,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show archived sessions": "Archivált munkamenetek megjelenítése",
         "MCP servers": "MCP-kiszolgálók",
         "About Collins": "A Collins névjegye",
-        "Refresh session list": "Munkamenetlista frissítése",
         "Search sessions…": "Munkamenetek keresése…",
         "Search sessions": "Munkamenetek keresése",
         "Close search": "Keresés bezárása",
         "A session is working": "Egy munkamenet dolgozik",
         "Collapse all groups": "Összes csoport összecsukása",
         "Expand all groups": "Összes csoport kibontása",
-        "No sessions found": "Nincs találat",
         "{n} sessions": "{n} munkamenet",
         "{n} projects": "{n} projekt",
         "{n} open": "{n} megnyitva",
@@ -368,12 +352,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Reopen it by relaunching Collins, or from a session's notification.":
             "Nyisd meg újra a Collins elindításával vagy egy munkamenet értesítéséből.",
         "no sessions open": "nincs nyitott munkamenet",
-        "1 session": "1 munkamenet",
         "{n} sessions": "{n} munkamenet",
-        "1 working": "1 dolgozik",
-        "{n} working": "{n} dolgozik",
-        "1 unread": "1 olvasatlan",
-        "{n} unread": "{n} olvasatlan",
         "Finished a run": "Befejezett egy futást",
         "Default: the desktop's message sound": "Alapértelmezett: az asztal üzenethangja",
         "Silent": "Néma",
@@ -433,7 +412,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Sound: {name}": "Hang: {name}",
         "Preferences…": "Beállítások…",
         "Show/hide notifications": "Értesítések megjelenítése/elrejtése",
-        "You interrupted Claude here": "Itt szakítottad meg a Claude-ot",
         "Restart now": "Újraindítás most",
         "Choose project directory": "Válassz projektkönyvtárat",
         "Tab name": "Lap neve",
@@ -530,7 +508,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "A projekt nagy — csak az első {count} fájl kereshető.",
         "Agent files": "Ügynökfájlok",
         "Open {name} in the editor": "A(z) {name} megnyitása a szerkesztőben",
-        "Session tools": "Munkamenet-eszközök",
         "Session behavior": "Munkamenetek viselkedése",
         "Composer": "Szerkesztő",
         "Built-in MCP tools": "Beépített MCP-eszközök",
@@ -579,7 +556,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "elég széles egy külön oszlophoz a terminál legnagyobb "
             "szélességén túl. Munkamenetlaponként egyszer, így a bezárt "
             "panel zárva marad",
-        "Open composer (Ctrl+.)": "Üzenetszerkesztő megnyitása (Ctrl+.)",
         "Attach file": "Fájl csatolása",
         "Remove image": "Kép eltávolítása",
         "Close composer and keep the text in the terminal":
@@ -660,6 +636,900 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Nem sikerült telepíteni az asztali ikont",
         "Collins is in your applications now":
             "A Collins mostantól megtalálható az alkalmazások között",
+        'Add application':
+            'Alkalmazás hozzáadása',
+        'Search applications…':
+            'Alkalmazások keresése…',
+        'Caffeine Mode is on':
+            'A Caffeine Mode be van kapcsolva',
+        "That file isn't an image Collins can display.":
+            'Ez a fájl nem olyan kép, amelyet a Collins meg tud jeleníteni.',
+        'Until idle':
+            'Tétlenségig',
+        'Indefinitely':
+            'Korlátlan ideig',
+        '1 hour':
+            '1 óra',
+        '{n} hours':
+            '{n} óra',
+        'Caffeine Mode is dozing until a session works again — then the computer and screen will stay awake':
+            'A Caffeine Mode szunnyad, amíg egy munkamenet újra dolgozni nem kezd — akkor a számítógép és a képernyő ébren marad',
+        'Caffeine Mode is dozing until a session works again — then the computer will stay awake, the screen may turn off':
+            'A Caffeine Mode szunnyad, amíg egy munkamenet újra dolgozni nem kezd — akkor a számítógép ébren marad, a képernyő kikapcsolhat',
+        'Caffeine Mode is on while sessions are working — the computer and screen will stay awake':
+            'A Caffeine Mode aktív, amíg munkamenetek dolgoznak — a számítógép és a képernyő ébren marad',
+        'Caffeine Mode is on while sessions are working — the computer will stay awake, the screen may turn off':
+            'A Caffeine Mode aktív, amíg munkamenetek dolgoznak — a számítógép ébren marad, a képernyő kikapcsolhat',
+        'Caffeine Mode is on — the computer and screen will stay awake':
+            'A Caffeine Mode be van kapcsolva — a számítógép és a képernyő ébren marad',
+        'Caffeine Mode is on — the computer will stay awake, the screen may turn off':
+            'A Caffeine Mode be van kapcsolva — a számítógép ébren marad, a képernyő kikapcsolhat',
+        'Caffeine Mode: keep the computer awake and the screen on':
+            'Caffeine Mode: a számítógép ébren, a képernyő bekapcsolva marad',
+        'Caffeine Mode: keep the computer awake, letting the screen turn off':
+            'Caffeine Mode: a számítógép ébren marad, a képernyő kikapcsolhat',
+        'Caffeine Mode turns off in {time} — computer and screen stay awake':
+            'A Caffeine Mode {time} múlva kikapcsol — a számítógép és a képernyő ébren marad',
+        'Caffeine Mode turns off in {time} — computer stays awake, screen may turn off':
+            'A Caffeine Mode {time} múlva kikapcsol — a számítógép ébren marad, a képernyő kikapcsolhat',
+        'Send':
+            'Küldés',
+        'The user declined this action.':
+            'A felhasználó elutasította ezt a műveletet.',
+        'Switch the effort level for this session':
+            'Erőfeszítési szint váltása ehhez a munkamenethez',
+        "couldn't save a copy of the dropped image":
+            'nem sikerült másolatot menteni a bedobott képről',
+        "skipped {n} item that isn't a local file":
+            '{n} elem kihagyva, amely nem helyi fájl',
+        "couldn't reference {n} dropped file name":
+            'nem sikerült hivatkozni {n} bedobott fájlnévre',
+        "couldn't save a copy of the pasted image":
+            'nem sikerült másolatot menteni a beillesztett képről',
+        'Effort':
+            'Erőfeszítés',
+        'Copied to clipboard':
+            'Vágólapra másolva',
+        'Rename folder':
+            'Mappa átnevezése',
+        'Rename file':
+            'Fájl átnevezése',
+        'Enter a new name for “{name}”.':
+            'Adjon meg új nevet ennek: „{name}”.',
+        'Rename':
+            'Átnevezés',
+        'Move editor to {name}?':
+            'Áthelyezi a szerkesztőt ide: {name}?',
+        'This session is now working in {path}. One open file has unsaved changes and also exists there — choose what happens to it.':
+            'Ez a munkamenet mostantól itt dolgozik: {path}. Egy megnyitott fájlban mentetlen módosítások vannak, és a fájl ott is létezik — válassza ki, mi történjen vele.',
+        'Stay':
+            'Maradás',
+        'Go on editing this file, where your unsaved changes belong':
+            'E fájl szerkesztésének folytatása ott, ahová a mentetlen módosításai tartoznak',
+        'Take edits':
+            'Módosítások átvitele',
+        'Move this tab to the new copy, keeping your unsaved changes — saving will write them over whatever that copy holds':
+            'A lap áthelyezése az új másolatra a mentetlen módosítások megtartásával — a mentés felülírja velük azt, ami abban a másolatban van',
+        'Use new':
+            'Új használata',
+        'Open the new copy and discard your unsaved changes':
+            'Az új másolat megnyitása és a mentetlen módosítások elvetése',
+        "Don't Move":
+            'Ne helyezze át',
+        'Move Editor':
+            'Szerkesztő áthelyezése',
+        'Do you trust this folder?':
+            'Megbízik ebben a mappában?',
+        '{agent} will be able to read, edit and execute files in\n\n{path}\n\nand everything inside it, including any worktrees it creates there. Open it only if this is a project you created or otherwise trust — like your own code, a well-known open source project, or work from your team.':
+            'A(z) {agent} olvashatja, szerkesztheti és futtathatja a fájlokat itt:\n\n{path}\n\nés mindent, ami benne van, az ott létrehozott munkafákat is beleértve. Csak akkor nyissa meg, ha ez egy Ön által létrehozott vagy egyébként megbízható projekt — például a saját kódja, egy jól ismert nyílt forráskódú projekt vagy a csapata munkája.',
+        'Trust and open':
+            'Megbízom benne, megnyitás',
+        'Generating icon…':
+            'Ikon generálása…',
+        'At sidebar size':
+            'Oldalsávméretben',
+        'Optional adjustments, e.g. “make it blue”':
+            'Opcionális igazítások, pl. „legyen kék”',
+        'Regenerate':
+            'Újragenerálás',
+        'Default model':
+            'Alapértelmezett modell',
+        "Model for this dialog's runs; Preferences sets the default":
+            'A párbeszédablak futtatásainak modellje; az alapértelmezettet a Beállítások adja meg',
+        'Default ({model})':
+            'Alapértelmezett ({model})',
+        'Generate Icon':
+            'Ikon generálása',
+        'the generated SVG could not be rendered':
+            'a generált SVG nem renderelhető',
+        'Icon generation failed: {error}':
+            'Az ikongenerálás sikertelen: {error}',
+        'Saving failed: {error}':
+            'A mentés sikertelen: {error}',
+        'Close other tabs':
+            'Többi lap bezárása',
+        'Close tabs to the right':
+            'Jobbra lévő lapok bezárása',
+        'Close all tabs':
+            'Összes lap bezárása',
+        'Add to chat':
+            'Hozzáadás a csevegéshez',
+        "Couldn't rename {name}: {message}":
+            'A(z) „{name}” nem nevezhető át: {message}',
+        'A name is needed to rename {name}.':
+            'A(z) „{name}” átnevezéséhez név szükséges.',
+        "“{new_name}” isn't a name — renaming can't move things elsewhere.":
+            'A(z) „{new_name}” nem név — az átnevezés nem helyezhet át semmit máshová.',
+        '“{new_name}” already exists here.':
+            'A(z) „{new_name}” már létezik itt.',
+        '{name} is no longer there.':
+            'A(z) „{name}” már nincs ott.',
+        "{name} can't be renamed to something outside this project.":
+            'A(z) „{name}” nem nevezhető át a projekten kívülre.',
+        "There's nothing on the clipboard to paste here.":
+            'Nincs a vágólapon semmi, amit ide be lehetne illeszteni.',
+        "{count} item couldn't be pasted.":
+            '{count} elemet nem sikerült beilleszteni.',
+        "{name} can't be pasted into itself.":
+            'A(z) „{name}” nem illeszthető be önmagába.',
+        'That folder is no longer there.':
+            'Ez a mappa már nincs ott.',
+        "{name} can't be pasted outside this project.":
+            'A(z) „{name}” nem illeszthető be a projekten kívülre.',
+        'There are already too many copies of {name} here.':
+            'Már túl sok másolat van itt a(z) „{name}” elemből.',
+        "Couldn't paste {name}: {message}":
+            'A(z) „{name}” nem illeszthető be: {message}',
+        "{name} couldn't be decoded as an image.":
+            'A(z) „{name}” nem dekódolható képként.',
+        'Session moved to {name}':
+            'Munkamenet áthelyezve ide: {name}',
+        'Follow':
+            'Követés',
+        'Image':
+            'Kép',
+        'Cut':
+            'Kivágás',
+        '{n} session(s) in {p} project(s) have their transcripts moved to the trash, where they can be restored. Sessions archived with their whole project — and originals a backgrounded fork replaced — are included.':
+            '{n} munkamenet átirata {p} projektben a kukába kerül, ahonnan visszaállítható. Az egész projektjükkel együtt archivált munkamenetek — és a háttérbe küldött elágazás által lecserélt eredetik — szintén beleszámítanak.',
+        '{project} — {n} of {total}':
+            '{project} — {n} / {total}',
+        '…and {p} other project(s) — {n} session(s)':
+            '…és {p} további projekt — {n} munkamenet',
+        '{p} of these project(s) lose every session they have.':
+            'E projektek közül {p} minden munkamenetét elveszíti.',
+        'Open, every check passed':
+            'Nyitott, minden ellenőrzés sikeres',
+        'Checks still running':
+            'Az ellenőrzések még futnak',
+        'A check failed':
+            'Egy ellenőrzés sikertelen',
+        'A reviewer is waiting on a reply':
+            'Egy véleményező válaszra vár',
+        'Draft, and the branch conflicts':
+            'Piszkozat, és az ág konfliktusban van',
+        'Merged':
+            'Egyesítve',
+        'Collins is better with the GitHub CLI':
+            'A Collins jobb a GitHub CLI-vel',
+        "Collins follows the pull requests your sessions open — and acts on them — through gh, GitHub's own command-line tool, which isn't installed here.":
+            'A Collins a gh-val, a GitHub saját parancssori eszközével követi a munkamenetei által nyitott pull requesteket — és cselekszik is velük —, de az itt nincs telepítve.',
+        "Collins follows the pull requests your sessions open — and acts on them — through gh, GitHub's own command-line tool, which is installed here but never signed in.":
+            'A Collins a gh-val, a GitHub saját parancssori eszközével követi a munkamenetei által nyitott pull requesteket — és cselekszik is velük —, de az telepítve van ugyan, ám sosem jelentkezett be.',
+        'Not now':
+            'Most nem',
+        'Get the GitHub CLI':
+            'GitHub CLI beszerzése',
+        'Copy command':
+            'Parancs másolása',
+        "With it, every session's pull requests carry their status:":
+            'Vele minden munkamenet pull requestjei magukon hordják az állapotukat:',
+        '…and a click on one does something about it:':
+            '…és egy rájuk kattintás tesz is valamit:',
+        "Don't show this again":
+            'Ne jelenjen meg többé',
+        'Install it from cli.github.com — Collins picks it up the next time it starts.':
+            'Telepítse a cli.github.com oldalról — a Collins a következő indításakor felveszi.',
+        'Run this once in any terminal. Collins asks for no login of its own.':
+            'Futtassa ezt egyszer bármelyik terminálban. A Collins saját bejelentkezést nem kér.',
+        'Keyboard Bindings':
+            'Billentyűparancsok',
+        'Reset All':
+            'Összes visszaállítása',
+        'Put every shortcut back to its default':
+            'Minden gyorsbillentyű visszaállítása az alapértelmezettre',
+        'Click a row to change its shortcut':
+            'Kattintson egy sorra a gyorsbillentyűje módosításához',
+        'Also bound to: {actions}':
+            'Ehhez is hozzárendelve: {actions}',
+        'Unbound':
+            'Nincs hozzárendelve',
+        'Reset to default':
+            'Visszaállítás alapértelmezettre',
+        'Reset every shortcut?':
+            'Minden gyorsbillentyű visszaállítása?',
+        'All of your custom keyboard bindings are replaced by the defaults.':
+            'Minden egyéni billentyűparancsát az alapértelmezettek váltják fel.',
+        '{chord} is already in use':
+            'A(z) {chord} már használatban van',
+        'It is bound to {actions}. Move it to {action}?':
+            'Ehhez van hozzárendelve: {actions}. Áthelyezi ide: {action}?',
+        'Move Shortcut':
+            'Gyorsbillentyű áthelyezése',
+        'unbound':
+            'nincs hozzárendelve',
+        'Set shortcut for “{action}”':
+            'Gyorsbillentyű beállítása: „{action}”',
+        'Press the new key combination. Currently: {current}.\nBackspace removes the binding; Escape keeps it.':
+            'Nyomja le az új billentyűkombinációt. Jelenleg: {current}.\nA Backspace törli a hozzárendelést; az Escape megtartja.',
+        'Tabs and windows':
+            'Lapok és ablakok',
+        'Panels':
+            'Panelek',
+        'Application':
+            'Alkalmazás',
+        'New session':
+            'Új munkamenet',
+        'Quick switcher':
+            'Gyorsváltó',
+        'Archive the current session':
+            'A jelenlegi munkamenet archiválása',
+        'Undo the last archive':
+            'Az utolsó archiválás visszavonása',
+        'Open the pull request page':
+            'A pull request oldalának megnyitása',
+        "Unbound by default; the sidebar's search button does the same.":
+            'Alapértelmezetten nincs hozzárendelve; az oldalsáv keresőgombja ugyanezt teszi.',
+        'Close tab':
+            'Lap bezárása',
+        'Next tab':
+            'Következő lap',
+        'Previous tab':
+            'Előző lap',
+        'Toggle the tab marker':
+            'A lapjelölő ki/be kapcsolása',
+        'Show/hide the sidebar':
+            'Oldalsáv megjelenítése/elrejtése',
+        'Show/hide the terminal panel':
+            'Terminálpanel megjelenítése/elrejtése',
+        'Clear the terminal panel':
+            'Terminálpanel törlése',
+        'Move the panel tab to the other side':
+            'A panellap áthelyezése a másik oldalra',
+        'Show/hide the composer':
+            'Üzenetszerkesztő megjelenítése/elrejtése',
+        'Show/hide the attachments gallery':
+            'Mellékletgaléria megjelenítése/elrejtése',
+        "Swap the panel's sides":
+            'A panel oldalainak felcserélése',
+        'Unbound by default.':
+            'Alapértelmezetten nincs hozzárendelve.',
+        'Move the panel tab to the other strip':
+            'A panellap áthelyezése a másik sávra',
+        'Show/hide the editor':
+            'Szerkesztő megjelenítése/elrejtése',
+        'Quick open a file':
+            'Fájl gyors megnyitása',
+        'Focus the editor':
+            'Fókusz a szerkesztőre',
+        'Save the file':
+            'Fájl mentése',
+        'In the editor.':
+            'A szerkesztőben.',
+        'Find in the file':
+            'Keresés a fájlban',
+        'Copy the selection':
+            'Kijelölés másolása',
+        'With easy copy and paste on; without a selection the key reaches the terminal.':
+            'Az egyszerű másolás és beillesztés bekapcsolt állapotában; kijelölés nélkül a billentyű a terminálba jut.',
+        'With easy copy and paste on.':
+            'Az egyszerű másolás és beillesztés bekapcsolt állapotában.',
+        'Copy (terminal-style)':
+            'Másolás (terminál módra)',
+        'Paste (terminal-style)':
+            'Beillesztés (terminál módra)',
+        'Find in the terminal':
+            'Keresés a terminálban',
+        'Insert a newline in the prompt':
+            'Új sor beszúrása a promptba',
+        'Zoom in':
+            'Nagyítás',
+        'Zoom out':
+            'Kicsinyítés',
+        'Reset zoom':
+            'Nagyítás visszaállítása',
+        'Keyboard bindings':
+            'Billentyűparancsok',
+        "Couldn't display image":
+            'A kép nem jeleníthető meg',
+        'Open in Editor':
+            'Megnyitás a szerkesztőben',
+        'Low':
+            'Alacsony',
+        'Medium':
+            'Közepes',
+        'High':
+            'Magas',
+        'Extra high':
+            'Extra magas',
+        'Max':
+            'Maximális',
+        'This model has no effort setting':
+            'Ennek a modellnek nincs erőfeszítés-beállítása',
+        'New chat':
+            'Új csevegés',
+        'Model to start this session on':
+            'A modell, amellyel ez a munkamenet indul',
+        'Effort level to start this session at':
+            'Az erőfeszítési szint, amellyel ez a munkamenet indul',
+        'New git worktree':
+            'Új git munkafa',
+        'Work in a fresh worktree of this project, apart from its uncommitted changes':
+            'Munka a projekt friss munkafájában, elkülönítve a nem véglegesített módosításaitól',
+        'Empty Session':
+            'Üres munkamenet',
+        'Start the session with no prompt':
+            'Munkamenet indítása prompt nélkül',
+        'Drag to move this tab: drop on an edge to split, on a strip to join':
+            'Húzással áthelyezheti a lapot: élre ejtve feloszt, sávra ejtve csatlakozik',
+        'Restore this tab to its size and place in the panel':
+            'A lap visszaállítása a panelbeli méretére és helyére',
+        'Close Tab':
+            'Lap bezárása',
+        'Overlay this tab over the whole session':
+            'A lap ráterítése az egész munkamenetre',
+        'Move this tab to the other side':
+            'A lap áthelyezése a másik oldalra',
+        'Close tab with a running command?':
+            'Bezárja a lapot, amelyen parancs fut?',
+        'Move to':
+            'Áthelyezés ide',
+        'Split Left':
+            'Felosztás balra',
+        'Split Right':
+            'Felosztás jobbra',
+        'Split Up':
+            'Felosztás felfelé',
+        'Split Down':
+            'Felosztás lefelé',
+        'Close tabs with running commands?':
+            'Bezárja a lapokat, amelyeken parancsok futnak?',
+        'A command is still running in one of these tabs and will be terminated.':
+            'Az egyik lapon még fut egy parancs, amely le lesz állítva.',
+        'Close Tabs':
+            'Lapok bezárása',
+        'Address unresolved comments':
+            'Megválaszolatlan hozzászólások kezelése',
+        'Send “{prompt}” to this session':
+            '„{prompt}” küldése ennek a munkamenetnek',
+        'Open a pull request':
+            'Pull request nyitása',
+        'Fix errors & resolve conflicts':
+            'Hibák javítása és konfliktusok feloldása',
+        'Address the CI errors':
+            'A CI-hibák kezelése',
+        'Fix errors':
+            'Hibák javítása',
+        'Resolve conflicts':
+            'Konfliktusok feloldása',
+        'Mark ready for review':
+            'Megjelölés véleményezésre késznek',
+        'Take {slug} out of draft':
+            'A(z) {slug} kivétele piszkozatból',
+        'Ready':
+            'Kész',
+        'Ask Claude for a review':
+            'Véleményezés kérése a Claude-tól',
+        'Comment “{comment}” on {slug}':
+            '„{comment}” hozzászólás a(z) {slug} pull requesthez',
+        'Merge when checks pass':
+            'Egyesítés, ha az ellenőrzések sikeresek',
+        'Turn on auto-merge for {slug}':
+            'Automatikus egyesítés bekapcsolása a(z) {slug} pull requesthez',
+        'Merge {slug} when its checks pass?':
+            'Egyesíti a(z) {slug} pull requestet, amint az ellenőrzései sikeresek?',
+        'GitHub merges it as soon as every required check has passed. You can still cancel auto-merge on the pull request page.':
+            'A GitHub egyesíti, amint minden kötelező ellenőrzés sikeres. Az automatikus egyesítést a pull request oldalán továbbra is lemondhatja.',
+        'Enable auto-merge':
+            'Automatikus egyesítés bekapcsolása',
+        'Auto-Merge':
+            'Automatikus egyesítés',
+        'Merge pull request':
+            'Pull request egyesítése',
+        'Merge {slug} now':
+            'A(z) {slug} egyesítése most',
+        'Merge {slug}?':
+            'Egyesíti a(z) {slug} pull requestet?',
+        'Merge':
+            'Egyesítés',
+        'Disable auto-merge':
+            'Automatikus egyesítés kikapcsolása',
+        'Stop GitHub from merging {slug} when its checks pass':
+            'A GitHub ne egyesítse a(z) {slug} pull requestet, amikor az ellenőrzései sikeresek',
+        'Disable Auto-Merge':
+            'Automatikus egyesítés kikapcsolása',
+        'Its checks have passed. This merges the pull request on GitHub now.':
+            'Az ellenőrzései sikeresek. Ez most egyesíti a pull requestet a GitHubon.',
+        "Its checks haven't all passed. This merges the pull request on GitHub now, if the repository lets it.":
+            'Nem minden ellenőrzése sikeres. Ez most egyesíti a pull requestet a GitHubon, ha a tároló engedi.',
+        'Merge and archive session':
+            'Egyesítés és a munkamenet archiválása',
+        'Merge {slug} now, then archive this session':
+            'A(z) {slug} egyesítése most, majd a munkamenet archiválása',
+        'Merge {slug} and archive this session?':
+            'Egyesíti a(z) {slug} pull requestet, és archiválja ezt a munkamenetet?',
+        'The session is archived once the merge lands — you can bring it back with Undo, or from “Show archived”.':
+            'A munkamenet az egyesítés megtörténtekor archiválódik — a Visszavonással vagy az „Archivált munkamenetek megjelenítése” alól hozható vissza.',
+        'Merge & archive':
+            'Egyesítés és archiválás',
+        'Mark ready & merge when checks pass':
+            'Késznek jelölés és egyesítés, ha az ellenőrzések sikeresek',
+        'Take {slug} out of draft, then turn on auto-merge':
+            'A(z) {slug} kivétele piszkozatból, majd az automatikus egyesítés bekapcsolása',
+        'Mark {slug} ready and merge it when its checks pass?':
+            'Késznek jelöli a(z) {slug} pull requestet, és egyesíti, amint az ellenőrzései sikeresek?',
+        'Ready & auto-merge':
+            'Kész és automatikus egyesítés',
+        'Ready & Auto-Merge':
+            'Kész és automatikus egyesítés',
+        'Mark ready & merge':
+            'Késznek jelölés és egyesítés',
+        'Take {slug} out of draft, then merge it now':
+            'A(z) {slug} kivétele piszkozatból, majd egyesítése most',
+        'Mark {slug} ready and merge it?':
+            'Késznek jelöli a(z) {slug} pull requestet, és egyesíti?',
+        'Ready & merge':
+            'Kész és egyesítés',
+        'Ready & Merge':
+            'Kész és egyesítés',
+        'Mark ready, merge & archive session':
+            'Késznek jelölés, egyesítés és a munkamenet archiválása',
+        'Take {slug} out of draft, merge it now, then archive this session':
+            'A(z) {slug} kivétele piszkozatból, egyesítése most, majd a munkamenet archiválása',
+        'Mark {slug} ready, merge it and archive this session?':
+            'Késznek jelöli a(z) {slug} pull requestet, egyesíti, és archiválja ezt a munkamenetet?',
+        'Ready, merge & archive':
+            'Kész, egyesítés és archiválás',
+        'The pull request is marked ready for review first.':
+            'A pull request előbb véleményezésre késznek lesz jelölve.',
+        'Close pull request':
+            'Pull request lezárása',
+        'Close {slug} without merging':
+            'A(z) {slug} lezárása egyesítés nélkül',
+        'Close {slug}?':
+            'Lezárja a(z) {slug} pull requestet?',
+        'The pull request is closed without merging. Its branch and its comments stay, and it can be reopened on GitHub.':
+            'A pull request egyesítés nélkül lesz lezárva. Az ága és a hozzászólásai megmaradnak, és a GitHubon újranyitható.',
+        "{url} doesn't look like a pull request.":
+            'A(z) {url} nem tűnik pull requestnek.',
+        "Collins doesn't know how to do that.":
+            'A Collins ezt nem tudja megtenni.',
+        'Merge conflicts':
+            'Beolvasztási konfliktusok',
+        'Refresh':
+            'Frissítés',
+        'Search settings…':
+            'Keresés a beállításokban…',
+        'Search settings':
+            'Keresés a beállításokban',
+        'No settings found':
+            'Nincs találat a beállításokban',
+        'Try a different search.':
+            'Próbáljon másik keresőkifejezést.',
+        'Tab drag handles':
+            'Lapok húzófogantyúi',
+        'Drag any panel tab by its handle to move, reorder, or split it. Relies on GTK internals — turn off to fall back to plain tab dragging plus a drag grip on each panel':
+            'Bármely panellap a fogantyújánál fogva húzható áthelyezéshez, átrendezéshez vagy felosztáshoz. GTK-belsőkre támaszkodik — kikapcsolva sima laphúzás marad, panelenkénti húzófüllel',
+        'Project icon size':
+            'Projektikonok mérete',
+        'Size of the project and folder icons in the sidebar':
+            'A projekt- és mappaikonok mérete az oldalsávban',
+        'Start new sessions in a git worktree':
+            'Új munkamenetek indítása git munkafában',
+        "Git projects only; each new session works in its own fresh worktree, so it won't see uncommitted local changes. Right-click a project header to override per project":
+            'Csak git projektekre; minden új munkamenet a saját friss munkafájában dolgozik, így nem látja a nem véglegesített helyi módosításokat. Projektenkénti felülbíráláshoz kattintson jobb gombbal a projekt fejlécére',
+        "Follow Claude's own session names":
+            'A Claude saját munkamenetneveinek követése',
+        'Rename sessions whenever Claude names or renames them — /rename and its automatic titles; manually renamed sessions keep their name':
+            'Munkamenetek átnevezése, valahányszor a Claude elnevezi vagy átnevezi őket — a /rename és az automatikus címei; a kézzel átnevezett munkamenetek megtartják a nevüket',
+        'Exact busy tracking from the agent':
+            'Pontos elfoglaltságkövetés az ügynöktől',
+        "Read Claude Code's own progress announcements for the sidebar's working indicator, instead of only inferring from terminal output (fully applies to newly opened tabs)":
+            'A Claude Code saját haladásjelzéseinek olvasása az oldalsáv dolgozik-jelzőjéhez, a pusztán terminálkimenetből való következtetés helyett (teljesen csak az újonnan megnyitott lapokra érvényes)',
+        'Poll for background sessions':
+            'Háttér-munkamenetek lekérdezése',
+        'Fallback: check the agent CLI every 20 seconds in case the yellow guide lines stop updating on their own':
+            'Tartalék: az ügynök CLI ellenőrzése 20 másodpercenként, arra az esetre, ha a sárga jelzővonalak maguktól már nem frissülnének',
+        'Typing opens the composer':
+            'A gépelés megnyitja az üzenetszerkesztőt',
+        "Start typing at an agent's empty prompt and the composer opens with what you typed. A dialog, a menu and the CLI's own /, !, # and @ keep their keys":
+            'Kezdjen gépelni az ügynök üres promptjánál, és az üzenetszerkesztő megnyílik a beírtakkal. A párbeszédablakok, a menük és a CLI saját /, !, # és @ jelei megtartják a billentyűiket',
+        'Right-click aims spell-check':
+            'A jobb kattintás irányítja a helyesírás-ellenőrzést',
+        'Right-clicking a misspelled word in the composer offers corrections for that word. Off: corrections follow the text cursor instead, and a right-click never moves it':
+            'Az üzenetszerkesztőben egy hibásan írt szóra jobb gombbal kattintva ahhoz a szóhoz kap javításokat. Kikapcsolva: a javítások a szövegkurzort követik, és a jobb kattintás sosem mozdítja azt',
+        'Max width':
+            'Legnagyobb szélesség',
+        'Stop growing past this width and center in the tab instead (0 = no limit)':
+            'Ennél a szélességnél ne nőjön tovább, hanem igazodjon a lap közepére (0 = nincs korlát)',
+        'Footer apps':
+            'Lábléc-alkalmazások',
+        "Buttons in each tab's footer that open the tab's directory":
+            'Gombok az egyes lapok láblécén, amelyek a lap könyvtárát nyitják meg',
+        'Add application…':
+            'Alkalmazás hozzáadása…',
+        'Pull requests':
+            'Pull requestek',
+        'Text size':
+            'Szövegméret',
+        'Reading-text size in the pull request panel, as a percentage of the app font; buttons and menus keep the app size':
+            'Az olvasószöveg mérete a pull request panelen, az alkalmazás betűméretének százalékában; a gombok és a menük az alkalmazás méretén maradnak',
+        'Show embedded images':
+            'Beágyazott képek megjelenítése',
+        'Render the images a description or comment embeds, and the changed image files, as pictures; click one to open it full size. Off, they stay links and patches, and opening a pull request downloads nothing':
+            'A leírásba vagy hozzászólásba ágyazott képek és a módosult képfájlok megjelenítése képként; kattintásra teljes méretben nyílnak meg. Kikapcsolva hivatkozások és patchek maradnak, és a pull request megnyitása semmit sem tölt le',
+        'Confirm before merging':
+            'Megerősítés egyesítés előtt',
+        'Ask before merging a pull request, enabling auto-merge, or merging and archiving the session. Off, the click merges; closing a pull request unmerged still asks either way':
+            'Rákérdezés pull request egyesítése, automatikus egyesítés bekapcsolása, vagy egyesítés és a munkamenet archiválása előtt. Kikapcsolva a kattintás egyesít; a pull request egyesítés nélküli lezárása így is, úgy is rákérdez',
+        'Attach pull requests named in prompts':
+            'A promptokban említett pull requestek csatolása',
+        "Put every pull request a new session's first prompt mentions on that session's row, without waiting for the agent to touch it":
+            'Az új munkamenet első promptjában említett minden pull request felkerül a munkamenet sorára, meg sem várva, hogy az ügynök hozzányúljon',
+        'Rename sessions after their pull requests':
+            'Munkamenetek átnevezése a pull requestjeik után',
+        'Retitle a session to match the newest pull request opened in it; manually renamed sessions keep their name':
+            'A munkamenet címének igazítása a benne nyitott legújabb pull requesthez; a kézzel átnevezett munkamenetek megtartják a nevüket',
+        'Refresh pull requests at launch':
+            'Pull requestek frissítése indításkor',
+        "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left":
+            'Induláskor egyszer megkérdezi a GitHubot minden listázott munkamenet pull requestjeiről, hogy az oldalsáv jelölései frissen induljanak, ne úgy, ahogy maradtak',
+        'Caffeine Mode':
+            'Caffeine Mode',
+        'Keep screen on':
+            'Képernyő bekapcsolva tartása',
+        'Hold the screen on as well as keeping the computer awake. Off lets the screen turn off as usual, while an unattended agent still keeps the computer from sleeping':
+            'A képernyőt is bekapcsolva tartja, nem csak a számítógépet ébren. Kikapcsolva a képernyő szokás szerint kikapcsolhat, miközben a felügyelet nélküli ügynök továbbra sem hagyja elaludni a számítógépet',
+        'Until idle grace period':
+            'Tétlenségig türelmi ideje',
+        'How many minutes Until idle keeps the computer awake after the last session stops working; any session picking work back up restarts the wait':
+            'Hány percig tartja ébren a Tétlenségig a számítógépet, miután az utolsó munkamenet abbahagyta a munkát; ha bármely munkamenet újra dolgozni kezd, a várakozás újraindul',
+        'Turn on at launch':
+            'Bekapcsolás indításkor',
+        'Start with Caffeine Mode already on, keeping the computer awake until you turn it off from the header':
+            'Indulás már bekapcsolt Caffeine Mode-dal, ébren tartva a számítógépet, amíg a fejlécből ki nem kapcsolja',
+        'Turn off after':
+            'Kikapcsolás ennyi idő után',
+        'Open in a window on small screens':
+            'Megnyitás ablakban kis képernyőn',
+        'On screens this many pixels wide or narrower (after display scaling), the editor opens in its own window instead of a panel (0 = always open as a panel)':
+            'Az ennyi képpont széles vagy keskenyebb képernyőkön (a kijelzőskálázás után) a szerkesztő saját ablakban nyílik meg panel helyett (0 = mindig panelként nyíljon)',
+        'Show status icon':
+            'Állapotikon megjelenítése',
+        'Shows Collins in the top bar, with a menu that jumps to any open session':
+            'Megjeleníti a Collinst a felső sávban, egy menüvel, amely bármelyik nyitott munkamenetre ugrik',
+        'No status-icon support was found in this desktop — GNOME needs an AppIndicator extension':
+            'Ezen az asztali környezetben nincs állapotikon-támogatás — a GNOME-hoz AppIndicator-kiterjesztés kell',
+        'Nothing on this desktop can show a status icon':
+            'Ezen az asztali környezetben semmi sem tud állapotikont megjeleníteni',
+        'Using the claude found on PATH at {path}.':
+            'A PATH-on talált claude használata innen: {path}.',
+        "claude isn't on PATH — Collins will ask where it is at the next launch.":
+            'A claude nincs a PATH-on — a Collins a következő indításkor megkérdezi, hol van.',
+        'How long that launch-time Caffeine Mode runs before it turns itself off. Until idle never does: it holds the computer awake while any session is working (and {n} minute past), dozing in between':
+            'Meddig fut az indításkori Caffeine Mode, mielőtt magától kikapcsol. A Tétlenségig sosem kapcsol ki: ébren tartja a számítógépet, amíg bármely munkamenet dolgozik (és utána {n} percig), közben szunnyad',
+        'Move up':
+            'Mozgatás fel',
+        'Move down':
+            'Mozgatás le',
+        'No apps configured':
+            'Nincs beállított alkalmazás',
+        'Before':
+            'Előtte',
+        'After':
+            'Utána',
+        'Back to the pull requests':
+            'Vissza a pull requestekhez',
+        'View in Collins':
+            'Megtekintés a Collinsban',
+        "Open this pull request's page beside the session":
+            'A pull request oldalának megnyitása a munkamenet mellett',
+        'View unresolved comments':
+            'Megválaszolatlan hozzászólások megtekintése',
+        "Open this pull request's page at its first unresolved thread":
+            'A pull request oldalának megnyitása az első megválaszolatlan szálnál',
+        "Collins couldn't run that action.":
+            'A Collins nem tudta futtatni ezt a műveletet.',
+        '{action} failed':
+            'A(z) {action} sikertelen',
+        'Pull request':
+            'Pull request',
+        'Merging when checks pass':
+            'Egyesítés, amint az ellenőrzések sikeresek',
+        "The GitHub CLI (gh) isn't installed, or isn't on PATH.":
+            'A GitHub CLI (gh) nincs telepítve, vagy nincs a PATH-on.',
+        "Collins couldn't run gh.":
+            'A Collins nem tudta futtatni a gh-t.',
+        'gh exited with status {code}.':
+            'A gh {code} státuszkóddal lépett ki.',
+        'and {n} more':
+            'és még {n} további',
+        'Approved':
+            'Jóváhagyva',
+        'Changes requested':
+            'Módosítások kérve',
+        'Review dismissed':
+            'Vélemény elvetve',
+        'Commented':
+            'Hozzászólt',
+        'Reload this pull request':
+            'A pull request újratöltése',
+        'Conversation':
+            'Beszélgetés',
+        'Files':
+            'Fájlok',
+        "Couldn't load this pull request — is the GitHub CLI signed in?":
+            'A pull request nem tölthető be — be van jelentkezve a GitHub CLI?',
+        'Nothing loaded yet.':
+            'Még semmi sincs betöltve.',
+        'Merges {head} into {base}':
+            'A(z) {head} egyesítése ebbe: {base}',
+        '{n} file':
+            '{n} fájl',
+        'No comments yet.':
+            'Még nincs hozzászólás.',
+        'No description provided.':
+            'Nincs leírás.',
+        'No changed files.':
+            'Nincsenek módosult fájlok.',
+        'Checks ({n})':
+            'Ellenőrzések ({n})',
+        'Checks':
+            'Ellenőrzések',
+        'More actions':
+            'További műveletek',
+        'Right-click for more actions':
+            'Jobb kattintás a további műveletekhez',
+        'Add a comment':
+            'Hozzászólás írása',
+        'Request changes':
+            'Módosítások kérése',
+        'Approve':
+            'Jóváhagyás',
+        'Comment':
+            'Hozzászólás',
+        'Comment on {slug}':
+            'Hozzászólás a(z) {slug} pull requesthez',
+        'Approve {slug}':
+            'A(z) {slug} jóváhagyása',
+        'Request changes on {slug}':
+            'Módosítások kérése a(z) {slug} pull requesthez',
+        'Address comments':
+            'Hozzászólások kezelése',
+        'Request review':
+            'Véleményezés kérése',
+        'Outdated':
+            'Elavult',
+        'The code this thread commented on has changed':
+            'A kód, amelyhez ez a szál hozzászólt, azóta megváltozott',
+        'Resolved':
+            'Megoldva',
+        'Reply':
+            'Válasz',
+        'Reply in this thread':
+            'Válasz ebben a szálban',
+        'Unresolve':
+            'Megoldás visszavonása',
+        'Resolve':
+            'Megoldás',
+        'Reopen this thread':
+            'A szál újranyitása',
+        'Mark this thread resolved':
+            'A szál megjelölése megoldottként',
+        'Post reply':
+            'Válasz elküldése',
+        'no diff — binary or too large':
+            'nincs diff — bináris vagy túl nagy',
+        '{n} line':
+            '{n} sor',
+        'Show more':
+            'Több megjelenítése',
+        'Show less':
+            'Kevesebb megjelenítése',
+        'New session in {path}':
+            'Új munkamenet itt: {path}',
+        'Expand':
+            'Kibontás',
+        'Collapse':
+            'Összecsukás',
+        'New Thread':
+            'Új szál',
+        'Discard draft and close tab':
+            'Piszkozat elvetése és a lap bezárása',
+        'Discard draft':
+            'Piszkozat elvetése',
+        'Backgrounding is unavailable until this session is registered and any handoff in progress finishes':
+            'A háttérbe küldés nem érhető el, amíg ez a munkamenet nincs regisztrálva, és a folyamatban lévő átadás be nem fejeződik',
+        'This session has no tab open.':
+            'Ennek a munkamenetnek nincs nyitott lapja.',
+        'Delete archived sessions…':
+            'Archivált munkamenetek törlése…',
+        'Add project':
+            'Projekt hozzáadása',
+        'Refresh session list and pull requests':
+            'Munkamenetlista és pull requestek frissítése',
+        'Chats':
+            'Csevegések',
+        'Draft':
+            'Piszkozat',
+        'Refreshing pull requests…':
+            'Pull requestek frissítése…',
+        'Open in new window':
+            'Megnyitás új ablakban',
+        'Move to new window':
+            'Áthelyezés új ablakba',
+        'Rename to match PR':
+            'Átnevezés a PR-hoz igazítva',
+        'Rename to match PR #{number}':
+            'Átnevezés a(z) #{number} PR-hoz igazítva',
+        'Repair session link':
+            'Munkamenet-kapcsolat javítása',
+        'New session in new window':
+            'Új munkamenet új ablakban',
+        'New session here (no worktree)':
+            'Új munkamenet itt (munkafa nélkül)',
+        'New session here (in a worktree)':
+            'Új munkamenet itt (munkafában)',
+        'New sessions use a worktree':
+            'Az új munkamenetek munkafát használnak',
+        'Git pull ({branch})':
+            'Git pull ({branch})',
+        'Git pull':
+            'Git pull',
+        'Remove project from sidebar':
+            'Projekt eltávolítása az oldalsávból',
+        'replaced':
+            'lecserélve',
+        'Open composer':
+            'Üzenetszerkesztő megnyitása',
+        "the agent didn't start — your prompt is kept in the composer":
+            'az ügynök nem indult el — a prompt az üzenetszerkesztőben megmaradt',
+        'Every pull request this session has opened':
+            'A munkamenet által nyitott összes pull request',
+        'Show/hide terminal panel':
+            'Terminálpanel megjelenítése/elrejtése',
+        'Move terminals to {name}?':
+            'Áthelyezi a terminálokat ide: {name}?',
+        'This session started in a worktree at {path}. The terminal open beside it is still in the project directory — change its directory to the worktree? A terminal running a command is left alone.':
+            'Ez a munkamenet munkafában indult itt: {path}. A mellette nyitott terminál még a projektkönyvtárban van — átállítja a könyvtárát a munkafára? A parancsot futtató terminál békén marad.',
+        'Change Directory':
+            'Könyvtárváltás',
+        '{n} terminal is running a command and stayed where it was':
+            '{n} terminál parancsot futtat, és ott maradt, ahol volt',
+        'Effort: {level}':
+            'Erőfeszítés: {level}',
+        'Click to switch the effort level':
+            'Kattintson az erőfeszítési szint váltásához',
+        'No pull request found for this branch':
+            'Nem található pull request ehhez az ághoz',
+        "Re-check this branch's pull requests":
+            'Az ág pull requestjeinek újraellenőrzése',
+        "Look for this branch's pull request":
+            'Az ág pull requestjének megkeresése',
+        "Add to chat: the agent isn't running in this tab":
+            'Hozzáadás a csevegéshez: ezen a lapon nem fut az ügynök',
+        "Add to chat isn't available for this file":
+            'A Hozzáadás a csevegéshez nem érhető el ehhez a fájlhoz',
+        "skipped {n} dropped item that isn't a local file":
+            '{n} bedobott elem kihagyva, amely nem helyi fájl',
+        "Composer: the input box holds a paste Collins can't read":
+            'Üzenetszerkesztő: a beviteli mezőben olyan beillesztés van, amelyet a Collins nem tud beolvasni',
+        "Effort switch: the agent isn't running in this tab":
+            'Erőfeszítés-váltás: ezen a lapon nem fut az ügynök',
+        "This session isn't at an empty prompt.":
+            'Ez a munkamenet nem üres promptnál áll.',
+        'Start sessions in the background':
+            'Munkamenetek indítása a háttérben',
+        'start_session — spawn a sibling agent in a new background tab, with a prompt':
+            'start_session — testvérügynök indítása új háttérlapon, prompttal',
+        'Read the terminal panel':
+            'A terminálpanel olvasása',
+        "read_terminal — the panel tabs' text and scrollback, your own typing included":
+            'read_terminal — a panellapok szövege és visszagörgetése, a saját gépelését is beleértve',
+        'Run commands in the terminal panel':
+            'Parancsok futtatása a terminálpanelen',
+        'run_in_terminal — type a command into an idle panel tab (or a new one) and run it':
+            'run_in_terminal — parancs beírása egy tétlen panellapra (vagy egy újra) és futtatása',
+        'Default (latest Haiku)':
+            'Alapértelmezett (legújabb Haiku)',
+        'Default (latest Sonnet)':
+            'Alapértelmezett (legújabb Sonnet)',
+        'Session title model':
+            'Munkamenetcímek modellje',
+        'Icon generation model':
+            'Ikongenerálás modellje',
+        'Model list':
+            'Modellista',
+        'Checking…':
+            'Ellenőrzés…',
+        'Ask Anthropic for the model list now, rather than waiting for the saved one to age out':
+            'A modellista lekérése az Anthropictól most, nem várva a mentett lista elavulására',
+        "Couldn't reach Anthropic — offering the CLI's aliases (opus, sonnet, haiku)":
+            'Az Anthropic nem érhető el — a CLI aliasai érhetők el (opus, sonnet, haiku)',
+        "Couldn't reach Anthropic — still showing the list fetched {when}":
+            'Az Anthropic nem érhető el — továbbra is a(z) {when} lekért lista látható',
+        '{count} models, updated {when}':
+            '{count} modell, frissítve {when}',
+        'Waiting for this session to be registered — backgrounding it now would leave the agent with no way back to it':
+            'Várakozás a munkamenet regisztrálására — ha most háttérbe kerülne, az ügynöknek nem lenne útja vissza hozzá',
+        'Another session is still being handed to the background — one at a time':
+            'Egy másik munkamenet átadása a háttérnek még tart — egyszerre csak egy',
+        'New chat (scratch folder)':
+            'Új csevegés (ideiglenes mappa)',
+        'Close window with {n} active session(s)?':
+            'Bezárja az ablakot {n} aktív munkamenettel?',
+        'Agents are asked to exit cleanly first; other running commands will be terminated.':
+            'Az ügynököket először tiszta kilépésre kérjük; a többi futó parancs leáll.',
+        'Backgrounding sessions…':
+            'Munkamenetek háttérbe küldése…',
+        'Quit Now':
+            'Kilépés most',
+        'Handing each session to a background agent, one at a time, so every one is paired with the agent it becomes. {done} of {total} done.':
+            'Minden munkamenet átadása egy-egy háttérügynöknek, egyenként, hogy mindegyik azzal az ügynökkel párosuljon, amellyé válik. {done} / {total} kész.',
+        'New session in {project} (no worktree)':
+            'Új munkamenet itt: {project} (munkafa nélkül)',
+        'New session in {project} (in a worktree)':
+            'Új munkamenet itt: {project} (munkafában)',
+        'Could not create chat directory':
+            'Nem sikerült létrehozni a csevegéskönyvtárat',
+        'Trust and add':
+            'Megbízom benne, hozzáadás',
+        'Discard draft?':
+            'Elveti a piszkozatot?',
+        '“{label}” will be forgotten, along with any terminal panel it kept.':
+            'A(z) „{label}” el lesz felejtve, a megtartott terminálpaneljével együtt.',
+        'Discard':
+            'Elvetés',
+        "Couldn't send that to the session":
+            'Nem sikerült elküldeni a munkamenetnek',
+        'Close tab with an active session?':
+            'Bezárja a lapot aktív munkamenettel?',
+        "The agent is asked to exit cleanly first; the command running in this tab's terminal panel will be terminated.":
+            'Az ügynököt először tiszta kilépésre kérjük; a lap terminálpaneljén futó parancs leáll.',
+        'The agent is asked to exit cleanly first.':
+            'Az ügynököt először tiszta kilépésre kérjük.',
+        "A command is still running in this tab's terminal panel and will be terminated.":
+            'A lap terminálpaneljén még fut egy parancs, amely le lesz állítva.',
+        "Backgrounding isn't available yet: this session hasn't been registered, so a detached agent would have no way back to it.":
+            'A háttérbe küldés még nem érhető el: ez a munkamenet nincs regisztrálva, így a leválasztott ügynöknek nem lenne útja vissza hozzá.',
+        "Backgrounding isn't available right now: another session is still being handed to the background.":
+            'A háttérbe küldés most nem érhető el: egy másik munkamenet átadása a háttérnek még tart.',
+        'No matching agent':
+            'Nincs egyező ügynök',
+        'No background agent matches this session — either its agent is gone, or more than one candidate matched and guessing would link the wrong one. The transcript itself is intact.':
+            'Egyik háttérügynök sem illik ehhez a munkamenethez — vagy eltűnt az ügynöke, vagy több jelölt is egyezett, és a találgatás rosszat kapcsolna hozzá. Maga az átirat sértetlen.',
+        'Session linked':
+            'Munkamenet összekapcsolva',
+        'Linked to its running background agent.':
+            'Összekapcsolva a futó háttérügynökével.',
+        'Nothing to repair':
+            'Nincs mit javítani',
+        'This session is already its own background agent. Opening it attaches to that agent.':
+            'Ez a munkamenet már a saját háttérügynöke. Megnyitása ahhoz az ügynökhöz csatlakozik.',
+        'No pull request is linked to this session yet':
+            'Ehhez a munkamenethez még nincs pull request kapcsolva',
+        'Undo':
+            'Visszavonás',
+        'Archived “{name}”':
+            'A(z) „{name}” archiválva',
+        'Archived {n} sessions':
+            '{n} munkamenet archiválva',
+        'Delete {n} archived session(s)?':
+            'Töröl {n} archivált munkamenetet?',
+        'Keep the {p} emptied project(s) in the sidebar':
+            'A(z) {p} kiürült projekt megtartása az oldalsávban',
+        'Manage and resume your AI coding agent sessions.\n\nUnofficial community tool — not affiliated with or endorsed by Anthropic.':
+            'Kezelje és folytassa AI kódolóügynök-munkameneteit.\n\nNem hivatalos közösségi eszköz — nem áll kapcsolatban az Anthropickal, és az nem is támogatja.',
     },
     "de": {
         'Before you start':
@@ -746,12 +1616,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Rename session": "Sitzung umbenennen",
         "Custom name": "Eigener Name",
         "Cancel": "Abbrechen",
-        "Session list": "Sitzungsliste",
-        "Show folder path": "Ordnerpfad anzeigen",
         "Show folder paths in sidebar": "Ordnerpfade in der Seitenleiste anzeigen",
-        "Show each session's project folder path in the sidebar":
-            "Den Projektordnerpfad jeder Sitzung in der Seitenleiste anzeigen",
-        "Startup": "Programmstart",
         "Reopen the last session": "Letzte Sitzung wieder öffnen",
         "Open the session that was active when the app was last closed. "
         "Off, the app launches with no session open":
@@ -824,7 +1689,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Tools used in this session": "In dieser Sitzung verwendete Tools",
         "Recent activity": "Letzte Aktivität",
         "You": "Du",
-        "Claude": "Claude",
         "Follow system": "System folgen",
         "Light": "Hell",
         "Dark": "Dunkel",
@@ -846,23 +1710,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Paste": "Einfügen",
         "Select All": "Alles auswählen",
         "Color theme": "Farbthema",
-        "Appearance": "Erscheinungsbild",
         "Color scheme": "Farbschema",
         "Dark / Light Mode": "Dunkel- / Hellmodus",
         "Language": "Sprache",
-        "Restart to apply": "Neustart erforderlich",
-        "Running sessions": "Laufende Sitzungen",
-        "Ask keeps the confirmation dialog; the other choices skip it and exit the "
-        "session(s) cleanly or keep them running detached":
-            "„Nachfragen“ behält den Bestätigungsdialog; die anderen Optionen überspringen "
-            "ihn und beenden die Sitzung(en) sauber oder lassen sie abgekoppelt weiterlaufen",
         "When archiving a running session": "Beim Archivieren einer laufenden Sitzung",
         "Archiving a session that is still running also closes its tab":
             "Das Archivieren einer noch laufenden Sitzung schließt auch ihren Tab",
         "When quitting with running sessions": "Beim Beenden mit laufenden Sitzungen",
         "Closing a window while agent sessions are still running":
             "Schließen eines Fensters, während Agenten-Sitzungen noch laufen",
-        "Archiving": "Archivierung",
         "Archive on claude.ai too": "Auch auf claude.ai archivieren",
         "A session that also appears on claude.ai is archived and restored "
         "there along with the toggle here; best-effort, archiving locally "
@@ -878,14 +1734,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show archived sessions": "Archivierte Sitzungen anzeigen",
         "MCP servers": "MCP-Server",
         "About Collins": "Über Collins",
-        "Refresh session list": "Sitzungsliste aktualisieren",
         "Search sessions…": "Sitzungen suchen…",
         "Search sessions": "Sitzungen suchen",
         "Close search": "Suche schließen",
         "A session is working": "Eine Sitzung arbeitet",
         "Collapse all groups": "Alle Gruppen einklappen",
         "Expand all groups": "Alle Gruppen ausklappen",
-        "No sessions found": "Keine Sitzungen gefunden",
         "{n} sessions": "{n} Sitzungen",
         "{n} projects": "{n} Projekte",
         "{n} open": "{n} geöffnet",
@@ -1016,12 +1870,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Öffne Collins erneut, indem du es neu startest oder über die "
             "Benachrichtigung einer Sitzung.",
         "no sessions open": "keine Sitzungen geöffnet",
-        "1 session": "1 Sitzung",
         "{n} sessions": "{n} Sitzungen",
-        "1 working": "1 arbeitet",
-        "{n} working": "{n} arbeiten",
-        "1 unread": "1 ungelesen",
-        "{n} unread": "{n} ungelesen",
         "Finished a run": "Hat einen Lauf beendet",
         "Default: the desktop's message sound": "Standard: der Nachrichtenton des Desktops",
         "Silent": "Stumm",
@@ -1081,7 +1930,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Sound: {name}": "Ton: {name}",
         "Preferences…": "Einstellungen…",
         "Show/hide notifications": "Benachrichtigungen ein-/ausblenden",
-        "You interrupted Claude here": "Du hast Claude hier unterbrochen",
         "Restart now": "Jetzt neu starten",
         "Choose project directory": "Projektverzeichnis wählen",
         "Tab name": "Tab-Name",
@@ -1180,7 +2028,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Großes Projekt — nur die ersten {count} Dateien sind durchsuchbar.",
         "Agent files": "Agent-Dateien",
         "Open {name} in the editor": "{name} im Editor öffnen",
-        "Session tools": "Sitzungswerkzeuge",
         "Session behavior": "Sitzungsverhalten",
         "Composer": "Composer",
         "Built-in MCP tools": "Eingebaute MCP-Werkzeuge",
@@ -1231,7 +2078,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "eine eigene Spalte jenseits der maximalen Terminalbreite ist. "
             "Einmal pro Sitzungstab — ein wieder geschlossenes Panel bleibt "
             "also zu",
-        "Open composer (Ctrl+.)": "Composer öffnen (Strg+.)",
         "Attach file": "Datei anhängen",
         "Remove image": "Bild entfernen",
         "Close composer and keep the text in the terminal":
@@ -1311,6 +2157,900 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Desktop-Symbol konnte nicht installiert werden",
         "Collins is in your applications now":
             "Collins ist jetzt in deinen Anwendungen",
+        'Add application':
+            'Anwendung hinzufügen',
+        'Search applications…':
+            'Anwendungen suchen…',
+        'Caffeine Mode is on':
+            'Caffeine Mode ist an',
+        "That file isn't an image Collins can display.":
+            'Diese Datei ist kein Bild, das Collins anzeigen kann.',
+        'Until idle':
+            'Bis zum Leerlauf',
+        'Indefinitely':
+            'Unbegrenzt',
+        '1 hour':
+            '1 Stunde',
+        '{n} hours':
+            '{n} Stunden',
+        'Caffeine Mode is dozing until a session works again — then the computer and screen will stay awake':
+            'Caffeine Mode döst, bis wieder eine Sitzung arbeitet — dann bleiben Computer und Bildschirm wach',
+        'Caffeine Mode is dozing until a session works again — then the computer will stay awake, the screen may turn off':
+            'Caffeine Mode döst, bis wieder eine Sitzung arbeitet — dann bleibt der Computer wach, der Bildschirm darf sich ausschalten',
+        'Caffeine Mode is on while sessions are working — the computer and screen will stay awake':
+            'Caffeine Mode ist an, solange Sitzungen arbeiten — Computer und Bildschirm bleiben wach',
+        'Caffeine Mode is on while sessions are working — the computer will stay awake, the screen may turn off':
+            'Caffeine Mode ist an, solange Sitzungen arbeiten — der Computer bleibt wach, der Bildschirm darf sich ausschalten',
+        'Caffeine Mode is on — the computer and screen will stay awake':
+            'Caffeine Mode ist an — Computer und Bildschirm bleiben wach',
+        'Caffeine Mode is on — the computer will stay awake, the screen may turn off':
+            'Caffeine Mode ist an — der Computer bleibt wach, der Bildschirm darf sich ausschalten',
+        'Caffeine Mode: keep the computer awake and the screen on':
+            'Caffeine Mode: Computer wach und Bildschirm an halten',
+        'Caffeine Mode: keep the computer awake, letting the screen turn off':
+            'Caffeine Mode: Computer wach halten, Bildschirm darf sich ausschalten',
+        'Caffeine Mode turns off in {time} — computer and screen stay awake':
+            'Caffeine Mode schaltet sich in {time} aus — Computer und Bildschirm bleiben wach',
+        'Caffeine Mode turns off in {time} — computer stays awake, screen may turn off':
+            'Caffeine Mode schaltet sich in {time} aus — der Computer bleibt wach, der Bildschirm darf sich ausschalten',
+        'Send':
+            'Senden',
+        'The user declined this action.':
+            'Der Benutzer hat diese Aktion abgelehnt.',
+        'Switch the effort level for this session':
+            'Die Effort-Stufe für diese Sitzung wechseln',
+        "couldn't save a copy of the dropped image":
+            'eine Kopie des abgelegten Bilds konnte nicht gespeichert werden',
+        "skipped {n} item that isn't a local file":
+            '{n} Element übersprungen, das keine lokale Datei ist',
+        "couldn't reference {n} dropped file name":
+            '{n} abgelegter Dateiname konnte nicht referenziert werden',
+        "couldn't save a copy of the pasted image":
+            'eine Kopie des eingefügten Bilds konnte nicht gespeichert werden',
+        'Effort':
+            'Effort',
+        'Copied to clipboard':
+            'In die Zwischenablage kopiert',
+        'Rename folder':
+            'Ordner umbenennen',
+        'Rename file':
+            'Datei umbenennen',
+        'Enter a new name for “{name}”.':
+            'Neuen Namen für „{name}“ eingeben.',
+        'Rename':
+            'Umbenennen',
+        'Move editor to {name}?':
+            'Editor nach {name} verschieben?',
+        'This session is now working in {path}. One open file has unsaved changes and also exists there — choose what happens to it.':
+            'Diese Sitzung arbeitet jetzt in {path}. Eine offene Datei hat ungespeicherte Änderungen und existiert auch dort — wählen Sie, was mit ihr geschieht.',
+        'Stay':
+            'Bleiben',
+        'Go on editing this file, where your unsaved changes belong':
+            'Diese Datei weiter bearbeiten, wo Ihre ungespeicherten Änderungen hingehören',
+        'Take edits':
+            'Änderungen mitnehmen',
+        'Move this tab to the new copy, keeping your unsaved changes — saving will write them over whatever that copy holds':
+            'Diesen Tab zur neuen Kopie verschieben und die ungespeicherten Änderungen behalten — Speichern überschreibt damit, was diese Kopie enthält',
+        'Use new':
+            'Neue verwenden',
+        'Open the new copy and discard your unsaved changes':
+            'Die neue Kopie öffnen und die ungespeicherten Änderungen verwerfen',
+        "Don't Move":
+            'Nicht verschieben',
+        'Move Editor':
+            'Editor verschieben',
+        'Do you trust this folder?':
+            'Vertrauen Sie diesem Ordner?',
+        '{agent} will be able to read, edit and execute files in\n\n{path}\n\nand everything inside it, including any worktrees it creates there. Open it only if this is a project you created or otherwise trust — like your own code, a well-known open source project, or work from your team.':
+            '{agent} kann Dateien lesen, bearbeiten und ausführen in\n\n{path}\n\nund allem darin, einschließlich aller Worktrees, die dort entstehen. Öffnen Sie ihn nur, wenn dies ein Projekt ist, das Sie erstellt haben oder dem Sie anderweitig vertrauen — etwa eigener Code, ein bekanntes Open-Source-Projekt oder Arbeit aus Ihrem Team.',
+        'Trust and open':
+            'Vertrauen und öffnen',
+        'Generating icon…':
+            'Icon wird generiert…',
+        'At sidebar size':
+            'In Seitenleisten-Größe',
+        'Optional adjustments, e.g. “make it blue”':
+            'Optionale Anpassungen, z. B. „mach es blau“',
+        'Regenerate':
+            'Neu generieren',
+        'Default model':
+            'Standardmodell',
+        "Model for this dialog's runs; Preferences sets the default":
+            'Modell für die Läufe dieses Dialogs; die Einstellungen legen den Standard fest',
+        'Default ({model})':
+            'Standard ({model})',
+        'Generate Icon':
+            'Icon generieren',
+        'the generated SVG could not be rendered':
+            'das generierte SVG konnte nicht gerendert werden',
+        'Icon generation failed: {error}':
+            'Icon-Generierung fehlgeschlagen: {error}',
+        'Saving failed: {error}':
+            'Speichern fehlgeschlagen: {error}',
+        'Close other tabs':
+            'Andere Tabs schließen',
+        'Close tabs to the right':
+            'Tabs rechts davon schließen',
+        'Close all tabs':
+            'Alle Tabs schließen',
+        'Add to chat':
+            'Zum Chat hinzufügen',
+        "Couldn't rename {name}: {message}":
+            '„{name}“ konnte nicht umbenannt werden: {message}',
+        'A name is needed to rename {name}.':
+            'Zum Umbenennen von „{name}“ wird ein Name benötigt.',
+        "“{new_name}” isn't a name — renaming can't move things elsewhere.":
+            '„{new_name}“ ist kein Name — Umbenennen kann nichts woandershin verschieben.',
+        '“{new_name}” already exists here.':
+            '„{new_name}“ existiert hier bereits.',
+        '{name} is no longer there.':
+            '„{name}“ ist nicht mehr da.',
+        "{name} can't be renamed to something outside this project.":
+            '„{name}“ kann nicht in etwas außerhalb dieses Projekts umbenannt werden.',
+        "There's nothing on the clipboard to paste here.":
+            'Die Zwischenablage enthält nichts, das sich hier einfügen ließe.',
+        "{count} item couldn't be pasted.":
+            '{count} Element konnte nicht eingefügt werden.',
+        "{name} can't be pasted into itself.":
+            '„{name}“ kann nicht in sich selbst eingefügt werden.',
+        'That folder is no longer there.':
+            'Dieser Ordner ist nicht mehr da.',
+        "{name} can't be pasted outside this project.":
+            '„{name}“ kann nicht außerhalb dieses Projekts eingefügt werden.',
+        'There are already too many copies of {name} here.':
+            'Es gibt hier bereits zu viele Kopien von „{name}“.',
+        "Couldn't paste {name}: {message}":
+            '„{name}“ konnte nicht eingefügt werden: {message}',
+        "{name} couldn't be decoded as an image.":
+            '„{name}“ konnte nicht als Bild dekodiert werden.',
+        'Session moved to {name}':
+            'Sitzung nach {name} verschoben',
+        'Follow':
+            'Folgen',
+        'Image':
+            'Bild',
+        'Cut':
+            'Ausschneiden',
+        '{n} session(s) in {p} project(s) have their transcripts moved to the trash, where they can be restored. Sessions archived with their whole project — and originals a backgrounded fork replaced — are included.':
+            'Die Transkripte von {n} Sitzung(en) in {p} Projekt(en) werden in den Papierkorb verschoben, wo sie wiederhergestellt werden können. Sitzungen, die mit ihrem ganzen Projekt archiviert wurden — und Originale, die ein Hintergrund-Fork ersetzt hat —, sind eingeschlossen.',
+        '{project} — {n} of {total}':
+            '{project} — {n} von {total}',
+        '…and {p} other project(s) — {n} session(s)':
+            '…und {p} weitere(s) Projekt(e) — {n} Sitzung(en)',
+        '{p} of these project(s) lose every session they have.':
+            '{p} dieser Projekte verlieren jede Sitzung, die sie haben.',
+        'Open, every check passed':
+            'Offen, alle Checks bestanden',
+        'Checks still running':
+            'Checks laufen noch',
+        'A check failed':
+            'Ein Check ist fehlgeschlagen',
+        'A reviewer is waiting on a reply':
+            'Ein Reviewer wartet auf eine Antwort',
+        'Draft, and the branch conflicts':
+            'Entwurf, und der Branch hat Konflikte',
+        'Merged':
+            'Zusammengeführt',
+        'Collins is better with the GitHub CLI':
+            'Collins ist besser mit der GitHub CLI',
+        "Collins follows the pull requests your sessions open — and acts on them — through gh, GitHub's own command-line tool, which isn't installed here.":
+            'Collins verfolgt die Pull-Requests, die Ihre Sitzungen öffnen — und führt Aktionen darauf aus — über gh, GitHubs eigenes Kommandozeilen-Tool, das hier nicht installiert ist.',
+        "Collins follows the pull requests your sessions open — and acts on them — through gh, GitHub's own command-line tool, which is installed here but never signed in.":
+            'Collins verfolgt die Pull-Requests, die Ihre Sitzungen öffnen — und führt Aktionen darauf aus — über gh, GitHubs eigenes Kommandozeilen-Tool, das hier installiert, aber nie angemeldet ist.',
+        'Not now':
+            'Jetzt nicht',
+        'Get the GitHub CLI':
+            'GitHub CLI holen',
+        'Copy command':
+            'Befehl kopieren',
+        "With it, every session's pull requests carry their status:":
+            'Damit tragen die Pull-Requests jeder Sitzung ihren Status:',
+        '…and a click on one does something about it:':
+            '…und ein Klick darauf unternimmt etwas:',
+        "Don't show this again":
+            'Nicht mehr anzeigen',
+        'Install it from cli.github.com — Collins picks it up the next time it starts.':
+            'Installieren Sie es von cli.github.com — Collins findet es beim nächsten Start.',
+        'Run this once in any terminal. Collins asks for no login of its own.':
+            'Führen Sie dies einmal in einem beliebigen Terminal aus. Collins verlangt keine eigene Anmeldung.',
+        'Keyboard Bindings':
+            'Tastaturbelegung',
+        'Reset All':
+            'Alle zurücksetzen',
+        'Put every shortcut back to its default':
+            'Jedes Kürzel auf seinen Standard zurücksetzen',
+        'Click a row to change its shortcut':
+            'Klicken Sie auf eine Zeile, um ihr Kürzel zu ändern',
+        'Also bound to: {actions}':
+            'Auch belegt für: {actions}',
+        'Unbound':
+            'Nicht belegt',
+        'Reset to default':
+            'Auf Standard zurücksetzen',
+        'Reset every shortcut?':
+            'Jedes Kürzel zurücksetzen?',
+        'All of your custom keyboard bindings are replaced by the defaults.':
+            'Alle Ihre eigenen Tastenbelegungen werden durch die Standards ersetzt.',
+        '{chord} is already in use':
+            '{chord} ist bereits belegt',
+        'It is bound to {actions}. Move it to {action}?':
+            'Es ist mit {actions} belegt. Zu {action} verschieben?',
+        'Move Shortcut':
+            'Kürzel verschieben',
+        'unbound':
+            'nicht belegt',
+        'Set shortcut for “{action}”':
+            'Kürzel für „{action}“ festlegen',
+        'Press the new key combination. Currently: {current}.\nBackspace removes the binding; Escape keeps it.':
+            'Drücken Sie die neue Tastenkombination. Aktuell: {current}.\nRücktaste entfernt die Belegung; Escape behält sie.',
+        'Tabs and windows':
+            'Tabs und Fenster',
+        'Panels':
+            'Panels',
+        'Application':
+            'Anwendung',
+        'New session':
+            'Neue Sitzung',
+        'Quick switcher':
+            'Schnellwechsler',
+        'Archive the current session':
+            'Aktuelle Sitzung archivieren',
+        'Undo the last archive':
+            'Letztes Archivieren rückgängig machen',
+        'Open the pull request page':
+            'Die Pull-Request-Seite öffnen',
+        "Unbound by default; the sidebar's search button does the same.":
+            'Standardmäßig nicht belegt; der Suchknopf der Seitenleiste tut dasselbe.',
+        'Close tab':
+            'Tab schließen',
+        'Next tab':
+            'Nächster Tab',
+        'Previous tab':
+            'Vorheriger Tab',
+        'Toggle the tab marker':
+            'Tab-Markierung umschalten',
+        'Show/hide the sidebar':
+            'Seitenleiste ein-/ausblenden',
+        'Show/hide the terminal panel':
+            'Terminal-Panel ein-/ausblenden',
+        'Clear the terminal panel':
+            'Terminal-Panel leeren',
+        'Move the panel tab to the other side':
+            'Panel-Tab auf die andere Seite verschieben',
+        'Show/hide the composer':
+            'Composer ein-/ausblenden',
+        'Show/hide the attachments gallery':
+            'Anhänge-Galerie ein-/ausblenden',
+        "Swap the panel's sides":
+            'Seiten des Panels tauschen',
+        'Unbound by default.':
+            'Standardmäßig nicht belegt.',
+        'Move the panel tab to the other strip':
+            'Panel-Tab auf die andere Leiste verschieben',
+        'Show/hide the editor':
+            'Editor ein-/ausblenden',
+        'Quick open a file':
+            'Datei schnell öffnen',
+        'Focus the editor':
+            'Editor fokussieren',
+        'Save the file':
+            'Datei speichern',
+        'In the editor.':
+            'Im Editor.',
+        'Find in the file':
+            'In der Datei suchen',
+        'Copy the selection':
+            'Auswahl kopieren',
+        'With easy copy and paste on; without a selection the key reaches the terminal.':
+            'Bei eingeschaltetem einfachem Kopieren & Einfügen; ohne Auswahl erreicht die Taste das Terminal.',
+        'With easy copy and paste on.':
+            'Bei eingeschaltetem einfachem Kopieren & Einfügen.',
+        'Copy (terminal-style)':
+            'Kopieren (Terminal-Stil)',
+        'Paste (terminal-style)':
+            'Einfügen (Terminal-Stil)',
+        'Find in the terminal':
+            'Im Terminal suchen',
+        'Insert a newline in the prompt':
+            'Neue Zeile in den Prompt einfügen',
+        'Zoom in':
+            'Vergrößern',
+        'Zoom out':
+            'Verkleinern',
+        'Reset zoom':
+            'Zoom zurücksetzen',
+        'Keyboard bindings':
+            'Tastaturbelegung',
+        "Couldn't display image":
+            'Bild konnte nicht angezeigt werden',
+        'Open in Editor':
+            'Im Editor öffnen',
+        'Low':
+            'Niedrig',
+        'Medium':
+            'Mittel',
+        'High':
+            'Hoch',
+        'Extra high':
+            'Sehr hoch',
+        'Max':
+            'Max',
+        'This model has no effort setting':
+            'Dieses Modell hat keine Effort-Einstellung',
+        'New chat':
+            'Neuer Chat',
+        'Model to start this session on':
+            'Modell, mit dem diese Sitzung startet',
+        'Effort level to start this session at':
+            'Effort-Stufe, mit der diese Sitzung startet',
+        'New git worktree':
+            'Neuer Git-Worktree',
+        'Work in a fresh worktree of this project, apart from its uncommitted changes':
+            'In einem frischen Worktree dieses Projekts arbeiten, getrennt von seinen nicht committeten Änderungen',
+        'Empty Session':
+            'Leere Sitzung',
+        'Start the session with no prompt':
+            'Sitzung ohne Prompt starten',
+        'Drag to move this tab: drop on an edge to split, on a strip to join':
+            'Ziehen verschiebt diesen Tab: Ablegen an einer Kante teilt, auf einer Leiste reiht ein',
+        'Restore this tab to its size and place in the panel':
+            'Diesen Tab auf seine Größe und seinen Platz im Panel zurücksetzen',
+        'Close Tab':
+            'Tab schließen',
+        'Overlay this tab over the whole session':
+            'Diesen Tab über die ganze Sitzung legen',
+        'Move this tab to the other side':
+            'Diesen Tab auf die andere Seite verschieben',
+        'Close tab with a running command?':
+            'Tab mit laufendem Befehl schließen?',
+        'Move to':
+            'Verschieben nach',
+        'Split Left':
+            'Nach links teilen',
+        'Split Right':
+            'Nach rechts teilen',
+        'Split Up':
+            'Nach oben teilen',
+        'Split Down':
+            'Nach unten teilen',
+        'Close tabs with running commands?':
+            'Tabs mit laufenden Befehlen schließen?',
+        'A command is still running in one of these tabs and will be terminated.':
+            'In einem dieser Tabs läuft noch ein Befehl, der beendet wird.',
+        'Close Tabs':
+            'Tabs schließen',
+        'Address unresolved comments':
+            'Unbeantwortete Kommentare bearbeiten',
+        'Send “{prompt}” to this session':
+            '„{prompt}“ an diese Sitzung senden',
+        'Open a pull request':
+            'Einen Pull Request öffnen',
+        'Fix errors & resolve conflicts':
+            'Fehler beheben & Konflikte auflösen',
+        'Address the CI errors':
+            'Die CI-Fehler beheben',
+        'Fix errors':
+            'Fehler beheben',
+        'Resolve conflicts':
+            'Konflikte auflösen',
+        'Mark ready for review':
+            'Als bereit für Review markieren',
+        'Take {slug} out of draft':
+            '{slug} aus dem Entwurfsstatus nehmen',
+        'Ready':
+            'Bereit',
+        'Ask Claude for a review':
+            'Claude um ein Review bitten',
+        'Comment “{comment}” on {slug}':
+            '„{comment}“ zu {slug} kommentieren',
+        'Merge when checks pass':
+            'Zusammenführen, wenn die Checks bestehen',
+        'Turn on auto-merge for {slug}':
+            'Auto-Merge für {slug} einschalten',
+        'Merge {slug} when its checks pass?':
+            '{slug} zusammenführen, wenn seine Checks bestehen?',
+        'GitHub merges it as soon as every required check has passed. You can still cancel auto-merge on the pull request page.':
+            'GitHub führt ihn zusammen, sobald jeder erforderliche Check bestanden ist. Auto-Merge lässt sich auf der Pull-Request-Seite weiterhin abbrechen.',
+        'Enable auto-merge':
+            'Auto-Merge aktivieren',
+        'Auto-Merge':
+            'Auto-Merge',
+        'Merge pull request':
+            'Pull Request zusammenführen',
+        'Merge {slug} now':
+            '{slug} jetzt zusammenführen',
+        'Merge {slug}?':
+            '{slug} zusammenführen?',
+        'Merge':
+            'Zusammenführen',
+        'Disable auto-merge':
+            'Auto-Merge deaktivieren',
+        'Stop GitHub from merging {slug} when its checks pass':
+            'GitHub davon abhalten, {slug} zusammenzuführen, wenn seine Checks bestehen',
+        'Disable Auto-Merge':
+            'Auto-Merge deaktivieren',
+        'Its checks have passed. This merges the pull request on GitHub now.':
+            'Seine Checks sind bestanden. Dies führt den Pull Request jetzt auf GitHub zusammen.',
+        "Its checks haven't all passed. This merges the pull request on GitHub now, if the repository lets it.":
+            'Seine Checks sind nicht alle bestanden. Dies führt den Pull Request jetzt auf GitHub zusammen, sofern das Repository es zulässt.',
+        'Merge and archive session':
+            'Zusammenführen und Sitzung archivieren',
+        'Merge {slug} now, then archive this session':
+            '{slug} jetzt zusammenführen, dann diese Sitzung archivieren',
+        'Merge {slug} and archive this session?':
+            '{slug} zusammenführen und diese Sitzung archivieren?',
+        'The session is archived once the merge lands — you can bring it back with Undo, or from “Show archived”.':
+            'Die Sitzung wird archiviert, sobald der Merge durch ist — zurückholen lässt sie sich mit Rückgängig oder über „Archivierte anzeigen“.',
+        'Merge & archive':
+            'Zusammenführen & archivieren',
+        'Mark ready & merge when checks pass':
+            'Bereit markieren & zusammenführen, wenn Checks bestehen',
+        'Take {slug} out of draft, then turn on auto-merge':
+            '{slug} aus dem Entwurfsstatus nehmen, dann Auto-Merge einschalten',
+        'Mark {slug} ready and merge it when its checks pass?':
+            '{slug} als bereit markieren und zusammenführen, wenn seine Checks bestehen?',
+        'Ready & auto-merge':
+            'Bereit & Auto-Merge',
+        'Ready & Auto-Merge':
+            'Bereit & Auto-Merge',
+        'Mark ready & merge':
+            'Bereit markieren & zusammenführen',
+        'Take {slug} out of draft, then merge it now':
+            '{slug} aus dem Entwurfsstatus nehmen, dann jetzt zusammenführen',
+        'Mark {slug} ready and merge it?':
+            '{slug} als bereit markieren und zusammenführen?',
+        'Ready & merge':
+            'Bereit & zusammenführen',
+        'Ready & Merge':
+            'Bereit & Zusammenführen',
+        'Mark ready, merge & archive session':
+            'Bereit markieren, zusammenführen & Sitzung archivieren',
+        'Take {slug} out of draft, merge it now, then archive this session':
+            '{slug} aus dem Entwurfsstatus nehmen, jetzt zusammenführen, dann diese Sitzung archivieren',
+        'Mark {slug} ready, merge it and archive this session?':
+            '{slug} als bereit markieren, zusammenführen und diese Sitzung archivieren?',
+        'Ready, merge & archive':
+            'Bereit, zusammenführen & archivieren',
+        'The pull request is marked ready for review first.':
+            'Der Pull Request wird zuerst als bereit für Review markiert.',
+        'Close pull request':
+            'Pull Request schließen',
+        'Close {slug} without merging':
+            '{slug} ohne Zusammenführen schließen',
+        'Close {slug}?':
+            '{slug} schließen?',
+        'The pull request is closed without merging. Its branch and its comments stay, and it can be reopened on GitHub.':
+            'Der Pull Request wird ohne Zusammenführen geschlossen. Sein Branch und seine Kommentare bleiben, und er kann auf GitHub wieder geöffnet werden.',
+        "{url} doesn't look like a pull request.":
+            '{url} sieht nicht wie ein Pull Request aus.',
+        "Collins doesn't know how to do that.":
+            'Collins weiß nicht, wie das geht.',
+        'Merge conflicts':
+            'Merge-Konflikte',
+        'Refresh':
+            'Aktualisieren',
+        'Search settings…':
+            'Einstellungen durchsuchen…',
+        'Search settings':
+            'Einstellungen durchsuchen',
+        'No settings found':
+            'Keine Einstellungen gefunden',
+        'Try a different search.':
+            'Versuchen Sie eine andere Suche.',
+        'Tab drag handles':
+            'Tab-Ziehgriffe',
+        'Drag any panel tab by its handle to move, reorder, or split it. Relies on GTK internals — turn off to fall back to plain tab dragging plus a drag grip on each panel':
+            'Jeden Panel-Tab an seinem Griff ziehen, um ihn zu verschieben, umzuordnen oder zu teilen. Beruht auf GTK-Interna — ausschalten, um auf einfaches Tab-Ziehen plus einen Ziehgriff pro Panel zurückzufallen',
+        'Project icon size':
+            'Projekt-Icon-Größe',
+        'Size of the project and folder icons in the sidebar':
+            'Größe der Projekt- und Ordner-Icons in der Seitenleiste',
+        'Start new sessions in a git worktree':
+            'Neue Sitzungen in einem Git-Worktree starten',
+        "Git projects only; each new session works in its own fresh worktree, so it won't see uncommitted local changes. Right-click a project header to override per project":
+            'Nur Git-Projekte; jede neue Sitzung arbeitet in einem eigenen frischen Worktree und sieht darum keine nicht committeten lokalen Änderungen. Rechtsklick auf einen Projektkopf überschreibt das pro Projekt',
+        "Follow Claude's own session names":
+            'Claudes eigenen Sitzungsnamen folgen',
+        'Rename sessions whenever Claude names or renames them — /rename and its automatic titles; manually renamed sessions keep their name':
+            'Sitzungen umbenennen, wann immer Claude sie benennt oder umbenennt — /rename und seine automatischen Titel; manuell umbenannte Sitzungen behalten ihren Namen',
+        'Exact busy tracking from the agent':
+            'Exakte Beschäftigt-Erkennung vom Agenten',
+        "Read Claude Code's own progress announcements for the sidebar's working indicator, instead of only inferring from terminal output (fully applies to newly opened tabs)":
+            'Claude Codes eigene Fortschrittsmeldungen für die Arbeitsanzeige der Seitenleiste lesen, statt nur aus der Terminalausgabe zu schließen (gilt vollständig für neu geöffnete Tabs)',
+        'Poll for background sessions':
+            'Hintergrundsitzungen abfragen',
+        'Fallback: check the agent CLI every 20 seconds in case the yellow guide lines stop updating on their own':
+            'Fallback: alle 20 Sekunden die Agent-CLI prüfen, falls die gelben Leitlinien von selbst nicht mehr aktualisieren',
+        'Typing opens the composer':
+            'Tippen öffnet den Composer',
+        "Start typing at an agent's empty prompt and the composer opens with what you typed. A dialog, a menu and the CLI's own /, !, # and @ keep their keys":
+            'Tippen Sie am leeren Prompt eines Agenten los, öffnet sich der Composer mit dem Getippten. Ein Dialog, ein Menü und die CLI-eigenen /, !, # und @ behalten ihre Tasten',
+        'Right-click aims spell-check':
+            'Rechtsklick lenkt die Rechtschreibprüfung',
+        'Right-clicking a misspelled word in the composer offers corrections for that word. Off: corrections follow the text cursor instead, and a right-click never moves it':
+            'Ein Rechtsklick auf ein falsch geschriebenes Wort im Composer bietet Korrekturen für dieses Wort an. Aus: Korrekturen folgen stattdessen dem Textcursor, und ein Rechtsklick bewegt ihn nie',
+        'Max width':
+            'Maximale Breite',
+        'Stop growing past this width and center in the tab instead (0 = no limit)':
+            'Über diese Breite hinaus nicht wachsen, sondern im Tab zentrieren (0 = keine Grenze)',
+        'Footer apps':
+            'Fußzeilen-Apps',
+        "Buttons in each tab's footer that open the tab's directory":
+            'Knöpfe in der Fußzeile jedes Tabs, die das Verzeichnis des Tabs öffnen',
+        'Add application…':
+            'Anwendung hinzufügen…',
+        'Pull requests':
+            'Pull-Requests',
+        'Text size':
+            'Textgröße',
+        'Reading-text size in the pull request panel, as a percentage of the app font; buttons and menus keep the app size':
+            'Lesetextgröße im Pull-Request-Panel, als Prozentsatz der App-Schrift; Knöpfe und Menüs behalten die App-Größe',
+        'Show embedded images':
+            'Eingebettete Bilder anzeigen',
+        'Render the images a description or comment embeds, and the changed image files, as pictures; click one to open it full size. Off, they stay links and patches, and opening a pull request downloads nothing':
+            'Bilder, die eine Beschreibung oder ein Kommentar einbettet, und geänderte Bilddateien als Bilder darstellen; ein Klick öffnet sie in voller Größe. Aus bleiben sie Links und Patches, und das Öffnen eines Pull-Requests lädt nichts herunter',
+        'Confirm before merging':
+            'Vor dem Zusammenführen bestätigen',
+        'Ask before merging a pull request, enabling auto-merge, or merging and archiving the session. Off, the click merges; closing a pull request unmerged still asks either way':
+            'Nachfragen, bevor ein Pull Request zusammengeführt, Auto-Merge aktiviert oder zusammengeführt und die Sitzung archiviert wird. Aus führt der Klick direkt zusammen; das Schließen eines nicht zusammengeführten Pull-Requests fragt trotzdem immer nach',
+        'Attach pull requests named in prompts':
+            'In Prompts genannte Pull-Requests anheften',
+        "Put every pull request a new session's first prompt mentions on that session's row, without waiting for the agent to touch it":
+            'Jeden Pull Request, den der erste Prompt einer neuen Sitzung erwähnt, auf die Zeile dieser Sitzung setzen, ohne zu warten, bis der Agent ihn anfasst',
+        'Rename sessions after their pull requests':
+            'Sitzungen nach ihren Pull-Requests benennen',
+        'Retitle a session to match the newest pull request opened in it; manually renamed sessions keep their name':
+            'Eine Sitzung nach dem neuesten in ihr geöffneten Pull Request umbenennen; manuell umbenannte Sitzungen behalten ihren Namen',
+        'Refresh pull requests at launch':
+            'Pull-Requests beim Start aktualisieren',
+        "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left":
+            'GitHub beim Start einmal nach den Pull-Requests jeder gelisteten Sitzung fragen, damit die Markierungen in der Seitenleiste aktuell starten statt so, wie sie zurückblieben',
+        'Caffeine Mode':
+            'Caffeine Mode',
+        'Keep screen on':
+            'Bildschirm anlassen',
+        'Hold the screen on as well as keeping the computer awake. Off lets the screen turn off as usual, while an unattended agent still keeps the computer from sleeping':
+            'Neben dem wachen Computer auch den Bildschirm anlassen. Aus lässt den Bildschirm wie üblich ausgehen, während ein unbeaufsichtigter Agent den Computer weiterhin am Schlafen hindert',
+        'Until idle grace period':
+            'Karenzzeit für „Bis zum Leerlauf“',
+        'How many minutes Until idle keeps the computer awake after the last session stops working; any session picking work back up restarts the wait':
+            'Wie viele Minuten „Bis zum Leerlauf“ den Computer wach hält, nachdem die letzte Sitzung aufgehört hat zu arbeiten; nimmt eine Sitzung die Arbeit wieder auf, beginnt die Wartezeit von vorn',
+        'Turn on at launch':
+            'Beim Start einschalten',
+        'Start with Caffeine Mode already on, keeping the computer awake until you turn it off from the header':
+            'Mit bereits eingeschaltetem Caffeine Mode starten; der Computer bleibt wach, bis Sie ihn in der Kopfleiste ausschalten',
+        'Turn off after':
+            'Ausschalten nach',
+        'Open in a window on small screens':
+            'Auf kleinen Bildschirmen in einem Fenster öffnen',
+        'On screens this many pixels wide or narrower (after display scaling), the editor opens in its own window instead of a panel (0 = always open as a panel)':
+            'Auf Bildschirmen, die so viele Pixel breit oder schmaler sind (nach Displayskalierung), öffnet sich der Editor in einem eigenen Fenster statt als Panel (0 = immer als Panel öffnen)',
+        'Show status icon':
+            'Statussymbol anzeigen',
+        'Shows Collins in the top bar, with a menu that jumps to any open session':
+            'Zeigt Collins in der oberen Leiste, mit einem Menü, das zu jeder offenen Sitzung springt',
+        'No status-icon support was found in this desktop — GNOME needs an AppIndicator extension':
+            'In diesem Desktop wurde keine Statussymbol-Unterstützung gefunden — GNOME braucht eine AppIndicator-Erweiterung',
+        'Nothing on this desktop can show a status icon':
+            'Nichts auf diesem Desktop kann ein Statussymbol anzeigen',
+        'Using the claude found on PATH at {path}.':
+            'Verwendet das auf PATH gefundene claude unter {path}.',
+        "claude isn't on PATH — Collins will ask where it is at the next launch.":
+            'claude ist nicht auf PATH — Collins fragt beim nächsten Start, wo es liegt.',
+        'How long that launch-time Caffeine Mode runs before it turns itself off. Until idle never does: it holds the computer awake while any session is working (and {n} minute past), dozing in between':
+            'Wie lange dieser beim Start eingeschaltete Caffeine Mode läuft, bevor er sich selbst ausschaltet. „Bis zum Leerlauf“ tut das nie: Er hält den Computer wach, solange irgendeine Sitzung arbeitet (und {n} Minute darüber hinaus), und döst dazwischen',
+        'Move up':
+            'Nach oben',
+        'Move down':
+            'Nach unten',
+        'No apps configured':
+            'Keine Apps konfiguriert',
+        'Before':
+            'Vorher',
+        'After':
+            'Nachher',
+        'Back to the pull requests':
+            'Zurück zu den Pull-Requests',
+        'View in Collins':
+            'In Collins anzeigen',
+        "Open this pull request's page beside the session":
+            'Die Seite dieses Pull-Requests neben der Sitzung öffnen',
+        'View unresolved comments':
+            'Unbeantwortete Kommentare anzeigen',
+        "Open this pull request's page at its first unresolved thread":
+            'Die Seite dieses Pull-Requests beim ersten unerledigten Thread öffnen',
+        "Collins couldn't run that action.":
+            'Collins konnte diese Aktion nicht ausführen.',
+        '{action} failed':
+            '{action} fehlgeschlagen',
+        'Pull request':
+            'Pull Request',
+        'Merging when checks pass':
+            'Wird zusammengeführt, wenn die Checks bestehen',
+        "The GitHub CLI (gh) isn't installed, or isn't on PATH.":
+            'Die GitHub CLI (gh) ist nicht installiert oder nicht auf PATH.',
+        "Collins couldn't run gh.":
+            'Collins konnte gh nicht ausführen.',
+        'gh exited with status {code}.':
+            'gh wurde mit Status {code} beendet.',
+        'and {n} more':
+            'und {n} weitere',
+        'Approved':
+            'Genehmigt',
+        'Changes requested':
+            'Änderungen angefordert',
+        'Review dismissed':
+            'Review verworfen',
+        'Commented':
+            'Kommentiert',
+        'Reload this pull request':
+            'Diesen Pull Request neu laden',
+        'Conversation':
+            'Unterhaltung',
+        'Files':
+            'Dateien',
+        "Couldn't load this pull request — is the GitHub CLI signed in?":
+            'Dieser Pull Request konnte nicht geladen werden — ist die GitHub CLI angemeldet?',
+        'Nothing loaded yet.':
+            'Noch nichts geladen.',
+        'Merges {head} into {base}':
+            'Führt {head} in {base} zusammen',
+        '{n} file':
+            '{n} Datei',
+        'No comments yet.':
+            'Noch keine Kommentare.',
+        'No description provided.':
+            'Keine Beschreibung vorhanden.',
+        'No changed files.':
+            'Keine geänderten Dateien.',
+        'Checks ({n})':
+            'Checks ({n})',
+        'Checks':
+            'Checks',
+        'More actions':
+            'Weitere Aktionen',
+        'Right-click for more actions':
+            'Rechtsklick für weitere Aktionen',
+        'Add a comment':
+            'Kommentar hinzufügen',
+        'Request changes':
+            'Änderungen anfordern',
+        'Approve':
+            'Genehmigen',
+        'Comment':
+            'Kommentieren',
+        'Comment on {slug}':
+            '{slug} kommentieren',
+        'Approve {slug}':
+            '{slug} genehmigen',
+        'Request changes on {slug}':
+            'Änderungen an {slug} anfordern',
+        'Address comments':
+            'Kommentare bearbeiten',
+        'Request review':
+            'Review anfordern',
+        'Outdated':
+            'Veraltet',
+        'The code this thread commented on has changed':
+            'Der Code, den dieser Thread kommentiert hat, hat sich geändert',
+        'Resolved':
+            'Erledigt',
+        'Reply':
+            'Antworten',
+        'Reply in this thread':
+            'In diesem Thread antworten',
+        'Unresolve':
+            'Wieder öffnen',
+        'Resolve':
+            'Erledigen',
+        'Reopen this thread':
+            'Diesen Thread wieder öffnen',
+        'Mark this thread resolved':
+            'Diesen Thread als erledigt markieren',
+        'Post reply':
+            'Antwort senden',
+        'no diff — binary or too large':
+            'kein Diff — binär oder zu groß',
+        '{n} line':
+            '{n} Zeile',
+        'Show more':
+            'Mehr anzeigen',
+        'Show less':
+            'Weniger anzeigen',
+        'New session in {path}':
+            'Neue Sitzung in {path}',
+        'Expand':
+            'Ausklappen',
+        'Collapse':
+            'Einklappen',
+        'New Thread':
+            'Neuer Thread',
+        'Discard draft and close tab':
+            'Entwurf verwerfen und Tab schließen',
+        'Discard draft':
+            'Entwurf verwerfen',
+        'Backgrounding is unavailable until this session is registered and any handoff in progress finishes':
+            'Das Verschieben in den Hintergrund ist erst möglich, wenn diese Sitzung registriert ist und eine laufende Übergabe abgeschlossen ist',
+        'This session has no tab open.':
+            'Diese Sitzung hat keinen offenen Tab.',
+        'Delete archived sessions…':
+            'Archivierte Sitzungen löschen…',
+        'Add project':
+            'Projekt hinzufügen',
+        'Refresh session list and pull requests':
+            'Sitzungsliste und Pull-Requests aktualisieren',
+        'Chats':
+            'Chats',
+        'Draft':
+            'Entwurf',
+        'Refreshing pull requests…':
+            'Pull-Requests werden aktualisiert…',
+        'Open in new window':
+            'In neuem Fenster öffnen',
+        'Move to new window':
+            'In neues Fenster verschieben',
+        'Rename to match PR':
+            'Nach PR benennen',
+        'Rename to match PR #{number}':
+            'Nach PR #{number} benennen',
+        'Repair session link':
+            'Sitzungsverknüpfung reparieren',
+        'New session in new window':
+            'Neue Sitzung in neuem Fenster',
+        'New session here (no worktree)':
+            'Neue Sitzung hier (ohne Worktree)',
+        'New session here (in a worktree)':
+            'Neue Sitzung hier (in einem Worktree)',
+        'New sessions use a worktree':
+            'Neue Sitzungen verwenden einen Worktree',
+        'Git pull ({branch})':
+            'Git pull ({branch})',
+        'Git pull':
+            'Git pull',
+        'Remove project from sidebar':
+            'Projekt aus der Seitenleiste entfernen',
+        'replaced':
+            'ersetzt',
+        'Open composer':
+            'Composer öffnen',
+        "the agent didn't start — your prompt is kept in the composer":
+            'der Agent ist nicht gestartet — Ihr Prompt bleibt im Composer',
+        'Every pull request this session has opened':
+            'Jeder Pull Request, den diese Sitzung geöffnet hat',
+        'Show/hide terminal panel':
+            'Terminal-Panel ein-/ausblenden',
+        'Move terminals to {name}?':
+            'Terminals nach {name} verschieben?',
+        'This session started in a worktree at {path}. The terminal open beside it is still in the project directory — change its directory to the worktree? A terminal running a command is left alone.':
+            'Diese Sitzung ist in einem Worktree unter {path} gestartet. Das daneben offene Terminal ist noch im Projektverzeichnis — sein Verzeichnis auf den Worktree wechseln? Ein Terminal, in dem ein Befehl läuft, bleibt unangetastet.',
+        'Change Directory':
+            'Verzeichnis wechseln',
+        '{n} terminal is running a command and stayed where it was':
+            'In {n} Terminal läuft ein Befehl; es blieb, wo es war',
+        'Effort: {level}':
+            'Effort: {level}',
+        'Click to switch the effort level':
+            'Zum Wechseln der Effort-Stufe klicken',
+        'No pull request found for this branch':
+            'Kein Pull Request für diesen Branch gefunden',
+        "Re-check this branch's pull requests":
+            'Pull-Requests dieses Branches erneut prüfen',
+        "Look for this branch's pull request":
+            'Nach dem Pull Request dieses Branches suchen',
+        "Add to chat: the agent isn't running in this tab":
+            'Zum Chat hinzufügen: In diesem Tab läuft kein Agent',
+        "Add to chat isn't available for this file":
+            'Zum Chat hinzufügen ist für diese Datei nicht verfügbar',
+        "skipped {n} dropped item that isn't a local file":
+            '{n} abgelegtes Element übersprungen, das keine lokale Datei ist',
+        "Composer: the input box holds a paste Collins can't read":
+            'Composer: Das Eingabefeld enthält eine Einfügung, die Collins nicht lesen kann',
+        "Effort switch: the agent isn't running in this tab":
+            'Effort-Wechsel: In diesem Tab läuft kein Agent',
+        "This session isn't at an empty prompt.":
+            'Diese Sitzung steht nicht an einem leeren Prompt.',
+        'Start sessions in the background':
+            'Sitzungen im Hintergrund starten',
+        'start_session — spawn a sibling agent in a new background tab, with a prompt':
+            'start_session — startet einen Geschwister-Agenten in einem neuen Hintergrund-Tab, mit einem Prompt',
+        'Read the terminal panel':
+            'Das Terminal-Panel lesen',
+        "read_terminal — the panel tabs' text and scrollback, your own typing included":
+            'read_terminal — Text und Scrollback der Panel-Tabs, eigene Eingaben eingeschlossen',
+        'Run commands in the terminal panel':
+            'Befehle im Terminal-Panel ausführen',
+        'run_in_terminal — type a command into an idle panel tab (or a new one) and run it':
+            'run_in_terminal — tippt einen Befehl in einen untätigen Panel-Tab (oder einen neuen) und führt ihn aus',
+        'Default (latest Haiku)':
+            'Standard (neuestes Haiku)',
+        'Default (latest Sonnet)':
+            'Standard (neuestes Sonnet)',
+        'Session title model':
+            'Modell für Sitzungstitel',
+        'Icon generation model':
+            'Modell für Icon-Generierung',
+        'Model list':
+            'Modellliste',
+        'Checking…':
+            'Wird geprüft…',
+        'Ask Anthropic for the model list now, rather than waiting for the saved one to age out':
+            'Anthropic jetzt nach der Modellliste fragen, statt zu warten, bis die gespeicherte veraltet',
+        "Couldn't reach Anthropic — offering the CLI's aliases (opus, sonnet, haiku)":
+            'Anthropic nicht erreichbar — angeboten werden die Aliasse der CLI (opus, sonnet, haiku)',
+        "Couldn't reach Anthropic — still showing the list fetched {when}":
+            'Anthropic nicht erreichbar — gezeigt wird weiterhin die Liste, abgerufen {when}',
+        '{count} models, updated {when}':
+            '{count} Modelle, aktualisiert {when}',
+        'Waiting for this session to be registered — backgrounding it now would leave the agent with no way back to it':
+            'Warten, bis diese Sitzung registriert ist — sie jetzt in den Hintergrund zu schicken ließe dem Agenten keinen Weg zurück zu ihr',
+        'Another session is still being handed to the background — one at a time':
+            'Eine andere Sitzung wird noch in den Hintergrund übergeben — eine nach der anderen',
+        'New chat (scratch folder)':
+            'Neuer Chat (Arbeitsverzeichnis)',
+        'Close window with {n} active session(s)?':
+            'Fenster mit {n} aktiven Sitzung(en) schließen?',
+        'Agents are asked to exit cleanly first; other running commands will be terminated.':
+            'Agenten werden zuerst gebeten, sich sauber zu beenden; andere laufende Befehle werden abgebrochen.',
+        'Backgrounding sessions…':
+            'Sitzungen werden in den Hintergrund verschoben…',
+        'Quit Now':
+            'Jetzt beenden',
+        'Handing each session to a background agent, one at a time, so every one is paired with the agent it becomes. {done} of {total} done.':
+            'Jede Sitzung wird einzeln an einen Hintergrund-Agenten übergeben, damit jede mit dem Agenten gepaart ist, der sie wird. {done} von {total} erledigt.',
+        'New session in {project} (no worktree)':
+            'Neue Sitzung in {project} (ohne Worktree)',
+        'New session in {project} (in a worktree)':
+            'Neue Sitzung in {project} (in einem Worktree)',
+        'Could not create chat directory':
+            'Chat-Verzeichnis konnte nicht erstellt werden',
+        'Trust and add':
+            'Vertrauen und hinzufügen',
+        'Discard draft?':
+            'Entwurf verwerfen?',
+        '“{label}” will be forgotten, along with any terminal panel it kept.':
+            '„{label}“ wird vergessen, mitsamt einem eventuell behaltenen Terminal-Panel.',
+        'Discard':
+            'Verwerfen',
+        "Couldn't send that to the session":
+            'Das konnte nicht an die Sitzung gesendet werden',
+        'Close tab with an active session?':
+            'Tab mit aktiver Sitzung schließen?',
+        "The agent is asked to exit cleanly first; the command running in this tab's terminal panel will be terminated.":
+            'Der Agent wird zuerst gebeten, sich sauber zu beenden; der im Terminal-Panel dieses Tabs laufende Befehl wird abgebrochen.',
+        'The agent is asked to exit cleanly first.':
+            'Der Agent wird zuerst gebeten, sich sauber zu beenden.',
+        "A command is still running in this tab's terminal panel and will be terminated.":
+            'Im Terminal-Panel dieses Tabs läuft noch ein Befehl, der beendet wird.',
+        "Backgrounding isn't available yet: this session hasn't been registered, so a detached agent would have no way back to it.":
+            'In den Hintergrund geht noch nicht: Diese Sitzung ist noch nicht registriert, ein abgekoppelter Agent fände also nicht zu ihr zurück.',
+        "Backgrounding isn't available right now: another session is still being handed to the background.":
+            'In den Hintergrund geht gerade nicht: Eine andere Sitzung wird noch in den Hintergrund übergeben.',
+        'No matching agent':
+            'Kein passender Agent',
+        'No background agent matches this session — either its agent is gone, or more than one candidate matched and guessing would link the wrong one. The transcript itself is intact.':
+            'Kein Hintergrund-Agent passt zu dieser Sitzung — entweder ist ihr Agent weg, oder mehr als ein Kandidat passte und Raten würde den falschen verknüpfen. Das Transkript selbst ist intakt.',
+        'Session linked':
+            'Sitzung verknüpft',
+        'Linked to its running background agent.':
+            'Mit ihrem laufenden Hintergrund-Agenten verknüpft.',
+        'Nothing to repair':
+            'Nichts zu reparieren',
+        'This session is already its own background agent. Opening it attaches to that agent.':
+            'Diese Sitzung ist bereits ihr eigener Hintergrund-Agent. Sie zu öffnen verbindet mit diesem Agenten.',
+        'No pull request is linked to this session yet':
+            'Mit dieser Sitzung ist noch kein Pull Request verknüpft',
+        'Undo':
+            'Rückgängig',
+        'Archived “{name}”':
+            '„{name}“ archiviert',
+        'Archived {n} sessions':
+            '{n} Sitzungen archiviert',
+        'Delete {n} archived session(s)?':
+            '{n} archivierte Sitzung(en) löschen?',
+        'Keep the {p} emptied project(s) in the sidebar':
+            '{p} geleerte(s) Projekt(e) in der Seitenleiste behalten',
+        'Manage and resume your AI coding agent sessions.\n\nUnofficial community tool — not affiliated with or endorsed by Anthropic.':
+            'Verwalten Sie Ihre KI-Coding-Agent-Sitzungen und setzen Sie sie fort.\n\nInoffizielles Community-Tool — weder mit Anthropic verbunden noch von Anthropic gebilligt.',
     },
     "es": {
         'Before you start':
@@ -1397,12 +3137,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Rename session": "Renombrar sesión",
         "Custom name": "Nombre personalizado",
         "Cancel": "Cancelar",
-        "Session list": "Lista de sesiones",
-        "Show folder path": "Mostrar ruta de carpeta",
         "Show folder paths in sidebar": "Mostrar rutas de carpeta en la barra lateral",
-        "Show each session's project folder path in the sidebar":
-            "Mostrar la ruta de la carpeta del proyecto de cada sesión en la barra lateral",
-        "Startup": "Inicio",
         "Reopen the last session": "Reabrir la última sesión",
         "Open the session that was active when the app was last closed. "
         "Off, the app launches with no session open":
@@ -1475,7 +3210,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Tools used in this session": "Herramientas usadas en esta sesión",
         "Recent activity": "Actividad reciente",
         "You": "Tú",
-        "Claude": "Claude",
         "Follow system": "Seguir el sistema",
         "Light": "Claro",
         "Dark": "Oscuro",
@@ -1498,23 +3232,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Paste": "Pegar",
         "Select All": "Seleccionar todo",
         "Color theme": "Tema de color",
-        "Appearance": "Apariencia",
         "Color scheme": "Esquema de color",
         "Dark / Light Mode": "Modo oscuro / claro",
         "Language": "Idioma",
-        "Restart to apply": "Reinicia para aplicar",
-        "Running sessions": "Sesiones en ejecución",
-        "Ask keeps the confirmation dialog; the other choices skip it and exit the "
-        "session(s) cleanly or keep them running detached":
-            "«Preguntar» mantiene el diálogo de confirmación; las demás opciones lo omiten "
-            "y salen limpiamente de las sesiones o las mantienen en ejecución desacopladas",
         "When archiving a running session": "Al archivar una sesión en ejecución",
         "Archiving a session that is still running also closes its tab":
             "Archivar una sesión que sigue en ejecución también cierra su pestaña",
         "When quitting with running sessions": "Al salir con sesiones en ejecución",
         "Closing a window while agent sessions are still running":
             "Cerrar una ventana mientras las sesiones del agente siguen en ejecución",
-        "Archiving": "Archivado",
         "Archive on claude.ai too": "Archivar también en claude.ai",
         "A session that also appears on claude.ai is archived and restored "
         "there along with the toggle here; best-effort, archiving locally "
@@ -1530,14 +3256,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show archived sessions": "Mostrar sesiones archivadas",
         "MCP servers": "Servidores MCP",
         "About Collins": "Acerca de Collins",
-        "Refresh session list": "Actualizar la lista de sesiones",
         "Search sessions…": "Buscar sesiones…",
         "Search sessions": "Buscar sesiones",
         "Close search": "Cerrar la búsqueda",
         "A session is working": "Una sesión está trabajando",
         "Collapse all groups": "Contraer todos los grupos",
         "Expand all groups": "Expandir todos los grupos",
-        "No sessions found": "No se encontraron sesiones",
         "{n} sessions": "{n} sesiones",
         "{n} projects": "{n} proyectos",
         "{n} open": "{n} abiertas",
@@ -1668,12 +3392,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Vuelve a abrirlo iniciando Collins de nuevo o desde la "
             "notificación de una sesión.",
         "no sessions open": "no hay sesiones abiertas",
-        "1 session": "1 sesión",
         "{n} sessions": "{n} sesiones",
-        "1 working": "1 trabajando",
-        "{n} working": "{n} trabajando",
-        "1 unread": "1 sin leer",
-        "{n} unread": "{n} sin leer",
         "Finished a run": "Terminó una ejecución",
         "Default: the desktop's message sound": "Predeterminado: el sonido de mensaje del escritorio",
         "Silent": "Silencio",
@@ -1733,7 +3452,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Sound: {name}": "Sonido: {name}",
         "Preferences…": "Preferencias…",
         "Show/hide notifications": "Mostrar/ocultar las notificaciones",
-        "You interrupted Claude here": "Interrumpiste a Claude aquí",
         "Restart now": "Reiniciar ahora",
         "Choose project directory": "Elegir directorio del proyecto",
         "Tab name": "Nombre de la pestaña",
@@ -1830,7 +3548,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "El proyecto es grande — solo se puede buscar entre los primeros {count} archivos.",
         "Agent files": "Archivos del agente",
         "Open {name} in the editor": "Abrir {name} en el editor",
-        "Session tools": "Herramientas de sesión",
         "Session behavior": "Comportamiento de las sesiones",
         "Composer": "Compositor",
         "Built-in MCP tools": "Herramientas MCP integradas",
@@ -1880,7 +3597,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "bastante ancha para ceder la columna, más allá del ancho máximo "
             "de la terminal. Una vez por pestaña de sesión, así que el que "
             "cierres seguirá cerrado",
-        "Open composer (Ctrl+.)": "Abrir el redactor (Ctrl+.)",
         "Attach file": "Adjuntar archivo",
         "Remove image": "Quitar imagen",
         "Close composer and keep the text in the terminal":
@@ -1959,6 +3675,900 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "No se pudo instalar el icono de escritorio",
         "Collins is in your applications now":
             "Collins ya está en tus aplicaciones",
+        'Add application':
+            'Añadir aplicación',
+        'Search applications…':
+            'Buscar aplicaciones…',
+        'Caffeine Mode is on':
+            'Caffeine Mode está activado',
+        "That file isn't an image Collins can display.":
+            'Ese archivo no es una imagen que Collins pueda mostrar.',
+        'Until idle':
+            'Hasta inactividad',
+        'Indefinitely':
+            'Indefinidamente',
+        '1 hour':
+            '1 hora',
+        '{n} hours':
+            '{n} horas',
+        'Caffeine Mode is dozing until a session works again — then the computer and screen will stay awake':
+            'Caffeine Mode dormita hasta que una sesión vuelva a trabajar — entonces el equipo y la pantalla se mantendrán despiertos',
+        'Caffeine Mode is dozing until a session works again — then the computer will stay awake, the screen may turn off':
+            'Caffeine Mode dormita hasta que una sesión vuelva a trabajar — entonces el equipo se mantendrá despierto, la pantalla puede apagarse',
+        'Caffeine Mode is on while sessions are working — the computer and screen will stay awake':
+            'Caffeine Mode está activado mientras las sesiones trabajan — el equipo y la pantalla se mantendrán despiertos',
+        'Caffeine Mode is on while sessions are working — the computer will stay awake, the screen may turn off':
+            'Caffeine Mode está activado mientras las sesiones trabajan — el equipo se mantendrá despierto, la pantalla puede apagarse',
+        'Caffeine Mode is on — the computer and screen will stay awake':
+            'Caffeine Mode está activado — el equipo y la pantalla se mantendrán despiertos',
+        'Caffeine Mode is on — the computer will stay awake, the screen may turn off':
+            'Caffeine Mode está activado — el equipo se mantendrá despierto, la pantalla puede apagarse',
+        'Caffeine Mode: keep the computer awake and the screen on':
+            'Caffeine Mode: mantener el equipo despierto y la pantalla encendida',
+        'Caffeine Mode: keep the computer awake, letting the screen turn off':
+            'Caffeine Mode: mantener el equipo despierto, dejando que la pantalla se apague',
+        'Caffeine Mode turns off in {time} — computer and screen stay awake':
+            'Caffeine Mode se apaga en {time} — el equipo y la pantalla siguen despiertos',
+        'Caffeine Mode turns off in {time} — computer stays awake, screen may turn off':
+            'Caffeine Mode se apaga en {time} — el equipo sigue despierto, la pantalla puede apagarse',
+        'Send':
+            'Enviar',
+        'The user declined this action.':
+            'El usuario rechazó esta acción.',
+        'Switch the effort level for this session':
+            'Cambiar el nivel de esfuerzo de esta sesión',
+        "couldn't save a copy of the dropped image":
+            'no se pudo guardar una copia de la imagen soltada',
+        "skipped {n} item that isn't a local file":
+            'se omitió {n} elemento que no es un archivo local',
+        "couldn't reference {n} dropped file name":
+            'no se pudo referenciar {n} nombre de archivo soltado',
+        "couldn't save a copy of the pasted image":
+            'no se pudo guardar una copia de la imagen pegada',
+        'Effort':
+            'Esfuerzo',
+        'Copied to clipboard':
+            'Copiado al portapapeles',
+        'Rename folder':
+            'Renombrar carpeta',
+        'Rename file':
+            'Renombrar archivo',
+        'Enter a new name for “{name}”.':
+            'Escribe un nombre nuevo para «{name}».',
+        'Rename':
+            'Renombrar',
+        'Move editor to {name}?':
+            '¿Mover el editor a {name}?',
+        'This session is now working in {path}. One open file has unsaved changes and also exists there — choose what happens to it.':
+            'Esta sesión ahora trabaja en {path}. Un archivo abierto tiene cambios sin guardar y también existe allí — elige qué pasa con él.',
+        'Stay':
+            'Quedarse',
+        'Go on editing this file, where your unsaved changes belong':
+            'Seguir editando este archivo, donde están tus cambios sin guardar',
+        'Take edits':
+            'Llevar los cambios',
+        'Move this tab to the new copy, keeping your unsaved changes — saving will write them over whatever that copy holds':
+            'Mover esta pestaña a la copia nueva conservando tus cambios sin guardar — al guardar se escribirán sobre lo que esa copia contenga',
+        'Use new':
+            'Usar la nueva',
+        'Open the new copy and discard your unsaved changes':
+            'Abrir la copia nueva y descartar tus cambios sin guardar',
+        "Don't Move":
+            'No mover',
+        'Move Editor':
+            'Mover el editor',
+        'Do you trust this folder?':
+            '¿Confías en esta carpeta?',
+        '{agent} will be able to read, edit and execute files in\n\n{path}\n\nand everything inside it, including any worktrees it creates there. Open it only if this is a project you created or otherwise trust — like your own code, a well-known open source project, or work from your team.':
+            '{agent} podrá leer, editar y ejecutar archivos en\n\n{path}\n\ny todo lo que contiene, incluidos los worktrees que cree ahí. Ábrela solo si es un proyecto que creaste o en el que confías — como tu propio código, un proyecto de código abierto conocido o trabajo de tu equipo.',
+        'Trust and open':
+            'Confiar y abrir',
+        'Generating icon…':
+            'Generando el icono…',
+        'At sidebar size':
+            'A tamaño de barra lateral',
+        'Optional adjustments, e.g. “make it blue”':
+            'Ajustes opcionales, p. ej. «hazlo azul»',
+        'Regenerate':
+            'Regenerar',
+        'Default model':
+            'Modelo predeterminado',
+        "Model for this dialog's runs; Preferences sets the default":
+            'Modelo para las ejecuciones de este diálogo; Preferencias establece el predeterminado',
+        'Default ({model})':
+            'Predeterminado ({model})',
+        'Generate Icon':
+            'Generar icono',
+        'the generated SVG could not be rendered':
+            'no se pudo renderizar el SVG generado',
+        'Icon generation failed: {error}':
+            'Falló la generación del icono: {error}',
+        'Saving failed: {error}':
+            'Falló el guardado: {error}',
+        'Close other tabs':
+            'Cerrar las otras pestañas',
+        'Close tabs to the right':
+            'Cerrar las pestañas a la derecha',
+        'Close all tabs':
+            'Cerrar todas las pestañas',
+        'Add to chat':
+            'Añadir al chat',
+        "Couldn't rename {name}: {message}":
+            'No se pudo renombrar «{name}»: {message}',
+        'A name is needed to rename {name}.':
+            'Se necesita un nombre para renombrar «{name}».',
+        "“{new_name}” isn't a name — renaming can't move things elsewhere.":
+            '«{new_name}» no es un nombre — renombrar no puede mover cosas a otro lugar.',
+        '“{new_name}” already exists here.':
+            '«{new_name}» ya existe aquí.',
+        '{name} is no longer there.':
+            '«{name}» ya no está ahí.',
+        "{name} can't be renamed to something outside this project.":
+            '«{name}» no se puede renombrar a algo fuera de este proyecto.',
+        "There's nothing on the clipboard to paste here.":
+            'No hay nada en el portapapeles que pegar aquí.',
+        "{count} item couldn't be pasted.":
+            'No se pudo pegar {count} elemento.',
+        "{name} can't be pasted into itself.":
+            '«{name}» no se puede pegar dentro de sí mismo.',
+        'That folder is no longer there.':
+            'Esa carpeta ya no está ahí.',
+        "{name} can't be pasted outside this project.":
+            '«{name}» no se puede pegar fuera de este proyecto.',
+        'There are already too many copies of {name} here.':
+            'Ya hay demasiadas copias de «{name}» aquí.',
+        "Couldn't paste {name}: {message}":
+            'No se pudo pegar «{name}»: {message}',
+        "{name} couldn't be decoded as an image.":
+            '«{name}» no se pudo decodificar como imagen.',
+        'Session moved to {name}':
+            'Sesión movida a {name}',
+        'Follow':
+            'Seguir',
+        'Image':
+            'Imagen',
+        'Cut':
+            'Cortar',
+        '{n} session(s) in {p} project(s) have their transcripts moved to the trash, where they can be restored. Sessions archived with their whole project — and originals a backgrounded fork replaced — are included.':
+            'Las transcripciones de {n} sesión(es) de {p} proyecto(s) se mueven a la papelera, donde se pueden restaurar. Se incluyen las sesiones archivadas con todo su proyecto — y los originales que un fork en segundo plano reemplazó.',
+        '{project} — {n} of {total}':
+            '{project} — {n} de {total}',
+        '…and {p} other project(s) — {n} session(s)':
+            '…y {p} proyecto(s) más — {n} sesión(es)',
+        '{p} of these project(s) lose every session they have.':
+            '{p} de estos proyecto(s) pierden todas las sesiones que tienen.',
+        'Open, every check passed':
+            'Abierto, todas las comprobaciones superadas',
+        'Checks still running':
+            'Comprobaciones aún en ejecución',
+        'A check failed':
+            'Falló una comprobación',
+        'A reviewer is waiting on a reply':
+            'Un revisor espera una respuesta',
+        'Draft, and the branch conflicts':
+            'Borrador, y la rama tiene conflictos',
+        'Merged':
+            'Fusionado',
+        'Collins is better with the GitHub CLI':
+            'Collins es mejor con la CLI de GitHub',
+        "Collins follows the pull requests your sessions open — and acts on them — through gh, GitHub's own command-line tool, which isn't installed here.":
+            'Collins sigue los pull requests que abren tus sesiones — y actúa sobre ellos — a través de gh, la herramienta de línea de comandos de GitHub, que no está instalada aquí.',
+        "Collins follows the pull requests your sessions open — and acts on them — through gh, GitHub's own command-line tool, which is installed here but never signed in.":
+            'Collins sigue los pull requests que abren tus sesiones — y actúa sobre ellos — a través de gh, la herramienta de línea de comandos de GitHub, que está instalada aquí pero nunca ha iniciado sesión.',
+        'Not now':
+            'Ahora no',
+        'Get the GitHub CLI':
+            'Obtener la CLI de GitHub',
+        'Copy command':
+            'Copiar el comando',
+        "With it, every session's pull requests carry their status:":
+            'Con ella, los pull requests de cada sesión llevan su estado:',
+        '…and a click on one does something about it:':
+            '…y un clic en uno hace algo al respecto:',
+        "Don't show this again":
+            'No volver a mostrar esto',
+        'Install it from cli.github.com — Collins picks it up the next time it starts.':
+            'Instálala desde cli.github.com — Collins la detecta la próxima vez que arranque.',
+        'Run this once in any terminal. Collins asks for no login of its own.':
+            'Ejecuta esto una vez en cualquier terminal. Collins no pide ningún inicio de sesión propio.',
+        'Keyboard Bindings':
+            'Combinaciones de teclado',
+        'Reset All':
+            'Restablecer todo',
+        'Put every shortcut back to its default':
+            'Devolver cada atajo a su valor predeterminado',
+        'Click a row to change its shortcut':
+            'Haz clic en una fila para cambiar su atajo',
+        'Also bound to: {actions}':
+            'También asignado a: {actions}',
+        'Unbound':
+            'Sin asignar',
+        'Reset to default':
+            'Restablecer el predeterminado',
+        'Reset every shortcut?':
+            '¿Restablecer todos los atajos?',
+        'All of your custom keyboard bindings are replaced by the defaults.':
+            'Todas tus combinaciones de teclado personalizadas se reemplazan por las predeterminadas.',
+        '{chord} is already in use':
+            '{chord} ya está en uso',
+        'It is bound to {actions}. Move it to {action}?':
+            'Está asignado a {actions}. ¿Moverlo a {action}?',
+        'Move Shortcut':
+            'Mover el atajo',
+        'unbound':
+            'sin asignar',
+        'Set shortcut for “{action}”':
+            'Establecer el atajo de «{action}»',
+        'Press the new key combination. Currently: {current}.\nBackspace removes the binding; Escape keeps it.':
+            'Pulsa la nueva combinación de teclas. Actual: {current}.\nRetroceso quita la asignación; Escape la conserva.',
+        'Tabs and windows':
+            'Pestañas y ventanas',
+        'Panels':
+            'Paneles',
+        'Application':
+            'Aplicación',
+        'New session':
+            'Nueva sesión',
+        'Quick switcher':
+            'Selector rápido',
+        'Archive the current session':
+            'Archivar la sesión actual',
+        'Undo the last archive':
+            'Deshacer el último archivado',
+        'Open the pull request page':
+            'Abrir la página del pull request',
+        "Unbound by default; the sidebar's search button does the same.":
+            'Sin asignar de forma predeterminada; el botón de búsqueda de la barra lateral hace lo mismo.',
+        'Close tab':
+            'Cerrar la pestaña',
+        'Next tab':
+            'Pestaña siguiente',
+        'Previous tab':
+            'Pestaña anterior',
+        'Toggle the tab marker':
+            'Alternar el marcador de la pestaña',
+        'Show/hide the sidebar':
+            'Mostrar/ocultar la barra lateral',
+        'Show/hide the terminal panel':
+            'Mostrar/ocultar el panel de terminal',
+        'Clear the terminal panel':
+            'Limpiar el panel de terminal',
+        'Move the panel tab to the other side':
+            'Mover la pestaña del panel al otro lado',
+        'Show/hide the composer':
+            'Mostrar/ocultar el redactor',
+        'Show/hide the attachments gallery':
+            'Mostrar/ocultar la galería de adjuntos',
+        "Swap the panel's sides":
+            'Intercambiar los lados del panel',
+        'Unbound by default.':
+            'Sin asignar de forma predeterminada.',
+        'Move the panel tab to the other strip':
+            'Mover la pestaña del panel a la otra franja',
+        'Show/hide the editor':
+            'Mostrar/ocultar el editor',
+        'Quick open a file':
+            'Apertura rápida de un archivo',
+        'Focus the editor':
+            'Enfocar el editor',
+        'Save the file':
+            'Guardar el archivo',
+        'In the editor.':
+            'En el editor.',
+        'Find in the file':
+            'Buscar en el archivo',
+        'Copy the selection':
+            'Copiar la selección',
+        'With easy copy and paste on; without a selection the key reaches the terminal.':
+            'Con «Copiado y pegado fáciles» activado; sin selección, la tecla llega a la terminal.',
+        'With easy copy and paste on.':
+            'Con «Copiado y pegado fáciles» activado.',
+        'Copy (terminal-style)':
+            'Copiar (estilo terminal)',
+        'Paste (terminal-style)':
+            'Pegar (estilo terminal)',
+        'Find in the terminal':
+            'Buscar en la terminal',
+        'Insert a newline in the prompt':
+            'Insertar una línea nueva en el prompt',
+        'Zoom in':
+            'Ampliar',
+        'Zoom out':
+            'Reducir',
+        'Reset zoom':
+            'Restablecer el zoom',
+        'Keyboard bindings':
+            'Combinaciones de teclado',
+        "Couldn't display image":
+            'No se pudo mostrar la imagen',
+        'Open in Editor':
+            'Abrir en el editor',
+        'Low':
+            'Bajo',
+        'Medium':
+            'Medio',
+        'High':
+            'Alto',
+        'Extra high':
+            'Muy alto',
+        'Max':
+            'Máximo',
+        'This model has no effort setting':
+            'Este modelo no tiene ajuste de esfuerzo',
+        'New chat':
+            'Nuevo chat',
+        'Model to start this session on':
+            'Modelo con el que iniciar esta sesión',
+        'Effort level to start this session at':
+            'Nivel de esfuerzo con el que iniciar esta sesión',
+        'New git worktree':
+            'Nuevo worktree de git',
+        'Work in a fresh worktree of this project, apart from its uncommitted changes':
+            'Trabajar en un worktree nuevo de este proyecto, aparte de sus cambios sin confirmar',
+        'Empty Session':
+            'Sesión vacía',
+        'Start the session with no prompt':
+            'Iniciar la sesión sin prompt',
+        'Drag to move this tab: drop on an edge to split, on a strip to join':
+            'Arrastra para mover esta pestaña: suéltala en un borde para dividir, en una franja para unir',
+        'Restore this tab to its size and place in the panel':
+            'Restaurar esta pestaña a su tamaño y lugar en el panel',
+        'Close Tab':
+            'Cerrar la pestaña',
+        'Overlay this tab over the whole session':
+            'Superponer esta pestaña sobre toda la sesión',
+        'Move this tab to the other side':
+            'Mover esta pestaña al otro lado',
+        'Close tab with a running command?':
+            '¿Cerrar la pestaña con un comando en ejecución?',
+        'Move to':
+            'Mover a',
+        'Split Left':
+            'Dividir a la izquierda',
+        'Split Right':
+            'Dividir a la derecha',
+        'Split Up':
+            'Dividir arriba',
+        'Split Down':
+            'Dividir abajo',
+        'Close tabs with running commands?':
+            '¿Cerrar pestañas con comandos en ejecución?',
+        'A command is still running in one of these tabs and will be terminated.':
+            'Todavía se está ejecutando un comando en una de estas pestañas y se terminará.',
+        'Close Tabs':
+            'Cerrar las pestañas',
+        'Address unresolved comments':
+            'Atender los comentarios sin resolver',
+        'Send “{prompt}” to this session':
+            'Enviar «{prompt}» a esta sesión',
+        'Open a pull request':
+            'Abrir un pull request',
+        'Fix errors & resolve conflicts':
+            'Corregir errores y resolver conflictos',
+        'Address the CI errors':
+            'Atender los errores de CI',
+        'Fix errors':
+            'Corregir errores',
+        'Resolve conflicts':
+            'Resolver conflictos',
+        'Mark ready for review':
+            'Marcar como listo para revisión',
+        'Take {slug} out of draft':
+            'Sacar {slug} de borrador',
+        'Ready':
+            'Listo',
+        'Ask Claude for a review':
+            'Pedir una revisión a Claude',
+        'Comment “{comment}” on {slug}':
+            'Comentar «{comment}» en {slug}',
+        'Merge when checks pass':
+            'Fusionar cuando pasen las comprobaciones',
+        'Turn on auto-merge for {slug}':
+            'Activar la fusión automática para {slug}',
+        'Merge {slug} when its checks pass?':
+            '¿Fusionar {slug} cuando pasen sus comprobaciones?',
+        'GitHub merges it as soon as every required check has passed. You can still cancel auto-merge on the pull request page.':
+            'GitHub lo fusiona en cuanto todas las comprobaciones requeridas hayan pasado. Aún puedes cancelar la fusión automática en la página del pull request.',
+        'Enable auto-merge':
+            'Activar la fusión automática',
+        'Auto-Merge':
+            'Fusión automática',
+        'Merge pull request':
+            'Fusionar el pull request',
+        'Merge {slug} now':
+            'Fusionar {slug} ahora',
+        'Merge {slug}?':
+            '¿Fusionar {slug}?',
+        'Merge':
+            'Fusionar',
+        'Disable auto-merge':
+            'Desactivar la fusión automática',
+        'Stop GitHub from merging {slug} when its checks pass':
+            'Impedir que GitHub fusione {slug} cuando pasen sus comprobaciones',
+        'Disable Auto-Merge':
+            'Desactivar la fusión automática',
+        'Its checks have passed. This merges the pull request on GitHub now.':
+            'Sus comprobaciones han pasado. Esto fusiona el pull request en GitHub ahora.',
+        "Its checks haven't all passed. This merges the pull request on GitHub now, if the repository lets it.":
+            'No todas sus comprobaciones han pasado. Esto fusiona el pull request en GitHub ahora, si el repositorio lo permite.',
+        'Merge and archive session':
+            'Fusionar y archivar la sesión',
+        'Merge {slug} now, then archive this session':
+            'Fusionar {slug} ahora y luego archivar esta sesión',
+        'Merge {slug} and archive this session?':
+            '¿Fusionar {slug} y archivar esta sesión?',
+        'The session is archived once the merge lands — you can bring it back with Undo, or from “Show archived”.':
+            'La sesión se archiva en cuanto la fusión se completa — puedes recuperarla con Deshacer o desde «Mostrar archivadas».',
+        'Merge & archive':
+            'Fusionar y archivar',
+        'Mark ready & merge when checks pass':
+            'Marcar como listo y fusionar cuando pasen las comprobaciones',
+        'Take {slug} out of draft, then turn on auto-merge':
+            'Sacar {slug} de borrador y luego activar la fusión automática',
+        'Mark {slug} ready and merge it when its checks pass?':
+            '¿Marcar {slug} como listo y fusionarlo cuando pasen sus comprobaciones?',
+        'Ready & auto-merge':
+            'Listo y fusión automática',
+        'Ready & Auto-Merge':
+            'Listo y fusión automática',
+        'Mark ready & merge':
+            'Marcar como listo y fusionar',
+        'Take {slug} out of draft, then merge it now':
+            'Sacar {slug} de borrador y luego fusionarlo ahora',
+        'Mark {slug} ready and merge it?':
+            '¿Marcar {slug} como listo y fusionarlo?',
+        'Ready & merge':
+            'Listo y fusionar',
+        'Ready & Merge':
+            'Listo y fusionar',
+        'Mark ready, merge & archive session':
+            'Marcar como listo, fusionar y archivar la sesión',
+        'Take {slug} out of draft, merge it now, then archive this session':
+            'Sacar {slug} de borrador, fusionarlo ahora y luego archivar esta sesión',
+        'Mark {slug} ready, merge it and archive this session?':
+            '¿Marcar {slug} como listo, fusionarlo y archivar esta sesión?',
+        'Ready, merge & archive':
+            'Listo, fusionar y archivar',
+        'The pull request is marked ready for review first.':
+            'El pull request se marca primero como listo para revisión.',
+        'Close pull request':
+            'Cerrar el pull request',
+        'Close {slug} without merging':
+            'Cerrar {slug} sin fusionar',
+        'Close {slug}?':
+            '¿Cerrar {slug}?',
+        'The pull request is closed without merging. Its branch and its comments stay, and it can be reopened on GitHub.':
+            'El pull request se cierra sin fusionar. Su rama y sus comentarios se conservan, y puede reabrirse en GitHub.',
+        "{url} doesn't look like a pull request.":
+            '{url} no parece un pull request.',
+        "Collins doesn't know how to do that.":
+            'Collins no sabe cómo hacer eso.',
+        'Merge conflicts':
+            'Conflictos de fusión',
+        'Refresh':
+            'Actualizar',
+        'Search settings…':
+            'Buscar ajustes…',
+        'Search settings':
+            'Buscar ajustes',
+        'No settings found':
+            'No se encontraron ajustes',
+        'Try a different search.':
+            'Prueba otra búsqueda.',
+        'Tab drag handles':
+            'Asas de arrastre de pestañas',
+        'Drag any panel tab by its handle to move, reorder, or split it. Relies on GTK internals — turn off to fall back to plain tab dragging plus a drag grip on each panel':
+            'Arrastra cualquier pestaña de panel por su asa para moverla, reordenarla o dividirla. Depende de detalles internos de GTK — desactívalo para volver al arrastre simple de pestañas más un agarre de arrastre en cada panel',
+        'Project icon size':
+            'Tamaño del icono de proyecto',
+        'Size of the project and folder icons in the sidebar':
+            'Tamaño de los iconos de proyecto y carpeta en la barra lateral',
+        'Start new sessions in a git worktree':
+            'Iniciar las sesiones nuevas en un worktree de git',
+        "Git projects only; each new session works in its own fresh worktree, so it won't see uncommitted local changes. Right-click a project header to override per project":
+            'Solo proyectos git; cada sesión nueva trabaja en su propio worktree nuevo, así que no verá cambios locales sin confirmar. Haz clic derecho en la cabecera de un proyecto para cambiarlo por proyecto',
+        "Follow Claude's own session names":
+            'Seguir los nombres de sesión del propio Claude',
+        'Rename sessions whenever Claude names or renames them — /rename and its automatic titles; manually renamed sessions keep their name':
+            'Renombrar las sesiones cuando Claude las nombra o renombra — /rename y sus títulos automáticos; las sesiones renombradas a mano conservan su nombre',
+        'Exact busy tracking from the agent':
+            'Seguimiento exacto de actividad desde el agente',
+        "Read Claude Code's own progress announcements for the sidebar's working indicator, instead of only inferring from terminal output (fully applies to newly opened tabs)":
+            'Leer los propios anuncios de progreso de Claude Code para el indicador de trabajo de la barra lateral, en lugar de inferirlo solo de la salida de la terminal (se aplica del todo a las pestañas recién abiertas)',
+        'Poll for background sessions':
+            'Sondear las sesiones en segundo plano',
+        'Fallback: check the agent CLI every 20 seconds in case the yellow guide lines stop updating on their own':
+            'Respaldo: consultar la CLI del agente cada 20 segundos por si las líneas guía amarillas dejan de actualizarse solas',
+        'Typing opens the composer':
+            'Escribir abre el redactor',
+        "Start typing at an agent's empty prompt and the composer opens with what you typed. A dialog, a menu and the CLI's own /, !, # and @ keep their keys":
+            'Empieza a escribir en el prompt vacío de un agente y el redactor se abre con lo que escribiste. Un diálogo, un menú y los /, !, # y @ propios de la CLI conservan sus teclas',
+        'Right-click aims spell-check':
+            'El clic derecho apunta el corrector',
+        'Right-clicking a misspelled word in the composer offers corrections for that word. Off: corrections follow the text cursor instead, and a right-click never moves it':
+            'Hacer clic derecho en una palabra mal escrita del redactor ofrece correcciones para esa palabra. Desactivado: las correcciones siguen al cursor de texto y el clic derecho nunca lo mueve',
+        'Max width':
+            'Ancho máximo',
+        'Stop growing past this width and center in the tab instead (0 = no limit)':
+            'Dejar de crecer más allá de este ancho y centrarse en la pestaña (0 = sin límite)',
+        'Footer apps':
+            'Aplicaciones del pie',
+        "Buttons in each tab's footer that open the tab's directory":
+            'Botones en el pie de cada pestaña que abren el directorio de la pestaña',
+        'Add application…':
+            'Añadir aplicación…',
+        'Pull requests':
+            'Pull requests',
+        'Text size':
+            'Tamaño del texto',
+        'Reading-text size in the pull request panel, as a percentage of the app font; buttons and menus keep the app size':
+            'Tamaño del texto de lectura en el panel de pull requests, como porcentaje de la fuente de la aplicación; botones y menús conservan el tamaño de la aplicación',
+        'Show embedded images':
+            'Mostrar imágenes incrustadas',
+        'Render the images a description or comment embeds, and the changed image files, as pictures; click one to open it full size. Off, they stay links and patches, and opening a pull request downloads nothing':
+            'Mostrar como imágenes las que incrusta una descripción o un comentario, y los archivos de imagen cambiados; haz clic en una para abrirla a tamaño completo. Desactivado, se quedan como enlaces y parches, y abrir un pull request no descarga nada',
+        'Confirm before merging':
+            'Confirmar antes de fusionar',
+        'Ask before merging a pull request, enabling auto-merge, or merging and archiving the session. Off, the click merges; closing a pull request unmerged still asks either way':
+            'Preguntar antes de fusionar un pull request, activar la fusión automática o fusionar y archivar la sesión. Desactivado, el clic fusiona; cerrar un pull request sin fusionar pregunta igualmente',
+        'Attach pull requests named in prompts':
+            'Adjuntar los pull requests mencionados en los prompts',
+        "Put every pull request a new session's first prompt mentions on that session's row, without waiting for the agent to touch it":
+            'Poner cada pull request que mencione el primer prompt de una sesión nueva en la fila de esa sesión, sin esperar a que el agente lo toque',
+        'Rename sessions after their pull requests':
+            'Renombrar las sesiones según sus pull requests',
+        'Retitle a session to match the newest pull request opened in it; manually renamed sessions keep their name':
+            'Retitular una sesión para que coincida con el pull request más reciente abierto en ella; las sesiones renombradas a mano conservan su nombre',
+        'Refresh pull requests at launch':
+            'Actualizar los pull requests al arrancar',
+        "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left":
+            'Preguntar a GitHub por los pull requests de cada sesión listada una vez al inicio, para que las marcas de la barra lateral empiecen al día en lugar de como quedaron',
+        'Caffeine Mode':
+            'Caffeine Mode',
+        'Keep screen on':
+            'Mantener la pantalla encendida',
+        'Hold the screen on as well as keeping the computer awake. Off lets the screen turn off as usual, while an unattended agent still keeps the computer from sleeping':
+            'Mantener la pantalla encendida además de mantener el equipo despierto. Desactivado, la pantalla se apaga como de costumbre, mientras un agente desatendido sigue impidiendo que el equipo se duerma',
+        'Until idle grace period':
+            'Periodo de gracia de «Hasta inactividad»',
+        'How many minutes Until idle keeps the computer awake after the last session stops working; any session picking work back up restarts the wait':
+            'Cuántos minutos mantiene «Hasta inactividad» el equipo despierto después de que la última sesión deje de trabajar; cualquier sesión que retome el trabajo reinicia la espera',
+        'Turn on at launch':
+            'Activar al arrancar',
+        'Start with Caffeine Mode already on, keeping the computer awake until you turn it off from the header':
+            'Arrancar con Caffeine Mode ya activado, manteniendo el equipo despierto hasta que lo apagues desde la cabecera',
+        'Turn off after':
+            'Apagar después de',
+        'Open in a window on small screens':
+            'Abrir en una ventana en pantallas pequeñas',
+        'On screens this many pixels wide or narrower (after display scaling), the editor opens in its own window instead of a panel (0 = always open as a panel)':
+            'En pantallas de este ancho en píxeles o más estrechas (tras el escalado de pantalla), el editor se abre en su propia ventana en lugar de en un panel (0 = abrir siempre como panel)',
+        'Show status icon':
+            'Mostrar el icono de estado',
+        'Shows Collins in the top bar, with a menu that jumps to any open session':
+            'Muestra Collins en la barra superior, con un menú que salta a cualquier sesión abierta',
+        'No status-icon support was found in this desktop — GNOME needs an AppIndicator extension':
+            'No se encontró soporte de icono de estado en este escritorio — GNOME necesita una extensión AppIndicator',
+        'Nothing on this desktop can show a status icon':
+            'Nada en este escritorio puede mostrar un icono de estado',
+        'Using the claude found on PATH at {path}.':
+            'Usando el claude encontrado en el PATH, en {path}.',
+        "claude isn't on PATH — Collins will ask where it is at the next launch.":
+            'claude no está en el PATH — Collins preguntará dónde está en el próximo arranque.',
+        'How long that launch-time Caffeine Mode runs before it turns itself off. Until idle never does: it holds the computer awake while any session is working (and {n} minute past), dozing in between':
+            'Cuánto dura ese Caffeine Mode de arranque antes de apagarse solo. «Hasta inactividad» nunca lo hace: mantiene el equipo despierto mientras alguna sesión trabaja (y {n} minuto más), dormitando entre tanto',
+        'Move up':
+            'Subir',
+        'Move down':
+            'Bajar',
+        'No apps configured':
+            'No hay aplicaciones configuradas',
+        'Before':
+            'Antes',
+        'After':
+            'Después',
+        'Back to the pull requests':
+            'Volver a los pull requests',
+        'View in Collins':
+            'Ver en Collins',
+        "Open this pull request's page beside the session":
+            'Abrir la página de este pull request junto a la sesión',
+        'View unresolved comments':
+            'Ver los comentarios sin resolver',
+        "Open this pull request's page at its first unresolved thread":
+            'Abrir la página de este pull request en su primer hilo sin resolver',
+        "Collins couldn't run that action.":
+            'Collins no pudo ejecutar esa acción.',
+        '{action} failed':
+            'Falló {action}',
+        'Pull request':
+            'Pull request',
+        'Merging when checks pass':
+            'Se fusionará cuando pasen las comprobaciones',
+        "The GitHub CLI (gh) isn't installed, or isn't on PATH.":
+            'La CLI de GitHub (gh) no está instalada o no está en el PATH.',
+        "Collins couldn't run gh.":
+            'Collins no pudo ejecutar gh.',
+        'gh exited with status {code}.':
+            'gh terminó con estado {code}.',
+        'and {n} more':
+            'y {n} más',
+        'Approved':
+            'Aprobado',
+        'Changes requested':
+            'Cambios solicitados',
+        'Review dismissed':
+            'Revisión descartada',
+        'Commented':
+            'Comentado',
+        'Reload this pull request':
+            'Recargar este pull request',
+        'Conversation':
+            'Conversación',
+        'Files':
+            'Archivos',
+        "Couldn't load this pull request — is the GitHub CLI signed in?":
+            'No se pudo cargar este pull request — ¿ha iniciado sesión la CLI de GitHub?',
+        'Nothing loaded yet.':
+            'Aún no se ha cargado nada.',
+        'Merges {head} into {base}':
+            'Fusiona {head} en {base}',
+        '{n} file':
+            '{n} archivo',
+        'No comments yet.':
+            'Aún no hay comentarios.',
+        'No description provided.':
+            'No se dio ninguna descripción.',
+        'No changed files.':
+            'No hay archivos cambiados.',
+        'Checks ({n})':
+            'Comprobaciones ({n})',
+        'Checks':
+            'Comprobaciones',
+        'More actions':
+            'Más acciones',
+        'Right-click for more actions':
+            'Haz clic derecho para más acciones',
+        'Add a comment':
+            'Añadir un comentario',
+        'Request changes':
+            'Solicitar cambios',
+        'Approve':
+            'Aprobar',
+        'Comment':
+            'Comentar',
+        'Comment on {slug}':
+            'Comentar en {slug}',
+        'Approve {slug}':
+            'Aprobar {slug}',
+        'Request changes on {slug}':
+            'Solicitar cambios en {slug}',
+        'Address comments':
+            'Atender los comentarios',
+        'Request review':
+            'Solicitar revisión',
+        'Outdated':
+            'Desactualizado',
+        'The code this thread commented on has changed':
+            'El código que comentaba este hilo ha cambiado',
+        'Resolved':
+            'Resuelto',
+        'Reply':
+            'Responder',
+        'Reply in this thread':
+            'Responder en este hilo',
+        'Unresolve':
+            'Reabrir',
+        'Resolve':
+            'Resolver',
+        'Reopen this thread':
+            'Reabrir este hilo',
+        'Mark this thread resolved':
+            'Marcar este hilo como resuelto',
+        'Post reply':
+            'Publicar la respuesta',
+        'no diff — binary or too large':
+            'sin diff — binario o demasiado grande',
+        '{n} line':
+            '{n} línea',
+        'Show more':
+            'Mostrar más',
+        'Show less':
+            'Mostrar menos',
+        'New session in {path}':
+            'Nueva sesión en {path}',
+        'Expand':
+            'Expandir',
+        'Collapse':
+            'Contraer',
+        'New Thread':
+            'Nuevo hilo',
+        'Discard draft and close tab':
+            'Descartar el borrador y cerrar la pestaña',
+        'Discard draft':
+            'Descartar el borrador',
+        'Backgrounding is unavailable until this session is registered and any handoff in progress finishes':
+            'Pasar a segundo plano no está disponible hasta que esta sesión esté registrada y termine cualquier traspaso en curso',
+        'This session has no tab open.':
+            'Esta sesión no tiene ninguna pestaña abierta.',
+        'Delete archived sessions…':
+            'Eliminar sesiones archivadas…',
+        'Add project':
+            'Añadir proyecto',
+        'Refresh session list and pull requests':
+            'Actualizar la lista de sesiones y los pull requests',
+        'Chats':
+            'Chats',
+        'Draft':
+            'Borrador',
+        'Refreshing pull requests…':
+            'Actualizando los pull requests…',
+        'Open in new window':
+            'Abrir en una ventana nueva',
+        'Move to new window':
+            'Mover a una ventana nueva',
+        'Rename to match PR':
+            'Renombrar según el PR',
+        'Rename to match PR #{number}':
+            'Renombrar según el PR #{number}',
+        'Repair session link':
+            'Reparar el vínculo de la sesión',
+        'New session in new window':
+            'Nueva sesión en una ventana nueva',
+        'New session here (no worktree)':
+            'Nueva sesión aquí (sin worktree)',
+        'New session here (in a worktree)':
+            'Nueva sesión aquí (en un worktree)',
+        'New sessions use a worktree':
+            'Las sesiones nuevas usan un worktree',
+        'Git pull ({branch})':
+            'Git pull ({branch})',
+        'Git pull':
+            'Git pull',
+        'Remove project from sidebar':
+            'Quitar el proyecto de la barra lateral',
+        'replaced':
+            'reemplazada',
+        'Open composer':
+            'Abrir el redactor',
+        "the agent didn't start — your prompt is kept in the composer":
+            'el agente no arrancó — tu prompt se conserva en el redactor',
+        'Every pull request this session has opened':
+            'Todos los pull requests que ha abierto esta sesión',
+        'Show/hide terminal panel':
+            'Mostrar/ocultar el panel de terminal',
+        'Move terminals to {name}?':
+            '¿Mover las terminales a {name}?',
+        'This session started in a worktree at {path}. The terminal open beside it is still in the project directory — change its directory to the worktree? A terminal running a command is left alone.':
+            'Esta sesión empezó en un worktree en {path}. La terminal abierta a su lado sigue en el directorio del proyecto — ¿cambiar su directorio al worktree? Una terminal con un comando en ejecución no se toca.',
+        'Change Directory':
+            'Cambiar el directorio',
+        '{n} terminal is running a command and stayed where it was':
+            '{n} terminal está ejecutando un comando y se quedó donde estaba',
+        'Effort: {level}':
+            'Esfuerzo: {level}',
+        'Click to switch the effort level':
+            'Haz clic para cambiar el nivel de esfuerzo',
+        'No pull request found for this branch':
+            'No se encontró ningún pull request para esta rama',
+        "Re-check this branch's pull requests":
+            'Volver a comprobar los pull requests de esta rama',
+        "Look for this branch's pull request":
+            'Buscar el pull request de esta rama',
+        "Add to chat: the agent isn't running in this tab":
+            'Añadir al chat: el agente no se está ejecutando en esta pestaña',
+        "Add to chat isn't available for this file":
+            'Añadir al chat no está disponible para este archivo',
+        "skipped {n} dropped item that isn't a local file":
+            'se omitió {n} elemento soltado que no es un archivo local',
+        "Composer: the input box holds a paste Collins can't read":
+            'Redactor: el cuadro de entrada contiene un pegado que Collins no puede leer',
+        "Effort switch: the agent isn't running in this tab":
+            'Cambio de esfuerzo: el agente no se está ejecutando en esta pestaña',
+        "This session isn't at an empty prompt.":
+            'Esta sesión no está en un prompt vacío.',
+        'Start sessions in the background':
+            'Iniciar sesiones en segundo plano',
+        'start_session — spawn a sibling agent in a new background tab, with a prompt':
+            'start_session — lanza un agente hermano en una pestaña nueva en segundo plano, con un prompt',
+        'Read the terminal panel':
+            'Leer el panel de terminal',
+        "read_terminal — the panel tabs' text and scrollback, your own typing included":
+            'read_terminal — el texto y el historial de las pestañas del panel, incluido lo que tú mismo escribes',
+        'Run commands in the terminal panel':
+            'Ejecutar comandos en el panel de terminal',
+        'run_in_terminal — type a command into an idle panel tab (or a new one) and run it':
+            'run_in_terminal — escribe un comando en una pestaña del panel inactiva (o una nueva) y lo ejecuta',
+        'Default (latest Haiku)':
+            'Predeterminado (último Haiku)',
+        'Default (latest Sonnet)':
+            'Predeterminado (último Sonnet)',
+        'Session title model':
+            'Modelo de títulos de sesión',
+        'Icon generation model':
+            'Modelo de generación de iconos',
+        'Model list':
+            'Lista de modelos',
+        'Checking…':
+            'Comprobando…',
+        'Ask Anthropic for the model list now, rather than waiting for the saved one to age out':
+            'Pedir a Anthropic la lista de modelos ahora, en lugar de esperar a que caduque la guardada',
+        "Couldn't reach Anthropic — offering the CLI's aliases (opus, sonnet, haiku)":
+            'No se pudo contactar con Anthropic — se ofrecen los alias de la CLI (opus, sonnet, haiku)',
+        "Couldn't reach Anthropic — still showing the list fetched {when}":
+            'No se pudo contactar con Anthropic — se sigue mostrando la lista obtenida {when}',
+        '{count} models, updated {when}':
+            '{count} modelos, actualizada {when}',
+        'Waiting for this session to be registered — backgrounding it now would leave the agent with no way back to it':
+            'Esperando a que esta sesión se registre — pasarla ahora a segundo plano dejaría al agente sin camino de vuelta a ella',
+        'Another session is still being handed to the background — one at a time':
+            'Otra sesión aún se está traspasando al segundo plano — de una en una',
+        'New chat (scratch folder)':
+            'Nuevo chat (carpeta temporal)',
+        'Close window with {n} active session(s)?':
+            '¿Cerrar la ventana con {n} sesión(es) activa(s)?',
+        'Agents are asked to exit cleanly first; other running commands will be terminated.':
+            'Primero se pide a los agentes que salgan limpiamente; los demás comandos en ejecución se terminarán.',
+        'Backgrounding sessions…':
+            'Pasando sesiones a segundo plano…',
+        'Quit Now':
+            'Salir ahora',
+        'Handing each session to a background agent, one at a time, so every one is paired with the agent it becomes. {done} of {total} done.':
+            'Traspasando cada sesión a un agente en segundo plano, de una en una, para que cada una quede emparejada con el agente en que se convierte. {done} de {total} hechas.',
+        'New session in {project} (no worktree)':
+            'Nueva sesión en {project} (sin worktree)',
+        'New session in {project} (in a worktree)':
+            'Nueva sesión en {project} (en un worktree)',
+        'Could not create chat directory':
+            'No se pudo crear el directorio del chat',
+        'Trust and add':
+            'Confiar y añadir',
+        'Discard draft?':
+            '¿Descartar el borrador?',
+        '“{label}” will be forgotten, along with any terminal panel it kept.':
+            '«{label}» se olvidará, junto con cualquier panel de terminal que conservara.',
+        'Discard':
+            'Descartar',
+        "Couldn't send that to the session":
+            'No se pudo enviar eso a la sesión',
+        'Close tab with an active session?':
+            '¿Cerrar la pestaña con una sesión activa?',
+        "The agent is asked to exit cleanly first; the command running in this tab's terminal panel will be terminated.":
+            'Primero se pide al agente que salga limpiamente; el comando en ejecución en el panel de terminal de esta pestaña se terminará.',
+        'The agent is asked to exit cleanly first.':
+            'Primero se pide al agente que salga limpiamente.',
+        "A command is still running in this tab's terminal panel and will be terminated.":
+            'Todavía se está ejecutando un comando en el panel de terminal de esta pestaña y se terminará.',
+        "Backgrounding isn't available yet: this session hasn't been registered, so a detached agent would have no way back to it.":
+            'Pasar a segundo plano aún no está disponible: esta sesión no se ha registrado, así que un agente desacoplado no tendría camino de vuelta a ella.',
+        "Backgrounding isn't available right now: another session is still being handed to the background.":
+            'Pasar a segundo plano no está disponible ahora mismo: otra sesión aún se está traspasando al segundo plano.',
+        'No matching agent':
+            'Ningún agente coincide',
+        'No background agent matches this session — either its agent is gone, or more than one candidate matched and guessing would link the wrong one. The transcript itself is intact.':
+            'Ningún agente en segundo plano coincide con esta sesión — o su agente ya no existe, o coincidió más de un candidato y adivinar vincularía el equivocado. La transcripción en sí está intacta.',
+        'Session linked':
+            'Sesión vinculada',
+        'Linked to its running background agent.':
+            'Vinculada a su agente en segundo plano en ejecución.',
+        'Nothing to repair':
+            'Nada que reparar',
+        'This session is already its own background agent. Opening it attaches to that agent.':
+            'Esta sesión ya es su propio agente en segundo plano. Al abrirla te conectas a ese agente.',
+        'No pull request is linked to this session yet':
+            'Aún no hay ningún pull request vinculado a esta sesión',
+        'Undo':
+            'Deshacer',
+        'Archived “{name}”':
+            '«{name}» archivada',
+        'Archived {n} sessions':
+            '{n} sesiones archivadas',
+        'Delete {n} archived session(s)?':
+            '¿Eliminar {n} sesión(es) archivada(s)?',
+        'Keep the {p} emptied project(s) in the sidebar':
+            'Mantener en la barra lateral los {p} proyecto(s) vaciados',
+        'Manage and resume your AI coding agent sessions.\n\nUnofficial community tool — not affiliated with or endorsed by Anthropic.':
+            'Gestiona y reanuda tus sesiones de agente de programación con IA.\n\nHerramienta comunitaria no oficial — sin afiliación ni respaldo de Anthropic.',
     },
     "fr": {
         'Before you start':
@@ -2044,12 +4654,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Rename session": "Renommer la session",
         "Custom name": "Nom personnalisé",
         "Cancel": "Annuler",
-        "Session list": "Liste des sessions",
-        "Show folder path": "Afficher le chemin du dossier",
         "Show folder paths in sidebar": "Afficher les chemins des dossiers dans la barre latérale",
-        "Show each session's project folder path in the sidebar":
-            "Afficher le chemin du dossier de projet de chaque session dans la barre latérale",
-        "Startup": "Démarrage",
         "Reopen the last session": "Rouvrir la dernière session",
         "Open the session that was active when the app was last closed. "
         "Off, the app launches with no session open":
@@ -2122,7 +4727,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Tools used in this session": "Outils utilisés dans cette session",
         "Recent activity": "Activité récente",
         "You": "Vous",
-        "Claude": "Claude",
         "Follow system": "Suivre le système",
         "Light": "Clair",
         "Dark": "Sombre",
@@ -2145,23 +4749,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Paste": "Coller",
         "Select All": "Tout sélectionner",
         "Color theme": "Thème de couleurs",
-        "Appearance": "Apparence",
         "Color scheme": "Schéma de couleurs",
         "Dark / Light Mode": "Mode sombre / clair",
         "Language": "Langue",
-        "Restart to apply": "Redémarrer pour appliquer",
-        "Running sessions": "Sessions en cours",
-        "Ask keeps the confirmation dialog; the other choices skip it and exit the "
-        "session(s) cleanly or keep them running detached":
-            "« Demander » conserve la boîte de dialogue de confirmation ; les autres choix "
-            "la sautent et quittent proprement la ou les sessions, ou les laissent tourner détachées",
         "When archiving a running session": "Lors de l’archivage d’une session en cours",
         "Archiving a session that is still running also closes its tab":
             "Archiver une session encore en cours ferme aussi son onglet",
         "When quitting with running sessions": "À la fermeture avec des sessions en cours",
         "Closing a window while agent sessions are still running":
             "Fermer une fenêtre alors que des sessions d’agent sont encore en cours",
-        "Archiving": "Archivage",
         "Archive on claude.ai too": "Archiver aussi sur claude.ai",
         "A session that also appears on claude.ai is archived and restored "
         "there along with the toggle here; best-effort, archiving locally "
@@ -2177,14 +4773,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Show archived sessions": "Afficher les sessions archivées",
         "MCP servers": "Serveurs MCP",
         "About Collins": "À propos de Collins",
-        "Refresh session list": "Actualiser la liste des sessions",
         "Search sessions…": "Rechercher des sessions…",
         "Search sessions": "Rechercher des sessions",
         "Close search": "Fermer la recherche",
         "A session is working": "Une session travaille",
         "Collapse all groups": "Réduire tous les groupes",
         "Expand all groups": "Développer tous les groupes",
-        "No sessions found": "Aucune session trouvée",
         "{n} sessions": "{n} sessions",
         "{n} projects": "{n} projets",
         "{n} open": "{n} ouvertes",
@@ -2316,12 +4910,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Reopen it by relaunching Collins, or from a session's notification.":
             "Rouvrez-le en relançant Collins ou depuis la notification d’une session.",
         "no sessions open": "aucune session ouverte",
-        "1 session": "1 session",
         "{n} sessions": "{n} sessions",
-        "1 working": "1 en cours",
-        "{n} working": "{n} en cours",
-        "1 unread": "1 non lue",
-        "{n} unread": "{n} non lues",
         "Finished a run": "A terminé une exécution",
         "Default: the desktop's message sound": "Par défaut : le son de message du bureau",
         "Silent": "Silencieux",
@@ -2381,7 +4970,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Sound: {name}": "Son : {name}",
         "Preferences…": "Préférences…",
         "Show/hide notifications": "Afficher/masquer les notifications",
-        "You interrupted Claude here": "Vous avez interrompu Claude ici",
         "Restart now": "Redémarrer maintenant",
         "Choose project directory": "Choisir le répertoire du projet",
         "Tab name": "Nom de l’onglet",
@@ -2478,7 +5066,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Le projet est volumineux — seuls les premiers {count} fichiers sont consultables.",
         "Agent files": "Fichiers de l’agent",
         "Open {name} in the editor": "Ouvrir {name} dans l’éditeur",
-        "Session tools": "Outils de session",
         "Session behavior": "Comportement des sessions",
         "Composer": "Compositeur",
         "Built-in MCP tools": "Outils MCP intégrés",
@@ -2529,7 +5116,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "onglet assez large pour céder la colonne, au-delà de la largeur "
             "maximale du terminal. Une fois par onglet de session : celui "
             "que vous refermez reste fermé",
-        "Open composer (Ctrl+.)": "Ouvrir le rédacteur (Ctrl+.)",
         "Attach file": "Joindre un fichier",
         "Remove image": "Retirer l'image",
         "Close composer and keep the text in the terminal":
@@ -2608,6 +5194,900 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Impossible d'installer l'icône de bureau",
         "Collins is in your applications now":
             "Collins est maintenant dans vos applications",
+        'Add application':
+            'Ajouter une application',
+        'Search applications…':
+            'Rechercher des applications…',
+        'Caffeine Mode is on':
+            'Caffeine Mode est activé',
+        "That file isn't an image Collins can display.":
+            "Ce fichier n'est pas une image que Collins peut afficher.",
+        'Until idle':
+            "Jusqu'à inactivité",
+        'Indefinitely':
+            'Indéfiniment',
+        '1 hour':
+            '1 heure',
+        '{n} hours':
+            '{n} heures',
+        'Caffeine Mode is dozing until a session works again — then the computer and screen will stay awake':
+            "Caffeine Mode somnole jusqu'à ce qu'une session travaille à nouveau — l'ordinateur et l'écran resteront alors éveillés",
+        'Caffeine Mode is dozing until a session works again — then the computer will stay awake, the screen may turn off':
+            "Caffeine Mode somnole jusqu'à ce qu'une session travaille à nouveau — l'ordinateur restera alors éveillé, l'écran peut s'éteindre",
+        'Caffeine Mode is on while sessions are working — the computer and screen will stay awake':
+            "Caffeine Mode est activé pendant que des sessions travaillent — l'ordinateur et l'écran resteront éveillés",
+        'Caffeine Mode is on while sessions are working — the computer will stay awake, the screen may turn off':
+            "Caffeine Mode est activé pendant que des sessions travaillent — l'ordinateur restera éveillé, l'écran peut s'éteindre",
+        'Caffeine Mode is on — the computer and screen will stay awake':
+            "Caffeine Mode est activé — l'ordinateur et l'écran resteront éveillés",
+        'Caffeine Mode is on — the computer will stay awake, the screen may turn off':
+            "Caffeine Mode est activé — l'ordinateur restera éveillé, l'écran peut s'éteindre",
+        'Caffeine Mode: keep the computer awake and the screen on':
+            "Caffeine Mode : garder l'ordinateur éveillé et l'écran allumé",
+        'Caffeine Mode: keep the computer awake, letting the screen turn off':
+            "Caffeine Mode : garder l'ordinateur éveillé, en laissant l'écran s'éteindre",
+        'Caffeine Mode turns off in {time} — computer and screen stay awake':
+            "Caffeine Mode s'éteint dans {time} — l'ordinateur et l'écran restent éveillés",
+        'Caffeine Mode turns off in {time} — computer stays awake, screen may turn off':
+            "Caffeine Mode s'éteint dans {time} — l'ordinateur reste éveillé, l'écran peut s'éteindre",
+        'Send':
+            'Envoyer',
+        'The user declined this action.':
+            "L'utilisateur a refusé cette action.",
+        'Switch the effort level for this session':
+            "Changer le niveau d'effort de cette session",
+        "couldn't save a copy of the dropped image":
+            "impossible d'enregistrer une copie de l'image déposée",
+        "skipped {n} item that isn't a local file":
+            "{n} élément ignoré qui n'est pas un fichier local",
+        "couldn't reference {n} dropped file name":
+            'impossible de référencer {n} nom de fichier déposé',
+        "couldn't save a copy of the pasted image":
+            "impossible d'enregistrer une copie de l'image collée",
+        'Effort':
+            'Effort',
+        'Copied to clipboard':
+            'Copié dans le presse-papiers',
+        'Rename folder':
+            'Renommer le dossier',
+        'Rename file':
+            'Renommer le fichier',
+        'Enter a new name for “{name}”.':
+            'Saisissez un nouveau nom pour « {name} ».',
+        'Rename':
+            'Renommer',
+        'Move editor to {name}?':
+            "Déplacer l'éditeur vers {name} ?",
+        'This session is now working in {path}. One open file has unsaved changes and also exists there — choose what happens to it.':
+            "Cette session travaille maintenant dans {path}. Un fichier ouvert a des modifications non enregistrées et existe aussi là-bas — choisissez ce qu'il en advient.",
+        'Stay':
+            'Rester',
+        'Go on editing this file, where your unsaved changes belong':
+            'Continuer à modifier ce fichier, où se trouvent vos modifications non enregistrées',
+        'Take edits':
+            'Emporter les modifications',
+        'Move this tab to the new copy, keeping your unsaved changes — saving will write them over whatever that copy holds':
+            "Déplacer cet onglet vers la nouvelle copie en gardant vos modifications non enregistrées — l'enregistrement écrasera ce que contient cette copie",
+        'Use new':
+            'Utiliser la nouvelle',
+        'Open the new copy and discard your unsaved changes':
+            'Ouvrir la nouvelle copie et abandonner vos modifications non enregistrées',
+        "Don't Move":
+            'Ne pas déplacer',
+        'Move Editor':
+            "Déplacer l'éditeur",
+        'Do you trust this folder?':
+            'Faites-vous confiance à ce dossier ?',
+        '{agent} will be able to read, edit and execute files in\n\n{path}\n\nand everything inside it, including any worktrees it creates there. Open it only if this is a project you created or otherwise trust — like your own code, a well-known open source project, or work from your team.':
+            "{agent} pourra lire, modifier et exécuter des fichiers dans\n\n{path}\n\net tout ce qu'il contient, y compris les worktrees qu'il y crée. Ouvrez-le seulement s'il s'agit d'un projet que vous avez créé ou auquel vous faites confiance — comme votre propre code, un projet open source bien connu, ou le travail de votre équipe.",
+        'Trust and open':
+            'Faire confiance et ouvrir',
+        'Generating icon…':
+            "Génération de l'icône…",
+        'At sidebar size':
+            'À la taille de la barre latérale',
+        'Optional adjustments, e.g. “make it blue”':
+            'Ajustements facultatifs, p. ex. « rends-la bleue »',
+        'Regenerate':
+            'Régénérer',
+        'Default model':
+            'Modèle par défaut',
+        "Model for this dialog's runs; Preferences sets the default":
+            'Modèle des exécutions de cette boîte de dialogue ; les Préférences fixent le défaut',
+        'Default ({model})':
+            'Par défaut ({model})',
+        'Generate Icon':
+            'Générer une icône',
+        'the generated SVG could not be rendered':
+            "le SVG généré n'a pas pu être rendu",
+        'Icon generation failed: {error}':
+            "Échec de la génération de l'icône : {error}",
+        'Saving failed: {error}':
+            "Échec de l'enregistrement : {error}",
+        'Close other tabs':
+            'Fermer les autres onglets',
+        'Close tabs to the right':
+            'Fermer les onglets à droite',
+        'Close all tabs':
+            'Fermer tous les onglets',
+        'Add to chat':
+            'Ajouter à la discussion',
+        "Couldn't rename {name}: {message}":
+            'Impossible de renommer « {name} » : {message}',
+        'A name is needed to rename {name}.':
+            'Un nom est requis pour renommer « {name} ».',
+        "“{new_name}” isn't a name — renaming can't move things elsewhere.":
+            "« {new_name} » n'est pas un nom — le renommage ne peut pas déplacer les choses ailleurs.",
+        '“{new_name}” already exists here.':
+            '« {new_name} » existe déjà ici.',
+        '{name} is no longer there.':
+            "« {name} » n'est plus là.",
+        "{name} can't be renamed to something outside this project.":
+            '« {name} » ne peut pas être renommé vers un emplacement hors de ce projet.',
+        "There's nothing on the clipboard to paste here.":
+            "Il n'y a rien dans le presse-papiers à coller ici.",
+        "{count} item couldn't be pasted.":
+            "{count} élément n'a pas pu être collé.",
+        "{name} can't be pasted into itself.":
+            '« {name} » ne peut pas être collé dans lui-même.',
+        'That folder is no longer there.':
+            "Ce dossier n'est plus là.",
+        "{name} can't be pasted outside this project.":
+            '« {name} » ne peut pas être collé hors de ce projet.',
+        'There are already too many copies of {name} here.':
+            'Il y a déjà trop de copies de « {name} » ici.',
+        "Couldn't paste {name}: {message}":
+            'Impossible de coller « {name} » : {message}',
+        "{name} couldn't be decoded as an image.":
+            "« {name} » n'a pas pu être décodé comme une image.",
+        'Session moved to {name}':
+            'Session déplacée vers {name}',
+        'Follow':
+            'Suivre',
+        'Image':
+            'Image',
+        'Cut':
+            'Couper',
+        '{n} session(s) in {p} project(s) have their transcripts moved to the trash, where they can be restored. Sessions archived with their whole project — and originals a backgrounded fork replaced — are included.':
+            "{n} session(s) dans {p} projet(s) voient leurs transcriptions mises à la corbeille, d'où elles peuvent être restaurées. Les sessions archivées avec leur projet entier — et les originales remplacées par une bifurcation passée en arrière-plan — sont incluses.",
+        '{project} — {n} of {total}':
+            '{project} — {n} sur {total}',
+        '…and {p} other project(s) — {n} session(s)':
+            '…et {p} autre(s) projet(s) — {n} session(s)',
+        '{p} of these project(s) lose every session they have.':
+            '{p} de ces projets perdent toutes leurs sessions.',
+        'Open, every check passed':
+            'Ouverte, toutes les vérifications réussies',
+        'Checks still running':
+            'Vérifications en cours',
+        'A check failed':
+            'Une vérification a échoué',
+        'A reviewer is waiting on a reply':
+            'Un relecteur attend une réponse',
+        'Draft, and the branch conflicts':
+            'Brouillon, et la branche a des conflits',
+        'Merged':
+            'Fusionnée',
+        'Collins is better with the GitHub CLI':
+            'Collins est meilleur avec la CLI GitHub',
+        "Collins follows the pull requests your sessions open — and acts on them — through gh, GitHub's own command-line tool, which isn't installed here.":
+            "Collins suit les pull requests que vos sessions ouvrent — et agit dessus — via gh, l'outil en ligne de commande de GitHub, qui n'est pas installé ici.",
+        "Collins follows the pull requests your sessions open — and acts on them — through gh, GitHub's own command-line tool, which is installed here but never signed in.":
+            "Collins suit les pull requests que vos sessions ouvrent — et agit dessus — via gh, l'outil en ligne de commande de GitHub, qui est installé ici mais jamais connecté.",
+        'Not now':
+            'Pas maintenant',
+        'Get the GitHub CLI':
+            'Obtenir la CLI GitHub',
+        'Copy command':
+            'Copier la commande',
+        "With it, every session's pull requests carry their status:":
+            'Avec lui, les pull requests de chaque session portent leur statut :',
+        '…and a click on one does something about it:':
+            "…et un clic sur l'une d'elles agit en conséquence :",
+        "Don't show this again":
+            'Ne plus afficher ceci',
+        'Install it from cli.github.com — Collins picks it up the next time it starts.':
+            'Installez-le depuis cli.github.com — Collins le détecte à son prochain démarrage.',
+        'Run this once in any terminal. Collins asks for no login of its own.':
+            "Exécutez ceci une fois dans n'importe quel terminal. Collins ne demande aucune connexion propre.",
+        'Keyboard Bindings':
+            'Raccourcis clavier',
+        'Reset All':
+            'Tout réinitialiser',
+        'Put every shortcut back to its default':
+            'Remettre chaque raccourci à sa valeur par défaut',
+        'Click a row to change its shortcut':
+            'Cliquez sur une ligne pour changer son raccourci',
+        'Also bound to: {actions}':
+            'Aussi assigné à : {actions}',
+        'Unbound':
+            'Non assigné',
+        'Reset to default':
+            'Rétablir la valeur par défaut',
+        'Reset every shortcut?':
+            'Réinitialiser tous les raccourcis ?',
+        'All of your custom keyboard bindings are replaced by the defaults.':
+            'Tous vos raccourcis clavier personnalisés sont remplacés par les valeurs par défaut.',
+        '{chord} is already in use':
+            '{chord} est déjà utilisé',
+        'It is bound to {actions}. Move it to {action}?':
+            'Il est assigné à {actions}. Le déplacer vers {action} ?',
+        'Move Shortcut':
+            'Déplacer le raccourci',
+        'unbound':
+            'non assigné',
+        'Set shortcut for “{action}”':
+            'Définir le raccourci pour « {action} »',
+        'Press the new key combination. Currently: {current}.\nBackspace removes the binding; Escape keeps it.':
+            'Appuyez sur la nouvelle combinaison de touches. Actuellement : {current}.\nRetour arrière supprime le raccourci ; Échap le conserve.',
+        'Tabs and windows':
+            'Onglets et fenêtres',
+        'Panels':
+            'Panneaux',
+        'Application':
+            'Application',
+        'New session':
+            'Nouvelle session',
+        'Quick switcher':
+            'Sélecteur rapide',
+        'Archive the current session':
+            'Archiver la session actuelle',
+        'Undo the last archive':
+            'Annuler le dernier archivage',
+        'Open the pull request page':
+            'Ouvrir la page de la pull request',
+        "Unbound by default; the sidebar's search button does the same.":
+            'Non assigné par défaut ; le bouton de recherche de la barre latérale fait de même.',
+        'Close tab':
+            "Fermer l'onglet",
+        'Next tab':
+            'Onglet suivant',
+        'Previous tab':
+            'Onglet précédent',
+        'Toggle the tab marker':
+            "Basculer le marqueur d'onglet",
+        'Show/hide the sidebar':
+            'Afficher/masquer la barre latérale',
+        'Show/hide the terminal panel':
+            'Afficher/masquer le panneau de terminal',
+        'Clear the terminal panel':
+            'Vider le panneau de terminal',
+        'Move the panel tab to the other side':
+            "Déplacer l'onglet du panneau de l'autre côté",
+        'Show/hide the composer':
+            'Afficher/masquer le rédacteur',
+        'Show/hide the attachments gallery':
+            'Afficher/masquer la galerie des pièces jointes',
+        "Swap the panel's sides":
+            'Échanger les côtés du panneau',
+        'Unbound by default.':
+            'Non assigné par défaut.',
+        'Move the panel tab to the other strip':
+            "Déplacer l'onglet du panneau vers l'autre bande",
+        'Show/hide the editor':
+            "Afficher/masquer l'éditeur",
+        'Quick open a file':
+            "Ouverture rapide d'un fichier",
+        'Focus the editor':
+            "Donner le focus à l'éditeur",
+        'Save the file':
+            'Enregistrer le fichier',
+        'In the editor.':
+            "Dans l'éditeur.",
+        'Find in the file':
+            'Rechercher dans le fichier',
+        'Copy the selection':
+            'Copier la sélection',
+        'With easy copy and paste on; without a selection the key reaches the terminal.':
+            'Avec le copier-coller simplifié activé ; sans sélection la touche atteint le terminal.',
+        'With easy copy and paste on.':
+            'Avec le copier-coller simplifié activé.',
+        'Copy (terminal-style)':
+            'Copier (façon terminal)',
+        'Paste (terminal-style)':
+            'Coller (façon terminal)',
+        'Find in the terminal':
+            'Rechercher dans le terminal',
+        'Insert a newline in the prompt':
+            'Insérer un saut de ligne dans le prompt',
+        'Zoom in':
+            'Zoom avant',
+        'Zoom out':
+            'Zoom arrière',
+        'Reset zoom':
+            'Réinitialiser le zoom',
+        'Keyboard bindings':
+            'Raccourcis clavier',
+        "Couldn't display image":
+            "Impossible d'afficher l'image",
+        'Open in Editor':
+            "Ouvrir dans l'éditeur",
+        'Low':
+            'Faible',
+        'Medium':
+            'Moyen',
+        'High':
+            'Élevé',
+        'Extra high':
+            'Très élevé',
+        'Max':
+            'Max',
+        'This model has no effort setting':
+            "Ce modèle n'a pas de réglage d'effort",
+        'New chat':
+            'Nouvelle discussion',
+        'Model to start this session on':
+            'Modèle avec lequel démarrer cette session',
+        'Effort level to start this session at':
+            "Niveau d'effort avec lequel démarrer cette session",
+        'New git worktree':
+            'Nouveau worktree git',
+        'Work in a fresh worktree of this project, apart from its uncommitted changes':
+            "Travailler dans un worktree neuf de ce projet, à l'écart de ses modifications non validées",
+        'Empty Session':
+            'Session vide',
+        'Start the session with no prompt':
+            'Démarrer la session sans prompt',
+        'Drag to move this tab: drop on an edge to split, on a strip to join':
+            'Glissez pour déplacer cet onglet : déposez sur un bord pour scinder, sur une bande pour regrouper',
+        'Restore this tab to its size and place in the panel':
+            'Restaurer cet onglet à sa taille et sa place dans le panneau',
+        'Close Tab':
+            "Fermer l'onglet",
+        'Overlay this tab over the whole session':
+            'Superposer cet onglet sur toute la session',
+        'Move this tab to the other side':
+            "Déplacer cet onglet de l'autre côté",
+        'Close tab with a running command?':
+            "Fermer l'onglet avec une commande en cours ?",
+        'Move to':
+            'Déplacer vers',
+        'Split Left':
+            'Scinder à gauche',
+        'Split Right':
+            'Scinder à droite',
+        'Split Up':
+            'Scinder en haut',
+        'Split Down':
+            'Scinder en bas',
+        'Close tabs with running commands?':
+            'Fermer les onglets avec des commandes en cours ?',
+        'A command is still running in one of these tabs and will be terminated.':
+            "Une commande est encore en cours d'exécution dans l'un de ces onglets et sera interrompue.",
+        'Close Tabs':
+            'Fermer les onglets',
+        'Address unresolved comments':
+            'Traiter les commentaires non résolus',
+        'Send “{prompt}” to this session':
+            'Envoyer « {prompt} » à cette session',
+        'Open a pull request':
+            'Ouvrir une pull request',
+        'Fix errors & resolve conflicts':
+            'Corriger les erreurs et résoudre les conflits',
+        'Address the CI errors':
+            'Traiter les erreurs de CI',
+        'Fix errors':
+            'Corriger les erreurs',
+        'Resolve conflicts':
+            'Résoudre les conflits',
+        'Mark ready for review':
+            'Marquer comme prête pour relecture',
+        'Take {slug} out of draft':
+            'Sortir {slug} du brouillon',
+        'Ready':
+            'Prête',
+        'Ask Claude for a review':
+            'Demander une relecture à Claude',
+        'Comment “{comment}” on {slug}':
+            'Commenter « {comment} » sur {slug}',
+        'Merge when checks pass':
+            'Fusionner quand les vérifications passent',
+        'Turn on auto-merge for {slug}':
+            'Activer la fusion automatique pour {slug}',
+        'Merge {slug} when its checks pass?':
+            'Fusionner {slug} quand ses vérifications passent ?',
+        'GitHub merges it as soon as every required check has passed. You can still cancel auto-merge on the pull request page.':
+            'GitHub la fusionne dès que toutes les vérifications requises ont réussi. Vous pouvez encore annuler la fusion automatique sur la page de la pull request.',
+        'Enable auto-merge':
+            'Activer la fusion automatique',
+        'Auto-Merge':
+            'Fusion auto',
+        'Merge pull request':
+            'Fusionner la pull request',
+        'Merge {slug} now':
+            'Fusionner {slug} maintenant',
+        'Merge {slug}?':
+            'Fusionner {slug} ?',
+        'Merge':
+            'Fusionner',
+        'Disable auto-merge':
+            'Désactiver la fusion automatique',
+        'Stop GitHub from merging {slug} when its checks pass':
+            'Empêcher GitHub de fusionner {slug} quand ses vérifications passent',
+        'Disable Auto-Merge':
+            'Désactiver la fusion auto',
+        'Its checks have passed. This merges the pull request on GitHub now.':
+            'Ses vérifications ont réussi. Ceci fusionne la pull request sur GitHub maintenant.',
+        "Its checks haven't all passed. This merges the pull request on GitHub now, if the repository lets it.":
+            "Ses vérifications n'ont pas toutes réussi. Ceci fusionne la pull request sur GitHub maintenant, si le dépôt le permet.",
+        'Merge and archive session':
+            'Fusionner et archiver la session',
+        'Merge {slug} now, then archive this session':
+            'Fusionner {slug} maintenant, puis archiver cette session',
+        'Merge {slug} and archive this session?':
+            'Fusionner {slug} et archiver cette session ?',
+        'The session is archived once the merge lands — you can bring it back with Undo, or from “Show archived”.':
+            'La session est archivée une fois la fusion effectuée — vous pouvez la récupérer avec Annuler, ou depuis « Afficher les archivées ».',
+        'Merge & archive':
+            'Fusionner et archiver',
+        'Mark ready & merge when checks pass':
+            'Marquer prête et fusionner quand les vérifications passent',
+        'Take {slug} out of draft, then turn on auto-merge':
+            'Sortir {slug} du brouillon, puis activer la fusion automatique',
+        'Mark {slug} ready and merge it when its checks pass?':
+            'Marquer {slug} prête et la fusionner quand ses vérifications passent ?',
+        'Ready & auto-merge':
+            'Prête et fusion auto',
+        'Ready & Auto-Merge':
+            'Prête et fusion auto',
+        'Mark ready & merge':
+            'Marquer prête et fusionner',
+        'Take {slug} out of draft, then merge it now':
+            'Sortir {slug} du brouillon, puis la fusionner maintenant',
+        'Mark {slug} ready and merge it?':
+            'Marquer {slug} prête et la fusionner ?',
+        'Ready & merge':
+            'Prête et fusionner',
+        'Ready & Merge':
+            'Prête et fusionner',
+        'Mark ready, merge & archive session':
+            'Marquer prête, fusionner et archiver la session',
+        'Take {slug} out of draft, merge it now, then archive this session':
+            'Sortir {slug} du brouillon, la fusionner maintenant, puis archiver cette session',
+        'Mark {slug} ready, merge it and archive this session?':
+            'Marquer {slug} prête, la fusionner et archiver cette session ?',
+        'Ready, merge & archive':
+            'Prête, fusionner et archiver',
+        'The pull request is marked ready for review first.':
+            "La pull request est d'abord marquée prête pour relecture.",
+        'Close pull request':
+            'Fermer la pull request',
+        'Close {slug} without merging':
+            'Fermer {slug} sans fusionner',
+        'Close {slug}?':
+            'Fermer {slug} ?',
+        'The pull request is closed without merging. Its branch and its comments stay, and it can be reopened on GitHub.':
+            'La pull request est fermée sans fusion. Sa branche et ses commentaires restent, et elle peut être rouverte sur GitHub.',
+        "{url} doesn't look like a pull request.":
+            '{url} ne ressemble pas à une pull request.',
+        "Collins doesn't know how to do that.":
+            'Collins ne sait pas faire cela.',
+        'Merge conflicts':
+            'Conflits de fusion',
+        'Refresh':
+            'Actualiser',
+        'Search settings…':
+            'Rechercher des réglages…',
+        'Search settings':
+            'Rechercher des réglages',
+        'No settings found':
+            'Aucun réglage trouvé',
+        'Try a different search.':
+            'Essayez une autre recherche.',
+        'Tab drag handles':
+            'Poignées de glissement des onglets',
+        'Drag any panel tab by its handle to move, reorder, or split it. Relies on GTK internals — turn off to fall back to plain tab dragging plus a drag grip on each panel':
+            "Glissez n'importe quel onglet de panneau par sa poignée pour le déplacer, le réordonner ou le scinder. Repose sur des rouages internes de GTK — désactivez pour revenir au glissement d'onglet simple plus une prise de glissement sur chaque panneau",
+        'Project icon size':
+            'Taille des icônes de projet',
+        'Size of the project and folder icons in the sidebar':
+            'Taille des icônes de projet et de dossier dans la barre latérale',
+        'Start new sessions in a git worktree':
+            'Démarrer les nouvelles sessions dans un worktree git',
+        "Git projects only; each new session works in its own fresh worktree, so it won't see uncommitted local changes. Right-click a project header to override per project":
+            "Projets git seulement ; chaque nouvelle session travaille dans son propre worktree neuf, et ne voit donc pas les modifications locales non validées. Clic droit sur l'en-tête d'un projet pour l'ajuster par projet",
+        "Follow Claude's own session names":
+            'Suivre les noms de session de Claude',
+        'Rename sessions whenever Claude names or renames them — /rename and its automatic titles; manually renamed sessions keep their name':
+            'Renommer les sessions chaque fois que Claude les nomme ou renomme — /rename et ses titres automatiques ; les sessions renommées à la main gardent leur nom',
+        'Exact busy tracking from the agent':
+            "Suivi d'activité exact depuis l'agent",
+        "Read Claude Code's own progress announcements for the sidebar's working indicator, instead of only inferring from terminal output (fully applies to newly opened tabs)":
+            "Lire les annonces de progression de Claude Code pour l'indicateur de travail de la barre latérale, au lieu de seulement déduire depuis la sortie du terminal (pleinement appliqué aux onglets nouvellement ouverts)",
+        'Poll for background sessions':
+            'Sonder les sessions en arrière-plan',
+        'Fallback: check the agent CLI every 20 seconds in case the yellow guide lines stop updating on their own':
+            "Solution de repli : interroger la CLI de l'agent toutes les 20 secondes au cas où les lignes-guides jaunes cessent de se mettre à jour d'elles-mêmes",
+        'Typing opens the composer':
+            'Taper ouvre le rédacteur',
+        "Start typing at an agent's empty prompt and the composer opens with what you typed. A dialog, a menu and the CLI's own /, !, # and @ keep their keys":
+            "Commencez à taper au prompt vide d'un agent et le rédacteur s'ouvre avec ce que vous avez tapé. Une boîte de dialogue, un menu et les /, !, # et @ propres à la CLI gardent leurs touches",
+        'Right-click aims spell-check':
+            'Le clic droit vise la correction orthographique',
+        'Right-clicking a misspelled word in the composer offers corrections for that word. Off: corrections follow the text cursor instead, and a right-click never moves it':
+            'Un clic droit sur un mot mal orthographié dans le rédacteur propose des corrections pour ce mot. Désactivé : les corrections suivent le curseur de texte, et un clic droit ne le déplace jamais',
+        'Max width':
+            'Largeur maximale',
+        'Stop growing past this width and center in the tab instead (0 = no limit)':
+            "Cesser de grandir au-delà de cette largeur et se centrer dans l'onglet (0 = sans limite)",
+        'Footer apps':
+            'Applications du pied de page',
+        "Buttons in each tab's footer that open the tab's directory":
+            "Boutons dans le pied de page de chaque onglet qui ouvrent le répertoire de l'onglet",
+        'Add application…':
+            'Ajouter une application…',
+        'Pull requests':
+            'Pull requests',
+        'Text size':
+            'Taille du texte',
+        'Reading-text size in the pull request panel, as a percentage of the app font; buttons and menus keep the app size':
+            "Taille du texte de lecture dans le panneau de pull request, en pourcentage de la police de l'application ; boutons et menus gardent la taille de l'application",
+        'Show embedded images':
+            'Afficher les images intégrées',
+        'Render the images a description or comment embeds, and the changed image files, as pictures; click one to open it full size. Off, they stay links and patches, and opening a pull request downloads nothing':
+            "Afficher comme images celles qu'une description ou un commentaire intègre, ainsi que les fichiers d'image modifiés ; cliquez sur l'une pour l'ouvrir en taille réelle. Désactivé, elles restent des liens et des correctifs, et ouvrir une pull request ne télécharge rien",
+        'Confirm before merging':
+            'Confirmer avant de fusionner',
+        'Ask before merging a pull request, enabling auto-merge, or merging and archiving the session. Off, the click merges; closing a pull request unmerged still asks either way':
+            "Demander avant de fusionner une pull request, d'activer la fusion automatique, ou de fusionner et archiver la session. Désactivé, le clic fusionne ; fermer une pull request sans la fusionner demande toujours confirmation",
+        'Attach pull requests named in prompts':
+            'Attacher les pull requests nommées dans les prompts',
+        "Put every pull request a new session's first prompt mentions on that session's row, without waiting for the agent to touch it":
+            "Placer chaque pull request mentionnée par le premier prompt d'une nouvelle session sur la ligne de cette session, sans attendre que l'agent y touche",
+        'Rename sessions after their pull requests':
+            "Renommer les sessions d'après leurs pull requests",
+        'Retitle a session to match the newest pull request opened in it; manually renamed sessions keep their name':
+            "Retitrer une session d'après la plus récente pull request qui y est ouverte ; les sessions renommées à la main gardent leur nom",
+        'Refresh pull requests at launch':
+            'Actualiser les pull requests au lancement',
+        "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left":
+            "Interroger GitHub une fois au démarrage sur les pull requests de chaque session listée, pour que les marques de la barre latérale démarrent à jour plutôt que telles qu'elles ont été laissées",
+        'Caffeine Mode':
+            'Caffeine Mode',
+        'Keep screen on':
+            "Garder l'écran allumé",
+        'Hold the screen on as well as keeping the computer awake. Off lets the screen turn off as usual, while an unattended agent still keeps the computer from sleeping':
+            "Maintenir l'écran allumé en plus de garder l'ordinateur éveillé. Désactivé, l'écran s'éteint comme d'habitude, tandis qu'un agent sans surveillance empêche toujours l'ordinateur de dormir",
+        'Until idle grace period':
+            "Délai de grâce de Jusqu'à inactivité",
+        'How many minutes Until idle keeps the computer awake after the last session stops working; any session picking work back up restarts the wait':
+            "Combien de minutes Jusqu'à inactivité garde l'ordinateur éveillé après que la dernière session a cessé de travailler ; toute session qui reprend le travail relance l'attente",
+        'Turn on at launch':
+            'Activer au lancement',
+        'Start with Caffeine Mode already on, keeping the computer awake until you turn it off from the header':
+            "Démarrer avec Caffeine Mode déjà activé, gardant l'ordinateur éveillé jusqu'à ce que vous le désactiviez depuis l'en-tête",
+        'Turn off after':
+            'Désactiver après',
+        'Open in a window on small screens':
+            'Ouvrir dans une fenêtre sur petits écrans',
+        'On screens this many pixels wide or narrower (after display scaling), the editor opens in its own window instead of a panel (0 = always open as a panel)':
+            "Sur les écrans de cette largeur en pixels ou moins (après mise à l'échelle de l'affichage), l'éditeur s'ouvre dans sa propre fenêtre au lieu d'un panneau (0 = toujours ouvrir en panneau)",
+        'Show status icon':
+            "Afficher l'icône d'état",
+        'Shows Collins in the top bar, with a menu that jumps to any open session':
+            "Affiche Collins dans la barre supérieure, avec un menu qui saute vers n'importe quelle session ouverte",
+        'No status-icon support was found in this desktop — GNOME needs an AppIndicator extension':
+            "Aucune prise en charge d'icône d'état trouvée dans ce bureau — GNOME nécessite une extension AppIndicator",
+        'Nothing on this desktop can show a status icon':
+            "Rien sur ce bureau ne peut afficher une icône d'état",
+        'Using the claude found on PATH at {path}.':
+            'Utilise le claude trouvé dans le PATH à {path}.',
+        "claude isn't on PATH — Collins will ask where it is at the next launch.":
+            "claude n'est pas dans le PATH — Collins demandera où il est au prochain lancement.",
+        'How long that launch-time Caffeine Mode runs before it turns itself off. Until idle never does: it holds the computer awake while any session is working (and {n} minute past), dozing in between':
+            "Durée pendant laquelle ce Caffeine Mode de lancement tourne avant de se désactiver tout seul. Jusqu'à inactivité ne le fait jamais : il garde l'ordinateur éveillé tant qu'une session travaille (et {n} minute au-delà), somnolant entre-temps",
+        'Move up':
+            'Monter',
+        'Move down':
+            'Descendre',
+        'No apps configured':
+            'Aucune application configurée',
+        'Before':
+            'Avant',
+        'After':
+            'Après',
+        'Back to the pull requests':
+            'Retour aux pull requests',
+        'View in Collins':
+            'Voir dans Collins',
+        "Open this pull request's page beside the session":
+            'Ouvrir la page de cette pull request à côté de la session',
+        'View unresolved comments':
+            'Voir les commentaires non résolus',
+        "Open this pull request's page at its first unresolved thread":
+            'Ouvrir la page de cette pull request à son premier fil non résolu',
+        "Collins couldn't run that action.":
+            "Collins n'a pas pu exécuter cette action.",
+        '{action} failed':
+            'Échec de {action}',
+        'Pull request':
+            'Pull request',
+        'Merging when checks pass':
+            'Fusion quand les vérifications passent',
+        "The GitHub CLI (gh) isn't installed, or isn't on PATH.":
+            "La CLI GitHub (gh) n'est pas installée, ou n'est pas dans le PATH.",
+        "Collins couldn't run gh.":
+            "Collins n'a pas pu exécuter gh.",
+        'gh exited with status {code}.':
+            "gh s'est terminé avec le statut {code}.",
+        'and {n} more':
+            'et {n} de plus',
+        'Approved':
+            'Approuvée',
+        'Changes requested':
+            'Modifications demandées',
+        'Review dismissed':
+            'Relecture rejetée',
+        'Commented':
+            'Commenté',
+        'Reload this pull request':
+            'Recharger cette pull request',
+        'Conversation':
+            'Conversation',
+        'Files':
+            'Fichiers',
+        "Couldn't load this pull request — is the GitHub CLI signed in?":
+            'Impossible de charger cette pull request — la CLI GitHub est-elle connectée ?',
+        'Nothing loaded yet.':
+            "Rien de chargé pour l'instant.",
+        'Merges {head} into {base}':
+            'Fusionne {head} dans {base}',
+        '{n} file':
+            '{n} fichier',
+        'No comments yet.':
+            'Pas encore de commentaires.',
+        'No description provided.':
+            'Aucune description fournie.',
+        'No changed files.':
+            'Aucun fichier modifié.',
+        'Checks ({n})':
+            'Vérifications ({n})',
+        'Checks':
+            'Vérifications',
+        'More actions':
+            "Plus d'actions",
+        'Right-click for more actions':
+            "Clic droit pour plus d'actions",
+        'Add a comment':
+            'Ajouter un commentaire',
+        'Request changes':
+            'Demander des modifications',
+        'Approve':
+            'Approuver',
+        'Comment':
+            'Commenter',
+        'Comment on {slug}':
+            'Commenter sur {slug}',
+        'Approve {slug}':
+            'Approuver {slug}',
+        'Request changes on {slug}':
+            'Demander des modifications sur {slug}',
+        'Address comments':
+            'Traiter les commentaires',
+        'Request review':
+            'Demander une relecture',
+        'Outdated':
+            'Obsolète',
+        'The code this thread commented on has changed':
+            'Le code commenté par ce fil a changé',
+        'Resolved':
+            'Résolu',
+        'Reply':
+            'Répondre',
+        'Reply in this thread':
+            'Répondre dans ce fil',
+        'Unresolve':
+            'Rouvrir',
+        'Resolve':
+            'Résoudre',
+        'Reopen this thread':
+            'Rouvrir ce fil',
+        'Mark this thread resolved':
+            'Marquer ce fil comme résolu',
+        'Post reply':
+            'Publier la réponse',
+        'no diff — binary or too large':
+            'pas de diff — binaire ou trop volumineux',
+        '{n} line':
+            '{n} ligne',
+        'Show more':
+            'Afficher plus',
+        'Show less':
+            'Afficher moins',
+        'New session in {path}':
+            'Nouvelle session dans {path}',
+        'Expand':
+            'Développer',
+        'Collapse':
+            'Réduire',
+        'New Thread':
+            'Nouveau fil',
+        'Discard draft and close tab':
+            "Abandonner le brouillon et fermer l'onglet",
+        'Discard draft':
+            'Abandonner le brouillon',
+        'Backgrounding is unavailable until this session is registered and any handoff in progress finishes':
+            "Le passage en arrière-plan est indisponible tant que cette session n'est pas enregistrée et qu'un transfert en cours n'est pas terminé",
+        'This session has no tab open.':
+            "Cette session n'a aucun onglet ouvert.",
+        'Delete archived sessions…':
+            'Supprimer les sessions archivées…',
+        'Add project':
+            'Ajouter un projet',
+        'Refresh session list and pull requests':
+            'Actualiser la liste des sessions et les pull requests',
+        'Chats':
+            'Discussions',
+        'Draft':
+            'Brouillon',
+        'Refreshing pull requests…':
+            'Actualisation des pull requests…',
+        'Open in new window':
+            'Ouvrir dans une nouvelle fenêtre',
+        'Move to new window':
+            'Déplacer vers une nouvelle fenêtre',
+        'Rename to match PR':
+            "Renommer d'après la PR",
+        'Rename to match PR #{number}':
+            "Renommer d'après la PR #{number}",
+        'Repair session link':
+            'Réparer le lien de session',
+        'New session in new window':
+            'Nouvelle session dans une nouvelle fenêtre',
+        'New session here (no worktree)':
+            'Nouvelle session ici (sans worktree)',
+        'New session here (in a worktree)':
+            'Nouvelle session ici (dans un worktree)',
+        'New sessions use a worktree':
+            'Les nouvelles sessions utilisent un worktree',
+        'Git pull ({branch})':
+            'Git pull ({branch})',
+        'Git pull':
+            'Git pull',
+        'Remove project from sidebar':
+            'Retirer le projet de la barre latérale',
+        'replaced':
+            'remplacée',
+        'Open composer':
+            'Ouvrir le rédacteur',
+        "the agent didn't start — your prompt is kept in the composer":
+            "l'agent n'a pas démarré — votre prompt est conservé dans le rédacteur",
+        'Every pull request this session has opened':
+            'Chaque pull request que cette session a ouverte',
+        'Show/hide terminal panel':
+            'Afficher/masquer le panneau de terminal',
+        'Move terminals to {name}?':
+            'Déplacer les terminaux vers {name} ?',
+        'This session started in a worktree at {path}. The terminal open beside it is still in the project directory — change its directory to the worktree? A terminal running a command is left alone.':
+            'Cette session a démarré dans un worktree à {path}. Le terminal ouvert à côté est encore dans le répertoire du projet — changer son répertoire vers le worktree ? Un terminal exécutant une commande est laissé tel quel.',
+        'Change Directory':
+            'Changer de répertoire',
+        '{n} terminal is running a command and stayed where it was':
+            '{n} terminal exécute une commande et est resté où il était',
+        'Effort: {level}':
+            'Effort : {level}',
+        'Click to switch the effort level':
+            "Cliquer pour changer le niveau d'effort",
+        'No pull request found for this branch':
+            'Aucune pull request trouvée pour cette branche',
+        "Re-check this branch's pull requests":
+            'Revérifier les pull requests de cette branche',
+        "Look for this branch's pull request":
+            'Chercher la pull request de cette branche',
+        "Add to chat: the agent isn't running in this tab":
+            "Ajouter à la discussion : l'agent ne s'exécute pas dans cet onglet",
+        "Add to chat isn't available for this file":
+            "Ajouter à la discussion n'est pas disponible pour ce fichier",
+        "skipped {n} dropped item that isn't a local file":
+            "{n} élément déposé ignoré qui n'est pas un fichier local",
+        "Composer: the input box holds a paste Collins can't read":
+            'Rédacteur : la zone de saisie contient un collage que Collins ne peut pas lire',
+        "Effort switch: the agent isn't running in this tab":
+            "Changement d'effort : l'agent ne s'exécute pas dans cet onglet",
+        "This session isn't at an empty prompt.":
+            "Cette session n'est pas à un prompt vide.",
+        'Start sessions in the background':
+            'Démarrer des sessions en arrière-plan',
+        'start_session — spawn a sibling agent in a new background tab, with a prompt':
+            "start_session — lance un agent frère dans un nouvel onglet d'arrière-plan, avec un prompt",
+        'Read the terminal panel':
+            'Lire le panneau de terminal',
+        "read_terminal — the panel tabs' text and scrollback, your own typing included":
+            "read_terminal — le texte et l'historique des onglets du panneau, votre propre saisie incluse",
+        'Run commands in the terminal panel':
+            'Exécuter des commandes dans le panneau de terminal',
+        'run_in_terminal — type a command into an idle panel tab (or a new one) and run it':
+            "run_in_terminal — tape une commande dans un onglet de panneau inactif (ou un nouveau) et l'exécute",
+        'Default (latest Haiku)':
+            'Par défaut (dernier Haiku)',
+        'Default (latest Sonnet)':
+            'Par défaut (dernier Sonnet)',
+        'Session title model':
+            'Modèle des titres de session',
+        'Icon generation model':
+            "Modèle de génération d'icônes",
+        'Model list':
+            'Liste des modèles',
+        'Checking…':
+            'Vérification…',
+        'Ask Anthropic for the model list now, rather than waiting for the saved one to age out':
+            "Demander la liste des modèles à Anthropic maintenant, plutôt que d'attendre que la liste enregistrée expire",
+        "Couldn't reach Anthropic — offering the CLI's aliases (opus, sonnet, haiku)":
+            'Impossible de joindre Anthropic — propose les alias de la CLI (opus, sonnet, haiku)',
+        "Couldn't reach Anthropic — still showing the list fetched {when}":
+            'Impossible de joindre Anthropic — affiche encore la liste récupérée {when}',
+        '{count} models, updated {when}':
+            '{count} modèles, mise à jour {when}',
+        'Waiting for this session to be registered — backgrounding it now would leave the agent with no way back to it':
+            "En attente de l'enregistrement de cette session — la passer en arrière-plan maintenant laisserait l'agent sans moyen d'y revenir",
+        'Another session is still being handed to the background — one at a time':
+            'Une autre session est encore en cours de passage en arrière-plan — une à la fois',
+        'New chat (scratch folder)':
+            'Nouvelle discussion (dossier temporaire)',
+        'Close window with {n} active session(s)?':
+            'Fermer la fenêtre avec {n} session(s) active(s) ?',
+        'Agents are asked to exit cleanly first; other running commands will be terminated.':
+            "Les agents sont d'abord invités à quitter proprement ; les autres commandes en cours seront interrompues.",
+        'Backgrounding sessions…':
+            'Passage des sessions en arrière-plan…',
+        'Quit Now':
+            'Quitter maintenant',
+        'Handing each session to a background agent, one at a time, so every one is paired with the agent it becomes. {done} of {total} done.':
+            "Chaque session est confiée à un agent d'arrière-plan, une à la fois, pour que chacune soit appariée à l'agent qu'elle devient. {done} sur {total} faites.",
+        'New session in {project} (no worktree)':
+            'Nouvelle session dans {project} (sans worktree)',
+        'New session in {project} (in a worktree)':
+            'Nouvelle session dans {project} (dans un worktree)',
+        'Could not create chat directory':
+            'Impossible de créer le répertoire de discussion',
+        'Trust and add':
+            'Faire confiance et ajouter',
+        'Discard draft?':
+            'Abandonner le brouillon ?',
+        '“{label}” will be forgotten, along with any terminal panel it kept.':
+            "« {label} » sera oublié, ainsi que tout panneau de terminal qu'il conservait.",
+        'Discard':
+            'Abandonner',
+        "Couldn't send that to the session":
+            "Impossible d'envoyer cela à la session",
+        'Close tab with an active session?':
+            "Fermer l'onglet avec une session active ?",
+        "The agent is asked to exit cleanly first; the command running in this tab's terminal panel will be terminated.":
+            "L'agent est d'abord invité à quitter proprement ; la commande en cours dans le panneau de terminal de cet onglet sera interrompue.",
+        'The agent is asked to exit cleanly first.':
+            "L'agent est d'abord invité à quitter proprement.",
+        "A command is still running in this tab's terminal panel and will be terminated.":
+            "Une commande est encore en cours d'exécution dans le panneau de terminal de cet onglet et sera interrompue.",
+        "Backgrounding isn't available yet: this session hasn't been registered, so a detached agent would have no way back to it.":
+            "Le passage en arrière-plan n'est pas encore disponible : cette session n'a pas été enregistrée, donc un agent détaché n'aurait aucun moyen d'y revenir.",
+        "Backgrounding isn't available right now: another session is still being handed to the background.":
+            "Le passage en arrière-plan n'est pas disponible pour le moment : une autre session est encore en cours de passage en arrière-plan.",
+        'No matching agent':
+            'Aucun agent correspondant',
+        'No background agent matches this session — either its agent is gone, or more than one candidate matched and guessing would link the wrong one. The transcript itself is intact.':
+            "Aucun agent d'arrière-plan ne correspond à cette session — soit son agent a disparu, soit plusieurs candidats correspondaient et deviner lierait le mauvais. La transcription elle-même est intacte.",
+        'Session linked':
+            'Session liée',
+        'Linked to its running background agent.':
+            "Liée à son agent d'arrière-plan en cours d'exécution.",
+        'Nothing to repair':
+            'Rien à réparer',
+        'This session is already its own background agent. Opening it attaches to that agent.':
+            "Cette session est déjà son propre agent d'arrière-plan. L'ouvrir se rattache à cet agent.",
+        'No pull request is linked to this session yet':
+            "Aucune pull request n'est encore liée à cette session",
+        'Undo':
+            'Annuler',
+        'Archived “{name}”':
+            '« {name} » archivée',
+        'Archived {n} sessions':
+            '{n} sessions archivées',
+        'Delete {n} archived session(s)?':
+            'Supprimer {n} session(s) archivée(s) ?',
+        'Keep the {p} emptied project(s) in the sidebar':
+            'Garder les {p} projet(s) vidé(s) dans la barre latérale',
+        'Manage and resume your AI coding agent sessions.\n\nUnofficial community tool — not affiliated with or endorsed by Anthropic.':
+            "Gérez et reprenez vos sessions d'agent de codage IA.\n\nOutil communautaire non officiel — sans affiliation ni approbation d'Anthropic.",
     },
 }
 
@@ -2628,7 +6108,7 @@ _HEADER = (
 
 
 def _escape(text: str) -> str:
-    return text.replace("\\", "\\\\").replace('"', '\\"')
+    return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 def main() -> None:
