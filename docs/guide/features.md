@@ -502,20 +502,22 @@ flipped the switch is refused if it calls it anyway.
   row (ticked or not as the project's setting says — see below) and a
   **model picker** and an **effort picker** at its right, where a running
   session's model and effort menus sit. The model
-  picker opens on *Default* — the CLI's own default, named after
-  what its settings resolve it to (`~/.claude/settings.json`'s `model`,
-  the key `/model` writes, with a project's `.claude/settings.json` or
-  `ANTHROPIC_MODEL` taking precedence the way the CLI has it), or bare
-  when nothing sets one — over the same catalog the session's model menu
-  lists. A pick is for this session alone: it is passed as `--model` on
-  launch and the default is left as it was; *Default* passes nothing, so
+  picker lists the same catalog the session's model menu does, and opens
+  pre-selected on the CLI's own default — the model its settings resolve
+  it to (`~/.claude/settings.json`'s `model`, the key `/model` writes,
+  with a project's `.claude/settings.json` or `ANTHROPIC_MODEL` taking
+  precedence the way the CLI has it), marked in the list and named on the
+  button; an alias like `opus` marks the newest Opus. When nothing sets
+  one, the button reads a bare *Default* and no row is marked. A pick is
+  for this session alone: it is passed as `--model` on launch and the
+  default is left as it was; with nothing picked nothing is passed, so
   the session runs on whatever the CLI resolves at that moment. The effort
-  picker works the same way for `--effort`: *Default* is named after the
-  `effortLevel` that `/effort` saves (or `CLAUDE_CODE_EFFORT_LEVEL`), and
-  the levels on offer — *Low* to *Max* — are the ones the model the launch
-  will run on takes, as the Models API reports them; a level that model
-  can't take is greyed out, and one picked before a model switch that
-  rules it out falls back to *Default*. Nothing runs
+  picker works the same way for `--effort`: it opens on the `effortLevel`
+  that `/effort` saves (or `CLAUDE_CODE_EFFORT_LEVEL`), and the levels on
+  offer — *Low* to *Max* — are the ones the model the launch will run on
+  takes, as the Models API reports them; a level that model can't take is
+  greyed out, and one picked before a model switch that rules it out
+  falls back to the default. Nothing runs
   until you press Send; then the agent starts with your prompt as its
   first turn, and the tab is an ordinary session tab from there. With
   nothing written, the button reads **Empty Session** instead — press it

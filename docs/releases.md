@@ -38,6 +38,14 @@ downloads of each version, see the
 
 ### v0.1.2 — UNRELEASED
 
+- **The new-chat pickers pre-select the CLI's default.** The model and
+  effort menus on the new-chat screen no longer head their lists with a
+  *Default (…)* row: the model the CLI's settings resolve to (`model` in
+  `~/.claude/settings.json`, `ANTHROPIC_MODEL`; an `opus` alias marks the
+  newest Opus in the catalog) and the `effortLevel` they name are marked
+  on the lists themselves, and the buttons read their names. Nothing is
+  passed on launch until something is picked, as before; with no default
+  set, the button reads a bare *Default* and no row is marked.
 - **The Advanced new-session dialog is gone.** Its *New … session
   (advanced)…* entry left the New Session menu along with the dialog it
   opened: the model and effort it offered are picked on the new-chat
@@ -51,9 +59,9 @@ downloads of each version, see the
   menu. On a running session the chip and the button read the level the
   transcript last answered at, and a pick posts `/effort` the way the model
   menu posts `/model`; on the new-chat screen the pick is the launch's
-  `--effort`, with *Default* named after the `effortLevel` that `/effort`
-  saves to the CLI's settings (`CLAUDE_CODE_EFFORT_LEVEL` outranking it),
-  and it is kept with the draft like the model pick. The levels on offer
+  `--effort`, opening on the `effortLevel` that `/effort` saves to the
+  CLI's settings (`CLAUDE_CODE_EFFORT_LEVEL` outranking it), and it is
+  kept with the draft like the model pick. The levels on offer
   are the ones the model in question takes, as the Models API reports
   them, so a level the CLI would refuse (*Extra high* on Opus 4.6, any on
   Haiku 4.5) is greyed out rather than sent. The screen's worktree

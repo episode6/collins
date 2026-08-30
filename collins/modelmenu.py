@@ -27,9 +27,11 @@ menu never offers a ``/effort xhigh`` the CLI would refuse.
 The new-chat screen's pickers (new_launch_model_popover,
 new_launch_effort_popover) are the same lists with different semantics:
 they choose the ``--model`` and ``--effort`` a session not yet started
-will launch with, so the mark follows the pick at once, and a *Default*
-row heads each list — the CLI's own default, named when the settings say
-what it is (claudemodels.cli_default_model, cli_default_effort).
+will launch with, so the mark follows the pick at once — and until there
+is a pick it sits on the CLI's own default, when the settings say what
+that is (claudemodels.cli_default_model, cli_default_effort): the list is
+the catalog alone, with the default pre-selected on it rather than given
+a row of its own.
 """
 
 from __future__ import annotations
@@ -154,20 +156,28 @@ def _append_families(menu: Gio.Menu, models: list[claudemodels.ClaudeModel] | No
 # -- the new-chat screen's launch picker ---------------------------------------
 
 
-def default_label(default_model: str | None) -> str:
-    """What the launch picker calls the CLI's default: named after the model
-    the settings resolve to, or bare when nothing sets one."""
-    name = claudemodels.short_name(default_model or "")
-    return _("Default ({model})").format(model=name) if name else _("Default")
-
-
 def model_label(model_id: str) -> str:
-    """What the launch picker calls a picked model: the catalog's display
-    name when the id is listed, else the short name read off the id."""
-    for model in claudemodels.cached_models() or claudemodels.FALLBACK_MODELS:
-        if model.id == model_id:
+    """What the launch picker calls a model — a pick, or the CLI's default
+    as its settings write it: the display name of the catalog row the id
+    resolves to (claudemodels.catalog_id, so an ``opus`` alias reads as the
+    Opus it stands for, the row the picker marks), else the short name read
+    off the id."""
+    catalog = list(claudemodels.cached_models() or claudemodels.FALLBACK_MODELS)
+    listed = claudemodels.catalog_id(model_id, catalog)
+    for model in catalog:
+        if model.id == listed:
             return model.display_name
     return claudemodels.short_name(model_id) or model_id
+
+
+def _launch_mark(
+    choice: str, default_model: str | None, models: list[claudemodels.ClaudeModel] | None
+) -> str:
+    """The row the launch picker marks: the pick, else the row the CLI's
+    default names in *models* (claudemodels.catalog_id), else none."""
+    if choice:
+        return choice
+    return claudemodels.catalog_id(default_model, models or []) or ""
 
 
 def new_launch_model_popover(
@@ -176,12 +186,14 @@ def new_launch_model_popover(
     on_pick: Callable[[str], None],
 ) -> Gtk.PopoverMenu:
     """A popover choosing the ``--model`` a session not yet started launches
-    with: a *Default* row (the CLI's own default, *default_model* naming it
-    when known — re-read on every show, since ``/model`` in another session
-    can move it) over the catalog. *choice* is the current pick, "" for the
-    default; picking hands the id (or "") to *on_pick* and moves the mark
-    at once — this menu chooses, it doesn't wait on a session to answer.
-    Hand it to a MenuButton, for the same reason new_model_popover asks."""
+    with: the catalog, marked at *choice* — the current pick, "" for none —
+    or, with nothing picked, at the row the CLI's own default names
+    (*default_model*, as the settings write it; re-read on every show, since
+    ``/model`` in another session can move it). No row wears the mark when
+    the settings name no default, or one the catalog doesn't list. Picking
+    hands the id to *on_pick* and moves the mark at once — this menu
+    chooses, it doesn't wait on a session to answer. Hand it to a
+    MenuButton, for the same reason new_model_popover asks."""
     menu = Gio.Menu()
     popover = Gtk.PopoverMenu.new_from_model(menu)
     pick = Gio.SimpleAction.new_stateful(
@@ -199,15 +211,13 @@ def new_launch_model_popover(
 
     def fill(models: list[claudemodels.ClaudeModel] | None) -> None:
         menu.remove_all()
-        head = Gio.Menu()
-        item = Gio.MenuItem.new(default_label(default_model()), None)
-        item.set_action_and_target_value(f"{_GROUP}.pick", GLib.Variant.new_string(""))
-        head.append_item(item)
-        menu.append_section(None, head)
         _append_families(menu, models)
+        # The mark is resolved against the list it sits on: an alias in
+        # the settings names a different row on the live catalog than on
+        # the aliases the menu opened with.
+        pick.set_state(GLib.Variant.new_string(_launch_mark(choice(), default_model(), models)))
 
     def refresh(*_a) -> None:
-        pick.set_state(GLib.Variant.new_string(choice()))
         cached = claudemodels.cached_models()
         fill(cached)
 
@@ -240,14 +250,6 @@ def effort_label(level: str) -> str:
         "max": _("Max"),
     }
     return names.get(level, level)
-
-
-def default_effort_label(default_effort: str | None) -> str:
-    """What the launch picker calls the CLI's default effort: named after
-    the level the settings resolve to, or bare when nothing sets one."""
-    if default_effort:
-        return _("Default ({effort})").format(effort=effort_label(default_effort))
-    return _("Default")
 
 
 def _append_efforts(menu: Gio.Menu, allowed: tuple[str, ...] | None) -> None:
@@ -307,13 +309,15 @@ def new_launch_effort_popover(
     on_pick: Callable[[str], None],
 ) -> Gtk.PopoverMenu:
     """A popover choosing the ``--effort`` a session not yet started launches
-    with: a *Default* row (the CLI's own default, *default_effort* naming it
-    when known — re-read on every show, since ``/effort`` in another session
-    can move it) over the levels *launch_model* — the ``--model`` the launch
-    will pass, or the CLI's default when it passes none — takes. *choice*
-    is the current pick, "" for the default; picking hands the level (or "")
-    to *on_pick* and moves the mark at once, as new_launch_model_popover
-    does. Hand it to a MenuButton, for the same reason."""
+    with: the levels *launch_model* — the ``--model`` the launch will pass,
+    or the CLI's default when it passes none — takes, marked at *choice*
+    (the current pick, "" for none) or, with nothing picked, at the CLI's
+    own default level (*default_effort*, as the settings write it; re-read
+    on every show, since ``/effort`` in another session can move it). No
+    row wears the mark when the settings name no default, or one the CLI
+    wouldn't take. Picking hands the level to *on_pick* and moves the mark
+    at once, as new_launch_model_popover does. Hand it to a MenuButton,
+    for the same reason."""
     menu = Gio.Menu()
     popover = Gtk.PopoverMenu.new_from_model(menu)
     pick = Gio.SimpleAction.new_stateful(
@@ -330,13 +334,11 @@ def new_launch_effort_popover(
     popover.insert_action_group(_GROUP, group)
 
     def refresh(*_a) -> None:
-        pick.set_state(GLib.Variant.new_string(choice()))
+        default = default_effort() or ""
+        if default not in claudemodels.EFFORT_LEVELS:
+            default = ""  # a name the CLI wouldn't take marks nothing
+        pick.set_state(GLib.Variant.new_string(choice() or default))
         menu.remove_all()
-        head = Gio.Menu()
-        item = Gio.MenuItem.new(default_effort_label(default_effort()), None)
-        item.set_action_and_target_value(f"{_GROUP}.pick-effort", GLib.Variant.new_string(""))
-        head.append_item(item)
-        menu.append_section(None, head)
         _append_efforts(menu, claudemodels.model_efforts(launch_model() or ""))
 
     popover.connect("show", refresh)

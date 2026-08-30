@@ -709,6 +709,47 @@ def test_short_name_hands_back_what_it_cannot_read():
     assert short_name("") == ""
 
 
+# -- catalog_id ---------------------------------------------------------------
+
+
+def _versioned() -> list[ClaudeModel]:
+    return [
+        ClaudeModel("claude-opus-5", "Opus 5", "2026-05-01"),
+        ClaudeModel("claude-opus-4-8", "Opus 4.8", "2026-02-01"),
+        ClaudeModel("claude-sonnet-5", "Sonnet 5", "2026-05-01"),
+        ClaudeModel("claude-haiku-4-5-20251001", "Haiku 4.5", "2025-10-01"),
+    ]
+
+
+def test_catalog_id_is_the_listed_id_itself():
+    assert claudemodels.catalog_id("claude-opus-4-8", _versioned()) == "claude-opus-4-8"
+
+
+def test_catalog_id_reads_past_the_context_window_suffix():
+    assert claudemodels.catalog_id("claude-sonnet-5[1m]", _versioned()) == "claude-sonnet-5"
+
+
+def test_catalog_id_resolves_an_alias_to_the_newest_of_its_tier():
+    assert claudemodels.catalog_id("opus", _versioned()) == "claude-opus-5"
+    assert claudemodels.catalog_id("opusplan", _versioned()) == "claude-opus-5"
+    assert claudemodels.catalog_id("haiku", _versioned()) == "claude-haiku-4-5-20251001"
+
+
+def test_catalog_id_marks_the_alias_row_on_the_fallback_list():
+    assert claudemodels.catalog_id("opus", list(FALLBACK_MODELS)) == "opus"
+
+
+def test_catalog_id_is_none_for_what_the_list_lacks():
+    """A versioned id names one model — not its tier's newest — and an
+    alias of no known tier names nothing."""
+    assert claudemodels.catalog_id("claude-opus-4-1-20250805", _versioned()) is None
+    assert claudemodels.catalog_id("claude-opus-5", list(FALLBACK_MODELS)) is None
+    assert claudemodels.catalog_id("gizmo", _versioned()) is None
+    assert claudemodels.catalog_id("", _versioned()) is None
+    assert claudemodels.catalog_id(None, _versioned()) is None
+    assert claudemodels.catalog_id("opus", []) is None
+
+
 # -- sort_models --------------------------------------------------------------
 
 
