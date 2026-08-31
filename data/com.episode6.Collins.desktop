@@ -1,17 +1,29 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-26. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 [Desktop Entry]
 Type=Application
 Name=Collins
 GenericName=Session Manager
+GenericName[hu]=Munkamenet-kezelő
+GenericName[de]=Sitzungsverwaltung
+GenericName[es]=Gestor de sesiones
+GenericName[fr]=Gestionnaire de sessions
 Comment=Manage and resume your AI coding agent sessions
+Comment[hu]=AI kódolóügynök-munkamenetek kezelése és folytatása
+Comment[de]=KI-Coding-Agent-Sitzungen verwalten und fortsetzen
+Comment[es]=Gestiona y reanuda tus sesiones de agente de programación con IA
+Comment[fr]=Gérez et reprenez vos sessions d'agent de codage IA
 Exec=python3 -m collins
 Path=/opt/collins
 Icon=com.episode6.Collins
 Terminal=false
 Categories=Development;
 Keywords=claude;ai;agent;terminal;session;code;
+Keywords[hu]=claude;ai;mi;ügynök;terminál;munkamenet;kód;
+Keywords[de]=claude;ki;ai;agent;terminal;sitzung;code;
+Keywords[es]=claude;ia;ai;agente;terminal;sesión;código;
+Keywords[fr]=claude;ia;ai;agent;terminal;session;code;
 StartupNotify=true
 StartupWMClass=com.episode6.Collins

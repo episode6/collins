@@ -11,6 +11,10 @@ fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
   <name>Collins</name>
   <summary>Manage and resume your AI coding agent sessions</summary>
+  <summary xml:lang="hu">AI kódolóügynök-munkamenetek kezelése és folytatása</summary>
+  <summary xml:lang="de">KI-Coding-Agent-Sitzungen verwalten und fortsetzen</summary>
+  <summary xml:lang="es">Gestiona y reanuda tus sesiones de agente de programación con IA</summary>
+  <summary xml:lang="fr">Gérez et reprenez vos sessions d'agent de codage IA</summary>
 
   <description>
     <p>

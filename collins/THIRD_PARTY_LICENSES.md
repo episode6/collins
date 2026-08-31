@@ -23,8 +23,15 @@ you are free to replace them with your own builds:
   [GNOME/libadwaita](https://gitlab.gnome.org/GNOME/libadwaita)
 - **VTE** (`vte-2.91-gtk4`, the embedded terminal widget) — © the VTE authors —
   LGPL-3.0-or-later — [GNOME/vte](https://gitlab.gnome.org/GNOME/vte)
-- **GLib / GObject / GIO**, **Pango** and **gdk-pixbuf** — © the GNOME Project —
-  LGPL-2.1-or-later — [gtk.org](https://www.gtk.org)
+- **GtkSourceView 5** (the editor's source view) — © the GtkSourceView authors —
+  LGPL-2.1-or-later — [GNOME/gtksourceview](https://gitlab.gnome.org/GNOME/gtksourceview)
+- **libspelling** (optional; the composer's spell check) — © the libspelling authors —
+  LGPL-2.1-or-later — [GNOME/libspelling](https://gitlab.gnome.org/GNOME/libspelling)
+- **GStreamer** and **gst-plugins-base** (optional; play the notification sound) —
+  © the GStreamer team — LGPL-2.1-or-later —
+  [gstreamer.freedesktop.org](https://gstreamer.freedesktop.org)
+- **GLib / GObject / GIO**, **Pango** (with PangoCairo) and **gdk-pixbuf** — © the GNOME
+  Project — LGPL-2.1-or-later — [gtk.org](https://www.gtk.org)
 - **cairo** — © the cairo authors — LGPL-2.1 or MPL-1.1 —
   [cairographics.org](https://www.cairographics.org)
 - **PyGObject**, the Python bindings for all of the above — © PyGObject contributors —

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-29. Full change history: git log for this file.
+fork. Last modified: 2026-08-30. Full change history: git log for this file.
 -->
 
 # What is Collins?
@@ -38,7 +38,8 @@ worked — re-attaching to sessions that are still running in the background.
 Collins is an independent community project, not affiliated with
 or endorsed by any agent vendor (including Anthropic). It is strictly read-only
 with respect to your agents' data — names, favorites, and all app state live in
-`~/.config/collins/`. Your transcripts are never modified.
+`~/.config/collins/` (caches in `~/.cache/collins/`, panel scrollback in
+`~/.local/state/collins/`). Your transcripts are never modified.
 :::
 
 ## Why use it?

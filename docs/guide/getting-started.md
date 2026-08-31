@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-29. Full change history: git log for this file.
+fork. Last modified: 2026-08-30. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -11,7 +11,9 @@ fork. Last modified: 2026-08-29. Full change history: git log for this file.
 Collins is a GTK4 app. You'll need:
 
 - **Python ≥ 3.10**
-- **GTK 4**, **libadwaita ≥ 1.5**, **VTE** (the GTK 4 build), and **PyGObject**
+- **GTK ≥ 4.10**, **libadwaita ≥ 1.5**, **VTE** (the GTK 4 build), **GtkSourceView 5**, and **PyGObject**
+- Optional: **libspelling** (spell-check in the composer) and **GStreamer** with its base
+  plugins (the notification sound — without it the desktop's beep stands in)
 - The [`claude` CLI](https://claude.com/claude-code) on your `PATH`
 
 Optional, but worth having: the [**GitHub CLI**](https://cli.github.com/)
@@ -90,6 +92,18 @@ As on Ubuntu, a Collins that came from PyPI or a checkout sees
 configured — except on the image-based variants (Silverblue, Kinoite,
 Bazzite…), where `dnf install` doesn't apply and the item stays out.
 
+### RPM — direct download
+
+The [releases page](https://github.com/episode6/collins/releases/latest)
+also carries a binary noarch `.rpm` next to the `.deb` — the same package
+the COPR builds, for an RPM distro where enabling a COPR isn't wanted:
+
+```bash
+sudo dnf install ./collins-*.noarch.rpm
+```
+
+It adds no repository, so it does not update itself; the COPR does.
+
 ### Debian — `.deb`
 
 A Launchpad PPA can only ever serve Ubuntu, so on Debian — and the
@@ -155,6 +169,7 @@ your `~/.config/collins/` state, so an update is always safe mid-stream.
 | **Ubuntu PPA** | Nothing special — `sudo apt update && sudo apt upgrade` (or your desktop's software updater) picks Collins up with everything else. |
 | **Fedora COPR** | Likewise — `sudo dnf upgrade` (or GNOME Software) picks it up with everything else. |
 | **Debian `.deb`** | Download the new `.deb` from the [releases page](https://github.com/episode6/collins/releases/latest) and install it over the old one the same way: `sudo apt install ./collins_*_all.deb`. apt treats it as an upgrade; settings stay put. |
+| **`.rpm` download** | Download the new one and `sudo dnf install ./collins-*.noarch.rpm` over the old. |
 | **pipx** | `pipx upgrade collins` — the `--system-site-packages` flag you installed with is remembered by the venv, so it needn't be repeated. |
 | **pip** | `pip install --user --upgrade collins` |
 | **From source** | `git pull` in the checkout. The launcher from `./data/install.sh` points at the checkout, so it needs no re-run. |

@@ -43,6 +43,13 @@ downloads of each version, see the
   COPR publishes, for installing directly on an RPM-based distro without
   enabling the `episode6/stable` COPR (which remains the maintained,
   self-updating channel on Fedora and RHEL 10).
+- **Collins has a proper app page in GNOME Software.** The AppStream
+  metadata Collins ships now carries a screenshot with a caption and the
+  app icon's own light and dark accent colors, so software centers render
+  a real page for the installed app instead of a bare name and summary —
+  and every package build validates it. The summary, and the launcher's
+  description and keywords, are translated into every language Collins
+  speaks.
 
 ### v0.1.2 — 2026-08-30
 

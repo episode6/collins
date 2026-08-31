@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-29. Full change history: git log for this file.
+fork. Last modified: 2026-08-30. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -17,13 +17,13 @@ These are the defaults. Every one of them can be changed — see
 | `Ctrl+PgUp` / `Ctrl+PgDn` | Previous / next tab |
 | `Ctrl+C` / `Ctrl+V` | Copy selection / paste (easy copy & paste, on by default) |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in the terminal (always available) |
-| `Ctrl+Shift+G` | Find in the terminal |
-| `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Zoom the terminal in / out / back to normal |
+| `Ctrl+Shift+G` | Find in the agent's terminal (the `Ctrl+J` shell has no find bar) |
+| `Ctrl++` (or `Ctrl+=`) / `Ctrl+-` / `Ctrl+0` | Zoom the terminal in / out / back to normal (the keypad's `+`, `-` and `0` work too) |
 | `Ctrl+K` | Quick switcher — jump to any session |
 | `Ctrl+Shift+A` | Archive the current session (closes its tab) |
 | `Ctrl+Shift+Z` | Undo the last archive (until another session is archived) |
 | `Ctrl+Shift+E` | Toggle a 😊 marker on the current tab |
-| `Shift+Enter` | Insert a newline in the agent's prompt |
+| `Shift+Enter` | Insert a newline in the agent's prompt (the keypad's Enter counts) |
 | `Ctrl+J` | Show/hide the terminal panel |
 | `Ctrl+Shift+K` | Clear the terminal panel (screen and saved history) |
 | `Ctrl+;` | Move the current panel tab to the panel's other side (bottom ↔ right) — the same thing as its tab row's rotate button |
@@ -70,7 +70,8 @@ one. A chord that another action already holds is offered back: confirm and
 it moves, leaving the other action without it.
 
 Each changed row shows a reset arrow that puts its default back; **Reset All**
-in the dialog's header does the same for all of them. Rows sharing a chord
+in the dialog's header does the same for all of them, after asking (it's
+greyed out while nothing is customized). Rows sharing a chord
 carry a warning mark naming the other action — every scope is checked
 against every other, because the window's shortcuts win over the editor's
 and the terminal's.
@@ -83,3 +84,17 @@ itself.
 The bindings are stored in `~/.config/collins/state.json` under
 `settings.keybindings`, as a map of action name to a list of GTK accelerator
 strings (`"win.close-tab": ["<Control>F4"]`; an empty list means unbound).
+
+## Keys that aren't rebindable
+
+These belong to the widget under the cursor, so they don't appear in the
+Keyboard Bindings dialog:
+
+| Key | Where | Action |
+| --- | --- | --- |
+| `Enter` / `Ctrl+Enter` | Composer, new-chat screen | Send / newline — swapped by the *Enter sends composer text* preference. `Shift+Enter` is always a newline |
+| `↑` / `↓`, `Enter`, `Esc` | Quick switcher, quick open | Move the selection, open it, close |
+| `Esc`, arrows, `Tab`, `Enter` / `Space` | Lightbox | Close, walk the gallery, cycle the shade's buttons, activate the focused one — nothing reaches the terminal underneath |
+| `Ctrl+Enter` | Pull request comment & review boxes | Post, as on GitHub; a bare `Enter` stays a newline |
+| `←` / `→` | Sidebar project header | Collapse / expand the group |
+| `Esc` | Notification sheet, attachments overlay, Open with picker | Close |

@@ -1,6 +1,9 @@
 collins (0.1.3) UNRELEASED; urgency=medium
 
-  * Development series after the 0.1.2 release.
+  * Each GitHub release now attaches a binary noarch .rpm next to the .deb.
+  * The AppStream metainfo is store-ready (screenshot, branding colours,
+    translated summaries) and appstreamcli-validated by every package build;
+    the desktop entry is translated too.
 
  -- Geoff Hackett <ghackett@episode6.com>  Sun, 30 Aug 2026 15:45:45 -0400
 
