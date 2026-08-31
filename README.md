@@ -8,7 +8,7 @@ fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
 [![CI](https://github.com/episode6/collins/actions/workflows/ci.yml/badge.svg)](https://github.com/episode6/collins/actions/workflows/ci.yml)
 
-A vibecoded, native GTK4/libadwaita agentic development environment to manage, orchestrate and compliment all your [Claude Code](https://claude.com/claude-code) sessions.
+A vibecoded, native GTK4/libadwaita agentic development environment to manage, orchestrate and complement all your [Claude Code](https://claude.com/claude-code) sessions.
 
 > My wife keeps referring to Claude as Collins by mistake. So now when she asks me if I'm talking to Collins, I can say yes.
 
@@ -41,7 +41,7 @@ Features:
 - **Tabs follow the sidebar's order**: left to right is the session list read top to bottom, whatever order you opened them in, and they re-arrange when the list does (drag a project to a new spot and its tabs move with it). Tabs with no row in the list — chats, replays — collect at the right-hand end; the tab bar itself isn't drag-reorderable, since the sidebar is where the order is set.
 - **Tabs** can be renamed, given an emoji prefix, or have their session ID copied (right-click → Rename… / Set emoji… / Copy session ID); renaming a session's tab updates its name everywhere. While a session tab is focused, header buttons **exit** or **background** it and close the tab immediately — no confirmation dialog — the **tab bar is hidden by default** — the window title names the active tab, and the header's toggle shows the bar for anyone who wants it, and the **sidebar toggles** with the header button or `F9`. **Shift+Enter** inserts a newline in the agent's prompt.
 - Each tab has a slim **footer** showing the agent's live working directory (click to copy; worktree-aware) and the current **git branch** (⎇), plus the terminal-panel buttons.
-- **Right-click a session** for the full action set: open, open in [Ghostty](https://ghostty.org) (external window — Ghostty can't be embedded), fork (`--fork-session`), rename, regenerate name, favorite, **details** (messages/models/tokens, a peek at recent messages, and MCP servers/usage), copy session id, export as Markdown, reveal transcript, archive, move the transcript to trash, or delete permanently. **Right-click a project header** to start a new session there (in a new window, or with the worktree setting inverted), **open its folder in another app**, or archive the whole project — projects with no visible sessions still show their header (with a `+` button) so a folder stays reachable. The open-in list carries each app's own icon: one row per app added under Preferences → *Footer apps*, plus **Open in File Manager** and **Open in Terminal** using whatever your desktop nominates for those (`$TERMINAL`, `xdg-terminals.list`, and the system's `x-terminal-emulator` are honoured, in that order).
+- **Right-click a session** for the full action set: open, open in [Ghostty](https://ghostty.org) (external window — Ghostty can't be embedded), fork (`--fork-session`), rename, regenerate name, favorite, **details** (messages/models/tokens, a peek at recent messages, and MCP servers/usage), copy session id, export as Markdown, reveal transcript, archive, move the transcript to trash, or delete permanently. **Right-click a project header** to start a new session there (in a new window, or with the worktree setting inverted), **open its folder in another app**, **git pull** it, check out its default branch, or archive the whole project — projects with no visible sessions still show their header (with a `+` button) so a folder stays reachable. The open-in list carries each app's own icon: one row per app added under Preferences → *Footer apps*, plus **Open in File Manager** and **Open in Terminal** using whatever your desktop nominates for those (`$TERMINAL`, `xdg-terminals.list`, and the system's `x-terminal-emulator` are honoured, in that order).
 - **Tools the session itself can call**: every session Collins starts is offered a small MCP server of Collins' own (`collins` in its `/mcp` list), so the agent can drive the window it runs in — `notify_user` (a **notification** titled with the session — a card inside the window when you're in Collins, a desktop notification when you're not; it flashes the session's tab and row, flags the row until you come back, and clicking it raises that tab), `set_session_title` (the session names itself in the tab and sidebar), `open_in_editor` (put a file on your screen at a line, in the session's editor pane), `show_image` (a screenshot or render in the in-app lightbox — a file, or an `http(s)` URL Collins fetches for it), `attach_pr` (put a pull request on the session's footer and sidebar row — for one Collins can't spot on its own, like a PR opened by a subagent), `start_session` (spawn a **sibling session** in a background tab, handed a prompt and inheriting the caller's permission mode — it never steals your focus), `read_terminal` (read the terminal panel's tabs, scrollback and all), and `run_in_terminal` (type a command into an idle panel shell and run it where you can watch). Each asks permission on first use, like any MCP tool, and each has its own on/off switch in Preferences → *Built-in MCP tools* (all on by default).
 - **Select mode** (menu → *Select multiple sessions*) for bulk actions: open, star, archive, or trash many sessions at once.
 - **New session** (tab icon in the header) starts a fresh agent session (`claude`) in the **visible session's project** — no dialog needed; with no session visible it asks for a folder. Every project header also has a **`+` button** to start a session right there. The tab opens onto a **new-chat screen** — the project's icon and name over the composer, with a *New git worktree* checkbox and, in the composer's Send row, a **model picker** and an **effort picker** (each opening pre-selected on the CLI's own default — the model or level `~/.claude/settings.json` resolves it to, marked in the list and named on the button; a pick here is for this session alone) — and the agent starts when you Send the first prompt, on the model and at the effort level the pickers say (with nothing written, the button reads **Empty Session** and starts the agent with no prompt); a just-started session shows a **"New Thread"** placeholder row until the agent writes its transcript. A screen with text on it (or a terminal open beside it) is kept as a **draft** in the sidebar if you close the tab or quit, and comes back as you left it.
@@ -55,19 +55,24 @@ Features:
 
 ### Keyboard shortcuts
 
-All rebindable from the sidebar menu → *Keyboard Bindings*. The defaults:
+All rebindable from the sidebar menu → *Keyboard Bindings*. The defaults (the full list is in the
+[docs](https://episode6.github.io/collins/guide/keyboard-shortcuts)):
 
 | Shortcut | Action |
 |---|---|
 | `Ctrl+Shift+T` | New session |
 | `Ctrl+Shift+N` | New window |
 | `Ctrl+W` | Close the last-focused panel tab, then the session tab once none are left |
+| `Ctrl+Q` | Quit |
 | `Ctrl+PgUp` / `Ctrl+PgDn` | Previous / next tab |
 | `Ctrl+C` / `Ctrl+V` | Copy selection / paste (easy copy & paste, on by default) |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in terminal (always available) |
 | `Ctrl+Shift+G` | Find in terminal |
+| `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Zoom the terminal in / out / back to normal |
 | `Ctrl+K` | Quick switcher (jump to any session) |
 | `Ctrl+Shift+E` | Toggle 😊 marker on the current tab |
+| `Ctrl+Shift+A` / `Ctrl+Shift+Z` | Archive the current session / undo the last archive |
+| `Ctrl+Shift+B` | Show/hide the notification history (the header bell's sheet) |
 | `Ctrl+J` | Show/hide the terminal panel |
 | `Ctrl+Shift+K` | Clear the terminal panel (screen and saved history) |
 | `Ctrl+;` | Move the current panel tab to the panel's other side (bottom ↔ right) |
@@ -75,6 +80,7 @@ All rebindable from the sidebar menu → *Keyboard Bindings*. The defaults:
 | `Ctrl+'` | Show/hide the attachments gallery (docked as a panel tab, it comes to the front instead) |
 | `F7` | Open the page for the session's most recently linked pull request |
 | `F8` | Show/hide the editor panel |
+| `Ctrl+Shift+O` | Quick open a file in the editor |
 | `Ctrl+S` (in the editor) | Save the current file |
 | `Ctrl+F` (in the editor) | Find in file |
 | `F9` | Toggle sidebar |
@@ -82,17 +88,17 @@ All rebindable from the sidebar menu → *Keyboard Bindings*. The defaults:
 
 ## Requirements
 
-Python ≥ 3.10, GTK 4, libadwaita ≥ 1.5, VTE (GTK 4 build), GtkSourceView 5, PyGObject — from your distro's packages. libspelling is optional: with it the prompt composer gets spell-check, without it the composer is a plain text box.
+Python ≥ 3.10, GTK ≥ 4.10, libadwaita ≥ 1.5, VTE (GTK 4 build), GtkSourceView 5, PyGObject — from your distro's packages. libspelling is optional: with it the prompt composer gets spell-check, without it the composer is a plain text box. GStreamer (the core typelib plus the base plugins) is optional too: with it Collins plays the notification sound, without it the desktop's beep stands in. The `.deb` and the `.rpm` only *recommend* those two.
 
 ```bash
 # Ubuntu / Debian
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 gir1.2-spelling-1
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 gir1.2-spelling-1 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0
 
 # Fedora
-sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling
+sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling gstreamer1 gstreamer1-plugins-base
 
 # Arch
-sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 libspelling
+sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 libspelling gstreamer gst-plugins-base-libs
 ```
 
 Plus the [`claude` CLI](https://claude.com/claude-code) on your `PATH` — Collins is a tool for Claude specifically.
@@ -150,7 +156,15 @@ sudo apt install ./collins_*_all.deb
 
 Dependencies are pulled in automatically and the app appears in your app grid as "Collins". Note that a `.deb` installed this way **does not update itself** — it adds no apt source, deliberately, so nothing is subscribed to a third-party archive behind your back. Watch the releases page, or use the PPA if you are on Ubuntu.
 
-**Updating.** PPA: `sudo apt upgrade` picks it up with everything else. COPR: `sudo dnf upgrade`, likewise. `.deb`: install the new one over the old with the same `sudo apt install ./collins_*_all.deb`. pipx: `pipx upgrade collins` (the `--system-site-packages` flag is remembered). pip: `pip install --user --upgrade collins`. Source: `git pull`. Relaunch Collins afterwards — a running instance keeps the old code, including one hidden with *Keep Running*; use **Quit** for a real restart.
+**RPM-based distros — .rpm package.** Every release also attaches a binary noarch `.rpm`, built from the same spec the COPR publishes, for installing directly without enabling a repository:
+
+```bash
+sudo dnf install ./collins-*.noarch.rpm
+```
+
+Like the `.deb` it adds no repository and does not update itself; on Fedora and RHEL 10 the COPR above is the maintained channel.
+
+**Updating.** PPA: `sudo apt upgrade` picks it up with everything else. COPR: `sudo dnf upgrade`, likewise. `.deb`: install the new one over the old with the same `sudo apt install ./collins_*_all.deb`; `.rpm`: likewise, `sudo dnf install ./collins-*.noarch.rpm`. pipx: `pipx upgrade collins` (the `--system-site-packages` flag is remembered). pip: `pip install --user --upgrade collins`. Source: `git pull`. Relaunch Collins afterwards — a running instance keeps the old code, including one hidden with *Keep Running*; use **Quit** for a real restart.
 
 Debian 13 (trixie) and newer have everything Collins needs. Debian 12 (bookworm) does not — libadwaita 1.2 against the 1.5 APIs.
 

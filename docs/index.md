@@ -1,13 +1,13 @@
 ---
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 # https://vitepress.dev/reference/default-theme-home-page
 layout: home
 
 hero:
   name: "Collins"
-  text: "A vibecoded agentic developement environment to manage, orchestrate and compliment all your Claude Code CLI sessions"
+  text: "A vibecoded agentic development environment to manage, orchestrate and complement all your Claude Code CLI sessions"
   tagline: Browse, name, and resume every Claude Code session on your machine — in embedded terminal tabs.
   image:
     src: /img/hero.png
@@ -99,10 +99,11 @@ python3 -m collins
 :::
 
 The PPA and the COPR are the channels that update themselves — the PPA on
-Ubuntu 24.04+ and its derivatives (Mint, Pop!_OS, elementary, Zorin), the
-COPR on every current Fedora and on RHEL 10 and its rebuilds; the `.deb`
-covers Debian and the rest of its family; and PyPI is the way in everywhere
-else — it works
+Ubuntu 24.04 and 26.04 LTS and their derivatives (Mint, Pop!_OS, elementary,
+Zorin), the COPR on every current Fedora and on RHEL 10 and its rebuilds; the
+`.deb` covers Debian and the rest of its family, with an `.rpm` on the same
+releases page for an RPM distro that would rather not enable a repository;
+and PyPI is the way in everywhere else — it works
 anywhere the system GTK libraries are installed (`--system-site-packages` is
 required — Collins gets GTK from your distro, not from PyPI). See [Getting Started](/guide/getting-started) for system
 requirements and the details of each channel. The installed command is

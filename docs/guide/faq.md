@@ -26,14 +26,15 @@ companion for the `claude` CLI you already use.
 
 No. Transcripts under `~/.claude/projects/` are read-only to Collins — names,
 favorites, emoji, and every other bit of app state live in
-`~/.config/collins/`. The only exceptions are the explicit *Move to trash*
+`~/.config/collins/` (with caches under `~/.cache/collins/` and panel
+scrollback under `~/.local/state/collins/`). The only exceptions are the explicit *Move to trash*
 and *Delete permanently* actions, both behind a confirmation. See
 [How It Works](/guide/how-it-works) for details.
 
 ## Does anything leave my machine?
 
-Collins talks to no third parties. Everything goes through the `claude` CLI
-and the login you already have: resuming sessions runs `claude` in a
+Nothing about your sessions does, and Collins has no service of its own.
+Everything goes through the `claude` CLI and the login you already have: resuming sessions runs `claude` in a
 terminal; auto-titling and icon generation run headless `claude -p` jobs
 with none of your skills, MCP servers, or the CLI's tools loaded
 (pre-existing sessions are titled locally, and each model picker in
@@ -46,7 +47,19 @@ the **model pickers** (which list the models your login can use, asked for
 about once a day and cached in `~/.cache/collins` in between), and the
 **archive mirror**, which archives a session's claude.ai sibling when you
 archive it here (*Archive on claude.ai too*, on by default). Pull request
-features go through the GitHub CLI (`gh`) and your login there.
+features go through the GitHub CLI (`gh`) and your login there, and so does
+the once-a-day update check below when `gh` is signed in (anonymously over
+GitHub's public API otherwise). The one thing that fetches on an agent's
+behalf is the `show_image` session tool, when the agent hands it an
+`http(s)` URL.
+
+## Does Collins check for updates?
+
+Once a day it asks GitHub for the latest release — through your `gh` login
+when you have one, anonymously over the public API otherwise — and says so
+once when a newer one exists: a card and the notification sound in Collins,
+a desktop notification away from it. Nothing about you or your sessions is
+sent. *Check for updates* in Preferences → *General* turns it off.
 
 ## What can break when Claude Code updates?
 

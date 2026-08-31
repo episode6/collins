@@ -35,6 +35,16 @@ conversation to a new session id; when that happens, Collins tracks the
 forwarding so the old sidebar row is replaced by the live one and names,
 favorites, emoji, and panel state carry over.
 
+## Worktrees
+
+With **Start new sessions in a git worktree** on (or the *New git worktree*
+checkbox in the new-chat screen's Send row), each new session gets a fresh
+worktree of its project, so it can't see — or trample — your uncommitted
+changes; a project header's right-click menu starts one session with the
+setting inverted. A session that hops into a worktree resumes there, because
+the resume cwd is the one its transcript last recorded, and the footer,
+terminal panel and editor follow it.
+
 ## Session titles
 
 Pre-existing sessions are titled **locally** on launch (first words of the
@@ -48,6 +58,12 @@ executed in a scratch directory, with none of your skills, MCP servers, or
 the CLI's tools loaded (see [What spends tokens](#what-spends-tokens)), so
 the title runs don't appear as sessions themselves and cost little more
 than the prompt.
+
+Two more sources fill the same generated-name slot, both off by default and
+display-only: **Follow Claude's own session names** shows the titles the CLI
+writes into the transcript (`/rename` included), and **Rename sessions after
+their pull requests** names a session after the PR it opened. A manual rename wins over
+all of them.
 
 ## Model list
 
@@ -98,7 +114,8 @@ is logged at `WARNING`, which the default level already prints.
 The sidebar's usage panel reads the OAuth token the `claude` CLI already
 stores in `~/.claude/.credentials.json` (read-only — Collins never writes
 it) and queries Anthropic's usage endpoint every 5 minutes, pausing
-while the window is minimized or the screen is locked.
+while the panel is off screen (sidebar hidden, panel collapsed), the
+window is minimized, or the screen is locked.
 
 Refreshing that token is the CLI's job, done at the start of any `claude`
 run — so when Collins finds the CLI installed but the token dead, it runs
@@ -128,7 +145,8 @@ the login expired, exactly as it does with the switch off.
 Collins runs Claude on your behalf — against your subscription's usage
 limits — in four places, each with its setting in **Preferences → Token
 use** (directly under General) or the **Built-in MCP tools** group right
-below it. Every headless run is a `claude -p` from a scratch directory, so
+below it. Every run Collins makes on your behalf is a headless `claude -p`
+from a scratch directory, so
 none of them ever appears as a session, and each passes
 `--strict-mcp-config --tools ""`, so none carries your MCP servers, the
 CLI's built-in tools, or your skills (they ride in the Skill tool) — what
@@ -161,7 +179,11 @@ that dialog has been answered.
 - **Built-in MCP tools** — no run of their own, but every enabled tool's
   definition rides in each session's context, `read_terminal` sends the
   panel's text into the conversation, and a session `start_session` starts
-  is titled like any other. One switch per tool.
+  is titled like any other. One switch per tool. Every launched session is
+  handed the Collins MCP server through `--mcp-config`; it offers eight
+  tools — `set_session_title`, `open_in_editor`, `show_image`,
+  `notify_user`, `attach_pr`, `start_session`, `read_terminal`,
+  `run_in_terminal` — and a session sees exactly the ones you left on.
 
 The **Model list** row beside the pickers is the odd one out: a Models API
 query that spends no tokens, which its subtitle says.
@@ -182,19 +204,69 @@ toggle. *Archive on claude.ai too* in Preferences turns it off.
 
 Custom names, generated titles, emoji, favorites, archived sessions, project
 order, panel layouts, unsent composer drafts, window geometry, and preferences
-are stored separately in `~/.config/collins/state.json`. The terminal panel's per-session scrollback
-lives in `~/.local/state/collins/panel_history/` (one file per panel tab).
+are stored separately in `~/.config/collins/state.json`; the headless
+runs' scratch directory is `~/.config/collins/title-scratch/` beside it.
+The terminal panel's per-session scrollback lives in
+`~/.local/state/collins/panel_history/` (one file per panel tab), and the
+sidebar's Chats project in `~/.local/share/collins/chats/`. Caches —
+the model list (`models.json`) and the update-check stamp
+(`update-check.json`) — sit in `~/.cache/collins/`; the MCP server's config
+and socket are under `~/.local/share/collins/<app id>/` and
+`$XDG_RUNTIME_DIR/collins/<app id>/`.
 This keeps the app's data fully decoupled from the agents' own — you can
 delete both at any time without affecting a single session.
 
 ## Terminals
 
-Each tab embeds a [VTE](https://gitlab.gnome.org/GNOME/vte) terminal — the same
+Each session tab embeds a [VTE](https://gitlab.gnome.org/GNOME/vte) terminal — the same
 widget behind GNOME Terminal and Ptyxis. The app spawns your `$SHELL` and types
 the agent's resume command (e.g. `claude --resume <id>`) into it, so your
 aliases and environment apply and you drop back to a prompt when the agent
 exits. The secondary panel terminal is another VTE running a plain shell —
-the same widget, minus the agent.
+the same widget, minus the agent. (The new-chat screen, the pull request
+page and a session replay are tabs with no terminal in them.)
+
+## Notifications
+
+Where a notification goes is a function of what raised it and where you
+are. A `notify_user` message or a terminal bell reaching a window that
+isn't active becomes a **desktop** notification; the same event while a
+Collins window is active becomes an in-app **card** plus the notification
+sound instead — never both, and the sound only plays beside a card, since
+the desktop sounds its own. A message to the tab you're already looking at
+lands in the history as an already-read row and nothing more; a bell from
+the selected tab keeps the compositor's beep. A finished run is a history
+row only, unless *Announce finished runs* is on. Message, bell and update
+rows survive a restart; the finished-run rows don't. The sound itself
+plays through GStreamer when its typelibs are installed, and falls back to
+the desktop's beep otherwise.
+
+## Checking for updates
+
+Once a day Collins asks GitHub for `episode6/collins`'s latest release —
+through your own `gh` when it's installed and signed in, anonymously over
+the public API otherwise (with the ETag sent back, so the usual "nothing
+changed" answer is a free 304). A newer version becomes one notification: a
+card while you're in Collins, a desktop notification while you're not, a
+history row either way, and a click opens the release page. The same
+release is announced once, ever. The stamp lives in
+`~/.cache/collins/update-check.json`, not in `state.json` — losing it costs
+one query. **Check for updates** in Preferences → General turns it off.
+
+## The status icon
+
+GTK 4 has no `GtkStatusIcon` and libayatana is GTK 3-only, so Collins puts
+a StatusNotifierItem on D-Bus by hand — the item on
+`org.kde.StatusNotifierItem`, its menu on `com.canonical.dbusmenu`. The
+artwork is handed over as pixmaps rather than an icon name, because the
+host resolves names in its own process; while any session is working the
+icon swaps to a second drawing with the sidebar's barber pole poured in —
+one `NewIcon` when the first session starts and one when the last stops,
+because the protocol has no animation and every frame would be a D-Bus
+round trip. The unread badge is composited into the pixmap and also
+broadcast to the dock as a launcher badge. Where no watcher is on the bus
+(GNOME without an AppIndicator extension), nothing appears; Preferences
+says so.
 
 ## The stack
 

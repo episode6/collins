@@ -46,8 +46,8 @@ SRPM upload to the `episode6/stable` COPR. Agent skills in
 
 ## Changelogs
 
-Collins keeps **three** changelogs, each read by a different audience, and a
-release is not finalized until all three describe it. (Consolidating them
+Collins keeps **four** changelogs, each read by a different audience, and a
+release is not finalized until all four describe it. (Consolidating them
 into one source is a future project; until then, every step below that says
 "the changelogs" means all of these.)
 
@@ -61,7 +61,7 @@ into one source is a future project; until then, every step below that says
 Mismatched versions are caught by CI (`scripts/verify_versions.py`), but
 nothing checks that the notes themselves are complete — before finalizing,
 list the PRs merged since the last release (`gh pr list --state merged
---search "merged:>YYYY-MM-DD"`) and check each one is reflected in all three.
+--search "merged:>YYYY-MM-DD"`) and check each one is reflected in all four.
 
 ## Cut new Release Branch
 
@@ -89,7 +89,7 @@ Create 2 PRs (as drafts, per repo convention):
       top `%changelog` entry for it.
     - `docs/releases.md`: add a new `### v<NEXT_VERSION> — UNRELEASED` section
       atop the changelog.
-    - Finalize the outgoing `v<VERSION>` in **all three changelogs** (see
+    - Finalize the outgoing `v<VERSION>` in **all four changelogs** (see
       Changelogs above): the `docs/releases.md` section gets its ship date
       (`### v<VERSION> — YYYY-MM-DD`) and complete notes; the `debian/changelog`
       `<VERSION>` entry gets a bullet per headline change, not just the
@@ -102,7 +102,7 @@ Create 2 PRs (as drafts, per repo convention):
       `.SRCINFO` (sha256 gets refreshed after the tag exists — see
       `packaging/aur/README.md`).
 - `[VERSION] Release v<VERSION>` points at the new release branch
-    - Make the same outgoing-release edits as above: finalize all three
+    - Make the same outgoing-release edits as above: finalize all four
       changelogs for `v<VERSION>` (ship date in the `docs/releases.md`
       heading, every change since the last release in each), and the AUR
       `pkgver`.
@@ -170,7 +170,7 @@ Create 2 PRs (as drafts, per repo convention):
   are cherry-picked onto the release branch (via PR).
 - A hotfix needs its own version bump PR on the release branch: append or
   increment the fourth version segment (`0.1.1` → `0.1.1.1` → `0.1.1.2`) and
-  describe the hotfix in all three changelogs — a `debian/changelog` entry, a
+  describe the hotfix in all four changelogs — a `debian/changelog` entry, a
   `### v<HOTFIX_VERSION>` section in `docs/releases.md`, and a metainfo
   `<release>` entry with a description — plus the spec's `Version:` and
   `%changelog`, and the AUR `pkgver`. No

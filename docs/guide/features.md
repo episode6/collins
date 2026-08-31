@@ -55,12 +55,23 @@ the app reads, are in
 - **Live updates** — new sessions appear the moment they're created, via a
   filesystem watch, and existing rows update in place without jumping
   around. A just-started session shows a **"New Thread"** placeholder row
-  until the agent writes its transcript.
+  until the agent writes its transcript. The header's refresh button
+  re-reads the list and every pull request on demand, and wears the same
+  barber pole as the rows while any session works.
+- **Search the list** from the header's magnifier: type, and only the
+  matching sessions — and the projects holding them — stay on screen. It
+  ships unbound; give it a chord in *Keyboard Bindings* if you want one.
+  `Ctrl+K`'s switcher is the one-jump version of the same thing.
+- **Add a project** with the sidebar's **+**: pick a folder, answer the
+  trust prompt once, and it gets a header of its own with no sessions in
+  it yet. A project emptied by archiving can be kept the same way; *Remove
+  project from sidebar* in the header's menu is what finally drops one.
 - A **Claude usage panel** under the session list: your subscription
   limits — the 5-hour session window, weekly limits, extra-usage credits —
   as progress bars with reset countdowns, read from the `claude` CLI's own
-  login and refreshed every 5 minutes. Toggle it in Preferences (*Show
-  Claude usage*).
+  login and refreshed every 5 minutes. Its heading folds the bars away,
+  its refresh button asks again on the spot, and Preferences (*Show
+  Claude usage*) removes it.
 
 ![The sidebar: each project wearing its own icon, sessions carrying pull request marks](/img/sidebar.png)
 
@@ -107,6 +118,13 @@ Enter opens, Esc closes.
   with and the **effort level** it answered at, the agent's live working
   directory (click to copy), and the current **git branch** (⎇), plus the
   terminal-panel buttons.
+- **Footer apps**: name any installed application in Preferences →
+  *Footer apps* and every session's footer grows a button that opens the
+  session's live directory in it — your editor, a file manager, a git GUI.
+  They're stored as desktop-file IDs, so names and icons follow the app.
+- A **tab bar** under the header is there for anyone who wants it — the
+  header's pages button toggles it, off by default, since the sidebar and
+  the window title are how Collins expects you to move between sessions.
 - **The model is one click from switching.** The footer's model name is a
   menu: every model your login can use, fetched from the Models API with
   the CLI's own token, the current one marked. Pick another and the
@@ -128,9 +146,10 @@ Enter opens, Esc closes.
   list each fold behind **Show more** — the description showing the start
   of its first paragraph, the checks keeping failing and pending rows on
   top — and the page carries its own action button: **Ready** on a draft,
-  **Merge** or **Auto-Merge** on an open PR. Right-clicking a draft's
+  **Merge** or **Auto-Merge** on an open PR (**Disable Auto-Merge** once
+  GitHub has it armed). Right-clicking a draft's
   *Ready* offers the stops past it: *Mark ready & merge* (or *…when checks
-  pass*), and *Mark ready, merge & archive session*. The caret beside them lists every
+  pass*), *Ready & Auto-Merge*, and *Mark ready, merge & archive session*. The caret beside them lists every
   PR with its title,
   `F7` opens the newest one's page, and *Open new pull requests
   automatically* (Preferences) opens the page by itself — once per PR — the
@@ -307,7 +326,7 @@ handle at the terminal's right edge.
 
 - **Every picture, from every source**: images the agent shows with
   `show_image`, the ones it mentions by path or URL in its replies, and the
-  files it hands over with its "send file" tool — those can be any kind of
+  files it hands over with the CLI's own `SendUserFile` tool — those can be any kind of
   file, shown as a typed icon with the filename. Captions ride along where
   there was one; a picture found in prose carries a snippet of the text
   around it instead.
@@ -355,7 +374,7 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 - Each session remembers which files were open, the cursor in each, and the
   panel's width — and the whole editor can **pop out** into a window of its
   own on a second monitor, then dock back with one click.
-- **One column when narrow.** Drag the editor column below 500 px (the
+- **One column when narrow.** Drag the editor column to 500 px or narrower (the
   *Single column when narrow* preference) and it shows the file tree and the
   open file one at a time: pick a file to see it, with a back button beside
   the tabs to return to the tree; widen it again and both come back side by
@@ -426,6 +445,10 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   session without resuming it, and the MCP servers it used.
 
 ![Session details dialog](/img/session-details.png)
+
+- **Replay…** (right-click) opens a past session's transcript as chat
+  bubbles in a tab of its own — step through it turn by turn, or let it
+  play — so an old session can be read end to end without resuming it.
 
 - **MCP servers browser** (menu → *MCP servers*): a read-only view of every
   MCP server configured in `~/.claude.json`, global and per-project.
@@ -523,13 +546,21 @@ flipped the switch is refused if it calls it anyway.
 
 - **New session** (tab icon in the header, or `Ctrl+Shift+T`) opens a
   new-chat screen in the **visible session's project** — no dialog
-  needed; with no session visible, it asks for a folder. **Continue**, in
-  the same menu, resumes the most recent session in a folder
-  (`claude --continue`).
+  needed; with no session visible, it asks for a folder. The button's
+  menu also holds **Continue last Claude Code session…**, which resumes
+  the most recent session in a folder (`claude --continue`), a one-off
+  launch of the visible project with its worktree setting inverted, and
+  **New chat (scratch folder)**.
+- **Chats** is a pinned virtual project for work that has no repository:
+  *New chat* on its header — or *New chat (scratch folder)* in the New
+  Session menu — starts a session in a throwaway directory under
+  `~/.local/share/collins/chats/`, pre-trusted, so a one-off question
+  doesn't need a project to live in.
 - **The first prompt is written on a new-chat screen**, not in the agent's
   console: the project's icon and name over the [composer](#prompt-composer),
   with a *New git worktree* checkbox at the left of its Send
-  row (ticked or not as the project's setting says — see below) and a
+  row (in a git project; ticked or not as the project's setting says —
+  see below) and a
   **model picker** and an **effort picker** at its right, where a running
   session's model and effort menus sit. The model
   picker lists the same catalog the session's model menu does, and opens
@@ -571,7 +602,13 @@ flipped the switch is refused if it calls it anyway.
   yet, say) says so and starts in the project directory instead. If
   terminals were open beside the new-chat screen when a worktree launch was
   sent, Collins offers to `cd` them into the worktree once it exists — a
-  terminal running a command is left alone.
+  terminal running a command is left alone. The choice is per project as
+  well as global: *New sessions use a worktree* in a project header's
+  right-click menu pins it for that project over the preference. Either
+  way, one launch can go the other way without changing anything — *New
+  session here (in a worktree)* / *(no worktree)* in the same menu, and
+  the matching entry the New Session dropdown grows for the visible
+  project.
 - **Folder trust is asked once, up front**: the first launch in a project
   the agent doesn't trust yet asks *Do you trust this folder?* before
   anything starts, and records the answer where the agent reads it, so the
@@ -584,8 +621,8 @@ flipped the switch is refused if it calls it anyway.
 
 - **Select mode** (sidebar menu → *Select multiple sessions*) to open, star,
   archive, or trash many sessions at once.
-- **Archive** sessions you're done with (kept on disk; toggle "Show
-  archived" to see and restore them). Archiving a session with an open tab
+- **Archive** sessions you're done with (kept on disk; toggle *Show
+  archived sessions* to see and restore them). Archiving a session with an open tab
   closes the tab too, and whole **projects** can be archived from their
   header's right-click menu.
 - **Archiving reaches claude.ai too** (on by default — Preferences →
@@ -601,10 +638,16 @@ flipped the switch is refused if it calls it anyway.
   in which projects. Any dialog that would empty a project out offers to
   keep it in the sidebar as an empty header, so *New session here* still
   works.
-- **Export as Markdown** (right-click) writes a session transcript to a
-  readable Markdown file. **Move to trash** (recoverable) and **delete
-  permanently** are the only actions that touch a transcript file, and
-  always sit behind a confirmation.
+- **Export as Markdown…** (right-click) writes a session transcript to a
+  readable Markdown file. **Move transcript to trash…** (recoverable) and
+  **Delete permanently…** are the only actions that touch a transcript
+  file, and always sit behind a confirmation.
+- The row's menu also carries the small stuff: **Reveal transcript** (the
+  `.jsonl` in your file manager), **Open In…** (the session's directory,
+  in any app the desktop offers), **Open in new window**, **Rename to
+  match PR**, and **Repair session link** for a row whose detached agent
+  the app lost track of. Project headers get **Open on GitHub** where the
+  checkout has a github.com remote.
 - **Open in [Ghostty](https://ghostty.org)** resumes a session in an
   external Ghostty window instead of an embedded tab (shown when `ghostty`
   is on your `PATH`).
@@ -615,8 +658,8 @@ The coffee cup at the right of the header keeps the computer awake and the
 screen on while an agent works unattended — click it to toggle; the cup
 fills while it's on.
 
-- **Right-click it for a timer**: *Until idle*, a duration from 1 to 12
-  hours, or *Indefinitely* — so a long build can't leave the machine awake
+- **Right-click it for a timer**: *Until idle*, 1, 2, 3, 6 or 12 hours,
+  or *Indefinitely* — so a long build can't leave the machine awake
   all week because you forgot. The time left counts down beside the cup.
 - **Until idle**, the default, hands the deadline to the sessions instead
   of the clock: as long as at least one open tab is working — the same
@@ -661,14 +704,19 @@ sessions**, and **Announce finished runs** — the
 Claude on your behalf — the **Session title model** and **Icon generation
 model** pickers (each with a **None** option — it replaced the
 *Auto-generate session titles* switch, and is the icon picker's default), an
-**Auto-renew the Claude login** switch for the throwaway run that repairs
-an expired login (off, the usage panel says to run `claude` yourself), and
+**Auto-renew the Claude login** switch (on) for the throwaway run that repairs
+an expired login — off, the usage panel just says to run `claude` yourself — and
 the **Model list** row, which is free — followed by a switch for each of the
 **built-in MCP tools** the agent can call, the **status icon**, **Reopen the
 last session**, what to do **when quitting with running sessions** (ask /
-exit / background / hide), **Archive on claude.ai too**, and **Check for
+exit / background / hide), **Archive on claude.ai too**, **Check for
 updates** (the once-a-day look at GitHub's latest release, through `gh` or
-anonymously) — reachable from the sidebar menu or `Ctrl+,`.
+anonymously), a **Pull requests** group — the PR page's **Text size**,
+whether a first prompt's "review PR 183" **attaches that PR to the
+session** (on), whether sessions are **renamed after their pull
+requests** (off), and whether the marks are **refreshed at launch**
+(on) — and the **Footer apps** list — reachable from the sidebar menu or
+`Ctrl+,`.
 
 A **search bar across the top** filters the whole screen as you type, and it
 has the focus the moment preferences opens, so the way to a setting is to
