@@ -1,7 +1,7 @@
 #!/usr/bin/make -f
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-08-30. Full change history: git log for this file.
 export PYBUILD_NAME=collins
 
 %:
@@ -29,3 +29,11 @@ execute_after_dh_install:
 	sed -e 's|^Exec=.*|Exec=collins|' -e '/^Path=/d' \
 	  data/com.episode6.Collins.desktop \
 	  > debian/collins/usr/share/applications/com.episode6.Collins.desktop
+# Validate what was just installed, mirroring the RPM spec's %check. The
+# releases-not-in-order override is the same one the spec carries: the
+# metainfo lists the upstream agent-session-manager releases below the fork's
+# own, so its versions don't descend end to end -- history, not a mistake.
+	desktop-file-validate \
+	  debian/collins/usr/share/applications/com.episode6.Collins.desktop
+	appstreamcli validate --no-net --override releases-not-in-order=info \
+	  debian/collins/usr/share/metainfo/com.episode6.Collins.metainfo.xml

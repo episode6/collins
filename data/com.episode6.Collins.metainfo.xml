@@ -47,6 +47,25 @@ fork. Last modified: 2026-08-30. Full change history: git log for this file.
 
   <content_rating type="oars-1.1"/>
 
+  <branding>
+    <color type="primary" scheme_preference="light">#EDE9E1</color>
+    <color type="primary" scheme_preference="dark">#262320</color>
+  </branding>
+
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/episode6/collins/main/data/screenshot.png</image>
+      <caption>Sessions grouped by project in the sidebar, with one resumed in an embedded terminal</caption>
+    </screenshot>
+  </screenshots>
+
+  <recommends>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </recommends>
+
+  <translation type="gettext">collins</translation>
+
   <releases>
     <release version="0.1.2" date="2026-08-30">
       <description>

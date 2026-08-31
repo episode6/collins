@@ -336,3 +336,34 @@ docker run --rm -it fedora:latest bash -c \
 ```
 
 and the same on `quay.io/centos/centos:stream10` for the EPEL 10 chroot.
+
+## AppStream metadata
+
+Every install channel ships `data/com.episode6.Collins.metainfo.xml` to
+`/usr/share/metainfo/` (the `.deb`, the PPA package, the RPM, the AUR
+package, and `collins --install-desktop` for pip/pipx installs). That file is
+what software centers read for an **installed** Collins — name, description,
+screenshot, release notes — and PackageKit handles updates from either
+repository regardless, so `dnf upgrade` / `apt upgrade` and the GNOME
+Software updates page all work.
+
+What does *not* exist today is repository-level **catalog** metadata, the
+kind software centers use to let users discover and install an app they
+don't have yet. Neither channel can produce it:
+
+- **COPR** only generates AppStream data for projects on its legacy storage;
+  `episode6/stable` is on Pulp storage, where the project's *Generate
+  AppStream metadata* setting is a no-op until
+  [fedora-copr/copr#3499](https://github.com/fedora-copr/copr/issues/3499)
+  lands (blocked on
+  [pulp/pulp_rpm#2432](https://github.com/pulp/pulp_rpm/issues/2432)).
+- **Launchpad** has never generated DEP-11 metadata for PPAs
+  ([bug #2012296](https://bugs.launchpad.net/launchpad/+bug/2012296)).
+
+So "Collins in GNOME Software before it's installed" is not achievable from
+these repositories today; revisit if either issue closes. Until then the
+metainfo itself is kept store-ready, and three builds validate it so a broken
+file fails a PR rather than a software center: the RPM spec's `%check`,
+`debian/rules` (runs on Launchpad's builders), and `scripts/build_deb.sh`
+(runs in ci.yml's `packaging` job on every PR) — all with the same
+`appstreamcli validate --no-net --override releases-not-in-order=info`.
