@@ -70,8 +70,8 @@ one. A chord that another action already holds is offered back: confirm and
 it moves, leaving the other action without it.
 
 Each changed row shows a reset arrow that puts its default back; **Reset All**
-in the dialog's header does the same for all of them, after asking (it's
-greyed out while nothing is customized). Rows sharing a chord
+in the dialog's header does the same for all of them, after asking. It's
+greyed out while nothing is customized. Rows sharing a chord
 carry a warning mark naming the other action — every scope is checked
 against every other, because the window's shortcuts win over the editor's
 and the terminal's.
