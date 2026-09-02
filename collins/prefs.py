@@ -1485,17 +1485,25 @@ class PreferencesDialog(Adw.Dialog):
             self._on_change()
 
     def _flush_git_word_on_focus_out(self, row: Adw.EntryRow, key: str, ok: Callable[[str], bool]) -> None:
-        """Tab or a click elsewhere keeps the word at once: the focus
-        controller watches the row and its entry (contains-focus), since
-        the keyboard sits in the Gtk.Text inside the row."""
-        focus = Gtk.EventControllerFocus()
+        """Tab or a click elsewhere keeps the word at once.
 
-        def on_focus(controller: Gtk.EventControllerFocus, _pspec) -> None:
-            if not controller.contains_focus():
+        Watched through the dialog's focus-widget property rather than a
+        Gtk.EventControllerFocus: GTK only delivers focus events while the
+        window is active, and a window nobody manages (CI's bare Xvfb) never
+        is, so a controller there would never see the keyboard leave. The
+        property moves whenever focus does, active window or not. The
+        keyboard sits in the Gtk.Text inside the row, hence the ancestry
+        test."""
+        inside = [False]
+
+        def on_focus_widget(dialog: Adw.Dialog, _pspec) -> None:
+            focus = dialog.get_focus()
+            now = focus is not None and (focus is row or focus.is_ancestor(row))
+            if inside[0] and not now:
                 self._flush_git_word(row, key, ok)
+            inside[0] = now
 
-        focus.connect("notify::contains-focus", on_focus)
-        row.add_controller(focus)
+        self.connect("notify::focus-widget", on_focus_widget)
 
     def _flush_git_words(self) -> None:
         self._flush_git_word(self._git_theme_row, "git_theme", _git_theme_ok)
