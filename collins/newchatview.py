@@ -314,7 +314,7 @@ class NewChatView(Gtk.Box):
         # one — possibly one the new model can't take at all — is let go.
         if model == self._model:
             return
-        self.set_effort("")
+        self._effort = ""  # set_model names the effort and emits once
         self.set_model(model)
 
     def _launch_model(self) -> str | None:
