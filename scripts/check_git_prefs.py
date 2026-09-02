@@ -91,6 +91,26 @@ FAILED = 0
 ROW_TITLES = ["Layout", "Theme", "Show untracked files", "Commits per page", "Default parent branch"]
 
 
+def focus_chain(widget) -> list:
+    """Why grab_focus might refuse: each ancestor's sensitivity, visibility
+    and focusability, innermost first."""
+    out = []
+    w = widget
+    while w is not None:
+        out.append(
+            (
+                type(w).__name__,
+                w.get_sensitive(),
+                w.is_sensitive(),
+                w.get_visible(),
+                w.get_focusable(),
+                w.get_can_focus(),
+            )
+        )
+        w = w.get_parent()
+    return out
+
+
 def check(label: str, ok: bool, detail: object = "") -> None:
     global PASSED, FAILED
     if ok:
@@ -317,6 +337,8 @@ def step_writes_settled() -> bool:
             "out", focus_out,
             "active", root.is_active() if root else None,
             "mapped", parent.get_mapped(),
+            "chain", focus_chain(parent),
+            "switch", focus_chain(state["untracked"]),
         ),
     )
     typed(parent, "")
