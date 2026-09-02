@@ -4,8 +4,9 @@
 `pip install collins` unpacks a wheel and runs nothing else — no post-install
 script, no data_files that land anywhere pipx or a venv would look. So every
 file the app needs at runtime ships inside the package: the action icons
-app.py puts on the icon search path, the app icon, and the launcher template
-and metainfo `collins --install-desktop` writes out, plus the translations.
+app.py puts on the icon search path, the app icon, the launcher template
+and metainfo `collins --install-desktop` writes out, the translations, the
+notification sounds, and the hunk extension the git page hands to hunk.
 
 They get there through `[tool.setuptools.package-data]` globs over paths that
 are *symlinks* into data/, and setuptools has not always followed those — the
@@ -53,6 +54,22 @@ def expected() -> set[str]:
     if not sounds:
         sys.exit(f"error: no sounds under {ROOT / 'data' / 'sounds'} — is this a full checkout?")
     paths |= {f"collins/sounds/{p.name}" for p in sounds}
+    # The hunk extension behind the git page (hunkctl.EXTENSION_DIR): hunk
+    # runs it out of the package directory, so its sources are data — the
+    # manifest, the readme, and every .ts/.tsx directly in the directory.
+    # Its tests (test/), tsconfig.json and a local bun install stay out.
+    # Without the manifest the page runs hunk bare; without index.ts hunk
+    # refuses the manifest — either is a broken package.
+    ext = ROOT / "collins" / "hunkext" / "collins-git"
+    for required in ("package.json", "index.ts"):
+        if not (ext / required).is_file():
+            sys.exit(f"error: no {required} under {ext} — is this a full checkout?")
+    shipped = sorted(
+        p
+        for p in ext.iterdir()
+        if p.is_file() and (p.name in ("package.json", "README.md") or p.suffix in (".ts", ".tsx"))
+    )
+    paths |= {f"collins/hunkext/collins-git/{p.name}" for p in shipped}
     return paths
 
 

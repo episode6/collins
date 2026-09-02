@@ -4,7 +4,7 @@ Upstream-Contact: Máté Molnár <molnar.mate@zengo.eu>
 Source: https://github.com/r4nd3l/agent-session-manager
 Comment: Modified from the original agent-session-manager
  (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
- fork. Last modified: 2026-08-30. Full change history: git log for this file.
+ fork. Last modified: 2026-09-02. Full change history: git log for this file.
 
 Files: *
 Copyright: 2026 Máté Molnár
@@ -53,6 +53,18 @@ License: Expat
 Comment: From GitHub Octicons (https://github.com/primer/octicons), used
  unmodified; each SVG names its source Octicon in its header. See
  THIRD_PARTY_LICENSES.md.
+
+Files: collins/hunkext/collins-git/*
+Copyright: 2026 Geoff Hackett
+           2026 Josh Edler
+           2026 hunk-jj-stage contributors
+           2026 Sadick
+License: GPL-3.0-or-later and Expat
+Comment: The hunk extension behind the git page: GPL-3.0-or-later like the
+ rest of the fork, with code adapted from three hunk extensions under the
+ Expat (MIT) license — hunk-git-lite (Josh Edler), hunk-commit
+ (hunk-jj-stage contributors) and hunk-commit-log (Sadick). Each borrowing
+ file says so in its header; the notices are in THIRD_PARTY_LICENSES.md.
 
 License: GPL-3.0-or-later
  This program is free software: you can redistribute it and/or modify it

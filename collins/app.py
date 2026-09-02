@@ -1078,7 +1078,7 @@ popover.menu button.open-with-row:hover {
   opacity: 0.55;
 }
 
-/* git page: hunk under a one-row header (branch, breadcrumb, the switch) */
+/* git page: hunk under a one-row header (branch, breadcrumb) */
 .git-header {
   padding: 4px 10px;
 }

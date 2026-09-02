@@ -98,5 +98,6 @@ Keyboard Bindings dialog:
 | `Esc`, arrows, `Tab`, `Enter` / `Space` | Lightbox | Close, walk the gallery, cycle the shade's buttons, activate the focused one — nothing reaches the terminal underneath |
 | `Ctrl+Enter` | Pull request comment & review boxes | Post, as on GitHub; a bare `Enter` stays a newline |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Git page | Load the unstaged changes, the staged changes, or the branch's diff against its parent |
+| `x` / `X` / `A` / `U` / `n` / `p` / `P` | Git page (hunk) | Stage or unstage the hunk or file under the cursor, stage or unstage all, walk the commits, set the parent branch |
 | `←` / `→` | Sidebar project header | Collapse / expand the group |
 | `Esc` | Notification sheet, attachments overlay, Open with picker | Close |

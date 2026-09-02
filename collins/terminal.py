@@ -5402,13 +5402,14 @@ class TerminalTab(Gtk.Box):
             self._git_page = None
 
     def _restore_git_page(self, page: dict) -> GitPage | None:
-        """A saved layout's git page, rebuilt in the mode it was saved in
-        (anything the saved dict can't name reads as unstaged — the layout
-        is a preference, so restore never refuses on it). One page per tab:
-        a duplicate entry (a hand-edited layout file) is refused, which
-        drops it from the restored strip. The page spawns hunk on its first
-        map, so a restored page in a hidden strip costs nothing until it is
-        shown."""
+        """A saved layout's git page, rebuilt on what it was saved showing —
+        a mode, or a commit — and with the parent branch the user had set,
+        if any (anything the saved dict can't name reads as unstaged, or as
+        no parent — the layout is a preference, so restore never refuses on
+        it). One page per tab: a duplicate entry (a hand-edited layout file)
+        is refused, which drops it from the restored strip. The page spawns
+        hunk on its first map, so a restored page in a hidden strip costs
+        nothing until it is shown."""
         if self._git_page is not None:
             return None
         self._git_page = GitPage(
@@ -5417,6 +5418,7 @@ class TerminalTab(Gtk.Box):
             on_close=self._dock.close_page,
             on_closed=self._on_git_page_closed,
             loaded=hunkctl.decode_state(page),
+            parent=hunkctl.decode_parent(page),
         )
         return self._git_page
 
