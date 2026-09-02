@@ -51,12 +51,14 @@ with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
 with open(f"{E2E}/usage-fixture.json", "w", encoding="utf-8") as fh:
     json.dump({"limits": [], "extra_usage": {"is_enabled": False}}, fh)
 # Titles on None so nothing asks the shim for a `-p` run; no usage panel;
-# the first-launch welcome answered already; the git settings at their
-# defaults, so the rows open on them.
+# the first-launch welcome answered already and the gh card dismissed (a
+# machine without gh, CI's container, would present it over Preferences,
+# and a shadowed dialog turns focus off — the focus-out step needs it on);
+# the git settings at their defaults, so the rows open on them.
 with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
     fh.write(
         '{"settings": {"title_model": "none", "show_usage_panel": false, "language": "", '
-        '"welcome_seen": true}}'
+        '"welcome_seen": true, "gh_welcome_dismissed": true}}'
     )
 
 with open(SHIM, "w", encoding="utf-8") as fh:
@@ -78,7 +80,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, GLib  # noqa: E402
 
 from collins import i18n, prefslayout  # noqa: E402
 from collins.app import App  # noqa: E402
@@ -187,9 +189,13 @@ def stage() -> bool:
             app.quit()
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
-    # No animations: the sheet's open transition gates focus into the
-    # dialog, and a bare Xvfb (CI) has no compositor to finish it quickly.
-    Gtk.Settings.get_default().set_property("gtk-enable-animations", False)
+    # Anything already presented over the window would shadow Preferences
+    # (libadwaita turns can-focus off the dialog underneath); nothing is
+    # expected here, but a stray card must not fail the focus-out step.
+    other = win.get_visible_dialog()
+    if other is not None:
+        print(f"closing a dialog presented at launch: {other}", file=sys.stderr)
+        other.force_close()
     dialog = PreferencesDialog(win.state, lambda: state.setdefault("changes", []).append(1))
     dialog.present(win)
     state.update(win=win, dialog=dialog)
@@ -321,9 +327,7 @@ def step_writes_settled() -> bool:
         setting("git_parent_branch"),
     )
     check("no other setting moved", changes() == 10, changes())
-    # Focus leaving the row saves at once, too — once focus can enter the
-    # dialog at all: libadwaita keeps can-focus off its sheet until the
-    # presentation animation ends, and on a bare Xvfb that takes a while.
+    # Focus leaving the row saves at once, too.
     state["focus_tries"] = 0
     return later(step_focus_out, 50)
 
@@ -351,6 +355,7 @@ def step_focus_out() -> bool:
             "out", focus_out,
             "active", root.is_active() if root else None,
             "mapped", parent.get_mapped(),
+            "visible dialog", state["win"].get_visible_dialog(),
             "chain", focus_chain(parent),
         ),
     )
