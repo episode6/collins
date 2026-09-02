@@ -99,5 +99,6 @@ Keyboard Bindings dialog:
 | `Ctrl+Enter` | Pull request comment & review boxes | Post, as on GitHub; a bare `Enter` stays a newline |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Git page | Load the unstaged changes, the staged changes, or the branch's diff against its parent |
 | `x` / `X` / `A` / `U` / `n` / `p` / `P` | Git page (hunk) | Stage or unstage the hunk or file under the cursor, stage or unstage all, walk the commits, set the parent branch |
+| `v` / `Esc`, `D`, `C` / `B`, `F` | Git page (hunk) | Anchor a line range at the cursor and clear it (`x` then stages the range), discard the hunk or range, commit the index with a summary (and a body), fix up an unpushed commit |
 | `←` / `→` | Sidebar project header | Collapse / expand the group |
 | `Esc` | Notification sheet, attachments overlay, Open with picker | Close |

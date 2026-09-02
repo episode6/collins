@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "license": "GPL-3.0-or-later",
-  "description": "Collins' hunk extension: commits and files panels, file and hunk staging",
+  "description": "Collins' hunk extension: commits and files panels, file, hunk and line staging, commit and fixup",
   "hunk": {
     "apiVersion": 8,
     "extensions": ["./index.ts"]

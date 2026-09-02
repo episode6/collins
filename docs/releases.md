@@ -47,7 +47,14 @@ downloads of each version, see the
   Staged on the working tree. `x` / `X` stage or unstage the hunk or file
   under the cursor, `A` / `U` all of them, `n` / `p` walk the commits, `P`
   (or a right-click) picks the parent branch; `Ctrl+1` / `Ctrl+2` /
-  `Ctrl+3` jump to the unstaged, staged and whole-branch diffs. The page
+  `Ctrl+3` jump to the unstaged, staged and whole-branch diffs. **Lines,
+  too**: `v` anchors the cursor line in amber, hunk's `j` / `k` move, and
+  `x` stages (or unstages) exactly the lines in between, across hunks of
+  one file. `D` discards a hunk or range from the working tree after a
+  confirmation (and restores a deleted file), `C` / `B` commit the index
+  with a summary (and a body), and `F` commits it as a `fixup!` for an
+  unpushed commit picked from a list, naming the `git rebase -i
+  --autosquash` that folds it in. The page
   reloads by itself when the index or `HEAD` moves, and each session
   remembers whether it was open, what it showed and the parent you set. A
   machine without hunk gets an install card in the page's place; the

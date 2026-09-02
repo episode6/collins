@@ -11,6 +11,7 @@ import {
   readLog,
   readStatus,
   resolveBranch,
+  restoreFile,
   revParse,
   stageAll,
   stageFiles,
@@ -24,9 +25,9 @@ import {
   unpushedShas,
 } from "../git.ts";
 import { parseFilePatch } from "../patch.ts";
-import { planAll, planFileToggle, planHunkToggle } from "../staging.ts";
+import { planAll, planDiscard, planFileToggle, planHunkToggle } from "../staging.ts";
 import { createTestGitRepository, hasGit, type TestGitRepository } from "./support/gitRepo.ts";
-import { realpathSync } from "node:fs";
+import { realpathSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 
 const TEN_LINES = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
@@ -182,6 +183,26 @@ describe.skipIf(!hasGit())("staging against a real index", () => {
     expect(readStatus(repo.git)).toEqual(before);
   });
 
+  test("D on a file deleted in the working tree restores it from the index, the index untouched", () => {
+    repo.write("old.txt", "keep me around\nstaged edit\n");
+    repo.run("add", "old.txt");
+    rmSync(join(repo.root, "old.txt"));
+    const patch = readFilePatch(repo.git, "old.txt", false);
+    expect(patch.stdout).toContain("deleted file mode 100644");
+    const plan = planDiscard({
+      file: { path: "old.txt", changeType: "deleted", hunks: [] },
+      reviewPatchText: patch.stdout,
+      live: "unstaged",
+      hunkIndex: 0,
+      range: null,
+      patchText: patch.stdout,
+    });
+    expect(plan).toEqual({ kind: "restore", path: "old.txt", label: "restored old.txt" });
+    expect(restoreFile(repo.git, "old.txt")).toMatchObject({ ok: true });
+    expect(repo.read("old.txt")).toBe("keep me around\nstaged edit\n"); // the index's copy, not HEAD's
+    expect(readStatus(repo.git)).toEqual({ unstaged: [], staged: [{ path: "old.txt", code: "M" }] });
+  });
+
   test("the read-side helpers answer for a real repository", () => {
     const head = revParse(repo.git, "HEAD")!;
     expect(head).toMatch(/^[0-9a-f]{40}$/);
@@ -192,11 +213,15 @@ describe.skipIf(!hasGit())("staging against a real index", () => {
     expect(resolveBranch(repo.git, "main")).toEqual({ target: "main", sha: head });
     expect(resolveBranch(repo.git, "nope")).toBeNull();
     expect(resolveBranch(repo.git, "-x")).toBeNull();
+    // With no remote-tracking ref at all, every commit is unpushed; once one names HEAD, none is.
+    expect(unpushedShas(repo.git)).toEqual(new Set([head]));
+    repo.run("update-ref", "refs/remotes/origin/main", head);
     expect(unpushedShas(repo.git).size).toBe(0);
 
     repo.run("checkout", "-qb", "feat");
     repo.write("f.txt", "second\n");
     repo.run("commit", "-qam", "second");
+    expect(unpushedShas(repo.git)).toEqual(new Set([revParse(repo.git, "HEAD")!]));
     expect(localBranches(repo.git)).toEqual(["feat", "main"]);
     const log = readLog(repo.git, ["main..HEAD"], { limit: 5 });
     expect(log.map((commit) => commit.subject)).toEqual(["second"]);

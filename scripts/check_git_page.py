@@ -7,7 +7,8 @@ can't reach: a real GitPage in a real window, spawning a stand-in `hunk`
 into its VTE with the bundled collins-git extension on its argv and the
 sidecar's path in its environment, resolving the session id by pid off the
 shim's `session list --json`, switching modes through `session reload`,
-reloading on a freshness tick after a commit, keeping the viewer through a
+reloading on a freshness tick after a commit (and not for a move the
+extension recorded as already shown), keeping the viewer through a
 reload hunk refuses, picking up a parent branch the extension set through
 the sidecar (and publishing the automatic one back), following a reload
 made behind Collins' back (the poll's `session get`) — a commit becoming
@@ -62,7 +63,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 Adw.init()
 
-from collins import gitpage, hunkctl  # noqa: E402
+from collins import gitinfo, gitpage, hunkctl  # noqa: E402
 from collins.gitpage import GitPage  # noqa: E402
 
 PASSED = 0
@@ -446,6 +447,27 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
         read_state(state_path),
     )
 
+    # -- freshness: a move the extension made and recorded is not reloaded for ---
+    with open(os.path.join(repo, "a.txt"), "w") as fh:
+        fh.write("two b\n")
+    git(repo, "add", "a.txt")  # what the extension's `x` does to the index …
+    write_sidecar(  # … and what it writes right after its own hunk.app.refresh
+        sidecar, refreshed={"index": str(gitinfo.index_mtime(repo)), "head": head_sha(repo)}
+    )
+    page.poll_tick()
+    wait_for(lambda: not page._reloading, timeout=1.0)
+    check(
+        "a stage the extension recorded in the sidecar does not reload the page",
+        read_state(state_path).get("reloads", 0) == reloads_before + 1 and page._ext_refreshed is not None,
+        (read_state(state_path), page._ext_refreshed),
+    )
+    git(repo, "commit", "-qm", "second-b")  # a shell's move after it: the record is stale
+    page.poll_tick()
+    landed = wait_for(
+        lambda: read_state(state_path).get("reloads", 0) == reloads_before + 2 and not page._reloading
+    )
+    check("a later move from a shell reloads the diff again", landed, read_state(state_path))
+
     # -- a reload hunk refuses keeps the viewer ------------------------------------
     pid_before = read_state(state_path).get("pid")
     reloads_before = read_state(state_path).get("reloads", 0)
@@ -513,14 +535,16 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     check("back to the automatic parent", page._parent_name == "main", page._parent_name)
     check("page_state drops the parent", "parent" not in page.page_state(), page.page_state())
     check(
-        "Collins published the automatic name into the sidecar",
+        "Collins published the automatic name into the sidecar (keeping the extension's record)",
         read_sidecar(sidecar) == {
             "version": 1,
             "parent": "main",
             "parentSource": "auto",
             "default": "main",
             "logPage": 20,
-        },
+            "refreshed": read_sidecar(sidecar).get("refreshed"),  # the extension's record, kept
+        }
+        and read_sidecar(sidecar).get("refreshed") is not None,
         read_sidecar(sidecar),
     )
     wait_for(lambda: settled(page))
@@ -555,7 +579,7 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     check("it isn't foreign", page._foreign is None)
     check(
         "breadcrumb names the commit: ref and subject",
-        page._breadcrumb.get_text() == "HEAD second",
+        page._breadcrumb.get_text() == "HEAD second-b",
         page._breadcrumb.get_text(),
     )
     check("the tab title names the commit", page.page_title() == "Git · HEAD", page.page_title())

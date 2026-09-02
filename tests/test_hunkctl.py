@@ -701,6 +701,56 @@ def test_sidecar_round_trip(tmp_path):
         assert hunkctl.read_sidecar(fh.read()) == ("base", "user")
 
 
+_HEAD = "2cdcdb0cb0170be576e43fd27c48d1f64f800df7"
+_NS = 1756800000123456789
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (f'{{"refreshed": {{"index": "{_NS}", "head": "{_HEAD}"}}}}', (_NS, _HEAD)),
+        (f'{{"parent": "main", "refreshed": {{"index": "7", "head": "{_HEAD}"}}}}', (7, _HEAD)),
+        (f'{{"refreshed": {{"index": {_NS}, "head": "{_HEAD}"}}}}', None),  # a number: JS would lose digits
+        (f'{{"refreshed": {{"index": "12x", "head": "{_HEAD}"}}}}', None),
+        ('{"refreshed": {"index": "12", "head": "HEAD"}}', None),
+        ('{"refreshed": {"index": "12"}}', None),
+        ('{"refreshed": "12"}', None),
+        ('{"parent": "main"}', None),
+        ("garbage", None),
+        ("", None),
+    ],
+)
+def test_read_sidecar_refreshed(text, expected):
+    assert hunkctl.read_sidecar_refreshed(text) == expected
+
+
+def test_shown_by_extension():
+    """A move the extension recorded (same index mtime and HEAD, base
+    untouched) is not one the page reloads for; anything else is."""
+    base = "b" * 40
+    previous = (100, _HEAD, base)
+    other = "3" * 40
+    shown = hunkctl.shown_by_extension
+    assert shown((200, _HEAD), (200, _HEAD, base), previous)  # an x
+    assert shown((200, other), (200, other, base), previous)  # a commit
+    assert not shown((200, _HEAD), (300, _HEAD, base), previous)  # a shell moved it since
+    assert not shown((200, _HEAD), (200, other, base), previous)
+    assert not shown((200, _HEAD), (200, _HEAD, other), previous)  # the base moved too
+    assert not shown(None, (200, _HEAD, base), previous)
+    assert not shown((200, _HEAD), None, previous)
+    assert not shown((200, _HEAD), (200, _HEAD, base), None)
+
+
+def test_sidecar_refreshed_survives_collins_write(tmp_path):
+    """Collins' write merges: the extension's record is still there after it."""
+    path = str(tmp_path / "git.json")
+    with open(path, "w") as fh:
+        fh.write(f'{{"version": 1, "refreshed": {{"index": "200", "head": "{_HEAD}"}}}}')
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("main", "auto", "main", 20))
+    with open(path) as fh:
+        assert hunkctl.read_sidecar_refreshed(fh.read()) == (200, _HEAD)
+
+
 def test_spawn_env():
     assert hunkctl.spawn_env(None) is None
     assert hunkctl.spawn_env("") is None
