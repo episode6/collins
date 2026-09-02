@@ -619,6 +619,13 @@ is running in:
 - **`open_in_editor(path, line?)`** — put a file on your screen in the
   session's own editor pane, instead of hoping you click a path in the
   terminal.
+- **`show_diff(what, file?, line?)`** — open the session's git page on a
+  diff — `unstaged`, `staged`, `branch`, or any commit ref — and move hunk
+  to a file and line in it: "show me what you did" lands as the change on
+  your screen rather than a pasted diff. The page is revealed, never
+  focused; the reply tells the agent what loaded and the hunk session id,
+  and that everything else in the viewer (moving between hunks,
+  highlighting lines, comments) is `hunk session …` from its own shell.
 - **`show_image(path)`** — show a screenshot, plot, or render in the in-app
   lightbox. An `http(s)` URL works too: Collins downloads it and shows the
   copy.

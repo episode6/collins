@@ -17,6 +17,7 @@ def test_serves_exactly_the_landed_tools():
     assert [tool["name"] for tool in mcptools.TOOLS] == [
         "set_session_title",
         "open_in_editor",
+        "show_diff",
         "show_image",
         "notify_user",
         "attach_pr",
@@ -63,6 +64,7 @@ def test_enabled_tools_serves_only_what_is_switched_on():
     assert [tool["name"] for tool in served] == [
         "set_session_title",
         "open_in_editor",
+        "show_diff",
         "notify_user",
         "attach_pr",
         "start_session",
@@ -142,6 +144,34 @@ def test_open_in_editor_line_must_be_a_positive_integer():
     assert "at least 1" in mcptools.validate_args(
         "open_in_editor", {"path": "x.py", "line": 0}
     )
+
+
+def test_show_diff_args():
+    assert mcptools.validate_args("show_diff", {"what": "unstaged"}) is None
+    assert mcptools.validate_args("show_diff", {"what": "HEAD~1"}) is None
+    assert (
+        mcptools.validate_args(
+            "show_diff", {"what": "branch", "file": "collins/app.py", "line": 12}
+        )
+        is None
+    )
+    assert "what" in mcptools.validate_args("show_diff", {})
+    assert "empty" in mcptools.validate_args("show_diff", {"what": ""})
+    assert "128" in mcptools.validate_args("show_diff", {"what": "x" * 129})
+    assert "empty" in mcptools.validate_args("show_diff", {"what": "staged", "file": ""})
+
+
+def test_show_diff_line_must_be_a_positive_integer():
+    """1-based on the wire, like open_in_editor's; the handler hands it to
+    hunk's `--new-line` as it is. Whether it needs a file is the handler's
+    check (the schema has no way to say so)."""
+    assert "integer" in mcptools.validate_args(
+        "show_diff", {"what": "staged", "file": "x.py", "line": "12"}
+    )
+    assert "at least 1" in mcptools.validate_args(
+        "show_diff", {"what": "staged", "file": "x.py", "line": 0}
+    )
+    assert "mode" in mcptools.validate_args("show_diff", {"what": "staged", "mode": "x"})
 
 
 def test_show_image_args():

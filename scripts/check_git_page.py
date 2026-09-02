@@ -32,10 +32,13 @@ arguments, the `--extension` directory and the sidecar path in a state
 file, and the `session` subcommands answer out of that file the way hunk
 0.20 does (shapes probed on 2026-09-01; the refusal of a bad range, which
 leaves the viewer as it was, on 2026-09-02). FAKE_HUNK_REFUSE names a diff
-target the shim's `session reload` refuses. A third pass checks hunk also
-goes down — viewer included — when the page is unparented (a tab close), on
-gitpage.shutdown_all (the app's shutdown), and when the page closes while
-its spawn is still in flight, not only through page_closed.
+target the shim's `session reload` refuses; `session navigate` records its
+target in the file and refuses a file outside FAKE_HUNK_FILES (the shim is
+shared with check_show_diff.py, which drives the tool against it). A third
+pass checks hunk also goes down — viewer included — when the page is
+unparented (a tab close), on gitpage.shutdown_all (the app's shutdown), and
+when the page closes while its spawn is still in flight, not only through
+page_closed.
 
 This is a script, not a pytest test, on purpose: tests/conftest.py blocks
 the GTK-stack namespaces for the whole suite so local runs reproduce CI.
@@ -187,6 +190,28 @@ if args and args[0] == "session":
         sys.exit(1)
     if args[1] == "get":
         print(json.dumps({"session": session}))
+        sys.exit(0)
+    if args[1] == "navigate":
+        # hunk 0.20.1's shape: exactly one target beside --file; a file the
+        # loaded diff doesn't have is refused by name; a landed navigate
+        # answers with the spot. FAKE_HUNK_FILES (comma-separated) names
+        # the files the diff "has"; unset, every file is in it.
+        flags = {args[i]: args[i + 1] for i in range(3, len(args) - 1) if args[i].startswith("--")}
+        path = flags.get("--file")
+        targets = [k for k in ("--hunk", "--old-line", "--new-line") if k in flags]
+        if len(targets) != 1:
+            print(
+                "hunk: Specify exactly one navigation target: --hunk <n>, --old-line <n>, or --new-line <n>.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        known = os.environ.get("FAKE_HUNK_FILES")
+        if known is not None and path not in known.split(","):
+            print(f"hunk: No diff file matches {path}.", file=sys.stderr)
+            sys.exit(1)
+        state["navigate"] = {"file": path, "target": targets[0], "value": flags[targets[0]]}
+        write_state(state)
+        print(json.dumps({"result": {"filePath": path, "hunkIndex": 0, "revealed": "line"}}))
         sys.exit(0)
     if args[1] == "reload":
         tail = args[args.index("--") + 1:] if "--" in args else []

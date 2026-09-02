@@ -10,6 +10,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from collections import deque
 from pathlib import Path
 
@@ -29,7 +30,9 @@ from . import (
     desktopentry,
     editorfiles,
     ghwelcome,
+    gitinfo,
     gitpage,
+    hunkctl,
     is_debug_app_id,
     keybindings,
     keymap,
@@ -1283,6 +1286,188 @@ _FILETYPE_COLORS = {
 }
 
 
+class _ShowDiff:
+    """One show_diff tool call in flight: a commit ref resolved to its sha
+    on a thread, the git page opened (or fronted, never focused) on the
+    load, the page polled until the load has landed, then — with a file
+    named — hunk's `session navigate` run on a thread; the deferred reply
+    resolves with what the page ended up showing, or the first reason it
+    couldn't.
+
+    The page is asynchronous three times over (the version probe and VTE's
+    spawn, the session-id lookup with its backoff, the reload round trip),
+    and each step's failure has a card or a state of its own; the poll
+    reads them off the page's public face (GitPage.card, settled, shows)
+    rather than hooking into its steps. One deadline bounds the whole call
+    (hunkctl.SHOW_DIFF_DEADLINE_S, under the CLI's own MCP timeout);
+    whatever the outcome the page stays open, showing what it shows — a
+    failed call is reported, not undone.
+    """
+
+    def __init__(self, tab, root: str, loaded, path, line, deferred) -> None:
+        self._tab = tab
+        self._root = root
+        self._loaded = loaded
+        self._path = path
+        self._line = line
+        self._deferred = deferred
+        self._page = None
+        self._deadline = time.monotonic() + hunkctl.SHOW_DIFF_DEADLINE_S
+        self._finished = False
+
+    def begin(self) -> None:
+        ref = hunkctl.show_ref(self._loaded)
+        if ref is None:
+            self._open()
+            return
+        cwd = self._tab.current_agent_cwd()
+
+        def work() -> None:
+            sha = hunkctl.resolve_commit(cwd, ref)
+            GLib.idle_add(self._resolved, ref, sha, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=work, name="show-diff-rev-parse", daemon=True).start()
+
+    def _resolved(self, ref: str, sha: str | None) -> bool:
+        if self._finished:
+            return GLib.SOURCE_REMOVE
+        if sha is None:
+            self._finish(False, f"No commit named {ref} in {self._root}")
+        elif not sha:
+            self._finish(False, f"git couldn't be asked about {ref} (is it on PATH?)")
+        else:
+            self._loaded = {hunkctl.SHOW_KEY: sha}
+            self._open()
+        return GLib.SOURCE_REMOVE
+
+    def _what(self) -> str:
+        ref = hunkctl.show_ref(self._loaded)
+        return f"commit {hunkctl.short_ref(ref)}" if ref else f"the {self._loaded} diff"
+
+    def _open(self) -> None:
+        tab = self._tab
+        if tab.get_root() is None:
+            self._finish(False, "That session's tab closed before the diff could be shown")
+            return
+        # Revealed, never focused: the agent asked, nobody clicked, and the
+        # user's keyboard stays where it was (the attachments panel's
+        # autodock makes the same choice).
+        if not tab.open_git_page(mode=self._loaded, focus=False):
+            self._finish(False, "The session's working directory isn't inside a git repository")
+            return
+        page = tab.git_page
+        if page is None:
+            self._finish(False, "Collins couldn't open the git page")
+            return
+        self._page = page
+        GLib.timeout_add(hunkctl.SHOW_DIFF_POLL_MS, self._poll)
+
+    def _poll(self) -> bool:
+        if self._finished:
+            return GLib.SOURCE_REMOVE
+        page = self._page
+        if self._tab.get_root() is None or self._tab.git_page is not page:
+            self._finish(False, "The git page closed before the diff loaded")
+            return GLib.SOURCE_REMOVE
+        card = page.card
+        if card == "install":
+            self._finish(
+                False,
+                "hunk isn't installed (or is too old): the git page is showing its "
+                "install card. The user has to install hunk (hunk.dev) before "
+                "Collins can show diffs",
+            )
+            return GLib.SOURCE_REMOVE
+        if card == "not-a-repo":
+            self._finish(False, "The session's working directory isn't inside a git repository")
+            return GLib.SOURCE_REMOVE
+        if card == "exited":
+            self._finish(
+                False,
+                "hunk exited while the git page was opening; the page is showing its "
+                "Reopen card",
+            )
+            return GLib.SOURCE_REMOVE
+        if page.hunk_alive and page.session_id is None and not page.resolving:
+            self._finish(
+                False,
+                "The git page is open, but hunk didn't register a session Collins "
+                "can drive (an old hunk, or its daemon didn't answer); the page "
+                "shows " + page.breadcrumb_text(),
+            )
+            return GLib.SOURCE_REMOVE
+        if page.settled():
+            if not page.shows(self._loaded):
+                hint = ""
+                if self._loaded == "branch":
+                    hint = (
+                        " — no parent branch resolves for this branch; the user can "
+                        "set one with the page's P key or in Preferences → Git"
+                    )
+                self._finish(
+                    False,
+                    f"The git page couldn't load {self._what()}{hint}; it shows "
+                    + page.breadcrumb_text(),
+                )
+            elif self._path is None:
+                self._finish(True, self._reply())
+            else:
+                self._navigate()
+            return GLib.SOURCE_REMOVE
+        if time.monotonic() >= self._deadline:
+            self._finish(
+                False,
+                f"The git page didn't finish loading {self._what()} in time; it is "
+                "open in Collins and shows " + (page.breadcrumb_text() or "nothing yet"),
+            )
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    def _navigate(self) -> None:
+        page = self._page
+        argv = hunkctl.navigate_argv(page.hunk_path, page.session_id, self._path, self._line)
+        # What is left of the call's own deadline, so the reply — hunk's or
+        # a timeout's — still beats the CLI's.
+        timeout = max(1.0, min(hunkctl.SESSION_TIMEOUT_S, self._deadline - time.monotonic()))
+
+        def work() -> None:
+            reply = hunkctl.run(argv, timeout=timeout)
+            GLib.idle_add(self._navigated, reply, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=work, name="show-diff-navigate", daemon=True).start()
+
+    def _navigated(self, reply: hunkctl.Reply) -> bool:
+        if self._finished:
+            return GLib.SOURCE_REMOVE
+        if reply.ok:
+            self._finish(True, self._reply())
+        elif reply.session_gone:
+            self._finish(
+                False,
+                "The hunk session went away before the viewer could be moved; the "
+                "git page is reopening it",
+            )
+        else:
+            self._finish(
+                False,
+                f"The git page loaded {self._what()}, but hunk couldn't move to "
+                f"{self._path}: {hunkctl.navigate_error(reply)}",
+            )
+        return GLib.SOURCE_REMOVE
+
+    def _reply(self) -> str:
+        page = self._page
+        return hunkctl.show_diff_reply(
+            page.breadcrumb_text(), page.session_id, self._path, self._line
+        )
+
+    def _finish(self, ok: bool, text: str) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        self._deferred.resolve(ok, text)
+
+
 class _BackgroundSpawn:
     """One start_session tool call in flight: spawn a background session,
     submit its prompt once the box is ready, and resolve the deferred reply
@@ -2095,6 +2280,7 @@ class App(Adw.Application):
             handlers={
                 "set_session_title": self._mcp_set_session_title,
                 "open_in_editor": self._mcp_open_in_editor,
+                "show_diff": self._mcp_show_diff,
                 "show_image": self._mcp_show_image,
                 "notify_user": self._mcp_notify_user,
                 "attach_pr": self._mcp_attach_pr,
@@ -2143,6 +2329,40 @@ class App(Adw.Application):
         line = args.get("line")
         window.open_in_tab_editor(tab, path, [line - 1, 0] if line else None)
         return True, "Opened in the editor."
+
+    def _mcp_show_diff(self, found, args: dict) -> mcptools.ToolResult:
+        """Open the session's git page on a diff, and point it at a file.
+
+        Everything an obviously-bad call can be refused for is checked here,
+        synchronously: no repository under the agent, a `what` that is
+        neither a mode nor a ref, a `file` that can't be a path in the
+        diff, a `line` with no file. The rest — a commit ref checked
+        against the repository (one git call, on a thread), the page opened
+        and its load landed (a spawn, a session-id lookup and a reload,
+        each asynchronous), then hunk's own `session navigate` — is
+        _ShowDiff's, and the reply waits for it (mcptools.DeferredResult),
+        so the agent reads back what actually loaded.
+        """
+        _window, tab = found
+        cwd = tab.current_agent_cwd()
+        root = gitinfo.repo_root(cwd)
+        if root is None:
+            return False, "The session's working directory isn't inside a git repository"
+        loaded = hunkctl.show_diff_load(args["what"])
+        if loaded is None:
+            return False, (
+                f"'what' must be unstaged, staged, branch, or a commit ref: {args['what']!r}"
+            )
+        path = None
+        if "file" in args:
+            path = hunkctl.diff_file_path(args["file"], str(root), cwd)
+            if path is None:
+                return False, f"'file' must be a path inside the repository: {args['file']!r}"
+        elif "line" in args:
+            return False, "'line' needs 'file'"
+        deferred = mcptools.DeferredResult()
+        _ShowDiff(tab, str(root), loaded, path, args.get("line"), deferred).begin()
+        return deferred
 
     def _mcp_show_image(self, found, args: dict) -> mcptools.ToolResult:
         window, tab = found

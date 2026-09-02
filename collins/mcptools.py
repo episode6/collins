@@ -93,6 +93,61 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "show_diff",
+        "description": (
+            "Open this session's Collins git page — hunk, the terminal diff "
+            "viewer, beside the terminal — on a diff, and optionally point it "
+            "at a file and line: put a change on the user's screen instead of "
+            "pasting a diff or asking them to run git. 'what' is one of "
+            "'unstaged' (the working tree), 'staged' (the index), 'branch' "
+            "(the current branch against its parent), or a commit — any ref "
+            "git resolves: a sha, HEAD~1, a branch or tag name. Reach for it "
+            "when the user should look at a change: 'show me what you did', "
+            "a review, a commit to walk through, the hunk a test failure "
+            "points at. The page is shown without taking the user's keyboard. "
+            "The reply names what loaded and the hunk session id; for "
+            "anything else in the viewer — moving between hunks, "
+            "highlighting lines, comments — drive it from your shell with "
+            "`hunk session …` (see `hunk skill path`)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "what": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": (
+                        "'unstaged', 'staged', 'branch', or a commit ref "
+                        "(sha, HEAD~2, a branch or tag name) to show."
+                    ),
+                },
+                "file": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "description": (
+                        "A file in that diff to move the viewer to, as a "
+                        "path relative to the repository root (an absolute "
+                        "path inside the repository works too). It must "
+                        "have changes in the diff being shown."
+                    ),
+                },
+                "line": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "1-based line number on the new side of the diff to "
+                        "reveal, within 'file'; omit to land on the file's "
+                        "first hunk. Needs 'file'."
+                    ),
+                },
+            },
+            "required": ["what"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "show_image",
         "description": (
             "Show the user an image inline in this session's Collins window — "

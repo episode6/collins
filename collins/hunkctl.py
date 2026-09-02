@@ -16,7 +16,10 @@ titles, the breadcrumb and tab title Collins shows for them (a commit's
 breadcrumb names it, `<sha7> <subject>`, through the one git call here,
 commit_subject), the Ctrl+1/2/3 chords that pick the modes, and the layout
 slot they persist in (with the parent branch the user set, when they set
-one).
+one). The `show_diff` session tool (app.py's _mcp_show_diff, driving the
+page) keeps its decisions here too: what its `what` argument names, the
+commit check behind a ref, the repo-relative file path it hands hunk, the
+`session navigate` argv, and the reply the agent reads back.
 
 What Preferences → Git decides about hunk arrives as the whole settings
 dict and is read into an `Options` (from_settings, a pure normaliser):
@@ -109,7 +112,16 @@ INSTALL_COMMANDS: tuple[str, ...] = (
 RESOLVE_DELAYS_MS: tuple[int, ...] = (500, 1000, 2000, 4000, 8000)
 PROBE_TIMEOUT_S = 5.0  # `hunk --version` (node startup included)
 SESSION_TIMEOUT_S = 10.0  # session list / get / reload
-GIT_TIMEOUT_S = 5.0  # commit_subject's `git log -1`
+GIT_TIMEOUT_S = 5.0  # commit_subject's `git log -1`, resolve_commit's `git rev-parse`
+# How long show_diff gives the whole call — the page opening, hunk spawning,
+# the session id resolving, the load landing, the navigate answering —
+# before it replies with an error. The CLI gives up on an MCP call at about
+# 17 s (see app.py's _START_SESSION_DEADLINE_MS), so this sits under it with
+# room for the reply to travel; a cold hunk start behind the npm wrapper
+# plus the session-list backoff (RESOLVE_DELAYS_MS) fits inside it, and a
+# page that takes longer is stuck, not slow.
+SHOW_DIFF_DEADLINE_S = 12.0
+SHOW_DIFF_POLL_MS = 250
 
 # Keyvals and modifier bits as integers rather than Gdk constants: this
 # module is imported by the unit tests, which run without the GTK stack, and
@@ -363,6 +375,124 @@ def commit_subject(
         return None
     lines = (result.stdout or "").strip().splitlines()
     return lines[0].strip() if lines else ""
+
+
+def resolve_commit(
+    cwd: str | None, ref: object, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
+) -> str | None:
+    """The full sha of the commit *ref* names in the repository at *cwd* —
+    `git rev-parse --verify --quiet <ref>^{commit}`, one subprocess, for
+    show_diff's worker thread: a load is asked for by sha, so a branch
+    name or `HEAD~2` handed to the tool lands as the commit it meant at
+    the time, and persists as one.
+
+    The same three answers as commit_subject: the sha when git resolved
+    the ref; None when git says it names no commit (or *ref* isn't safe to
+    ask about); "" when git couldn't be asked at all (not on PATH, no cwd,
+    a timeout)."""
+    if not cwd or not safe_ref(ref):
+        return None
+    argv = ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"]
+    try:
+        result = run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if getattr(result, "returncode", 1) != 0:
+        return None
+    sha = (result.stdout or "").strip()
+    return sha if safe_ref(sha) else None
+
+
+# -- the show_diff session tool ---------------------------------------------------
+
+
+def show_diff_load(what: object) -> Loaded | None:
+    """What the tool's `what` argument asks for: one of MODES as itself, any
+    other safe ref (safe_ref) as a commit load {"show": ref} — resolved to
+    a sha by resolve_commit before it is loaded — and None for anything
+    else (whitespace, a leading "-", a range)."""
+    if not isinstance(what, str):
+        return None
+    if what in MODES:
+        return what
+    return {SHOW_KEY: what} if safe_ref(what) else None
+
+
+def diff_file_path(
+    raw: object, repo_root: str | None, cwd: str | None = None, exists=os.path.exists
+) -> str | None:
+    """The path hunk's `--file` takes — repo-relative, "/"-separated, as the
+    files panel shows it — out of what the agent handed the tool: an
+    absolute path inside *repo_root*, or a relative one. A relative path
+    is taken against the repository root (that is how a diff names files)
+    unless it is only there against the agent's *cwd* (an agent that cd'd
+    into a subdirectory and named a file the way its shell sees it) —
+    *exists* decides, injectable for the tests. None for anything that
+    can't be a file in the diff: empty, escaping the root, a leading "-"
+    (hunk's parser would read it as a flag)."""
+    if not isinstance(raw, str) or not raw.strip() or not repo_root:
+        return None
+    root = os.path.normpath(repo_root)
+    text = os.path.expanduser(raw.strip())
+    if os.path.isabs(text):
+        full = os.path.normpath(text)
+    else:
+        full = os.path.normpath(os.path.join(root, text))
+        if cwd and os.path.normpath(cwd) != root:
+            from_cwd = os.path.normpath(os.path.join(cwd, text))
+            if not exists(full) and exists(from_cwd):
+                full = from_cwd
+    try:
+        relative = os.path.relpath(full, root)
+    except ValueError:
+        return None
+    if relative == os.curdir or relative.startswith(os.pardir) or os.path.isabs(relative):
+        return None
+    relative = relative.replace(os.sep, "/")
+    return None if relative.startswith("-") else relative
+
+
+def navigate_argv(hunk: str, session_id: str, path: str, line: int | None = None) -> list[str]:
+    """[hunk, "session", "navigate", session_id, "--json", "--file", path,
+    "--new-line", "<line>"] — or "--hunk", "1" without a *line*: hunk
+    0.20 wants exactly one target, and the file's first hunk is where a
+    file with no line named lands."""
+    target = ["--new-line", str(line)] if line else ["--hunk", "1"]
+    return [hunk, "session", "navigate", session_id, "--json", "--file", path, *target]
+
+
+def navigate_error(reply: Reply) -> str:
+    """hunk's own word for a navigate it refused ("No diff file matches
+    src/x.ts.", "No diff hunk in x.ts matches the requested target."), the
+    `hunk: ` prefix dropped; a run that never answered says so."""
+    text = (reply.stderr or "").strip().splitlines()
+    line = text[-1].strip() if text else ""
+    if line.startswith("hunk:"):
+        line = line[len("hunk:") :].strip()
+    if not line:
+        return "hunk didn't answer the navigate" + (
+            " in time" if reply.returncode is None else f" (exit {reply.returncode})"
+        )
+    return line
+
+
+def show_diff_reply(
+    breadcrumb: str, session_id: str, path: str | None = None, line: int | None = None
+) -> str:
+    """What the agent reads back from a show_diff that landed: the load by
+    its breadcrumb and the hunk session id, the spot navigated to (when a
+    file was named), and the one thing it needs next — that everything
+    else the viewer can do is `hunk session …` from its own shell."""
+    lines = [f"Loaded {breadcrumb} in the session's git page (hunk session {session_id})."]
+    if path:
+        where = f"{path}, line {line}" if line else path
+        lines.append(f"Navigated the viewer to {where}.")
+    lines.append(
+        "Anything else in the viewer — navigate, highlight lines, comments — is "
+        "`hunk session <command> " + session_id + " …` from your shell; "
+        "`hunk skill path` names the skill file that documents the commands."
+    )
+    return "\n".join(lines)
 
 
 def diff_args(mode: str, parent_target: str | None) -> list[str]:

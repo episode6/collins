@@ -368,6 +368,54 @@ class GitPage(Adw.Bin):
         """Whether a hunk child is running in the VTE right now."""
         return self._child_pid is not None
 
+    @property
+    def session_id(self) -> str | None:
+        """The hunk session id the page drives, once resolved by pid; None
+        before that, and for good once the lookup gave up (every switch is
+        a respawn then, and nothing outside can drive the viewer)."""
+        return self._session_id
+
+    @property
+    def hunk_path(self) -> str | None:
+        """The hunk executable the page probed, None before the probe."""
+        return self._hunk_path
+
+    @property
+    def card(self) -> str | None:
+        """Which card stands in for hunk — "install", "exited",
+        "not-a-repo" — or None while the viewer (or its spawn) is up."""
+        return self._card
+
+    @property
+    def resolving(self) -> bool:
+        """Whether a spawn is between its start and the session id."""
+        return self._resolving
+
+    def breadcrumb_text(self) -> str:
+        """What the header says is loaded — hunk's word once it answered."""
+        return self._breadcrumb.get_text()
+
+    def settled(self) -> bool:
+        """Whether the viewer is up with a session id in hand and nothing in
+        flight: no spawn resolving, no reload or `session get` out, no load
+        queued behind one. What a caller driving the page from outside
+        (the show_diff tool) waits for before trusting `loaded` and before
+        sending the session its own commands."""
+        return (
+            self.hunk_alive
+            and self._session_id is not None
+            and not self._resolving
+            and not self._reloading
+            and not self._syncing_session
+            and self._pending_mode is None
+            and self._pending_reload is None
+        )
+
+    def shows(self, loaded: hunkctl.Loaded) -> bool:
+        """Whether the page shows exactly *loaded* — the same mode or commit,
+        and not a load Collins has no name for."""
+        return self._foreign is None and self._loaded == loaded
+
     def load(self, loaded: hunkctl.Loaded) -> None:
         """Show *loaded* — "unstaged" | "staged" | "branch", or a commit as
         {"show": ref}: Ctrl+1/2/3 and the host's open_git_page(mode) land

@@ -7,6 +7,8 @@ collins (0.1.3) UNRELEASED; urgency=medium
   * Preferences gains a Git group: hunk's layout and theme, untracked files
     on or off, commits per page in the commits panel, and a default parent
     branch for the git page.
+  * A ninth session tool, show_diff, lets the agent open the git page on a
+    working-tree, branch or commit diff and move it to a file and line.
   * Each GitHub release now attaches a binary noarch .rpm next to the .deb.
   * The AppStream metainfo is store-ready (screenshot, branding colours,
     translated summaries) and appstreamcli-validated by every package build;
