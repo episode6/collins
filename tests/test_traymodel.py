@@ -6,12 +6,16 @@ from collins.traymodel import (
     ACTION_NEW_WINDOW,
     ACTION_QUIT,
     ACTION_SHOW,
+    ARTWORK_EMPTY,
+    ARTWORK_FULL,
+    ARTWORK_WORKING,
     MARKER_UNREAD,
     MARKER_WORKING,
     STATUS_ACTIVE,
     STATUS_ATTENTION,
     STATUS_PASSIVE,
     TraySession,
+    artwork_for,
     badge_text,
     menu_entries,
     session_label,
@@ -113,6 +117,40 @@ def test_badge_and_status_clear_when_every_flag_is_under_a_pole():
     view = tray_view([session("a", unread=True, busy=True)], unread=0)
     assert (view.badge, view.unread, view.working) == ("", 0, 1)
     assert view.status == STATUS_ACTIVE
+
+
+# -- the glass ----------------------------------------------------------------
+
+
+def test_artwork_is_empty_with_nothing_running_and_nothing_unread():
+    assert artwork_for(0, 0) == ARTWORK_EMPTY
+    assert artwork_for(0, -1) == ARTWORK_EMPTY
+    # Open-but-idle sessions do not fill the glass: the icon says "nothing
+    # to do here", the tooltip and the menu carry the count.
+    assert tray_view([session("a"), session("b")]).artwork == ARTWORK_EMPTY
+    assert tray_view([], placeholders=2).artwork == ARTWORK_EMPTY
+
+
+def test_artwork_pours_the_drink_for_anything_unread():
+    assert artwork_for(0, 1) == ARTWORK_FULL
+    assert tray_view([session("a", unread=True)], unread=1).artwork == ARTWORK_FULL
+    # The badge and the glass move together: nothing open, a message waiting.
+    assert tray_view([], unread=2).artwork == ARTWORK_FULL
+
+
+def test_artwork_pours_the_pole_while_anything_works_whatever_the_badge_says():
+    assert artwork_for(1, 0) == ARTWORK_WORKING
+    assert artwork_for(3, 5) == ARTWORK_WORKING
+    view = tray_view([session("a", busy=True), session("b", unread=True)], unread=1)
+    assert (view.artwork, view.badge) == (ARTWORK_WORKING, "1")
+
+
+def test_artwork_names_are_the_panel_file_suffixes():
+    # statusicon appends these to `<app id>-panel` to find the drawing; the
+    # full glass is the plain panel file, so it adds nothing.
+    assert ARTWORK_FULL == ""
+    assert ARTWORK_WORKING == "-working"
+    assert ARTWORK_EMPTY == "-empty"
 
 
 def test_badge_counts_placeholder_rows_through_the_same_number():

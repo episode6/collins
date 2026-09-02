@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-30. Full change history: git log for this file.
+fork. Last modified: 2026-09-01. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,6 +38,13 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
+- **The status icon's glass empties when there's nothing to do.** The drink
+  now stands for something waiting: the glass holds the coral pour while
+  anything is unread, pours the barber pole while any session works, and
+  stands empty when nothing is running and nothing is waiting — so a glance
+  at the top bar says "all clear" without a badge to read. Open sessions
+  that are simply idle don't fill it; the tooltip and the menu still count
+  them.
 - **Releases now include an `.rpm` download.** Each GitHub release attaches
   a binary noarch RPM next to the `.deb` — built from the same spec the
   COPR publishes, for installing directly on an RPM-based distro without

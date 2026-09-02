@@ -10,9 +10,10 @@ window — this returns the four things the StatusNotifierItem exports:
 - **`Status`**: `Passive` with nothing open (a host may hide the item),
   `Active` with tabs open, `NeedsAttention` once something is unread.
 - **The badge text** composited onto the icon: `""`, `"1"`…`"9"`, `"9+"` —
-  and beside it the **working count**, which picks the artwork the badge
-  lands on: the glass pours the sidebar's barber pole while it is above
-  zero (statusicon.panel_icon_name).
+  and beside it the **artwork** the badge lands on (`artwork_for`): the
+  glass pours the sidebar's barber pole while anything is working, holds the
+  drink while something is unread, and stands empty otherwise — nothing
+  running, nothing waiting, nothing to look at (statusicon.panel_icon_name).
 - **The tooltip**, the same state in words.
 - **The menu layout** as plain data — labels, markers, actions and the
   separators that survive — which the DBusMenu export walks.
@@ -71,6 +72,13 @@ ACTION_QUIT = "quit"
 MARKER_WORKING = "working"
 MARKER_UNREAD = "unread"
 
+# What is in the glass. The names are the suffixes of the panel artwork's
+# variants (statusicon.PANEL_ICON_SUFFIX + one of these); the full glass is
+# the plain panel drawing, so it has no suffix.
+ARTWORK_EMPTY = "-empty"
+ARTWORK_FULL = ""
+ARTWORK_WORKING = "-working"
+
 # A jump list, not a second sidebar: the most recently active handful, and
 # the window for anything else.
 SESSION_ROW_CAP = 8
@@ -114,6 +122,7 @@ class TrayView:
 
     status: str = STATUS_PASSIVE
     badge: str = ""
+    artwork: str = ARTWORK_EMPTY
     tooltip: str = ""
     menu: list[MenuEntry] = field(default_factory=list)
     sessions: int = 0
@@ -128,6 +137,23 @@ def badge_text(unread: int) -> str:
     if unread > BADGE_MAX:
         return f"{BADGE_MAX}+"
     return str(unread)
+
+
+def artwork_for(working: int, unread: int) -> str:
+    """Which glass to draw, from the working count and the badge's number.
+
+    Working wins: the barber pole is the one state the user can do nothing
+    about, and it goes up on the first session to start and comes down on the
+    last to stop, whatever the badge says meanwhile (a flagged session that
+    goes back to work is under a pole in the sidebar too). Unread pours the
+    drink — there is something in the glass for the user. With neither, the
+    glass is empty: nothing running and nothing waiting, so a glance at the
+    panel says "nothing to do here" without a badge to read. Open-but-idle
+    sessions do not fill it — the tooltip and the menu count those.
+    """
+    if working > 0:
+        return ARTWORK_WORKING
+    return ARTWORK_FULL if unread > 0 else ARTWORK_EMPTY
 
 
 def status_for(sessions: int, unread: int, hidden_windows: bool = False) -> str:
@@ -302,6 +328,7 @@ def tray_view(
     return TrayView(
         status=status_for(open_count, unread, hidden_windows),
         badge=badge_text(unread),
+        artwork=artwork_for(working, unread),
         tooltip=tooltip_for(open_count, working, unread, name=name),
         menu=menu_entries(sessions, hidden_windows),
         sessions=open_count,

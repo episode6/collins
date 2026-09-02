@@ -52,13 +52,16 @@ GNOME's `ubuntu-appindicators@ubuntu.com` — actually behaves:
 - **The artwork is its own drawing**, `<app id>-panel`, not the launcher icon
   at a smaller size: the app icon is drawn on a 128 grid whose strokes land on
   about one pixel at 22 and smear across two. See `panel_icon_name`.
-- **Busy is a second drawing, not an animation.** `<app id>-panel-working`
-  is the same glass poured with the sidebar's barber pole, exported for as
-  long as any session is busy. The protocol has no animation of its own —
-  an icon only changes when the item says `NewIcon` and the host re-`Get`s
-  the pixmap — and GNOME's host turns every such frame into a D-Bus round
-  trip plus a texture upload, so the pole stands still: one `NewIcon` when
-  the first session starts working and one when the last stops.
+- **The glass is three drawings, not an animation.** `<app id>-panel-working`
+  is the glass poured with the sidebar's barber pole, exported for as long
+  as any session is busy; `<app id>-panel` holds the drink while something
+  is unread; `<app id>-panel-empty` is the bare glass for nothing running
+  and nothing waiting (traymodel.artwork_for decides). The protocol has no
+  animation of its own — an icon only changes when the item says `NewIcon`
+  and the host re-`Get`s the pixmap — and GNOME's host turns every such
+  frame into a D-Bus round trip plus a texture upload, so the pole stands
+  still: one `NewIcon` when the first session starts working and one when
+  the last stops.
 
 The unread badge is composited into those pixmaps rather than sent as text:
 the shell has no badge slot, and the one text affordance (`XAyatanaLabel`)
@@ -118,11 +121,11 @@ QUICKLIST_PATH = "/QuickList"
 # smeared one.
 ICON_SIZES = (22, 24, 32, 44)
 
-# Appended to the app id to find the panel-sized artwork (see panel_icon_name),
-# and the further suffix that picks its working variant — the same glass with
-# the sidebar's barber pole poured in — while any session is busy.
+# Appended to the app id to find the panel-sized artwork (see panel_icon_name).
+# The further suffix that picks what is in the glass — the barber pole, the
+# drink, or nothing — is traymodel's ARTWORK_* value, so the model and the
+# file names agree by construction.
 PANEL_ICON_SUFFIX = "-panel"
-PANEL_WORKING_SUFFIX = "-working"
 
 # The badge inherits nothing: it has to read against whatever is behind it —
 # a light panel, a dark one, the icon's own art underneath — so it carries
@@ -347,27 +350,30 @@ def _argb_bytes(pixbuf: GdkPixbuf.Pixbuf) -> bytes:
     return bytes(out)
 
 
-def panel_icon_name(icon_name: str, working: bool = False) -> str:
+def panel_icon_name(icon_name: str, artwork: str = traymodel.ARTWORK_FULL) -> str:
     """The artwork to export: the panel variant of *icon_name* if the theme
-    has one, else *icon_name* itself. With *working*, the panel variant's
-    working variant is tried first, and the same two follow it in the same
-    order — `<app id>-panel-working`, `<app id>-panel`, `<app id>`.
+    has one, else *icon_name* itself. *artwork* is one of traymodel's
+    ARTWORK_* values and names the glass wanted; a variant other than the
+    full glass is tried first and the same two follow it in the same order —
+    `<app id>-panel<artwork>`, `<app id>-panel`, `<app id>`.
 
     The app icon is drawn on a 128 grid for a launcher, and at the 22 pixels
     a panel asks for its strokes land on about one pixel and smear across
     two. `<app id>-panel` is the same drink redrawn on a 22 grid, and it is
     only ever the item's artwork — the launcher, the dock and the window all
     keep the full icon. `<app id>-panel-working` is that glass with the
-    sidebar's barber pole poured in, for while any session is busy. Each is
-    looked up rather than assumed, falling back to the next, so a checkout
-    whose icons have not been installed still shows something.
+    sidebar's barber pole poured in, for while any session is busy, and
+    `<app id>-panel-empty` the glass with nothing in it, for nothing running
+    and nothing unread. Each is looked up rather than assumed, falling back
+    to the next, so a checkout whose icons have not been installed still
+    shows something.
     """
     display = Gdk.Display.get_default()
     if display is None:
         return icon_name
     theme = Gtk.IconTheme.get_for_display(display)
     panel = f"{icon_name}{PANEL_ICON_SUFFIX}"
-    candidates = [f"{panel}{PANEL_WORKING_SUFFIX}", panel] if working else [panel]
+    candidates = [f"{panel}{artwork}", panel] if artwork else [panel]
     return next((name for name in candidates if theme.has_icon(name)), icon_name)
 
 
@@ -495,15 +501,17 @@ def _badged_surface(pixbuf: GdkPixbuf.Pixbuf, badge: str, size: int) -> cairo.Im
     return surface
 
 
-def icon_pixmaps(icon_name: str, badge: str = "", working: bool = False) -> list[tuple[int, int, bytes]]:
-    """The item's artwork at every exported size, largest last — the working
-    variant if *working* — with *badge* (if any) composited onto each. Empty
-    when the icon can't be found at all, which leaves the host to try
-    `IconName`."""
+def icon_pixmaps(
+    icon_name: str, badge: str = "", artwork: str = traymodel.ARTWORK_FULL
+) -> list[tuple[int, int, bytes]]:
+    """The item's artwork at every exported size, largest last — the glass
+    *artwork* names (a traymodel.ARTWORK_* value) — with *badge* (if any)
+    composited onto each. Empty when the icon can't be found at all, which
+    leaves the host to try `IconName`."""
     pixmaps = []
     # Resolved once, not per size: a theme carrying the panel variant at some
     # sizes and not others would otherwise export a mix of two drawings.
-    name = panel_icon_name(icon_name, working)
+    name = panel_icon_name(icon_name, artwork)
     for size in ICON_SIZES:
         pixbuf = _load_icon(name, size)
         if pixbuf is None:
@@ -515,12 +523,12 @@ def icon_pixmaps(icon_name: str, badge: str = "", working: bool = False) -> list
     return pixmaps
 
 
-def _artwork_key(view: traymodel.TrayView) -> tuple[str, bool]:
-    """What decides the exported artwork: the badge text and whether anything
-    is working — `icon_pixmaps`' arguments, in order. Two views with the same
-    key draw the same pixels, so this is both the render cache's key and the
-    test for whether a refresh has a `NewIcon` to announce."""
-    return (view.badge, view.working > 0)
+def _artwork_key(view: traymodel.TrayView) -> tuple[str, str]:
+    """What decides the exported artwork: the badge text and the glass —
+    `icon_pixmaps`' arguments, in order. Two views with the same key draw the
+    same pixels, so this is both the render cache's key and the test for
+    whether a refresh has a `NewIcon` to announce."""
+    return (view.badge, view.artwork)
 
 
 # -- the item -----------------------------------------------------------------
@@ -588,8 +596,8 @@ class StatusIcon:
         self._registered = False
         self._revision = 1
         self._pixmaps: list[tuple[int, int, bytes]] | None = None
-        # (badge, working) the rendered pixmaps stand for — see _artwork_key.
-        self._pixmap_key: tuple[str, bool] = ("", False)
+        # (badge, artwork) the rendered pixmaps stand for — see _artwork_key.
+        self._pixmap_key: tuple[str, str] = ("", traymodel.ARTWORK_FULL)
         # What the dock was last told, None for "nothing yet": the first
         # refresh always broadcasts, so a badge left behind by a crashed run
         # is cleared even when this one starts with nothing unread.
@@ -738,11 +746,12 @@ class StatusIcon:
         if self._view.status != old.status:
             self._emit_item("NewStatus", GLib.Variant("(s)", (self._view.status,)))
         if _artwork_key(self._view) != _artwork_key(old):
-            # Both artworks carry the badge and the pole, and a host reads
+            # Both artworks carry the badge and the glass, and a host reads
             # whichever its Status picks — so both are announced when either
-            # moves. The pole moves on the first session to start working
-            # and the last to stop, never on the count in between: every
-            # NewIcon costs the host a round trip and a texture upload.
+            # moves. The glass moves on the first session to start working
+            # and the last to stop, and on the badge going up or clearing,
+            # never on the counts in between: every NewIcon costs the host a
+            # round trip and a texture upload.
             self._emit_item("NewIcon", None)
             self._emit_item("NewAttentionIcon", None)
         if self._view.tooltip != old.tooltip:
