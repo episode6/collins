@@ -1,7 +1,7 @@
 // New in the ghackett fork of agent-session-manager (GPL-3.0).
 
 import { describe, expect, test } from "bun:test";
-import { EMPTY_TREE, type Commit } from "../git.ts";
+import type { Commit } from "../git.ts";
 import {
   buildRows,
   decodeTail,
@@ -61,20 +61,19 @@ const base: RowsInput = {
   defaultCommits: [commit(9), commit(8)],
   defaultMore: true,
   unpushed: new Set([commit(3).sha]),
-  defaultOldestParent: commit(7).sha,
 };
 
 describe("buildRows", () => {
   test("lists current, parent and default groups in order with the spec's loads", () => {
     const rows = buildRows(base);
     expect(rows.map((row) => `${row.group}/${row.kind}:${row.label}`)).toEqual([
-      "current/header:FEAT/PANEL",
+      "current/header:feat/panel",
       "current/worktree:working tree",
       "current/commit:commit 3",
       "current/commit:commit 2",
-      "parent/header:DEVELOP",
+      "parent/header:develop",
       "parent/commit:commit 5",
-      "default/header:MAIN",
+      "default/header:main",
       "default/commit:commit 9",
       "default/commit:commit 8",
       "default/more:load more…",
@@ -85,7 +84,7 @@ describe("buildRows", () => {
     expect(rows[2]!.unpushed).toBe(true);
     expect(rows[3]!.unpushed).toBe(false);
     expect(rows[4]!.load).toEqual(["diff", "main...origin/develop"]);
-    expect(rows[6]!.load).toEqual(["diff", `${commit(7).sha}..${commit(9).sha}`]);
+    expect(rows[6]!.load).toEqual([]);
     expect(rows[9]!.load).toEqual([]);
   });
 
@@ -101,10 +100,10 @@ describe("buildRows", () => {
     expect(rows[0]!.load).toEqual(["diff", `${commit(2).sha}^..HEAD`]);
   });
 
-  test("a root commit at the bottom of the default page diffs from the empty tree", () => {
-    const rows = buildRows({ ...base, defaultOldestParent: null, defaultMore: false });
+  test("the default branch's header loads nothing", () => {
+    const rows = buildRows({ ...base, defaultMore: false });
     const header = rows.find((row) => row.group === "default" && row.kind === "header")!;
-    expect(header.load).toEqual(["diff", `${EMPTY_TREE}..${commit(9).sha}`]);
+    expect(header.load).toEqual([]);
     expect(rows.some((row) => row.kind === "more")).toBe(false);
   });
 

@@ -6,7 +6,7 @@ What the page shows is hunk's — hunk.dev, the terminal diff viewer, running
 with the collins-git extension Collins ships as package data, which draws
 the commits and files panels and binds the staging keys — and all Collins
 adds is a one-row header (the branch, a breadcrumb of what is loaded,
-refresh and close) and the plumbing that keeps hunk pointed at the right
+and refresh; the tab's X closes) and the plumbing that keeps hunk pointed at the right
 thing: it spawns `hunk diff --watch --extension <collins-git>` in the
 agent's working tree the first time the page is shown, finds the session
 hunk registered for that process (`hunk session list --json`, matched by
@@ -172,7 +172,6 @@ class GitPage(Adw.Bin):
         self,
         cwd_provider: Callable[[], str | None],
         parent_provider: Callable[[str | None], str | None],
-        on_close: Callable[[GitPage], None],
         on_closed: Callable[[GitPage], None],
         loaded: hunkctl.Loaded = hunkctl.DEFAULT_MODE,
         parent: str | None = None,
@@ -181,9 +180,8 @@ class GitPage(Adw.Bin):
         — read at every spawn and poll. *parent_provider(cwd)*: the parent
         branch NAME ("main") the host computes (the newest PR's base, else
         the default branch), or None; the page resolves it to a diff target
-        itself (gitinfo.resolve_branch). *on_close(page)*: the header ✕ — the
-        host routes it through the dock (PanelDock.close_page) so the strip's
-        funnel runs. *on_closed(page)*: fired from page_closed(), after hunk
+        itself (gitinfo.resolve_branch). *on_closed(page)*: fired from
+        page_closed() — the tab's X, through the strip's close funnel — after hunk
         is signalled, so the host drops its reference. *loaded*: what to
         spawn into (a restored layout's, or the footer's choice): a mode, or
         a commit as {"show": ref}. *parent*: the branch the user set through
@@ -194,7 +192,6 @@ class GitPage(Adw.Bin):
         self.set_size_request(_MIN_PAGE_WIDTH, -1)
         self._cwd_provider = cwd_provider
         self._parent_provider = parent_provider
-        self._on_close = on_close
         self._on_closed = on_closed
         self._loaded: hunkctl.Loaded = loaded if hunkctl.loaded_ok(loaded) else hunkctl.DEFAULT_MODE
         # The user-set parent branch NAME, or None for the automatic rung
@@ -314,11 +311,6 @@ class GitPage(Adw.Bin):
         refresh.set_tooltip_text(_("Reload the diff"))
         refresh.connect("clicked", lambda *_a: self.refresh())
         header.append(refresh)
-        close = Gtk.Button(icon_name="window-close-symbolic")
-        close.add_css_class("flat")
-        close.set_tooltip_text(_("Close the git page"))
-        close.connect("clicked", lambda *_a: self._on_close(self))
-        header.append(close)
 
         # -- hunk's terminal, and the cards that stand in for it ----------------
         self.terminal = Vte.Terminal()

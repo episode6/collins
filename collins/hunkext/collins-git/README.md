@@ -24,7 +24,7 @@ Two panes on the left of hunk's review stream:
   | a commit               | `show <sha>`                           |
   | current-branch header  | `diff <parent>...HEAD`                 |
   | parent-branch header   | `diff <default>...<parent>`            |
-  | default-branch header  | `diff <oldest listed>^..<tip>`         |
+  | default-branch header  | nothing — a whole trunk is too much     |
 
   A right click on the pane opens *Set parent branch…*.
 

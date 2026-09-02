@@ -403,8 +403,9 @@ panels:
   page* (twenty by default) with a *load more…* row. A click loads it
   into the same window: the *working tree* row the unstaged changes, a
   commit that one commit, a branch header everything the branch did since
-  it forked. The loaded row wears `▸`, and its group's header is
-  highlighted.
+  it forked — except the default branch's, which stays put: a whole trunk
+  is more than a diff viewer should be handed. The loaded row wears `▸`,
+  and its group's header is highlighted.
 - **The files panel splits on the working tree.** With *working tree*
   loaded it shows **Unstaged · n** and **Staged · n** sections; hunk holds
   one of the two at a time, so the other is navigation — clicking a file
@@ -458,9 +459,9 @@ panels:
   session reload` run from a shell, or by the agent shows up in it within
   a couple of seconds. A commit is the page's own load — kept fresh,
   remembered, restored — while a range between two other branches (the
-  parent's or the default branch's header) is named as hunk names it and
+  parent's header) is named as hunk names it and
   left alone until the next load takes the page back. A refresh button
-  reloads the same diff; the ✕ closes the page.
+  reloads the same diff; the tab's X closes the page.
 - **It keeps itself fresh.** Every two seconds the page compares the
   index, `HEAD` and the parent branch against what it last loaded, and
   reloads when any of them moved — an agent staging, committing or

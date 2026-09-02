@@ -295,7 +295,6 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
       defaultBranch !== null
         ? readPage(runner, [defaultBranch.target], "default", cfg.logPage)
         : { commits: [] as Commit[], more: false };
-    const oldest = defaultCommits.commits[defaultCommits.commits.length - 1];
     rows = buildRows({
       branch,
       parent,
@@ -307,7 +306,6 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
       defaultCommits: defaultCommits.commits,
       defaultMore: defaultCommits.more,
       unpushed: unpushedShas(runner),
-      defaultOldestParent: oldest === undefined ? null : parentOf(runner, oldest.sha),
     });
     publishCommitsState();
   }

@@ -348,7 +348,6 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: p.page_closed(),
         on_closed=closed.append,
     )
     window = Gtk.Window(title="check_git_page", default_width=900, default_height=600)
@@ -695,7 +694,6 @@ def check_restore(repo: str, state_path: str, shim: str) -> None:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: None,
         on_closed=lambda p: None,
         loaded=hunkctl.decode_state({"kind": "git", "loaded": {"show": sha}, "parent": "base"}),
         parent=hunkctl.decode_parent({"kind": "git", "loaded": {"show": sha}, "parent": "base"}),
@@ -755,7 +753,6 @@ def check_restore(repo: str, state_path: str, shim: str) -> None:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: None,
         on_closed=lambda p: None,
         loaded=hunkctl.decode_state({"kind": "git", "loaded": {"show": gone}}),
     )
@@ -778,7 +775,6 @@ def check_restore(repo: str, state_path: str, shim: str) -> None:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: None,
         on_closed=lambda p: None,
         loaded="branch",
         parent="nosuch",
@@ -800,7 +796,6 @@ def spawn_page(repo: str, title: str) -> tuple[GitPage, Gtk.Window]:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: None,
         on_closed=lambda p: None,
     )
     window = Gtk.Window(title=title, default_width=900, default_height=600)
@@ -848,7 +843,6 @@ def check_teardown_paths(repo: str, state_path: str, shim: str) -> None:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: None,
         on_closed=lambda p: None,
     )
     window = Gtk.Window(title="close mid-spawn", default_width=900, default_height=600)
@@ -1094,7 +1088,6 @@ def check_without_hunk(repo: str) -> None:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: None,
         on_closed=lambda p: None,
     )
     window = Gtk.Window(title="check_git_page (no hunk)", default_width=900, default_height=600)
@@ -1116,7 +1109,6 @@ def check_outside_a_repo(scratch: str) -> None:
     page = GitPage(
         cwd_provider=lambda: nowhere,
         parent_provider=lambda _cwd: None,
-        on_close=lambda p: None,
         on_closed=lambda p: None,
     )
     window = Gtk.Window(title="check_git_page (no repo)", default_width=900, default_height=600)

@@ -5346,7 +5346,6 @@ class TerminalTab(Gtk.Box):
             page = GitPage(
                 cwd_provider=self.current_agent_cwd,
                 parent_provider=self._git_parent_branch,
-                on_close=self._dock.close_page,
                 on_closed=self._on_git_page_closed,
                 loaded=mode,
             )
@@ -5421,7 +5420,6 @@ class TerminalTab(Gtk.Box):
         self._git_page = GitPage(
             cwd_provider=self.current_agent_cwd,
             parent_provider=self._git_parent_branch,
-            on_close=self._dock.close_page,
             on_closed=self._on_git_page_closed,
             loaded=hunkctl.decode_state(page),
             parent=hunkctl.decode_parent(page),
