@@ -118,12 +118,19 @@ def enable_copy_on_click(
     label: Gtk.Label,
     get_text: Callable[[], str | None],
     format_text: Callable[[str], str] = display_path,
+    *,
+    button: int = Gdk.BUTTON_PRIMARY,
 ) -> None:
     """Copy the label's full text to the clipboard when it is clicked.
 
     The label briefly shows a confirmation, then restores itself from
     `get_text` rendered through `format_text` (re-read at restore time, so a
     value that changed mid-flash comes back current).
+
+    `button` picks the mouse button that copies: the primary one by default,
+    `Gdk.BUTTON_SECONDARY` for a label whose plain click does something else
+    — the footer's branch label opens the git page, and keeps the copy a
+    right-click away.
     """
     label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
     flash_source: list[int] = []
@@ -144,6 +151,6 @@ def enable_copy_on_click(
             GLib.source_remove(flash_source.pop())
         flash_source.append(GLib.timeout_add(_FLASH_MS, restore))
 
-    click = Gtk.GestureClick()
+    click = Gtk.GestureClick(button=button)
     click.connect("released", on_released)
     label.add_controller(click)

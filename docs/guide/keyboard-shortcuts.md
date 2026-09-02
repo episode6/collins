@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-30. Full change history: git log for this file.
+fork. Last modified: 2026-09-02. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -30,6 +30,7 @@ These are the defaults. Every one of them can be changed — see
 | `Esc` | Bring a panel tab that's overlaying the whole session back to its place in the panel (a shell with a program running in it keeps the key) |
 | `Ctrl+.` | Show/hide the composer — raised, the cursor lands in it; pressed again while composing it closes and puts the draft back in the agent's own input box |
 | `Ctrl+'` | Show/hide the attachments gallery — the images this session has been shown, the same panel the handle on the terminal's right edge raises; docked as a panel tab it comes to the front (revealing a hidden strip) instead of closing |
+| `F6` | Show/hide the git page — hunk beside the session showing the working tree, the index, or the branch against its parent; pressed while the cursor is in it, it closes |
 | `F7` | Open the pull request page for the newest PR this session is linked to — already open, it comes to the front and re-reads itself |
 | `F8` | Show/hide the editor panel (brings a popped-out editor back first) |
 | `Ctrl+Shift+O` | Quick open — fuzzy-find a file in the project, opened in the editor |
@@ -96,5 +97,6 @@ Keyboard Bindings dialog:
 | `↑` / `↓`, `Enter`, `Esc` | Quick switcher, quick open | Move the selection, open it, close |
 | `Esc`, arrows, `Tab`, `Enter` / `Space` | Lightbox | Close, walk the gallery, cycle the shade's buttons, activate the focused one — nothing reaches the terminal underneath |
 | `Ctrl+Enter` | Pull request comment & review boxes | Post, as on GitHub; a bare `Enter` stays a newline |
+| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Git page | Load the unstaged changes, the staged changes, or the branch's diff against its parent |
 | `←` / `→` | Sidebar project header | Collapse / expand the group |
 | `Esc` | Notification sheet, attachments overlay, Open with picker | Close |

@@ -528,6 +528,13 @@ class PrViewPage(Adw.Bin):
         return self._pr.url
 
     @property
+    def base_ref(self) -> str | None:
+        """The PR's base branch (`baseRefName`) as last fetched — the git
+        page's first choice of parent branch (see TerminalTab._git_parent_branch);
+        None until the first fetch lands."""
+        return self._detail.base_ref if self._detail is not None else None
+
+    @property
     def pull_request(self) -> PullRequest:
         """The summary as last fetched (or as constructed, before that)."""
         return self._pr

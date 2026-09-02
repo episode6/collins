@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-01. Full change history: git log for this file.
+fork. Last modified: 2026-09-02. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,6 +38,15 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
+- **A git page beside the session.** `F6`, or a click on the footer's ⎇
+  branch label, opens [hunk](https://hunk.dev) in a terminal of its own
+  next to the agent's, showing the unstaged changes, the staged changes,
+  or the whole branch against its parent — `Ctrl+1` / `Ctrl+2` / `Ctrl+3`
+  or the header's buttons switch between them, and the page reloads by
+  itself when the index or `HEAD` moves. Each session remembers whether
+  the page was open and what it showed. A machine without hunk gets an
+  install card in the page's place; the branch label's copy moved to a
+  right-click.
 - **The status icon's glass empties when there's nothing to do.** The drink
   now stands for something waiting: the glass holds the coral pour while
   anything is unread, pours the barber pole while any session works, and

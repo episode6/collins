@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-30. Full change history: git log for this file.
+fork. Last modified: 2026-09-02. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -22,6 +22,10 @@ sessions open — state, CI, conflicts, unanswered comments — and what carries
 out everything the PR menus offer. Without it a pull request is a number and
 nothing else, and Collins says so on every launch that finds `gh` missing or
 signed out — until you install it, or tick *Don't show this again*.
+
+Also optional: [**hunk**](https://hunk.dev) (`npm i -g hunkdiff`, 0.20 or
+newer), the terminal diff viewer behind the git page. Without it the page
+opens on a card with the install lines and a *Check again* button.
 
 Install the system libraries with your distro's package manager:
 

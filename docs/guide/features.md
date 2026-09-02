@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-01. Full change history: git log for this file.
+fork. Last modified: 2026-09-02. Full change history: git log for this file.
 -->
 
 # Features
@@ -116,7 +116,8 @@ Enter opens, Esc closes.
   output.
 - A slim **session footer** shows the **model** the session last answered
   with and the **effort level** it answered at, the agent's live working
-  directory (click to copy), and the current **git branch** (⎇), plus the
+  directory (click to copy), and the current **git branch** (⎇ — click to
+  open the [git page](#git-page), right-click to copy), plus the
   terminal-panel buttons.
 - **Footer apps**: name any installed application in Preferences →
   *Footer apps* and every session's footer grows a button that opens the
@@ -308,8 +309,8 @@ auto-launched — below or beside the agent terminal, with **tabs of its own**:
 - Scrollback **persists across restarts, per panel tab** — reopen a session
   and the panel picks up where it left off. Each session remembers its
   panel's open state, position, and size; the strip that **pages** dock
-  into (a PR view, the attachments gallery, a docked composer) remembers a
-  size of its own, kept apart from the shells'.
+  into (a PR view, the git page, the attachments gallery, a docked
+  composer) remembers a size of its own, kept apart from the shells'.
 - **Right-click the footer's terminal button** to open the agent's live
   directory in your desktop's own terminal instead, for the times a window
   of its own beats a panel.
@@ -381,6 +382,53 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   side, the tree at the width you left it.
 
 ![The editor panel beside an agent session](/img/editor-panel.png)
+
+## Git page
+
+What the agent has changed, beside the terminal it is changing it in. The
+page is [hunk](https://hunk.dev) — the terminal diff viewer — running in a
+terminal of its own under a one-row header, one page per session:
+
+- **Three loads.** The **unstaged** changes (the working tree against the
+  index), the **staged** changes (the index against `HEAD`), or the whole
+  **branch against its parent** (`main...HEAD`). The parent is the base
+  branch of the session's newest pull request once its PR page has been
+  opened — a stacked PR is measured against the branch it stacks on — and
+  otherwise the repository's default branch; either way the local branch
+  when there is one, else the remote's. `Ctrl+1` / `Ctrl+2` / `Ctrl+3`
+  switch between them from anywhere in the page, and so do the header's
+  three buttons.
+- **The header says what you're looking at**: the branch, then a
+  breadcrumb — *working tree · unstaged*, *working tree · staged*,
+  *feature vs main* — that the page's tab title follows (*Git · staged*).
+  It reports what hunk has loaded, not what was last clicked: a `hunk
+  session reload` run from a shell or by the agent shows up in it within a
+  couple of seconds, and a load that isn't one of the three (`show HEAD`)
+  is named as hunk names it, with none of the buttons down, until a click
+  on one takes the page back. A refresh button reloads the same diff; the
+  ✕ closes the page.
+- **It keeps itself fresh.** Every two seconds the page compares the
+  index, `HEAD` and the parent branch against what it last loaded, and
+  reloads when any of them moved — an agent staging, committing or
+  rebasing shows up without a keypress, and a session that finishes a
+  turn is checked on the spot. A session that steps into a worktree takes
+  the page with it.
+- **Two ways in**: `F6` (pressed while the cursor is in the page, it
+  closes; from anywhere else it opens or fronts it), or a click on the
+  footer's **⎇ branch** label. A fresh page opens on the unstaged changes
+  while anything in the tree is dirty, and on the staged ones when only
+  the index is. Outside a git repository there is nothing to open, and
+  the terminal says so.
+- **Hunk's own keys still work** — it is the real program, in a real
+  terminal, so its navigation, search and `r` reload are all there. The
+  page holds `Esc` for it, and the terminal zoom chords apply.
+- **No hunk, no error.** A machine without hunk (or with one older than
+  0.20) gets a card in the page's place: the three install lines,
+  click-to-copy, and a *Check again* button. Hunk exiting gets a *Reopen*
+  card; a directory that stops being a repository, a card saying so.
+- Each session remembers whether its git page was open, where it sat, and
+  which of the three loads it showed — restored on the next launch, hunk
+  starting the moment the page is first shown.
 
 ## Knowing what's happening
 
