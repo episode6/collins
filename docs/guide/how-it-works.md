@@ -264,10 +264,10 @@ the sidebar's barber pole poured in while any session is working, the drink
 while anything is unread, and an empty glass with nothing running and
 nothing waiting (`traymodel.artwork_for`) — swapped with one `NewIcon` on
 each change, never per frame: the protocol has no animation and every frame
-would be a D-Bus round trip. The unread badge is composited into the pixmap and also
-broadcast to the dock as a launcher badge. Where no watcher is on the bus
-(GNOME without an AppIndicator extension), nothing appears; Preferences
-says so.
+would be a D-Bus round trip. The unread badge is composited into the pixmap
+and also broadcast to the dock as a launcher badge. Where no watcher is on
+the bus (GNOME without an AppIndicator extension), nothing appears;
+Preferences says so.
 
 ## The stack
 
