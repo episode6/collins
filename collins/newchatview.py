@@ -23,8 +23,10 @@ whatever the CLI resolves at launch; a pick here is for this launch alone,
 and the default is left as it was. A model the tab was opened with (a
 start_session caller's) seeds the picker instead of the default. The
 effort picker beside it chooses the ``--effort`` on the same terms
-(claudemodels.cli_default_effort is what it opens on), and lists only the
-levels the model the launch will run on takes. The screen owns no launch
+(claudemodels.cli_default_effort is what it opens on, read for the model
+the launch will run on: the CLI keeps a level per model), and lists only
+the levels that model takes; picking a different model lets the effort
+pick go, so the dial reads the new model's own default. The screen owns no launch
 plumbing and no persistence — it announces ``send-requested`` and
 ``changed`` and its host (the tab, then the window) decides what those
 mean, the same division the composer itself draws.
@@ -163,7 +165,7 @@ class NewChatView(Gtk.Box):
         # on: the pick, or the CLI's default when nothing is picked.
         effort_popover = (
             modelmenu.new_launch_effort_popover(
-                default_effort=lambda: claudemodels.cli_default_effort(self._cwd),
+                default_effort=self._default_effort,
                 choice=lambda: self._effort,
                 launch_model=self._launch_model,
                 on_pick=self._on_effort_picked,
@@ -260,6 +262,7 @@ class NewChatView(Gtk.Box):
             return
         self._model = model
         self._name_model()
+        self._name_effort()  # the default effort is the model's
         self.emit("changed")
 
     def effort(self) -> str:
@@ -305,18 +308,24 @@ class NewChatView(Gtk.Box):
             )
 
     def _on_model_picked(self, model: str) -> None:
+        # The effort dial is the model's: the CLI keeps a level per model
+        # (/effort saves one under modelSettings), so a different model
+        # brings its own default along, and a level picked for the last
+        # one — possibly one the new model can't take at all — is let go.
+        if model == self._model:
+            return
+        self._effort = ""  # set_model names the effort and emits once
         self.set_model(model)
-        # A level the new model can't take would be an --effort the CLI
-        # refuses: the pick falls back to the default rather than ride
-        # along. A model the catalog can't speak for keeps it.
-        allowed = claudemodels.model_efforts(self._launch_model() or "")
-        if self._effort and allowed is not None and self._effort not in allowed:
-            self.set_effort("")
 
     def _launch_model(self) -> str | None:
         """The model the launch will run on: the pick, else the CLI's own
         default as its settings name it (None when they don't)."""
         return self._model or claudemodels.cli_default_model(self._cwd)
+
+    def _default_effort(self) -> str | None:
+        """The effort the launch runs at with nothing picked: the CLI's
+        default for the model the launch will run on."""
+        return claudemodels.cli_default_effort(self._cwd, self._launch_model())
 
     def _on_effort_picked(self, effort: str) -> None:
         self.set_effort(effort)
@@ -325,7 +334,7 @@ class NewChatView(Gtk.Box):
         """The effort button reads what the launch will run at: the picked
         level's name, else the CLI's own default's when the settings name
         one — re-read like the model's, for the same reason — else *Default*."""
-        effort = self._effort or claudemodels.cli_default_effort(self._cwd)
+        effort = self._effort or self._default_effort()
         self.composer.set_effort_name(modelmenu.effort_label(effort) if effort else _("Default"))
 
     def _name_model(self) -> None:

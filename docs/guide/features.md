@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-30. Full change history: git log for this file.
+fork. Last modified: 2026-09-01. Full change history: git log for this file.
 -->
 
 # Features
@@ -573,12 +573,14 @@ flipped the switch is refused if it calls it anyway.
   for this session alone: it is passed as `--model` on launch and the
   default is left as it was; with nothing picked nothing is passed, so
   the session runs on whatever the CLI resolves at that moment. The effort
-  picker works the same way for `--effort`: it opens on the `effortLevel`
-  that `/effort` saves (or `CLAUDE_CODE_EFFORT_LEVEL`), and the levels on
-  offer — *Low* to *Max* — are the ones the model the launch will run on
-  takes, as the Models API reports them; a level that model can't take is
-  greyed out, and one picked before a model switch that rules it out
-  falls back to the default. Nothing runs
+  picker works the same way for `--effort`: it opens on the level the CLI
+  keeps for the model the launch will run on — the `modelSettings` entry
+  `/effort` saves, else a top-level `effortLevel`, or
+  `CLAUDE_CODE_EFFORT_LEVEL` over both — and the levels on offer — *Low*
+  to *Max* — are the ones that model takes, as the Models API reports
+  them; a level the model can't take is greyed out. The effort follows
+  the model: picking a different model lets any effort pick go, and the
+  picker reads the new model's own default. Nothing runs
   until you press Send; then the agent starts with your prompt as its
   first turn, and the tab is an ordinary session tab from there. With
   nothing written, the button reads **Empty Session** instead — press it
