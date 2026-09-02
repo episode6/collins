@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-30. Full change history: git log for this file.
+fork. Last modified: 2026-09-01. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -50,6 +50,15 @@ downloads of each version, see the
   and every package build validates it. The summary, and the launcher's
   description and keywords, are translated into every language Collins
   speaks.
+- **The new-chat effort picker reads the model's own default.** The CLI
+  keeps an effort level per model (`/effort` saves it under
+  `modelSettings` in `settings.json`, leaving any older top-level
+  `effortLevel` standing), and the new-chat screen's effort picker was
+  reading only the top-level key — so a default of *medium* set on the
+  current model still showed as *High*. It now opens on the level the CLI
+  would run the launch's model at, and picking a different model swaps
+  the effort along with it: an effort chosen for the last model is let
+  go, and the picker reads the new model's default.
 
 ### v0.1.2 — 2026-08-30
 

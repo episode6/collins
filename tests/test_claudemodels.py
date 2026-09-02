@@ -995,3 +995,71 @@ def test_cli_default_model_shrugs_off_junk_files(monkeypatch, tmp_path):
     assert claudemodels.cli_default_model(None) is None
     (home / ".claude" / "settings.json").write_text(json.dumps({"model": 5, "env": "x"}))
     assert claudemodels.cli_default_model(None) is None
+
+
+def test_cli_default_effort_prefers_the_models_own_entry(monkeypatch, tmp_path):
+    # /effort saves a per-model entry under modelSettings and leaves an
+    # older top-level effortLevel standing; the CLI reads the entry first.
+    _settings_home(
+        monkeypatch,
+        tmp_path,
+        {
+            "model": "claude-fable-5-1",
+            "effortLevel": "high",
+            "modelSettings": {
+                "claude-fable-5-1": {"effortLevel": "medium"},
+                "claude-fable-5": {"effortLevel": "xhigh"},
+            },
+        },
+    )
+    monkeypatch.setattr(claudemodels, "cached_models", lambda: None)
+    assert claudemodels.cli_default_effort(None) == "medium"  # the settings' model
+    assert claudemodels.cli_default_effort(None, "claude-fable-5") == "xhigh"
+    assert claudemodels.cli_default_effort(None, "claude-fable-5-1[1m]") == "medium"
+    # A model with no entry of its own falls back to the file's own key.
+    assert claudemodels.cli_default_effort(None, "claude-opus-5") == "high"
+
+
+def test_cli_default_effort_takes_an_alias_to_its_catalog_row(monkeypatch, tmp_path):
+    _settings_home(
+        monkeypatch,
+        tmp_path,
+        {"effortLevel": "high", "modelSettings": {"claude-opus-5": {"effortLevel": "low"}}},
+    )
+    monkeypatch.setattr(claudemodels, "cached_models", lambda: None)
+    assert claudemodels.cli_default_effort(None, "opus") == "high"  # no catalog: no row
+    monkeypatch.setattr(
+        claudemodels,
+        "cached_models",
+        lambda: [ClaudeModel("claude-opus-5", "Claude Opus 5", "2026-02-01")],
+    )
+    assert claudemodels.cli_default_effort(None, "opus") == "low"
+    # An entry written under an alias is read for the id it names, too.
+    _settings_home(
+        monkeypatch,
+        tmp_path,
+        {"effortLevel": "high", "modelSettings": {"opus": {"effortLevel": "low"}}},
+    )
+    assert claudemodels.cli_default_effort(None, "claude-opus-5") == "low"
+
+
+def test_cli_default_effort_ranks_files_before_entries(monkeypatch, tmp_path):
+    # A more specific file's top-level key beats a less specific file's
+    # per-model entry: the CLI settles each file before moving on.
+    monkeypatch.setattr(claudemodels, "cached_models", lambda: None)
+    _settings_home(
+        monkeypatch,
+        tmp_path,
+        {"modelSettings": {"claude-opus-5": {"effortLevel": "user-entry"}}},
+    )
+    proj = tmp_path / "proj"
+    (proj / ".claude").mkdir(parents=True)
+    (proj / ".claude" / "settings.json").write_text(json.dumps({"effortLevel": "project"}))
+    assert claudemodels.cli_default_effort(str(proj), "claude-opus-5") == "project"
+    # Junk in the block is stepped over.
+    _settings_home(
+        monkeypatch,
+        tmp_path,
+        {"effortLevel": "high", "modelSettings": {"claude-opus-5": {"effortLevel": 3}, "x": 1}},
+    )
+    assert claudemodels.cli_default_effort(None, "claude-opus-5") == "high"

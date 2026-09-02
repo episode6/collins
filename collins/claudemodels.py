@@ -790,20 +790,60 @@ def cli_default_model(cwd: str | None = None) -> str | None:
     return None
 
 
-def cli_default_effort(cwd: str | None = None) -> str | None:
+def _model_settings_key(model_id: str | None) -> str | None:
+    """The id *model_id* — a ``--model`` or a ``model`` setting, as written —
+    names in a settings file's ``modelSettings`` block: the ``[1m]``
+    context-window suffix read past, and a bare alias (``opus``) taken to
+    the catalog row it stands for, when the cache has one. None for no
+    model at all."""
+    ident = (model_id or "").strip().removesuffix("[1m]")
+    if not ident:
+        return None
+    return catalog_id(ident, cached_models() or []) or ident
+
+
+def _model_effort(data: dict, key: str | None) -> str | None:
+    """A settings file's ``modelSettings.<model>.effortLevel`` for *key*
+    (a _model_settings_key): the entry written under that id exactly, else
+    the first whose id names the same model. None without one."""
+    if not key:
+        return None
+    block = data.get("modelSettings")
+    if not isinstance(block, dict):
+        return None
+    found = None
+    for name, entry in block.items():
+        effort = entry.get(_EFFORT_KEY) if isinstance(entry, dict) else None
+        if not isinstance(effort, str) or not effort.strip():
+            continue
+        if name == key:
+            return effort.strip()
+        if found is None and _model_settings_key(name) == key:
+            found = effort.strip()
+    return found
+
+
+def cli_default_effort(cwd: str | None = None, model: str | None = None) -> str | None:
     """The effort a ``claude`` launched in *cwd* with no ``--effort`` runs
-    at, read the way cli_default_model reads the model: the environment's
-    ``CLAUDE_CODE_EFFORT_LEVEL`` first (a pin the CLI honours over every
-    file), then each settings file's ``effortLevel`` — the key ``/effort``
-    saves — most specific first, then the files' ``env`` blocks. None when
-    nothing sets one and the CLI's own built-in default applies. Handed
-    back as written, unchecked against EFFORT_LEVELS: it is a name to show,
-    never a value passed on."""
+    at — on *model* (a ``--model`` as written, or None for the settings'
+    own default model) — read the way cli_default_model reads the model:
+    the environment's ``CLAUDE_CODE_EFFORT_LEVEL`` first (a pin the CLI
+    honours over every file), then each settings file most specific first,
+    where the ``modelSettings`` entry for the model outranks the file's
+    top-level ``effortLevel`` (``/effort`` saves the per-model entry, and
+    leaves an older top-level key standing), then the files' ``env``
+    blocks. None when nothing sets one and the CLI's own built-in default
+    applies. Handed back as written, unchecked against EFFORT_LEVELS: it is
+    a name to show, never a value passed on."""
     from_env = (os.environ.get(_EFFORT_ENV) or "").strip()
     if from_env:
         return from_env
     settings = [_read_settings(path) for path in _settings_files(cwd)]
+    key = _model_settings_key(model or cli_default_model(cwd))
     for data in settings:
+        effort = _model_effort(data, key)
+        if effort:
+            return effort
         effort = data.get(_EFFORT_KEY)
         if isinstance(effort, str) and effort.strip():
             return effort.strip()
