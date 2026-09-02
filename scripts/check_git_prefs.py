@@ -78,7 +78,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
-from gi.repository import Adw, GLib  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from collins import i18n, prefslayout  # noqa: E402
 from collins.app import App  # noqa: E402
@@ -187,6 +187,9 @@ def stage() -> bool:
             app.quit()
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
+    # No animations: the sheet's open transition gates focus into the
+    # dialog, and a bare Xvfb (CI) has no compositor to finish it quickly.
+    Gtk.Settings.get_default().set_property("gtk-enable-animations", False)
     dialog = PreferencesDialog(win.state, lambda: state.setdefault("changes", []).append(1))
     dialog.present(win)
     state.update(win=win, dialog=dialog)
@@ -318,11 +321,22 @@ def step_writes_settled() -> bool:
         setting("git_parent_branch"),
     )
     check("no other setting moved", changes() == 10, changes())
-    # Focus leaving the row saves at once, too.
+    # Focus leaving the row saves at once, too — once focus can enter the
+    # dialog at all: libadwaita keeps can-focus off its sheet until the
+    # presentation animation ends, and on a bare Xvfb that takes a while.
+    state["focus_tries"] = 0
+    return later(step_focus_out, 50)
+
+
+def step_focus_out() -> bool:
+    parent = state["parent"]
     dialog = state["dialog"]
     root = parent.get_root()
     grabbed = parent.grab_focus()
-    focus_in = (grabbed, dialog.get_focus(), root.get_focus() if root else None)
+    if not grabbed and state["focus_tries"] < 60:  # ~3 s
+        state["focus_tries"] += 1
+        return later(step_focus_out, 50)
+    focus_in = (grabbed, state["focus_tries"], dialog.get_focus(), root.get_focus() if root else None)
     parent.set_text("develop")
     settle()
     left = state["untracked"].grab_focus()
@@ -338,7 +352,6 @@ def step_writes_settled() -> bool:
             "active", root.is_active() if root else None,
             "mapped", parent.get_mapped(),
             "chain", focus_chain(parent),
-            "switch", focus_chain(state["untracked"]),
         ),
     )
     typed(parent, "")
