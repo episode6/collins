@@ -480,12 +480,14 @@ watched — and reached — without the window:
   desktop has one, shows the same number and lives with the status icon:
   off when the icon is off. The bell is the one place the number is always
   on.
-- While any session is **working**, the drink in the glass turns into the
-  sidebar's blue **barber pole** — the same stripes as a busy row's guide
-  line, standing still — and goes back to the coral pour the moment the
-  last run stops. It's a change of picture, not an animation: the tray
-  protocol has none, and re-sending frames would cost the desktop a
-  round trip per frame.
+- The glass says at a glance what the badge says in numbers. While any
+  session is **working**, the drink turns into the sidebar's blue **barber
+  pole** — the same stripes as a busy row's guide line, standing still. With
+  nothing working, the glass holds the **coral drink** while anything is
+  unread, and stands **empty** when nothing is running and nothing is
+  waiting — open-but-idle sessions don't fill it. It's a change of picture,
+  not an animation: the tray protocol has none, and re-sending frames would
+  cost the desktop a round trip per frame.
 - With no session tabs open anywhere the icon goes passive, and the desktop
   may hide it entirely.
 - It's a StatusNotifierItem — the modern tray protocol — so on GNOME it

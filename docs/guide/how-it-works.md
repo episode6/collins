@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-30. Full change history: git log for this file.
+fork. Last modified: 2026-09-01. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -259,14 +259,15 @@ GTK 4 has no `GtkStatusIcon` and libayatana is GTK 3-only, so Collins puts
 a StatusNotifierItem on D-Bus by hand — the item on
 `org.kde.StatusNotifierItem`, its menu on `com.canonical.dbusmenu`. The
 artwork is handed over as pixmaps rather than an icon name, because the
-host resolves names in its own process; while any session is working the
-icon swaps to a second drawing with the sidebar's barber pole poured in —
-one `NewIcon` when the first session starts and one when the last stops,
-because the protocol has no animation and every frame would be a D-Bus
-round trip. The unread badge is composited into the pixmap and also
-broadcast to the dock as a launcher badge. Where no watcher is on the bus
-(GNOME without an AppIndicator extension), nothing appears; Preferences
-says so.
+host resolves names in its own process. The glass is three drawings —
+the sidebar's barber pole poured in while any session is working, the drink
+while anything is unread, and an empty glass with nothing running and
+nothing waiting (`traymodel.artwork_for`) — swapped with one `NewIcon` on
+each change, never per frame: the protocol has no animation and every frame
+would be a D-Bus round trip. The unread badge is composited into the pixmap
+and also broadcast to the dock as a launcher badge. Where no watcher is on
+the bus (GNOME without an AppIndicator extension), nothing appears;
+Preferences says so.
 
 ## The stack
 

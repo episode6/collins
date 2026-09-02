@@ -238,14 +238,19 @@ def main():
     check("an app with no panel variant keeps its own icon",
           statusicon.panel_icon_name("com.episode6.Collins.NotAnIcon")
           == "com.episode6.Collins.NotAnIcon")
-    # Busy is a second drawing — the glass with the barber pole poured in —
-    # looked up ahead of the plain panel variant, which stays the fallback.
+    # Busy and idle are further drawings — the glass with the barber pole
+    # poured in, and the glass with nothing in it — looked up ahead of the
+    # plain panel variant, which stays the fallback for both.
     check("working picks the pole",
-          statusicon.panel_icon_name("com.episode6.Collins", working=True)
+          statusicon.panel_icon_name("com.episode6.Collins", traymodel.ARTWORK_WORKING)
           == "com.episode6.Collins-panel-working",
-          statusicon.panel_icon_name("com.episode6.Collins", working=True))
-    check("working falls back to the plain panel variant",
-          statusicon.panel_icon_name("com.episode6.Collins.NotAnIcon", working=True)
+          statusicon.panel_icon_name("com.episode6.Collins", traymodel.ARTWORK_WORKING))
+    check("idle picks the empty glass",
+          statusicon.panel_icon_name("com.episode6.Collins", traymodel.ARTWORK_EMPTY)
+          == "com.episode6.Collins-panel-empty",
+          statusicon.panel_icon_name("com.episode6.Collins", traymodel.ARTWORK_EMPTY))
+    check("a variant falls back to the plain panel variant",
+          statusicon.panel_icon_name("com.episode6.Collins.NotAnIcon", traymodel.ARTWORK_WORKING)
           == "com.episode6.Collins.NotAnIcon")
 
     pixmaps = item_prop("IconPixmap")
@@ -383,7 +388,7 @@ def main():
     icon.refresh()
     check("the last session stopping announces NewIcon", spin(lambda: bool(icons)))
     plain_pixmaps = item_prop("IconPixmap")
-    check("idle restores the coral pour", plain_pixmaps != working_pixmaps)
+    check("idle empties the glass", plain_pixmaps != working_pixmaps)
     check("attention artwork follows the pole",
           item_prop("AttentionIconPixmap") == plain_pixmaps)
     icons.clear()
