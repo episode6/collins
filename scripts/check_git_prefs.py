@@ -299,15 +299,25 @@ def step_writes_settled() -> bool:
     )
     check("no other setting moved", changes() == 10, changes())
     # Focus leaving the row saves at once, too.
-    parent.grab_focus()
+    dialog = state["dialog"]
+    root = parent.get_root()
+    grabbed = parent.grab_focus()
+    focus_in = (grabbed, dialog.get_focus(), root.get_focus() if root else None)
     parent.set_text("develop")
     settle()
-    state["untracked"].grab_focus()
+    left = state["untracked"].grab_focus()
     settle()
+    focus_out = (left, dialog.get_focus(), root.get_focus() if root else None)
     check(
         "leaving the row keeps the word without waiting",
         setting("git_parent_branch") == "develop",
-        setting("git_parent_branch"),
+        (
+            setting("git_parent_branch"),
+            "in", focus_in,
+            "out", focus_out,
+            "active", root.is_active() if root else None,
+            "mapped", parent.get_mapped(),
+        ),
     )
     typed(parent, "")
     return later(step_search, 200)
