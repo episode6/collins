@@ -356,6 +356,20 @@ export function filesSections(status: Status | null, files: readonly PaneFile[],
   return { mode: "split", live: "staged", unstaged: status.unstaged.map(statusRow), staged: rows };
 }
 
+/**
+ * `git status` with its untracked (`?`) rows left out: what the files panel
+ * shows when Collins' untracked switch is off, so the UNSTAGED section of a
+ * staged load lists no file the `diff --exclude-untracked` it would load
+ * can't hold. Staging's own reads keep the full status (`A` stages new
+ * files whatever the panel shows).
+ */
+export function withoutUntracked(status: Status | null): Status | null {
+  if (status === null) {
+    return null;
+  }
+  return { ...status, unstaged: status.unstaged.filter((row) => row.code !== "?") };
+}
+
 /** The `session reload` tail that loads one working-tree side. */
 export function sideTail(side: Side): string[] {
   return side === "staged" ? ["diff", "--staged"] : ["diff"];

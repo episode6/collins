@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-02. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -287,6 +287,20 @@ DEFAULT_SETTINGS = {
     # merges — closing a pull request unmerged still asks, since that is the
     # one PR action that throws the work away rather than landing it.
     "confirm_merges": True,
+    # The git page (gitpage.py), Preferences → Git. The first four reach
+    # hunk: layout and theme on its command line (a change restarts hunk in
+    # place), the untracked switch on every diff it loads, the page size
+    # through the sidecar the collins-git extension reads.
+    "git_layout": "auto",  # hunk --mode: auto / split / stack
+    "git_theme": "",  # hunk --theme; "" = hunk's own default
+    "git_untracked": True,  # off: --exclude-untracked (working-tree reviews hide untracked files)
+    "git_log_page": 20,  # commits per group page in the commits panel ("load more…" step)
+    # The branch a session's git page measures its branch against when no
+    # attached pull request names one (see TerminalTab._git_parent_branch):
+    # "" = automatic (the PR's base, else the repository's default branch).
+    # A branch name; "origin/x" is taken as x when origin has it
+    # (gitinfo.parent_branch); skipped in a repository that lacks it.
+    "git_parent_branch": "",
     "editor_window_width": 1000,  # last popped-out editor window size (floating, unmaximized)
     "editor_window_height": 700,
     "editor_window_maximized": False,

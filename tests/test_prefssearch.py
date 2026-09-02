@@ -49,3 +49,12 @@ def test_the_notifications_group_answers_to_the_words_people_use():
     for word in ("notification", "notify", "bell", "sound", "chime", "badge", "unread"):
         assert matches(word, text), word
     assert not matches("terminal", text)
+
+
+def test_git_search_terms_name_the_page_and_its_parts():
+    # The words someone has for the git page's settings that no row's own
+    # text carries: the tool's name, "untracked", the parent branch.
+    text = " ".join(prefslayout.GIT_SEARCH_TERMS)
+    for word in ("git", "hunk", "diff", "untracked", "parent branch", "theme", "layout"):
+        assert matches(word, text), word
+    assert not matches("scrollback", text)

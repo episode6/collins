@@ -18,9 +18,19 @@ commit_subject), the Ctrl+1/2/3 chords that pick the modes, and the layout
 slot they persist in (with the parent branch the user set, when they set
 one).
 
+What Preferences → Git decides about hunk arrives as the whole settings
+dict and is read into an `Options` (from_settings, a pure normaliser):
+the layout (`--mode`) and theme (`--theme`) go on the spawn argv, since
+nothing in hunk's session API changes them on a running viewer; the
+untracked switch goes on every `diff` tail, spawn and reload alike
+(`--exclude-untracked`, which hunk resolves afresh on each reload — and
+which `show` refuses); the log page rides in the sidecar.
+
 The extension and the page share a *sidecar*: a small JSON file under the
 runtime dir whose path rides to hunk's child in COLLINS_GIT_STATE. Collins
-writes the parent and default branch names and the log page size into it;
+writes the parent and default branch names, the log page size and the
+untracked switch into it (the extension puts `--exclude-untracked` on the
+`diff` tails it sends itself, so its loads agree with Collins' own);
 the extension writes the user's "Set parent branch…" pick back, and the
 index mtime and HEAD it last reloaded the review for on its own (so the
 page's freshness reload stays home for a move hunk has already shown —
@@ -39,7 +49,7 @@ import re
 import shutil
 import signal
 import subprocess
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 
 from .i18n import _
@@ -56,10 +66,25 @@ Loaded = str | dict
 # hunk with `--extension <dir>`, so nothing lands in the user's hunk config
 # and no trust prompt appears.
 EXTENSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hunkext", "collins-git")
-# The sidecar (see the module docstring): the variable its path travels in,
-# and the commits-per-group page the extension loads (a setting in PR 4).
+# The sidecar (see the module docstring): the variable its path travels in.
 SIDECAR_ENV = "COLLINS_GIT_STATE"
+# hunk's layouts, `--mode`'s words (`hunk diff --help`, 0.20.1): the
+# git_layout setting's domain. LAYOUTS[0] is hunk's own choice and sends
+# no flag; hunk exits at once on a word it doesn't know, so anything else
+# normalises to it (Options.from_settings). Not MODES — those are the
+# page's loads.
+LAYOUTS: tuple[str, ...] = ("auto", "split", "stack")
+DEFAULT_LAYOUT = LAYOUTS[0]
+# The commits-per-group page the extension loads (the git_log_page setting),
+# its default and the clamp — the same numbers as sidecar.ts's, so what
+# Collins writes is what the extension reads.
 LOG_PAGE = 20
+MIN_LOG_PAGE = 5
+MAX_LOG_PAGE = 500
+# A theme name (git_theme) that can go on hunk's argv: hunk falls back to
+# its default theme on a name it doesn't know (verified against 0.20.1),
+# so the gate is only against something that isn't one argument.
+_MAX_THEME_LEN = 64
 # A ref that is safe as an argument and as a title token: the same rule as
 # gitinfo._safe_branch_name (non-empty, no whitespace, no leading "-", no
 # "..") plus a length cap, since a title token or a persisted string is
@@ -170,6 +195,58 @@ class Reply:
         """Whether the failure says the session id names no live viewer (see
         session_gone) — the one failure a respawn is the answer to."""
         return not self.ok and session_gone(self.stderr)
+
+
+@dataclass(frozen=True)
+class Options:
+    """What Preferences → Git decides about hunk, normalised (see
+    from_settings): the layout (one of LAYOUTS) and theme name ("" for
+    hunk's own default), whether working-tree reviews include untracked
+    files, and the commits-per-group page. The defaults are the shipped
+    settings' — a page that never received settings runs on them, and
+    with them every argv here is the one it was before the settings
+    existed."""
+
+    layout: str = DEFAULT_LAYOUT
+    theme: str = ""
+    untracked: bool = True
+    log_page: int = LOG_PAGE
+
+    @classmethod
+    def from_settings(cls, settings: Mapping) -> Options:
+        """An Options out of the whole settings dict, tolerant of every
+        key being missing or wrong: git_layout not in LAYOUTS → "auto";
+        git_theme stripped, kept only when it is one argument (no
+        whitespace, no leading "-", at most _MAX_THEME_LEN chars) else "";
+        git_untracked as a bool (absent: on); git_log_page as an int
+        clamped to MIN_LOG_PAGE..MAX_LOG_PAGE (garbage: LOG_PAGE)."""
+        layout = settings.get("git_layout")
+        if layout not in LAYOUTS:
+            layout = DEFAULT_LAYOUT
+        theme = settings.get("git_theme")
+        theme = theme.strip() if isinstance(theme, str) else ""
+        if not safe_theme(theme):
+            theme = ""
+        untracked = settings.get("git_untracked", True)
+        try:
+            log_page = int(settings.get("git_log_page", LOG_PAGE))
+        except (TypeError, ValueError):
+            log_page = LOG_PAGE
+        log_page = max(MIN_LOG_PAGE, min(MAX_LOG_PAGE, log_page))
+        return cls(layout=layout, theme=theme, untracked=bool(untracked), log_page=log_page)
+
+
+def safe_theme(name: object) -> bool:
+    """Whether *name* can go on hunk's argv as `--theme <name>`: a non-empty
+    str of at most _MAX_THEME_LEN chars, no whitespace, no leading "-". Not
+    whether hunk knows it — it can't be listed (built-ins, `auto`, aliases
+    and the user's own `[themes.<id>]`), and an unknown one degrades to
+    hunk's default rather than failing the spawn."""
+    if not isinstance(name, str) or not name or len(name) > _MAX_THEME_LEN:
+        return False
+    if any(ch.isspace() for ch in name):
+        return False
+    return not name.startswith("-")
 
 
 def session_gone(stderr: str) -> bool:
@@ -301,27 +378,52 @@ def diff_args(mode: str, parent_target: str | None) -> list[str]:
     raise ValueError(f"unknown git page mode: {mode!r}")
 
 
-def _load_tail(loaded: Loaded, parent_target: str | None) -> list[str]:
+def _load_tail(loaded: Loaded, parent_target: str | None, options: Options | None = None) -> list[str]:
     """The subcommand and its arguments for *loaded*: ["diff", *diff_args]
-    for a mode, ["show", ref] for a commit. ValueError (diff_args's, or for
-    a malformed dict) otherwise."""
+    for a mode — with "--exclude-untracked" right after "diff" when
+    *options* says untracked files are out (a `diff` option; `show`
+    refuses it) — ["show", ref] for a commit. ValueError (diff_args's, or
+    for a malformed dict) otherwise."""
     if is_show(loaded):
         return ["show", show_ref(loaded)]
     if not isinstance(loaded, str):
         raise ValueError(f"unknown git page load: {loaded!r}")
-    return ["diff", *diff_args(loaded, parent_target)]
+    excluded = ["--exclude-untracked"] if options is not None and not options.untracked else []
+    return ["diff", *excluded, *diff_args(loaded, parent_target)]
+
+
+def spawn_flags(options: Options | None) -> list[str]:
+    """The spawn-only flags *options* adds: ["--mode", layout] when the
+    layout isn't hunk's own, ["--theme", name] when a theme is set. Neither
+    reapplies to a running viewer (hunk's session API has no way to set
+    them), so a change to either is a respawn, and neither goes on a
+    reload tail."""
+    if options is None:
+        return []
+    flags: list[str] = []
+    if options.layout != DEFAULT_LAYOUT:
+        flags += ["--mode", options.layout]
+    if options.theme:
+        flags += ["--theme", options.theme]
+    return flags
 
 
 def spawn_argv(
-    hunk: str, loaded: Loaded, parent_target: str | None, extension_dir: str | None = None
+    hunk: str,
+    loaded: Loaded,
+    parent_target: str | None,
+    extension_dir: str | None = None,
+    options: Options | None = None,
 ) -> list[str]:
-    """[hunk, "diff", "--watch", "--transparent-bg", "--extension", dir, *diff_args]
-    for a mode, [hunk, "show", "--watch", "--transparent-bg", "--extension",
-    dir, ref] for a commit; the "--extension" pair only with an
-    *extension_dir* (see extension_dir()). *hunk* is an absolute path (VTE
-    spawns with GLib.SpawnFlags.DEFAULT, no PATH search)."""
-    command, *tail = _load_tail(loaded, parent_target)
-    flags = ["--watch", "--transparent-bg"]
+    """[hunk, "diff", "--watch", "--transparent-bg", *spawn_flags, "--extension",
+    dir, *diff_args] for a mode, [hunk, "show", "--watch", "--transparent-bg",
+    *spawn_flags, "--extension", dir, ref] for a commit; the "--extension"
+    pair only with an *extension_dir* (see extension_dir()), the
+    `--mode`/`--theme` flags and a `diff`'s "--exclude-untracked" only as
+    *options* asks (None, or the defaults: none of them). *hunk* is an
+    absolute path (VTE spawns with GLib.SpawnFlags.DEFAULT, no PATH search)."""
+    command, *tail = _load_tail(loaded, parent_target, options)
+    flags = ["--watch", "--transparent-bg", *spawn_flags(options)]
     if extension_dir:
         flags += ["--extension", extension_dir]
     return [hunk, command, *flags, *tail]
@@ -345,10 +447,17 @@ def get_argv(hunk: str, session_id: str) -> list[str]:
     return [hunk, "session", "get", session_id, "--json"]
 
 
-def reload_argv(hunk: str, session_id: str, loaded: Loaded, parent_target: str | None) -> list[str]:
+def reload_argv(
+    hunk: str, session_id: str, loaded: Loaded, parent_target: str | None, options: Options | None = None
+) -> list[str]:
     """[hunk, "session", "reload", session_id, "--json", "--", "diff", *diff_args(...)]
-    for a mode; the same with "--", "show", ref for a commit."""
-    return [hunk, "session", "reload", session_id, "--json", "--", *_load_tail(loaded, parent_target)]
+    for a mode — "--exclude-untracked" first among the diff args when
+    *options* excludes untracked files: hunk re-reads the option on every
+    reload, and a tail without it brings them back — the same with "--",
+    "show", ref for a commit. The layout and theme never ride here (see
+    spawn_flags)."""
+    tail = _load_tail(loaded, parent_target, options)
+    return [hunk, "session", "reload", session_id, "--json", "--", *tail]
 
 
 def _load_json(text: str) -> dict | None:
@@ -552,17 +661,22 @@ def sidecar_path(runtime_dir: str, pid: int, serial: int) -> str:
     return os.path.join(runtime_dir, "collins", f"git-{pid}-{serial}.json")
 
 
-def sidecar_payload(parent: str | None, source: str, default: str | None, log_page: int) -> dict:
+def sidecar_payload(
+    parent: str | None, source: str, default: str | None, log_page: int, untracked: bool = True
+) -> dict:
     """The keys Collins owns in the sidecar, plus the version: {"version": 1,
     "parent": name|None, "parentSource": "auto"|"user", "default": name|None,
-    "logPage": n}. *parent* is a branch NAME, never a target like
-    "origin/main" — each side resolves the name itself."""
+    "logPage": n, "untracked": bool}. *parent* is a branch NAME, never a
+    target like "origin/main" — each side resolves the name itself.
+    *untracked* False is what makes the extension put "--exclude-untracked"
+    on the diff tails it sends (absent or garbled reads as True there)."""
     return {
         "version": 1,
         "parent": parent,
         "parentSource": "user" if source == "user" else "auto",
         "default": default,
         "logPage": int(log_page),
+        "untracked": bool(untracked),
     }
 
 

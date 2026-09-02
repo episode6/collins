@@ -229,9 +229,12 @@ session API (`hunk session reload`) to swap what it shows in place, and
 starts it with `--extension` pointing at the `collins-git` extension the
 package ships (`collins/hunkext/collins-git`), which draws the commits and
 files panels inside hunk and does the staging. The two sides trade the
-parent branch through a small JSON file under `$XDG_RUNTIME_DIR` whose path
-hunk's process gets in `COLLINS_GIT_STATE`: Collins writes the branch it
-resolved, the extension writes the one the user picks. (The new-chat
+parent branch, the commits page size and the untracked-files switch through
+a small JSON file under `$XDG_RUNTIME_DIR` whose path hunk's process gets in
+`COLLINS_GIT_STATE`: Collins writes the branch it resolved and the two
+settings from Preferences → Git, the extension writes the branch the user
+picks and adds `--exclude-untracked` to its own loads while the switch is
+off. (The new-chat
 screen, the pull request page and a session replay are tabs with no
 terminal in them.)
 

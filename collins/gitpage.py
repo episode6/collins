@@ -48,16 +48,28 @@ more (the page closed, or was unparented, while the spawn was in flight),
 since its pty is the only one the viewer will ever answer a signal on.
 
 The parent branch travels both ways through a sidecar file (hunkctl's
-sidecar_*): Collins writes the name it resolved — the newest PR's base, else
-the default branch, else what the user set — and the default branch, so the
-extension groups its commits the same way the breadcrumb reads; the
-extension writes the user's "Set parent branch…" pick back, and the tick
-picks it up (one os.stat, a read when the mtime moved), re-resolves, and
-reloads a branch diff that now has another base. The user's pick persists
-with the page (page_state's "parent") from the moment it is set or restored
-— a restored page that was never shown still carries it into the next
-layout save — and is dropped only once a resolution found the branch
-missing.
+sidecar_*): Collins writes the name it resolved — the user's pick while it
+resolves, else the host's automatic rung (the newest PR's base, then the
+default parent from Preferences → Git, then the default branch) — and the
+default branch, so the extension groups its commits the same way the
+breadcrumb reads; the extension writes the user's "Set parent branch…"
+pick back, and the tick picks it up (one os.stat, a read when the mtime
+moved), re-resolves, and reloads a branch diff that now has another base.
+The user's pick persists with the page (page_state's "parent") from the
+moment it is set or restored — a restored page that was never shown still
+carries it into the next layout save — and is dropped only once a
+resolution found the branch missing.
+
+The rest of Preferences → Git reaches the page as the whole settings dict
+(apply_settings, on every change the dialog makes), read into an
+hunkctl.Options: the layout and theme are spawn flags, so a change to
+either respawns hunk into the current load — and only when it differs from
+what the running child was spawned with, since every unrelated preference
+lands here too; the untracked switch rides every `diff` tail, so a change
+is a `session reload` of the current mode (hunk re-reads the option on
+each reload); the commits page size and the untracked switch also go into
+the sidecar, rewritten at once, from which the extension pages its
+commits panel and flags its own loads.
 
 The decisions with no widget in them — argv, reply parsing, title →
 breadcrumb, the chords, the layout slot, the sidecar — live in hunkctl,
@@ -249,12 +261,27 @@ class GitPage(Adw.Bin):
         self._subject: str | None = None
         self._signature: tuple | None = None
 
+        # -- what Preferences → Git says (see apply_settings) ------------------
+        # The shipped defaults until the host's first apply_settings — a
+        # page built by the strip gets the dock's settings before it maps.
+        self._options = hunkctl.Options()
+        # The Options the running (or in-flight) child was spawned with:
+        # what a settings change compares against to decide on a respawn.
+        self._spawned_options: hunkctl.Options | None = None
+        # The untracked switch flipped while the session id was still being
+        # resolved (or before the probe's argv was even built): the
+        # resolution reloads the current load with the new tail (or
+        # respawns, having given up on an id); a spawn that reads the
+        # options after the flip clears it (see _probed).
+        self._options_stale = False
+
         # -- the sidecar shared with the extension (see hunkctl) ---------------
         # One path per page, kept across respawns, removed at shutdown.
         self._sidecar: str = hunkctl.sidecar_path(GLib.get_user_runtime_dir(), os.getpid(), next(_SERIAL))
-        # The (parent, source, default, log page) last written, so the tick
-        # rewrites only on a change; None until the first write lands (and
-        # again after the file went missing, so it is written afresh).
+        # The (parent, source, default, log page, untracked) last written,
+        # so the tick rewrites only on a change; None until the first write
+        # lands (and again after the file went missing, so it is written
+        # afresh).
         self._sidecar_written: tuple | None = None
         # The file's mtime after our own last write — or the extension's,
         # once read — so the tick reads only what the other side wrote.
@@ -502,13 +529,53 @@ class GitPage(Adw.Bin):
         return self.hunk_alive
 
     def apply_settings(self, settings: dict) -> None:
-        """Font ("font"), terminal theme ("terminal_theme") and the KeyMatcher
-        for the zoom chords. The scrollback setting is ignored (hunk runs at
-        scrollback 0). Safe before the spawn."""
+        """Font ("font"), terminal theme ("terminal_theme"), the KeyMatcher
+        for the zoom chords, and Preferences → Git (hunkctl.Options.
+        from_settings: git_layout, git_theme, git_untracked, git_log_page).
+        The scrollback setting is ignored (hunk runs at scrollback 0). Safe
+        before the spawn, which then reads the options.
+
+        On a running page: a layout or theme other than the child was
+        spawned with respawns it into the current load (there is no other
+        way to change either; a spawn in flight leaves a note, _respawn);
+        a flipped untracked switch reloads the current working-tree or
+        branch load (a commit, or a load Collins can't name, picks it up
+        on its next diff load) — or, while the session id is still being
+        resolved, leaves a note the resolution acts on (_options_stale);
+        the sidecar is rewritten now, not on the next tick, so the page
+        size and the switch reach the extension while the page is hidden
+        too. Nothing happens for a call that changed none of them — every
+        preference the dialog touches lands here."""
         font = settings.get("font") or ""
         self.terminal.set_font(Pango.FontDescription.from_string(font) if font else None)
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
         self._keys = keymap.KeyMatcher.from_settings(settings)
+        old, self._options = self._options, hunkctl.Options.from_settings(settings)
+        new = self._options
+        spawned = self._spawned_options
+        if (
+            spawned is not None
+            and (new.layout, new.theme) != (spawned.layout, spawned.theme)
+            and (self.hunk_alive or self._spawned)
+        ):
+            log.debug("gitpage: layout/theme changed; respawning hunk")
+            self._respawn()
+        elif new.untracked != old.untracked and self._spawned and (self._resolving or self._respawn_wanted):
+            # Between the spawn and the session id (the probe, VTE's fork,
+            # `session list`), or with a respawn on its way (the child
+            # signalled, its exit spawning the next): nothing to reload
+            # yet. _probed reads the options for the argv and drops the
+            # note; _resolved reloads.
+            self._options_stale = True
+        elif (
+            new.untracked != old.untracked
+            and self.hunk_alive
+            and not hunkctl.is_show(self._loaded)
+            and self._foreign is None
+        ):
+            self._reload(self._loaded)
+        if self._sidecar_written is not None:
+            self._write_sidecar()
 
     def page_state(self) -> dict:
         """This page's slot in a serialized dock layout (see panellayout):
@@ -679,12 +746,18 @@ class GitPage(Adw.Bin):
     # -- the sidecar -----------------------------------------------------------------
 
     def _write_sidecar(self) -> None:
-        """Publish (parent, source, default, log page) to the extension when
-        any of them changed since the last write (or the file is gone).
-        Records the mtime of our own write so the tick doesn't read it
-        back."""
+        """Publish (parent, source, default, log page, untracked) to the
+        extension when any of them changed since the last write (or the
+        file is gone). Records the mtime of our own write so the tick
+        doesn't read it back."""
         cwd = self._cwd_provider()
-        payload = (self._parent_name, self._parent_source(), gitinfo.default_branch(cwd), hunkctl.LOG_PAGE)
+        payload = (
+            self._parent_name,
+            self._parent_source(),
+            gitinfo.default_branch(cwd),
+            self._options.log_page,
+            self._options.untracked,
+        )
         if payload == self._sidecar_written:
             return
         if not hunkctl.write_sidecar(self._sidecar, hunkctl.sidecar_payload(*payload)):
@@ -881,7 +954,9 @@ class GitPage(Adw.Bin):
         # and the extension guesses (see hunkctl.spawn_env).
         self._write_sidecar()
         sidecar = self._sidecar if self._sidecar_written is not None else None
-        argv = hunkctl.spawn_argv(probe.path, self._loaded, parent, extension)
+        self._spawned_options = self._options
+        self._options_stale = False  # the argv carries what the switch says now
+        argv = hunkctl.spawn_argv(probe.path, self._loaded, parent, extension, self._options)
         self._show_hunk()
         self.terminal.spawn_async(
             Vte.PtyFlags.DEFAULT,
@@ -901,6 +976,7 @@ class GitPage(Adw.Bin):
         self._spawned = False
         self._resolving = False
         self._pending_mode = None
+        self._options_stale = False
 
     def _on_spawned(self, terminal: Vte.Terminal, pid: int, error: GLib.Error | None, gen: int) -> None:
         if gen != self._gen or self._closing:
@@ -952,22 +1028,28 @@ class GitPage(Adw.Bin):
             if step + 1 < len(hunkctl.RESOLVE_DELAYS_MS):
                 GLib.timeout_add(hunkctl.RESOLVE_DELAYS_MS[step + 1], self._resolve_step, gen, step + 1)
                 return GLib.SOURCE_REMOVE
-            # Given up: every switch from here on is a respawn.
+            # Given up: every switch from here on is a respawn — a load
+            # queued meanwhile, or an untracked switch the argv missed.
             log.debug("gitpage: no hunk session for pid %s after %d tries", pid, step + 1)
             self._resolving = False
             pending, self._pending_mode = self._pending_mode, None
-            if pending and pending != self._spawned_mode:
+            stale, self._options_stale = self._options_stale, False
+            if (pending and pending != self._spawned_mode) or stale:
                 self._respawn()
             return GLib.SOURCE_REMOVE
         self._session_id = session.session_id
         self._resolving = False
         pending, self._pending_mode = self._pending_mode, None
+        stale, self._options_stale = self._options_stale, False
         self._apply_title(session.title, session.repo_root, subject)
         if pending and pending != self._loaded:
             self._loaded = pending
             self._sync_header()
             self.emit("title-changed")
-            self._reload(pending)
+            self._reload(pending)  # the reload's tail reads the options as they are now
+        elif stale and not hunkctl.is_show(self._loaded) and self._foreign is None:
+            log.debug("gitpage: the untracked switch flipped during the spawn; reloading")
+            self._reload(self._loaded)
         return GLib.SOURCE_REMOVE
 
     def _respawn(self) -> None:
@@ -1011,6 +1093,7 @@ class GitPage(Adw.Bin):
         self._pending_reload = None
         self._stale = False
         self._pending_mode = None
+        self._options_stale = False
         self._gen += 1  # orphan any session list / get / reload still out
         self.terminal.reset(True, True)
         if self._closing:
@@ -1041,7 +1124,9 @@ class GitPage(Adw.Bin):
             return
         self._reloading = True
         gen = self._gen
-        argv = hunkctl.reload_argv(self._hunk_path, self._session_id, loaded, self._parent_target)
+        argv = hunkctl.reload_argv(
+            self._hunk_path, self._session_id, loaded, self._parent_target, self._options
+        )
         cwd = self._cwd_provider()
 
         def work() -> None:

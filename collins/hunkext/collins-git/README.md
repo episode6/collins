@@ -145,7 +145,7 @@ environment variable `COLLINS_GIT_STATE`, created before hunk is spawned and
 deleted when the page closes:
 
 ```json
-{"version": 1, "parent": "main", "parentSource": "auto", "default": "main", "logPage": 20}
+{"version": 1, "parent": "main", "parentSource": "auto", "default": "main", "logPage": 20, "untracked": true}
 ```
 
 - `parent` — the parent branch *name* (each side resolves it: a local branch,
@@ -156,6 +156,13 @@ deleted when the page closes:
   for *Automatic*; Collins then recomputes and rewrites `parent`.
 - `default` — the default branch name; Collins only.
 - `logPage` — commits per group page, 5..500; Collins only.
+- `untracked` — whether working-tree reviews include untracked files (true by
+  default; absent or garbled reads as true); Collins only. When false the
+  extension adds `--exclude-untracked` to every `diff` tail it sends, so its
+  loads agree with Collins' own — hunk resolves the option afresh on each
+  reload, and a bare tail would bring the files back — and leaves the `?`
+  rows out of the files panel's status-fed section (the UNSTAGED list of a
+  staged load), rebuilt when the sidecar changes.
 - `refreshed` — `{"index": "<mtime ns>", "head": "<sha>"}`, the index file's
   mtime (a string: the number is past what a JSON double holds) and HEAD as
   the extension saw them right after reloading the review for a mutation of
@@ -181,7 +188,8 @@ hunk diff --extension /path/to/collins/hunkext/collins-git
 
 Without `COLLINS_GIT_STATE` the extension guesses: default branch from
 `origin/HEAD`, else `main`, else `master`; parent = default; 20 commits per
-page. A parent picked with `P` is kept in memory for the session.
+page; untracked files in. A parent picked with `P` is kept in memory for the
+session.
 
 ## Tests and typecheck
 

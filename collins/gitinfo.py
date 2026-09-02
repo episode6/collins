@@ -14,7 +14,10 @@ ever asked on demand.
 The git page (gitpage) reads the same files for its freshness check: where
 the working tree root is (`repo_root`), when the index last moved
 (`index_mtime`), what HEAD and the parent branch point at (`head_sha`,
-`resolve_branch`, `base_ref`), folded into one comparable `tree_signature`.
+`resolve_branch`, `base_ref`), folded into one comparable `tree_signature`
+— and names the branch it measures the current one against
+(`parent_branch`: the first of the host's candidates the tree can resolve,
+else the default branch).
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ import logging
 import re
 import shutil
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -121,6 +125,64 @@ def default_branch(cwd: str | Path | None) -> str | None:
         if _has_local_branch(common, name):
             return name
     return None
+
+
+def parent_branch(cwd: str | Path | None, candidates: Iterable[str | None]) -> str | None:
+    """The branch the current one is measured against — the git page's "vs"
+    load, the extension's commit groups: the first of *candidates* (in
+    order; None and "" are skipped) that `resolve_branch` finds in the
+    repository enclosing *cwd*, as a local or remote-tracking ref, else
+    `default_branch(cwd)`.
+
+    The whole automatic rung in one place: the host passes the attached
+    PR's base, then the default parent from Preferences, and a candidate
+    the tree can't name — a base nothing here can diff against, a name
+    typed for another repository, one that reads as an option — falls
+    through rather than disabling the load. A branch NAME comes back
+    ("main", never "origin/main"): callers resolve it to a target
+    themselves. A candidate written the way git prints a remote branch —
+    "origin/develop", the form people type first — is taken as the branch
+    behind it when that remote has it (`remote_branch_name`), so the
+    Preferences entry needn't know the rule. None outside a repository, or
+    when nothing resolves and the trunk can't be named either.
+    """
+    for name in candidates:
+        if not name:
+            continue
+        if resolve_branch(cwd, name) is not None:
+            return name
+        stripped = remote_branch_name(cwd, name)
+        if stripped is not None:
+            return stripped
+    return default_branch(cwd)
+
+
+def remote_branch_name(cwd: str | Path | None, name: str | None) -> str | None:
+    """The branch a remote-qualified *name* points at — "develop" for
+    "origin/develop" — when its first segment names a remote in the
+    repository's config and that remote has the branch
+    (refs/remotes/<remote>/<rest>); None otherwise, and for a *name* that
+    isn't safe as an argument. Asked only after the name failed to resolve
+    as written, so a local branch that happens to carry a slash
+    ("release/v1") is never mistaken for a remote's.
+
+    What comes back is a NAME: `resolve_branch` turns it into the local
+    branch when the tree has one, else the ranked remote's — which, for a
+    remote that isn't the first-ranked one, may name another remote's copy
+    of the branch than the one typed.
+    """
+    if not _safe_branch_name(name) or "/" not in name:
+        return None
+    remote, _, rest = name.partition("/")
+    if not remote or not rest:
+        return None
+    git_dir = _git_dir(cwd)
+    if git_dir is None:
+        return None
+    common = _common_dir(git_dir)
+    if remote not in _remote_urls(common / "config"):
+        return None
+    return rest if _ref_sha(common, f"refs/remotes/{remote}/{rest}") else None
 
 
 def github_url(cwd: str | Path | None) -> str | None:

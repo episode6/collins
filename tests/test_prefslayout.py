@@ -70,3 +70,27 @@ def test_the_update_check_setting_has_a_default():
 
     assert updatecheck.SETTING == "check_for_updates"
     assert DEFAULT_SETTINGS[updatecheck.SETTING] is True
+
+
+def test_git_follows_pull_requests():
+    # The git page's knobs sit beside the other page's, above the two
+    # groups nobody adjusts twice.
+    groups = prefslayout.GROUPS
+    assert groups.index("git") == groups.index("pull_requests") + 1
+
+
+def test_every_git_setting_has_its_default():
+    # hunk's own defaults for what reaches hunk, twenty commits a page, and
+    # the parent branch left to the page to work out.
+    assert DEFAULT_SETTINGS["git_layout"] == "auto"
+    assert DEFAULT_SETTINGS["git_theme"] == ""
+    assert DEFAULT_SETTINGS["git_untracked"] is True
+    assert DEFAULT_SETTINGS["git_log_page"] == 20
+    assert DEFAULT_SETTINGS["git_parent_branch"] == ""
+
+
+def test_git_layouts_are_hunks_mode_words():
+    # The values go to hunk's --mode verbatim, and the default is first so
+    # an unknown stored value falls back to it.
+    assert [value for value, _label in prefslayout.GIT_LAYOUTS] == ["auto", "split", "stack"]
+    assert DEFAULT_SETTINGS["git_layout"] == prefslayout.GIT_LAYOUTS[0][0]

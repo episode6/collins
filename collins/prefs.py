@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-02. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -115,6 +115,44 @@ _RUNNING_BEHAVIORS = [
 # "Keep Running (Hide Window)"). Shortened here because a ComboRow's value
 # label ellipsizes past ~130px.
 _QUIT_BEHAVIORS = _RUNNING_BEHAVIORS + [("hide", N_("Hide Window"))]
+
+# The git page's Layout row: hunk's --mode words in prefslayout.GIT_LAYOUTS'
+# order, labelled here so the labels are the dialog's to translate.
+_GIT_LAYOUT_LABELS = {
+    "auto": N_("Automatic"),
+    "split": N_("Split"),
+    "stack": N_("Stacked"),
+}
+_GIT_LAYOUTS = [(value, _GIT_LAYOUT_LABELS.get(value, label)) for value, label in prefslayout.GIT_LAYOUTS]
+
+# The longest theme id hunk ships is 26 characters; a name past this is
+# not a theme, and never reaches hunk's argv.
+_GIT_THEME_MAX = 64
+
+# How long the Git group's two entry rows wait after the last keystroke
+# before keeping what the box holds (see _save_git_word): a theme is saved
+# once per name typed, not once per letter — every open git page restarts
+# hunk for a theme change — and a parent branch likewise, since a prefix
+# that happens to name a branch ("main" on the way to "main-old") would
+# reload every branch diff against it. Enter, leaving the row and closing
+# the dialog save at once.
+_GIT_ENTRY_SETTLE_MS = 600
+
+
+def _git_theme_ok(text: str) -> bool:
+    """Whether *text* can stand as hunk's --theme: empty (hunk's own
+    default), or one word that can't read as a flag."""
+    return not text or (
+        len(text) <= _GIT_THEME_MAX and not text.startswith("-") and not any(c.isspace() for c in text)
+    )
+
+
+def _git_branch_ok(text: str) -> bool:
+    """Whether *text* can stand as a branch name to look up: empty
+    (automatic), or one word that is neither a flag nor a range."""
+    return not text or (
+        not text.startswith("-") and ".." not in text and not any(c.isspace() for c in text)
+    )
 
 
 # The search keywords for the Token use group's rows (tokensettings builds
@@ -255,6 +293,7 @@ class PreferencesDialog(Adw.Dialog):
             "terminal": self._build_terminal_group,
             "footer_apps": self._build_footer_apps_group,
             "pull_requests": self._build_pr_group,
+            "git": self._build_git_group,
             "caffeine": self._build_caffeine_group,
             "editor": self._build_editor_group,
         }
@@ -895,6 +934,93 @@ class PreferencesDialog(Adw.Dialog):
         pr_group.add(self._pr_launch_row)
         return pr_group
 
+    def _build_git_group(self, state: AppState) -> _SearchableGroup:
+        """The git page's knobs (see gitpage.py and hunkctl.Options): what
+        hunk is started with, what its commits panel loads, and the branch
+        the page measures against. All of them reach an open page — the
+        first two by restarting hunk in place, the rest without."""
+        git_group = _SearchableGroup(
+            title=_("Git"),
+            description=_("The git page: hunk's layout and theme, and what the commits panel loads"),
+        )
+        _searchable(git_group, *prefslayout.GIT_SEARCH_TERMS)
+        self._git_layout_row = self._add_running_behavior_row(
+            git_group,
+            _("Layout"),
+            _("How hunk lays a diff out: side by side, stacked, or whichever fits the width"),
+            "git_layout",
+            _GIT_LAYOUTS,
+        )
+
+        # Free text, not a list: hunk can't be asked for its themes, the
+        # built-in ones number sixty-odd, and a config file can add more —
+        # and a name hunk doesn't know falls back to its default rather
+        # than breaking the page. The reason row under the box names a few,
+        # the way the CLI row's reason sits under its entry; the same search
+        # terms keep the two showing and hiding together.
+        theme_terms = ("hunk", "nord", "dracula", "catppuccin", "gruvbox", "solarized", "tokyo night")
+        self._git_theme_row = Adw.EntryRow(title=_("Theme"))
+        self._git_theme_row.set_text(state.get_setting("git_theme") or "")
+        self._git_theme_row.connect("changed", self._on_git_theme_changed)
+        self._git_theme_row.connect("entry-activated", self._on_git_theme_activated)
+        self._flush_git_word_on_focus_out(self._git_theme_row, "git_theme", _git_theme_ok)
+        git_group.add(_searchable(self._git_theme_row, *theme_terms))
+        theme_reason = Adw.ActionRow(activatable=False, selectable=False)
+        theme_reason.add_css_class("dim-label")
+        theme_reason.set_subtitle(
+            _(
+                "Empty: hunk's own default. Any theme hunk knows — nord, dracula, "
+                "catppuccin-mocha, github-light-default, auto (follows the terminal "
+                "background) — or one from hunk's config; a name hunk doesn't know "
+                "falls back to its default"
+            )
+        )
+        git_group.add(_searchable(theme_reason, *theme_terms))
+
+        self._git_untracked_row = Adw.SwitchRow(
+            title=_("Show untracked files"),
+            subtitle=_(
+                "List files git doesn't track yet in working-tree reviews. Off, the "
+                "page and the files panel show only tracked changes"
+            ),
+        )
+        self._git_untracked_row.set_active(bool(state.get_setting("git_untracked")))
+        self._git_untracked_row.connect("notify::active", self._on_git_untracked_changed)
+        git_group.add(_searchable(self._git_untracked_row, "new files", "exclude"))
+
+        log_page_row = Adw.SpinRow.new_with_range(5, 200, 5)
+        log_page_row.set_title(_("Commits per page"))
+        log_page_row.set_subtitle(
+            _("How many commits each group of the commits panel shows before its load more… row")
+        )
+        log_page_row.set_value(int(state.get_setting("git_log_page") or 20))
+        log_page_row.connect("notify::value", self._on_git_log_page_changed)
+        git_group.add(_searchable(log_page_row, "load more", "log"))
+
+        # A branch name, not a picker: Preferences is app-wide and one
+        # repository's branches can't serve the rest, so the name is looked
+        # up per repository and skipped where it isn't found.
+        parent_terms = ("base", "main", "trunk", "vs", "stacked")
+        self._git_parent_row = Adw.EntryRow(title=_("Default parent branch"))
+        self._git_parent_row.set_text(state.get_setting("git_parent_branch") or "")
+        self._git_parent_row.connect("changed", self._on_git_parent_changed)
+        self._git_parent_row.connect("entry-activated", self._on_git_parent_activated)
+        self._flush_git_word_on_focus_out(self._git_parent_row, "git_parent_branch", _git_branch_ok)
+        self.connect("closed", lambda *_a: self._flush_git_words())
+        git_group.add(_searchable(self._git_parent_row, *parent_terms))
+        parent_reason = Adw.ActionRow(activatable=False, selectable=False)
+        parent_reason.add_css_class("dim-label")
+        parent_reason.set_subtitle(
+            _(
+                "Empty: automatic. The page measures the branch against the attached "
+                "pull request's base first, then this branch when the repository has "
+                "it (develop, or origin/develop for one only the remote has), then the "
+                "default branch; Set parent branch… in the page still overrides it"
+            )
+        )
+        git_group.add(_searchable(parent_reason, *parent_terms))
+        return git_group
+
     def _build_caffeine_group(self, state: AppState) -> _SearchableGroup:
         caffeine_group = _SearchableGroup(title=_("Caffeine Mode"))
         self._caffeine_screen_row = Adw.SwitchRow(
@@ -1307,6 +1433,92 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_confirm_merges_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("confirm_merges", bool(row.get_active()))
+        self._on_change()
+
+    def _save_git_word(self, row: Adw.EntryRow, key: str, ok: Callable[[str], bool]) -> None:
+        """Wear the error style while the box holds nothing that can stand
+        as *key*'s value, and keep what it holds once the typing settles
+        (_GIT_ENTRY_SETTLE_MS after the last keystroke — Enter, leaving the
+        row and closing the dialog don't wait): a half-typed or unusable
+        name leaves the stored answer where it was, so closing preferences
+        on it loses nothing — the CLI row's rule. One pending save per row,
+        reading the box when it runs, so replacing the text (a paste over a
+        selection, set_text) — which empties the box and refills it in two
+        "changed" emissions — saves the real name once, never the empty
+        one in between."""
+        text = row.get_text().strip()
+        if ok(text):
+            row.remove_css_class("error")
+        else:
+            row.add_css_class("error")
+        pending = getattr(row, "_git_save_source", None)
+        if pending is not None:
+            GLib.source_remove(pending)
+
+        def settled() -> bool:
+            row._git_save_source = None
+            self._commit_git_word(row, key, ok)
+            return GLib.SOURCE_REMOVE
+
+        # PRIORITY_DEFAULT, not idle: a starved display (CI's Xvfb) never
+        # reaches the idle band.
+        row._git_save_source = GLib.timeout_add(
+            _GIT_ENTRY_SETTLE_MS, settled, priority=GLib.PRIORITY_DEFAULT
+        )
+
+    def _flush_git_word(self, row: Adw.EntryRow, key: str, ok: Callable[[str], bool]) -> None:
+        """Keep the box's word now, when a save is waiting on the typing to
+        settle: Enter, the focus leaving the row, the dialog closing."""
+        pending = getattr(row, "_git_save_source", None)
+        if pending is None:
+            return
+        GLib.source_remove(pending)
+        row._git_save_source = None
+        self._commit_git_word(row, key, ok)
+
+    def _commit_git_word(self, row: Adw.EntryRow, key: str, ok: Callable[[str], bool]) -> None:
+        text = row.get_text().strip()
+        if not ok(text):
+            return
+        if text != (self._state.get_setting(key) or ""):
+            self._state.set_setting(key, text)
+            self._on_change()
+
+    def _flush_git_word_on_focus_out(self, row: Adw.EntryRow, key: str, ok: Callable[[str], bool]) -> None:
+        """Tab or a click elsewhere keeps the word at once: the focus
+        controller watches the row and its entry (contains-focus), since
+        the keyboard sits in the Gtk.Text inside the row."""
+        focus = Gtk.EventControllerFocus()
+
+        def on_focus(controller: Gtk.EventControllerFocus, _pspec) -> None:
+            if not controller.contains_focus():
+                self._flush_git_word(row, key, ok)
+
+        focus.connect("notify::contains-focus", on_focus)
+        row.add_controller(focus)
+
+    def _flush_git_words(self) -> None:
+        self._flush_git_word(self._git_theme_row, "git_theme", _git_theme_ok)
+        self._flush_git_word(self._git_parent_row, "git_parent_branch", _git_branch_ok)
+
+    def _on_git_theme_changed(self, row: Adw.EntryRow) -> None:
+        self._save_git_word(row, "git_theme", _git_theme_ok)
+
+    def _on_git_theme_activated(self, row: Adw.EntryRow) -> None:
+        self._flush_git_word(row, "git_theme", _git_theme_ok)
+
+    def _on_git_parent_changed(self, row: Adw.EntryRow) -> None:
+        self._save_git_word(row, "git_parent_branch", _git_branch_ok)
+
+    def _on_git_parent_activated(self, row: Adw.EntryRow) -> None:
+        self._flush_git_word(row, "git_parent_branch", _git_branch_ok)
+
+    def _on_git_untracked_changed(self, row: Adw.SwitchRow, _pspec) -> None:
+        self._state.set_setting("git_untracked", bool(row.get_active()))
+        self._on_change()
+
+    def _on_git_log_page_changed(self, row: Adw.SpinRow, _pspec) -> None:
+        self._state.set_setting("git_log_page", int(row.get_value()))
         self._on_change()
 
     def _on_theme_radio(self, radio: Gtk.CheckButton, name: str) -> None:

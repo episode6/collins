@@ -81,13 +81,22 @@ import {
   loadedRow,
   neighbour,
   sideTail,
+  withoutUntracked,
   type BranchRef,
   type Group,
   type Loaded,
   type Row,
   type Side,
 } from "./model.ts";
-import { firstLine, onPendingChange, pendingLoad, requestLoad, type Report } from "./session.ts";
+import {
+  firstLine,
+  hunkRunner,
+  onPendingChange,
+  pendingLoad,
+  requestLoad,
+  type Report,
+  type SessionDeps,
+} from "./session.ts";
 import {
   configFromEnv,
   effectiveConfig,
@@ -240,13 +249,24 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     const runner = ensureGit(cwd);
     let sidecar = sidecarPath !== null ? readSidecar(sidecarPath) : null;
     if (sidecar === null && memoryParent !== null) {
-      sidecar = { parent: memoryParent, parentSource: "user", default: null, logPage: 20 };
+      sidecar = { parent: memoryParent, parentSource: "user", default: null, logPage: 20, untracked: true };
     }
     if (sidecar !== null && awaitingAuto && sidecarPath !== null) {
       sidecar = { ...sidecar, parent: null, parentSource: "auto" };
     }
     return effectiveConfig(sidecar, runner);
   }
+
+  /**
+   * What every load of ours runs with: the hunk that runs us, our own pid,
+   * and Collins' untracked switch — read off the sidecar as each reload
+   * goes out, so a `diff` load never brings back files Collins hides.
+   */
+  const sessionDeps: SessionDeps = {
+    run: hunkRunner(),
+    pid: process.pid,
+    excludeUntracked: () => !config().untracked,
+  };
 
   function readPage(runner: GitRunner, range: string[], group: Group, logPage: number) {
     const limit = logPage * pages[group];
@@ -326,10 +346,16 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     });
   }
 
-  /** Re-read status (working-tree loads only) and republish the files panel. */
+  /**
+   * Re-read status (working-tree loads only) and republish the files panel.
+   * With Collins' untracked switch off the `?` rows go: the live side never
+   * has them (hunk loaded `--exclude-untracked`), and the other side's
+   * list must not offer a file a click could never land on.
+   */
   function refreshFiles(): void {
     const runner = ensureGit(cwd);
-    status = error === null && (loaded.kind === "unstaged" || loaded.kind === "staged") ? readStatus(runner) : null;
+    const read = error === null && (loaded.kind === "unstaged" || loaded.kind === "staged") ? readStatus(runner) : null;
+    status = config().untracked ? read : withoutUntracked(read);
     publishFiles({ status, loaded, pendingSelectPath, error });
   }
 
@@ -347,14 +373,14 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     if (row.load.length === 0) {
       return;
     }
-    requestLoad(row.load, report);
+    requestLoad(row.load, report, sessionDeps);
     publishCommitsState();
   }
 
   function loadSide(side: Side, path: string | null, report: Report): void {
     pendingSelectPath = path;
     publishFiles({ status, loaded, pendingSelectPath, error });
-    requestLoad(sideTail(side), report);
+    requestLoad(sideTail(side), report, sessionDeps);
   }
 
   function onChangeset(changeset: ExtensionChangeset, ctx: ExtensionEventContext): void {
@@ -421,7 +447,7 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
   function refreshAfter(ctx: ExtensionCommandContext, path: string | null): void {
     pendingSelectPath = path;
     if (!ctx.commands.execute("hunk.app.refresh")) {
-      requestLoad(currentTail(), ctx.notify);
+      requestLoad(currentTail(), ctx.notify, sessionDeps);
     }
     refreshFiles();
     recordRefreshed();
@@ -1044,6 +1070,7 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
         awaitingAuto = false;
         debug(`sidecar changed: ${now}`);
         refreshCommits();
+        refreshFiles(); // the untracked switch shapes the sections too
       });
     }
     refreshCommits();

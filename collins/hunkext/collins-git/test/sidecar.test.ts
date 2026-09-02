@@ -19,7 +19,14 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const collinsWrote = { version: 1, parent: "main", parentSource: "auto" as const, default: "main", logPage: 20 };
+const collinsWrote = {
+  version: 1,
+  parent: "main",
+  parentSource: "auto" as const,
+  default: "main",
+  logPage: 20,
+  untracked: true,
+};
 
 /** A git that knows one local branch, `develop`, and nothing about origin. */
 const git: GitRunner = (args) => {
@@ -35,7 +42,18 @@ const git: GitRunner = (args) => {
 describe("readSidecar", () => {
   test("reads what Collins wrote", () => {
     writeSidecar(path, collinsWrote);
-    expect(readSidecar(path)).toEqual({ parent: "main", parentSource: "auto", default: "main", logPage: 20 });
+    expect(readSidecar(path)).toEqual({ parent: "main", parentSource: "auto", default: "main", logPage: 20, untracked: true });
+  });
+
+  test("untracked is false only when Collins says so; absent or garbled reads as true", () => {
+    writeSidecar(path, { ...collinsWrote, untracked: false });
+    expect(readSidecar(path)?.untracked).toBe(false);
+    writeFileSync(path, JSON.stringify({ parent: "main" }), "utf8");
+    expect(readSidecar(path)?.untracked).toBe(true);
+    writeFileSync(path, JSON.stringify({ untracked: "false" }), "utf8");
+    expect(readSidecar(path)?.untracked).toBe(true);
+    writeFileSync(path, JSON.stringify({ untracked: 0 }), "utf8");
+    expect(readSidecar(path)?.untracked).toBe(true);
   });
 
   test("is tolerant: missing file, garbage, wrong shapes, unsafe names, out-of-range pages", () => {
@@ -46,7 +64,7 @@ describe("readSidecar", () => {
     writeFileSync(path, JSON.stringify([1, 2]), "utf8");
     expect(readSidecar(path)).toBeNull();
     writeFileSync(path, JSON.stringify({ parent: "-x", parentSource: "nonsense", default: "a b", logPage: 1000 }), "utf8");
-    expect(readSidecar(path)).toEqual({ parent: null, parentSource: "auto", default: null, logPage: 500 });
+    expect(readSidecar(path)).toEqual({ parent: null, parentSource: "auto", default: null, logPage: 500, untracked: true });
     writeFileSync(path, JSON.stringify({ logPage: 1 }), "utf8");
     expect(readSidecar(path)?.logPage).toBe(5);
     writeFileSync(path, JSON.stringify({ logPage: "20" }), "utf8");
@@ -86,22 +104,32 @@ describe("configFromEnv and effectiveConfig", () => {
   });
 
   test("the sidecar's names win; without them the extension guesses", () => {
-    expect(effectiveConfig({ parent: "feature", parentSource: "user", default: "trunk", logPage: 7 }, git)).toEqual({
+    expect(
+      effectiveConfig({ parent: "feature", parentSource: "user", default: "trunk", logPage: 7, untracked: false }, git),
+    ).toEqual({
       parent: "feature",
       parentSource: "user",
       default: "trunk",
       logPage: 7,
+      untracked: false,
     });
-    expect(effectiveConfig({ parent: null, parentSource: "auto", default: null, logPage: 20 }, git)).toEqual({
+    expect(effectiveConfig({ parent: null, parentSource: "auto", default: null, logPage: 20, untracked: true }, git)).toEqual({
       parent: null,
       parentSource: "auto",
       default: null,
       logPage: 20,
+      untracked: true,
     });
     const guessing: GitRunner = (args) =>
       args[0] === "rev-parse" && args[3] === "refs/heads/master"
         ? { ok: true, stdout: "b".repeat(40), stderr: "" }
         : { ok: false, stdout: "", stderr: "" };
-    expect(effectiveConfig(null, guessing)).toEqual({ parent: "master", parentSource: "auto", default: "master", logPage: 20 });
+    expect(effectiveConfig(null, guessing)).toEqual({
+      parent: "master",
+      parentSource: "auto",
+      default: "master",
+      logPage: 20,
+      untracked: true,
+    });
   });
 });

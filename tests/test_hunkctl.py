@@ -1,7 +1,8 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
 """Tests for hunkctl: the git page's decisions that need no widget — the
-version gate, argv (the bundled extension on it), hunk's JSON replies,
+version gate, argv (the bundled extension on it, and what Preferences → Git
+adds), the Options those settings normalise into, hunk's JSON replies,
 session titles (a commit's included), the chords, the layout slot (with the
 user-set parent), and the sidecar the page shares with the extension."""
 
@@ -160,6 +161,195 @@ def test_spawn_argv_show():
         hunkctl.spawn_argv("/h", {"show": "-x"}, None)
     with pytest.raises(ValueError):
         hunkctl.spawn_argv("/h", {"other": "x"}, None)
+
+
+# -- Preferences → Git ---------------------------------------------------------
+
+
+def test_options_defaults_reproduce_the_shipped_settings():
+    """A page that never received settings, and an empty dict, both run on
+    the defaults — and the defaults change no argv (see the exact lists
+    above)."""
+    options = hunkctl.Options()
+    assert options == hunkctl.Options(layout="auto", theme="", untracked=True, log_page=20)
+    assert hunkctl.Options.from_settings({}) == options
+    assert hunkctl.LAYOUTS == ("auto", "split", "stack")
+    assert hunkctl.DEFAULT_LAYOUT == "auto"
+    assert (hunkctl.MIN_LOG_PAGE, hunkctl.LOG_PAGE, hunkctl.MAX_LOG_PAGE) == (5, 20, 500)
+    assert hunkctl.spawn_flags(None) == []
+    assert hunkctl.spawn_flags(options) == []
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected"),
+    [
+        ({"git_layout": "split"}, hunkctl.Options(layout="split")),
+        ({"git_layout": "stack"}, hunkctl.Options(layout="stack")),
+        ({"git_layout": "bogus"}, hunkctl.Options()),
+        ({"git_layout": None}, hunkctl.Options()),
+        ({"git_theme": "nord"}, hunkctl.Options(theme="nord")),
+        ({"git_theme": "  nord "}, hunkctl.Options(theme="nord")),
+        ({"git_theme": "-x"}, hunkctl.Options()),
+        ({"git_theme": "a b"}, hunkctl.Options()),
+        ({"git_theme": "x" * 65}, hunkctl.Options()),
+        ({"git_theme": "x" * 64}, hunkctl.Options(theme="x" * 64)),
+        ({"git_theme": 3}, hunkctl.Options()),
+        ({"git_untracked": 0}, hunkctl.Options(untracked=False)),
+        ({"git_untracked": False}, hunkctl.Options(untracked=False)),
+        ({"git_untracked": "yes"}, hunkctl.Options(untracked=True)),
+        ({"git_log_page": 50}, hunkctl.Options(log_page=50)),
+        ({"git_log_page": "50"}, hunkctl.Options(log_page=50)),
+        ({"git_log_page": 3}, hunkctl.Options(log_page=5)),
+        ({"git_log_page": 1000}, hunkctl.Options(log_page=500)),
+        ({"git_log_page": "abc"}, hunkctl.Options(log_page=20)),
+        ({"git_log_page": None}, hunkctl.Options(log_page=20)),
+    ],
+)
+def test_options_from_settings_normalises_each_key(settings, expected):
+    assert hunkctl.Options.from_settings(settings) == expected
+
+
+def test_options_from_settings_reads_the_whole_dict():
+    settings = {
+        "font": "Monospace 11",
+        "git_layout": "stack",
+        "git_theme": "catppuccin-mocha",
+        "git_untracked": False,
+        "git_log_page": 40,
+    }
+    assert hunkctl.Options.from_settings(settings) == hunkctl.Options("stack", "catppuccin-mocha", False, 40)
+
+
+def test_safe_theme():
+    assert hunkctl.safe_theme("nord")
+    assert hunkctl.safe_theme("github-light-default")
+    assert hunkctl.safe_theme("auto")
+    assert not hunkctl.safe_theme("")
+    assert not hunkctl.safe_theme("-nord")
+    assert not hunkctl.safe_theme("no rd")
+    assert not hunkctl.safe_theme("nord\n")
+    assert not hunkctl.safe_theme(None)
+
+
+OPTIONS = hunkctl.Options(layout="split", theme="nord", untracked=False, log_page=50)
+
+
+def test_spawn_argv_with_options():
+    """--mode/--theme after --transparent-bg and before --extension;
+    --exclude-untracked right after `diff`, before --staged or the range."""
+    assert hunkctl.spawn_argv("/h", "unstaged", None, EXT, OPTIONS) == [
+        "/h",
+        "diff",
+        "--watch",
+        "--transparent-bg",
+        "--mode",
+        "split",
+        "--theme",
+        "nord",
+        "--extension",
+        EXT,
+        "--exclude-untracked",
+    ]
+    assert hunkctl.spawn_argv("/h", "staged", None, None, OPTIONS) == [
+        "/h",
+        "diff",
+        "--watch",
+        "--transparent-bg",
+        "--mode",
+        "split",
+        "--theme",
+        "nord",
+        "--exclude-untracked",
+        "--staged",
+    ]
+    assert hunkctl.spawn_argv("/h", "branch", "main", EXT, OPTIONS)[-4:] == [
+        "--extension",
+        EXT,
+        "--exclude-untracked",
+        "main...HEAD",
+    ]
+
+
+def test_spawn_argv_show_with_options():
+    """`show` takes the layout and theme but never --exclude-untracked (hunk
+    0.20.1 refuses it there: "unknown option")."""
+    assert hunkctl.spawn_argv("/h", {"show": SHA}, None, EXT, OPTIONS) == [
+        "/h",
+        "show",
+        "--watch",
+        "--transparent-bg",
+        "--mode",
+        "split",
+        "--theme",
+        "nord",
+        "--extension",
+        EXT,
+        SHA,
+    ]
+
+
+def test_spawn_argv_each_option_alone():
+    assert hunkctl.spawn_argv("/h", "unstaged", None, None, hunkctl.Options(layout="stack")) == [
+        "/h",
+        "diff",
+        "--watch",
+        "--transparent-bg",
+        "--mode",
+        "stack",
+    ]
+    assert hunkctl.spawn_argv("/h", "unstaged", None, None, hunkctl.Options(theme="dracula")) == [
+        "/h",
+        "diff",
+        "--watch",
+        "--transparent-bg",
+        "--theme",
+        "dracula",
+    ]
+    assert hunkctl.spawn_argv("/h", "unstaged", None, None, hunkctl.Options(untracked=False)) == [
+        "/h",
+        "diff",
+        "--watch",
+        "--transparent-bg",
+        "--exclude-untracked",
+    ]
+    # The log page is the sidecar's, never argv's.
+    assert hunkctl.spawn_argv("/h", "unstaged", None, None, hunkctl.Options(log_page=50)) == [
+        "/h",
+        "diff",
+        "--watch",
+        "--transparent-bg",
+    ]
+
+
+def test_reload_argv_with_options():
+    """The untracked switch rides every diff reload (hunk re-reads it each
+    time); the layout and theme never do — they don't reapply to a running
+    viewer, and the respawn covers them."""
+    assert hunkctl.reload_argv("/h", "abc", "staged", None, OPTIONS) == [
+        "/h",
+        "session",
+        "reload",
+        "abc",
+        "--json",
+        "--",
+        "diff",
+        "--exclude-untracked",
+        "--staged",
+    ]
+    assert hunkctl.reload_argv("/h", "abc", "unstaged", None, OPTIONS)[-3:] == [
+        "--",
+        "diff",
+        "--exclude-untracked",
+    ]
+    assert hunkctl.reload_argv("/h", "abc", "branch", "main", OPTIONS)[-3:] == [
+        "diff",
+        "--exclude-untracked",
+        "main...HEAD",
+    ]
+    assert hunkctl.reload_argv("/h", "abc", {"show": SHA}, None, OPTIONS)[-3:] == ["--", "show", SHA]
+    assert hunkctl.reload_argv("/h", "abc", "staged", None, hunkctl.Options()) == hunkctl.reload_argv(
+        "/h", "abc", "staged", None
+    )
 
 
 def test_extension_dir_is_package_data():
@@ -623,9 +813,19 @@ def test_sidecar_payload():
         "parentSource": "auto",
         "default": "main",
         "logPage": 20,
+        "untracked": True,
     }
     assert hunkctl.sidecar_payload("base", "user", None, hunkctl.LOG_PAGE)["parentSource"] == "user"
     assert hunkctl.sidecar_payload(None, "bogus", None, 20)["parentSource"] == "auto"
+    assert hunkctl.sidecar_payload("main", "auto", "main", 50, False) == {
+        "version": 1,
+        "parent": "main",
+        "parentSource": "auto",
+        "default": "main",
+        "logPage": 50,
+        "untracked": False,
+    }
+    assert hunkctl.sidecar_payload("main", "auto", "main", 20, untracked=0)["untracked"] is False
 
 
 def test_write_sidecar_creates_and_replaces(tmp_path):
@@ -638,6 +838,7 @@ def test_write_sidecar_creates_and_replaces(tmp_path):
             "parentSource": "auto",
             "default": "main",
             "logPage": 20,
+            "untracked": True,
         }
     assert sorted(os.listdir(tmp_path / "collins")) == ["git-1-1.json"]  # no temp file left behind
     assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("base", "user", "main", 20))

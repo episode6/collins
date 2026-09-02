@@ -11,6 +11,7 @@ import {
   loadedRow,
   neighbour,
   sideTail,
+  withoutUntracked,
   type RowsInput,
 } from "../model.ts";
 
@@ -216,6 +217,29 @@ describe("filesSections", () => {
     expect(sections.mode === "split" && sections.live).toBe("staged");
     expect(sections.mode === "split" && sections.staged[0]!.id).toBe("f0");
     expect(sections.mode === "split" && sections.unstaged[0]!.id).toBeNull();
+  });
+
+  test("with untracked files off, the staged view's unstaged side lists none", () => {
+    // What index.ts feeds filesSections when the sidecar says untracked:
+    // false — the live side comes from a `diff --exclude-untracked`, and
+    // the other side's `?` rows would be files a click could never load.
+    const withNew = {
+      unstaged: [
+        { path: "a.txt", code: "M" as const },
+        { path: "new.txt", code: "?" as const },
+        { path: "u.txt", code: "U" as const },
+      ],
+      staged: status.staged,
+    };
+    const filtered = withoutUntracked(withNew);
+    expect(filtered?.unstaged.map((row) => row.code)).toEqual(["M", "U"]);
+    expect(filtered?.staged).toBe(status.staged);
+    expect(withoutUntracked(null)).toBeNull();
+    const sections = filesSections(filtered, files.slice(0, 1), { kind: "staged" });
+    expect(sections.mode === "split" && sections.unstaged.map((row) => row.path)).toEqual(["a.txt", "u.txt"]);
+    // With the switch on nothing is dropped.
+    const shown = filesSections(withNew, files.slice(0, 1), { kind: "staged" });
+    expect(shown.mode === "split" && shown.unstaged.map((row) => row.code)).toEqual(["M", "?", "U"]);
   });
 
   test("everything else is flat, and so is a working tree with no status", () => {
