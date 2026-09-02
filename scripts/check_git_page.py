@@ -237,13 +237,24 @@ def read_state(path: str) -> dict:
 
 
 def pid_alive(pid: int | None) -> bool:
+    """Is *pid* still running — a zombie counts as gone.
+
+    A viewer orphaned by its wrapper's death is re-parented to pid 1, and
+    CI's job container has no init that reaps: the dead viewer lingers as
+    a zombie there, which `os.kill(pid, 0)` still answers for. Read the
+    state off /proc instead, so "went down" means the same thing on a
+    desktop (systemd reaps at once) and in the container.
+    """
     if not pid:
         return False
     try:
-        os.kill(pid, 0)
+        with open(f"/proc/{pid}/status") as fh:
+            for line in fh:
+                if line.startswith("State:"):
+                    return not line.split()[1].startswith("Z")
     except OSError:
         return False
-    return True
+    return False
 
 
 def card_title(page: GitPage) -> str:
