@@ -813,7 +813,6 @@ class GitPage(Adw.Bin):
             return
         hunkctl.terminate_tree(pid, proctree.process_children(pid))
 
-
     def _on_child_exited(self, _terminal: Vte.Terminal, _status: int) -> None:
         if self._child_pid is None:
             # A child this page never took on — spawned for a generation
