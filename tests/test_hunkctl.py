@@ -1145,3 +1145,62 @@ def test_show_diff_reply():
     assert text.split("\n")[1] == "Navigated the viewer to src/a.py, line 12."
     text = hunkctl.show_diff_reply("a1b2c3d Wire it", "abc-1", "src/a.py")
     assert text.split("\n")[1] == "Navigated the viewer to src/a.py."
+
+
+# -- the probe cache ----------------------------------------------------------------
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_probe_cache_probes_once_until_the_ttl_passes():
+    calls = []
+    clock = _Clock()
+
+    def fake_probe():
+        calls.append(clock.now)
+        return hunkctl.Probe("/usr/bin/hunk", (0, 20, 1))
+
+    cache = hunkctl.ProbeCache(probe=fake_probe, ttl=30.0, clock=clock)
+    assert cache.result is None and cache.stale
+    assert cache.ok() is True  # never filled: probes on the spot
+    assert calls == [100.0]
+    assert not cache.stale
+    clock.now = 129.0
+    assert cache.ok() is True and calls == [100.0]  # answered from the cache
+    clock.now = 130.0
+    assert cache.stale  # due, but ok() still never re-probes on its own
+    assert cache.ok() is True and calls == [100.0]
+    assert cache.refresh().status == "ok"
+    assert calls == [100.0, 130.0] and not cache.stale
+
+
+@pytest.mark.parametrize(
+    ("probe", "expected"),
+    [
+        (hunkctl.Probe(None, None), False),
+        (hunkctl.Probe("/usr/bin/hunk", None), False),
+        (hunkctl.Probe("/usr/bin/hunk", (0, 19, 9)), False),
+        (hunkctl.Probe("/usr/bin/hunk", (0, 20, 0)), True),
+        (hunkctl.Probe("/usr/bin/hunk", (1, 2)), True),
+    ],
+)
+def test_probe_cache_ok_is_the_probes_status(probe, expected):
+    cache = hunkctl.ProbeCache(probe=lambda: probe, clock=_Clock())
+    assert cache.ok() is expected
+    assert cache.result == probe
+
+
+def test_probe_cache_follows_an_install_on_refresh():
+    """hunk installed after the first probe: the next refresh (the app's,
+    once the TTL passed) turns the tool on for the next session."""
+    answers = [hunkctl.Probe(None, None), hunkctl.Probe("/usr/bin/hunk", (0, 20, 1))]
+    cache = hunkctl.ProbeCache(probe=lambda: answers.pop(0), clock=_Clock())
+    assert cache.ok() is False
+    cache.refresh()
+    assert cache.ok() is True

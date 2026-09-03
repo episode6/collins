@@ -73,6 +73,42 @@ def test_enabled_tools_serves_only_what_is_switched_on():
     ]
 
 
+def test_enabled_tools_leaves_show_diff_out_without_hunk():
+    """The tool drives hunk; a machine without it is never told the tool
+    exists (the author's ask on PR 487), whatever the switch says."""
+    served = mcptools.enabled_tools(lambda _name: True, lambda _name: False)
+    assert "show_diff" not in [tool["name"] for tool in served]
+    assert len(served) == len(mcptools.TOOLS) - 1
+    served = mcptools.enabled_tools(lambda _name: True, lambda _name: True)
+    assert served == mcptools.TOOLS
+
+
+def test_availability_is_asked_only_about_the_tools_that_need_hunk():
+    asked = []
+
+    def available(name):
+        asked.append(name)
+        return False
+
+    served = mcptools.enabled_tools(lambda _name: True, available)
+    assert asked == ["show_diff"]
+    assert mcptools.REQUIRES_HUNK == {"show_diff"}
+    assert [tool["name"] for tool in served] == [
+        tool["name"] for tool in mcptools.TOOLS if tool["name"] != "show_diff"
+    ]
+
+
+def test_switch_off_beats_availability():
+    """A switched-off tool is never asked about: the switch is the user's
+    word and comes first."""
+    asked = []
+    served = mcptools.enabled_tools(
+        lambda name: name != "show_diff", lambda name: asked.append(name) or True
+    )
+    assert asked == []
+    assert "show_diff" not in [tool["name"] for tool in served]
+
+
 def test_enabled_tools_can_serve_nothing_at_all():
     assert mcptools.enabled_tools(lambda _name: False) == []
     assert mcptools.enabled_tools(lambda _name: True) == mcptools.TOOLS

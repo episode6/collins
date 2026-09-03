@@ -184,7 +184,9 @@ that dialog has been answered.
   tools — `set_session_title`, `open_in_editor`, `show_diff`,
   `show_image`, `notify_user`, `attach_pr`, `start_session`,
   `read_terminal`, `run_in_terminal` — and a session sees exactly the ones
-  you left on.
+  you left on (`show_diff` only while hunk is installed, too: Collins
+  probes for it at most every 30 s and leaves the tool off the list
+  otherwise).
 
 The **Model list** row beside the pickers is the odd one out: a Models API
 query that spends no tokens, which its subtitle says.

@@ -52,6 +52,7 @@ import re
 import shutil
 import signal
 import subprocess
+import time
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 
@@ -111,6 +112,12 @@ INSTALL_COMMANDS: tuple[str, ...] = (
 # but a cold node start behind the npm wrapper can take a few.
 RESOLVE_DELAYS_MS: tuple[int, ...] = (500, 1000, 2000, 4000, 8000)
 PROBE_TIMEOUT_S = 5.0  # `hunk --version` (node startup included)
+# How long ProbeCache trusts one answer: the show_diff tool is offered to a
+# session only while a hunk the page can drive is on PATH, and tools/list
+# is asked per session start — a `hunk --version` each time would be a
+# node start per session. Half a minute means an install (or `hunk
+# update`) reaches the next session started after it without a restart.
+PROBE_CACHE_TTL_S = 30.0
 SESSION_TIMEOUT_S = 10.0  # session list / get / reload
 GIT_TIMEOUT_S = 5.0  # commit_subject's `git log -1`, resolve_commit's `git rev-parse`
 # How long show_diff gives the whole call — the page opening, hunk spawning,
@@ -313,6 +320,60 @@ def probe(which: Callable[[str], str | None] = shutil.which, run=subprocess.run)
     if getattr(result, "returncode", 1) != 0:
         return Probe(path, None)
     return Probe(path, parse_version(result.stdout or ""))
+
+
+class ProbeCache:
+    """The last `probe()` answer, kept for PROBE_CACHE_TTL_S: what gates the
+    show_diff tool's place in a session's tools/list (mcptools.enabled_tools
+    through App._mcp_tool_available).
+
+    `ok` answers from what is known — the cached probe's status is "ok" —
+    and never runs anything; `stale` says when a fresh `refresh()` is due,
+    which the app runs on a thread (the probe is a subprocess). The one
+    exception is a cache that has never been filled: `ok` then probes on
+    the spot rather than answer wrong, so the first session started before
+    the startup refresh landed still sees the tool. No hook from the git
+    page's own probes or the install card's *Check again*: the TTL covers
+    them — a session already running keeps the list it was handed at
+    startup anyway (see tokensettings.MCP_DESCRIPTION), so the tool
+    appearing reaches only the next session started, and that one is at
+    most half a minute away. *probe* and *clock* are injectable for the
+    tests."""
+
+    def __init__(
+        self,
+        probe: Callable[[], Probe] = probe,
+        ttl: float = PROBE_CACHE_TTL_S,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._probe = probe
+        self._ttl = ttl
+        self._clock = clock
+        self._result: Probe | None = None
+        self._at: float | None = None
+
+    @property
+    def result(self) -> Probe | None:
+        """The last answer, None before the first refresh."""
+        return self._result
+
+    @property
+    def stale(self) -> bool:
+        """Whether a refresh is due: never filled, or older than the TTL."""
+        return self._at is None or self._clock() - self._at >= self._ttl
+
+    def refresh(self) -> Probe:
+        """Run the probe now and remember it. Meant for a worker thread."""
+        result = self._probe()
+        self._result, self._at = result, self._clock()
+        return result
+
+    def ok(self) -> bool:
+        """Whether the last probe found a hunk the page can drive (status
+        "ok"); a never-filled cache probes first."""
+        if self._result is None:
+            self.refresh()
+        return self._result.status == "ok"
 
 
 def safe_ref(name: object) -> bool:

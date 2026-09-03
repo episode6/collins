@@ -2205,9 +2205,17 @@ class App(Adw.Application):
         # queue of pending spawns, its head the one running.
         self._start_session_chains: dict[str, deque] = {}
         app_id = self.get_application_id()
+        # Whether hunk is on PATH, for show_diff's place in the list (see
+        # _mcp_tool_available); warmed now, on a thread, so the first
+        # session's tools/list finds an answer waiting.
+        self._hunk_probe = hunkctl.ProbeCache()
+        self._hunk_probing = False
+        self._refresh_hunk_probe()
         service = mcpserver.SessionToolService(
             mcptools.socket_path(app_id),
-            list_tools=lambda: mcptools.enabled_tools(self._mcp_tool_enabled),
+            list_tools=lambda: mcptools.enabled_tools(
+                self._mcp_tool_enabled, self._mcp_tool_available
+            ),
             dispatch=self._mcp_dispatch,
         )
         try:
@@ -2247,6 +2255,34 @@ class App(Adw.Application):
         keeps the tool list it was handed at startup, so the switch reaching
         a running session at all depends on this being asked again."""
         return bool(self.state.get_setting(mcptools.tool_setting_key(name)))
+
+    def _mcp_tool_available(self, _name: str) -> bool:
+        """Whether the program a tool drives is here: for the tools in
+        mcptools.REQUIRES_HUNK (the only ones this is asked about), a hunk
+        of hunkctl.MIN_VERSION or newer on PATH. Answered from the probe
+        cache, never by a subprocess on the main loop — a stale cache
+        answers with what it has and is refreshed on a thread behind the
+        answer, so the next list (the next session started, at least
+        PROBE_CACHE_TTL_S later) sees an install or a removal. The one
+        blocking probe is a cache never filled (hunkctl.ProbeCache.ok)."""
+        if self._hunk_probe.stale:
+            self._refresh_hunk_probe()
+        return self._hunk_probe.ok()
+
+    def _refresh_hunk_probe(self) -> None:
+        """`hunk --version` on a daemon thread into the probe cache; one at a
+        time (a second ask while one is out is answered by the one out)."""
+        if self._hunk_probing:
+            return
+        self._hunk_probing = True
+
+        def work() -> None:
+            try:
+                self._hunk_probe.refresh()
+            finally:
+                self._hunk_probing = False
+
+        threading.Thread(target=work, name="hunk-probe", daemon=True).start()
 
     def _mcp_tab_for_pid(self, shim_pid: int) -> tuple[MainWindow, TerminalTab] | None:
         """The window and tab whose terminal the calling shim descends from.

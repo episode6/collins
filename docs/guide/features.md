@@ -626,6 +626,8 @@ is running in:
   focused; the reply tells the agent what loaded and the hunk session id,
   and that everything else in the viewer (moving between hunks,
   highlighting lines, comments) is `hunk session …` from its own shell.
+  Sessions are offered the tool only while hunk is on the `PATH` (checked
+  at most every 30 s), so an agent on a machine without it never sees it.
 - **`show_image(path)`** — show a screenshot, plot, or render in the in-app
   lightbox. An `http(s)` URL works too: Collins downloads it and shows the
   copy.
