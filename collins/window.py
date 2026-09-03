@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-02. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -1335,6 +1335,7 @@ class MainWindow(Adw.ApplicationWindow):
             "clear-panel": lambda *_: self._clear_panel(),
             "toggle-composer": lambda *_: self._toggle_composer(),
             "toggle-attachments": lambda *_: self._toggle_attachments(),
+            "toggle-git": lambda *_: self._toggle_git(),
             "open-pr-page": lambda *_: self._open_pr_page(),
             # Deliberately no default accelerator or menu surface: the
             # dock's visible affordances (per-tab drag handles, drop
@@ -4701,6 +4702,22 @@ class MainWindow(Adw.ApplicationWindow):
         tab = self._current_terminal_tab()
         if tab is not None:
             tab.toggle_attachments()
+
+    def _toggle_git(self) -> None:
+        """F6: raise this tab's git page — hunk over the session's working
+        tree, index or branch — or, pressed while the cursor is in it, lower
+        it. As with the composer, the toggle turns on focus: a page behind
+        another panel tab or in a hidden strip is one the press was asking
+        to *see*, so it comes forward instead of closing.
+
+        Outside a git repository there is nothing to show, and the tab says
+        so in the terminal (the F7 precedent): a shortcut that silently does
+        nothing is indistinguishable from one that was never installed."""
+        tab = self._current_terminal_tab()
+        if tab is None:
+            return
+        if not tab.toggle_git_page():
+            tab.feed_message(_("This session isn't in a git repository"))
 
     def _open_pr_page(self) -> None:
         """F7: open — or front — the page for the pull request this session

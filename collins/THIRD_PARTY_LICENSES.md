@@ -103,6 +103,13 @@ runs whatever `claude` it finds on your `PATH`, under Anthropic's own terms
 Anthropic are trademarks of Anthropic PBC. Collins is an unofficial community tool, not
 affiliated with or endorsed by Anthropic.
 
+## hunk
+
+The git page shows diffs through **hunk** — © Ben Vinegar — MIT License —
+[modem-dev/hunk](https://github.com/modem-dev/hunk), [hunk.dev](https://hunk.dev). Collins
+neither bundles nor redistributes it: it runs whatever `hunk` it finds on your `PATH`
+(0.20 or newer), and shows how to install one when there is none.
+
 ## Documentation site
 
 The docs under `docs/` are built with **VitePress** — © Yuxi (Evan) You and VitePress

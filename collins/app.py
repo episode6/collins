@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-02. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -29,6 +29,7 @@ from . import (
     desktopentry,
     editorfiles,
     ghwelcome,
+    gitpage,
     is_debug_app_id,
     keybindings,
     keymap,
@@ -1077,6 +1078,14 @@ popover.menu button.open-with-row:hover {
   opacity: 0.55;
 }
 
+/* git page: hunk under a one-row header (branch, breadcrumb, the switch) */
+.git-header {
+  padding: 4px 10px;
+}
+.git-breadcrumb {
+  opacity: 0.7;
+}
+
 /* native PR view panel page: header, conversation cards, label pills */
 .pr-view-header {
   padding: 6px 10px;
@@ -2030,6 +2039,9 @@ class App(Adw.Application):
         providers.MCP_CONFIG_PATH = config
 
     def do_shutdown(self) -> None:
+        # The git pages' hunks first, while their ptys are still open: a
+        # hunk left to the pty's hangup strands its viewer (see gitpage).
+        gitpage.shutdown_all()
         # Stops accepting and unlinks the socket; mcp.json stays behind on
         # purpose — the app-id-keyed path is stable across restarts, so a
         # session that outlives this run reconnects to the next one, and

@@ -7,8 +7,14 @@ its trunk (`default_branch`) or the repository's page on GitHub
 (`github_url`) is a couple of stat calls and one small file read, with no
 `git` processes spawned — cheap enough for the tab footer's 2s poll, and for
 a context menu that asks on every right-click. Asking whether the tree is
-dirty (`has_changes`) or which entries are ignored (`ignored_names`) can't be
-answered that way, so those shell out and are only ever asked on demand.
+dirty (`has_changes`, `change_summary`) or which entries are ignored
+(`ignored_names`) can't be answered that way, so those shell out and are only
+ever asked on demand.
+
+The git page (gitpage) reads the same files for its freshness check: where
+the working tree root is (`repo_root`), when the index last moved
+(`index_mtime`), what HEAD and the parent branch point at (`head_sha`,
+`resolve_branch`, `base_ref`), folded into one comparable `tree_signature`.
 """
 
 from __future__ import annotations
@@ -161,11 +167,53 @@ def has_changes(cwd: str | Path | None) -> bool:
     menu item claiming there is something to open a pull request *for*, so
     anything short of git saying so means no.
     """
+    status = _status_porcelain(cwd)
+    return status is not None and bool(status.strip())
+
+
+def change_summary(cwd: str | Path | None) -> tuple[bool, bool]:
+    """(staged, unstaged) for the repo enclosing *cwd*, from one `git status`.
+
+    *staged* is any entry with a status in the index column (the first of
+    the two porcelain columns), *unstaged* any entry with one in the
+    worktree column or an untracked (`??`) entry — the split the git page's
+    footer entry point opens on (see hunkctl.initial_mode: the working tree
+    while anything in it is dirty, the index when only that is). The same
+    `--no-optional-locks status --porcelain` as `has_changes`, with the same
+    2 s budget, and like it asked on demand only — never from the poll.
+
+    (False, False) whenever git can't answer, for the same reason
+    `has_changes` says False: a wrong "staged" would open the page on the
+    index when the tree is what changed.
+    """
+    status = _status_porcelain(cwd)
+    if status is None:
+        return False, False
+    staged = unstaged = False
+    for line in status.splitlines():
+        if len(line) < 2:
+            continue
+        if line.startswith("??"):
+            unstaged = True
+            continue
+        if line.startswith("!!"):
+            continue  # ignored entries only show up with --ignored, but be safe
+        if line[0] not in " ?!":
+            staged = True
+        if line[1] != " ":
+            unstaged = True
+    return staged, unstaged
+
+
+def _status_porcelain(cwd: str | Path | None) -> str | None:
+    """`git --no-optional-locks status --porcelain` in *cwd*, or None when git
+    can't answer: no cwd, no git on PATH, not a repository, a non-zero exit,
+    a run longer than _STATUS_TIMEOUT_S."""
     if not cwd or not Path(cwd).is_dir():
-        return False
+        return None
     git = shutil.which("git")
     if git is None:
-        return False
+        return None
     try:
         result = subprocess.run(
             [git, "--no-optional-locks", "status", "--porcelain"],
@@ -176,8 +224,8 @@ def has_changes(cwd: str | Path | None) -> bool:
         )
     except (OSError, subprocess.SubprocessError) as err:
         log.debug("gitinfo: git status in %s failed: %s", cwd, err)
-        return False
-    return result.returncode == 0 and bool(result.stdout.strip())
+        return None
+    return result.stdout if result.returncode == 0 else None
 
 
 def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
@@ -221,11 +269,115 @@ def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
     return {name for name in result.stdout.split("\0") if name}
 
 
+def repo_root(cwd: str | Path | None) -> Path | None:
+    """The working tree root enclosing *cwd*: the directory holding the
+    nearest `.git` entry (a directory, or a worktree/submodule pointer file).
+    None outside a repository."""
+    found = _find_git_entry(cwd)
+    return found[0] if found else None
+
+
+def index_mtime(cwd: str | Path | None) -> int | None:
+    """st_mtime_ns of the repository's index file (in the worktree's own git
+    dir, not the common dir). None when there is no index yet or it can't be
+    stat'd."""
+    git_dir = _git_dir(cwd)
+    if git_dir is None:
+        return None
+    try:
+        return (git_dir / "index").stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def head_sha(cwd: str | Path | None) -> str | None:
+    """The commit HEAD points at: a symbolic HEAD resolved through the loose
+    ref or packed-refs in the common dir, a detached HEAD's own hash. None
+    outside a repository or for an unborn branch."""
+    git_dir = _git_dir(cwd)
+    if git_dir is None:
+        return None
+    try:
+        head = (git_dir / "HEAD").read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    if head.startswith(_REF_PREFIX):
+        ref = head[len(_REF_PREFIX) :].strip()
+        return _ref_sha(_common_dir(git_dir), ref) if ref else None
+    return head or None
+
+
+def resolve_branch(cwd: str | Path | None, name: str | None) -> tuple[str, str] | None:
+    """(*target*, sha) for a branch a diff can name: ("main", sha) when
+    refs/heads/<name> exists, else ("<remote>/<name>", sha) for the first
+    remote in _REMOTE_ORDER rank that has refs/remotes/<remote>/<name>. None
+    when neither exists, outside a repository, or for a *name* that isn't
+    safe as an argument (empty, whitespace, leading "-", containing "..").
+
+    The remote fallback is what lets a clone that never checked `main` out
+    locally still diff against it: `origin/main` is a ref git knows just as
+    well. The name is what ends up in hunk's argv, hence the gate on it.
+    """
+    if not _safe_branch_name(name):
+        return None
+    git_dir = _git_dir(cwd)
+    if git_dir is None:
+        return None
+    common = _common_dir(git_dir)
+    sha = _ref_sha(common, f"{_BRANCH_REF_PREFIX}{name}")
+    if sha:
+        return name, sha
+    remotes = _remote_urls(common / "config")
+    for remote in sorted(remotes, key=_remote_rank):
+        sha = _ref_sha(common, f"refs/remotes/{remote}/{name}")
+        if sha:
+            return f"{remote}/{name}", sha
+    return None
+
+
+def base_ref(cwd: str | Path | None, base: str | None) -> str | None:
+    """The sha *base* resolves to (see resolve_branch), or None."""
+    resolved = resolve_branch(cwd, base)
+    return resolved[1] if resolved else None
+
+
+def tree_signature(cwd: str | Path | None, base: str | None) -> tuple | None:
+    """(index_mtime(cwd), head_sha(cwd), base_ref(cwd, base)) — what the git
+    page compares on the footer's 2 s poll; any element moving means the
+    loaded diff is stale. None outside a repository."""
+    if _git_dir(cwd) is None:
+        return None
+    return index_mtime(cwd), head_sha(cwd), base_ref(cwd, base)
+
+
+def _safe_branch_name(name: str | None) -> bool:
+    """Whether *name* can be handed to git as a revision without it reading
+    as an option or a range: no empty or blank names, no leading dash, no
+    `..` (which would make a range of it), no whitespace."""
+    if not name or any(ch.isspace() for ch in name):
+        return False
+    return not name.startswith("-") and ".." not in name
+
+
 def _git_dir(cwd: str | Path | None) -> Path | None:
     """The git directory of the repository enclosing *cwd* — the nearest
     `.git` walking upwards, resolved through the pointer file a worktree or
     submodule has there instead of a directory. None outside a repository, and
     for a pointer file that doesn't point anywhere."""
+    found = _find_git_entry(cwd)
+    if found is None:
+        return None
+    _root, git = found
+    if git.is_dir():
+        return git
+    return _resolve_gitdir_pointer(git)  # worktree or submodule: "gitdir: <real git dir>"
+
+
+def _find_git_entry(cwd: str | Path | None) -> tuple[Path, Path] | None:
+    """(working tree root, its `.git` entry) for the repository enclosing
+    *cwd*: the nearest directory walking upwards that has a `.git` — a
+    directory in an ordinary checkout, a pointer file in a worktree or
+    submodule. None outside a repository."""
     if not cwd:
         return None
     start = Path(cwd)
@@ -233,10 +385,8 @@ def _git_dir(cwd: str | Path | None) -> Path | None:
         return None
     for directory in (start, *start.parents):
         git = directory / ".git"
-        if git.is_dir():
-            return git
-        if git.is_file():  # worktree or submodule: "gitdir: <real git dir>"
-            return _resolve_gitdir_pointer(git)
+        if git.is_dir() or git.is_file():
+            return directory, git
     return None
 
 
@@ -371,18 +521,38 @@ def _has_local_branch(common_dir: Path, name: str) -> bool:
     `git gc` moves it."""
     if (common_dir / "refs" / "heads" / name).is_file():
         return True
+    return _packed_ref(common_dir, f"{_BRANCH_REF_PREFIX}{name}") is not None
+
+
+def _ref_sha(common_dir: Path, ref: str) -> str | None:
+    """The hash *ref* (`refs/heads/main`, `refs/remotes/origin/main`) holds:
+    the loose ref file first, then `packed-refs`. None for a ref that exists
+    nowhere, and for a loose ref that is itself symbolic (git writes those
+    only for HEADs, which never come through here)."""
+    try:
+        text = (common_dir / ref).read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        text = ""
+    if text and not text.startswith(_REF_PREFIX):
+        return text
+    return _packed_ref(common_dir, ref)
+
+
+def _packed_ref(common_dir: Path, ref: str) -> str | None:
+    """The hash `packed-refs` records for *ref*, or None. Peeled lines (`^`)
+    and the header are skipped; the first match wins, as git's own reader
+    takes the file as sorted."""
     try:
         packed = (common_dir / "packed-refs").read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return False
-    wanted = f"{_BRANCH_REF_PREFIX}{name}"
+        return None
     for line in packed.splitlines():
         if line.startswith(("#", "^")):
             continue
         parts = line.split(" ", 1)
-        if len(parts) == 2 and parts[1].strip() == wanted:
-            return True
-    return False
+        if len(parts) == 2 and parts[1].strip() == ref:
+            return parts[0].strip() or None
+    return None
 
 
 def _read_head(git_dir: Path) -> str | None:

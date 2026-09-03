@@ -107,6 +107,10 @@ BINDINGS: tuple[Binding, ...] = (
         ("<Control>apostrophe",),
         GROUP_PANELS,
     ),
+    # F6, not the Ctrl+Shift+G the spec first named: that chord is the
+    # terminal's find bar, and the house rule for a surface beside the
+    # terminal is a function key anyway (F7 PR page, F8 editor, F9 sidebar).
+    Binding("win.toggle-git", N_("Show/hide the git page"), ("F6",), GROUP_PANELS),
     Binding(
         "win.swap-panel",
         N_("Swap the panel's sides"),

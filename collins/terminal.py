@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-02. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -32,6 +32,7 @@ from . import (  # noqa: E402
     editor,
     editorfiles,
     footerapps,
+    hunkctl,
     keybindings,
     keymap,
     modelmenu,
@@ -49,7 +50,15 @@ from .composer import ComposerPage, ComposerView  # noqa: E402
 from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
 from .flash import flash  # noqa: E402
 from .formatting import display_path  # noqa: E402
-from .gitinfo import current_branch, has_changes  # noqa: E402
+from .gitinfo import (  # noqa: E402
+    change_summary,
+    current_branch,
+    default_branch,
+    has_changes,
+    repo_root,
+    resolve_branch,
+)
+from .gitpage import GitPage  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 from .lightbox import present_image_lightbox  # noqa: E402
 from .linkpatterns import (  # noqa: E402
@@ -1475,6 +1484,7 @@ class TerminalTab(Gtk.Box):
         self._attachments_view: attachpanel.AttachmentsView | None = None
         self._attachments_revealer: Gtk.Revealer | None = None
         self._attachments_page: attachpanel.AttachmentsPage | None = None  # docked
+        self._git_page: GitPage | None = None  # one per tab, nulled by _on_git_page_closed
         # An open asked for but not yet on screen: the panel is revealed from
         # an idle, so without this a second click in the same frame reads as
         # "not open yet" and opens it again instead of closing it.
@@ -2244,7 +2254,17 @@ class TerminalTab(Gtk.Box):
         self._branch_label.add_css_class("caption")
         self._branch_label.add_css_class("dim-label")
         self._branch_label.set_visible(False)
-        enable_copy_on_click(self._branch_label, lambda: self._footer_branch, lambda b: f"⎇ {b}")
+        # A click opens the git page (hunk over this tree); the copy the
+        # label used to be moves to the right button, so nothing is lost.
+        enable_copy_on_click(
+            self._branch_label,
+            lambda: self._footer_branch,
+            lambda b: f"⎇ {b}",
+            button=Gdk.BUTTON_SECONDARY,
+        )
+        open_git = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
+        open_git.connect("released", lambda *_: self.open_git_page())
+        self._branch_label.add_controller(open_git)
 
         # The PR chips trail the branch, sharing its leading divider — one per
         # PR the session has opened, oldest first, so the row reads in the
@@ -2381,12 +2401,24 @@ class TerminalTab(Gtk.Box):
         if branch != self._footer_branch:
             self._footer_branch = branch
             self._branch_label.set_text(f"⎇ {branch}" if branch else "")
-            self._branch_label.set_tooltip_text(copy_tooltip(branch) if branch else None)
+            self._branch_label.set_tooltip_text(self._branch_tooltip(branch) if branch else None)
             self._branch_label.set_visible(branch is not None)
             # The chips are the session's history, so a checkout doesn't retire
             # any of them; it only makes the button worth pressing again.
             self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
+        # The git page's freshness check rides this same 2 s tick — but only
+        # for a page somebody can see; one in a hidden strip catches up on
+        # its next map.
+        page = self._git_page
+        if page is not None and page.get_mapped():
+            page.poll_tick()
+
+    @staticmethod
+    def _branch_tooltip(branch: str) -> str:
+        """The branch label's tooltip: the branch, then both things a click
+        can do to it (see the footer's gestures)."""
+        return f"⎇ {branch}\n" + _("Click to open the git page") + "\n" + _("Right-click to copy")
 
     def _maybe_follow_editor(self, cwd: str | None) -> None:
         """Keep the editor pointed at wherever the agent is actually working.
@@ -3497,6 +3529,12 @@ class TerminalTab(Gtk.Box):
             # there to avoid.
             if getattr(page, "page_kind", None) == "pr" and page.get_mapped():
                 page.refresh_if_stale()
+        # The git page compares the tree's signature on the footer's 2 s tick
+        # anyway; asking now makes the commit the agent just made show up on
+        # the finish edge instead of up to two seconds later.
+        page = self._git_page
+        if page is not None and page.get_mapped():
+            page.poll_tick()
 
     # -- graceful close ----------------------------------------------------
 
@@ -5275,17 +5313,127 @@ class TerminalTab(Gtk.Box):
     def _make_pr_page(self, pr: PullRequest) -> PrViewPage:
         return PrViewPage(pr, host_factory=self._pr_action_host, pr_store=self._pr_store)
 
+    # -- the git page ------------------------------------------------------
+
+    def open_git_page(self, mode: str | None = None, focus: bool = True) -> bool:
+        """Open — or front — this session's git page: hunk beside the
+        terminal, over the agent's working tree.
+
+        One page per tab: a second ask fronts the page (revealing its strip
+        if hidden) rather than opening a twin. *mode* None means a page
+        already open keeps what it shows, and a new one opens on what the
+        tree suggests — unstaged while anything in the tree is dirty, staged
+        when only the index is (`hunkctl.initial_mode`, fed by one `git
+        status` on the click; the poll never pays for one). An explicit
+        *mode* is loaded either way.
+
+        False, doing nothing, when the agent's cwd is not inside a git
+        repository — the caller announces it (the footer's branch label,
+        the other way in, is already hidden then). *focus* False shows the
+        page without moving the keyboard, for a caller nobody clicked.
+        """
+        cwd = self.current_agent_cwd()
+        if repo_root(cwd) is None:
+            return False
+        page = self._git_page
+        if page is None:
+            if mode is None:
+                mode = hunkctl.initial_mode(*change_summary(cwd))
+            page = GitPage(
+                cwd_provider=self.current_agent_cwd,
+                parent_provider=self._git_parent_branch,
+                on_close=self._dock.close_page,
+                on_closed=self._on_git_page_closed,
+                loaded=mode,
+            )
+            self._git_page = page
+            self._dock.open_page(page, focus=focus)
+        else:
+            self._dock.reveal_page(page, focus=focus)
+            if mode is not None:
+                page.load(mode)
+        return True
+
+    def toggle_git_page(self) -> bool:
+        """F6: close the git page when the keyboard is in it, else open or
+        front it. False only when there is no repository to open a page for
+        (see `open_git_page`)."""
+        if self.git_page_focused():
+            self._dock.close_page(self._git_page)
+            return True
+        return self.open_git_page()
+
+    def git_page_focused(self) -> bool:
+        """Whether the git page exists and holds the focus."""
+        page = self._git_page
+        return page is not None and page.has_page_focus()
+
+    def _git_parent_branch(self, cwd: str | None) -> str | None:
+        """The branch the current one is measured against — what the page's
+        "vs" load diffs HEAD from. The attached PR's base first (a stacked
+        PR is measured against the branch it stacks on, not trunk), then
+        the repository's default branch.
+
+        The tab's own PR records (prstatus.PullRequest) carry no base ref —
+        only a fetched PR page does (prdetail's `baseRefName`) — so the base
+        is what the newest PR's open page has learned, and only when the
+        tree can name it (`resolve_branch`: a local or remote-tracking ref);
+        a base nothing here can diff against falls through to the default
+        branch rather than disabling the load. Until the git page fetches
+        the base itself (the spec's second phase), a tab with no PR page
+        open measures against the default branch."""
+        base = self._pr_base_ref()
+        if base and resolve_branch(cwd, base) is not None:
+            return base
+        return default_branch(cwd)
+
+    def _pr_base_ref(self) -> str | None:
+        """The base branch of this session's newest PR, as its open page has
+        fetched it; None with no PR, no page for it, or a page still loading."""
+        if not self._footer_prs:
+            return None
+        page = self._find_pr_page(self._footer_prs[-1].url)
+        return page.base_ref if page is not None else None
+
+    def _on_git_page_closed(self, page: GitPage) -> None:
+        """The page's `page_closed` hook: drop the reference, guarded on
+        identity so a stale page closing late can't null a newer one."""
+        if page is self._git_page:
+            self._git_page = None
+
+    def _restore_git_page(self, page: dict) -> GitPage | None:
+        """A saved layout's git page, rebuilt in the mode it was saved in
+        (anything the saved dict can't name reads as unstaged — the layout
+        is a preference, so restore never refuses on it). One page per tab:
+        a duplicate entry (a hand-edited layout file) is refused, which
+        drops it from the restored strip. The page spawns hunk on its first
+        map, so a restored page in a hidden strip costs nothing until it is
+        shown."""
+        if self._git_page is not None:
+            return None
+        self._git_page = GitPage(
+            cwd_provider=self.current_agent_cwd,
+            parent_provider=self._git_parent_branch,
+            on_close=self._dock.close_page,
+            on_closed=self._on_git_page_closed,
+            loaded=hunkctl.decode_state(page),
+        )
+        return self._git_page
+
     def _make_panel_page(self, page: dict):
         """The dock's non-shell factory for layout restore (see
         paneldock.set_page_factory). A pr page's URL is persisted state and
         therefore untrusted, so it re-passes the same gate every PR URL
         passes before reaching gh; a composer entry conjures a fresh empty
-        docked composer (placement persists, drafts never), and an
-        attachments entry a panel over this session's own saved list."""
+        docked composer (placement persists, drafts never), an attachments
+        entry a panel over this session's own saved list, and a git entry
+        the page in the mode it was saved in."""
         if page.get("kind") == "composer":
             return self._restore_composer_page()
         if page.get("kind") == "attachments":
             return self._restore_attachments_page()
+        if page.get("kind") == "git":
+            return self._restore_git_page(page)
         if page.get("kind") != "pr":
             return None
         pr = parse_pr_url(page.get("url"))
@@ -5476,7 +5624,7 @@ class TerminalTab(Gtk.Box):
         layout = panellayout.validate(layout)
         if not layout:
             return
-        layout = panellayout.prune(layout, {"shell", "pr", "composer", "attachments"})
+        layout = panellayout.prune(layout, {"shell", "pr", "composer", "attachments", "git"})
         mode = layout.get("mode")
         if mode in ("bottom", "right"):
             self._dock.set_home_position(mode)

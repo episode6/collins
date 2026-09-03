@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-01. Full change history: git log for this file.
+fork. Last modified: 2026-09-02. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -223,8 +223,11 @@ widget behind GNOME Terminal and Ptyxis. The app spawns your `$SHELL` and types
 the agent's resume command (e.g. `claude --resume <id>`) into it, so your
 aliases and environment apply and you drop back to a prompt when the agent
 exits. The secondary panel terminal is another VTE running a plain shell —
-the same widget, minus the agent. (The new-chat screen, the pull request
-page and a session replay are tabs with no terminal in them.)
+the same widget, minus the agent. The git page is a third VTE, running
+[hunk](https://hunk.dev) instead of a shell — Collins drives it over hunk's
+session API (`hunk session reload`) to swap what it shows in place. (The
+new-chat screen, the pull request page and a session replay are tabs with
+no terminal in them.)
 
 ## Notifications
 
@@ -341,6 +344,8 @@ collins/
 ├── mcptools.py       # the tools it offers (notify, spawn, show_image, …)
 ├── prstore.py        # single source of truth for pull request state (gh)
 ├── prview.py         # the in-app pull request page
+├── gitpage.py        # the git page: hunk in a VTE, driven over its session API
+├── hunkctl.py        # what the git page decides without a widget: argv, titles, session ids
 ├── practions.py      # what a PR offers (merge, review, …) and the gh calls
 ├── statusicon.py     # the status icon: a StatusNotifierItem over D-Bus
 ├── traymodel.py      # what the icon shows (badge, menu) — toolkit-free
@@ -354,7 +359,7 @@ collins/
 ├── updatecheck.py    # the once-a-day look at GitHub's latest release
 ├── tokensettings.py  # the Token use rows: what runs Claude for you
 ├── welcome.py        # the first-launch dialog: those rows, and where claude is
-├── gitinfo.py        # git branch for the tab footer; is the tree dirty?
+├── gitinfo.py        # git branch, trunk and freshness for the footer and the git page
 ├── transcript.py     # tail transcripts for touched files and PR links
 ├── dialogs.py        # rename / emoji / confirm / details / MCP dialogs
 ├── prefs.py          # preferences dialog

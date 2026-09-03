@@ -1,14 +1,28 @@
 """Tests for gitinfo: current_branch, default_branch and github_url, which are
-pure filesystem parsing and need no git, and has_changes/ignored_names, the calls that shell
-out to it."""
+pure filesystem parsing and need no git, the git page's readers (repo_root,
+index_mtime, head_sha, resolve_branch, tree_signature — files only, too), and
+has_changes/change_summary/ignored_names, the calls that shell out to it."""
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from collins.gitinfo import current_branch, default_branch, github_url, has_changes, ignored_names
+from collins.gitinfo import (
+    change_summary,
+    current_branch,
+    default_branch,
+    github_url,
+    has_changes,
+    head_sha,
+    ignored_names,
+    index_mtime,
+    repo_root,
+    resolve_branch,
+    tree_signature,
+)
 
 
 def make_repo(root: Path, head: str = "ref: refs/heads/main\n") -> Path:
@@ -488,3 +502,253 @@ def test_a_real_worktrees_config(repo, tmp_path):
     worktree = tmp_path / "wt"
     _git(repo, "worktree", "add", "-q", "-b", "wt-branch", str(worktree))
     assert github_url(worktree) == "https://github.com/episode6/collins"
+
+
+# -- repo_root ----------------------------------------------------------------
+
+
+def test_repo_root_at_root_and_below(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    sub = repo / "a" / "b"
+    sub.mkdir(parents=True)
+    assert repo_root(repo) == repo
+    assert repo_root(sub) == repo
+
+
+def test_repo_root_of_a_worktree_is_the_worktree(tmp_path):
+    """The directory holding the pointer file, not the main checkout the
+    pointer names: hunk is spawned there and diffs that tree."""
+    main = make_repo(tmp_path / "main")
+    wt_git_dir = main / ".git" / "worktrees" / "wt"
+    wt_git_dir.mkdir(parents=True)
+    (wt_git_dir / "HEAD").write_text("ref: refs/heads/wt-branch\n")
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / ".git").write_text(f"gitdir: {wt_git_dir}\n")
+    assert repo_root(worktree) == worktree
+    assert repo_root(worktree / "missing") is None
+
+
+def test_repo_root_outside_a_repository(tmp_path):
+    assert repo_root(tmp_path) is None
+    assert repo_root(None) is None
+    assert repo_root("") is None
+
+
+# -- index_mtime --------------------------------------------------------------
+
+
+def test_index_mtime_reads_the_index(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    assert index_mtime(repo) is None  # no index yet
+    index = repo / ".git" / "index"
+    index.write_bytes(b"DIRC")
+    os.utime(index, ns=(1_000_000_000, 1_234_567_890_123))
+    assert index_mtime(repo) == 1_234_567_890_123
+    assert index_mtime(tmp_path) is None
+
+
+def test_index_mtime_is_the_worktrees_own(tmp_path):
+    """A linked worktree keeps its own index under .git/worktrees/<name>."""
+    main = make_repo(tmp_path / "main")
+    (main / ".git" / "index").write_bytes(b"main")
+    wt_git_dir = main / ".git" / "worktrees" / "wt"
+    wt_git_dir.mkdir(parents=True)
+    (wt_git_dir / "HEAD").write_text("ref: refs/heads/wt\n")
+    (wt_git_dir / "commondir").write_text("../..\n")
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / ".git").write_text(f"gitdir: {wt_git_dir}\n")
+    assert index_mtime(worktree) is None
+    (wt_git_dir / "index").write_bytes(b"wt")
+    assert index_mtime(worktree) == (wt_git_dir / "index").stat().st_mtime_ns
+
+
+# -- head_sha -----------------------------------------------------------------
+
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+SHA_C = "c" * 40
+
+
+def test_head_sha_through_a_loose_ref(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    with_local_branch(repo, "main")
+    assert head_sha(repo) == "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_head_sha_through_packed_refs(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    (repo / ".git" / "packed-refs").write_text(
+        f"# pack-refs with: peeled fully-peeled sorted\n{SHA_A} refs/heads/main\n^{SHA_B}\n"
+    )
+    assert head_sha(repo) == SHA_A
+
+
+def test_head_sha_prefers_the_loose_ref(tmp_path):
+    """A loose ref is newer than the packed copy (git updates the loose file
+    and leaves packed-refs until the next gc)."""
+    repo = make_repo(tmp_path / "repo")
+    (repo / ".git" / "packed-refs").write_text(f"{SHA_A} refs/heads/main\n")
+    with_local_branch(repo, "main")
+    assert head_sha(repo) == "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_head_sha_detached(tmp_path):
+    repo = make_repo(tmp_path / "repo", head=f"{SHA_C}\n")
+    assert head_sha(repo) == SHA_C
+
+
+def test_head_sha_unborn_and_outside(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    assert head_sha(repo) is None  # ref: refs/heads/main, no such ref yet
+    assert head_sha(tmp_path) is None
+
+
+def test_head_sha_in_a_worktree_reads_the_common_refs(tmp_path):
+    main = make_repo(tmp_path / "main")
+    (main / ".git" / "packed-refs").write_text(f"{SHA_B} refs/heads/wt\n")
+    wt_git_dir = main / ".git" / "worktrees" / "wt"
+    wt_git_dir.mkdir(parents=True)
+    (wt_git_dir / "HEAD").write_text("ref: refs/heads/wt\n")
+    (wt_git_dir / "commondir").write_text("../..\n")
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / ".git").write_text(f"gitdir: {wt_git_dir}\n")
+    assert head_sha(worktree) == SHA_B
+
+
+# -- resolve_branch -----------------------------------------------------------
+
+
+def with_remote_branch(repo: Path, remote: str, name: str, sha: str) -> None:
+    ref = repo / ".git" / "refs" / "remotes" / remote / name
+    ref.parent.mkdir(parents=True, exist_ok=True)
+    ref.write_text(f"{sha}\n")
+
+
+def test_resolve_branch_local(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    with_local_branch(repo, "main")
+    assert resolve_branch(repo, "main") == ("main", "0123456789abcdef0123456789abcdef01234567")
+
+
+def test_resolve_branch_falls_back_to_the_remote_in_rank_order(tmp_path):
+    """A clone that never checked main out locally still diffs against
+    origin/main; origin outranks upstream outranks anything else."""
+    repo = with_remotes(
+        tmp_path / "repo",
+        '[remote "zed"]\n\turl = x\n' + UPSTREAM.format(url="y") + ORIGIN.format(url="z"),
+    )
+    with_remote_branch(repo, "zed", "main", SHA_C)
+    with_remote_branch(repo, "upstream", "main", SHA_B)
+    assert resolve_branch(repo, "main") == ("upstream/main", SHA_B)
+    with_remote_branch(repo, "origin", "main", SHA_A)
+    assert resolve_branch(repo, "main") == ("origin/main", SHA_A)
+
+
+def test_resolve_branch_packed_remote(tmp_path):
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url="z"))
+    (repo / ".git" / "packed-refs").write_text(f"{SHA_A} refs/remotes/origin/main\n")
+    assert resolve_branch(repo, "main") == ("origin/main", SHA_A)
+
+
+def test_resolve_branch_none(tmp_path):
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url="z"))
+    assert resolve_branch(repo, "main") is None
+    assert resolve_branch(tmp_path, "main") is None
+    assert resolve_branch(repo, None) is None
+
+
+@pytest.mark.parametrize("name", ["", " ", "-main", "--staged", "a..b", "a...b", "ma in", "main\n"])
+def test_resolve_branch_rejects_names_that_read_as_arguments(tmp_path, name):
+    """The name ends up in hunk's argv; anything git could read as an option
+    or a range never gets there."""
+    repo = make_repo(tmp_path / "repo")
+    with_local_branch(repo, "main")
+    assert resolve_branch(repo, name) is None
+
+
+# -- tree_signature -----------------------------------------------------------
+
+
+def test_tree_signature_outside_a_repository(tmp_path):
+    assert tree_signature(tmp_path, "main") is None
+
+
+def test_tree_signature_moves_with_index_head_and_base(tmp_path):
+    repo = make_repo(tmp_path / "repo", head="ref: refs/heads/feat\n")
+    with_local_branch(repo, "main")
+    feat = repo / ".git" / "refs" / "heads" / "feat"
+    feat.write_text(f"{SHA_A}\n")
+    index = repo / ".git" / "index"
+    index.write_bytes(b"1")
+    os.utime(index, ns=(1_000, 1_000))
+    first = tree_signature(repo, "main")
+    assert first == (1_000, SHA_A, "0123456789abcdef0123456789abcdef01234567")
+    assert tree_signature(repo, "main") == first  # stable while nothing moves
+
+    os.utime(index, ns=(2_000, 2_000))
+    second = tree_signature(repo, "main")
+    assert second != first
+
+    feat.write_text(f"{SHA_B}\n")
+    third = tree_signature(repo, "main")
+    assert third != second
+
+    (repo / ".git" / "refs" / "heads" / "main").write_text(f"{SHA_C}\n")
+    assert tree_signature(repo, "main") != third
+
+
+def test_tree_signature_without_a_base(tmp_path):
+    repo = make_repo(tmp_path / "repo", head=f"{SHA_A}\n")
+    assert tree_signature(repo, None) == (None, SHA_A, None)
+
+
+# -- change_summary -----------------------------------------------------------
+
+
+@needs_git
+def test_change_summary_clean(repo):
+    assert change_summary(repo) == (False, False)
+
+
+@needs_git
+def test_change_summary_staged_only(repo):
+    (repo / "b.txt").write_text("new\n")
+    _git(repo, "add", "b.txt")
+    assert change_summary(repo) == (True, False)
+
+
+@needs_git
+def test_change_summary_unstaged_only(repo):
+    (repo / "a.txt").write_text("two\n")
+    assert change_summary(repo) == (False, True)
+
+
+@needs_git
+def test_change_summary_untracked_counts_as_unstaged(repo):
+    (repo / "b.txt").write_text("new\n")
+    assert change_summary(repo) == (False, True)
+
+
+@needs_git
+def test_change_summary_both(repo):
+    (repo / "a.txt").write_text("two\n")
+    _git(repo, "add", "a.txt")
+    (repo / "a.txt").write_text("three\n")
+    assert change_summary(repo) == (True, True)
+
+
+@needs_git
+def test_change_summary_outside_a_repository(tmp_path):
+    assert change_summary(tmp_path) == (False, False)
+    assert change_summary(None) == (False, False)
+
+
+def test_change_summary_when_git_never_answers(repo, monkeypatch):
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired("git", 2.0)
+
+    monkeypatch.setattr("collins.gitinfo.subprocess.run", timeout)
+    assert change_summary(repo) == (False, False)
