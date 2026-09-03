@@ -645,7 +645,11 @@ class GitPage(Adw.Bin):
             self._user_parent_missing = self._user_parent is not None
             name = self._parent_provider(cwd)
         resolved = gitinfo.resolve_branch(cwd, name)
-        self._parent_name = name
+        # The name goes out in the sidecar (and into the header) whether or
+        # not it resolves yet, so it passes the same gate the read side
+        # applies to what comes back: a PR base or a provider answer that
+        # does not look like a ref is not a parent at all.
+        self._parent_name = name if hunkctl.safe_ref(name) else None
         self._parent_target = resolved[0] if resolved else None
         return self._parent_target
 

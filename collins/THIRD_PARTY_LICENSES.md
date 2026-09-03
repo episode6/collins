@@ -119,16 +119,18 @@ rest, with code adapted from three community extensions, each under the **MIT Li
 
 - **hunk-git-lite** — © 2026 Josh Edler —
   [joshedler/hunk-git-lite](https://github.com/joshedler/hunk-git-lite): the two-section
-  status list (`files.tsx`), the store bridge (`store.ts`) and the git runner shape
-  (`git.ts`).
+  status list (`files.tsx`), the store bridge (`store.ts`), the git runner shape
+  (`git.ts`) and the pane registration in the composition root (`index.ts`).
 - **hunk-commit** — © 2026 hunk-jj-stage contributors —
   [muzomer/hunk-commit](https://github.com/muzomer/hunk-commit): the single-file patch
-  parser, writer and guards (`patch.ts`, `staging.ts`) and the temp-repository test
+  parser, writer and guards (`patch.ts`, `staging.ts`, `test/patch.test.ts`), the
+  staging commands in the composition root (`index.ts`) and the temp-repository test
   fixture (`test/support/gitRepo.ts`).
 - **hunk-commit-log** — © 2026 Sadick —
   [sadick254/hunk-commit-log](https://github.com/sadick254/hunk-commit-log): reloading
-  the window through hunk's own CLI by pid (`session.ts`), the commits pane
-  (`commits.tsx`) and the log reader (`git.ts`).
+  the window through hunk's own CLI by pid (`session.ts`, `test/session.test.ts`), the
+  commits pane (`commits.tsx`), the log reader (`git.ts`), the store bridge (`store.ts`)
+  and the reload wiring in the composition root (`index.ts`).
 
 Each borrowing file names its source in its header. The MIT License text, which applies
 to those portions:

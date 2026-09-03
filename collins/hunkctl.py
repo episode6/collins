@@ -267,7 +267,10 @@ def commit_subject(
     when git answered that it names no commit (the one answer a restored
     {"show": sha} whose commit was rebased away falls back on); "" when git
     couldn't be asked at all (not on PATH, no cwd, a timeout) — the ref is
-    not disproven, only unnamed. An unsafe *ref* is None without a call."""
+    not disproven, only unnamed. A real commit with an empty subject
+    (`--allow-empty-message`) also answers "", so callers must not read ""
+    as "git was unreachable" — today none does; both mean "no subject to
+    show". An unsafe *ref* is None without a call."""
     if not cwd or not safe_ref(ref):
         return None
     argv = ["git", "log", "-1", "--format=%s", f"{ref}^{{commit}}", "--"]
