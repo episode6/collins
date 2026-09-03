@@ -50,7 +50,7 @@ since its pty is the only one the viewer will ever answer a signal on.
 A page too narrow for both of the extension's panes shows one at a time —
 hunk lays its left panes out from a fixed budget (hunkctl.pane_fit: one
 pane beside the diff from 73 columns, both from 100) — and the header
-grows two buttons, up and down, that walk the extension's *levels*: the
+grows two buttons, back and forward, that walk the extension's *levels*: the
 diff alone, the files pane, the commits pane (its level.ts). Each press
 feeds hunk the key the extension binds (`<` up, `>` down, through the
 VTE's pty — hunk has no session command that runs an extension command),
@@ -332,16 +332,17 @@ class GitPage(Adw.Bin):
 
         # The level buttons of a narrow page (see the module docstring):
         # hidden while both panes fit, insensitive at either end of the
-        # stack. Between the breadcrumb and refresh, so up and down sit
-        # together at the header's right.
-        self._down = Gtk.Button(icon_name="go-down-symbolic")
-        self._down.add_css_class("flat")
-        self._down.connect("clicked", lambda *_a: self.step_level(up=False))
-        header.insert_child_after(self._down, self._breadcrumb)
-        self._up = Gtk.Button(icon_name="go-up-symbolic")
+        # stack. Drawn as back and forward — back climbs a level (diff →
+        # files → commits), forward descends — with back on the left, the
+        # way a browser's pair reads; between the breadcrumb and refresh.
+        self._up = Gtk.Button(icon_name="go-previous-symbolic")
         self._up.add_css_class("flat")
         self._up.connect("clicked", lambda *_a: self.step_level(up=True))
-        header.insert_child_after(self._up, self._down)
+        header.insert_child_after(self._up, self._breadcrumb)
+        self._down = Gtk.Button(icon_name="go-next-symbolic")
+        self._down.add_css_class("flat")
+        self._down.connect("clicked", lambda *_a: self.step_level(up=False))
+        header.insert_child_after(self._down, self._up)
         # What the extension says a narrow page shows (the sidecar's
         # "level"), the default until it says; and the VTE's column count
         # as of the last allocation, which decides whether the page is

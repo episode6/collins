@@ -426,7 +426,7 @@ panels:
   | `A` / `U` | stage all / unstage all, after a confirmation naming the count |
   | `n` / `p` | load the next / previous row of the current commits group |
   | `P` | set the parent branch — a pick over the local branches, also on a right-click in the commits panel |
-  | `<` / `>` | on a narrow page, one level up / down — the diff, the files panel, the commits panel (see below); the header's ↑ / ↓ buttons press the same |
+  | `<` / `>` | on a narrow page, one level up / down — the diff, the files panel, the commits panel (see below); the header's back / forward buttons press the same |
 
   Every action reloads the review and says what it did. Stage and unstage
   ask nothing; discard and the commit keys confirm first — discard because

@@ -63,8 +63,8 @@ downloads of each version, see the
   the extension's panels beside the diff only from about 100 columns, and
   one from 73; below that the page used to show the diff alone with no
   way to the panels. Now the page opens one panel wide at its narrowest,
-  and while it is narrower than both, the header grows an **up** and a
-  **down** button that step through three levels — the diff, the files
+  and while it is narrower than both, the header grows a **back** and a
+  **forward** button that step through three levels — the diff, the files
   panel, the commits panel — with `<` / `>` doing the same from the
   keyboard, and a click drilling down by itself: a commit clicked loads
   it and shows the files, a file clicked selects it and shows the diff.

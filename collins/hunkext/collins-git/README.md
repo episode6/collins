@@ -65,8 +65,9 @@ Collins widens its git column while hunk is still starting). Wide, `<` opens
 both panes when one is closed ("show me the panels") and `>` does nothing;
 under 73 columns both say *too narrow for a panel — widen the page*. A pane
 closed with hunk's own `s` stays closed until a level step or a crossing
-resize says otherwise. Collins' git page shows an up and a down button in its
-header while the page is narrow; they feed these two keys.
+resize says otherwise. Collins' git page shows a back and a forward button in
+its header while the page is narrow (back climbs, forward descends); they feed
+these two keys.
 
 ## Keys
 

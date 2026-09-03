@@ -1153,7 +1153,7 @@ def check_levels(repo: str, state_path: str) -> None:
     check("the level buttons show on a narrow page", page.level_buttons_visible())
     check("the page starts at the diff level", page.level == "diff", page.level)
     check(
-        "up offers the files; down has nowhere to go",
+        "back offers the files; forward has nowhere to go",
         page._up.get_tooltip_text() == "Show the files"
         and page._up.get_sensitive()
         and not page._down.get_sensitive()
@@ -1170,12 +1170,12 @@ def check_levels(repo: str, state_path: str) -> None:
         (page.level, page._up.get_tooltip_text(), page._down.get_tooltip_text()),
     )
     landed = wait_for(lambda: read_state(state_path).get("keys") == "<")
-    check("the up button fed hunk `<`", landed, read_state(state_path).get("keys"))
+    check("the back button fed hunk `<`", landed, read_state(state_path).get("keys"))
     page.step_level(up=True)
     landed = wait_for(lambda: read_state(state_path).get("keys") == "<<")
     check("a second up fed another `<`", landed, read_state(state_path).get("keys"))
     check(
-        "at the top the up button is insensitive and says so",
+        "at the top the back button is insensitive and says so",
         page.level == "commits"
         and not page._up.get_sensitive()
         and page._up.get_tooltip_text() == "The commits are shown — the top level"
@@ -1189,7 +1189,7 @@ def check_levels(repo: str, state_path: str) -> None:
     page.step_level(up=False)
     landed = wait_for(lambda: read_state(state_path).get("keys") == "<<>")
     keys = read_state(state_path).get("keys")
-    check("the down button fed hunk `>`", landed and page.level == "files", (keys, page.level))
+    check("the forward button fed hunk `>`", landed and page.level == "files", (keys, page.level))
 
     # -- the extension's word through the sidecar wins ---------------------------------
     sidecar = read_state(state_path).get("sidecar")
