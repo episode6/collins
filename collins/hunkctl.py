@@ -21,11 +21,13 @@ one).
 The extension and the page share a *sidecar*: a small JSON file under the
 runtime dir whose path rides to hunk's child in COLLINS_GIT_STATE. Collins
 writes the parent and default branch names and the log page size into it;
-the extension writes the user's "Set parent branch…" pick back; each side
-re-reads when the other wrote (the extension watches the file, the page
-stats it on the footer tick). The path, payload, reader and writer live
-here. Kept importable by the unit tests (see tests/conftest.py), which is
-where all of it is exercised.
+the extension writes the user's "Set parent branch…" pick back, and the
+index mtime and HEAD it last reloaded the review for on its own (so the
+page's freshness reload stays home for a move hunk has already shown —
+shown_by_extension); each side re-reads when the other wrote (the
+extension watches the file, the page stats it on the footer tick). The
+path, payload, readers and writer live here. Kept importable by the unit
+tests (see tests/conftest.py), which is where all of it is exercised.
 """
 
 from __future__ import annotations
@@ -607,6 +609,39 @@ def read_sidecar(text: str) -> tuple[str | None, str]:
     parent = data.get("parent")
     source = "user" if data.get("parentSource") == "user" else "auto"
     return (parent if safe_ref(parent) else None), source
+
+
+def read_sidecar_refreshed(text: str) -> tuple[int, str] | None:
+    """(index mtime ns, HEAD sha) out of the sidecar's "refreshed" record —
+    what the extension observed right after reloading the review for a
+    mutation of its own (an `x`, a commit): {"refreshed": {"index":
+    "<ns>", "head": "<sha>"}}, the mtime a string because JavaScript's
+    numbers can't hold it exactly. None when absent or malformed."""
+    data = _load_json(text)
+    record = data.get("refreshed") if data is not None else None
+    if not isinstance(record, dict):
+        return None
+    index = record.get("index")
+    head = record.get("head")
+    if not isinstance(index, str) or not index.isdigit():
+        return None
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
+        return None
+    return int(index), head
+
+
+def shown_by_extension(
+    refreshed: tuple[int, str] | None, signature: tuple | None, previous: tuple | None
+) -> bool:
+    """Whether a tree_signature move from *previous* to *signature* is one
+    the extension already reloaded the review for — its record names
+    exactly the index mtime and HEAD the tree now has, and the base (which
+    the extension doesn't watch) stayed put. The page then leaves hunk
+    alone: a `session reload` would only cancel whatever dialog the user
+    has open by the time it lands (a `D` confirm, a `C` summary)."""
+    if refreshed is None or signature is None or previous is None:
+        return False
+    return (signature[0], signature[1]) == refreshed and signature[2] == previous[2]
 
 
 def spawn_env(sidecar: str | None, environ: dict | None = None) -> list[str] | None:

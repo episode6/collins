@@ -4,8 +4,8 @@
 
 /**
  * Git, as the collins-git extension runs it: one runner, the parsers for the
- * porcelain it reads, and the handful of operations the panels and the
- * staging keys need.
+ * porcelain it reads, and the handful of operations the panels, the
+ * staging keys and the commit keys need.
  *
  * Everything below takes the runner as an argument rather than reaching for
  * a global, so the tests feed it a temp repository (or a canned reply) and
@@ -14,8 +14,9 @@
  * git chatter on stderr would corrupt the frame.
  */
 
-import { execFileSync } from "node:child_process";
-import { basename } from "node:path";
+import { execFile, execFileSync } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 
 /** What one git invocation came back with. `ok` is "exit status 0". */
 export interface GitResult {
@@ -24,10 +25,29 @@ export interface GitResult {
   readonly stderr: string;
 }
 
-/** One git invocation in a fixed working directory, with optional stdin. */
-export type GitRunner = (args: readonly string[], stdin?: string) => GitResult;
+/** Per-call knobs a caller may set; everything else the runner decides. */
+export interface GitRunOptions {
+  /** How long to wait before giving up; the default suits reads and applies. */
+  readonly timeoutMs?: number;
+}
+
+/**
+ * One git invocation in a fixed working directory, with optional stdin.
+ * `R` is the result's shape: a `GitResult` from the synchronous runner the
+ * reads and applies use, a promise of one from `gitRunnerAsync`.
+ */
+export type AnyGitRunner<R> = (args: readonly string[], stdin?: string, options?: GitRunOptions) => R;
+export type GitRunner = AnyGitRunner<GitResult>;
+export type AsyncGitRunner = AnyGitRunner<Promise<GitResult>>;
 
 const GIT_TIMEOUT_MS = 5_000;
+/**
+ * A commit runs the user's hooks and maybe a signer, and it runs on the
+ * asynchronous runner so a slow hook never freezes the renderer — so the
+ * deadline only has to catch a git that will never come back (a pinentry
+ * nobody can see). A test suite in a pre-commit hook fits comfortably.
+ */
+export const COMMIT_TIMEOUT_MS = 600_000;
 const GIT_MAX_BUFFER = 32 * 1024 * 1024;
 
 /** The sha of git's empty tree: the "parent" a root commit diffs against. */
@@ -66,29 +86,68 @@ export const DIFF_PREFIX_ARGS: readonly string[] = [
  * the user without a try/catch each.
  */
 export function gitRunner(cwd: string): GitRunner {
-  return (args, stdin) => {
+  return (args, stdin, options) => {
     try {
       const stdout = execFileSync("git", [...args], {
         cwd,
         encoding: "utf8",
-        timeout: GIT_TIMEOUT_MS,
+        timeout: options?.timeoutMs ?? GIT_TIMEOUT_MS,
         maxBuffer: GIT_MAX_BUFFER,
         stdio: ["pipe", "pipe", "pipe"],
         input: stdin ?? "",
       });
       return { ok: true, stdout, stderr: "" };
     } catch (error) {
-      const failure = error as { stdout?: unknown; stderr?: unknown; message?: unknown };
-      return {
-        ok: false,
-        stdout: typeof failure.stdout === "string" ? failure.stdout : "",
-        stderr:
-          typeof failure.stderr === "string" && failure.stderr !== ""
-            ? failure.stderr
-            : String(failure.message ?? error),
-      };
+      return failedResult(error);
     }
   };
+}
+
+/** The failed result a thrown child-process error stands for. */
+function failedResult(error: unknown): GitResult {
+  const failure = error as { stdout?: unknown; stderr?: unknown; message?: unknown };
+  return {
+    ok: false,
+    stdout: typeof failure.stdout === "string" ? failure.stdout : "",
+    stderr:
+      typeof failure.stderr === "string" && failure.stderr !== "" ? failure.stderr : String(failure.message ?? error),
+  };
+}
+
+/**
+ * The same runner, without blocking the event loop: for a commit, whose
+ * hooks and signer can take as long as they like while hunk keeps painting
+ * (a synchronous wait freezes the renderer — no toast, no repaint, keys
+ * queued — for the whole of it). Reads and applies stay synchronous: they
+ * are milliseconds, and their callers read `ctx.selection` in one go.
+ */
+export function gitRunnerAsync(cwd: string): AsyncGitRunner {
+  return (args, stdin, options) =>
+    new Promise((resolve) => {
+      let child: ReturnType<typeof execFile>;
+      try {
+        child = execFile(
+          "git",
+          [...args],
+          {
+            cwd,
+            encoding: "utf8",
+            timeout: options?.timeoutMs ?? GIT_TIMEOUT_MS,
+            maxBuffer: GIT_MAX_BUFFER,
+          },
+          (error, stdout, stderr) => {
+            resolve(error === null ? { ok: true, stdout, stderr } : { ...failedResult(error), stdout, stderr: stderr || failedResult(error).stderr });
+          },
+        );
+      } catch (error) {
+        resolve(failedResult(error));
+        return;
+      }
+      child.stdin?.on("error", () => {
+        // git closed its end first (it read no stdin); the exit status says the rest.
+      });
+      child.stdin?.end(stdin ?? "");
+    });
 }
 
 /**
@@ -296,9 +355,29 @@ export function readLog(git: GitRunner, range: readonly string[], window: LogWin
   return result.ok ? parseLog(result.stdout) : [];
 }
 
-/** The shas on HEAD that its upstream lacks; empty when there is no upstream. */
+/**
+ * "Not on any remote": the revision arguments that leave only the commits
+ * no remote-tracking ref reaches. Not `@{upstream}..HEAD` — after a rebase
+ * onto a pushed base that range holds the base's own pushed commits, a
+ * branch pushed without `-u` has no upstream at all, and a branch pushed
+ * to a second remote is on that remote. With no remotes configured every
+ * commit is unpushed, which is also what this reports.
+ */
+export const NOT_ON_ANY_REMOTE: readonly string[] = ["--not", "--remotes"];
+
+/**
+ * The shas on HEAD that no remote-tracking ref has — what the commits panel
+ * marks `↑`. A repository with no remote-tracking ref at all has nothing to
+ * be unpushed against, so it marks nothing: without that guard `HEAD --not
+ * --remotes` would walk, and flag, the entire history of a local-only
+ * repository on every panel rebuild.
+ */
 export function unpushedShas(git: GitRunner): Set<string> {
-  const result = git(["rev-list", "@{upstream}..HEAD"]);
+  const tracking = git(["for-each-ref", "--count=1", "--format=%(refname)", "refs/remotes/"]);
+  if (!tracking.ok || tracking.stdout.trim() === "") {
+    return new Set();
+  }
+  const result = git(["rev-list", "HEAD", ...NOT_ON_ANY_REMOTE, "--"]);
   if (!result.ok) {
     return new Set();
   }
@@ -470,12 +549,149 @@ export function unstageAll(git: GitRunner): GitResult {
 }
 
 /**
- * Apply a patch to the index only — `git apply --cached -p1 [--reverse] -`
- * with the patch on stdin. Reverse against a `--cached` patch is how a hunk
- * is unstaged. `-p1` is apply's default, spelled out: the patch always
- * carries `a/` and `b/` (readFilePatch), whatever the user's diff config
- * says, and the strip count has to match that rather than the config.
+ * The options every apply here gets. `-p1` is apply's default, spelled
+ * out: the patch always carries `a/` and `b/` (readFilePatch), whatever
+ * the user's diff config says, and the strip count has to match that
+ * rather than the config. `--unidiff-zero` turns off apply's rule that a
+ * hunk with no trailing context must sit at the end of the file (and one
+ * with none leading at the start): the patches come from the user's `git
+ * diff`, whose `diff.context` may be 0, and a hunk from such a diff — or a
+ * partial patch that keeps only a `+` line after its demoted context —
+ * has no trailing context anywhere in the file. Every line the patch does
+ * carry still has to match; only the at-the-edge heuristic goes.
+ */
+const APPLY_ARGS: readonly string[] = ["-p1", "--unidiff-zero"];
+
+/**
+ * Apply a patch to the index only — `git apply --cached -p1 --unidiff-zero
+ * [--reverse] -` with the patch on stdin. Reverse against a `--cached`
+ * patch is how a hunk is unstaged.
  */
 export function applyCached(git: GitRunner, patch: string, reverse: boolean): GitResult {
-  return git(["apply", "--cached", "-p1", ...(reverse ? ["--reverse"] : []), "-"], patch);
+  return git(["apply", "--cached", ...APPLY_ARGS, ...(reverse ? ["--reverse"] : []), "-"], patch);
+}
+
+/**
+ * Take a patch back out of the working tree — `git apply -p1
+ * --unidiff-zero --reverse -` with no `--cached`: the index is not
+ * consulted and not touched. This is what `D` does with a `git diff --
+ * <path>` patch, whole or trimmed to a range; apply itself refuses when
+ * the file no longer looks like the patch's new side, so a file edited
+ * under us fails loudly rather than losing something else.
+ */
+export function applyWorktreeReverse(git: GitRunner, patch: string): GitResult {
+  return git(["apply", ...APPLY_ARGS, "--reverse", "-"], patch);
+}
+
+/**
+ * Put a path back the way the index has it — `git checkout -q -- <path>`.
+ * What `D` does for a file deleted in the working tree: the deletion's
+ * patch reversed would say the same, but this needs no patch and restores
+ * a binary too.
+ */
+export function restoreFile(git: GitRunner, path: string): GitResult {
+  return git(["checkout", "-q", "--", path]);
+}
+
+/** The markers git leaves in its directory while an operation waits on the user. */
+const IN_PROGRESS_MARKERS: readonly (readonly [string, string])[] = [
+  ["rebase-merge", "a rebase"],
+  ["rebase-apply", "a rebase"],
+  ["MERGE_HEAD", "a merge"],
+  ["CHERRY_PICK_HEAD", "a cherry-pick"],
+  ["REVERT_HEAD", "a revert"],
+];
+
+/**
+ * What is half-finished in this repository — "a rebase", "a merge", "a
+ * cherry-pick" or "a revert" — or null when nothing is. A commit made
+ * while one waits would be that operation's next step, not the user's,
+ * so the commit keys ask this before they ask for a message.
+ */
+export function inProgressOperation(git: GitRunner): string | null {
+  const dir = gitDir(git);
+  if (dir === null) {
+    return null;
+  }
+  for (const [marker, name] of IN_PROGRESS_MARKERS) {
+    if (existsSync(join(dir, marker))) {
+      return name;
+    }
+  }
+  return null;
+}
+
+/** This working tree's git directory (absolute; a worktree's own, not the common one), or null. */
+export function gitDir(git: GitRunner): string | null {
+  const result = git(["rev-parse", "--absolute-git-dir"]);
+  const dir = result.stdout.trim();
+  return result.ok && dir !== "" ? dir : null;
+}
+
+/**
+ * What Collins' freshness poll compares, as this extension sees it after a
+ * mutation of its own: the index file's mtime in nanoseconds (a string —
+ * the number is past what a JSON reader's double holds exactly) and HEAD's
+ * sha. Written to the sidecar so Collins can tell a move hunk has already
+ * reloaded for from one made in a shell. Null when either cannot be read.
+ */
+export interface TreeMark {
+  readonly index: string;
+  readonly head: string;
+}
+
+export function treeMark(git: GitRunner): TreeMark | null {
+  const dir = gitDir(git);
+  const head = revParse(git, "HEAD");
+  if (dir === null || head === null) {
+    return null;
+  }
+  try {
+    return { index: statSync(join(dir, "index"), { bigint: true }).mtimeNs.toString(), head };
+  } catch {
+    return null;
+  }
+}
+
+/** The paths the index differs from HEAD in — what a commit now would carry. */
+export function stagedPaths(git: GitRunner): string[] {
+  const result = git(["diff", "--cached", "--name-only", "-z"]);
+  if (!result.ok) {
+    return [];
+  }
+  return result.stdout.split("\0").filter((path) => path !== "");
+}
+
+/**
+ * `git commit -q -m <summary> [-m <body>]`: git joins the two with a blank
+ * line, and `-m` means no editor is ever opened on a terminal the renderer
+ * owns. Hooks and signing run, hence the longer timeout — and the runner
+ * is the caller's choice, so the composition root hands in the
+ * asynchronous one (the tests, the synchronous one).
+ */
+export function commit<R>(git: AnyGitRunner<R>, summary: string, body?: string): R {
+  const message = body === undefined || body === "" ? ["-m", summary] : ["-m", summary, "-m", body];
+  return git(["commit", "-q", ...message], undefined, { timeoutMs: COMMIT_TIMEOUT_MS });
+}
+
+/**
+ * Commit the index as a fixup of `sha`. The subject is `fixup! <full sha>`
+ * rather than `--fixup=`'s copy of the target's title: titles repeat,
+ * hashes do not, and `rebase --autosquash` matches either form.
+ */
+export function commitFixup<R>(git: AnyGitRunner<R>, sha: string): R {
+  return git(["commit", "-q", "-m", `fixup! ${sha}`], undefined, { timeoutMs: COMMIT_TIMEOUT_MS });
+}
+
+/**
+ * The commits `F` may fold into, newest first: those in `range` (the
+ * commits panel's current group, `<parent>..HEAD`) that no remote-tracking
+ * ref reaches — the only ones a fixup may target without rewriting what
+ * somebody else has. The parent's own commits are out whether pushed or
+ * not (a fixup for one of those belongs on the parent branch); the rest
+ * are filtered by NOT_ON_ANY_REMOTE, which is exactly what the panel's
+ * `↑` marks.
+ */
+export function unpushedCommits(git: GitRunner, range: readonly string[], limit: number): Commit[] {
+  return readLog(git, [...range, ...NOT_ON_ANY_REMOTE], { limit });
 }

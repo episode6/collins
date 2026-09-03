@@ -270,26 +270,60 @@ export function hunkSideLines(hunk: PatchHunk, side: "old" | "new"): string[] {
   return hunk.lines.filter((line) => line.kind !== excluded).map((line) => line.text);
 }
 
-const MARKER: Record<PatchLineKind, string> = { context: " ", added: "+", removed: "-" };
-const NO_NEWLINE_MARKER = "\\ No newline at end of file";
+/** The diff marker each line kind is written with. */
+export const MARKER: Readonly<Record<PatchLineKind, string>> = { context: " ", added: "+", removed: "-" };
+export const NO_NEWLINE_MARKER = "\\ No newline at end of file";
 
-function renderHunkHeader(hunk: PatchHunk, newStart: number): string {
-  const oldSpan = hunk.oldCount === 1 ? `${hunk.oldStart}` : `${hunk.oldStart},${hunk.oldCount}`;
-  const newSpan = hunk.newCount === 1 ? `${newStart}` : `${newStart},${hunk.newCount}`;
-  return `@@ -${oldSpan} +${newSpan} @@${hunk.heading}`;
+/** One side's span the way git spells it: the count only when it is not 1. */
+function renderSpan(start: number, count: number): string {
+  return count === 1 ? `${start}` : `${start},${count}`;
 }
 
-function renderHunkBody(hunk: PatchHunk): string[] {
-  return hunk.lines.flatMap((line) =>
+/** A hunk header from explicit numbers — what a rewritten hunk needs. */
+export function formatHunkHeader(
+  oldStart: number,
+  oldCount: number,
+  newStart: number,
+  newCount: number,
+  heading: string,
+): string {
+  return `@@ -${renderSpan(oldStart, oldCount)} +${renderSpan(newStart, newCount)} @@${heading}`;
+}
+
+function renderHunkHeader(hunk: PatchHunk, newStart: number): string {
+  return formatHunkHeader(hunk.oldStart, hunk.oldCount, newStart, hunk.newCount, hunk.heading);
+}
+
+/** Patch lines back to text, each `\ No newline` marker after the line it belongs to. */
+export function renderPatchLines(lines: readonly PatchLine[]): string[] {
+  return lines.flatMap((line) =>
     line.noNewlineAtEof
       ? [`${MARKER[line.kind]}${line.text}`, NO_NEWLINE_MARKER]
       : [`${MARKER[line.kind]}${line.text}`],
   );
 }
 
+function renderHunkBody(hunk: PatchHunk): string[] {
+  return renderPatchLines(hunk.lines);
+}
+
 /** How many lines a hunk adds to the file it applies to. */
 function lineDelta(hunk: PatchHunk): number {
   return hunkSideLines(hunk, "new").length - hunkSideLines(hunk, "old").length;
+}
+
+/**
+ * The header a *partial* patch — some hunks, or some lines — is written
+ * with: the source's, minus its `old mode` / `new mode` pair. A patch
+ * that names both modes tells `git apply` to change the mode too, and a
+ * hunk or a range of lines is not a mode change: `x` on "2 lines" must
+ * not set the executable bit in the index, and `D` on them must not take
+ * it off the working-tree file. Without the pair apply keeps the target's
+ * mode as it is, and the mode change stays behind for `X`, which stages
+ * the file whole.
+ */
+export function partialHeaderLines(patch: FilePatch): string[] {
+  return patch.headerLines.filter((line) => !line.startsWith("old mode ") && !line.startsWith("new mode "));
 }
 
 /**
@@ -302,7 +336,7 @@ function lineDelta(hunk: PatchHunk): number {
  * nothing is selected.
  */
 export function writeSelectedHunks(patch: FilePatch, selected: ReadonlySet<number>): string | null {
-  const lines = [...patch.headerLines];
+  const lines = partialHeaderLines(patch);
   let hasSelection = false;
   let droppedDelta = 0;
   for (const hunk of patch.hunks) {

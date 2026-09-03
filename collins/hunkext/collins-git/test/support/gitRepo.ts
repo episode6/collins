@@ -17,6 +17,13 @@ export interface TestGitRepository {
   run(...args: string[]): string;
   write(path: string, content: string): void;
   read(path: string): string;
+  /**
+   * Pretend the checked-out branch was pushed: a remote-tracking ref
+   * `origin/<branch>` at HEAD, and the branch tracking it, so `@{upstream}`
+   * resolves and `--remotes` sees it — no network, no second repository.
+   * Commits made afterwards are on no remote.
+   */
+  markPushed(): void;
   dispose(): void;
 }
 
@@ -49,6 +56,14 @@ export function createTestGitRepository(): TestGitRepository {
       writeFileSync(absolute, content, "utf8");
     },
     read: (path) => readFileSync(join(root, path), "utf8"),
+    markPushed() {
+      const branch = repository.run("symbolic-ref", "--short", "HEAD").trim();
+      repository.run("update-ref", `refs/remotes/origin/${branch}`, "HEAD");
+      repository.run("config", "remote.origin.url", "/nowhere");
+      repository.run("config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*");
+      repository.run("config", `branch.${branch}.remote`, "origin");
+      repository.run("config", `branch.${branch}.merge`, `refs/heads/${branch}`);
+    },
     dispose: () => rmSync(root, { recursive: true, force: true }),
   };
   repository.run("init", "-q", "-b", "main", ".");

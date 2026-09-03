@@ -415,15 +415,21 @@ panels:
 
   | Key | Does |
   | --- | --- |
-  | `x` | stage the current hunk — unstage it, in the Staged view |
+  | `x` | stage the current hunk — unstage it, in the Staged view — or, after `v`, the lines from the anchor to the cursor |
   | `X` | stage / unstage the current file (a rename as both paths at once) |
+  | `v` / `Esc` | anchor a line range at the cursor line (painted amber), and clear it again; move with hunk's own `j` / `k`, then `x` or `D` |
+  | `D` | discard the current hunk, or the anchored range, from the working tree — after a confirmation; on a deleted file, restore it from the index |
+  | `C` / `B` | commit the index, asking for a summary — `B` asks for a body too |
+  | `F` | pick an unpushed commit (on no remote yet) and commit the index as a `fixup!` for it; the toast names the `git rebase -i --autosquash` that folds it in |
   | `A` / `U` | stage all / unstage all, after a confirmation naming the count |
   | `n` / `p` | load the next / previous row of the current commits group |
   | `P` | set the parent branch — a pick over the local branches, also on a right-click in the commits panel |
 
   Every action reloads the review and says what it did. Stage and unstage
-  ask nothing; a binary file, or one that changed since the review loaded,
-  is refused with a word rather than half-done.
+  ask nothing; discard and the commit keys confirm first — discard because
+  the change exists nowhere else, a commit by the summary you type. A
+  binary file, a range across two files, or a file that changed since the
+  review loaded, is refused with a word rather than half-done.
 - **The parent branch** is the base branch of the session's newest pull
   request once its PR page has been opened — a stacked PR is measured
   against the branch it stacks on — and otherwise the repository's default

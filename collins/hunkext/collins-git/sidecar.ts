@@ -18,11 +18,19 @@
  * extension writes `"user"` with the user's pick, or `"auto"` to hand the
  * choice back. `default` and `logPage` are Collins' alone. Readers tolerate
  * a missing or garbled file, and unknown keys pass through untouched.
+ *
+ * One more key is this extension's alone: `refreshed`, the index mtime
+ * and HEAD (git.ts's TreeMark) it observed right after reloading the
+ * review for a mutation of its own — `{"refreshed": {"index": "<ns>",
+ * "head": "<sha>"}}`. Collins' freshness poll reloads the page when the
+ * index or HEAD moves; a move that matches this record is one hunk has
+ * already shown, and a reload for it would only cancel whatever dialog
+ * the user has open by then.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, unwatchFile, watchFile, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { guessDefault, safeRef, type GitRunner } from "./git.ts";
+import { guessDefault, safeRef, type GitRunner, type TreeMark } from "./git.ts";
 
 export type ParentSource = "auto" | "user";
 
@@ -88,12 +96,17 @@ export function readSidecar(path: string): SidecarConfig | null {
   return data === null ? null : configFrom(data);
 }
 
+/** What this extension writes: its share of the config, and the freshness record. */
+export interface SidecarPatch extends Partial<SidecarConfig> {
+  readonly refreshed?: TreeMark;
+}
+
 /**
  * Write a patch into the sidecar, keeping every key the patch does not
  * name (Collins' `default` and `logPage`, anything newer). Atomic: a temp
  * file beside the target, then a rename. Returns false when it could not.
  */
-export function writeSidecar(path: string, patch: Partial<SidecarConfig>): boolean {
+export function writeSidecar(path: string, patch: SidecarPatch): boolean {
   const existing = readObject(path) ?? {};
   const merged: Record<string, unknown> = { ...existing, ...patch, version: SIDECAR_VERSION };
   const temp = join(dirname(path), `.${process.pid}-${Date.now()}.tmp`);

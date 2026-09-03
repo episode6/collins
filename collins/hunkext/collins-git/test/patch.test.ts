@@ -8,6 +8,7 @@ import {
   hunkRange,
   hunkSideLines,
   parseFilePatch,
+  partialHeaderLines,
   PatchParseError,
   unsafePathReason,
   unsupportedModeReason,
@@ -111,6 +112,14 @@ describe("writeSelectedHunks", () => {
     ]);
     expect(written).toContain("-old\n+new\n");
     expect(written).not.toContain("NEW1");
+  });
+
+  test("leaves a mode change out of the header: a hunk is not the mode", () => {
+    const text = "diff --git a/f b/f\nold mode 100644\nnew mode 100755\nindex 1111111..2222222\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n";
+    const patch = parseFilePatch(text);
+    expect(patch.declaredModes).toEqual(["100644", "100755"]);
+    expect(partialHeaderLines(patch)).toEqual(["diff --git a/f b/f", "index 1111111..2222222", "--- a/f", "+++ b/f"]);
+    expect(writeSelectedHunks(patch, new Set([0]))).toBe("diff --git a/f b/f\nindex 1111111..2222222\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n");
   });
 
   test("renumbers later hunks by what was dropped, leaves earlier ones alone", () => {

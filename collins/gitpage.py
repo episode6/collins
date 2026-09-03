@@ -23,7 +23,10 @@ the way it learns of any load it didn't make: freshness rides the tab
 footer's 2 s tick, the host forwards it while the page is mapped, and the
 page reloads what it shows when the index, HEAD or the parent branch moved
 (gitinfo.tree_signature) — hunk's own `--watch` covers edits to files, this
-covers commits and staging done from a shell or by the agent. The same tick
+covers commits and staging done from a shell or by the agent; a move the
+extension made itself, and reloaded hunk for, is left alone (it records the
+index mtime and HEAD it showed in the sidecar, hunkctl.shown_by_extension),
+since a second reload would cancel whatever dialog the user opened next. The same tick
 asks `hunk session get <id>` what the viewer has loaded, and the breadcrumb
 and tab title follow *that* rather than Collins' own asks: a `show <sha>`
 becomes the page's commit load (reloaded on freshness, persisted, restored
@@ -256,6 +259,10 @@ class GitPage(Adw.Bin):
         # The file's mtime after our own last write — or the extension's,
         # once read — so the tick reads only what the other side wrote.
         self._sidecar_mtime_ns: int | None = None
+        # (index mtime ns, HEAD) the extension last reloaded the review
+        # for on its own (hunkctl.read_sidecar_refreshed): a signature
+        # move that matches it needs no reload from here.
+        self._ext_refreshed: tuple[int, str] | None = None
 
         self._keys = keymap.KeyMatcher(keybindings.current())
 
@@ -436,8 +443,14 @@ class GitPage(Adw.Bin):
             self.emit("title-changed")
         signature = gitinfo.tree_signature(cwd, self._parent_name)
         # A parent that changed changes the signature's base too; that is
-        # not the tree moving, and only a branch diff has to follow it.
+        # not the tree moving, and only a branch diff has to follow it. A
+        # move the extension made (an `x`, a commit) and reloaded hunk for
+        # itself is not one to reload again: the reload would land on the
+        # dialog the user opened next and cancel it.
         moved = self._signature is not None and signature != self._signature and not parent_moved
+        if moved and hunkctl.shown_by_extension(self._ext_refreshed, signature, self._signature):
+            log.debug("gitpage: the extension already reloaded for this move")
+            moved = False
         self._signature = signature
         if not self.hunk_alive or self._resolving:
             return
@@ -703,6 +716,7 @@ class GitPage(Adw.Bin):
                 text = fh.read()
         except OSError:
             return
+        self._ext_refreshed = hunkctl.read_sidecar_refreshed(text)
         parent, source = hunkctl.read_sidecar(text)
         if source == "user" and parent:
             self._user_parent = parent
