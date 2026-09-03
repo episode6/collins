@@ -399,11 +399,13 @@ panels:
   the **current branch** — a *working tree* row, then its own commits
   since it forked from the parent, unpushed ones marked `↑` — the **parent
   branch**'s commits not on the default branch (left out when the parent
-  *is* the default), and the **default branch**'s latest twenty with a
-  *load more…* row. A click loads it into the same window: the *working
-  tree* row the unstaged changes, a commit that one commit, a branch
-  header everything the branch did since it forked. The loaded row wears
-  `▸`, and its group's header is highlighted.
+  *is* the default), and the **default branch**'s latest *Commits per
+  page* (twenty by default) with a *load more…* row. A click loads it
+  into the same window: the *working tree* row the unstaged changes, a
+  commit that one commit, a branch header everything the branch did since
+  it forked — except the default branch's, which stays put: a whole trunk
+  is more than a diff viewer should be handed. The loaded row wears `▸`,
+  and its group's header is highlighted.
 - **The files panel splits on the working tree.** With *working tree*
   loaded it shows **Unstaged · n** and **Staged · n** sections; hunk holds
   one of the two at a time, so the other is navigation — clicking a file
@@ -432,11 +434,19 @@ panels:
   review loaded, is refused with a word rather than half-done.
 - **The parent branch** is the base branch of the session's newest pull
   request once its PR page has been opened — a stacked PR is measured
-  against the branch it stacks on — and otherwise the repository's default
-  branch; either way the local branch when there is one, else the remote's.
-  *Set parent branch…* (`P`, or the right-click) overrides that for the
-  session until *Automatic* is picked again, and the choice is remembered
-  with the page.
+  against the branch it stacks on — then the **Default parent branch**
+  from Preferences → Git when the repository has a branch by that name
+  (`develop`, or `origin/develop` for one only the remote has), and
+  otherwise the repository's default branch; either way the local branch
+  when there is one, else the remote's. *Set parent branch…* (`P`,
+  or the right-click) overrides all of that for the session until
+  *Automatic* is picked again, and the choice is remembered with the page.
+- **Preferences → Git** sets how hunk is started — its **Layout**
+  (automatic, split or stacked) and **Theme** (any name hunk knows; empty
+  is hunk's own default) — whether working-tree reviews **show untracked
+  files**, and the commits panel's **Commits per page**. All of them reach
+  a page already open: a layout or theme change restarts hunk in place,
+  the other two don't.
 - `Ctrl+1` / `Ctrl+2` / `Ctrl+3` still load the **unstaged** changes, the
   **staged** changes and the whole **branch against its parent**
   (`main...HEAD`) from anywhere in the page — the three most common rows,
@@ -449,9 +459,9 @@ panels:
   session reload` run from a shell, or by the agent shows up in it within
   a couple of seconds. A commit is the page's own load — kept fresh,
   remembered, restored — while a range between two other branches (the
-  parent's or the default branch's header) is named as hunk names it and
+  parent's header) is named as hunk names it and
   left alone until the next load takes the page back. A refresh button
-  reloads the same diff; the ✕ closes the page.
+  reloads the same diff; the tab's X closes the page.
 - **It keeps itself fresh.** Every two seconds the page compares the
   index, `HEAD` and the parent branch against what it last loaded, and
   reloads when any of them moved — an agent staging, committing or
@@ -813,8 +823,11 @@ anonymously), a **Pull requests** group — the PR page's **Text size**,
 whether a first prompt's "review PR 183" **attaches that PR to the
 session** (on), whether sessions are **renamed after their pull
 requests** (off), and whether the marks are **refreshed at launch**
-(on) — and the **Footer apps** list — reachable from the sidebar menu or
-`Ctrl+,`.
+(on) — a **Git** group for the git page — hunk's **Layout** (automatic /
+split / stacked) and **Theme**, **Show untracked files**, **Commits per
+page**, and a **Default parent branch** to measure branches against when
+no pull request names one — and the **Footer apps** list — reachable from
+the sidebar menu or `Ctrl+,`.
 
 A **search bar across the top** filters the whole screen as you type, and it
 has the focus the moment preferences opens, so the way to a setting is to

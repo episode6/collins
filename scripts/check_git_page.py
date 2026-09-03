@@ -17,8 +17,13 @@ real git), a range between two branches staying hunk's — taking the child
 down on close, restoring into `hunk show <sha>` with the user's parent
 (carried in page_state before the page is ever shown), opening the default
 mode for a saved commit git no longer has, and reopening a dead viewer
-from Ctrl+1/2/3. A second pass with an empty PATH checks the install card
-comes up instead.
+from Ctrl+1/2/3. A pass through apply_settings checks Preferences → Git
+reaching an open page: a layout or theme change respawns hunk with
+--mode/--theme (the same settings again don't), the untracked switch
+reloads the current load with --exclude-untracked and rides every later
+diff load and the sidecar (never a `show`), the page size reaches the
+sidecar with neither. A second pass with an empty PATH checks the install
+card comes up instead.
 
 The shim is a small Python script staged on a scratch PATH: `--version`
 answers 0.20.1, `diff …` and `show …` spawn a child "viewer" (the
@@ -132,11 +137,15 @@ if args and args[0] in ("diff", "show"):
         while True:
             time.sleep(0.1)
     tail = args[1:]
-    extension = None
-    if "--extension" in tail:
-        at = tail.index("--extension")
-        extension = tail[at + 1]
-        del tail[at:at + 2]
+    # The valued flags are lifted out and recorded on their own; what is
+    # left after the bare ones go is the load's tail (`--exclude-untracked`
+    # included: it is part of the tail a reload records too).
+    valued = {}
+    for flag in ("--extension", "--mode", "--theme"):
+        if flag in tail:
+            at = tail.index(flag)
+            valued[flag] = tail[at + 1]
+            del tail[at:at + 2]
     diff_args = [a for a in tail if a not in ("--watch", "--transparent-bg")]
     if args[0] == "show":
         diff_args = ["show", *diff_args]  # the same shape a `session reload -- show` records
@@ -147,7 +156,9 @@ if args and args[0] in ("diff", "show"):
         "pid": viewer.pid,
         "wrapper": os.getpid(),
         "args": diff_args,
-        "extension": extension,
+        "extension": valued.get("--extension"),
+        "mode": valued.get("--mode"),
+        "theme": valued.get("--theme"),
         "sidecar": os.environ.get("COLLINS_GIT_STATE"),
         "reloads": state.get("reloads", 0),
     })
@@ -337,7 +348,6 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: p.page_closed(),
         on_closed=closed.append,
     )
     window = Gtk.Window(title="check_git_page", default_width=900, default_height=600)
@@ -384,7 +394,14 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     check(
         "the sidecar carries the automatic parent, the default branch and the page size",
         read_sidecar(sidecar)
-        == {"version": 1, "parent": "main", "parentSource": "auto", "default": "main", "logPage": 20},
+        == {
+            "version": 1,
+            "parent": "main",
+            "parentSource": "auto",
+            "default": "main",
+            "logPage": 20,
+            "untracked": True,
+        },
         read_sidecar(sidecar),
     )
     check("the check's own environment was not touched", hunkctl.SIDECAR_ENV not in os.environ)
@@ -542,6 +559,7 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
             "parentSource": "auto",
             "default": "main",
             "logPage": 20,
+            "untracked": True,
             "refreshed": read_sidecar(sidecar).get("refreshed"),  # the extension's record, kept
         }
         and read_sidecar(sidecar).get("refreshed") is not None,
@@ -676,7 +694,6 @@ def check_restore(repo: str, state_path: str, shim: str) -> None:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: None,
         on_closed=lambda p: None,
         loaded=hunkctl.decode_state({"kind": "git", "loaded": {"show": sha}, "parent": "base"}),
         parent=hunkctl.decode_parent({"kind": "git", "loaded": {"show": sha}, "parent": "base"}),
@@ -736,7 +753,6 @@ def check_restore(repo: str, state_path: str, shim: str) -> None:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: None,
         on_closed=lambda p: None,
         loaded=hunkctl.decode_state({"kind": "git", "loaded": {"show": gone}}),
     )
@@ -759,7 +775,6 @@ def check_restore(repo: str, state_path: str, shim: str) -> None:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: None,
         on_closed=lambda p: None,
         loaded="branch",
         parent="nosuch",
@@ -781,7 +796,6 @@ def spawn_page(repo: str, title: str) -> tuple[GitPage, Gtk.Window]:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: None,
         on_closed=lambda p: None,
     )
     window = Gtk.Window(title=title, default_width=900, default_height=600)
@@ -829,7 +843,6 @@ def check_teardown_paths(repo: str, state_path: str, shim: str) -> None:
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: None,
         on_closed=lambda p: None,
     )
     window = Gtk.Window(title="close mid-spawn", default_width=900, default_height=600)
@@ -855,12 +868,226 @@ def check_teardown_paths(repo: str, state_path: str, shim: str) -> None:
     window.destroy()
 
 
+# What a real settings dict carries besides the git_* keys the page reads
+# (apply_settings sets the font, the terminal theme and the key chords off
+# the same dict; the keybinding key is absent, as it is until the user
+# rebinds something, and KeyMatcher tolerates that).
+SETTINGS = {"font": "", "terminal_theme": "Default"}
+
+
+def check_settings(repo: str, state_path: str) -> None:
+    """Preferences → Git reaching an open page through apply_settings: the
+    defaults spawn today's argv; a layout or theme change respawns hunk
+    with --mode/--theme (and the same dict again doesn't); the untracked
+    switch is a reload of the current load with --exclude-untracked (no
+    respawn), rides every later diff load and the sidecar, and never
+    touches a `show`; the page size reaches the sidecar with neither."""
+    print("-- Preferences → Git")
+    page, window = spawn_page(repo, "settings")
+    state = read_state(state_path)
+    check(
+        "default options spawn hunk without --mode/--theme/--exclude-untracked",
+        state.get("args") == [] and state.get("mode") is None and state.get("theme") is None,
+        state,
+    )
+    sidecar = state.get("sidecar")
+    check(
+        "the sidecar carries the default page size and the untracked switch",
+        read_sidecar(sidecar).get("logPage") == 20 and read_sidecar(sidecar).get("untracked") is True,
+        read_sidecar(sidecar),
+    )
+
+    # -- layout and theme: a respawn, once ---------------------------------------------
+    settings = {**SETTINGS, "git_layout": "split", "git_theme": "nord", "git_untracked": True}
+    settings["git_log_page"] = 20
+    pid_before = state.get("pid")
+    page.apply_settings(settings)
+    respawned = wait_for(
+        lambda: read_state(state_path).get("pid") not in (None, pid_before)
+        and page._session_id is not None
+        and not page._resolving
+    )
+    check("a layout/theme change respawns hunk", respawned, read_state(state_path))
+    check("the old viewer went down", not pid_alive(pid_before), pid_before)
+    state = read_state(state_path)
+    check(
+        "the new hunk runs with --mode split --theme nord, the tail unchanged",
+        state.get("mode") == "split" and state.get("theme") == "nord" and state.get("args") == [],
+        state,
+    )
+    check("the page still shows the working tree", page.loaded == "unstaged" and page._foreign is None)
+    pid_before = state.get("pid")
+    reloads_before = state.get("reloads", 0)
+    page.apply_settings(settings)  # the same dict again: every other preference change looks like this
+    wait_for(lambda: False, timeout=0.6)
+    check(
+        "the same settings again respawn nothing and reload nothing",
+        read_state(state_path).get("pid") == pid_before
+        and pid_alive(pid_before)
+        and read_state(state_path).get("reloads", 0) == reloads_before,
+        read_state(state_path),
+    )
+
+    # -- the untracked switch: a reload of the current load ---------------------------
+    settings["git_untracked"] = False
+    page.apply_settings(settings)
+    landed = wait_for(
+        lambda: read_state(state_path).get("reloads", 0) == reloads_before + 1 and settled(page)
+    )
+    check("turning untracked files off reloads the current load once", landed, read_state(state_path))
+    check(
+        "as `diff --exclude-untracked`, on the same viewer",
+        read_state(state_path).get("args") == ["--exclude-untracked"]
+        and read_state(state_path).get("pid") == pid_before,
+        read_state(state_path),
+    )
+    check(
+        "the sidecar says untracked: false at once",
+        read_sidecar(sidecar).get("untracked") is False,
+        read_sidecar(sidecar),
+    )
+    check(
+        "the breadcrumb still reads the working tree",
+        page._breadcrumb.get_text() == "working tree · unstaged",
+        page._breadcrumb.get_text(),
+    )
+    page.load("staged")
+    landed = wait_for(
+        lambda: read_state(state_path).get("args") == ["--exclude-untracked", "--staged"] and settled(page)
+    )
+    check("a later diff load carries the switch too", landed, read_state(state_path))
+    page.load({"show": "HEAD"})
+    landed = wait_for(lambda: read_state(state_path).get("args") == ["show", "HEAD"] and settled(page))
+    check("a commit load never carries it (hunk show refuses the flag)", landed, read_state(state_path))
+    reloads_before = read_state(state_path).get("reloads", 0)
+    settings["git_untracked"] = True
+    page.apply_settings(settings)
+    wait_for(lambda: settled(page))
+    wait_for(lambda: False, timeout=0.5)
+    check(
+        "flipping the switch under a commit load reloads nothing",
+        read_state(state_path).get("reloads", 0) == reloads_before
+        and read_state(state_path).get("pid") == pid_before,
+        read_state(state_path),
+    )
+    check("but the sidecar follows it", read_sidecar(sidecar).get("untracked") is True, read_sidecar(sidecar))
+    page.load("unstaged")
+    landed = wait_for(lambda: read_state(state_path).get("args") == [] and settled(page))
+    check("the next diff load runs without the flag", landed, read_state(state_path))
+
+    # -- the switch flipped while a respawn is still resolving its session id ---------
+    settings["git_untracked"] = True
+    page.apply_settings(settings)
+    wait_for(lambda: read_state(state_path).get("args") == [] and settled(page))
+    settings["git_layout"] = "stack"
+    pid_before = read_state(state_path).get("pid")
+    page.apply_settings(settings)
+    # The new child is up, its `session list` not yet answered (the first
+    # resolve step waits RESOLVE_DELAYS_MS[0]): the window the flip must
+    # survive.
+    in_window = wait_for(
+        lambda: read_state(state_path).get("pid") not in (None, pid_before)
+        and page.hunk_alive
+        and page._resolving
+    )
+    check("the respawn into stack is up and resolving", in_window, read_state(state_path))
+    settings["git_untracked"] = False
+    page.apply_settings(settings)
+    check("the flip is noted for the resolution", page._options_stale is True)
+    check(
+        "and the sidecar says so already",
+        read_sidecar(sidecar).get("untracked") is False,
+        read_sidecar(sidecar),
+    )
+    landed = wait_for(
+        lambda: not page._resolving
+        and read_state(state_path).get("args") == ["--exclude-untracked"]
+        and settled(page)
+    )
+    check("once the id lands the current load is reloaded with the switch", landed, read_state(state_path))
+    pid_before = read_state(state_path).get("pid")
+    check(
+        "on the viewer the respawn started (no second respawn)",
+        pid_alive(pid_before) and read_state(state_path).get("mode") == "stack" and not page._options_stale,
+        read_state(state_path),
+    )
+    # A flip while the respawn is still on its way — the old child going
+    # down, the probe not yet run — rides the new argv instead: the spawn
+    # reads the options as they are then, and nothing is reloaded after.
+    settings["git_layout"] = "split"
+    page.apply_settings(settings)
+    settings["git_untracked"] = True
+    page.apply_settings(settings)  # the old child is going down; the probe hasn't run
+    check("a flip before the probe leaves the respawn to carry it", page._respawn_wanted is True)
+    respawned = wait_for(
+        lambda: read_state(state_path).get("pid") not in (None, pid_before)
+        and page._session_id is not None
+        and not page._resolving
+        and settled(page)
+    )
+    state = read_state(state_path)
+    check(
+        "and the spawn's own argv carries it, with no reload after",
+        respawned and state.get("args") == [] and state.get("mode") == "split" and not page._options_stale,
+        state,
+    )
+    reloads_before = state.get("reloads", 0)
+    wait_for(lambda: False, timeout=0.5)
+    check(
+        "really no reload",
+        read_state(state_path).get("reloads", 0) == reloads_before,
+        read_state(state_path),
+    )
+    pid_before = state.get("pid")
+    settings["git_untracked"] = False
+    page.apply_settings(settings)
+    wait_for(lambda: read_state(state_path).get("args") == ["--exclude-untracked"] and settled(page))
+
+    # -- the page size: the sidecar alone ---------------------------------------------
+    reloads_before = read_state(state_path).get("reloads", 0)
+    settings["git_log_page"] = 50
+    page.apply_settings(settings)
+    wait_for(lambda: False, timeout=0.5)
+    check(
+        "a page size change is neither a respawn nor a reload",
+        read_state(state_path).get("pid") == pid_before
+        and read_state(state_path).get("reloads", 0) == reloads_before,
+        read_state(state_path),
+    )
+    check(
+        "the sidecar carries the new page size",
+        read_sidecar(sidecar).get("logPage") == 50,
+        read_sidecar(sidecar),
+    )
+
+    # -- back to the defaults: a respawn into today's argv ----------------------------
+    page.apply_settings(SETTINGS)
+    respawned = wait_for(
+        lambda: read_state(state_path).get("pid") not in (None, pid_before)
+        and page._session_id is not None
+        and not page._resolving
+    )
+    state = read_state(state_path)
+    check(
+        "the defaults respawn hunk without --mode/--theme",
+        respawned and state.get("mode") is None and state.get("theme") is None and state.get("args") == [],
+        state,
+    )
+    check(
+        "and the sidecar is back to the defaults",
+        read_sidecar(sidecar).get("logPage") == 20,
+        read_sidecar(sidecar),
+    )
+    page.page_closed()
+    wait_for(lambda: not page.hunk_alive, timeout=2.0)
+    window.destroy()
+
+
 def check_without_hunk(repo: str) -> None:
     print("-- with no hunk on PATH")
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
-        on_close=lambda p: None,
         on_closed=lambda p: None,
     )
     window = Gtk.Window(title="check_git_page (no hunk)", default_width=900, default_height=600)
@@ -882,7 +1109,6 @@ def check_outside_a_repo(scratch: str) -> None:
     page = GitPage(
         cwd_provider=lambda: nowhere,
         parent_provider=lambda _cwd: None,
-        on_close=lambda p: None,
         on_closed=lambda p: None,
     )
     window = Gtk.Window(title="check_git_page (no repo)", default_width=900, default_height=600)
@@ -924,6 +1150,7 @@ def main() -> int:
         try:
             check_with_hunk(repo, state_path, shim)
             check_restore(repo, state_path, shim)
+            check_settings(repo, state_path)
             check_teardown_paths(repo, state_path, shim)
         finally:
             os.environ["PATH"] = real_path

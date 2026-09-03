@@ -19,6 +19,8 @@ from collins.gitinfo import (
     head_sha,
     ignored_names,
     index_mtime,
+    parent_branch,
+    remote_branch_name,
     repo_root,
     resolve_branch,
     tree_signature,
@@ -667,6 +669,93 @@ def test_resolve_branch_rejects_names_that_read_as_arguments(tmp_path, name):
     repo = make_repo(tmp_path / "repo")
     with_local_branch(repo, "main")
     assert resolve_branch(repo, name) is None
+
+
+# -- parent_branch ------------------------------------------------------------
+
+
+def test_parent_branch_takes_the_first_candidate_the_tree_can_name(tmp_path):
+    """The attached PR's base beats the Preferences default, which beats the
+    default branch — each only when the repository has it."""
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url="z"))
+    with_remote_head(repo, "origin", "ref: refs/remotes/origin/main\n")
+    with_local_branch(repo, "main")
+    with_local_branch(repo, "base")
+    with_local_branch(repo, "develop")
+    assert parent_branch(repo, ("base", "develop")) == "base"
+    assert parent_branch(repo, (None, "develop")) == "develop"
+    assert parent_branch(repo, ("", "develop")) == "develop"
+    assert parent_branch(repo, (None, None)) == "main"
+    assert parent_branch(repo, ()) == "main"
+
+
+def test_parent_branch_falls_through_a_candidate_the_tree_lacks(tmp_path):
+    """A base nothing here can diff against, a name typed for another
+    repository, or one that reads as an option: the next rung, never a
+    disabled load."""
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url="z"))
+    with_remote_head(repo, "origin", "ref: refs/remotes/origin/main\n")
+    with_local_branch(repo, "main")
+    with_local_branch(repo, "develop")
+    assert parent_branch(repo, ("nosuch", "develop")) == "develop"
+    assert parent_branch(repo, ("-x", "develop")) == "develop"
+    assert parent_branch(repo, ("a..b", "develop")) == "develop"
+    assert parent_branch(repo, ("nosuch", "-x")) == "main"
+
+
+def test_parent_branch_names_a_branch_only_the_remote_has(tmp_path):
+    """A name is returned, not a target: resolve_branch finds origin/develop,
+    the caller resolves "develop" to that itself."""
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url="z"))
+    with_remote_branch(repo, "origin", "develop", SHA_A)
+    with_local_branch(repo, "main")
+    assert parent_branch(repo, (None, "develop")) == "develop"
+
+
+def test_parent_branch_takes_a_remote_qualified_name_as_the_branch_behind_it(tmp_path):
+    """"origin/develop" — the form git prints and people type — is the
+    branch develop when origin has it: the name comes back bare, and the
+    caller's resolve_branch lands on the same ref. Only after the name
+    failed as written, so a local branch with a slash in it keeps its
+    whole name."""
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url="z"))
+    with_remote_head(repo, "origin", "ref: refs/remotes/origin/main\n")
+    with_local_branch(repo, "main")
+    with_remote_branch(repo, "origin", "develop", SHA_A)
+    with_local_branch(repo, "release/v1")
+    assert parent_branch(repo, ("origin/develop",)) == "develop"
+    assert resolve_branch(repo, "develop") == ("origin/develop", SHA_A)
+    assert parent_branch(repo, ("release/v1",)) == "release/v1"
+    # A slashed name that is neither: a remote the config lacks, a branch
+    # the remote lacks, or a prefix alone — the next rung.
+    assert parent_branch(repo, ("nosuch/develop", "main")) == "main"
+    assert parent_branch(repo, ("origin/nosuch",)) == "main"
+    assert parent_branch(repo, ("origin/",)) == "main"
+
+
+def test_remote_branch_name(tmp_path):
+    repo = with_remotes(tmp_path / "repo", ORIGIN.format(url="z"))
+    with_remote_branch(repo, "origin", "develop", SHA_A)
+    with_remote_branch(repo, "origin", "release/v2", SHA_B)
+    assert remote_branch_name(repo, "origin/develop") == "develop"
+    assert remote_branch_name(repo, "origin/release/v2") == "release/v2"
+    assert remote_branch_name(repo, "develop") is None
+    assert remote_branch_name(repo, "upstream/develop") is None  # no such remote
+    assert remote_branch_name(repo, "origin/main") is None  # origin has no main
+    assert remote_branch_name(repo, "origin/") is None
+    assert remote_branch_name(repo, "/develop") is None
+    assert remote_branch_name(repo, "-origin/develop") is None
+    assert remote_branch_name(repo, "origin/a..b") is None
+    assert remote_branch_name(repo, None) is None
+    assert remote_branch_name(tmp_path, "origin/develop") is None
+    assert remote_branch_name(None, "origin/develop") is None
+
+
+def test_parent_branch_with_nothing_to_name(tmp_path):
+    repo = make_repo(tmp_path / "repo", head="ref: refs/heads/feature\n")
+    assert parent_branch(repo, ("nosuch",)) is None
+    assert parent_branch(tmp_path, ("main",)) is None
+    assert parent_branch(None, ("main",)) is None
 
 
 # -- tree_signature -----------------------------------------------------------

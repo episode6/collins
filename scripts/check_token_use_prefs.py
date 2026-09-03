@@ -140,6 +140,7 @@ HEADINGS = {
     "terminal": "Terminal",
     "footer_apps": "Footer apps",
     "pull_requests": "Pull requests",
+    "git": "Git",
     "caffeine": "Caffeine Mode",
     "editor": "Editor",
 }

@@ -83,6 +83,12 @@ export function findSessionId(listing: string, pid: number): string | null {
 export interface SessionDeps {
   readonly run: CommandRunner;
   readonly pid: number;
+  /**
+   * Whether a `diff` load should leave untracked files out (Collins'
+   * sidecar `untracked: false`). Read when the reload is sent, not when
+   * it is queued, so a switch flipped meanwhile lands on the next load.
+   */
+  readonly excludeUntracked?: () => boolean;
 }
 
 export type Report = (message: string, type?: "info" | "warning" | "error") => void;
@@ -100,7 +106,11 @@ async function sessionId(deps: SessionDeps): Promise<string | null> {
 
 /**
  * Ask the daemon to reload this window with `tail` (`["show", sha]`,
- * `["diff", "--staged"]`, …). Resolves what went wrong, or null when the
+ * `["diff", "--staged"]`, …). A `diff` tail goes out with
+ * `--exclude-untracked` right after the subcommand when the deps say so
+ * (hunk resolves the option afresh on every reload, so a bare tail would
+ * bring untracked files back); `show` never takes it. The tails the
+ * model holds stay bare. Resolves what went wrong, or null when the
  * window followed — and also null when the CLI merely timed out waiting
  * for the daemon: the viewer reloads anyway, and `session_reload` will say
  * what it did.
@@ -110,7 +120,8 @@ export async function load(tail: readonly string[], deps: SessionDeps): Promise<
   if (id === null) {
     return "cannot find this hunk window in the session daemon";
   }
-  const result = await deps.run(["session", "reload", id, "--json", "--", ...tail]);
+  const sent = tail[0] === "diff" && deps.excludeUntracked?.() === true ? ["diff", "--exclude-untracked", ...tail.slice(1)] : tail;
+  const result = await deps.run(["session", "reload", id, "--json", "--", ...sent]);
   if (result.ok || TIMED_OUT.test(result.stderr)) {
     return null;
   }

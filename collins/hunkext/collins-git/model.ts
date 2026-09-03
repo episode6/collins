@@ -11,7 +11,7 @@
  * `bun test` without a terminal.
  */
 
-import { EMPTY_TREE, type Commit, type Status, type StatusCode } from "./git.ts";
+import type { Commit, Status, StatusCode } from "./git.ts";
 
 /**
  * What hunk has loaded, decoded from its session title.
@@ -117,8 +117,6 @@ export interface RowsInput {
   readonly defaultCommits: readonly Commit[];
   readonly defaultMore: boolean;
   readonly unpushed: ReadonlySet<string>;
-  /** First parent of the oldest loaded default-branch commit; null for a root. */
-  readonly defaultOldestParent: string | null;
 }
 
 export const WORKTREE_ROW_ID = "worktree";
@@ -159,8 +157,10 @@ function moreRow(group: Group): Row {
  *
  * Header loads follow the spec's table: the current branch's header loads
  * `diff <parent>...HEAD` (or, with no parent at all, `diff <oldest^>..HEAD`
- * over what is listed), the parent's `diff <default>...<parent>`, and the
- * default's `diff <oldest loaded>^..<tip>` — the commits the group shows.
+ * over what is listed) and the parent's `diff <default>...<parent>`. The
+ * default branch's header loads nothing: a whole trunk is more than a
+ * viewer should be handed, and a large repository would fall over on it.
+ * Branch names are shown as written — a branch is a name, not a heading.
  */
 export function buildRows(input: RowsInput): Row[] {
   const rows: Row[] = [];
@@ -177,7 +177,7 @@ export function buildRows(input: RowsInput): Row[] {
     id: headerRowId("current"),
     kind: "header",
     group: "current",
-    label: input.branch.toUpperCase(),
+    label: input.branch,
     load: currentLoad,
   });
   rows.push({ id: WORKTREE_ROW_ID, kind: "worktree", group: "current", label: "working tree", load: ["diff"] });
@@ -192,7 +192,7 @@ export function buildRows(input: RowsInput): Row[] {
       id: headerRowId("parent"),
       kind: "header",
       group: "parent",
-      label: parent.name.toUpperCase(),
+      label: parent.name,
       load: defaultBranch !== null ? ["diff", `${defaultBranch.target}...${parent.target}`] : ["diff", parent.target],
     });
     rows.push(...commitRows(input.parentCommits, "parent", input.unpushed));
@@ -202,14 +202,12 @@ export function buildRows(input: RowsInput): Row[] {
   }
 
   if (defaultBranch !== null) {
-    const tip = input.defaultCommits[0];
-    const oldestParent = input.defaultOldestParent ?? EMPTY_TREE;
     rows.push({
       id: headerRowId("default"),
       kind: "header",
       group: "default",
-      label: defaultBranch.name.toUpperCase(),
-      load: tip !== undefined ? ["diff", `${oldestParent}..${tip.sha}`] : ["diff", defaultBranch.target],
+      label: defaultBranch.name,
+      load: [],
     });
     rows.push(...commitRows(input.defaultCommits, "default", input.unpushed));
     if (input.defaultMore) {
@@ -354,6 +352,20 @@ export function filesSections(status: Status | null, files: readonly PaneFile[],
     return { mode: "split", live: "unstaged", unstaged: rows, staged: status.staged.map(statusRow) };
   }
   return { mode: "split", live: "staged", unstaged: status.unstaged.map(statusRow), staged: rows };
+}
+
+/**
+ * `git status` with its untracked (`?`) rows left out: what the files panel
+ * shows when Collins' untracked switch is off, so the UNSTAGED section of a
+ * staged load lists no file the `diff --exclude-untracked` it would load
+ * can't hold. Staging's own reads keep the full status (`A` stages new
+ * files whatever the panel shows).
+ */
+export function withoutUntracked(status: Status | null): Status | null {
+  if (status === null) {
+    return null;
+  }
+  return { ...status, unstaged: status.unstaged.filter((row) => row.code !== "?") };
 }
 
 /** The `session reload` tail that loads one working-tree side. */

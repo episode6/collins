@@ -112,6 +112,32 @@ describe("load", () => {
     ]);
   });
 
+  test("a diff load carries --exclude-untracked when the deps say so; show never does", async () => {
+    const cli = daemon();
+    const deps = { run: cli.run, pid: OWN_PID, excludeUntracked: () => true };
+    expect(await load(["diff"], deps)).toBeNull();
+    expect(await load(["diff", "--staged"], deps)).toBeNull();
+    expect(await load(["diff", "main...HEAD"], deps)).toBeNull();
+    expect(await load(["show", SHA], deps)).toBeNull();
+    expect(reloadedTails(cli.calls)).toEqual([
+      "diff --exclude-untracked",
+      "diff --exclude-untracked --staged",
+      "diff --exclude-untracked main...HEAD",
+      `show ${SHA}`,
+    ]);
+  });
+
+  test("the untracked switch is read as each reload goes out; off or absent sends the bare tail", async () => {
+    const cli = daemon();
+    let exclude = false;
+    const deps = { run: cli.run, pid: OWN_PID, excludeUntracked: () => exclude };
+    expect(await load(["diff"], deps)).toBeNull();
+    exclude = true;
+    expect(await load(["diff"], deps)).toBeNull();
+    expect(await load(["diff", "--staged"], { run: cli.run, pid: OWN_PID })).toBeNull();
+    expect(reloadedTails(cli.calls)).toEqual(["diff", "diff --exclude-untracked", "diff --staged"]);
+  });
+
   test("an unknown window is reported instead of reloading blindly", async () => {
     const cli = daemon({ sessions: listing({ pid: 111, sessionId: "other" }) });
     expect(await load(["diff"], { run: cli.run, pid: OWN_PID })).toMatch(/session daemon/);

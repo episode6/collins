@@ -11,13 +11,17 @@
  * survive):
  *
  *     {"version": 1, "parent": "main", "parentSource": "auto",
- *      "default": "main", "logPage": 20}
+ *      "default": "main", "logPage": 20, "untracked": true}
  *
  * `parent` is the parent branch's NAME (each side resolves it itself);
  * `parentSource` says who chose it — Collins writes the auto rung, this
  * extension writes `"user"` with the user's pick, or `"auto"` to hand the
- * choice back. `default` and `logPage` are Collins' alone. Readers tolerate
- * a missing or garbled file, and unknown keys pass through untouched.
+ * choice back. `default`, `logPage` and `untracked` are Collins' alone:
+ * the last says whether working-tree reviews include untracked files, and
+ * when it is false every `diff` tail this extension sends carries
+ * `--exclude-untracked` (session.ts), so its loads agree with Collins'
+ * own. Readers tolerate a missing or garbled file, and unknown keys pass
+ * through untouched.
  *
  * One more key is this extension's alone: `refreshed`, the index mtime
  * and HEAD (git.ts's TreeMark) it observed right after reloading the
@@ -39,6 +43,8 @@ export interface SidecarConfig {
   readonly parentSource: ParentSource;
   readonly default: string | null;
   readonly logPage: number;
+  /** Whether working-tree reviews include untracked files; false adds `--exclude-untracked` to every `diff` load. */
+  readonly untracked: boolean;
 }
 
 export const DEFAULT_LOG_PAGE = 20;
@@ -70,6 +76,7 @@ function configFrom(data: Record<string, unknown>): SidecarConfig {
     parentSource: data.parentSource === "user" ? "user" : "auto",
     default: safeRef(data.default),
     logPage: clampLogPage(data.logPage),
+    untracked: data.untracked !== false,
   };
 }
 
@@ -145,7 +152,7 @@ export function sidecarExists(path: string): boolean {
 /**
  * The names the panels run with: the sidecar's when it has them, else the
  * extension's own guesses — default from `origin/HEAD` → main → master,
- * parent = default, twenty commits per page.
+ * parent = default, twenty commits per page, untracked files in.
  */
 export function effectiveConfig(sidecar: SidecarConfig | null, git: GitRunner): SidecarConfig {
   const defaultBranch = sidecar?.default ?? guessDefault(git);
@@ -154,5 +161,6 @@ export function effectiveConfig(sidecar: SidecarConfig | null, git: GitRunner): 
     parentSource: sidecar?.parentSource ?? "auto",
     default: defaultBranch,
     logPage: sidecar?.logPage ?? DEFAULT_LOG_PAGE,
+    untracked: sidecar?.untracked ?? true,
   };
 }

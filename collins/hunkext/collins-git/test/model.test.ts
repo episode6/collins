@@ -1,7 +1,7 @@
 // New in the ghackett fork of agent-session-manager (GPL-3.0).
 
 import { describe, expect, test } from "bun:test";
-import { EMPTY_TREE, type Commit } from "../git.ts";
+import type { Commit } from "../git.ts";
 import {
   buildRows,
   decodeTail,
@@ -11,6 +11,7 @@ import {
   loadedRow,
   neighbour,
   sideTail,
+  withoutUntracked,
   type RowsInput,
 } from "../model.ts";
 
@@ -60,20 +61,19 @@ const base: RowsInput = {
   defaultCommits: [commit(9), commit(8)],
   defaultMore: true,
   unpushed: new Set([commit(3).sha]),
-  defaultOldestParent: commit(7).sha,
 };
 
 describe("buildRows", () => {
   test("lists current, parent and default groups in order with the spec's loads", () => {
     const rows = buildRows(base);
     expect(rows.map((row) => `${row.group}/${row.kind}:${row.label}`)).toEqual([
-      "current/header:FEAT/PANEL",
+      "current/header:feat/panel",
       "current/worktree:working tree",
       "current/commit:commit 3",
       "current/commit:commit 2",
-      "parent/header:DEVELOP",
+      "parent/header:develop",
       "parent/commit:commit 5",
-      "default/header:MAIN",
+      "default/header:main",
       "default/commit:commit 9",
       "default/commit:commit 8",
       "default/more:load more…",
@@ -84,7 +84,7 @@ describe("buildRows", () => {
     expect(rows[2]!.unpushed).toBe(true);
     expect(rows[3]!.unpushed).toBe(false);
     expect(rows[4]!.load).toEqual(["diff", "main...origin/develop"]);
-    expect(rows[6]!.load).toEqual(["diff", `${commit(7).sha}..${commit(9).sha}`]);
+    expect(rows[6]!.load).toEqual([]);
     expect(rows[9]!.load).toEqual([]);
   });
 
@@ -100,10 +100,10 @@ describe("buildRows", () => {
     expect(rows[0]!.load).toEqual(["diff", `${commit(2).sha}^..HEAD`]);
   });
 
-  test("a root commit at the bottom of the default page diffs from the empty tree", () => {
-    const rows = buildRows({ ...base, defaultOldestParent: null, defaultMore: false });
+  test("the default branch's header loads nothing", () => {
+    const rows = buildRows({ ...base, defaultMore: false });
     const header = rows.find((row) => row.group === "default" && row.kind === "header")!;
-    expect(header.load).toEqual(["diff", `${EMPTY_TREE}..${commit(9).sha}`]);
+    expect(header.load).toEqual([]);
     expect(rows.some((row) => row.kind === "more")).toBe(false);
   });
 
@@ -216,6 +216,29 @@ describe("filesSections", () => {
     expect(sections.mode === "split" && sections.live).toBe("staged");
     expect(sections.mode === "split" && sections.staged[0]!.id).toBe("f0");
     expect(sections.mode === "split" && sections.unstaged[0]!.id).toBeNull();
+  });
+
+  test("with untracked files off, the staged view's unstaged side lists none", () => {
+    // What index.ts feeds filesSections when the sidecar says untracked:
+    // false — the live side comes from a `diff --exclude-untracked`, and
+    // the other side's `?` rows would be files a click could never load.
+    const withNew = {
+      unstaged: [
+        { path: "a.txt", code: "M" as const },
+        { path: "new.txt", code: "?" as const },
+        { path: "u.txt", code: "U" as const },
+      ],
+      staged: status.staged,
+    };
+    const filtered = withoutUntracked(withNew);
+    expect(filtered?.unstaged.map((row) => row.code)).toEqual(["M", "U"]);
+    expect(filtered?.staged).toBe(status.staged);
+    expect(withoutUntracked(null)).toBeNull();
+    const sections = filesSections(filtered, files.slice(0, 1), { kind: "staged" });
+    expect(sections.mode === "split" && sections.unstaged.map((row) => row.path)).toEqual(["a.txt", "u.txt"]);
+    // With the switch on nothing is dropped.
+    const shown = filesSections(withNew, files.slice(0, 1), { kind: "staged" });
+    expect(shown.mode === "split" && shown.unstaged.map((row) => row.code)).toEqual(["M", "?", "U"]);
   });
 
   test("everything else is flat, and so is a working tree with no status", () => {

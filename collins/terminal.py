@@ -53,10 +53,9 @@ from .formatting import display_path  # noqa: E402
 from .gitinfo import (  # noqa: E402
     change_summary,
     current_branch,
-    default_branch,
     has_changes,
+    parent_branch,
     repo_root,
-    resolve_branch,
 )
 from .gitpage import GitPage  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
@@ -1431,6 +1430,11 @@ class TerminalTab(Gtk.Box):
         # apply_settings lands: a merge asks before it goes ahead. Read by the
         # PR actions this tab hosts (see _pr_action_host).
         self._confirm_merges = True
+        # The git_parent_branch setting — the default parent branch name
+        # the git page measures against when no PR names one ("" =
+        # automatic); at its shipped default until apply_settings lands.
+        # Read on every resolution (see _git_parent_branch).
+        self._git_parent_setting = ""
         # An open that has been asked for but hasn't reached the screen yet:
         # the panel is revealed from an idle, so two keys pressed in the same
         # frame both find a composer that isn't open (see open_composer).
@@ -5342,7 +5346,6 @@ class TerminalTab(Gtk.Box):
             page = GitPage(
                 cwd_provider=self.current_agent_cwd,
                 parent_provider=self._git_parent_branch,
-                on_close=self._dock.close_page,
                 on_closed=self._on_git_page_closed,
                 loaded=mode,
             )
@@ -5370,22 +5373,24 @@ class TerminalTab(Gtk.Box):
 
     def _git_parent_branch(self, cwd: str | None) -> str | None:
         """The branch the current one is measured against — what the page's
-        "vs" load diffs HEAD from. The attached PR's base first (a stacked
-        PR is measured against the branch it stacks on, not trunk), then
-        the repository's default branch.
+        "vs" load diffs HEAD from: the automatic rung, three deep. The
+        attached PR's base first (a stacked PR is measured against the
+        branch it stacks on, not trunk), then the default parent branch
+        from Preferences → Git when the repository has it, then the
+        repository's default branch (gitinfo.parent_branch). The branch
+        the user set through the extension's "Set parent branch…" beats
+        all three, inside the page itself (GitPage._resolve_parent).
 
         The tab's own PR records (prstatus.PullRequest) carry no base ref —
         only a fetched PR page does (prdetail's `baseRefName`) — so the base
         is what the newest PR's open page has learned, and only when the
         tree can name it (`resolve_branch`: a local or remote-tracking ref);
-        a base nothing here can diff against falls through to the default
-        branch rather than disabling the load. Until the git page fetches
-        the base itself (the spec's second phase), a tab with no PR page
-        open measures against the default branch."""
-        base = self._pr_base_ref()
-        if base and resolve_branch(cwd, base) is not None:
-            return base
-        return default_branch(cwd)
+        a base nothing here can diff against — or a Preferences name this
+        repository doesn't have — falls through rather than disabling the
+        load. Until the git page fetches the base itself (the spec's second
+        phase), a tab with no PR page open measures against the setting or
+        the default branch."""
+        return parent_branch(cwd, (self._pr_base_ref(), self._git_parent_setting))
 
     def _pr_base_ref(self) -> str | None:
         """The base branch of this session's newest PR, as its open page has
@@ -5415,7 +5420,6 @@ class TerminalTab(Gtk.Box):
         self._git_page = GitPage(
             cwd_provider=self.current_agent_cwd,
             parent_provider=self._git_parent_branch,
-            on_close=self._dock.close_page,
             on_closed=self._on_git_page_closed,
             loaded=hunkctl.decode_state(page),
             parent=hunkctl.decode_parent(page),
@@ -5955,6 +5959,10 @@ class TerminalTab(Gtk.Box):
         # button (see _pr_action_host), so a switch flipped in Preferences
         # takes effect on chips and pages that were built before it.
         self._confirm_merges = bool(settings.get("confirm_merges", True))
+        # Likewise read at each resolution: the page re-resolves its parent
+        # on every 2 s tick (and reloads a branch diff whose base moved), so
+        # a changed name reaches an open page without a push.
+        self._git_parent_setting = str(settings.get("git_parent_branch") or "").strip()
         self._apply_terminal_max_width(settings)
         self._set_footer_apps(settings.get("footer_apps") or [])
         self._dock.apply_settings(settings)

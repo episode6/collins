@@ -59,6 +59,13 @@ downloads of each version, see the
   remembers whether it was open, what it showed and the parent you set. A
   machine without hunk gets an install card in the page's place; the
   branch label's copy moved to a right-click.
+- **Preferences → Git.** A group for the git page: hunk's layout
+  (automatic / split / stacked) and theme, whether working-tree reviews
+  show untracked files, how many commits each group of the commits panel
+  shows per *load more…*, and a default parent branch — the branch a
+  session's diffs are measured against when no attached pull request names
+  one; *Set parent branch…* in the page still overrides it. Every one of
+  them reaches a page already open.
 - **The status icon's glass empties when there's nothing to do.** The drink
   now stands for something waiting: the glass holds the coral pour while
   anything is unread, pours the barber pole while any session works, and

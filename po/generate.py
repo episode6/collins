@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-02. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -1184,6 +1184,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Pull requestek frissítése indításkor',
         "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left":
             'Induláskor egyszer megkérdezi a GitHubot minden listázott munkamenet pull requestjeiről, hogy az oldalsáv jelölései frissen induljanak, ne úgy, ahogy maradtak',
+        'Git':
+            'Git',
+        "The git page: hunk's layout and theme, and what the commits panel loads":
+            'A git oldal: a hunk elrendezése és témája, és amit a commit-panel betölt',
+        'Layout':
+            'Elrendezés',
+        'How hunk lays a diff out: side by side, stacked, or whichever fits the width':
+            'Hogyan rendezi el a hunk a diffet: egymás mellett, egymás alatt, vagy ahogy a szélességbe belefér',
+        'Automatic':
+            'Automatikus',
+        'Split':
+            'Osztott',
+        'Stacked':
+            'Egymás alatt',
+        'Theme':
+            'Téma',
+        "Empty: hunk's own default. Any theme hunk knows — nord, dracula, catppuccin-mocha, github-light-default, auto (follows the terminal background) — or one from hunk's config; a name hunk doesn't know falls back to its default":
+            'Üresen: a hunk saját alapértelmezése. Bármely téma, amit a hunk ismer — nord, dracula, catppuccin-mocha, github-light-default, auto (a terminál hátteréhez igazodik) — vagy egy a hunk konfigurációjából; az ismeretlen nevet az alapértelmezés váltja',
+        'Show untracked files':
+            'Nem követett fájlok mutatása',
+        "List files git doesn't track yet in working-tree reviews. Off, the page and the files panel show only tracked changes":
+            'A git által még nem követett fájlok listázása a munkafa áttekintésében. Kikapcsolva az oldal és a fájlpanel csak a követett változásokat mutatja',
+        'Commits per page':
+            'Commitok oldalanként',
+        'How many commits each group of the commits panel shows before its load more… row':
+            'Hány commitot mutat a commit-panel egy-egy csoportja a további betöltése… sora előtt',
+        'Default parent branch':
+            'Alapértelmezett szülőág',
+        "Empty: automatic. The page measures the branch against the attached pull request's base first, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch; Set parent branch… in the page still overrides it":
+            'Üresen: automatikus. Az oldal az ágat először a csatolt pull request alapágához méri, aztán ehhez az ághoz, ha megvan a tárolóban (develop, vagy origin/develop, ha csak a távoli tárolóban van meg), aztán az alapértelmezett ághoz; az oldal Szülőág beállítása… menüpontja továbbra is felülírja',
         'Caffeine Mode':
             'Caffeine Mode',
         'Keep screen on':
@@ -2705,6 +2735,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Pull-Requests beim Start aktualisieren',
         "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left":
             'GitHub beim Start einmal nach den Pull-Requests jeder gelisteten Sitzung fragen, damit die Markierungen in der Seitenleiste aktuell starten statt so, wie sie zurückblieben',
+        'Git':
+            'Git',
+        "The git page: hunk's layout and theme, and what the commits panel loads":
+            'Die Git-Seite: Layout und Thema von hunk, und was das Commit-Panel lädt',
+        'Layout':
+            'Layout',
+        'How hunk lays a diff out: side by side, stacked, or whichever fits the width':
+            'Wie hunk einen Diff anordnet: nebeneinander, untereinander, oder was in die Breite passt',
+        'Automatic':
+            'Automatisch',
+        'Split':
+            'Geteilt',
+        'Stacked':
+            'Untereinander',
+        'Theme':
+            'Thema',
+        "Empty: hunk's own default. Any theme hunk knows — nord, dracula, catppuccin-mocha, github-light-default, auto (follows the terminal background) — or one from hunk's config; a name hunk doesn't know falls back to its default":
+            'Leer: hunks eigener Standard. Jedes Thema, das hunk kennt — nord, dracula, catppuccin-mocha, github-light-default, auto (folgt dem Terminalhintergrund) — oder eines aus hunks Konfiguration; ein Name, den hunk nicht kennt, fällt auf den Standard zurück',
+        'Show untracked files':
+            'Unversionierte Dateien anzeigen',
+        "List files git doesn't track yet in working-tree reviews. Off, the page and the files panel show only tracked changes":
+            'Dateien, die git noch nicht verfolgt, in Arbeitsbaum-Reviews auflisten. Aus: Seite und Dateipanel zeigen nur verfolgte Änderungen',
+        'Commits per page':
+            'Commits pro Seite',
+        'How many commits each group of the commits panel shows before its load more… row':
+            'Wie viele Commits jede Gruppe des Commit-Panels vor ihrer Zeile „mehr laden…“ zeigt',
+        'Default parent branch':
+            'Standard-Elternbranch',
+        "Empty: automatic. The page measures the branch against the attached pull request's base first, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch; Set parent branch… in the page still overrides it":
+            'Leer: automatisch. Die Seite misst den Branch zuerst an der Basis des angehängten Pull-Requests, dann an diesem Branch, wenn das Repository ihn hat (develop, oder origin/develop für einen, den nur das Remote hat), dann am Standardbranch; „Elternbranch festlegen…“ auf der Seite hat weiterhin Vorrang',
         'Caffeine Mode':
             'Caffeine Mode',
         'Keep screen on':
@@ -4223,6 +4283,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Actualizar los pull requests al arrancar',
         "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left":
             'Preguntar a GitHub por los pull requests de cada sesión listada una vez al inicio, para que las marcas de la barra lateral empiecen al día en lugar de como quedaron',
+        'Git':
+            'Git',
+        "The git page: hunk's layout and theme, and what the commits panel loads":
+            'La página de git: la disposición y el tema de hunk, y lo que carga el panel de commits',
+        'Layout':
+            'Disposición',
+        'How hunk lays a diff out: side by side, stacked, or whichever fits the width':
+            'Cómo dispone hunk un diff: lado a lado, apilado, o lo que quepa en el ancho',
+        'Automatic':
+            'Automática',
+        'Split':
+            'Dividida',
+        'Stacked':
+            'Apilada',
+        'Theme':
+            'Tema',
+        "Empty: hunk's own default. Any theme hunk knows — nord, dracula, catppuccin-mocha, github-light-default, auto (follows the terminal background) — or one from hunk's config; a name hunk doesn't know falls back to its default":
+            'Vacío: el predeterminado de hunk. Cualquier tema que hunk conozca — nord, dracula, catppuccin-mocha, github-light-default, auto (sigue el fondo del terminal) — o uno de la configuración de hunk; un nombre que hunk no conoce vuelve al predeterminado',
+        'Show untracked files':
+            'Mostrar archivos sin seguimiento',
+        "List files git doesn't track yet in working-tree reviews. Off, the page and the files panel show only tracked changes":
+            'Listar los archivos que git aún no sigue en las revisiones del árbol de trabajo. Desactivado, la página y el panel de archivos muestran solo cambios con seguimiento',
+        'Commits per page':
+            'Commits por página',
+        'How many commits each group of the commits panel shows before its load more… row':
+            'Cuántos commits muestra cada grupo del panel de commits antes de su fila cargar más…',
+        'Default parent branch':
+            'Rama padre predeterminada',
+        "Empty: automatic. The page measures the branch against the attached pull request's base first, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch; Set parent branch… in the page still overrides it":
+            'Vacío: automático. La página mide la rama primero contra la base del pull request adjunto, luego contra esta rama cuando el repositorio la tiene (develop, u origin/develop para una que solo tiene el remoto), luego contra la rama predeterminada; Establecer rama padre… en la página sigue teniendo prioridad',
         'Caffeine Mode':
             'Caffeine Mode',
         'Keep screen on':
@@ -5742,6 +5832,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Actualiser les pull requests au lancement',
         "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left":
             "Interroger GitHub une fois au démarrage sur les pull requests de chaque session listée, pour que les marques de la barre latérale démarrent à jour plutôt que telles qu'elles ont été laissées",
+        'Git':
+            'Git',
+        "The git page: hunk's layout and theme, and what the commits panel loads":
+            'La page git : la disposition et le thème de hunk, et ce que charge le panneau des commits',
+        'Layout':
+            'Disposition',
+        'How hunk lays a diff out: side by side, stacked, or whichever fits the width':
+            'Comment hunk dispose un diff : côte à côte, empilé, ou ce qui tient dans la largeur',
+        'Automatic':
+            'Automatique',
+        'Split':
+            'Côte à côte',
+        'Stacked':
+            'Empilé',
+        'Theme':
+            'Thème',
+        "Empty: hunk's own default. Any theme hunk knows — nord, dracula, catppuccin-mocha, github-light-default, auto (follows the terminal background) — or one from hunk's config; a name hunk doesn't know falls back to its default":
+            'Vide : le thème par défaut de hunk. Tout thème que hunk connaît — nord, dracula, catppuccin-mocha, github-light-default, auto (suit le fond du terminal) — ou un de la configuration de hunk ; un nom que hunk ne connaît pas retombe sur son thème par défaut',
+        'Show untracked files':
+            'Afficher les fichiers non suivis',
+        "List files git doesn't track yet in working-tree reviews. Off, the page and the files panel show only tracked changes":
+            "Lister les fichiers que git ne suit pas encore dans les revues de l'arbre de travail. Désactivé, la page et le panneau des fichiers ne montrent que les changements suivis",
+        'Commits per page':
+            'Commits par page',
+        'How many commits each group of the commits panel shows before its load more… row':
+            'Combien de commits chaque groupe du panneau des commits affiche avant sa ligne charger plus…',
+        'Default parent branch':
+            'Branche parente par défaut',
+        "Empty: automatic. The page measures the branch against the attached pull request's base first, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch; Set parent branch… in the page still overrides it":
+            "Vide : automatique. La page mesure la branche d'abord contre la base du pull request attaché, puis contre cette branche quand le dépôt l'a (develop, ou origin/develop pour une que seul le dépôt distant a), puis contre la branche par défaut ; Définir la branche parente… dans la page reste prioritaire",
         'Caffeine Mode':
             'Caffeine Mode',
         'Keep screen on':

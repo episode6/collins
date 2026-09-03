@@ -4,6 +4,9 @@ collins (0.1.3) UNRELEASED; urgency=medium
     panel and a files panel drawn by a bundled hunk extension, staging of
     files, hunks and line ranges from the keyboard, discard with a
     confirmation, and commit / fixup of the index.
+  * Preferences gains a Git group: hunk's layout and theme, untracked files
+    on or off, commits per page in the commits panel, and a default parent
+    branch for the git page.
   * Each GitHub release now attaches a binary noarch .rpm next to the .deb.
   * The AppStream metainfo is store-ready (screenshot, branding colours,
     translated summaries) and appstreamcli-validated by every package build;

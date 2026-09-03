@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-02. Full change history: git log for this file.
 
 import json
 import time
@@ -1156,6 +1156,29 @@ def test_notification_settings_have_their_defaults(app_state):
     assert app_state.DEFAULT_SETTINGS["bell_notifications"] is True
     assert app_state.DEFAULT_SETTINGS["announce_finished_runs"] is False
     assert app_state.DEFAULT_SETTINGS["notification_color_scheme"] == "app"
+
+
+def test_git_settings_have_their_defaults(app_state):
+    # The five rows of the Git group (see prefslayout): hunk's own layout
+    # and theme, untracked files shown, twenty commits a page, and the
+    # parent branch worked out by the page.
+    assert app_state.DEFAULT_SETTINGS["git_layout"] == "auto"
+    assert app_state.DEFAULT_SETTINGS["git_theme"] == ""
+    assert app_state.DEFAULT_SETTINGS["git_untracked"] is True
+    assert app_state.DEFAULT_SETTINGS["git_log_page"] == 20
+    assert app_state.DEFAULT_SETTINGS["git_parent_branch"] == ""
+
+
+def test_git_settings_round_trip(app_state):
+    state = app_state.AppState()
+    state.set_setting("git_layout", "split")
+    state.set_setting("git_untracked", False)
+    state.set_setting("git_parent_branch", "develop")
+    reloaded = app_state.AppState()
+    assert reloaded.get_setting("git_layout") == "split"
+    assert reloaded.get_setting("git_untracked") is False
+    assert reloaded.get_setting("git_parent_branch") == "develop"
+    assert reloaded.get_setting("git_log_page") == 20
 
 
 def test_notification_settings_round_trip(app_state):
