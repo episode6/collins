@@ -426,12 +426,25 @@ panels:
   | `A` / `U` | stage all / unstage all, after a confirmation naming the count |
   | `n` / `p` | load the next / previous row of the current commits group |
   | `P` | set the parent branch — a pick over the local branches, also on a right-click in the commits panel |
+  | `<` / `>` | on a narrow page, one level up / down — the diff, the files panel, the commits panel (see below); the header's back / forward buttons press the same |
 
   Every action reloads the review and says what it did. Stage and unstage
   ask nothing; discard and the commit keys confirm first — discard because
   the change exists nowhere else, a commit by the summary you type. A
   binary file, a range across two files, or a file that changed since the
   review loaded, is refused with a word rather than half-done.
+- **A narrow page shows one panel at a time.** hunk needs about 100
+  columns for both panels beside the diff and 73 for one; the page opens
+  at its narrowest — one panel's worth — and grows with a drag of the
+  divider or its maximize. Narrower than both, the header gains an **up**
+  and a **down** button and the page becomes a stack of three levels: the
+  **diff** alone, the **files** panel beside it, the **commits** panel
+  beside it. Up (`<`) climbs diff → files → commits, down (`>`) comes back,
+  and a click drills down by itself — a commit clicked loads it *and*
+  shows the files, a file clicked selects it *and* shows the diff. The
+  buttons' tooltips name the next level and go dim at either end; wide
+  enough for both panels, they disappear and the page shows both as ever
+  (up then means "show the panels", if one was closed with hunk's `s`).
 - **The parent branch** is the base branch of the session's newest pull
   request once its PR page has been opened — a stacked PR is measured
   against the branch it stacks on — then the **Default parent branch**

@@ -47,6 +47,23 @@ callback, which terminates the child it announces when nobody wants it any
 more (the page closed, or was unparented, while the spawn was in flight),
 since its pty is the only one the viewer will ever answer a signal on.
 
+A page too narrow for both of the extension's panes shows one at a time —
+hunk lays its left panes out from a fixed budget (hunkctl.pane_fit: one
+pane beside the diff from 73 columns, both from 100) — and the header
+grows two buttons, back and forward, that walk the extension's *levels*: the
+diff alone, the files pane, the commits pane (its level.ts). Each press
+feeds hunk the key the extension binds (`<` up, `>` down, through the
+VTE's pty — hunk has no session command that runs an extension command),
+the header takes the step for granted at once (tooltips and sensitivity
+follow the level, insensitive at either end and on a page too narrow for
+any pane), and the extension's own word arrives through the sidecar's
+`level` on the next tick. The buttons show only while the VTE's column
+count says the page is narrow, re-read after every allocation (a width
+sensor at the foot of the page) and on the tick; wide, the page shows
+both panes as it always did. The page's minimum width holds
+one pane at the default font, so a page at its narrowest is never one
+where the buttons can do nothing.
+
 The parent branch travels both ways through a sidecar file (hunkctl's
 sidecar_*): Collins writes the name it resolved — the user's pick while it
 resolves, else the host's automatic rung (the newest PR's base, then the
@@ -109,14 +126,15 @@ log = logging.getLogger(__name__)
 _LIVE_PAGES: weakref.WeakSet = weakref.WeakSet()
 
 # The width a column has to reach for the dock to spend free gutter on one
-# (see PanelDock._column_floor): hunk's diff on its own, at a readable
-# width. The extension's panes want more — hunk 0.20 shows the commits pane
-# from about 75 columns and both panes from about 100 — and drops a pane
-# that wouldn't leave the diff its minimum, so at this width hunk shows the
-# diff alone and the panes appear as the column is widened (a drag of the
-# divider, the page's maximize): the extension re-reveals them on a resize,
-# since hunk itself doesn't bring a hidden sidebar back.
-_MIN_PAGE_WIDTH = 560
+# (see PanelDock._column_floor), and the page's own minimum: room for hunk's
+# diff at its narrowest beside one of the extension's panes
+# (hunkctl.ONE_PANE_COLUMNS, 73 columns) at the default monospace size —
+# measured at 9.1 px a column under the headless display, 560 px gave 62.
+# Narrower than that hunk shows the diff alone and no key or button can
+# bring a pane up (its sidebar area needs the 73); both panes want 100
+# columns, which a drag of the divider or the page's maximize provides,
+# and the extension opens them as the width crosses that line.
+_MIN_PAGE_WIDTH = 680
 
 # Sidecar serial numbers, one per page built in this process (see
 # hunkctl.sidecar_path): a closed page's file is removed and the number is
@@ -312,6 +330,26 @@ class GitPage(Adw.Bin):
         refresh.connect("clicked", lambda *_a: self.refresh())
         header.append(refresh)
 
+        # The level buttons of a narrow page (see the module docstring):
+        # hidden while both panes fit, insensitive at either end of the
+        # stack. Drawn as back and forward — back climbs a level (diff →
+        # files → commits), forward descends — with back on the left, the
+        # way a browser's pair reads; between the breadcrumb and refresh.
+        self._up = Gtk.Button(icon_name="go-previous-symbolic")
+        self._up.add_css_class("flat")
+        self._up.connect("clicked", lambda *_a: self.step_level(up=True))
+        header.insert_child_after(self._up, self._breadcrumb)
+        self._down = Gtk.Button(icon_name="go-next-symbolic")
+        self._down.add_css_class("flat")
+        self._down.connect("clicked", lambda *_a: self.step_level(up=False))
+        header.insert_child_after(self._down, self._up)
+        # What the extension says a narrow page shows (the sidecar's
+        # "level"), the default until it says; and the VTE's column count
+        # as of the last allocation, which decides whether the page is
+        # narrow at all.
+        self._level = hunkctl.DEFAULT_LEVEL
+        self._columns = 0
+
         # -- hunk's terminal, and the cards that stand in for it ----------------
         self.terminal = Vte.Terminal()
         self.terminal.set_scrollback_lines(0)  # hunk is full-screen; nothing scrolls off
@@ -336,6 +374,19 @@ class GitPage(Adw.Bin):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(header)
         box.append(self._stack)
+        # A width sensor: nothing tells a widget its allocation changed
+        # (Adw.Bin allocates through a layout manager, so the vfunc never
+        # runs here) except a drawing area's "resize" — zero rows tall, it
+        # costs nothing, and being last in the box it fires after the
+        # terminal above it was allocated; the column count is read on
+        # idle all the same, so the order never matters.
+        sensor = Gtk.DrawingArea(hexpand=True)
+        sensor.set_content_height(0)
+        sensor.set_size_request(-1, 0)
+        sensor.connect(
+            "resize", lambda *_a: GLib.idle_add(self._read_columns, priority=GLib.PRIORITY_DEFAULT)
+        )
+        box.append(sensor)
         self.set_child(box)
 
         # Ctrl+1/2/3 and the zoom chords, ahead of VTE: in the capture phase
@@ -347,6 +398,7 @@ class GitPage(Adw.Bin):
         self.add_controller(keys)
 
         self._sync_header()
+        self._sync_levels()
         # First shown (and every re-show): make sure hunk is running. A
         # restored page is built unselected, maybe in a hidden strip, and
         # must not spawn a process nobody is looking at.
@@ -394,6 +446,40 @@ class GitPage(Adw.Bin):
     def breadcrumb_text(self) -> str:
         """What the header says is loaded — hunk's word once it answered."""
         return self._breadcrumb.get_text()
+
+    @property
+    def level(self) -> str:
+        """What a narrow page shows — "diff", "files" or "commits" (one of
+        hunkctl.LEVELS): the extension's last word through the sidecar, or
+        the step the header just took, or the default before either."""
+        return self._level
+
+    @property
+    def columns(self) -> int:
+        """The VTE's column count as of the last allocation (0 before one):
+        what decides whether the page is narrow (hunkctl.page_is_narrow)."""
+        return self._columns
+
+    def level_buttons_visible(self) -> bool:
+        """Whether the header shows the up/down level buttons: the page is
+        narrower than both panes want."""
+        return self._up.get_visible()
+
+    def step_level(self, up: bool) -> None:
+        """The header's up (or down) button: feed hunk the key the extension
+        binds for one level up (`<`) or down (`>`), and take the step for
+        granted in the header until the extension's word arrives through
+        the sidecar. Nothing without a running hunk, on a page that isn't
+        narrow (the buttons are hidden there), or where the step has
+        nowhere to go (the button is insensitive there)."""
+        if not self.hunk_alive or not hunkctl.page_is_narrow(self._columns):
+            return
+        target = hunkctl.level_up(self._level) if up else hunkctl.level_down(self._level)
+        if target is None or hunkctl.pane_fit(self._columns) == "none":
+            return
+        self.terminal.feed_child(hunkctl.LEVEL_UP_KEY if up else hunkctl.LEVEL_DOWN_KEY)
+        self._level = target
+        self._sync_levels()
 
     def settled(self) -> bool:
         """Whether the viewer is up with a session id in hand and nothing in
@@ -500,6 +586,7 @@ class GitPage(Adw.Bin):
         if branch != self._branch:
             self._branch = branch
             self._sync_header()
+        self._read_columns()
         self._read_sidecar()
         target_before = self._parent_target
         self._resolve_parent()
@@ -699,6 +786,30 @@ class GitPage(Adw.Bin):
                 hunkctl.breadcrumb(self._loaded, self._branch, self._target_label(), self._subject)
             )
 
+    def _read_columns(self) -> bool:
+        """Re-read the VTE's column count (after an allocation — the width
+        sensor — and on every tick) and show or hide the level buttons by
+        it."""
+        columns = int(self.terminal.get_column_count() or 0)
+        if columns != self._columns:
+            self._columns = columns
+            self._sync_levels()
+        return GLib.SOURCE_REMOVE
+
+    def _sync_levels(self) -> None:
+        """The level buttons follow the column count (shown while the page
+        is narrow) and the level (tooltips, sensitivity), and need a hunk
+        to feed."""
+        narrow = self._columns > 0 and hunkctl.page_is_narrow(self._columns)
+        self._up.set_visible(narrow)
+        self._down.set_visible(narrow)
+        if not narrow:
+            return
+        for button, up in ((self._up, True), (self._down, False)):
+            tooltip, sensitive = hunkctl.level_button(up, self._level, self._columns)
+            button.set_tooltip_text(tooltip)
+            button.set_sensitive(sensitive and self.hunk_alive)
+
     def _on_key_pressed(self, ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:
         mode = hunkctl.load_for_key(int(keyval), int(state))
         if mode is not None:
@@ -830,6 +941,10 @@ class GitPage(Adw.Bin):
         except OSError:
             return
         self._ext_refreshed = hunkctl.read_sidecar_refreshed(text)
+        level = hunkctl.read_sidecar_level(text)
+        if level is not None and level != self._level:
+            self._level = level
+            self._sync_levels()
         parent, source = hunkctl.read_sidecar(text)
         if source == "user" and parent:
             self._user_parent = parent
@@ -1034,6 +1149,10 @@ class GitPage(Adw.Bin):
             self._show_exited_card(error.message)
             return
         self._child_pid = pid
+        # A fresh hunk starts at the bottom of the stack; the sidecar says
+        # otherwise soon if it doesn't.
+        self._level = hunkctl.DEFAULT_LEVEL
+        self._sync_levels()
         if self._respawn_wanted:
             # Asked to start over (the repo root moved) between the probe's
             # answer and this: the child's exit spawns the next one.
@@ -1136,6 +1255,7 @@ class GitPage(Adw.Bin):
         self._options_stale = False
         self._gen += 1  # orphan any session list / get / reload still out
         self.terminal.reset(True, True)
+        self._sync_levels()  # nothing to feed: the buttons go insensitive
         if self._closing:
             return
         if self._respawn_wanted:

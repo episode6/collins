@@ -159,6 +159,7 @@ export function FilesPane({ files, selectedFileId, width, height, theme, actions
   const selectLive = (row: FileRow) => {
     if (row.id !== null) {
       actions.selectFile(row.id);
+      paneHandlers().selectedFile();
     }
   };
   const goTo = (side: Side, row: FileRow | null) => {
