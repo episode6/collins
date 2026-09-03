@@ -21,7 +21,7 @@ downloads of each version, see the
 - ✅ **Pull requests** — every session's PRs tracked through `gh` (checks, conflicts, unanswered comments) as sidebar marks, footer chips, and an in-app PR page; merge / auto-merge / ready-for-review / request-a-review actions, with red CI, conflicts, and unanswered comments sendable back to the agent as prompts
 - ✅ **Editor** — a per-tab code editor beside the terminal: file tree, quick open, an agent-files list of what the session just wrote, pop-out to a second monitor
 - ✅ **Composer** — a spell-checked, multi-line prompt box that opens the moment you start typing, floating or docked, with dropped or pasted image attachments; an unsent prompt is a **draft** kept with its session across tab close and quit — or a sidebar Draft row, for a session not started yet
-- ✅ **Session tools** — an in-app MCP server every launched session can call: rename itself, open a file or an image on your screen, notify you when it needs you, attach a pull request to its own row, spawn a sibling session, and read or drive the terminal panel
+- ✅ **Session tools** — an in-app MCP server every launched session can call: rename itself, open a file, a diff or an image on your screen, notify you when it needs you, attach a pull request to its own row, spawn a sibling session, and read or drive the terminal panel
 - ✅ **Desktop presence** — a status icon with an unread badge, close-to-hide (sessions keep running without a window), notifications wearing each project's own icon, an in-app notification center (cards, a header bell, a history sheet, a choice of sounds), a daily update check, Caffeine Mode
 - ✅ **Theming** — light/dark plus selectable terminal color palettes
 - ✅ **Localization** — English, Hungarian, German, Spanish, French
@@ -59,6 +59,13 @@ downloads of each version, see the
   remembers whether it was open, what it showed and the parent you set. A
   machine without hunk gets an install card in the page's place; the
   branch label's copy moved to a right-click.
+- **`show_diff`, a session tool for the git page.** The agent can put a
+  change on your screen: `show_diff("unstaged" | "staged" | "branch" |
+  <commit ref>, file?, line?)` opens the session's git page on that diff
+  (revealed, never focused) and moves hunk to the file and line. The reply
+  names what loaded and the hunk session id, and points the agent at
+  `hunk session …` for everything else the viewer can do. Its switch sits
+  with the other tools' under Preferences → *Built-in MCP tools*.
 - **Preferences → Git.** A group for the git page: hunk's layout
   (automatic / split / stacked) and theme, whether working-tree reviews
   show untracked files, how many commits each group of the commits panel

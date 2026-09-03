@@ -5357,6 +5357,13 @@ class TerminalTab(Gtk.Box):
                 page.load(mode)
         return True
 
+    @property
+    def git_page(self) -> GitPage | None:
+        """This tab's git page while one is open (in the dock, shown or
+        not), else None. What a caller that opened it through
+        `open_git_page` drives afterwards (the show_diff tool)."""
+        return self._git_page
+
     def toggle_git_page(self) -> bool:
         """F6: close the git page when the keyboard is in it, else open or
         front it. False only when there is no repository to open a page for

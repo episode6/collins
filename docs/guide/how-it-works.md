@@ -180,10 +180,13 @@ that dialog has been answered.
   definition rides in each session's context, `read_terminal` sends the
   panel's text into the conversation, and a session `start_session` starts
   is titled like any other. One switch per tool. Every launched session is
-  handed the Collins MCP server through `--mcp-config`; it offers eight
-  tools — `set_session_title`, `open_in_editor`, `show_image`,
-  `notify_user`, `attach_pr`, `start_session`, `read_terminal`,
-  `run_in_terminal` — and a session sees exactly the ones you left on.
+  handed the Collins MCP server through `--mcp-config`; it offers nine
+  tools — `set_session_title`, `open_in_editor`, `show_diff`,
+  `show_image`, `notify_user`, `attach_pr`, `start_session`,
+  `read_terminal`, `run_in_terminal` — and a session sees exactly the ones
+  you left on (`show_diff` only while hunk is installed, too: Collins
+  probes for it at most every 30 s and leaves the tool off the list
+  otherwise).
 
 The **Model list** row beside the pickers is the odd one out: a Models API
 query that spends no tokens, which its subtitle says.

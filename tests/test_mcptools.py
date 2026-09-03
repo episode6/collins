@@ -17,6 +17,7 @@ def test_serves_exactly_the_landed_tools():
     assert [tool["name"] for tool in mcptools.TOOLS] == [
         "set_session_title",
         "open_in_editor",
+        "show_diff",
         "show_image",
         "notify_user",
         "attach_pr",
@@ -63,12 +64,49 @@ def test_enabled_tools_serves_only_what_is_switched_on():
     assert [tool["name"] for tool in served] == [
         "set_session_title",
         "open_in_editor",
+        "show_diff",
         "notify_user",
         "attach_pr",
         "start_session",
         "read_terminal",
         "run_in_terminal",
     ]
+
+
+def test_enabled_tools_leaves_show_diff_out_without_hunk():
+    """The tool drives hunk; a machine without it is never told the tool
+    exists (the author's ask on PR 487), whatever the switch says."""
+    served = mcptools.enabled_tools(lambda _name: True, lambda _name: False)
+    assert "show_diff" not in [tool["name"] for tool in served]
+    assert len(served) == len(mcptools.TOOLS) - 1
+    served = mcptools.enabled_tools(lambda _name: True, lambda _name: True)
+    assert served == mcptools.TOOLS
+
+
+def test_availability_is_asked_only_about_the_tools_that_need_hunk():
+    asked = []
+
+    def available(name):
+        asked.append(name)
+        return False
+
+    served = mcptools.enabled_tools(lambda _name: True, available)
+    assert asked == ["show_diff"]
+    assert mcptools.REQUIRES_HUNK == {"show_diff"}
+    assert [tool["name"] for tool in served] == [
+        tool["name"] for tool in mcptools.TOOLS if tool["name"] != "show_diff"
+    ]
+
+
+def test_switch_off_beats_availability():
+    """A switched-off tool is never asked about: the switch is the user's
+    word and comes first."""
+    asked = []
+    served = mcptools.enabled_tools(
+        lambda name: name != "show_diff", lambda name: asked.append(name) or True
+    )
+    assert asked == []
+    assert "show_diff" not in [tool["name"] for tool in served]
 
 
 def test_enabled_tools_can_serve_nothing_at_all():
@@ -142,6 +180,34 @@ def test_open_in_editor_line_must_be_a_positive_integer():
     assert "at least 1" in mcptools.validate_args(
         "open_in_editor", {"path": "x.py", "line": 0}
     )
+
+
+def test_show_diff_args():
+    assert mcptools.validate_args("show_diff", {"what": "unstaged"}) is None
+    assert mcptools.validate_args("show_diff", {"what": "HEAD~1"}) is None
+    assert (
+        mcptools.validate_args(
+            "show_diff", {"what": "branch", "file": "collins/app.py", "line": 12}
+        )
+        is None
+    )
+    assert "what" in mcptools.validate_args("show_diff", {})
+    assert "empty" in mcptools.validate_args("show_diff", {"what": ""})
+    assert "128" in mcptools.validate_args("show_diff", {"what": "x" * 129})
+    assert "empty" in mcptools.validate_args("show_diff", {"what": "staged", "file": ""})
+
+
+def test_show_diff_line_must_be_a_positive_integer():
+    """1-based on the wire, like open_in_editor's; the handler hands it to
+    hunk's `--new-line` as it is. Whether it needs a file is the handler's
+    check (the schema has no way to say so)."""
+    assert "integer" in mcptools.validate_args(
+        "show_diff", {"what": "staged", "file": "x.py", "line": "12"}
+    )
+    assert "at least 1" in mcptools.validate_args(
+        "show_diff", {"what": "staged", "file": "x.py", "line": 0}
+    )
+    assert "mode" in mcptools.validate_args("show_diff", {"what": "staged", "mode": "x"})
 
 
 def test_show_image_args():

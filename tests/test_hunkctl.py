@@ -4,7 +4,9 @@
 version gate, argv (the bundled extension on it, and what Preferences → Git
 adds), the Options those settings normalise into, hunk's JSON replies,
 session titles (a commit's included), the chords, the layout slot (with the
-user-set parent), and the sidecar the page shares with the extension."""
+user-set parent), the sidecar the page shares with the extension, and the
+show_diff tool's decisions (what it loads, the file path it hands hunk, the
+navigate argv, the reply)."""
 
 import json
 import os
@@ -1011,3 +1013,194 @@ def test_terminate_tree_survives_a_vanished_pid():
         raise ProcessLookupError
 
     hunkctl.terminate_tree(42, getpgid=getpgid, killpg=lambda *a: None, kill=kill)  # no raise
+
+
+# -- the show_diff tool ------------------------------------------------------------
+
+
+class _Result:
+    def __init__(self, returncode: int, stdout: str = "", stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_resolve_commit_runs_rev_parse_and_returns_the_sha():
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _Result(0, SHA + "\n")
+
+    assert hunkctl.resolve_commit("/repo", "HEAD~1", run=run) == SHA
+    argv, kwargs = calls[0]
+    assert argv == ["git", "rev-parse", "--verify", "--quiet", "HEAD~1^{commit}"]
+    assert kwargs["cwd"] == "/repo"
+    assert kwargs["timeout"] == hunkctl.GIT_TIMEOUT_S
+
+
+def test_resolve_commit_three_answers():
+    """None: git says it names no commit. "": git couldn't be asked. Neither
+    call happens for a ref that isn't safe as an argument."""
+    assert hunkctl.resolve_commit("/repo", "nope", run=lambda *a, **k: _Result(1)) is None
+    assert hunkctl.resolve_commit("/repo", "HEAD", run=lambda *a, **k: _Result(0, "garbage sha")) is None
+
+    def boom(*a, **k):
+        raise OSError("no git")
+
+    assert hunkctl.resolve_commit("/repo", "HEAD", run=boom) == ""
+
+    def never(*a, **k):
+        raise AssertionError("must not run")
+
+    assert hunkctl.resolve_commit("/repo", "--output=x", run=never) is None
+    assert hunkctl.resolve_commit("/repo", "a..b", run=never) is None
+    assert hunkctl.resolve_commit(None, "HEAD", run=never) is None
+
+
+@pytest.mark.parametrize(
+    ("what", "expected"),
+    [
+        ("unstaged", "unstaged"),
+        ("staged", "staged"),
+        ("branch", "branch"),
+        ("HEAD~2", {"show": "HEAD~2"}),
+        (SHA, {"show": SHA}),
+        ("v1.2", {"show": "v1.2"}),
+        ("", None),
+        ("main..feat", None),
+        ("--output=x", None),
+        ("two words", None),
+        (None, None),
+        (7, None),
+    ],
+)
+def test_show_diff_load(what, expected):
+    assert hunkctl.show_diff_load(what) == expected
+
+
+def test_diff_file_path_is_repo_relative():
+    root = "/repo"
+    assert hunkctl.diff_file_path("src/a.py", root) == "src/a.py"
+    assert hunkctl.diff_file_path("./src/a.py", root) == "src/a.py"
+    assert hunkctl.diff_file_path("/repo/src/a.py", root) == "src/a.py"
+    assert hunkctl.diff_file_path(" src/a.py ", root) == "src/a.py"
+    assert hunkctl.diff_file_path("src/../a.py", root) == "a.py"
+
+
+def test_diff_file_path_refuses_what_cannot_be_in_the_diff():
+    root = "/repo"
+    assert hunkctl.diff_file_path("", root) is None
+    assert hunkctl.diff_file_path("   ", root) is None
+    assert hunkctl.diff_file_path(".", root) is None
+    assert hunkctl.diff_file_path("../x.py", root) is None
+    assert hunkctl.diff_file_path("/etc/passwd", root) is None
+    assert hunkctl.diff_file_path("-flag", root) is None
+    assert hunkctl.diff_file_path("src/a.py", None) is None
+    assert hunkctl.diff_file_path(None, root) is None
+
+
+def test_diff_file_path_prefers_the_agent_cwd_when_only_it_has_the_file():
+    """An agent that cd'd into a subdirectory names files the way its shell
+    sees them; a path that is only there against its cwd is taken from
+    there — and one that exists against the root wins outright."""
+    root = "/repo"
+    cwd = "/repo/pkg"
+    only_in_pkg = {"/repo/pkg/a.py"}
+    assert hunkctl.diff_file_path("a.py", root, cwd, exists=only_in_pkg.__contains__) == "pkg/a.py"
+    both = {"/repo/a.py", "/repo/pkg/a.py"}
+    assert hunkctl.diff_file_path("a.py", root, cwd, exists=both.__contains__) == "a.py"
+    neither = set()
+    assert hunkctl.diff_file_path("a.py", root, cwd, exists=neither.__contains__) == "a.py"
+    # The cwd never lifts a path out of the repository.
+    assert hunkctl.diff_file_path("../../x.py", root, cwd, exists=lambda _p: True) is None
+
+
+def test_navigate_argv():
+    assert hunkctl.navigate_argv("/usr/bin/hunk", "abc", "src/a.py", 42) == [
+        "/usr/bin/hunk", "session", "navigate", "abc", "--json", "--file", "src/a.py", "--new-line", "42",
+    ]
+    assert hunkctl.navigate_argv("/usr/bin/hunk", "abc", "src/a.py") == [
+        "/usr/bin/hunk", "session", "navigate", "abc", "--json", "--file", "src/a.py", "--hunk", "1",
+    ]
+
+
+def test_navigate_error_passes_hunks_word_through():
+    reply = hunkctl.Reply("", "hunk: No diff file matches src/x.ts.\n", 1)
+    assert hunkctl.navigate_error(reply) == "No diff file matches src/x.ts."
+    reply = hunkctl.Reply("", "warning: x\nhunk: No diff hunk in a.py matches the requested target.", 1)
+    assert hunkctl.navigate_error(reply) == "No diff hunk in a.py matches the requested target."
+    assert hunkctl.navigate_error(hunkctl.Reply("", "", None)) == "hunk didn't answer the navigate in time"
+    assert hunkctl.navigate_error(hunkctl.Reply("", "", 2)) == "hunk didn't answer the navigate (exit 2)"
+
+
+def test_show_diff_reply():
+    text = hunkctl.show_diff_reply("working tree · unstaged", "abc-1")
+    lines = text.split("\n")
+    assert lines[0] == "Loaded working tree · unstaged in the session's git page (hunk session abc-1)."
+    assert "Navigated" not in text
+    assert "`hunk session <command> abc-1 …`" in lines[-1]
+    assert "`hunk skill path`" in lines[-1]
+    text = hunkctl.show_diff_reply("a1b2c3d Wire it", "abc-1", "src/a.py", 12)
+    assert text.split("\n")[1] == "Navigated the viewer to src/a.py, line 12."
+    text = hunkctl.show_diff_reply("a1b2c3d Wire it", "abc-1", "src/a.py")
+    assert text.split("\n")[1] == "Navigated the viewer to src/a.py."
+
+
+# -- the probe cache ----------------------------------------------------------------
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_probe_cache_probes_once_until_the_ttl_passes():
+    calls = []
+    clock = _Clock()
+
+    def fake_probe():
+        calls.append(clock.now)
+        return hunkctl.Probe("/usr/bin/hunk", (0, 20, 1))
+
+    cache = hunkctl.ProbeCache(probe=fake_probe, ttl=30.0, clock=clock)
+    assert cache.result is None and cache.stale
+    assert cache.ok() is True  # never filled: probes on the spot
+    assert calls == [100.0]
+    assert not cache.stale
+    clock.now = 129.0
+    assert cache.ok() is True and calls == [100.0]  # answered from the cache
+    clock.now = 130.0
+    assert cache.stale  # due, but ok() still never re-probes on its own
+    assert cache.ok() is True and calls == [100.0]
+    assert cache.refresh().status == "ok"
+    assert calls == [100.0, 130.0] and not cache.stale
+
+
+@pytest.mark.parametrize(
+    ("probe", "expected"),
+    [
+        (hunkctl.Probe(None, None), False),
+        (hunkctl.Probe("/usr/bin/hunk", None), False),
+        (hunkctl.Probe("/usr/bin/hunk", (0, 19, 9)), False),
+        (hunkctl.Probe("/usr/bin/hunk", (0, 20, 0)), True),
+        (hunkctl.Probe("/usr/bin/hunk", (1, 2)), True),
+    ],
+)
+def test_probe_cache_ok_is_the_probes_status(probe, expected):
+    cache = hunkctl.ProbeCache(probe=lambda: probe, clock=_Clock())
+    assert cache.ok() is expected
+    assert cache.result == probe
+
+
+def test_probe_cache_follows_an_install_on_refresh():
+    """hunk installed after the first probe: the next refresh (the app's,
+    once the TTL passed) turns the tool on for the next session."""
+    answers = [hunkctl.Probe(None, None), hunkctl.Probe("/usr/bin/hunk", (0, 20, 1))]
+    cache = hunkctl.ProbeCache(probe=lambda: answers.pop(0), clock=_Clock())
+    assert cache.ok() is False
+    cache.refresh()
+    assert cache.ok() is True

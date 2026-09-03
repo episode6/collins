@@ -77,6 +77,13 @@ _MCP_TOOL_LABELS = {
         N_("Open files in the editor"),
         N_("open_in_editor — put a file from the project on screen, at a line"),
     ),
+    "show_diff": (
+        N_("Show diffs in the git page"),
+        N_(
+            "show_diff — open the git page on a working-tree, branch or commit diff, at a file "
+            "and line; offered to sessions only while hunk is installed"
+        ),
+    ),
     "show_image": (
         N_("Show images"),
         # The URL half is disclosure, not detail: it is the only tool that
