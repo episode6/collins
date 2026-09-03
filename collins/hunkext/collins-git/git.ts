@@ -365,8 +365,18 @@ export function readLog(git: GitRunner, range: readonly string[], window: LogWin
  */
 export const NOT_ON_ANY_REMOTE: readonly string[] = ["--not", "--remotes"];
 
-/** The shas on HEAD that no remote-tracking ref has — what the commits panel marks `↑`. */
+/**
+ * The shas on HEAD that no remote-tracking ref has — what the commits panel
+ * marks `↑`. A repository with no remote-tracking ref at all has nothing to
+ * be unpushed against, so it marks nothing: without that guard `HEAD --not
+ * --remotes` would walk, and flag, the entire history of a local-only
+ * repository on every panel rebuild.
+ */
 export function unpushedShas(git: GitRunner): Set<string> {
+  const tracking = git(["for-each-ref", "--count=1", "--format=%(refname)", "refs/remotes/"]);
+  if (!tracking.ok || tracking.stdout.trim() === "") {
+    return new Set();
+  }
   const result = git(["rev-list", "HEAD", ...NOT_ON_ANY_REMOTE, "--"]);
   if (!result.ok) {
     return new Set();

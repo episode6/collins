@@ -213,10 +213,15 @@ describe.skipIf(!hasGit())("staging against a real index", () => {
     expect(resolveBranch(repo.git, "main")).toEqual({ target: "main", sha: head });
     expect(resolveBranch(repo.git, "nope")).toBeNull();
     expect(resolveBranch(repo.git, "-x")).toBeNull();
-    // With no remote-tracking ref at all, every commit is unpushed; once one names HEAD, none is.
-    expect(unpushedShas(repo.git)).toEqual(new Set([head]));
+    // With no remote-tracking ref at all there is nothing to be unpushed against, so
+    // nothing is marked; once one names HEAD, still nothing; once HEAD moves past it, HEAD.
+    expect(unpushedShas(repo.git).size).toBe(0);
     repo.run("update-ref", "refs/remotes/origin/main", head);
     expect(unpushedShas(repo.git).size).toBe(0);
+    repo.write("f.txt", "unpushed\n");
+    repo.run("commit", "-qam", "unpushed");
+    expect(unpushedShas(repo.git)).toEqual(new Set([revParse(repo.git, "HEAD")!]));
+    repo.run("reset", "-q", "--hard", head);
 
     repo.run("checkout", "-qb", "feat");
     repo.write("f.txt", "second\n");

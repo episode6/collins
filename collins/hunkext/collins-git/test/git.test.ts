@@ -114,10 +114,18 @@ describe("the commit keys' git calls", () => {
   });
 
   test("unpushedShas asks the same question of every commit on HEAD", () => {
-    const { git, calls } = fakeRunner({ "rev-list": ok(`${SHA_A}\n${SHA_B}\n`) });
+    const tracked = { "for-each-ref": ok("refs/remotes/origin/main\n") };
+    const { git, calls } = fakeRunner({ ...tracked, "rev-list": ok(`${SHA_A}\n${SHA_B}\n`) });
     expect(unpushedShas(git)).toEqual(new Set([SHA_A, SHA_B]));
-    expect(calls[0]?.args).toEqual(["rev-list", "HEAD", "--not", "--remotes", "--"]);
-    expect(unpushedShas(fakeRunner({ "rev-list": failed("") }).git)).toEqual(new Set());
+    expect(calls[0]?.args).toEqual(["for-each-ref", "--count=1", "--format=%(refname)", "refs/remotes/"]);
+    expect(calls[1]?.args).toEqual(["rev-list", "HEAD", "--not", "--remotes", "--"]);
+    expect(unpushedShas(fakeRunner({ ...tracked, "rev-list": failed("") }).git)).toEqual(new Set());
+  });
+
+  test("unpushedShas marks nothing, and never walks, without a remote-tracking ref", () => {
+    const { git, calls } = fakeRunner({ "for-each-ref": ok(""), "rev-list": ok(`${SHA_A}\n`) });
+    expect(unpushedShas(git)).toEqual(new Set());
+    expect(calls.map((call) => call.args[0])).toEqual(["for-each-ref"]);
   });
 });
 
