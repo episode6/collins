@@ -23,6 +23,7 @@ from . import (  # noqa: E402
     composerkeys,
     editor,
     footerapps,
+    hunkctl,
     notifycenter,
     notifysound,
     prefslayout,
@@ -125,9 +126,9 @@ _GIT_LAYOUT_LABELS = {
 }
 _GIT_LAYOUTS = [(value, _GIT_LAYOUT_LABELS.get(value, label)) for value, label in prefslayout.GIT_LAYOUTS]
 
-# The longest theme id hunk ships is 26 characters; a name past this is
-# not a theme, and never reaches hunk's argv.
-_GIT_THEME_MAX = 64
+# The same bound hunkctl.safe_theme applies before a name reaches hunk's
+# argv, so the row refuses exactly what the page would drop.
+_GIT_THEME_MAX = hunkctl.MAX_THEME_LEN
 
 # How long the Git group's two entry rows wait after the last keystroke
 # before keeping what the box holds (see _save_git_word): a theme is saved

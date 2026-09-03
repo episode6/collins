@@ -83,8 +83,10 @@ MIN_LOG_PAGE = 5
 MAX_LOG_PAGE = 500
 # A theme name (git_theme) that can go on hunk's argv: hunk falls back to
 # its default theme on a name it doesn't know (verified against 0.20.1),
-# so the gate is only against something that isn't one argument.
-_MAX_THEME_LEN = 64
+# so the gate is only against something that isn't one argument. The
+# longest theme id hunk ships is 26 characters. Preferences validates
+# against the same number, imported from here.
+MAX_THEME_LEN = 64
 # A ref that is safe as an argument and as a title token: the same rule as
 # gitinfo._safe_branch_name (non-empty, no whitespace, no leading "-", no
 # "..") plus a length cap, since a title token or a persisted string is
@@ -217,7 +219,7 @@ class Options:
         """An Options out of the whole settings dict, tolerant of every
         key being missing or wrong: git_layout not in LAYOUTS → "auto";
         git_theme stripped, kept only when it is one argument (no
-        whitespace, no leading "-", at most _MAX_THEME_LEN chars) else "";
+        whitespace, no leading "-", at most MAX_THEME_LEN chars) else "";
         git_untracked as a bool (absent: on); git_log_page as an int
         clamped to MIN_LOG_PAGE..MAX_LOG_PAGE (garbage: LOG_PAGE)."""
         layout = settings.get("git_layout")
@@ -238,11 +240,11 @@ class Options:
 
 def safe_theme(name: object) -> bool:
     """Whether *name* can go on hunk's argv as `--theme <name>`: a non-empty
-    str of at most _MAX_THEME_LEN chars, no whitespace, no leading "-". Not
+    str of at most MAX_THEME_LEN chars, no whitespace, no leading "-". Not
     whether hunk knows it — it can't be listed (built-ins, `auto`, aliases
     and the user's own `[themes.<id>]`), and an unknown one degrades to
     hunk's default rather than failing the spawn."""
-    if not isinstance(name, str) or not name or len(name) > _MAX_THEME_LEN:
+    if not isinstance(name, str) or not name or len(name) > MAX_THEME_LEN:
         return False
     if any(ch.isspace() for ch in name):
         return False
