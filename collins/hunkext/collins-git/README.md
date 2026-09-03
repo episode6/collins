@@ -94,8 +94,10 @@ Every key avoids hunk's own defaults. Users can rebind them under
 `[keybindings]` as `collins-git.stage-hunk`, `stage-file`, `set-anchor`,
 `clear-anchor`, `discard`, `commit`, `commit-with-body`, `fixup`, `stage-all`,
 `unstage-all`, `next-row`, `previous-row`, `set-parent`, `level-up`,
-`level-down` — the last two are what Collins' header buttons press, so a
-rebinding of them takes the buttons with it.
+`level-down`. The last two are the exception: Collins' header buttons feed
+hunk the bytes `<` and `>` (hunk's session CLI cannot run an extension command
+by name), so they are pinned to those keys — rebind `level-up` / `level-down`
+and the buttons keep pressing `<` / `>`, which then do whatever owns them.
 
 `C`, `B` and `F` act on the index as it is — whatever `x`/`X`/`A` put there,
 from either view — and refuse before asking anything when nothing is staged or
