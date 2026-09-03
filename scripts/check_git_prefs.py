@@ -373,8 +373,11 @@ def step_search() -> bool:
         ("load more", ["Commits per page"]),
         # A theme name finds the terminal's palette row too.
         ("dracula", ["Color theme", "Theme", ""]),
-        # The group's own words keep every row, by design.
-        ("hunk", titles(git)),
+        # The group's own words keep every row, by design; "hunk" also
+        # finds the show_diff switch (Built-in MCP tools, above this
+        # group), whose subtitle says the tool is offered while hunk is
+        # installed.
+        ("hunk", ["Show diffs in the git page", *titles(git)]),
         ("untracked", titles(git)),
         ("parent branch", titles(git)),
     ):
