@@ -2,50 +2,73 @@
 
 """The git page: hunk in a VTE beside the session, driven over its session API.
 
-What the page shows is hunk's — hunk.dev, the terminal diff viewer — and all
-Collins adds is a one-row header (the branch, a breadcrumb of what is loaded,
-a three-way switch, refresh and close) and the plumbing that keeps hunk
-pointed at the right thing: it spawns `hunk diff --watch` in the agent's
-working tree the first time the page is shown, finds the session hunk
-registered for that process (`hunk session list --json`, matched by pid —
-the npm wrapper spawns the real viewer as a child, so both pids are tried),
-and swaps what is loaded with `hunk session reload <id> -- diff …` whenever
-the switch, Ctrl+1/2/3 or the host asks for another of the three loads: the
-unstaged working tree, the index, or the branch against its parent. When the
-session id can't be had (an old hunk, a daemon that never answered), every
-switch is a respawn instead — slower, never wrong.
+What the page shows is hunk's — hunk.dev, the terminal diff viewer, running
+with the collins-git extension Collins ships as package data, which draws
+the commits and files panels and binds the staging keys — and all Collins
+adds is a one-row header (the branch, a breadcrumb of what is loaded,
+refresh and close) and the plumbing that keeps hunk pointed at the right
+thing: it spawns `hunk diff --watch --extension <collins-git>` in the
+agent's working tree the first time the page is shown, finds the session
+hunk registered for that process (`hunk session list --json`, matched by
+pid — the npm wrapper spawns the real viewer as a child, so both pids are
+tried), and swaps what is loaded with `hunk session reload <id> -- diff …`
+(or `-- show <ref>`) whenever Ctrl+1/2/3 or the host asks for another load:
+the unstaged working tree, the index, the branch against its parent, or a
+commit. When the session id can't be had (an old hunk, a daemon that never
+answered), every switch is a respawn instead — slower, never wrong.
 
-Freshness rides the tab footer's 2 s tick: the host forwards it while the
-page is mapped, and the page reloads what it shows when the index, HEAD or
-the parent branch moved (gitinfo.tree_signature) — hunk's own `--watch`
-covers edits to files, this covers commits and staging done from a shell or
-by the agent. The same tick asks `hunk session get <id>` what the viewer has
-loaded, and the breadcrumb, switch and tab title follow *that* rather than
-Collins' own asks: the agent (hunk's bundled skill teaches it) or a shell can
-`session reload` the page's session behind Collins' back, and a load Collins
-has no name for (`show <sha>`) is shown by hunk's title, left alone by the
-freshness reload, and reclaimed by the next click on the switch. A reload
-hunk refuses (a parent ref that vanished between the header and the ask, a
-timeout) keeps the viewer — it is still showing what it showed — and only a
-reply saying the session itself is gone respawns. Everything that leaves the
-main loop (the version probe, the session list, the get, the reload) runs on
-a daemon thread and comes back through GLib.idle_add behind a generation
-counter, so a reply to a spawn that has since been replaced changes nothing —
-except a spawn's own callback, which terminates the child it announces when
-nobody wants it any more (the page closed, or was unparented, while the
-spawn was in flight), since its pty is the only one the viewer will ever
-answer a signal on.
+The extension does its own loads — a click on a commit, a branch header, the
+Staged section — through the same session API, and the page learns of them
+the way it learns of any load it didn't make: freshness rides the tab
+footer's 2 s tick, the host forwards it while the page is mapped, and the
+page reloads what it shows when the index, HEAD or the parent branch moved
+(gitinfo.tree_signature) — hunk's own `--watch` covers edits to files, this
+covers commits and staging done from a shell or by the agent. The same tick
+asks `hunk session get <id>` what the viewer has loaded, and the breadcrumb
+and tab title follow *that* rather than Collins' own asks: a `show <sha>`
+becomes the page's commit load (reloaded on freshness, persisted, restored
+into `hunk show` — after the probe checked the commit still exists, else
+the default mode), its breadcrumb naming the commit (`<sha7> <subject>`,
+the subject read by the worker thread that brought the title back, one
+`git log -1`, see hunkctl.commit_subject), and a load Collins has no name
+for (a range between two branches) is shown by hunk's title, left alone by
+the freshness reload, and reclaimed by the next Ctrl+1/2/3. A reload hunk
+refuses (a parent ref that
+vanished between the header and the ask, a timeout) keeps the viewer — it is
+still showing what it showed — and only a reply saying the session itself is
+gone respawns. Everything that leaves the main loop (the version probe, the
+session list, the get, the reload) runs on a daemon thread and comes back
+through GLib.idle_add behind a generation counter, so a reply to a spawn
+that has since been replaced changes nothing — except a spawn's own
+callback, which terminates the child it announces when nobody wants it any
+more (the page closed, or was unparented, while the spawn was in flight),
+since its pty is the only one the viewer will ever answer a signal on.
+
+The parent branch travels both ways through a sidecar file (hunkctl's
+sidecar_*): Collins writes the name it resolved — the newest PR's base, else
+the default branch, else what the user set — and the default branch, so the
+extension groups its commits the same way the breadcrumb reads; the
+extension writes the user's "Set parent branch…" pick back, and the tick
+picks it up (one os.stat, a read when the mtime moved), re-resolves, and
+reloads a branch diff that now has another base. The user's pick persists
+with the page (page_state's "parent") from the moment it is set or restored
+— a restored page that was never shown still carries it into the next
+layout save — and is dropped only once a resolution found the branch
+missing.
 
 The decisions with no widget in them — argv, reply parsing, title →
-breadcrumb, the chords, the layout slot — live in hunkctl, where the unit
-tests can reach them. This module never imports terminal.py (which imports
-it) and declares no "shell-exited": the strip closes any page that emits it,
-and a hunk that exits should show a Reopen card, not take the page with it.
+breadcrumb, the chords, the layout slot, the sidecar — live in hunkctl,
+where the unit tests can reach them. This module never imports terminal.py
+(which imports it) and declares no "shell-exited": the strip closes any page
+that emits it, and a hunk that exits should show a Reopen card, not take
+the page with it.
 """
 
 from __future__ import annotations
 
+import itertools
 import logging
+import os
 import threading
 import weakref
 from collections.abc import Callable
@@ -70,10 +93,21 @@ log = logging.getLogger(__name__)
 # alive (see GitPage._shutdown).
 _LIVE_PAGES: weakref.WeakSet = weakref.WeakSet()
 
-# The width a column has to reach for the dock to spend free gutter on one:
-# hunk's own files pane plus a diff at a readable width (see
-# PanelDock._column_floor).
+# The width a column has to reach for the dock to spend free gutter on one
+# (see PanelDock._column_floor): hunk's diff on its own, at a readable
+# width. The extension's panes want more — hunk 0.20 shows the commits pane
+# from about 75 columns and both panes from about 100 — and drops a pane
+# that wouldn't leave the diff its minimum, so at this width hunk shows the
+# diff alone and the panes appear as the column is widened (a drag of the
+# divider, the page's maximize): the extension re-reveals them on a resize,
+# since hunk itself doesn't bring a hidden sidebar back.
 _MIN_PAGE_WIDTH = 560
+
+# Sidecar serial numbers, one per page built in this process (see
+# hunkctl.sidecar_path): a closed page's file is removed and the number is
+# never reused, so a late write from a page that is gone can't land in a
+# newer page's file.
+_SERIAL = itertools.count(1)
 
 # The tab's icon, bundled under data/icons.
 _ICON = "git-merge-symbolic"
@@ -86,7 +120,7 @@ _FONT_SCALE_MAX = 4.0
 _FONT_SCALE_STEP = 1.1
 
 # How the branch label is cut when a branch name runs long: the header has
-# the breadcrumb and the switch to fit beside it.
+# the breadcrumb to fit beside it.
 _BRANCH_MAX_CHARS = 24
 
 # Stack page names.
@@ -125,16 +159,21 @@ class GitPage(Adw.Bin):
         parent_provider: Callable[[str | None], str | None],
         on_close: Callable[[GitPage], None],
         on_closed: Callable[[GitPage], None],
-        loaded: str = hunkctl.DEFAULT_MODE,
+        loaded: hunkctl.Loaded = hunkctl.DEFAULT_MODE,
+        parent: str | None = None,
     ) -> None:
         """*cwd_provider*: the agent's live cwd (TerminalTab.current_agent_cwd)
         — read at every spawn and poll. *parent_provider(cwd)*: the parent
-        branch NAME ("main"), or None; the page resolves it to a diff target
+        branch NAME ("main") the host computes (the newest PR's base, else
+        the default branch), or None; the page resolves it to a diff target
         itself (gitinfo.resolve_branch). *on_close(page)*: the header ✕ — the
         host routes it through the dock (PanelDock.close_page) so the strip's
         funnel runs. *on_closed(page)*: fired from page_closed(), after hunk
-        is signalled, so the host drops its reference. *loaded*: the mode to
-        spawn into (a restored layout's, or the footer's choice)."""
+        is signalled, so the host drops its reference. *loaded*: what to
+        spawn into (a restored layout's, or the footer's choice): a mode, or
+        a commit as {"show": ref}. *parent*: the branch the user set through
+        the extension's "Set parent branch…", restored from the layout; it
+        beats *parent_provider* while it resolves."""
         super().__init__()
         self.add_css_class("git-page")
         self.set_size_request(_MIN_PAGE_WIDTH, -1)
@@ -142,7 +181,17 @@ class GitPage(Adw.Bin):
         self._parent_provider = parent_provider
         self._on_close = on_close
         self._on_closed = on_closed
-        self._loaded = loaded if loaded in hunkctl.MODES else hunkctl.DEFAULT_MODE
+        self._loaded: hunkctl.Loaded = loaded if hunkctl.loaded_ok(loaded) else hunkctl.DEFAULT_MODE
+        # The user-set parent branch NAME, or None for the automatic rung
+        # (see _resolve_parent). Comes in from the layout, changes through
+        # the sidecar, goes out in page_state.
+        self._user_parent: str | None = parent if hunkctl.safe_ref(parent) else None
+        # Set by _resolve_parent when the user's branch was looked for and
+        # not found; cleared when it resolves again or another pick lands.
+        # Only this puts the pick out of force (see _parent_source): a page
+        # that hasn't resolved anything yet — restored into a hidden strip,
+        # or shown over a directory that isn't a repository — keeps it.
+        self._user_parent_missing = False
 
         # -- hunk process state ----------------------------------------------
         self._hunk_path: str | None = None
@@ -151,20 +200,20 @@ class GitPage(Adw.Bin):
         # From the start of a spawn attempt (the probe included) until the
         # child exits or the attempt fails: guards the "map" hook.
         self._spawned = False
-        # The mode the running child was spawned into — what a give-up on the
-        # session id compares a queued mode against.
-        self._spawned_mode: str | None = None
+        # The load the running child was spawned into — what a give-up on
+        # the session id compares a queued load against.
+        self._spawned_mode: hunkctl.Loaded | None = None
         # From the spawn until the session id is known or given up on: loads
         # in that window queue in _pending_mode rather than respawn.
         self._resolving = False
-        self._pending_mode: str | None = None
+        self._pending_mode: hunkctl.Loaded | None = None
         self._reloading = False
         # A `session get` on the poll, in flight.
         self._syncing_session = False
         # While a reload or get is out: the mode a newer ask wants loaded
         # once it lands (the user's word beats any title the reply carries),
         # and whether the tree moved meanwhile (reload what hunk shows).
-        self._pending_reload: str | None = None
+        self._pending_reload: hunkctl.Loaded | None = None
         self._stale = False
         # A respawn asked while a child is alive: the child is signalled and
         # the exit handler spawns the next one instead of showing the card.
@@ -185,14 +234,30 @@ class GitPage(Adw.Bin):
         # the breadcrumb over the resolved one, so the header says what hunk
         # has rather than what was asked.
         self._shown_target: str | None = None
-        # hunk's title (repo name stripped) for a load Collins didn't make —
-        # `show <sha>` from a shell or the agent. None while hunk shows one
-        # of MODES; while set, _loaded is the last mode Collins knew.
+        # hunk's title (repo name stripped) for a load Collins has no name
+        # for — a range between two branches, from the extension's parent
+        # and default headers, a shell or the agent. None while hunk shows
+        # a mode or a commit; while set, _loaded is the last load Collins
+        # knew.
         self._foreign: str | None = None
+        # The subject of the loaded commit, for the breadcrumb; None for a
+        # mode, or while it isn't known (a load just asked for, git not
+        # answering). Read on the worker thread that brings a title back.
+        self._subject: str | None = None
         self._signature: tuple | None = None
 
+        # -- the sidecar shared with the extension (see hunkctl) ---------------
+        # One path per page, kept across respawns, removed at shutdown.
+        self._sidecar: str = hunkctl.sidecar_path(GLib.get_user_runtime_dir(), os.getpid(), next(_SERIAL))
+        # The (parent, source, default, log page) last written, so the tick
+        # rewrites only on a change; None until the first write lands (and
+        # again after the file went missing, so it is written afresh).
+        self._sidecar_written: tuple | None = None
+        # The file's mtime after our own last write — or the extension's,
+        # once read — so the tick reads only what the other side wrote.
+        self._sidecar_mtime_ns: int | None = None
+
         self._keys = keymap.KeyMatcher(keybindings.current())
-        self._syncing = False  # header toggles being set from code, not clicked
 
         # -- header -------------------------------------------------------------
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -207,28 +272,9 @@ class GitPage(Adw.Bin):
         self._breadcrumb.set_ellipsize(Pango.EllipsizeMode.END)
         header.append(self._breadcrumb)
 
-        # The three-way switch: PR 1's stand-in for the commits panel the
-        # extension brings in PR 2 (see the spec). Grouped toggles, so exactly
-        # one is down and a click on the active one changes nothing.
-        switch = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        switch.add_css_class("linked")
-        self._toggles: dict[str, Gtk.ToggleButton] = {}
-        first: Gtk.ToggleButton | None = None
-        for mode, label in (
-            ("unstaged", _("Unstaged")),
-            ("staged", _("Staged")),
-            ("branch", _("vs parent")),
-        ):
-            toggle = Gtk.ToggleButton(label=label)
-            if first is None:
-                first = toggle
-            else:
-                toggle.set_group(first)
-            toggle.connect("toggled", self._on_toggle, mode)
-            switch.append(toggle)
-            self._toggles[mode] = toggle
-        header.append(switch)
-
+        # No switch: the extension's commits panel is the switch, and says
+        # more (which commit, which branch). Ctrl+1/2/3 stay as shortcuts to
+        # the three most common rows.
         refresh = Gtk.Button(icon_name="view-refresh-symbolic")
         refresh.add_css_class("flat")
         refresh.set_tooltip_text(_("Reload the diff"))
@@ -286,8 +332,9 @@ class GitPage(Adw.Bin):
     # -- public -------------------------------------------------------------
 
     @property
-    def loaded(self) -> str:
-        """The mode the page is showing (or will spawn into): one of hunkctl.MODES."""
+    def loaded(self) -> hunkctl.Loaded:
+        """What the page is showing (or will spawn into): one of hunkctl.MODES,
+        or a commit as {"show": ref}."""
         return self._loaded
 
     @property
@@ -295,38 +342,43 @@ class GitPage(Adw.Bin):
         """Whether a hunk child is running in the VTE right now."""
         return self._child_pid is not None
 
-    def load(self, mode: str) -> None:
-        """Show *mode* ("unstaged" | "staged" | "branch"): the header switch,
-        Ctrl+1/2/3 and the host's open_git_page(mode) all land here. Updates
-        the breadcrumb/tab title at once, then reloads the live session (or
-        respawns when there is no session id, or queues the mode while the id
-        is still being resolved). "branch" with no resolvable parent is a
-        no-op. Unknown modes raise ValueError."""
-        if mode not in hunkctl.MODES:
-            raise ValueError(f"unknown git page mode: {mode!r}")
-        if mode == "branch" and self._resolve_parent() is None:
+    def load(self, loaded: hunkctl.Loaded) -> None:
+        """Show *loaded* — "unstaged" | "staged" | "branch", or a commit as
+        {"show": ref}: Ctrl+1/2/3 and the host's open_git_page(mode) land
+        here. Updates the breadcrumb/tab title at once, then reloads the
+        live session (or respawns when there is no session id, or queues
+        the load while the id is still being resolved). On the "hunk
+        exited" card it is the Reopen button, into this load. "branch"
+        with no resolvable parent is a no-op. Anything else raises
+        ValueError."""
+        if not hunkctl.loaded_ok(loaded):
+            raise ValueError(f"unknown git page load: {loaded!r}")
+        if loaded == "branch" and self._resolve_parent() is None:
             self._sync_header()
             return
-        self._loaded = mode
+        self._loaded = dict(loaded) if isinstance(loaded, dict) else loaded
         self._foreign = None
-        if mode != "branch":
+        self._subject = None
+        if loaded != "branch":
             self._shown_target = None
         self._sync_header()
         self.emit("title-changed")
         if not self._spawned:
-            return  # the spawn on map reads _loaded
+            if self._card == _EXITED and self.get_mapped():
+                self._spawn()  # Ctrl+1/2/3 on a dead viewer: reopen into that load
+            return  # else the spawn on map reads _loaded
         if self._resolving:
-            self._pending_mode = mode
+            self._pending_mode = self._loaded
         elif self._session_id is None:
             self._respawn()
         else:
-            self._reload(mode)
+            self._reload(self._loaded)
 
     def refresh(self) -> None:
         """Reload what is loaded (the header's ⟳): `hunk session reload` of
-        the same target, or a respawn without a session id. No-op on a card,
-        and while hunk shows a load Collins can't name (hunk's own `r` key
-        and `--watch` cover that one)."""
+        the same target — a mode's or a commit's — or a respawn without a
+        session id. No-op on a card, and while hunk shows a load Collins
+        can't name (hunk's own `r` key and `--watch` cover that one)."""
         if not self.hunk_alive:
             return
         if self._resolving:
@@ -339,11 +391,15 @@ class GitPage(Adw.Bin):
         """The footer's 2 s tick, forwarded by the host only for a mapped page
         (the page checks get_mapped() again itself). Re-reads the branch
         label; respawns when the agent's repo root moved (a worktree entry)
-        or shows the "not a repository" card when there is none; seeds and
-        compares gitinfo.tree_signature and reloads the current mode when it
-        moved — after asking hunk what it has loaded (`session get`), so the
-        reload re-asks for what hunk shows, not what Collins last asked for.
-        Never spawns a git process."""
+        or shows the "not a repository" card when there is none; picks up a
+        parent the user set through the extension (the sidecar's mtime
+        moved), re-resolves the parent and publishes it and the default
+        branch back into the sidecar when either changed; seeds and compares
+        gitinfo.tree_signature and reloads the current load when it moved —
+        after asking hunk what it has loaded (`session get`), so the reload
+        re-asks for what hunk shows, not what Collins last asked for. Never
+        spawns a git process: file reads, one stat, and a write when the
+        sidecar is due one."""
         if not self.get_mapped() or self._closing:
             return
         cwd = self._cwd_provider()
@@ -370,10 +426,27 @@ class GitPage(Adw.Bin):
         if branch != self._branch:
             self._branch = branch
             self._sync_header()
+        self._read_sidecar()
+        target_before = self._parent_target
+        self._resolve_parent()
+        self._write_sidecar()
+        parent_moved = self._parent_target != target_before
+        if parent_moved:
+            self._sync_header()
+            self.emit("title-changed")
         signature = gitinfo.tree_signature(cwd, self._parent_name)
-        moved = self._signature is not None and signature != self._signature
+        # A parent that changed changes the signature's base too; that is
+        # not the tree moving, and only a branch diff has to follow it.
+        moved = self._signature is not None and signature != self._signature and not parent_moved
         self._signature = signature
         if not self.hunk_alive or self._resolving:
+            return
+        if parent_moved and target_before is not None and self._loaded == "branch" and not self._foreign:
+            # The branch diff's base is another branch now: reload against
+            # it. Not from None — that is a parent coming back after a
+            # refused reload put it down (_reloaded), which the header
+            # follows without asking again.
+            self._reload("branch")
             return
         if self._session_id is None:
             if moved:
@@ -425,8 +498,10 @@ class GitPage(Adw.Bin):
         self._keys = keymap.KeyMatcher.from_settings(settings)
 
     def page_state(self) -> dict:
-        """This page's slot in a serialized dock layout (see panellayout)."""
-        return hunkctl.encode_state(self._loaded)
+        """This page's slot in a serialized dock layout (see panellayout):
+        what is loaded, and the user-set parent while it is in force."""
+        parent = self._user_parent if self._parent_source() == "user" else None
+        return hunkctl.encode_state(self._loaded, parent)
 
     def page_closed(self) -> None:
         """The tab is really closing: SIGTERM the hunk child if alive, then
@@ -451,6 +526,10 @@ class GitPage(Adw.Bin):
         self._gen += 1
         self._terminate_child()
         _LIVE_PAGES.discard(self)
+        try:
+            os.remove(self._sidecar)
+        except OSError:
+            pass  # never written, or already gone with the runtime dir
 
     def do_dispose(self) -> None:
         self._shutdown()
@@ -497,27 +576,8 @@ class GitPage(Adw.Bin):
             self._breadcrumb.set_text(self._foreign)
         else:
             self._breadcrumb.set_text(
-                hunkctl.breadcrumb(self._loaded, self._branch, self._target_label())
+                hunkctl.breadcrumb(self._loaded, self._branch, self._target_label(), self._subject)
             )
-        vs = self._toggles["branch"]
-        parent = self._parent_target or self._parent_name
-        vs.set_label(_("vs {parent}").format(parent=parent) if parent else _("vs parent"))
-        vs.set_sensitive(self._parent_target is not None)
-        self._syncing = True
-        try:
-            # None down while hunk shows a load that isn't one of the three:
-            # any click is then a way back.
-            for mode, toggle in self._toggles.items():
-                toggle.set_active(self._foreign is None and mode == self._loaded)
-        finally:
-            self._syncing = False
-
-    def _on_toggle(self, toggle: Gtk.ToggleButton, mode: str) -> None:
-        if self._syncing or not toggle.get_active():
-            return
-        if mode == self._loaded and self._foreign is None:
-            return
-        self.load(mode)
 
     def _on_key_pressed(self, ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:
         mode = hunkctl.load_for_key(int(keyval), int(state))
@@ -544,33 +604,112 @@ class GitPage(Adw.Bin):
             scale = max(_FONT_SCALE_MIN, min(_FONT_SCALE_MAX, self.terminal.get_font_scale() * factor))
         self.terminal.set_font_scale(scale)
 
-    def _apply_title(self, title: str, repo_root: str | None = None) -> None:
+    def _apply_title(self, title: str, repo_root: str | None = None, subject: str | None = None) -> None:
         """Take hunk's word for what it has loaded (a session or reload
-        reply's title): the breadcrumb, switch and tab title follow it, so
-        Collins never claims a load hunk didn't make. A title naming none of
-        the three loads (`<repo> show HEAD`) is shown as it is, less the
-        repo name (*repo_root*'s, or the page's own), with no toggle down."""
-        mode, target = hunkctl.loaded_from_title(title)
-        if mode is None:
+        reply's title): the breadcrumb and tab title follow it, so Collins
+        never claims a load hunk didn't make. `<repo> show <ref>` becomes
+        the page's commit load, named by *subject* when the worker that
+        brought the title read one (_title_subject); a title naming nothing
+        Collins can load (`<repo> main...feat`) is shown as it is, less the
+        repo name (*repo_root*'s, or the page's own)."""
+        kind, target = hunkctl.loaded_from_title(title)
+        self._subject = None
+        if kind is None:
             root = repo_root or (str(self._repo_root) if self._repo_root else None)
             self._foreign = hunkctl.title_tail(title, root)
+        elif kind == "show":
+            self._foreign = None
+            self._loaded = {hunkctl.SHOW_KEY: target}
+            self._shown_target = None
+            self._subject = subject or None
         else:
             self._foreign = None
-            self._loaded = mode
-            self._shown_target = target if mode == "branch" else None
+            self._loaded = kind
+            self._shown_target = target if kind == "branch" else None
         self._sync_header()
         self.emit("title-changed")
 
     def _resolve_parent(self) -> str | None:
         """The diff target for the parent branch (`main`, `origin/main`),
         re-read from the tree each time: a fetch or a checkout can create the
-        ref between two asks. None when there is no parent to name."""
+        ref between two asks. The user's pick (_user_parent) while it
+        resolves, else the host's automatic rung (parent_provider: the
+        newest PR's base, else the default branch). None when there is no
+        parent to name."""
         cwd = self._cwd_provider()
-        name = self._parent_provider(cwd)
+        name = None
+        if self._user_parent and gitinfo.resolve_branch(cwd, self._user_parent):
+            name = self._user_parent
+            self._user_parent_missing = False
+        else:
+            self._user_parent_missing = self._user_parent is not None
+            name = self._parent_provider(cwd)
         resolved = gitinfo.resolve_branch(cwd, name)
-        self._parent_name = name
+        # The name goes out in the sidecar (and into the header) whether or
+        # not it resolves yet, so it passes the same gate the read side
+        # applies to what comes back: a PR base or a provider answer that
+        # does not look like a ref is not a parent at all.
+        self._parent_name = name if hunkctl.safe_ref(name) else None
         self._parent_target = resolved[0] if resolved else None
         return self._parent_target
+
+    def _parent_source(self) -> str:
+        """"user" while the user-set parent is in force — set, and not found
+        missing by the last _resolve_parent (a page that never resolved,
+        being unshown or over no repository, keeps the pick) — else "auto":
+        the sidecar's parentSource, and whether page_state carries the
+        name."""
+        if self._user_parent and not self._user_parent_missing:
+            return "user"
+        return "auto"
+
+    # -- the sidecar -----------------------------------------------------------------
+
+    def _write_sidecar(self) -> None:
+        """Publish (parent, source, default, log page) to the extension when
+        any of them changed since the last write (or the file is gone).
+        Records the mtime of our own write so the tick doesn't read it
+        back."""
+        cwd = self._cwd_provider()
+        payload = (self._parent_name, self._parent_source(), gitinfo.default_branch(cwd), hunkctl.LOG_PAGE)
+        if payload == self._sidecar_written:
+            return
+        if not hunkctl.write_sidecar(self._sidecar, hunkctl.sidecar_payload(*payload)):
+            log.debug("gitpage: could not write the sidecar %s", self._sidecar)
+            return
+        self._sidecar_written = payload
+        try:
+            self._sidecar_mtime_ns = os.stat(self._sidecar).st_mtime_ns
+        except OSError:
+            self._sidecar_mtime_ns = None
+
+    def _read_sidecar(self) -> None:
+        """Pick up what the extension wrote: one os.stat, and a read only
+        when the mtime isn't the one recorded after our own last write.
+        "user" with a parent sets the user's pick; "auto" clears it. The
+        caller re-resolves and writes the resolved name back. Reading our
+        own write (a write and a pick a moment apart) is harmless: it says
+        what the page already holds."""
+        try:
+            mtime_ns = os.stat(self._sidecar).st_mtime_ns
+        except OSError:
+            self._sidecar_written = None  # gone (a cleaned runtime dir): write it afresh
+            return
+        if mtime_ns == self._sidecar_mtime_ns:
+            return
+        self._sidecar_mtime_ns = mtime_ns
+        try:
+            with open(self._sidecar, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError:
+            return
+        parent, source = hunkctl.read_sidecar(text)
+        if source == "user" and parent:
+            self._user_parent = parent
+            self._user_parent_missing = False  # a fresh pick: resolve it before judging
+        elif source == "auto":
+            self._user_parent = None
+            self._user_parent_missing = False
 
     # -- cards ----------------------------------------------------------------------
 
@@ -659,7 +798,11 @@ class GitPage(Adw.Bin):
 
     def _spawn(self) -> None:
         """Start (or restart, from a card) a hunk child in the current mode:
-        the version probe on a thread, then the VTE spawn on the main loop."""
+        the version probe on a thread — and, for a commit load, whether the
+        commit still exists (hunkctl.commit_subject: `hunk show` of a sha
+        that was rebased away exits at once, and the page would sit on the
+        exited card, Reopen after Reopen) — then the VTE spawn on the main
+        loop."""
         if self._closing or self.hunk_alive:
             return
         self._spawned = True
@@ -668,14 +811,17 @@ class GitPage(Adw.Bin):
         self._session_id = None
         self._gen += 1
         gen = self._gen
+        cwd = self._cwd_provider()
+        show_ref = hunkctl.show_ref(self._loaded)
 
         def work() -> None:
             probe = hunkctl.probe()
-            GLib.idle_add(self._probed, gen, probe)
+            subject = hunkctl.commit_subject(cwd, show_ref) if show_ref else None
+            GLib.idle_add(self._probed, gen, probe, subject)
 
         threading.Thread(target=work, name="git-page-probe", daemon=True).start()
 
-    def _probed(self, gen: int, probe: hunkctl.Probe) -> bool:
+    def _probed(self, gen: int, probe: hunkctl.Probe, subject: str | None = None) -> bool:
         if gen != self._gen or self._closing:
             return GLib.SOURCE_REMOVE
         if probe.status != "ok":
@@ -694,6 +840,13 @@ class GitPage(Adw.Bin):
         parent = self._resolve_parent()
         if self._loaded == "branch" and parent is None:
             self._loaded = hunkctl.DEFAULT_MODE  # a saved "vs main" in a tree with no main
+        if hunkctl.is_show(self._loaded) and subject is None:
+            # git said the commit is gone (a saved sha the branch was rebased
+            # past, a layout restored in another clone): not a load to
+            # spawn into. "" — git couldn't be asked — spawns as asked.
+            log.debug("gitpage: commit %s doesn't resolve; opening %s", self._loaded, hunkctl.DEFAULT_MODE)
+            self._loaded = hunkctl.DEFAULT_MODE
+        self._subject = (subject or None) if hunkctl.is_show(self._loaded) else None
         self._shown_target = None
         self._foreign = None
         self._signature = gitinfo.tree_signature(cwd, self._parent_name)
@@ -703,13 +856,24 @@ class GitPage(Adw.Bin):
         # A respawn asked while the probe was out is answered by this very
         # spawn: the cwd and mode were read just now.
         self._respawn_wanted = False
-        argv = hunkctl.spawn_argv(probe.path, self._loaded, parent)
+        extension = hunkctl.extension_dir()
+        if extension is None:
+            log.warning(
+                "gitpage: the collins-git extension is missing from %s; running hunk bare",
+                hunkctl.EXTENSION_DIR,
+            )
+        # The sidecar goes down before the child comes up, so the extension
+        # finds it on startup; a write that failed leaves the variable out
+        # and the extension guesses (see hunkctl.spawn_env).
+        self._write_sidecar()
+        sidecar = self._sidecar if self._sidecar_written is not None else None
+        argv = hunkctl.spawn_argv(probe.path, self._loaded, parent, extension)
         self._show_hunk()
         self.terminal.spawn_async(
             Vte.PtyFlags.DEFAULT,
             str(cwd),
             argv,
-            None,  # envv: inherit
+            hunkctl.spawn_env(sidecar),  # None: inherit
             GLib.SpawnFlags.DEFAULT,
             None,  # child_setup
             None,  # child_setup_data
@@ -754,18 +918,22 @@ class GitPage(Adw.Bin):
             return GLib.SOURCE_REMOVE
         hunk = self._hunk_path
         pid = self._child_pid
+        cwd = self._cwd_provider()
 
         def work() -> None:
             reply = hunkctl.run(hunkctl.list_argv(hunk))
-            GLib.idle_add(self._resolved, gen, step, pid, reply)
+            session = hunkctl.session_for_pid(reply.stdout, pid, proctree.process_children(pid))
+            subject = _title_subject(cwd, session.title) if session else None
+            GLib.idle_add(self._resolved, gen, step, pid, session, subject)
 
         threading.Thread(target=work, name="git-page-session", daemon=True).start()
         return GLib.SOURCE_REMOVE
 
-    def _resolved(self, gen: int, step: int, pid: int, reply: hunkctl.Reply) -> bool:
+    def _resolved(
+        self, gen: int, step: int, pid: int, session: hunkctl.Session | None, subject: str | None
+    ) -> bool:
         if gen != self._gen or self._closing or self._child_pid != pid:
             return GLib.SOURCE_REMOVE
-        session = hunkctl.session_for_pid(reply.stdout, pid, proctree.process_children(pid))
         if session is None:
             if step + 1 < len(hunkctl.RESOLVE_DELAYS_MS):
                 GLib.timeout_add(hunkctl.RESOLVE_DELAYS_MS[step + 1], self._resolve_step, gen, step + 1)
@@ -780,7 +948,7 @@ class GitPage(Adw.Bin):
         self._session_id = session.session_id
         self._resolving = False
         pending, self._pending_mode = self._pending_mode, None
-        self._apply_title(session.title, session.repo_root)
+        self._apply_title(session.title, session.repo_root, subject)
         if pending and pending != self._loaded:
             self._loaded = pending
             self._sync_header()
@@ -841,36 +1009,40 @@ class GitPage(Adw.Bin):
 
     # -- reloading ----------------------------------------------------------------------
 
-    def _reload(self, mode: str) -> None:
-        """`hunk session reload` into *mode* on a thread. A reply saying the
-        session is gone respawns; any other refusal (a target hunk can't
-        diff, a timeout) leaves the viewer — still showing what it showed —
-        and asks it what that is (see _reloaded)."""
+    def _reload(self, loaded: hunkctl.Loaded) -> None:
+        """`hunk session reload` into *loaded* (a mode, or a commit) on a
+        thread. A reply saying the session is gone respawns; any other
+        refusal (a target hunk can't diff, a timeout) leaves the viewer —
+        still showing what it showed — and asks it what that is (see
+        _reloaded)."""
         if self._closing:
             return
         if self._session_id is None or self._hunk_path is None:
             self._respawn()
             return
         if self._reloading or self._syncing_session:
-            self._pending_reload = mode
+            self._pending_reload = loaded
             return
-        if mode == "branch" and self._resolve_parent() is None:
+        if loaded == "branch" and self._resolve_parent() is None:
             return
         self._reloading = True
         gen = self._gen
-        argv = hunkctl.reload_argv(self._hunk_path, self._session_id, mode, self._parent_target)
+        argv = hunkctl.reload_argv(self._hunk_path, self._session_id, loaded, self._parent_target)
+        cwd = self._cwd_provider()
 
         def work() -> None:
             reply = hunkctl.run(argv)
-            GLib.idle_add(self._reloaded, gen, mode, reply)
+            title = hunkctl.parse_reload_reply(reply.stdout) if reply.ok else None
+            GLib.idle_add(self._reloaded, gen, loaded, reply, title, _title_subject(cwd, title))
 
         threading.Thread(target=work, name="git-page-reload", daemon=True).start()
 
-    def _reloaded(self, gen: int, mode: str, reply: hunkctl.Reply) -> bool:
+    def _reloaded(
+        self, gen: int, mode: hunkctl.Loaded, reply: hunkctl.Reply, title: str | None, subject: str | None
+    ) -> bool:
         if gen != self._gen or self._closing:
             return GLib.SOURCE_REMOVE
         self._reloading = False
-        title = hunkctl.parse_reload_reply(reply.stdout) if reply.ok else None
         if title is None and reply.session_gone:
             log.debug("gitpage: session reload found no session; respawning")
             self._pending_reload = None
@@ -881,10 +1053,10 @@ class GitPage(Adw.Bin):
         if title is None:
             # hunk kept what it had (verified against 0.20.1: a bad range
             # exits 1 and the viewer stays put). A parent that stopped
-            # resolving takes the vs toggle with it until it resolves again;
-            # a newer ask queued meanwhile goes out; else the header goes
-            # back to what hunk says it shows (and a move seen meanwhile
-            # reloads that, see _synced).
+            # resolving is put down until it resolves again (the next tick
+            # re-asks); a newer ask queued meanwhile goes out; else the
+            # header goes back to what hunk says it shows (and a move seen
+            # meanwhile reloads that, see _synced).
             log.debug("gitpage: session reload into %s refused: %s", mode, reply.stderr.strip())
             if mode == "branch" and reply.returncode is not None:
                 self._parent_target = None
@@ -898,7 +1070,7 @@ class GitPage(Adw.Bin):
         if pending is not None:
             self._reload(pending)  # the header already says so (load); no flicker back
         else:
-            self._apply_title(title)
+            self._apply_title(title, None, subject)
         return GLib.SOURCE_REMOVE
 
     def _sync_session(self, reload: bool) -> None:
@@ -914,14 +1086,24 @@ class GitPage(Adw.Bin):
         self._syncing_session = True
         gen = self._gen
         argv = hunkctl.get_argv(self._hunk_path, self._session_id)
+        cwd = self._cwd_provider()
 
         def work() -> None:
             reply = hunkctl.run(argv)
-            GLib.idle_add(self._synced, gen, reload, reply)
+            session = hunkctl.parse_session_get(reply.stdout) if reply.ok else None
+            subject = _title_subject(cwd, session.title) if session else None
+            GLib.idle_add(self._synced, gen, reload, reply, session, subject)
 
         threading.Thread(target=work, name="git-page-get", daemon=True).start()
 
-    def _synced(self, gen: int, reload: bool, reply: hunkctl.Reply) -> bool:
+    def _synced(
+        self,
+        gen: int,
+        reload: bool,
+        reply: hunkctl.Reply,
+        session: hunkctl.Session | None,
+        subject: str | None,
+    ) -> bool:
         if gen != self._gen or self._closing:
             return GLib.SOURCE_REMOVE
         self._syncing_session = False
@@ -935,13 +1117,25 @@ class GitPage(Adw.Bin):
         if pending is not None:
             self._reload(pending)  # asked meanwhile: the title here is already old news
             return GLib.SOURCE_REMOVE
-        session = hunkctl.parse_session_get(reply.stdout) if reply.ok else None
         if session is not None:
-            self._apply_title(session.title, session.repo_root)
+            self._apply_title(session.title, session.repo_root, subject)
         stale, self._stale = reload or self._stale, False
         if stale and self._foreign is None:
             self._reload(self._loaded)
         return GLib.SOURCE_REMOVE
+
+
+def _title_subject(cwd: str | None, title: str | None) -> str | None:
+    """The subject of the commit a `<repo> show <ref>` title names, for the
+    worker threads that carry a title back to the main loop (one `git log
+    -1`, hunkctl.commit_subject); None for any other title, or when git
+    couldn't say."""
+    if not title:
+        return None
+    kind, ref = hunkctl.loaded_from_title(title)
+    if kind != "show":
+        return None
+    return hunkctl.commit_subject(cwd, ref) or None
 
 
 def shutdown_all() -> None:

@@ -6,14 +6,26 @@ The git page (gitpage) is hunk — hunk.dev, the terminal diff viewer — runnin
 in a VTE, steered over its session API: `hunk session list --json` names the
 live viewers by pid, `hunk session reload <id> --json -- diff …` swaps what
 one of them shows. This module is the GTK-free half of that: the version
-gate behind the install card, the argv for each command, the runner that
-turns one into a Reply, the parsers for their JSON replies (and for the
-stderr that says a session is gone, as opposed to a load hunk refused), and
-the small mappings between the three things the page can load ("unstaged",
-"staged", "branch"), hunk's own session titles, the breadcrumb and tab title
-Collins shows for them, the Ctrl+1/2/3 chords that pick them, and the layout
-slot they persist in. Kept importable by the unit tests (see
-tests/conftest.py), which is where all of it is exercised.
+gate behind the install card, the argv for each command (with the bundled
+collins-git extension on it, see extension_dir), the runner that turns one
+into a Reply, the parsers for their JSON replies (and for the stderr that
+says a session is gone, as opposed to a load hunk refused), and the small
+mappings between the things the page can load — the three modes "unstaged",
+"staged", "branch", and a commit as {"show": ref} — hunk's own session
+titles, the breadcrumb and tab title Collins shows for them (a commit's
+breadcrumb names it, `<sha7> <subject>`, through the one git call here,
+commit_subject), the Ctrl+1/2/3 chords that pick the modes, and the layout
+slot they persist in (with the parent branch the user set, when they set
+one).
+
+The extension and the page share a *sidecar*: a small JSON file under the
+runtime dir whose path rides to hunk's child in COLLINS_GIT_STATE. Collins
+writes the parent and default branch names and the log page size into it;
+the extension writes the user's "Set parent branch…" pick back; each side
+re-reads when the other wrote (the extension watches the file, the page
+stats it on the footer tick). The path, payload, reader and writer live
+here. Kept importable by the unit tests (see tests/conftest.py), which is
+where all of it is exercised.
 """
 
 from __future__ import annotations
@@ -33,6 +45,26 @@ from .i18n import _
 HUNK = "hunk"
 MODES: tuple[str, ...] = ("unstaged", "staged", "branch")
 DEFAULT_MODE = "unstaged"
+# The fourth kind of load, a commit: {"show": "<ref>"} beside the three mode
+# strings. `Loaded` is what the page's loaded/load()/page_state carry.
+SHOW_KEY = "show"
+Loaded = str | dict
+# The hunk extension Collins ships as package data (collins/hunkext/
+# collins-git): the commits and files panels and the staging keys. Handed to
+# hunk with `--extension <dir>`, so nothing lands in the user's hunk config
+# and no trust prompt appears.
+EXTENSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hunkext", "collins-git")
+# The sidecar (see the module docstring): the variable its path travels in,
+# and the commits-per-group page the extension loads (a setting in PR 4).
+SIDECAR_ENV = "COLLINS_GIT_STATE"
+LOG_PAGE = 20
+# A ref that is safe as an argument and as a title token: the same rule as
+# gitinfo._safe_branch_name (non-empty, no whitespace, no leading "-", no
+# "..") plus a length cap, since a title token or a persisted string is
+# nobody's promise. Full shas are 40 (64 for sha256 repositories).
+_MAX_REF_LEN = 128
+_FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+_SHORT_SHA_LEN = 7
 # The first release whose session API the page relies on (and, for PR 2, the
 # first with extension API v8).
 MIN_VERSION: tuple[int, int] = (0, 20)
@@ -48,6 +80,7 @@ INSTALL_COMMANDS: tuple[str, ...] = (
 RESOLVE_DELAYS_MS: tuple[int, ...] = (500, 1000, 2000, 4000, 8000)
 PROBE_TIMEOUT_S = 5.0  # `hunk --version` (node startup included)
 SESSION_TIMEOUT_S = 10.0  # session list / get / reload
+GIT_TIMEOUT_S = 5.0  # commit_subject's `git log -1`
 
 # Keyvals and modifier bits as integers rather than Gdk constants: this
 # module is imported by the unit tests, which run without the GTK stack, and
@@ -77,6 +110,11 @@ _VERSION = re.compile(r"(\d+(?:\.\d+)+)")
 # is on the tail alone.
 _TITLE_WORKING_TREE = " working tree"
 _TITLE_STAGED = " staged changes"
+# A branch load's title ends in "<target>...HEAD"; `show <ref>` ends in
+# those two tokens. Anything else (`a..b`, `a...b` between two branches —
+# the commits panel's parent and default headers) is a load Collins shows
+# by its title and doesn't reload.
+_TITLE_BRANCH_SUFFIX = "...HEAD"
 
 # What hunk 0.20.1 writes to stderr when a session id names nothing live —
 # "No active session matches sessionId X." for a viewer that has gone, "No
@@ -184,6 +222,68 @@ def probe(which: Callable[[str], str | None] = shutil.which, run=subprocess.run)
     return Probe(path, parse_version(result.stdout or ""))
 
 
+def safe_ref(name: object) -> bool:
+    """Whether *name* can be handed to git (and to hunk's argv) as one
+    revision: a non-empty str, no whitespace, no leading "-", no ".." (a
+    range), at most _MAX_REF_LEN chars. gitinfo._safe_branch_name's rule,
+    for what arrives from a title, a sidecar or a saved layout."""
+    if not isinstance(name, str) or not name or len(name) > _MAX_REF_LEN:
+        return False
+    if any(ch.isspace() for ch in name):
+        return False
+    return not name.startswith("-") and ".." not in name
+
+
+def is_show(loaded: object) -> bool:
+    """Whether *loaded* is a commit load, {"show": ref} with a safe ref."""
+    return isinstance(loaded, dict) and safe_ref(loaded.get(SHOW_KEY))
+
+
+def show_ref(loaded: object) -> str | None:
+    """The ref of a commit load, None for anything else."""
+    return loaded[SHOW_KEY] if is_show(loaded) else None
+
+
+def loaded_ok(loaded: object) -> bool:
+    """Whether *loaded* is something the page can spawn into: one of MODES
+    or a well-formed commit load."""
+    return (isinstance(loaded, str) and loaded in MODES) or is_show(loaded)
+
+
+def short_ref(ref: str) -> str:
+    """A full sha cut to its first 7 characters; any other ref (a branch, a
+    tag, `HEAD`, an abbreviation already) as it is."""
+    return ref[:_SHORT_SHA_LEN] if _FULL_SHA.match(ref or "") else ref
+
+
+def commit_subject(
+    cwd: str | None, ref: object, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
+) -> str | None:
+    """The subject line of the commit *ref* names in the repository at *cwd*
+    — `git log -1 --format=%s <ref>^{commit} --`, one subprocess, meant for
+    the page's worker threads (the poll itself never runs git).
+
+    Three answers: the subject (maybe empty) when git resolved the ref; None
+    when git answered that it names no commit (the one answer a restored
+    {"show": sha} whose commit was rebased away falls back on); "" when git
+    couldn't be asked at all (not on PATH, no cwd, a timeout) — the ref is
+    not disproven, only unnamed. A real commit with an empty subject
+    (`--allow-empty-message`) also answers "", so callers must not read ""
+    as "git was unreachable" — today none does; both mean "no subject to
+    show". An unsafe *ref* is None without a call."""
+    if not cwd or not safe_ref(ref):
+        return None
+    argv = ["git", "log", "-1", "--format=%s", f"{ref}^{{commit}}", "--"]
+    try:
+        result = run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if getattr(result, "returncode", 1) != 0:
+        return None
+    lines = (result.stdout or "").strip().splitlines()
+    return lines[0].strip() if lines else ""
+
+
 def diff_args(mode: str, parent_target: str | None) -> list[str]:
     """The `hunk diff` positional/flag tail for *mode*: [] / ["--staged"] /
     ["<parent_target>...HEAD"]. ValueError for an unknown mode, or "branch"
@@ -199,11 +299,38 @@ def diff_args(mode: str, parent_target: str | None) -> list[str]:
     raise ValueError(f"unknown git page mode: {mode!r}")
 
 
-def spawn_argv(hunk: str, mode: str, parent_target: str | None) -> list[str]:
-    """[hunk, "diff", "--watch", "--transparent-bg", *diff_args(mode, parent_target)]
-    — *hunk* is an absolute path (VTE spawns with GLib.SpawnFlags.DEFAULT, no
-    PATH search)."""
-    return [hunk, "diff", "--watch", "--transparent-bg", *diff_args(mode, parent_target)]
+def _load_tail(loaded: Loaded, parent_target: str | None) -> list[str]:
+    """The subcommand and its arguments for *loaded*: ["diff", *diff_args]
+    for a mode, ["show", ref] for a commit. ValueError (diff_args's, or for
+    a malformed dict) otherwise."""
+    if is_show(loaded):
+        return ["show", show_ref(loaded)]
+    if not isinstance(loaded, str):
+        raise ValueError(f"unknown git page load: {loaded!r}")
+    return ["diff", *diff_args(loaded, parent_target)]
+
+
+def spawn_argv(
+    hunk: str, loaded: Loaded, parent_target: str | None, extension_dir: str | None = None
+) -> list[str]:
+    """[hunk, "diff", "--watch", "--transparent-bg", "--extension", dir, *diff_args]
+    for a mode, [hunk, "show", "--watch", "--transparent-bg", "--extension",
+    dir, ref] for a commit; the "--extension" pair only with an
+    *extension_dir* (see extension_dir()). *hunk* is an absolute path (VTE
+    spawns with GLib.SpawnFlags.DEFAULT, no PATH search)."""
+    command, *tail = _load_tail(loaded, parent_target)
+    flags = ["--watch", "--transparent-bg"]
+    if extension_dir:
+        flags += ["--extension", extension_dir]
+    return [hunk, command, *flags, *tail]
+
+
+def extension_dir() -> str | None:
+    """EXTENSION_DIR when the bundled extension is really there (its
+    package.json, which is what hunk reads first), else None — a broken
+    install runs hunk bare, with its own files pane and no commits panel,
+    rather than a hunk that refuses to start."""
+    return EXTENSION_DIR if os.path.isfile(os.path.join(EXTENSION_DIR, "package.json")) else None
 
 
 def list_argv(hunk: str) -> list[str]:
@@ -216,9 +343,10 @@ def get_argv(hunk: str, session_id: str) -> list[str]:
     return [hunk, "session", "get", session_id, "--json"]
 
 
-def reload_argv(hunk: str, session_id: str, mode: str, parent_target: str | None) -> list[str]:
-    """[hunk, "session", "reload", session_id, "--json", "--", "diff", *diff_args(...)]"""
-    return [hunk, "session", "reload", session_id, "--json", "--", "diff", *diff_args(mode, parent_target)]
+def reload_argv(hunk: str, session_id: str, loaded: Loaded, parent_target: str | None) -> list[str]:
+    """[hunk, "session", "reload", session_id, "--json", "--", "diff", *diff_args(...)]
+    for a mode; the same with "--", "show", ref for a commit."""
+    return [hunk, "session", "reload", session_id, "--json", "--", *_load_tail(loaded, parent_target)]
 
 
 def _load_json(text: str) -> dict | None:
@@ -293,17 +421,23 @@ def parse_reload_reply(text: str) -> str | None:
 def loaded_from_title(title: str) -> tuple[str | None, str | None]:
     """What hunk says it has loaded, from a session title: "<repo> working
     tree" → ("unstaged", None), "<repo> staged changes" → ("staged", None),
-    "<repo> <X>...HEAD" → ("branch", "<X>"); anything else → (None, None).
-    The repo name may contain spaces; match on the tail."""
+    "<repo> <X>...HEAD" → ("branch", "<X>"), "<repo> show <ref>" → ("show",
+    "<ref>") for a safe ref; anything else — `a...b` between two branches,
+    `a..b`, a range with a pathspec, an unsafe ref — → (None, None), the
+    load Collins shows by its title and leaves alone. The repo name may
+    contain spaces; match on the tail."""
     text = (title or "").rstrip()
     if text.endswith(_TITLE_WORKING_TREE):
         return "unstaged", None
     if text.endswith(_TITLE_STAGED):
         return "staged", None
-    last = text.rsplit(" ", 1)[-1] if text else ""
-    if "..." in last:
-        target = last.split("...", 1)[0]
+    tokens = text.split()
+    last = tokens[-1] if tokens else ""
+    if last.endswith(_TITLE_BRANCH_SUFFIX):
+        target = last[: -len(_TITLE_BRANCH_SUFFIX)]
         return "branch", target or None
+    if len(tokens) >= 2 and tokens[-2] == "show" and safe_ref(last):
+        return "show", last
     return None, None
 
 
@@ -324,22 +458,32 @@ def foreign_tab_title(tail: str) -> str:
     return _("Git · {what}").format(what=tail or "?")
 
 
-def breadcrumb(mode: str, branch: str | None, parent: str | None) -> str:
+def breadcrumb(loaded: Loaded, branch: str | None, parent: str | None, subject: str | None = None) -> str:
     """Header text: _("working tree · unstaged"), _("working tree · staged"),
-    or _("{branch} vs {parent}") (branch/parent fall back to "HEAD" / "?"
-    when None)."""
-    if mode == "unstaged":
+    _("{branch} vs {parent}") (branch/parent fall back to "HEAD" / "?" when
+    None), or for a commit "<ref> <subject>" with the ref cut short
+    (short_ref) — `a1b2c3d Wire the mode switch` — and _("commit {ref}")
+    while the *subject* isn't known (see commit_subject)."""
+    if is_show(loaded):
+        ref = short_ref(show_ref(loaded))
+        if subject:
+            return f"{ref} {subject}"
+        return _("commit {ref}").format(ref=ref)
+    if loaded == "unstaged":
         return _("working tree · unstaged")
-    if mode == "staged":
+    if loaded == "staged":
         return _("working tree · staged")
     return _("{branch} vs {parent}").format(branch=branch or "HEAD", parent=parent or "?")
 
 
-def tab_title(mode: str, parent: str | None) -> str:
-    """Tab text: _("Git · unstaged"), _("Git · staged"), _("Git · vs {parent}")."""
-    if mode == "unstaged":
+def tab_title(loaded: Loaded, parent: str | None) -> str:
+    """Tab text: _("Git · unstaged"), _("Git · staged"), _("Git · vs {parent}"),
+    _("Git · {ref}") for a commit (short_ref)."""
+    if is_show(loaded):
+        return _("Git · {ref}").format(ref=short_ref(show_ref(loaded)))
+    if loaded == "unstaged":
         return _("Git · unstaged")
-    if mode == "staged":
+    if loaded == "staged":
         return _("Git · staged")
     return _("Git · vs {parent}").format(parent=parent or "?")
 
@@ -364,19 +508,117 @@ def initial_mode(staged: bool, unstaged: bool) -> str:
     return "staged" if staged and not unstaged else "unstaged"
 
 
-def encode_state(loaded: str) -> dict:
-    """{"kind": "git", "loaded": loaded} — the page's panel_layout slot."""
-    return {"kind": "git", "loaded": loaded}
+def encode_state(loaded: Loaded, parent: str | None = None) -> dict:
+    """{"kind": "git", "loaded": loaded, "parent": parent} — the page's
+    panel_layout slot; "parent" (the branch the user set) only when there
+    is one. A commit load is its dict, {"show": ref}, copied."""
+    state = {"kind": "git", "loaded": dict(loaded) if isinstance(loaded, dict) else loaded}
+    if parent:
+        state["parent"] = parent
+    return state
 
 
-def decode_state(page: object) -> str:
-    """The mode a saved page dict asks for; anything not in MODES (a future
-    {"show": sha}, garbage, a non-dict) reads as DEFAULT_MODE — the layout is
-    a preference, restore never refuses on it."""
+def decode_state(page: object) -> Loaded:
+    """What a saved page dict asks for: one of MODES, or a validated
+    {"show": ref}; anything else (garbage, an unsafe ref, a non-dict) reads
+    as DEFAULT_MODE — the layout is a preference, restore never refuses on
+    it."""
     if not isinstance(page, dict):
         return DEFAULT_MODE
     loaded = page.get("loaded")
+    if is_show(loaded):
+        return {SHOW_KEY: loaded[SHOW_KEY]}
     return loaded if isinstance(loaded, str) and loaded in MODES else DEFAULT_MODE
+
+
+def decode_parent(page: object) -> str | None:
+    """The parent branch name a saved page dict carries, when it is a safe
+    one; None otherwise (no parent set, or a string git couldn't take)."""
+    if not isinstance(page, dict):
+        return None
+    parent = page.get("parent")
+    return parent if safe_ref(parent) else None
+
+
+# -- the sidecar ------------------------------------------------------------------
+
+
+def sidecar_path(runtime_dir: str, pid: int, serial: int) -> str:
+    """<runtime_dir>/collins/git-<pid>-<serial>.json: one file per page of
+    one Collins process (*serial* counts the pages), under the runtime dir
+    (GLib.get_user_runtime_dir(): $XDG_RUNTIME_DIR, tmpfs, per user)."""
+    return os.path.join(runtime_dir, "collins", f"git-{pid}-{serial}.json")
+
+
+def sidecar_payload(parent: str | None, source: str, default: str | None, log_page: int) -> dict:
+    """The keys Collins owns in the sidecar, plus the version: {"version": 1,
+    "parent": name|None, "parentSource": "auto"|"user", "default": name|None,
+    "logPage": n}. *parent* is a branch NAME, never a target like
+    "origin/main" — each side resolves the name itself."""
+    return {
+        "version": 1,
+        "parent": parent,
+        "parentSource": "user" if source == "user" else "auto",
+        "default": default,
+        "logPage": int(log_page),
+    }
+
+
+def write_sidecar(path: str, payload: dict) -> bool:
+    """Merge *payload* into the sidecar at *path*: what is there already
+    (the extension's keys, anything a newer extension adds) survives, the
+    payload's keys win, and the file is replaced whole (a temp file beside
+    it, then os.replace) so a reader never sees half a document. Creates the
+    directory. Never raises: False when the write failed (no runtime dir, a
+    read-only one), and the page then runs hunk without a sidecar."""
+    merged: dict = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            existing = json.load(fh)
+        if isinstance(existing, dict):
+            merged = existing
+    except (OSError, ValueError):
+        pass
+    merged.update(payload)
+    merged["version"] = 1
+    temp = f"{path}.{os.getpid()}.tmp"
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(temp, "w", encoding="utf-8") as fh:
+            json.dump(merged, fh)
+        os.replace(temp, path)
+    except OSError:
+        try:
+            os.unlink(temp)
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def read_sidecar(text: str) -> tuple[str | None, str]:
+    """(parent, source) out of a sidecar's *text*: the parent branch name
+    when it is a safe one (else None) and "user" when parentSource says so
+    (else "auto"). Tolerant: garbage, a non-object, missing keys all read as
+    (None, "auto")."""
+    data = _load_json(text)
+    if data is None:
+        return None, "auto"
+    parent = data.get("parent")
+    source = "user" if data.get("parentSource") == "user" else "auto"
+    return (parent if safe_ref(parent) else None), source
+
+
+def spawn_env(sidecar: str | None, environ: dict | None = None) -> list[str] | None:
+    """The envv for hunk's spawn: None (inherit) without a *sidecar*; else
+    every variable of *environ* (os.environ by default) as "K=V" plus
+    SIDECAR_ENV=<sidecar> — VTE takes the whole list or nothing, the same
+    shape terminal._agent_tab_environment builds."""
+    if not sidecar:
+        return None
+    env = dict(os.environ if environ is None else environ)
+    env[SIDECAR_ENV] = sidecar
+    return [f"{key}={value}" for key, value in env.items()]
 
 
 def terminate_tree(

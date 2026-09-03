@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-09-02. Full change history: git log for this file.
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -13,6 +13,9 @@ build/
 !.claude/skills/
 00_Temp.md
 node_modules/
+# The hunk extension's lockfile: `bun install` is a typecheck-only convenience,
+# nothing ships from it (see collins/hunkext/collins-git/README.md).
+collins/hunkext/collins-git/bun.lock
 docs/.vitepress/dist/
 docs/.vitepress/cache/
 

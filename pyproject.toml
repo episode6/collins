@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-01. Full change history: git log for this file.
+# fork. Last modified: 2026-09-02. Full change history: git log for this file.
 
 [project]
 # The distribution name, the installed command and the import package are all
@@ -65,6 +65,15 @@ collins = [
     "sounds/*.oga",
     "com.episode6.Collins.desktop",
     "com.episode6.Collins.metainfo.xml",
+    # The hunk extension behind the git page (gitpage.py, hunkctl.EXTENSION_DIR):
+    # hunk loads it straight out of the package directory (`--extension
+    # <dir>`) and transpiles the TypeScript itself, so the sources ship as
+    # data, with no build step. Its tests (test/), tsconfig.json and
+    # whatever a local `bun install` leaves behind stay out.
+    "hunkext/collins-git/package.json",
+    "hunkext/collins-git/README.md",
+    "hunkext/collins-git/*.ts",
+    "hunkext/collins-git/*.tsx",
 ]
 
 [tool.ruff]

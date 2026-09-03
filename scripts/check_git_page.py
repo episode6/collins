@@ -4,16 +4,25 @@
 
 Exercises the GTK side that tests/test_hunkctl.py and tests/test_gitinfo.py
 can't reach: a real GitPage in a real window, spawning a stand-in `hunk`
-into its VTE, resolving the session id by pid off the shim's `session list
---json`, switching modes through `session reload`, reloading on a freshness
-tick after a commit, keeping the viewer through a reload hunk refuses,
-following a reload made behind Collins' back (the poll's `session get`), and
-taking the child down on close. A second pass with an empty PATH checks the
-install card comes up instead.
+into its VTE with the bundled collins-git extension on its argv and the
+sidecar's path in its environment, resolving the session id by pid off the
+shim's `session list --json`, switching modes through `session reload`,
+reloading on a freshness tick after a commit, keeping the viewer through a
+reload hunk refuses, picking up a parent branch the extension set through
+the sidecar (and publishing the automatic one back), following a reload
+made behind Collins' back (the poll's `session get`) — a commit becoming
+the page's own load (its breadcrumb naming it, `<ref> <subject>`, off a
+real git), a range between two branches staying hunk's — taking the child
+down on close, restoring into `hunk show <sha>` with the user's parent
+(carried in page_state before the page is ever shown), opening the default
+mode for a saved commit git no longer has, and reopening a dead viewer
+from Ctrl+1/2/3. A second pass with an empty PATH checks the install card
+comes up instead.
 
 The shim is a small Python script staged on a scratch PATH: `--version`
-answers 0.20.1, `diff …` spawns a child "viewer" (the two-process shape of
-the real npm wrapper) and records both pids and the arguments in a state
+answers 0.20.1, `diff …` and `show …` spawn a child "viewer" (the
+two-process shape of the real npm wrapper) and record both pids, the
+arguments, the `--extension` directory and the sidecar path in a state
 file, and the `session` subcommands answer out of that file the way hunk
 0.20 does (shapes probed on 2026-09-01; the refusal of a bad range, which
 leaves the viewer as it was, on 2026-09-02). FAKE_HUNK_REFUSE names a diff
@@ -53,7 +62,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 Adw.init()
 
-from collins import gitpage  # noqa: E402
+from collins import gitpage, hunkctl  # noqa: E402
 from collins.gitpage import GitPage  # noqa: E402
 
 PASSED = 0
@@ -95,7 +104,7 @@ def title_for(args):
     if "--staged" in args:
         return "repo staged changes"
     for arg in args:
-        if "..." in arg:
+        if ".." in arg:
             return "repo " + arg
     return "repo working tree"
 
@@ -112,7 +121,7 @@ args = sys.argv[1:]
 if args == ["--version"]:
     print("0.20.1")
     sys.exit(0)
-if args and args[0] == "diff":
+if args and args[0] in ("diff", "show"):
     # The real hunk on PATH is an npm wrapper that spawnSyncs the viewer
     # binary and never forwards a signal to it — so the shim is two
     # processes too: this one is the wrapper, its child the viewer, and it
@@ -121,7 +130,15 @@ if args and args[0] == "diff":
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         while True:
             time.sleep(0.1)
-    diff_args = [a for a in args[1:] if a not in ("--watch", "--transparent-bg")]
+    tail = args[1:]
+    extension = None
+    if "--extension" in tail:
+        at = tail.index("--extension")
+        extension = tail[at + 1]
+        del tail[at:at + 2]
+    diff_args = [a for a in tail if a not in ("--watch", "--transparent-bg")]
+    if args[0] == "show":
+        diff_args = ["show", *diff_args]  # the same shape a `session reload -- show` records
     state = read_state()
     env = {**os.environ, "FAKE_HUNK_ROLE": "viewer"}
     viewer = subprocess.Popen([sys.executable, __file__, *args], env=env)
@@ -129,6 +146,8 @@ if args and args[0] == "diff":
         "pid": viewer.pid,
         "wrapper": os.getpid(),
         "args": diff_args,
+        "extension": extension,
+        "sidecar": os.environ.get("COLLINS_GIT_STATE"),
         "reloads": state.get("reloads", 0),
     })
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
@@ -217,6 +236,8 @@ def git(repo: str, *args: str) -> None:
 
 
 def make_repo(root: str) -> str:
+    """main and feat at one commit, plus `base`: another branch the user can
+    pick as the parent through the sidecar."""
     repo = os.path.join(root, "repo")
     os.mkdir(repo)
     git(repo, "init", "-q", "-b", "main")
@@ -224,8 +245,34 @@ def make_repo(root: str) -> str:
         fh.write("one\n")
     git(repo, "add", "a.txt")
     git(repo, "commit", "-qm", "first")
+    git(repo, "branch", "base")
     git(repo, "checkout", "-qb", "feat")
     return repo
+
+
+def head_sha(repo: str) -> str:
+    return subprocess.run(
+        [GIT, "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def read_sidecar(path: str | None) -> dict:
+    if not path:
+        return {}
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def write_sidecar(path: str, **fields) -> None:
+    """What the extension writes: the whole file, read-merge-write, keeping
+    what Collins put there."""
+    data = read_sidecar(path)
+    data.update(fields)
+    with open(path, "w") as fh:
+        json.dump(data, fh)
 
 
 def read_state(path: str) -> dict:
@@ -314,7 +361,37 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
         page._breadcrumb.get_text(),
     )
     check("branch label reads the checked-out branch", page._branch_label.get_text() == "⎇ feat")
-    check("vs toggle is sensitive with a main to diff against", page._toggles["branch"].get_sensitive())
+    check("the parent resolved to main", page._parent_name == "main" and page._parent_target == "main")
+
+    # -- the extension and the sidecar reached the child --------------------------------
+    check(
+        "hunk spawned with --extension pointing at the bundled collins-git",
+        state.get("extension") == hunkctl.extension_dir() == hunkctl.EXTENSION_DIR,
+        (state.get("extension"), hunkctl.EXTENSION_DIR),
+    )
+    check(
+        "the extension directory has its package.json",
+        os.path.isfile(os.path.join(hunkctl.EXTENSION_DIR, "package.json")),
+    )
+    sidecar = state.get("sidecar")
+    check("COLLINS_GIT_STATE names the page's sidecar", sidecar == page._sidecar, (sidecar, page._sidecar))
+    check(
+        "the sidecar sits under the runtime dir's collins/",
+        bool(sidecar) and os.path.dirname(sidecar) == os.path.join(GLib.get_user_runtime_dir(), "collins"),
+        sidecar,
+    )
+    check(
+        "the sidecar carries the automatic parent, the default branch and the page size",
+        read_sidecar(sidecar)
+        == {"version": 1, "parent": "main", "parentSource": "auto", "default": "main", "logPage": 20},
+        read_sidecar(sidecar),
+    )
+    check("the check's own environment was not touched", hunkctl.SIDECAR_ENV not in os.environ)
+    check(
+        "page_state carries no parent while the automatic one is in force",
+        "parent" not in page.page_state(),
+        page.page_state(),
+    )
 
     # -- switch to staged through session reload --------------------------------
     titles = []
@@ -332,7 +409,6 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
         page._breadcrumb.get_text() == "working tree · staged",
         page._breadcrumb.get_text(),
     )
-    check("the staged toggle is down", page._toggles["staged"].get_active())
 
     # -- branch mode names the parent ------------------------------------------
     page.load("branch")
@@ -345,11 +421,11 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
         page._breadcrumb.get_text(),
     )
 
-    # -- a click on the switch is a load ---------------------------------------
-    page._toggles["unstaged"].set_active(True)
+    # -- load() is what Ctrl+1 and the host's open_git_page(mode) do --------------
+    page.load("unstaged")
     landed = wait_for(lambda: read_state(state_path).get("args") == [] and not page._reloading)
-    check("the header switch loads the working tree", landed, read_state(state_path))
-    check("loaded follows the switch", page.loaded == "unstaged")
+    check("load(\"unstaged\") reloads the working tree", landed, read_state(state_path))
+    check("loaded follows the load", page.loaded == "unstaged")
 
     # -- freshness: a commit moves HEAD, the tick reloads ----------------------
     reloads_before = read_state(state_path).get("reloads", 0)
@@ -392,14 +468,68 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
             "the refused reload changed nothing",
             read_state(state_path).get("reloads", 0) == reloads_before,
         )
-        check("the vs toggle is insensitive after the refusal", not page._toggles["branch"].get_sensitive())
-        check("the unstaged toggle is down again", page._toggles["unstaged"].get_active())
+        check("the parent target is put down after the refusal", page._parent_target is None)
     finally:
         del os.environ["FAKE_HUNK_REFUSE"]
     page.load("branch")
     landed = wait_for(lambda: read_state(state_path).get("args") == ["main...HEAD"] and settled(page))
     check("the vs load works again once the target resolves", landed, read_state(state_path))
-    check("the vs toggle is sensitive again", page._toggles["branch"].get_sensitive())
+    check("the parent target is back", page._parent_target == "main")
+
+    # -- the extension sets the parent through the sidecar ----------------------------
+    reloads_before = read_state(state_path).get("reloads", 0)
+    write_sidecar(sidecar, parent="base", parentSource="user")
+    page.poll_tick()
+    check("a tick picks the user's parent up off the sidecar", page._parent_name == "base", page._parent_name)
+    check(
+        "page_state carries the user-set parent", page.page_state().get("parent") == "base", page.page_state()
+    )
+    landed = wait_for(lambda: read_state(state_path).get("args") == ["base...HEAD"] and settled(page))
+    check("the branch diff reloads against the new parent", landed, read_state(state_path))
+    check(
+        "one reload for the parent change, not a freshness one on top",
+        read_state(state_path).get("reloads", 0) == reloads_before + 1,
+        read_state(state_path),
+    )
+    check(
+        "breadcrumb reads feat vs base",
+        page._breadcrumb.get_text() == "feat vs base",
+        page._breadcrumb.get_text(),
+    )
+    check("tab title names the new parent", page.page_title() == "Git · vs base", page.page_title())
+    check(
+        "Collins wrote the pick back as it stands",
+        read_sidecar(sidecar).get("parent") == "base" and read_sidecar(sidecar).get("parentSource") == "user",
+        read_sidecar(sidecar),
+    )
+    page.poll_tick()
+    wait_for(lambda: settled(page))
+    check("a second tick changes nothing", read_state(state_path).get("reloads", 0) == reloads_before + 1)
+    page.load("unstaged")
+    wait_for(lambda: read_state(state_path).get("args") == [] and settled(page))
+    reloads_before = read_state(state_path).get("reloads", 0)
+    write_sidecar(sidecar, parentSource="auto")  # "Automatic": the extension leaves the name alone
+    page.poll_tick()
+    check("back to the automatic parent", page._parent_name == "main", page._parent_name)
+    check("page_state drops the parent", "parent" not in page.page_state(), page.page_state())
+    check(
+        "Collins published the automatic name into the sidecar",
+        read_sidecar(sidecar) == {
+            "version": 1,
+            "parent": "main",
+            "parentSource": "auto",
+            "default": "main",
+            "logPage": 20,
+        },
+        read_sidecar(sidecar),
+    )
+    wait_for(lambda: settled(page))
+    wait_for(lambda: False, timeout=0.3)
+    check(
+        "a parent change under a working-tree load reloads nothing",
+        read_state(state_path).get("reloads", 0) == reloads_before,
+        read_state(state_path),
+    )
 
     # -- the poll follows a reload made behind Collins' back -----------------------
     subprocess.run(
@@ -407,15 +537,57 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
         check=True,
         capture_output=True,
     )
-    check("(the header still says vs main before the tick)", page.loaded == "branch")
+    check("(the header still says working tree · unstaged before the tick)", page.loaded == "unstaged")
     page.poll_tick()
     landed = wait_for(lambda: settled(page) and page.loaded == "staged")
     check("the tick reads the title back from session get", landed, page._breadcrumb.get_text())
     check("the tab title follows hunk", page.page_title() == "Git · staged", page.page_title())
-    check("the staged toggle is down", page._toggles["staged"].get_active())
 
+    # -- a commit loaded by the extension (or anyone) becomes the page's own load ----
     subprocess.run(
         [shim, "session", "reload", "fake-session-1", "--json", "--", "show", "HEAD"],
+        check=True,
+        capture_output=True,
+    )
+    page.poll_tick()
+    landed = wait_for(lambda: settled(page) and page.loaded == {"show": "HEAD"})
+    check("a `show` title becomes a commit load", landed, page.loaded)
+    check("it isn't foreign", page._foreign is None)
+    check(
+        "breadcrumb names the commit: ref and subject",
+        page._breadcrumb.get_text() == "HEAD second",
+        page._breadcrumb.get_text(),
+    )
+    check("the tab title names the commit", page.page_title() == "Git · HEAD", page.page_title())
+    check(
+        "page_state persists the commit",
+        page.page_state() == {"kind": "git", "loaded": {"show": "HEAD"}},
+        page.page_state(),
+    )
+    reloads_before = read_state(state_path).get("reloads", 0)
+    with open(os.path.join(repo, "a.txt"), "w") as fh:
+        fh.write("three\n")
+    git(repo, "commit", "-qam", "third")
+    page.poll_tick()
+    landed = wait_for(
+        lambda: read_state(state_path).get("reloads", 0) == reloads_before + 1 and settled(page)
+    )
+    check("a freshness tick reloads the commit", landed, read_state(state_path))
+    check("as `show HEAD`", read_state(state_path).get("args") == ["show", "HEAD"], read_state(state_path))
+    check(
+        "the breadcrumb's subject follows the reload",
+        page._breadcrumb.get_text() == "HEAD third",
+        page._breadcrumb.get_text(),
+    )
+    page.refresh()
+    landed = wait_for(
+        lambda: read_state(state_path).get("reloads", 0) == reloads_before + 2 and settled(page)
+    )
+    check("refresh reloads it too", landed, read_state(state_path))
+
+    # -- a range between two branches is hunk's: shown, left alone -------------------
+    subprocess.run(
+        [shim, "session", "reload", "fake-session-1", "--json", "--", "diff", "main..feat"],
         check=True,
         capture_output=True,
     )
@@ -423,15 +595,15 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     landed = wait_for(lambda: settled(page) and page._foreign is not None)
     check(
         "a load Collins can't name shows hunk's title, repo name stripped",
-        landed and page._breadcrumb.get_text() == "show HEAD",
+        landed and page._breadcrumb.get_text() == "main..feat",
         page._breadcrumb.get_text(),
     )
-    check("the tab title shows it too", page.page_title() == "Git · show HEAD", page.page_title())
-    check("no toggle is down", not any(t.get_active() for t in page._toggles.values()))
+    check("the tab title shows it too", page.page_title() == "Git · main..feat", page.page_title())
+    check("page_state keeps the last load Collins knew", page.page_state()["loaded"] == {"show": "HEAD"})
     reloads_before = read_state(state_path).get("reloads", 0)
     with open(os.path.join(repo, "a.txt"), "w") as fh:
-        fh.write("three\n")
-    git(repo, "commit", "-qam", "third")
+        fh.write("four\n")
+    git(repo, "commit", "-qam", "fourth")
     page.poll_tick()
     wait_for(lambda: settled(page))
     wait_for(lambda: False, timeout=0.5)
@@ -443,13 +615,12 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     page.refresh()
     wait_for(lambda: settled(page))
     check("refresh is a no-op on it", read_state(state_path).get("reloads", 0) == reloads_before)
-    page._toggles["unstaged"].set_active(True)
+    page.load("unstaged")
     landed = wait_for(lambda: read_state(state_path).get("args") == [] and settled(page))
     check(
-        "a click on the switch reclaims the page",
+        "load() reclaims the page",
         landed and page._foreign is None and page.loaded == "unstaged",
     )
-    check("the unstaged toggle is down", page._toggles["unstaged"].get_active())
 
     # -- close ---------------------------------------------------------------------
     pid = read_state(state_path).get("pid")
@@ -467,6 +638,117 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     check("the viewer went down with it (no orphan)", gone, pid)
     wait_for(lambda: not page.hunk_alive, timeout=2.0)
     check("no exited card after a deliberate close", page._stack.get_visible_child_name() == "hunk")
+    check("the sidecar is removed on close", not os.path.exists(sidecar), sidecar)
+    window.destroy()
+
+
+def check_restore(repo: str, state_path: str, shim: str) -> None:
+    """A page rebuilt from a saved layout — a commit, and the user's parent —
+    spawns `hunk show <sha>` and reports the parent it was given; a saved
+    commit that no longer exists opens the default mode instead of a dead
+    viewer; a dead viewer's card reopens on Ctrl+1/2/3 (load())."""
+    print("-- restored from a layout")
+    sha = head_sha(repo)
+    page = GitPage(
+        cwd_provider=lambda: repo,
+        parent_provider=lambda _cwd: "main",
+        on_close=lambda p: None,
+        on_closed=lambda p: None,
+        loaded=hunkctl.decode_state({"kind": "git", "loaded": {"show": sha}, "parent": "base"}),
+        parent=hunkctl.decode_parent({"kind": "git", "loaded": {"show": sha}, "parent": "base"}),
+    )
+    check(
+        "page_state before the spawn keeps the restored parent (a hidden page saves it again)",
+        page.page_state() == {"kind": "git", "loaded": {"show": sha}, "parent": "base"},
+        page.page_state(),
+    )
+    check("breadcrumb reads the short sha", page.page_title() == f"Git · {sha[:7]}", page.page_title())
+    check(
+        "no subject before the spawn",
+        page._breadcrumb.get_text() == f"commit {sha[:7]}",
+        page._breadcrumb.get_text(),
+    )
+    window = Gtk.Window(title="restore", default_width=900, default_height=600)
+    window.set_child(page)
+    window.present()
+    check("session id resolved", wait_for(lambda: page._session_id is not None))
+    state = read_state(state_path)
+    check("hunk spawned as `show <sha>`", state.get("args") == ["show", sha], state)
+    check("the user's parent is in force", page._parent_name == "base" and page._parent_target == "base")
+    check(
+        "page_state carries it",
+        page.page_state() == {"kind": "git", "loaded": {"show": sha}, "parent": "base"},
+        page.page_state(),
+    )
+    check(
+        "the sidecar says so",
+        read_sidecar(state.get("sidecar")).get("parent") == "base"
+        and read_sidecar(state.get("sidecar")).get("parentSource") == "user",
+        read_sidecar(state.get("sidecar")),
+    )
+    check(
+        "breadcrumb reads <sha7> <subject>",
+        page._breadcrumb.get_text() == f"{sha[:7]} fourth",
+        page._breadcrumb.get_text(),
+    )
+    check("the tab title stays short", page.page_title() == f"Git · {sha[:7]}", page.page_title())
+
+    # -- the viewer dies: the card, and Ctrl+1/2/3 as its Reopen -----------------------
+    hunkctl.terminate_tree(state["wrapper"], [state["pid"]])
+    shown = wait_for(lambda: page._stack.get_visible_child_name() == "card")
+    check("a dead viewer shows the exited card", shown and card_title(page) == "hunk exited")
+    page.load("staged")
+    landed = wait_for(
+        lambda: page._session_id is not None and read_state(state_path).get("args") == ["--staged"]
+    )
+    check("load() on the card reopens hunk, into that load", landed, read_state(state_path))
+    check("the card is gone", page._stack.get_visible_child_name() == "hunk")
+    page.page_closed()
+    wait_for(lambda: not page.hunk_alive, timeout=2.0)
+    window.destroy()
+
+    # -- a saved commit that no longer exists (rebased away, another clone) -------------
+    gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    page = GitPage(
+        cwd_provider=lambda: repo,
+        parent_provider=lambda _cwd: "main",
+        on_close=lambda p: None,
+        on_closed=lambda p: None,
+        loaded=hunkctl.decode_state({"kind": "git", "loaded": {"show": gone}}),
+    )
+    check("the page asks for the saved commit", page.loaded == {"show": gone})
+    window = Gtk.Window(title="restore (gone commit)", default_width=900, default_height=600)
+    window.set_child(page)
+    window.present()
+    check("session id resolved (gone commit)", wait_for(lambda: page._session_id is not None))
+    check(
+        "a commit git doesn't know opens the default mode, not a dead `show`",
+        read_state(state_path).get("args") == [] and page.loaded == "unstaged",
+        (read_state(state_path).get("args"), page.loaded),
+    )
+    check("no card", page._stack.get_visible_child_name() == "hunk")
+    page.page_closed()
+    wait_for(lambda: not page.hunk_alive, timeout=2.0)
+    window.destroy()
+
+    # A saved parent that no longer exists falls back to the automatic rung.
+    page = GitPage(
+        cwd_provider=lambda: repo,
+        parent_provider=lambda _cwd: "main",
+        on_close=lambda p: None,
+        on_closed=lambda p: None,
+        loaded="branch",
+        parent="nosuch",
+    )
+    window = Gtk.Window(title="restore (stale parent)", default_width=900, default_height=600)
+    window.set_child(page)
+    window.present()
+    check("session id resolved (stale parent)", wait_for(lambda: page._session_id is not None))
+    check("a parent that doesn't resolve yields to the automatic one", page._parent_name == "main")
+    check("and isn't persisted once found missing", "parent" not in page.page_state(), page.page_state())
+    check("the branch diff is against main", read_state(state_path).get("args") == ["main...HEAD"])
+    page.page_closed()
+    wait_for(lambda: not page.hunk_alive, timeout=2.0)
     window.destroy()
 
 
@@ -588,7 +870,8 @@ def check_outside_a_repo(scratch: str) -> None:
         shown and card_title(page) == "Not a git repository",
         card_title(page),
     )
-    check("vs toggle is insensitive with no parent", not page._toggles["branch"].get_sensitive())
+    check("no parent to name", page._parent_target is None)
+    check("no sidecar was written", not os.path.exists(page._sidecar))
     page.page_closed()
     window.destroy()
 
@@ -605,6 +888,9 @@ def main() -> int:
         with open(shim, "w") as fh:
             fh.write(FAKE_HUNK)
         os.chmod(shim, os.stat(shim).st_mode | stat.S_IXUSR)
+        # The page's own git (a commit's subject, a saved commit's existence)
+        # comes off the same PATH, which otherwise holds nothing but the shim.
+        os.symlink(GIT, os.path.join(bindir, "git"))
         state_path = os.path.join(scratch, "hunk-state.json")
         os.environ["FAKE_HUNK_STATE"] = state_path
         repo = make_repo(scratch)
@@ -613,6 +899,7 @@ def main() -> int:
         os.environ["PATH"] = bindir
         try:
             check_with_hunk(repo, state_path, shim)
+            check_restore(repo, state_path, shim)
             check_teardown_paths(repo, state_path, shim)
         finally:
             os.environ["PATH"] = real_path

@@ -40,13 +40,18 @@ downloads of each version, see the
 
 - **A git page beside the session.** `F6`, or a click on the footer's ⎇
   branch label, opens [hunk](https://hunk.dev) in a terminal of its own
-  next to the agent's, showing the unstaged changes, the staged changes,
-  or the whole branch against its parent — `Ctrl+1` / `Ctrl+2` / `Ctrl+3`
-  or the header's buttons switch between them, and the page reloads by
-  itself when the index or `HEAD` moves. Each session remembers whether
-  the page was open and what it showed. A machine without hunk gets an
-  install card in the page's place; the branch label's copy moved to a
-  right-click.
+  next to the agent's, with an extension Collins ships drawing two panels
+  inside it: **commits** — the current branch with a *working tree* row,
+  its parent, the default branch — where a click loads that commit or
+  branch into the same window, and **files**, split into Unstaged and
+  Staged on the working tree. `x` / `X` stage or unstage the hunk or file
+  under the cursor, `A` / `U` all of them, `n` / `p` walk the commits, `P`
+  (or a right-click) picks the parent branch; `Ctrl+1` / `Ctrl+2` /
+  `Ctrl+3` jump to the unstaged, staged and whole-branch diffs. The page
+  reloads by itself when the index or `HEAD` moves, and each session
+  remembers whether it was open, what it showed and the parent you set. A
+  machine without hunk gets an install card in the page's place; the
+  branch label's copy moved to a right-click.
 - **The status icon's glass empties when there's nothing to do.** The drink
   now stands for something waiting: the glass holds the coral pour while
   anything is unread, pours the barber pole while any session works, and

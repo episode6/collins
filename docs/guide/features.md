@@ -387,26 +387,65 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 
 What the agent has changed, beside the terminal it is changing it in. The
 page is [hunk](https://hunk.dev) — the terminal diff viewer — running in a
-terminal of its own under a one-row header, one page per session:
+terminal of its own under a one-row header, one page per session, with a
+hunk extension Collins ships (`collins-git`) drawing two of its three
+panels:
 
-- **Three loads.** The **unstaged** changes (the working tree against the
-  index), the **staged** changes (the index against `HEAD`), or the whole
-  **branch against its parent** (`main...HEAD`). The parent is the base
-  branch of the session's newest pull request once its PR page has been
-  opened — a stacked PR is measured against the branch it stacks on — and
-  otherwise the repository's default branch; either way the local branch
-  when there is one, else the remote's. `Ctrl+1` / `Ctrl+2` / `Ctrl+3`
-  switch between them from anywhere in the page, and so do the header's
-  three buttons.
+- **Three panels.** **Commits** on the left, **files** in the middle, and
+  hunk's own review stream — every file of what is loaded, in one
+  scrollable column — on the right. Clicking a file scrolls the stream to
+  it; hunk's `.` / `,` and `]` / `[` walk files and hunks as ever.
+- **The commits panel is the switch.** One group per branch of interest:
+  the **current branch** — a *working tree* row, then its own commits
+  since it forked from the parent, unpushed ones marked `↑` — the **parent
+  branch**'s commits not on the default branch (left out when the parent
+  *is* the default), and the **default branch**'s latest twenty with a
+  *load more…* row. A click loads it into the same window: the *working
+  tree* row the unstaged changes, a commit that one commit, a branch
+  header everything the branch did since it forked. The loaded row wears
+  `▸`, and its group's header is highlighted.
+- **The files panel splits on the working tree.** With *working tree*
+  loaded it shows **Unstaged · n** and **Staged · n** sections; hunk holds
+  one of the two at a time, so the other is navigation — clicking a file
+  there (or the section's header) loads that side and selects the file.
+  Any other load (a commit, a branch) is a flat list, each file with its
+  `+` / `-` counts.
+- **Staging, from the keyboard** — live while the working tree is loaded;
+  in a commit or branch view the keys say *read-only view* and do nothing:
+
+  | Key | Does |
+  | --- | --- |
+  | `x` | stage the current hunk — unstage it, in the Staged view |
+  | `X` | stage / unstage the current file (a rename as both paths at once) |
+  | `A` / `U` | stage all / unstage all, after a confirmation naming the count |
+  | `n` / `p` | load the next / previous row of the current commits group |
+  | `P` | set the parent branch — a pick over the local branches, also on a right-click in the commits panel |
+
+  Every action reloads the review and says what it did. Stage and unstage
+  ask nothing; a binary file, or one that changed since the review loaded,
+  is refused with a word rather than half-done.
+- **The parent branch** is the base branch of the session's newest pull
+  request once its PR page has been opened — a stacked PR is measured
+  against the branch it stacks on — and otherwise the repository's default
+  branch; either way the local branch when there is one, else the remote's.
+  *Set parent branch…* (`P`, or the right-click) overrides that for the
+  session until *Automatic* is picked again, and the choice is remembered
+  with the page.
+- `Ctrl+1` / `Ctrl+2` / `Ctrl+3` still load the **unstaged** changes, the
+  **staged** changes and the whole **branch against its parent**
+  (`main...HEAD`) from anywhere in the page — the three most common rows,
+  as chords.
 - **The header says what you're looking at**: the branch, then a
   breadcrumb — *working tree · unstaged*, *working tree · staged*,
-  *feature vs main* — that the page's tab title follows (*Git · staged*).
-  It reports what hunk has loaded, not what was last clicked: a `hunk
-  session reload` run from a shell or by the agent shows up in it within a
-  couple of seconds, and a load that isn't one of the three (`show HEAD`)
-  is named as hunk names it, with none of the buttons down, until a click
-  on one takes the page back. A refresh button reloads the same diff; the
-  ✕ closes the page.
+  *feature vs main*, *a1b2c3d Wire the mode switch* — that the page's tab
+  title follows (*Git · staged*, *Git · a1b2c3d*). It reports what hunk has loaded, not
+  what was last clicked: a load made in the commits panel, by a `hunk
+  session reload` run from a shell, or by the agent shows up in it within
+  a couple of seconds. A commit is the page's own load — kept fresh,
+  remembered, restored — while a range between two other branches (the
+  parent's or the default branch's header) is named as hunk names it and
+  left alone until the next load takes the page back. A refresh button
+  reloads the same diff; the ✕ closes the page.
 - **It keeps itself fresh.** Every two seconds the page compares the
   index, `HEAD` and the parent branch against what it last loaded, and
   reloads when any of them moved — an agent staging, committing or
@@ -426,9 +465,10 @@ terminal of its own under a one-row header, one page per session:
   0.20) gets a card in the page's place: the three install lines,
   click-to-copy, and a *Check again* button. Hunk exiting gets a *Reopen*
   card; a directory that stops being a repository, a card saying so.
-- Each session remembers whether its git page was open, where it sat, and
-  which of the three loads it showed — restored on the next launch, hunk
-  starting the moment the page is first shown.
+- Each session remembers whether its git page was open, where it sat,
+  what it showed — one of the three working-tree loads, or a commit — and
+  the parent branch you set, restored on the next launch, hunk starting
+  the moment the page is first shown.
 
 ## Knowing what's happening
 

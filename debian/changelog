@@ -1,6 +1,8 @@
 collins (0.1.3) UNRELEASED; urgency=medium
 
-  * A git page (F6) shows the session's diffs through hunk.
+  * A git page (F6) shows the session's diffs through hunk, with a commits
+    panel and a files panel drawn by a bundled hunk extension, and staging
+    of hunks and files from the keyboard.
   * Each GitHub release now attaches a binary noarch .rpm next to the .deb.
   * The AppStream metainfo is store-ready (screenshot, branding colours,
     translated summaries) and appstreamcli-validated by every package build;

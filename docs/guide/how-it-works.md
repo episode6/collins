@@ -225,9 +225,15 @@ aliases and environment apply and you drop back to a prompt when the agent
 exits. The secondary panel terminal is another VTE running a plain shell —
 the same widget, minus the agent. The git page is a third VTE, running
 [hunk](https://hunk.dev) instead of a shell — Collins drives it over hunk's
-session API (`hunk session reload`) to swap what it shows in place. (The
-new-chat screen, the pull request page and a session replay are tabs with
-no terminal in them.)
+session API (`hunk session reload`) to swap what it shows in place, and
+starts it with `--extension` pointing at the `collins-git` extension the
+package ships (`collins/hunkext/collins-git`), which draws the commits and
+files panels inside hunk and does the staging. The two sides trade the
+parent branch through a small JSON file under `$XDG_RUNTIME_DIR` whose path
+hunk's process gets in `COLLINS_GIT_STATE`: Collins writes the branch it
+resolved, the extension writes the one the user picks. (The new-chat
+screen, the pull request page and a session replay are tabs with no
+terminal in them.)
 
 ## Notifications
 
@@ -346,6 +352,7 @@ collins/
 ├── prview.py         # the in-app pull request page
 ├── gitpage.py        # the git page: hunk in a VTE, driven over its session API
 ├── hunkctl.py        # what the git page decides without a widget: argv, titles, session ids
+├── hunkext/collins-git/  # the hunk extension: commits + files panels, staging
 ├── practions.py      # what a PR offers (merge, review, …) and the gh calls
 ├── statusicon.py     # the status icon: a StatusNotifierItem over D-Bus
 ├── traymodel.py      # what the icon shows (badge, menu) — toolkit-free

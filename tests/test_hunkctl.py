@@ -1,16 +1,21 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
 """Tests for hunkctl: the git page's decisions that need no widget — the
-version gate, argv, hunk's JSON replies, session titles, the chords, and the
-layout slot."""
+version gate, argv (the bundled extension on it), hunk's JSON replies,
+session titles (a commit's included), the chords, the layout slot (with the
+user-set parent), and the sidecar the page shares with the extension."""
 
 import json
+import os
 import signal
 import subprocess
 
 import pytest
 
 from collins import hunkctl
+
+EXT = "/opt/collins/hunkext/collins-git"
+SHA = "0123456789abcdef0123456789abcdef01234567"
 
 # -- version gate ------------------------------------------------------------
 
@@ -112,6 +117,65 @@ def test_spawn_argv():
     assert hunkctl.spawn_argv("/h", "branch", "main")[-1] == "main...HEAD"
 
 
+def test_spawn_argv_with_the_extension():
+    """The --extension pair sits between the flags and the diff tail, and only
+    when a directory is given (none: a broken install runs hunk bare)."""
+    assert hunkctl.spawn_argv("/h", "unstaged", None, EXT) == [
+        "/h",
+        "diff",
+        "--watch",
+        "--transparent-bg",
+        "--extension",
+        EXT,
+    ]
+    assert hunkctl.spawn_argv("/h", "branch", "main", EXT)[-3:] == ["--extension", EXT, "main...HEAD"]
+    assert hunkctl.spawn_argv("/h", "staged", None, None) == [
+        "/h",
+        "diff",
+        "--watch",
+        "--transparent-bg",
+        "--staged",
+    ]
+
+
+def test_spawn_argv_show():
+    """A saved commit spawns `hunk show <ref>`, the same flags in front."""
+    assert hunkctl.spawn_argv("/h", {"show": SHA}, None, EXT) == [
+        "/h",
+        "show",
+        "--watch",
+        "--transparent-bg",
+        "--extension",
+        EXT,
+        SHA,
+    ]
+    assert hunkctl.spawn_argv("/h", {"show": "HEAD"}, "main") == [
+        "/h",
+        "show",
+        "--watch",
+        "--transparent-bg",
+        "HEAD",
+    ]
+    with pytest.raises(ValueError):
+        hunkctl.spawn_argv("/h", {"show": "-x"}, None)
+    with pytest.raises(ValueError):
+        hunkctl.spawn_argv("/h", {"other": "x"}, None)
+
+
+def test_extension_dir_is_package_data():
+    """The bundled extension is really in the tree — the argv check in
+    scripts/check_git_page.py spawns with it — and extension_dir() only
+    names it while its package.json (what hunk reads first) is there."""
+    assert hunkctl.EXTENSION_DIR.endswith(os.path.join("collins", "hunkext", "collins-git"))
+    assert os.path.isfile(os.path.join(hunkctl.EXTENSION_DIR, "package.json"))
+    assert hunkctl.extension_dir() == hunkctl.EXTENSION_DIR
+
+
+def test_extension_dir_none_without_package_json(monkeypatch):
+    monkeypatch.setattr(hunkctl, "EXTENSION_DIR", "/nowhere/collins-git")
+    assert hunkctl.extension_dir() is None
+
+
 def test_session_argvs():
     assert hunkctl.list_argv("/h") == ["/h", "session", "list", "--json"]
     assert hunkctl.get_argv("/h", "abc") == ["/h", "session", "get", "abc", "--json"]
@@ -127,6 +191,58 @@ def test_session_argvs():
     ]
     assert hunkctl.reload_argv("/h", "abc", "branch", "main")[-1] == "main...HEAD"
     assert hunkctl.reload_argv("/h", "abc", "unstaged", None)[-2:] == ["--", "diff"]
+    assert hunkctl.reload_argv("/h", "abc", {"show": SHA}, None)[-3:] == ["--", "show", SHA]
+
+
+# -- loads -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "ok"),
+    [
+        ("main", True),
+        ("origin/main", True),
+        ("feature/x-1", True),
+        (SHA, True),
+        ("HEAD", True),
+        ("", False),
+        (None, False),
+        (42, False),
+        ("-x", False),
+        ("--staged", False),
+        ("a..b", False),
+        ("a...b", False),
+        ("with space", False),
+        ("tab\there", False),
+        ("x" * 129, False),
+    ],
+)
+def test_safe_ref(name, ok):
+    assert hunkctl.safe_ref(name) is ok
+
+
+def test_show_helpers():
+    assert hunkctl.is_show({"show": SHA})
+    assert hunkctl.show_ref({"show": "HEAD"}) == "HEAD"
+    assert not hunkctl.is_show({"show": "-x"})
+    assert not hunkctl.is_show({"show": ""})
+    assert not hunkctl.is_show("show")
+    assert not hunkctl.is_show({})
+    assert hunkctl.show_ref("unstaged") is None
+    for mode in hunkctl.MODES:
+        assert hunkctl.loaded_ok(mode)
+    assert hunkctl.loaded_ok({"show": SHA})
+    assert not hunkctl.loaded_ok("commit")
+    assert not hunkctl.loaded_ok({"show": "a..b"})
+    assert not hunkctl.loaded_ok(None)
+
+
+def test_short_ref():
+    assert hunkctl.short_ref(SHA) == "0123456"
+    assert hunkctl.short_ref("HEAD") == "HEAD"
+    assert hunkctl.short_ref("a1b2c3d") == "a1b2c3d"
+    assert hunkctl.short_ref("main") == "main"
+    assert hunkctl.short_ref("") == ""
 
 
 # -- replies -----------------------------------------------------------------
@@ -267,6 +383,18 @@ def test_parse_reload_reply():
         ("wondrous-inventing-orbit origin/main...HEAD", ("branch", "origin/main")),
         ("my repo with spaces working tree", ("unstaged", None)),
         ("my repo with spaces main...HEAD", ("branch", "main")),
+        ("repo show HEAD", ("show", "HEAD")),
+        ("repo show " + SHA, ("show", SHA)),
+        ("my repo with spaces show abc1234", ("show", "abc1234")),
+        ("show show HEAD", ("show", "HEAD")),  # a repository named "show"
+        # The commits panel's other headers: a range between two branches is
+        # not a branch load, and is left to hunk.
+        ("repo main...feat", (None, None)),
+        ("repo main..feat", (None, None)),
+        ("repo " + SHA + ".." + SHA, (None, None)),
+        ("repo show -x", (None, None)),
+        ("repo show a..b", (None, None)),
+        ("repo show", (None, None)),
         ("repo a1b2c3d", (None, None)),
         ("", (None, None)),
     ],
@@ -302,6 +430,55 @@ def test_breadcrumb():
     assert hunkctl.breadcrumb("staged", None, None) == "working tree · staged"
     assert hunkctl.breadcrumb("branch", "feat", "main") == "feat vs main"
     assert hunkctl.breadcrumb("branch", None, None) == "HEAD vs ?"
+    assert hunkctl.breadcrumb({"show": SHA}, "feat", "main") == "commit 0123456"
+    assert hunkctl.breadcrumb({"show": "HEAD"}, None, None) == "commit HEAD"
+    # A commit is named by its subject once known: the spec's `a1b2c3 Wire the mode switch`.
+    named = hunkctl.breadcrumb({"show": SHA}, "feat", "main", "Wire the mode switch")
+    assert named == "0123456 Wire the mode switch"
+    assert hunkctl.breadcrumb({"show": "HEAD"}, None, None, "") == "commit HEAD"
+    assert hunkctl.breadcrumb("unstaged", None, None, "ignored for a mode") == "working tree · unstaged"
+
+
+def test_commit_subject_resolves():
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, stdout="Wire the mode switch\n", stderr="")
+
+    assert hunkctl.commit_subject("/repo", SHA, run=run) == "Wire the mode switch"
+    argv, kwargs = calls[0]
+    assert argv == ["git", "log", "-1", "--format=%s", f"{SHA}^{{commit}}", "--"]
+    assert kwargs["cwd"] == "/repo"
+    assert kwargs["capture_output"] and kwargs["text"]
+    assert kwargs["timeout"] == hunkctl.GIT_TIMEOUT_S
+
+
+def test_commit_subject_three_answers():
+    """A subject; None when git says the ref names no commit; "" when git
+    couldn't be asked — the ref is not disproven."""
+
+    def gone(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 128, stdout="", stderr="fatal: bad revision")
+
+    def empty(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="\n", stderr="")
+
+    def missing(argv, **kwargs):
+        raise FileNotFoundError("git")
+
+    def slow(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 1)
+
+    assert hunkctl.commit_subject("/repo", "deadbeef", run=gone) is None
+    assert hunkctl.commit_subject("/repo", "HEAD", run=empty) == ""
+    assert hunkctl.commit_subject("/repo", "HEAD", run=missing) == ""
+    assert hunkctl.commit_subject("/repo", "HEAD", run=slow) == ""
+    # Nothing to ask about: no cwd, or a ref git could misread.
+    assert hunkctl.commit_subject(None, "HEAD", run=empty) is None
+    assert hunkctl.commit_subject("/repo", "-x", run=empty) is None
+    assert hunkctl.commit_subject("/repo", "a..b", run=empty) is None
+    assert hunkctl.commit_subject("/repo", None, run=empty) is None
 
 
 def test_tab_title():
@@ -309,6 +486,8 @@ def test_tab_title():
     assert hunkctl.tab_title("staged", None) == "Git · staged"
     assert hunkctl.tab_title("branch", "main") == "Git · vs main"
     assert hunkctl.tab_title("branch", None) == "Git · vs ?"
+    assert hunkctl.tab_title({"show": SHA}, "main") == "Git · 0123456"
+    assert hunkctl.tab_title({"show": "v1.2"}, None) == "Git · v1.2"
 
 
 # -- chords ------------------------------------------------------------------
@@ -368,6 +547,18 @@ def test_initial_mode(staged, unstaged, expected):
 
 def test_encode_state():
     assert hunkctl.encode_state("staged") == {"kind": "git", "loaded": "staged"}
+    assert hunkctl.encode_state("staged", None) == {"kind": "git", "loaded": "staged"}
+    assert hunkctl.encode_state("branch", "base") == {"kind": "git", "loaded": "branch", "parent": "base"}
+    state = hunkctl.encode_state({"show": SHA}, "base")
+    assert state == {"kind": "git", "loaded": {"show": SHA}, "parent": "base"}
+    assert json.loads(json.dumps(state)) == state  # what panellayout writes
+
+
+def test_encode_state_copies_the_show_dict():
+    loaded = {"show": SHA}
+    state = hunkctl.encode_state(loaded)
+    state["loaded"]["show"] = "HEAD"
+    assert loaded == {"show": SHA}
 
 
 @pytest.mark.parametrize(
@@ -376,7 +567,11 @@ def test_encode_state():
         ({"kind": "git", "loaded": "staged"}, "staged"),
         ({"kind": "git", "loaded": "branch"}, "branch"),
         ({"kind": "git", "loaded": "unstaged"}, "unstaged"),
-        ({"kind": "git", "loaded": {"show": "abc"}}, "unstaged"),
+        ({"kind": "git", "loaded": {"show": "abc"}}, {"show": "abc"}),
+        ({"kind": "git", "loaded": {"show": SHA}, "parent": "base"}, {"show": SHA}),
+        ({"kind": "git", "loaded": {"show": "-x"}}, "unstaged"),
+        ({"kind": "git", "loaded": {"show": ""}}, "unstaged"),
+        ({"kind": "git", "loaded": {"commit": "abc"}}, "unstaged"),
         ({"kind": "git", "loaded": "commit"}, "unstaged"),
         ({"kind": "git"}, "unstaged"),
         ("git", "unstaged"),
@@ -387,9 +582,142 @@ def test_decode_state(page, expected):
     assert hunkctl.decode_state(page) == expected
 
 
+@pytest.mark.parametrize(
+    ("page", "expected"),
+    [
+        ({"kind": "git", "loaded": "branch", "parent": "base"}, "base"),
+        ({"kind": "git", "loaded": "branch", "parent": "release/v1"}, "release/v1"),
+        ({"kind": "git", "loaded": "branch"}, None),
+        ({"kind": "git", "parent": ""}, None),
+        ({"kind": "git", "parent": "-x"}, None),
+        ({"kind": "git", "parent": "a..b"}, None),
+        ({"kind": "git", "parent": 3}, None),
+        ("git", None),
+        (None, None),
+    ],
+)
+def test_decode_parent(page, expected):
+    assert hunkctl.decode_parent(page) == expected
+
+
 def test_state_round_trips():
     for mode in hunkctl.MODES:
         assert hunkctl.decode_state(hunkctl.encode_state(mode)) == mode
+    state = hunkctl.encode_state({"show": SHA}, "base")
+    assert hunkctl.decode_state(state) == {"show": SHA}
+    assert hunkctl.decode_parent(state) == "base"
+    assert hunkctl.decode_parent(hunkctl.encode_state("branch")) is None
+
+
+# -- the sidecar -------------------------------------------------------------
+
+
+def test_sidecar_path():
+    assert hunkctl.sidecar_path("/run/user/1000", 4242, 3) == "/run/user/1000/collins/git-4242-3.json"
+
+
+def test_sidecar_payload():
+    assert hunkctl.sidecar_payload("main", "auto", "main", 20) == {
+        "version": 1,
+        "parent": "main",
+        "parentSource": "auto",
+        "default": "main",
+        "logPage": 20,
+    }
+    assert hunkctl.sidecar_payload("base", "user", None, hunkctl.LOG_PAGE)["parentSource"] == "user"
+    assert hunkctl.sidecar_payload(None, "bogus", None, 20)["parentSource"] == "auto"
+
+
+def test_write_sidecar_creates_and_replaces(tmp_path):
+    path = str(tmp_path / "collins" / "git-1-1.json")
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("main", "auto", "main", 20))
+    with open(path) as fh:
+        assert json.load(fh) == {
+            "version": 1,
+            "parent": "main",
+            "parentSource": "auto",
+            "default": "main",
+            "logPage": 20,
+        }
+    assert sorted(os.listdir(tmp_path / "collins")) == ["git-1-1.json"]  # no temp file left behind
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("base", "user", "main", 20))
+    with open(path) as fh:
+        assert json.load(fh)["parent"] == "base"
+
+
+def test_write_sidecar_keeps_the_other_sides_keys(tmp_path):
+    """Read-merge-write: what the extension (or a newer one) put in the file
+    survives Collins' rewrite; Collins' own keys win; version stays 1."""
+    path = str(tmp_path / "git.json")
+    with open(path, "w") as fh:
+        json.dump({"version": 7, "parent": "x", "parentSource": "user", "extra": {"a": 1}}, fh)
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("main", "auto", "main", 20))
+    with open(path) as fh:
+        data = json.load(fh)
+    assert data["extra"] == {"a": 1}
+    assert data["parent"] == "main" and data["parentSource"] == "auto" and data["version"] == 1
+
+
+def test_write_sidecar_over_garbage(tmp_path):
+    path = str(tmp_path / "git.json")
+    with open(path, "w") as fh:
+        fh.write("not json")
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("main", "auto", None, 20))
+    with open(path) as fh:
+        assert json.load(fh)["parent"] == "main"
+
+
+def test_write_sidecar_never_raises(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    # The parent "directory" is a file: mkdir fails, the write reports False.
+    assert not hunkctl.write_sidecar(str(blocker / "collins" / "git.json"), {"parent": "main"})
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('{"version": 1, "parent": "base", "parentSource": "user"}', ("base", "user")),
+        ('{"version": 1, "parent": "main", "parentSource": "auto"}', ("main", "auto")),
+        ('{"parent": null, "parentSource": "auto"}', (None, "auto")),
+        ('{"parent": "base"}', ("base", "auto")),
+        ('{"parent": "-x", "parentSource": "user"}', (None, "user")),
+        ('{"parent": "a..b", "parentSource": "user"}', (None, "user")),
+        ('{"parent": 3, "parentSource": "user"}', (None, "user")),
+        ('{"parentSource": "other"}', (None, "auto")),
+        ("[]", (None, "auto")),
+        ("garbage", (None, "auto")),
+        ("", (None, "auto")),
+    ],
+)
+def test_read_sidecar(text, expected):
+    assert hunkctl.read_sidecar(text) == expected
+
+
+def test_sidecar_round_trip(tmp_path):
+    path = str(tmp_path / "git.json")
+    hunkctl.write_sidecar(path, hunkctl.sidecar_payload("base", "user", "main", 20))
+    with open(path) as fh:
+        assert hunkctl.read_sidecar(fh.read()) == ("base", "user")
+
+
+def test_spawn_env():
+    assert hunkctl.spawn_env(None) is None
+    assert hunkctl.spawn_env("") is None
+    env = hunkctl.spawn_env("/run/user/1/collins/git-1-1.json", {"PATH": "/bin", "HOME": "/home/me"})
+    assert sorted(env) == ["COLLINS_GIT_STATE=/run/user/1/collins/git-1-1.json", "HOME=/home/me", "PATH=/bin"]
+    # An inherited variable of the same name is overridden, not doubled.
+    env = hunkctl.spawn_env("/x.json", {"COLLINS_GIT_STATE": "/old.json"})
+    assert env == ["COLLINS_GIT_STATE=/x.json"]
+
+
+def test_spawn_env_reads_os_environ_by_default(monkeypatch):
+    monkeypatch.setenv("COLLINS_TEST_MARKER", "1")
+    monkeypatch.delenv(hunkctl.SIDECAR_ENV, raising=False)
+    env = hunkctl.spawn_env("/x.json")
+    assert "COLLINS_TEST_MARKER=1" in env
+    assert f"{hunkctl.SIDECAR_ENV}=/x.json" in env
+    assert hunkctl.SIDECAR_ENV not in os.environ  # the list is a copy; the app's own env is untouched
 
 
 # -- terminate_tree ---------------------------------------------------------
