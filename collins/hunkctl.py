@@ -37,9 +37,14 @@ untracked switch into it (the extension puts `--exclude-untracked` on the
 the extension writes the user's "Set parent branch…" pick back, and the
 index mtime and HEAD it last reloaded the review for on its own (so the
 page's freshness reload stays home for a move hunk has already shown —
-shown_by_extension); each side re-reads when the other wrote (the
-extension watches the file, the page stats it on the footer tick). The
-path, payload, readers and writer live here. Kept importable by the unit
+shown_by_extension), and the level a narrow page shows — the extension's
+level.ts: `diff`, `files` or `commits`, one pane at a time when only one
+fits beside the diff — which the page's header buttons follow
+(read_sidecar_level, level_button); each side re-reads when the other
+wrote (the extension watches the file, the page stats it on the footer
+tick). The path, payload, readers and writer live here, and the column
+arithmetic that says when the page is narrow (pane_fit): hunk's layout
+budget, the same numbers level.ts holds. Kept importable by the unit
 tests (see tests/conftest.py), which is where all of it is exercised.
 """
 
@@ -949,6 +954,88 @@ def shown_by_extension(
     if refreshed is None or signature is None or previous is None:
         return False
     return (signature[0], signature[1]) == refreshed and signature[2] == previous[2]
+
+
+# -- levels of a narrow page (the extension's level.ts) ------------------------------
+
+# Hunk 0.20.1's layout budget in columns: two of body padding, a one-column
+# divider per pane, 48 for the diff at its narrowest, 22 before the sidebar
+# area shows at all (hunk's own pane's minimum), and the extension's panes at
+# 26 (commits, preferred) and 22 (files, minimum). The numbers are level.ts's,
+# and its tests pin them; a hunk that changes them moves both.
+ONE_PANE_COLUMNS = 2 + 22 + 1 + 48  # 73: one pane beside the diff
+TWO_PANE_COLUMNS = 2 + 26 + 1 + 22 + 1 + 48  # 100: both panes — the wide layout
+
+# The levels a narrow page stacks, bottom to top.
+LEVELS = ("diff", "files", "commits")
+DEFAULT_LEVEL = LEVELS[0]
+
+# What the header's buttons feed hunk: the extension's `<` (level-up) and
+# `>` (level-down), keys neither hunk nor the extension use otherwise.
+LEVEL_UP_KEY = b"<"
+LEVEL_DOWN_KEY = b">"
+
+
+def pane_fit(columns: int) -> str:
+    """How many of the extension's panes a terminal *columns* wide shows
+    beside the diff: "none" under ONE_PANE_COLUMNS, "one" under
+    TWO_PANE_COLUMNS, else "two". A count that isn't known yet (0, or
+    negative) is "none"."""
+    if columns < ONE_PANE_COLUMNS:
+        return "none"
+    return "one" if columns < TWO_PANE_COLUMNS else "two"
+
+
+def page_is_narrow(columns: int) -> bool:
+    """Whether the page shows one pane at a time — anything short of both —
+    and the header shows its level buttons."""
+    return pane_fit(columns) != "two"
+
+
+def level_ok(level: object) -> bool:
+    return isinstance(level, str) and level in LEVELS
+
+
+def level_up(level: str) -> str | None:
+    """The level above *level*, None at the top (or for a level unknown here)."""
+    if not level_ok(level):
+        return None
+    at = LEVELS.index(level)
+    return LEVELS[at + 1] if at + 1 < len(LEVELS) else None
+
+
+def level_down(level: str) -> str | None:
+    """The level below *level*, None at the bottom (or for a level unknown here)."""
+    if not level_ok(level):
+        return None
+    at = LEVELS.index(level)
+    return LEVELS[at - 1] if at > 0 else None
+
+
+def read_sidecar_level(text: str) -> str | None:
+    """The level the extension last reported — {"level": "files"} — or None
+    when absent or not one of LEVELS."""
+    data = _load_json(text)
+    level = data.get("level") if data is not None else None
+    return level if level_ok(level) else None
+
+
+def level_button(up: bool, level: str, columns: int) -> tuple[str, bool]:
+    """(tooltip, sensitive) for the header's up (or down) button at *level*
+    on a page *columns* wide. Insensitive at the end of the stack, and on a
+    page too narrow for any pane — where the tooltip says what would help."""
+    if pane_fit(columns) == "none":
+        return _("Too narrow for a panel — widen the page"), False
+    target = level_up(level) if up else level_down(level)
+    if target == "files":
+        return (_("Show the files") if up else _("Back to the files")), True
+    if target == "commits":
+        return _("Show the commits"), True
+    if target == "diff":
+        return _("Back to the diff"), True
+    if up:
+        return _("The commits are shown — the top level"), False
+    return _("The diff is shown — the bottom level"), False
 
 
 def spawn_env(sidecar: str | None, environ: dict | None = None) -> list[str] | None:

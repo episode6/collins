@@ -17,12 +17,14 @@
  * confirmation, `C`/`B` commit the index with a summary (and a body), `F`
  * makes a `fixup!` commit for an unpushed commit picked from a list,
  * `n`/`p` walk the current group of the commits panel, `P` (or a right
- * click on the panel) picks the parent branch.
+ * click on the panel) picks the parent branch, `<`/`>` walk the levels of
+ * a page too narrow for both panes (diff, files, commits — level.ts).
  *
  * This file only composes: git.ts runs git, model.ts builds rows, store.ts
  * holds what the panes paint, session.ts reloads the window, sidecar.ts
  * talks to Collins, staging.ts plans the keys, range.ts does the line-range
- * arithmetic, anchor.ts remembers where `v` was pressed and paints it.
+ * arithmetic, anchor.ts remembers where `v` was pressed and paints it,
+ * level.ts decides what a narrow terminal shows.
  * Runs standalone too: `hunk diff --extension <this dir>` with no sidecar
  * guesses the branches.
  */
@@ -105,6 +107,21 @@ import {
   writeSidecar,
   type SidecarConfig,
 } from "./sidecar.ts";
+import {
+  BOTH_PANES,
+  descendAfterPick,
+  fit,
+  levelOf,
+  panesFor,
+  planPanes,
+  planResize,
+  stepDown,
+  stepUp,
+  type Level,
+  type PaneId,
+  type PaneState,
+  type Plan,
+} from "./level.ts";
 import type { LineAddress } from "./range.ts";
 import { describe, planAll, planDiscard, planFileToggle, planHunkToggle, planRangeToggle } from "./staging.ts";
 import { publishCommits, publishFiles, setPaneHandlers } from "./store.ts";
@@ -209,6 +226,8 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
    */
   let panes: ExtensionPaneControls | null = null;
   let columns = readColumns();
+  /** The level last written to the sidecar, so a step that changed nothing writes nothing. */
+  let levelWritten: string | null = null;
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
   let resizePoll: ReturnType<typeof setInterval> | null = null;
 
@@ -373,12 +392,14 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     }
     requestLoad(row.load, report, sessionDeps);
     publishCommitsState();
+    descend("commits");
   }
 
   function loadSide(side: Side, path: string | null, report: Report): void {
     pendingSelectPath = path;
     publishFiles({ status, loaded, pendingSelectPath, error });
     requestLoad(sideTail(side), report, sessionDeps);
+    descend("files");
   }
 
   function onChangeset(changeset: ExtensionChangeset, ctx: ExtensionEventContext): void {
@@ -460,6 +481,74 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     if (mark !== null && !writeSidecar(sidecarPath, { refreshed: mark })) {
       log("could not record the refresh in the sidecar");
     }
+  }
+
+  // -- levels (see level.ts) ------------------------------------------------
+
+  /** Which panes are open, in hunk's word — an open pane may be unseen (hidden area, or omitted for width). */
+  function paneState(controls: ExtensionPaneControls): PaneState {
+    return { commits: controls.isOpen("commits"), files: controls.isOpen("files") };
+  }
+
+  /** Close, then open, what *plan* says. True when it touched anything. */
+  function applyPlan(controls: ExtensionPaneControls, plan: Plan): boolean {
+    for (const id of plan.close) {
+      controls.close(id);
+    }
+    for (const id of plan.open) {
+      controls.open(id);
+    }
+    return plan.close.length + plan.open.length > 0;
+  }
+
+  /**
+   * Write the level shown to the sidecar when it changed, for Collins'
+   * header buttons. *level* is the one just planned, never re-read off the
+   * controls: hunk's `isOpen` answers from React state and still says what
+   * the panes were until the next render.
+   */
+  function recordLevel(level: Level): void {
+    if (level === levelWritten) {
+      return;
+    }
+    levelWritten = level;
+    debug(`level ${level} columns=${columns}`);
+    if (sidecarPath !== null && !writeSidecar(sidecarPath, { level })) {
+      log("could not record the level in the sidecar");
+    }
+  }
+
+  /** `<` / `>`: one level up or down (or, wide, "show the panels" / nothing). */
+  function stepLevel(ctx: ExtensionCommandContext, up: boolean): void {
+    columns = readColumns();
+    const state = paneState(ctx.panes);
+    const step = up ? stepUp(columns, state) : stepDown(columns, state);
+    debug(`level ${up ? "up" : "down"} columns=${columns} open=${JSON.stringify(state)} -> ${JSON.stringify(step)}`);
+    if (step.kind === "refuse") {
+      ctx.notify(step.reason, "info");
+      return;
+    }
+    if (step.kind === "noop") {
+      return;
+    }
+    applyPlan(ctx.panes, step.plan);
+    panes = ctx.panes;
+    recordLevel(step.level === "all" ? levelOf(BOTH_PANES) : step.level);
+  }
+
+  /** After a row pick in *pane*: one level down while one pane fits, so the mouse alone drills down. */
+  function descend(pane: PaneId): void {
+    if (panes === null) {
+      return;
+    }
+    columns = readColumns();
+    const state = paneState(panes);
+    const target = descendAfterPick(columns, state, pane);
+    if (target === null) {
+      return;
+    }
+    applyPlan(panes, planPanes(state, panesFor(target)));
+    recordLevel(target);
   }
 
   function toggleFile(ctx: ExtensionCommandContext, file: ExtensionDiffFile, side: Side): void {
@@ -969,6 +1058,7 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
       hunk.events.emit(SET_PARENT_EVENT, {});
     },
     loadSide,
+    selectedFile: () => descend("files"),
   });
 
   onPendingChange(publishCommitsState);
@@ -1007,31 +1097,47 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     chooseParent(ctx),
   );
   hunk.events.on(SET_PARENT_EVENT, (_payload, ctx) => chooseParent(ctx));
+  hunk.registerCommand({ id: "level-up", title: "Show the files, then the commits (narrow page)", key: "<" }, (ctx) =>
+    stepLevel(ctx, true),
+  );
+  hunk.registerCommand({ id: "level-down", title: "Back to the files, then the diff (narrow page)", key: ">" }, (ctx) =>
+    stepLevel(ctx, false),
+  );
 
   /**
-   * Hunk hides its sidebar area when the terminal is too narrow for a pane
+   * The terminal's width changed (SIGWINCH, or the one-second poll — a
+   * resize that lands while hunk is still starting precedes any handler
+   * this extension could install, and Collins widens its git column as
+   * the page settles). Crossing into the wide regime opens both panes and
+   * crossing out of it closes both (level.ts planResize); inside a regime
+   * the panes are left as they are — but re-opened when the width grew:
+   * hunk hides its sidebar area when the terminal is too narrow for a pane
    * and does not bring it back when the terminal grows (0.20.1, verified
-   * against a 62 → 138 column resize): the panes stay "open" but unseen.
-   * Opening an open pane reveals the area again, so a resize that made
-   * the terminal wider re-opens whatever is open — never a pane the user
-   * closed. Collins' git page starts narrow and is widened by a drag or a
-   * maximize, which is exactly this path. Called on SIGWINCH and from a
-   * one-second poll (see RESIZE_POLL_MS); a width that did not grow is a
-   * no-op, so the poll costs one ioctl. `panes` is the newest event
-   * context's (see its comment): a dead lease would answer "closed" for
-   * everything and this would quietly do nothing.
+   * against a 62 → 138 column resize), while opening an open pane reveals
+   * the area again. A width that did not change is a no-op, so the poll
+   * costs one ioctl. `panes` is the newest event context's (see its
+   * comment): a dead lease would answer "closed" for everything and this
+   * would quietly do nothing.
    */
   function revealPanes(): void {
     const now = readColumns();
-    const grew = now > columns;
+    const before = columns;
     columns = now;
-    if (!grew || panes === null) {
+    if (now === before || panes === null) {
       return;
     }
-    debug(`resize columns=${now} open=${PANE_IDS.map((id) => `${id}:${panes?.isOpen(id)}`).join(",")}`);
-    for (const id of PANE_IDS) {
-      if (panes.isOpen(id)) {
-        panes.open(id);
+    const state = paneState(panes);
+    const plan = planResize(before, now, state);
+    debug(`resize columns=${before}->${now} open=${JSON.stringify(state)} plan=${JSON.stringify(plan)}`);
+    if (applyPlan(panes, plan)) {
+      recordLevel(fit(now) === "two" ? levelOf(BOTH_PANES) : "diff"); // what planResize opens or closes
+      return;
+    }
+    if (now > before) {
+      for (const id of PANE_IDS) {
+        if (panes.isOpen(id)) {
+          panes.open(id);
+        }
       }
     }
   }
@@ -1051,8 +1157,12 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     ensureGit(event.cwd);
     debug(`startup cwd=${event.cwd} sidecar=${sidecarPath ?? "-"} pid=${process.pid} columns=${columns}`);
     panes = ctx.panes;
-    ctx.panes.open("commits");
-    ctx.panes.open("files");
+    // Wide: both panes, as ever. Narrow: the diff, the bottom of the
+    // level stack (the files pane is open by default, as hunk's own is).
+    columns = readColumns();
+    const wide = fit(columns) === "two";
+    applyPlan(ctx.panes, planPanes(paneState(ctx.panes), wide ? BOTH_PANES : panesFor("diff")));
+    recordLevel(wide ? levelOf(BOTH_PANES) : "diff");
     process.on("SIGWINCH", onResize);
     resizePoll = setInterval(revealPanes, RESIZE_POLL_MS);
     resizePoll.unref?.();

@@ -22,8 +22,12 @@ reaching an open page: a layout or theme change respawns hunk with
 --mode/--theme (the same settings again don't), the untracked switch
 reloads the current load with --exclude-untracked and rides every later
 diff load and the sidecar (never a `show`), the page size reaches the
-sidecar with neither. A second pass with an empty PATH checks the install
-card comes up instead.
+sidecar with neither. A pass over a narrow window checks the header's
+level buttons: shown while the VTE's column count says one pane fits,
+feeding hunk `<` / `>` (the shim's viewer records what reaches its pty),
+following the level the extension reports through the sidecar, and gone
+once the page is wide enough for both panes. A second pass with an empty
+PATH checks the install card comes up instead.
 
 The shim is a small Python script staged on a scratch PATH: `--version`
 answers 0.20.1, `diff …` and `show …` spawn a child "viewer" (the
@@ -137,8 +141,25 @@ if args and args[0] in ("diff", "show"):
     # is the *child's* pid the session list reports, as hunk's does.
     if os.environ.get("FAKE_HUNK_ROLE") == "viewer":
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        # What Collins feeds the pty (the header's level buttons) is
+        # recorded in the state file, raw, so the check can read it back.
+        import select, termios, tty
+        try:
+            tty.setraw(0)
+        except (OSError, termios.error, ValueError):
+            pass
         while True:
-            time.sleep(0.1)
+            ready, _, _ = select.select([0], [], [], 0.1)
+            if not ready:
+                continue
+            try:
+                data = os.read(0, 64)
+            except OSError:
+                data = b""
+            if data:
+                state = read_state()
+                state["keys"] = state.get("keys", "") + data.decode("utf-8", "replace")
+                write_state(state)
     tail = args[1:]
     # The valued flags are lifted out and recorded on their own; what is
     # left after the bare ones go is the load's tail (`--exclude-untracked`
@@ -1108,6 +1129,100 @@ def check_settings(repo: str, state_path: str) -> None:
     window.destroy()
 
 
+def check_levels(repo: str, state_path: str) -> None:
+    """A narrow page's level buttons: the VTE's column count decides they
+    show, a press feeds hunk the extension's key and moves the header at
+    once, the sidecar's `level` overrides, a widened page hides them."""
+    print("-- a narrow page: the level buttons")
+    page = GitPage(
+        cwd_provider=lambda: repo,
+        parent_provider=lambda _cwd: "main",
+        on_closed=lambda p: None,
+    )
+    window = Gtk.Window(title="levels", default_width=700, default_height=600)
+    window.set_child(page)
+    window.present()
+    check("levels: session id resolved", wait_for(lambda: page._session_id is not None))
+    check("the VTE reported its columns", wait_for(lambda: page.columns > 0), page.columns)
+    columns = page.columns
+    check(
+        f"a 700 px window is a narrow page where one pane fits ({columns} columns)",
+        hunkctl.pane_fit(columns) == "one",
+        columns,
+    )
+    check("the level buttons show on a narrow page", page.level_buttons_visible())
+    check("the page starts at the diff level", page.level == "diff", page.level)
+    check(
+        "up offers the files; down has nowhere to go",
+        page._up.get_tooltip_text() == "Show the files"
+        and page._up.get_sensitive()
+        and not page._down.get_sensitive()
+        and page._down.get_tooltip_text() == "The diff is shown — the bottom level",
+        (page._up.get_tooltip_text(), page._up.get_sensitive(), page._down.get_tooltip_text()),
+    )
+    page.step_level(up=True)
+    check(
+        "the header takes the step at once",
+        page.level == "files"
+        and page._up.get_tooltip_text() == "Show the commits"
+        and page._down.get_tooltip_text() == "Back to the diff"
+        and page._down.get_sensitive(),
+        (page.level, page._up.get_tooltip_text(), page._down.get_tooltip_text()),
+    )
+    landed = wait_for(lambda: read_state(state_path).get("keys") == "<")
+    check("the up button fed hunk `<`", landed, read_state(state_path).get("keys"))
+    page.step_level(up=True)
+    landed = wait_for(lambda: read_state(state_path).get("keys") == "<<")
+    check("a second up fed another `<`", landed, read_state(state_path).get("keys"))
+    check(
+        "at the top the up button is insensitive and says so",
+        page.level == "commits"
+        and not page._up.get_sensitive()
+        and page._up.get_tooltip_text() == "The commits are shown — the top level"
+        and page._down.get_tooltip_text() == "Back to the files",
+        (page.level, page._up.get_tooltip_text(), page._down.get_tooltip_text()),
+    )
+    page.step_level(up=True)
+    wait_for(lambda: False, timeout=0.3)
+    keys = read_state(state_path).get("keys")
+    check("up at the top feeds nothing", keys == "<<", keys)
+    page.step_level(up=False)
+    landed = wait_for(lambda: read_state(state_path).get("keys") == "<<>")
+    keys = read_state(state_path).get("keys")
+    check("the down button fed hunk `>`", landed and page.level == "files", (keys, page.level))
+
+    # -- the extension's word through the sidecar wins ---------------------------------
+    sidecar = read_state(state_path).get("sidecar")
+    write_sidecar(sidecar, level="diff")
+    page.poll_tick()
+    check(
+        "a tick reads the level off the sidecar",
+        page.level == "diff"
+        and page._up.get_tooltip_text() == "Show the files"
+        and not page._down.get_sensitive(),
+        (page.level, page._up.get_tooltip_text()),
+    )
+    write_sidecar(sidecar, level="bogus")
+    page.poll_tick()
+    check("a level the page doesn't know is ignored", page.level == "diff", page.level)
+    write_sidecar(sidecar, level="commits")
+    page.poll_tick()
+    check("the sidecar can say commits", page.level == "commits" and not page._up.get_sensitive(), page.level)
+
+    # -- widened past both panes: the buttons go ----------------------------------------
+    page.set_size_request(1150, -1)  # the toplevel grows to its child's minimum
+    wide = wait_for(lambda: page.columns >= hunkctl.TWO_PANE_COLUMNS)
+    check(f"a widened page reports both panes' columns ({page.columns})", wide, page.columns)
+    check("the level buttons hide on a wide page", not page.level_buttons_visible())
+    page.step_level(up=False)
+    wait_for(lambda: False, timeout=0.3)
+    keys = read_state(state_path).get("keys")
+    check("a step on a wide page feeds nothing", keys == "<<>", keys)
+    page.page_closed()
+    wait_for(lambda: not page.hunk_alive, timeout=2.0)
+    window.destroy()
+
+
 def check_without_hunk(repo: str) -> None:
     print("-- with no hunk on PATH")
     page = GitPage(
@@ -1176,6 +1291,7 @@ def main() -> int:
             check_with_hunk(repo, state_path, shim)
             check_restore(repo, state_path, shim)
             check_settings(repo, state_path)
+            check_levels(repo, state_path)
             check_teardown_paths(repo, state_path, shim)
         finally:
             os.environ["PATH"] = real_path

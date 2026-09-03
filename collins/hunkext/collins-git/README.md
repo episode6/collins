@@ -34,12 +34,39 @@ Two panes on the left of hunk's review stream:
   holds one side at a time, so the loaded side is live and clicking a file (or
   the header) on the other side reloads to that side and selects the file.
 
-Hunk hides its sidebar area when the terminal is too narrow for a pane (0.20
-shows the commits pane from about 75 columns and both from about 100) and does
-not bring it back when the terminal grows, so the extension re-opens whatever
-panes are open when the width grows — on `SIGWINCH`, and from a one-second
-poll of the tty size, since Collins widens its git column while hunk is still
-starting. A pane closed with hunk's own `s` stays closed.
+## Narrow terminals
+
+Hunk lays its left panes out from a fixed budget (0.20.1): two columns of body
+padding, each open pane in registration order at its preferred width as long as
+the review keeps 48 columns behind a one-column divider — else the pane is
+omitted — and the sidebar area hidden altogether until 73 columns (its own
+22-column pane beside that minimum). With the commits pane at 26 preferred /
+18 minimum and the files pane at 30 / 22 that gives three regimes by terminal
+width (`level.ts`, whose tests pin the numbers):
+
+| Columns | Shows |
+|---------|-------|
+| under 73 | the diff alone — no key or button can bring a pane up |
+| 73 – 99 | one pane beside a 48-column diff |
+| 100 and up | both panes — the wide layout |
+
+In the one-pane regime the page is a stack of three **levels**: `diff` (no pane
+open), `files` (the files pane alone) and `commits` (the commits pane alone).
+`<` goes up a level and `>` down; picking a row goes down by itself — a commit
+clicked loads it *and* shows the files, a file clicked selects it *and* shows
+the diff — so the mouse alone drills down. Both panes open in this regime is
+the `commits` level (hunk omits the files pane beside it). The extension starts
+at `diff` when the terminal is narrow and with both panes when it is wide; a
+resize that crosses the 100-column line opens both panes or closes both, and
+one inside a regime leaves the panes alone — but re-opens whatever is open when
+the width grew, since hunk does not bring a hidden sidebar area back by itself
+(checked on `SIGWINCH` and from a one-second poll of the tty size, because
+Collins widens its git column while hunk is still starting). Wide, `<` opens
+both panes when one is closed ("show me the panels") and `>` does nothing;
+under 73 columns both say *too narrow for a panel — widen the page*. A pane
+closed with hunk's own `s` stays closed until a level step or a crossing
+resize says otherwise. Collins' git page shows an up and a down button in its
+header while the page is narrow; they feed these two keys.
 
 ## Keys
 
@@ -60,11 +87,14 @@ staging keys say "read-only view" and do nothing.
 | `U` | unstage all changes, likewise |
 | `n` / `p` | load the next / previous row of the current commits-panel group |
 | `P` | set the parent branch (a `select` over local branches; *Automatic* hands the choice back) |
+| `<` / `>` | one level up / down on a narrow terminal — diff, files, commits (see "Narrow terminals"); wide, `<` opens both panes and `>` does nothing |
 
 Every key avoids hunk's own defaults. Users can rebind them under
 `[keybindings]` as `collins-git.stage-hunk`, `stage-file`, `set-anchor`,
 `clear-anchor`, `discard`, `commit`, `commit-with-body`, `fixup`, `stage-all`,
-`unstage-all`, `next-row`, `previous-row`, `set-parent`.
+`unstage-all`, `next-row`, `previous-row`, `set-parent`, `level-up`,
+`level-down` — the last two are what Collins' header buttons press, so a
+rebinding of them takes the buttons with it.
 
 `C`, `B` and `F` act on the index as it is — whatever `x`/`X`/`A` put there,
 from either view — and refuse before asking anything when nothing is staged or
@@ -167,6 +197,11 @@ deleted when the page closes:
   mtime (a string: the number is past what a JSON double holds) and HEAD as
   the extension saw them right after reloading the review for a mutation of
   its own; extension only. Collins' freshness poll skips a move that matches.
+- `level` — `"diff"`, `"files"` or `"commits"`: which level of the narrow
+  page's stack the panes show (see "Narrow terminals"), written on startup
+  and whenever a key, a click or a crossing resize changes it; extension
+  only. Collins' header buttons take their tooltips and sensitivity from it
+  (and step it forward themselves on a press, until this catches up).
 
 Both sides read-merge-write (temp file + rename), tolerate a missing or garbled
 file, and pass unknown keys through. The extension polls the file every 2 s
@@ -206,5 +241,5 @@ OpenTUI to them. `bun.lock` and `node_modules` are not committed.
 
 The extension never writes to the terminal (hunk owns it). To watch what it
 does, set `COLLINS_GIT_DEBUG_LOG=/path/to/file` in hunk's environment: startup,
-every changeset it decodes, and each resize that re-revealed the panes are
-appended there.
+every changeset it decodes, each resize and what it did to the panes, and every
+level step and the level written are appended there.

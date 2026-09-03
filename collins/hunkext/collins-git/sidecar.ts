@@ -29,12 +29,16 @@
  * "head": "<sha>"}}`. Collins' freshness poll reloads the page when the
  * index or HEAD moves; a move that matches this record is one hunk has
  * already shown, and a reload for it would only cancel whatever dialog
- * the user has open by then.
+ * the user has open by then. And `level`: which level of the narrow
+ * page's stack is shown — `"diff"`, `"files"` or `"commits"` (level.ts) —
+ * rewritten whenever it changes, so Collins' header buttons can say what
+ * the next step shows.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, unwatchFile, watchFile, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { guessDefault, safeRef, type GitRunner, type TreeMark } from "./git.ts";
+import type { Level } from "./level.ts";
 
 export type ParentSource = "auto" | "user";
 
@@ -103,9 +107,11 @@ export function readSidecar(path: string): SidecarConfig | null {
   return data === null ? null : configFrom(data);
 }
 
-/** What this extension writes: its share of the config, and the freshness record. */
+/** What this extension writes: its share of the config, the freshness record, and the level. */
 export interface SidecarPatch extends Partial<SidecarConfig> {
   readonly refreshed?: TreeMark;
+  /** What a narrow page shows (level.ts): `diff`, `files` or `commits`; Collins' header buttons follow it. */
+  readonly level?: Level;
 }
 
 /**

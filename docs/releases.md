@@ -59,6 +59,16 @@ downloads of each version, see the
   remembers whether it was open, what it showed and the parent you set. A
   machine without hunk gets an install card in the page's place; the
   branch label's copy moved to a right-click.
+- **A narrow git page walks its panels one at a time.** hunk fits both of
+  the extension's panels beside the diff only from about 100 columns, and
+  one from 73; below that the page used to show the diff alone with no
+  way to the panels. Now the page opens one panel wide at its narrowest,
+  and while it is narrower than both, the header grows an **up** and a
+  **down** button that step through three levels — the diff, the files
+  panel, the commits panel — with `<` / `>` doing the same from the
+  keyboard, and a click drilling down by itself: a commit clicked loads
+  it and shows the files, a file clicked selects it and shows the diff.
+  Wide enough for both, the buttons go and both panels show as before.
 - **`show_diff`, a session tool for the git page.** The agent can put a
   change on your screen: `show_diff("unstaged" | "staged" | "branch" |
   <commit ref>, file?, line?)` opens the session's git page on that diff

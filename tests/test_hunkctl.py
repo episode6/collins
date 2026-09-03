@@ -944,6 +944,92 @@ def test_shown_by_extension():
     assert not shown((200, _HEAD), (200, _HEAD, base), None)
 
 
+# -- levels of a narrow page ---------------------------------------------------
+
+
+def test_pane_thresholds_are_hunks_budget():
+    assert hunkctl.ONE_PANE_COLUMNS == 73
+    assert hunkctl.TWO_PANE_COLUMNS == 100
+
+
+@pytest.mark.parametrize(
+    ("columns", "fit"),
+    [
+        (0, "none"),
+        (-1, "none"),
+        (62, "none"),
+        (72, "none"),
+        (73, "one"),
+        (99, "one"),
+        (100, "two"),
+        (138, "two"),
+    ],
+)
+def test_pane_fit(columns, fit):
+    assert hunkctl.pane_fit(columns) == fit
+    assert hunkctl.page_is_narrow(columns) is (fit != "two")
+
+
+def test_level_steps():
+    assert hunkctl.LEVELS == ("diff", "files", "commits")
+    assert hunkctl.DEFAULT_LEVEL == "diff"
+    assert hunkctl.level_up("diff") == "files"
+    assert hunkctl.level_up("files") == "commits"
+    assert hunkctl.level_up("commits") is None
+    assert hunkctl.level_down("commits") == "files"
+    assert hunkctl.level_down("files") == "diff"
+    assert hunkctl.level_down("diff") is None
+    assert hunkctl.level_up("bogus") is None
+    assert hunkctl.level_down("bogus") is None
+
+
+def test_level_keys_are_free_of_hunks_and_the_extensions():
+    assert hunkctl.LEVEL_UP_KEY == b"<"
+    assert hunkctl.LEVEL_DOWN_KEY == b">"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('{"level": "files"}', "files"),
+        ('{"level": "commits", "parent": "main"}', "commits"),
+        ('{"level": "diff"}', "diff"),
+        ('{"level": "all"}', None),
+        ('{"level": 3}', None),
+        ('{"parent": "main"}', None),
+        ("", None),
+        ("[]", None),
+    ],
+)
+def test_read_sidecar_level(text, expected):
+    assert hunkctl.read_sidecar_level(text) == expected
+
+
+def test_level_survives_collins_write(tmp_path):
+    path = str(tmp_path / "sidecar.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write('{"level": "files"}')
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("main", "auto", "main", 20))
+    with open(path, encoding="utf-8") as fh:
+        assert hunkctl.read_sidecar_level(fh.read()) == "files"
+
+
+def test_level_button_walks_the_stack():
+    assert hunkctl.level_button(True, "diff", 75) == ("Show the files", True)
+    assert hunkctl.level_button(True, "files", 75) == ("Show the commits", True)
+    assert hunkctl.level_button(True, "commits", 75) == ("The commits are shown — the top level", False)
+    assert hunkctl.level_button(False, "commits", 75) == ("Back to the files", True)
+    assert hunkctl.level_button(False, "files", 75) == ("Back to the diff", True)
+    assert hunkctl.level_button(False, "diff", 75) == ("The diff is shown — the bottom level", False)
+
+
+def test_level_button_too_narrow_for_a_panel():
+    for up in (True, False):
+        for level in hunkctl.LEVELS:
+            assert hunkctl.level_button(up, level, 62) == ("Too narrow for a panel — widen the page", False)
+    assert hunkctl.level_button(True, "diff", 73)[1] is True
+
+
 def test_sidecar_refreshed_survives_collins_write(tmp_path):
     """Collins' write merges: the extension's record is still there after it."""
     path = str(tmp_path / "git.json")

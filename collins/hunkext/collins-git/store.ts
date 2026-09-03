@@ -48,6 +48,8 @@ export interface PaneHandlers {
   contextRow(row: Row): void;
   /** A click on the files panel's other side: load it, then select `path`. */
   loadSide(side: Side, path: string | null, report: Report): void;
+  /** A click on a live-side file, after hunk selected it: a narrow page drops to the diff (level.ts). */
+  selectedFile(): void;
 }
 
 export const EMPTY_COMMITS: CommitsSnapshot = { rows: [], loadedRowId: null, pendingRowId: null, error: null };
@@ -157,7 +159,7 @@ export function setPaneHandlers(next: PaneHandlers | null): void {
 
 /** The installed handlers, or a set that does nothing (panes render before load). */
 export function paneHandlers(): PaneHandlers {
-  return handlers ?? { activateRow() {}, contextRow() {}, loadSide() {} };
+  return handlers ?? { activateRow() {}, contextRow() {}, loadSide() {}, selectedFile() {} };
 }
 
 /** Back to the initial state; only tests need this. */
