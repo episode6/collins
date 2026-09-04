@@ -3,9 +3,10 @@
 """The composer: a GUI prompt box for the agent's terminal.
 
 A `ComposerView` is an optionally spell-checked multi-line text box under
-a button row that reads left to right as close, dock, then attach and Send
-— chrome at one end, composing at the other — everything the CLI's own
-input box isn't when a prompt outgrows one line. It owns no terminal plumbing at all: it
+a button row that reads left to right as close (floating only), dock, then
+attach and Send — chrome at one end, composing at the other — everything
+the CLI's own input box isn't when a prompt outgrows one line. It owns no
+terminal plumbing at all: it
 announces ``send-requested`` / ``close-requested`` and its host
 (terminal.py's overlay or a dock panel page) decides what those mean — cut
 text out of the CLI's box on the way in, type it back or submit it on the
@@ -222,6 +223,7 @@ class ComposerView(Gtk.Box):
         close.add_css_class("flat")
         close.connect("clicked", lambda *_a: self.emit("close-requested"))
         close.set_visible(self._chrome)
+        self._close_btn = close
         row.append(close)
         self._dock_btn = Gtk.Button()
         self._dock_btn.add_css_class("flat")
@@ -615,8 +617,12 @@ class ComposerView(Gtk.Box):
         terminal) drops the floating card's rounded top and grows the text
         view to fill the page, since a panel tab has real height to give
         where the overlay only borrowed the terminal's bottom edge. The
-        chrome's toggle button swaps meaning with the mode."""
+        chrome's toggle button swaps meaning with the mode, and its close
+        button only shows floating (the tab's X covers docked)."""
         self._docked = bool(docked)
+        # Docked, the panel tab's own X already closes the composer, so the
+        # chrome's close button would be a second one an inch away.
+        self._close_btn.set_visible(self._chrome and not self._docked)
         if self._docked:
             self.add_css_class("docked")
             self._scroller.set_max_content_height(-1)
@@ -734,9 +740,9 @@ class ComposerPage(Adw.Bin):
     are not written to disk.
 
     *on_closed(page)* fires when the page's tab really closes (the strip's
-    `page_closed` hook — an X, a bulk close, the chrome's close button
-    routed through the dock), while the view is still inside: the host
-    rescues it back to the overlay and applies paste-back semantics there.
+    `page_closed` hook — an X, a bulk close), while the view is still
+    inside: the host rescues it back to the overlay and applies paste-back
+    semantics there.
     """
 
     page_kind = "composer"
