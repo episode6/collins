@@ -57,7 +57,8 @@ from .gitinfo import (  # noqa: E402
     parent_branch,
     repo_root,
 )
-from .gitpage import ICON as GIT_PAGE_ICON, GitPage  # noqa: E402
+from .gitpage import ICON as GIT_PAGE_ICON  # noqa: E402
+from .gitpage import GitPage  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 from .lightbox import present_image_lightbox  # noqa: E402
 from .linkpatterns import (  # noqa: E402
