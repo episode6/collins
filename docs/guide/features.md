@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-03. Full change history: git log for this file.
+fork. Last modified: 2026-09-04. Full change history: git log for this file.
 -->
 
 # Features
@@ -118,7 +118,7 @@ Enter opens, Esc closes.
   with and the **effort level** it answered at, the agent's live working
   directory (click to copy), and the current **git branch** (⎇ — click to
   open the [git page](#git-page), right-click to copy), plus the
-  git-page, terminal-panel and editor buttons.
+  terminal-panel, git-page and editor buttons.
 - **Footer apps**: name any installed application in Preferences →
   *Footer apps* and every session's footer grows a button that opens the
   session's live directory in it — your editor, a file manager, a git GUI.
