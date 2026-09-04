@@ -3151,6 +3151,10 @@ msgstr ""
 msgid "Show/hide terminal panel"
 msgstr ""
 
+#: collins/terminal.py:2354
+msgid "Show/hide git page"
+msgstr ""
+
 #: collins/terminal.py:2308
 msgid "Right-click to open this folder in your terminal"
 msgstr ""

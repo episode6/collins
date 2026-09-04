@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-02. Full change history: git log for this file.
+# fork. Last modified: 2026-09-04. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -1428,6 +1428,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'A munkamenet által nyitott összes pull request',
         'Show/hide terminal panel':
             'Terminálpanel megjelenítése/elrejtése',
+        'Show/hide git page':
+            'Git-oldal megjelenítése/elrejtése',
         'Move terminals to {name}?':
             'Áthelyezi a terminálokat ide: {name}?',
         'This session started in a worktree at {path}. The terminal open beside it is still in the project directory — change its directory to the worktree? A terminal running a command is left alone.':
@@ -2979,6 +2981,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Jeder Pull Request, den diese Sitzung geöffnet hat',
         'Show/hide terminal panel':
             'Terminal-Panel ein-/ausblenden',
+        'Show/hide git page':
+            'Git-Seite ein-/ausblenden',
         'Move terminals to {name}?':
             'Terminals nach {name} verschieben?',
         'This session started in a worktree at {path}. The terminal open beside it is still in the project directory — change its directory to the worktree? A terminal running a command is left alone.':
@@ -4527,6 +4531,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Todos los pull requests que ha abierto esta sesión',
         'Show/hide terminal panel':
             'Mostrar/ocultar el panel de terminal',
+        'Show/hide git page':
+            'Mostrar/ocultar la página de git',
         'Move terminals to {name}?':
             '¿Mover las terminales a {name}?',
         'This session started in a worktree at {path}. The terminal open beside it is still in the project directory — change its directory to the worktree? A terminal running a command is left alone.':
@@ -6076,6 +6082,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Chaque pull request que cette session a ouverte',
         'Show/hide terminal panel':
             'Afficher/masquer le panneau de terminal',
+        'Show/hide git page':
+            'Afficher/masquer la page git',
         'Move terminals to {name}?':
             'Déplacer les terminaux vers {name} ?',
         'This session started in a worktree at {path}. The terminal open beside it is still in the project directory — change its directory to the worktree? A terminal running a command is left alone.':

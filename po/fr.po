@@ -2213,6 +2213,51 @@ msgstr "Actualiser les pull requests au lancement"
 msgid "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left"
 msgstr "Interroger GitHub une fois au démarrage sur les pull requests de chaque session listée, pour que les marques de la barre latérale démarrent à jour plutôt que telles qu'elles ont été laissées"
 
+msgid "Git"
+msgstr "Git"
+
+msgid "The git page: hunk's layout and theme, and what the commits panel loads"
+msgstr "La page git : la disposition et le thème de hunk, et ce que charge le panneau des commits"
+
+msgid "Layout"
+msgstr "Disposition"
+
+msgid "How hunk lays a diff out: side by side, stacked, or whichever fits the width"
+msgstr "Comment hunk dispose un diff : côte à côte, empilé, ou ce qui tient dans la largeur"
+
+msgid "Automatic"
+msgstr "Automatique"
+
+msgid "Split"
+msgstr "Côte à côte"
+
+msgid "Stacked"
+msgstr "Empilé"
+
+msgid "Theme"
+msgstr "Thème"
+
+msgid "Empty: hunk's own default. Any theme hunk knows — nord, dracula, catppuccin-mocha, github-light-default, auto (follows the terminal background) — or one from hunk's config; a name hunk doesn't know falls back to its default"
+msgstr "Vide : le thème par défaut de hunk. Tout thème que hunk connaît — nord, dracula, catppuccin-mocha, github-light-default, auto (suit le fond du terminal) — ou un de la configuration de hunk ; un nom que hunk ne connaît pas retombe sur son thème par défaut"
+
+msgid "Show untracked files"
+msgstr "Afficher les fichiers non suivis"
+
+msgid "List files git doesn't track yet in working-tree reviews. Off, the page and the files panel show only tracked changes"
+msgstr "Lister les fichiers que git ne suit pas encore dans les revues de l'arbre de travail. Désactivé, la page et le panneau des fichiers ne montrent que les changements suivis"
+
+msgid "Commits per page"
+msgstr "Commits par page"
+
+msgid "How many commits each group of the commits panel shows before its load more… row"
+msgstr "Combien de commits chaque groupe du panneau des commits affiche avant sa ligne charger plus…"
+
+msgid "Default parent branch"
+msgstr "Branche parente par défaut"
+
+msgid "Empty: automatic. The page measures the branch against the attached pull request's base first, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch; Set parent branch… in the page still overrides it"
+msgstr "Vide : automatique. La page mesure la branche d'abord contre la base du pull request attaché, puis contre cette branche quand le dépôt l'a (develop, ou origin/develop pour une que seul le dépôt distant a), puis contre la branche par défaut ; Définir la branche parente… dans la page reste prioritaire"
+
 msgid "Caffeine Mode"
 msgstr "Caffeine Mode"
 
@@ -2533,6 +2578,9 @@ msgstr "Chaque pull request que cette session a ouverte"
 
 msgid "Show/hide terminal panel"
 msgstr "Afficher/masquer le panneau de terminal"
+
+msgid "Show/hide git page"
+msgstr "Afficher/masquer la page git"
 
 msgid "Move terminals to {name}?"
 msgstr "Déplacer les terminaux vers {name} ?"

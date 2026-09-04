@@ -2213,6 +2213,51 @@ msgstr "Pull-Requests beim Start aktualisieren"
 msgid "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left"
 msgstr "GitHub beim Start einmal nach den Pull-Requests jeder gelisteten Sitzung fragen, damit die Markierungen in der Seitenleiste aktuell starten statt so, wie sie zurückblieben"
 
+msgid "Git"
+msgstr "Git"
+
+msgid "The git page: hunk's layout and theme, and what the commits panel loads"
+msgstr "Die Git-Seite: Layout und Thema von hunk, und was das Commit-Panel lädt"
+
+msgid "Layout"
+msgstr "Layout"
+
+msgid "How hunk lays a diff out: side by side, stacked, or whichever fits the width"
+msgstr "Wie hunk einen Diff anordnet: nebeneinander, untereinander, oder was in die Breite passt"
+
+msgid "Automatic"
+msgstr "Automatisch"
+
+msgid "Split"
+msgstr "Geteilt"
+
+msgid "Stacked"
+msgstr "Untereinander"
+
+msgid "Theme"
+msgstr "Thema"
+
+msgid "Empty: hunk's own default. Any theme hunk knows — nord, dracula, catppuccin-mocha, github-light-default, auto (follows the terminal background) — or one from hunk's config; a name hunk doesn't know falls back to its default"
+msgstr "Leer: hunks eigener Standard. Jedes Thema, das hunk kennt — nord, dracula, catppuccin-mocha, github-light-default, auto (folgt dem Terminalhintergrund) — oder eines aus hunks Konfiguration; ein Name, den hunk nicht kennt, fällt auf den Standard zurück"
+
+msgid "Show untracked files"
+msgstr "Unversionierte Dateien anzeigen"
+
+msgid "List files git doesn't track yet in working-tree reviews. Off, the page and the files panel show only tracked changes"
+msgstr "Dateien, die git noch nicht verfolgt, in Arbeitsbaum-Reviews auflisten. Aus: Seite und Dateipanel zeigen nur verfolgte Änderungen"
+
+msgid "Commits per page"
+msgstr "Commits pro Seite"
+
+msgid "How many commits each group of the commits panel shows before its load more… row"
+msgstr "Wie viele Commits jede Gruppe des Commit-Panels vor ihrer Zeile „mehr laden…“ zeigt"
+
+msgid "Default parent branch"
+msgstr "Standard-Elternbranch"
+
+msgid "Empty: automatic. The page measures the branch against the attached pull request's base first, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch; Set parent branch… in the page still overrides it"
+msgstr "Leer: automatisch. Die Seite misst den Branch zuerst an der Basis des angehängten Pull-Requests, dann an diesem Branch, wenn das Repository ihn hat (develop, oder origin/develop für einen, den nur das Remote hat), dann am Standardbranch; „Elternbranch festlegen…“ auf der Seite hat weiterhin Vorrang"
+
 msgid "Caffeine Mode"
 msgstr "Caffeine Mode"
 
@@ -2533,6 +2578,9 @@ msgstr "Jeder Pull Request, den diese Sitzung geöffnet hat"
 
 msgid "Show/hide terminal panel"
 msgstr "Terminal-Panel ein-/ausblenden"
+
+msgid "Show/hide git page"
+msgstr "Git-Seite ein-/ausblenden"
 
 msgid "Move terminals to {name}?"
 msgstr "Terminals nach {name} verschieben?"

@@ -141,8 +141,9 @@ _MIN_PAGE_WIDTH = 680
 # newer page's file.
 _SERIAL = itertools.count(1)
 
-# The tab's icon, bundled under data/icons.
-_ICON = "git-merge-symbolic"
+# The tab's icon, bundled under data/icons — and the footer's git button's
+# (terminal.py), so the button and the page it opens wear one glyph.
+ICON = "git-merge-symbolic"
 
 # The zoom chords' step and clamp, the same numbers PanelTerminal uses
 # (terminal.py's _FONT_SCALE_*), copied rather than imported: terminal.py
@@ -633,7 +634,7 @@ class GitPage(Adw.Bin):
         return hunkctl.tab_title(self._loaded, self._target_label())
 
     def page_icon(self) -> str | None:
-        return _ICON
+        return ICON
 
     def grab_page_focus(self) -> None:
         if self._stack.get_visible_child_name() == _CARD and self._card_button is not None:
