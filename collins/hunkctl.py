@@ -347,8 +347,9 @@ def repair_daemon_dir(runtime_dir: str | None, chmod: Callable[[str, int], None]
     session daemon will start (see DAEMON_DIR). The directory is the user's
     own, on tmpfs, and holds nothing but the daemon's records, so tightening
     it needs no asking. Never raises. Returns what happened: "absent" (no
-    runtime dir, or no such directory yet — hunk creates it 0700 itself),
-    "ok" (already owner-only), "repaired" (chmod done) or "failed" (chmod
+    runtime dir, no such directory yet — hunk creates it 0700 itself — or a
+    directory we can't even stat, which is equally nothing to repair), "ok"
+    (already owner-only), "repaired" (chmod done) or "failed" (chmod
     refused — not ours, a read-only mount)."""
     if not runtime_dir:
         return "absent"

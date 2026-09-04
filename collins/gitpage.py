@@ -1079,12 +1079,13 @@ class GitPage(Adw.Bin):
 
         def work() -> None:
             probe = hunkctl.probe()
-            daemon_dir = os.path.join(runtime_dir, hunkctl.DAEMON_DIR)
             repaired = hunkctl.repair_daemon_dir(runtime_dir)
-            if repaired == "repaired":
-                log.info("gitpage: made %s owner-only for hunk's daemon", daemon_dir)
-            elif repaired == "failed":
-                log.warning("gitpage: %s isn't owner-only and can't be made so", daemon_dir)
+            if repaired in ("repaired", "failed"):
+                daemon_dir = os.path.join(runtime_dir, hunkctl.DAEMON_DIR)
+                if repaired == "repaired":
+                    log.info("gitpage: made %s owner-only for hunk's daemon", daemon_dir)
+                else:
+                    log.warning("gitpage: %s isn't owner-only and can't be made so", daemon_dir)
             subject = hunkctl.commit_subject(cwd, show_ref) if show_ref else None
             GLib.idle_add(self._probed, gen, probe, subject)
 
