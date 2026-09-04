@@ -56,6 +56,7 @@ import posixpath
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import time
 from collections.abc import Callable, Collection, Mapping
@@ -117,6 +118,20 @@ INSTALL_COMMANDS: tuple[str, ...] = (
 # but a cold node start behind the npm wrapper can take a few.
 RESOLVE_DELAYS_MS: tuple[int, ...] = (500, 1000, 2000, 4000, 8000)
 PROBE_TIMEOUT_S = 5.0  # `hunk --version` (node startup included)
+# Where hunk's session daemon keeps its records and credentials, under the
+# user runtime dir ($XDG_RUNTIME_DIR). hunk 0.21 refuses to run the daemon
+# while this directory is readable by anyone but its owner ("Hunk session
+# credentials are unavailable because their owner-private runtime state is
+# unsafe or malformed") — and 0.20 created it with the process umask, so a
+# machine that ran 0.20 under umask 002 carries a 0775 directory 0.21 won't
+# touch. Every viewer then auto-spawns a daemon that exits at once, no
+# viewer registers, and every load the extension sends finds no session.
+# See repair_daemon_dir.
+DAEMON_DIR = "hunk-mcp"
+DAEMON_DIR_MODE = 0o700
+# What to run in a terminal when the viewer never registers: the daemon's
+# auto-spawn swallows its own stderr, the foreground run prints it.
+DAEMON_DIAGNOSTIC = "hunk daemon serve"
 # How long ProbeCache trusts one answer: the show_diff tool is offered to a
 # session only while a hunk the page can drive is on PATH, and tools/list
 # is asked per session start — a `hunk --version` each time would be a
@@ -325,6 +340,32 @@ def probe(which: Callable[[str], str | None] = shutil.which, run=subprocess.run)
     if getattr(result, "returncode", 1) != 0:
         return Probe(path, None)
     return Probe(path, parse_version(result.stdout or ""))
+
+
+def repair_daemon_dir(runtime_dir: str | None, chmod: Callable[[str, int], None] = os.chmod) -> str:
+    """Make <runtime_dir>/hunk-mcp owner-only when it isn't, so hunk 0.21's
+    session daemon will start (see DAEMON_DIR). The directory is the user's
+    own, on tmpfs, and holds nothing but the daemon's records, so tightening
+    it needs no asking. Never raises. Returns what happened: "absent" (no
+    runtime dir, or no such directory yet — hunk creates it 0700 itself),
+    "ok" (already owner-only), "repaired" (chmod done) or "failed" (chmod
+    refused — not ours, a read-only mount)."""
+    if not runtime_dir:
+        return "absent"
+    path = os.path.join(runtime_dir, DAEMON_DIR)
+    try:
+        mode = os.stat(path).st_mode
+    except OSError:
+        return "absent"
+    if not stat.S_ISDIR(mode):
+        return "absent"
+    if stat.S_IMODE(mode) & 0o077 == 0:
+        return "ok"
+    try:
+        chmod(path, DAEMON_DIR_MODE)
+    except OSError:
+        return "failed"
+    return "repaired"
 
 
 class ProbeCache:

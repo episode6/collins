@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-02. Full change history: git log for this file.
+fork. Last modified: 2026-09-04. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -59,6 +59,15 @@ downloads of each version, see the
   remembers whether it was open, what it showed and the parent you set. A
   machine without hunk gets an install card in the page's place; the
   branch label's copy moved to a right-click.
+- **The git page repairs hunk's daemon directory, and says when the
+  daemon is missing.** hunk 0.21 refuses to start its session daemon while
+  `$XDG_RUNTIME_DIR/hunk-mcp` is readable by anyone but its owner, and 0.20
+  created that directory at the umask — so an upgrade could leave every
+  commit click landing nowhere, with no word why. Before each spawn the
+  page now makes the directory owner-only when it isn't, and when the
+  viewer still never registers with the daemon, a banner over it says so,
+  names `hunk daemon serve` as the run that prints the reason, and offers
+  a Retry.
 - **A narrow git page walks its panels one at a time.** hunk fits both of
   the extension's panels beside the diff only from about 100 columns, and
   one from 73; below that the page used to show the diff alone with no

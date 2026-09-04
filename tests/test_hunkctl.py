@@ -11,6 +11,7 @@ navigate argv, the reply)."""
 import json
 import os
 import signal
+import stat
 import subprocess
 
 import pytest
@@ -89,6 +90,45 @@ def test_probe_run_raising_reads_as_old():
 def test_probe_nonzero_exit_reads_as_old():
     probe = hunkctl.probe(which=lambda _name: "/x/hunk", run=_run_answering("boom", returncode=1))
     assert probe.status == "old"
+
+
+# -- the daemon's runtime dir -----------------------------------------------
+
+
+def test_repair_daemon_dir_tightens_a_group_readable_dir(tmp_path):
+    """hunk 0.20 left the dir at the umask; 0.21 refuses to run its daemon
+    on anything but owner-only."""
+    path = tmp_path / hunkctl.DAEMON_DIR
+    path.mkdir(mode=0o775)
+    assert hunkctl.repair_daemon_dir(str(tmp_path)) == "repaired"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o700
+    assert hunkctl.repair_daemon_dir(str(tmp_path)) == "ok"
+
+
+def test_repair_daemon_dir_leaves_an_owner_only_dir_alone(tmp_path):
+    (tmp_path / hunkctl.DAEMON_DIR).mkdir(mode=0o700)
+    calls = []
+    assert hunkctl.repair_daemon_dir(str(tmp_path), chmod=lambda *a: calls.append(a)) == "ok"
+    assert calls == []
+
+
+def test_repair_daemon_dir_absent(tmp_path):
+    """No dir yet (hunk creates it 0700 itself), a file in its place, or no
+    runtime dir at all: nothing to do."""
+    assert hunkctl.repair_daemon_dir(str(tmp_path)) == "absent"
+    (tmp_path / hunkctl.DAEMON_DIR).write_text("")
+    assert hunkctl.repair_daemon_dir(str(tmp_path)) == "absent"
+    assert hunkctl.repair_daemon_dir(None) == "absent"
+    assert hunkctl.repair_daemon_dir("") == "absent"
+
+
+def test_repair_daemon_dir_refused_chmod(tmp_path):
+    (tmp_path / hunkctl.DAEMON_DIR).mkdir(mode=0o775)
+
+    def refuse(_path, _mode):
+        raise PermissionError("not yours")
+
+    assert hunkctl.repair_daemon_dir(str(tmp_path), chmod=refuse) == "failed"
 
 
 # -- argv --------------------------------------------------------------------

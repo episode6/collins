@@ -118,7 +118,7 @@ async function sessionId(deps: SessionDeps): Promise<string | null> {
 export async function load(tail: readonly string[], deps: SessionDeps): Promise<string | null> {
   const id = await sessionId(deps);
   if (id === null) {
-    return "cannot find this hunk window in the session daemon";
+    return "cannot find this hunk window in the session daemon — `hunk daemon serve` in a terminal says why";
   }
   const sent = tail[0] === "diff" && deps.excludeUntracked?.() === true ? ["diff", "--exclude-untracked", ...tail.slice(1)] : tail;
   const result = await deps.run(["session", "reload", id, "--json", "--", ...sent]);
