@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-02. Full change history: git log for this file.
+fork. Last modified: 2026-09-03. Full change history: git log for this file.
 -->
 
 # Features
@@ -491,8 +491,8 @@ panels:
   terminal, so its navigation, search and `r` reload are all there. The
   page holds `Esc` for it, and the terminal zoom chords apply.
 - **No hunk, no error.** A machine without hunk (or with one older than
-  0.20) gets a card in the page's place: the three install lines,
-  click-to-copy, and a *Check again* button. Hunk exiting gets a *Reopen*
+  0.20) gets a card in the page's place: a link to hunk's install
+  instructions and a *Check again* button. Hunk exiting gets a *Reopen*
   card; a directory that stops being a repository, a card saying so.
 - Each session remembers whether its git page was open, where it sat,
   what it showed — one of the three working-tree loads, or a commit — and

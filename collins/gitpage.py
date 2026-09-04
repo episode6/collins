@@ -115,7 +115,6 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import gitinfo, hunkctl, keybindings, keymap, proctree, themes  # noqa: E402
-from .ghwelcome import command_row  # noqa: E402
 from .i18n import _  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -963,15 +962,16 @@ class GitPage(Adw.Bin):
         description: str,
         button: str,
         on_click: Callable[[], None],
-        commands: tuple[str, ...] = (),
+        link: tuple[str, str] | None = None,
     ) -> None:
-        """Replace hunk with an Adw.StatusPage: *commands* become click-to-copy
-        rows above the one *button*, which does *on_click*."""
+        """Replace hunk with an Adw.StatusPage: *link* — (label, uri) — is a
+        link button above the one *button*, which does *on_click*."""
         page = Adw.StatusPage(icon_name=icon, title=title, description=description)
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         body.set_halign(Gtk.Align.CENTER)
-        for command in commands:
-            body.append(command_row(command))
+        if link is not None:
+            label, uri = link
+            body.append(Gtk.LinkButton.new_with_label(uri, label))
         action = Gtk.Button(label=button)
         action.add_css_class("pill")
         action.add_css_class("suggested-action")
@@ -998,7 +998,7 @@ class GitPage(Adw.Bin):
             title = _("hunk {version} or newer is needed").format(
                 version=".".join(str(part) for part in hunkctl.MIN_VERSION)
             )
-        description = _("Collins shows diffs through hunk (hunk.dev). Install it, then check again.")
+        description = _("Collins shows diffs through hunk. Install it, then check again.")
         if probe.status == "old":
             found = ".".join(str(part) for part in probe.version) if probe.version else _("unknown")
             description = (
@@ -1011,7 +1011,7 @@ class GitPage(Adw.Bin):
             description,
             _("Check again"),
             self._spawn,
-            hunkctl.INSTALL_COMMANDS,
+            (_("Install instructions at hunk.dev"), hunkctl.INSTALL_URL),
         )
 
     def _show_exited_card(self, detail: str | None = None) -> None:

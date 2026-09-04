@@ -106,12 +106,9 @@ _SHORT_SHA_LEN = 7
 # The first release whose session API the page relies on (and, for PR 2, the
 # first with extension API v8).
 MIN_VERSION: tuple[int, int] = (0, 20)
-# The three install lines from hunk's README, click-to-copy on the install card.
-INSTALL_COMMANDS: tuple[str, ...] = (
-    "npm i -g hunkdiff",
-    "curl -fsSL https://hunk.dev/install.sh | sh",
-    "brew install hunk",
-)
+# Where the install card sends the user: hunk's own site carries the install
+# instructions, so Collins doesn't copy lines that can go stale.
+INSTALL_URL = "https://hunk.dev"
 # Backoff between `hunk session list --json` polls after a spawn, ms: the
 # viewer registers with hunk's daemon within half a second on a warm machine,
 # but a cold node start behind the npm wrapper can take a few.
