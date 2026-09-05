@@ -222,7 +222,6 @@ class ComposerView(Gtk.Box):
         )
         close.add_css_class("flat")
         close.connect("clicked", lambda *_a: self.emit("close-requested"))
-        close.set_visible(self._chrome)
         self._close_btn = close
         row.append(close)
         self._dock_btn = Gtk.Button()
