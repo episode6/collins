@@ -3,14 +3,14 @@
 // contributors); see collins/THIRD_PARTY_LICENSES.md.
 
 /**
- * What `x`, `X`, `A`, `U` and `D` will do, decided before anything is done.
+ * What `x`, `X` and `D` will do, decided before anything is done.
  *
  * Each planner is pure over its inputs (the file and hunk selected, the
  * line range between the anchor and the cursor, the patch re-read from
- * git, the working tree's status) and returns a plan the composition root
- * carries out — or a refusal with the reason the user sees. Keeping the
- * decision apart from the git call is what lets the tests feed patches
- * from a temp repository and check every guard.
+ * git) and returns a plan the composition root carries out — or a refusal
+ * with the reason the user sees. Keeping the decision apart from the git
+ * call is what lets the tests feed patches from a temp repository and
+ * check every guard.
  *
  * A range (`x` or `D` with an anchor set) meets more guards than a hunk:
  * its line numbers came out of the review, so besides hunk's own hunk
@@ -19,7 +19,6 @@
  */
 
 import type { Side } from "./model.ts";
-import type { Status } from "./git.ts";
 import {
   findDisagreement,
   parseFilePatch,
@@ -75,11 +74,6 @@ export interface FilePlan {
   readonly paths: readonly string[];
   readonly stage: boolean;
   readonly label: string;
-}
-
-export interface AllPlan {
-  readonly count: number;
-  readonly stage: boolean;
 }
 
 function verb(stage: boolean): string {
@@ -495,23 +489,10 @@ export function planFileToggle(input: { file: StagingFile; live: Side }): FilePl
   return { paths, stage, label: `${verb(stage)} ${file.path}` };
 }
 
-/**
- * Plan `A` (stage everything) or `U` (unstage everything): how many files
- * the confirmation names. Unlike `x`/`X`, the direction is the key's, not
- * the loaded side's — `A` stages all from the staged view too.
- */
-export function planAll(status: Status | null, stage: boolean): AllPlan {
-  const rows = status === null ? [] : stage ? status.unstaged : status.staged;
-  return { count: rows.length, stage };
-}
-
 /** The toast after a plan was carried out. */
-export function describe(plan: HunkPlan | FilePlan | AllPlan | RangePlan | DiscardPlan): string {
+export function describe(plan: HunkPlan | FilePlan | RangePlan | DiscardPlan): string {
   if ("kind" in plan) {
     return plan.kind === "refuse" ? plan.reason : "label" in plan ? plan.label : "";
   }
-  if ("paths" in plan) {
-    return plan.label;
-  }
-  return `${verb(plan.stage)} ${plan.count} ${plan.count === 1 ? "file" : "files"}`;
+  return plan.label;
 }
