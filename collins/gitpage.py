@@ -3,12 +3,14 @@
 """The git page: hunk in a VTE beside the session, driven over its session API.
 
 What the page shows is hunk's — hunk.dev, the terminal diff viewer, running
-with the collins-git extension Collins ships as package data, which draws
-the commits and files panels and binds the staging keys — and all Collins
-adds is a one-row header (the branch, a breadcrumb of what is loaded,
-and refresh; the tab's X closes) and the plumbing that keeps hunk pointed at the right
-thing: it spawns `hunk diff --watch --extension <collins-git>` in the
-agent's working tree the first time the page is shown, finds the session
+with `--no-sidebar` (its review stream alone; the native sidebar below
+lists the files) and the collins-git extension Collins ships as package
+data, which binds the keys that need hunk's cursor (`x`, `X`, `v`, escape,
+`D`) — plus a one-row header (the branch, a breadcrumb of what is loaded,
+the sidebar toggle and refresh; the tab's X closes) and the plumbing that
+keeps hunk pointed at the right thing: it spawns `hunk diff --watch
+--no-sidebar --extension <collins-git>` in the agent's working tree the
+first time the page is shown, finds the session
 hunk registered for that process (`hunk session list --json`, matched by
 pid — the npm wrapper spawns the real viewer as a child, so both pids are
 tried), and swaps what is loaded with `hunk session reload <id> -- diff …`
@@ -21,16 +23,17 @@ what the auto-spawn swallowed (hunkctl.DAEMON_DIAGNOSTIC). Before each spawn
 the daemon's runtime directory is made owner-only if it isn't
 (hunkctl.repair_daemon_dir): the one daemon failure seen so far.
 
-The extension does its own loads — a click on a commit, a branch header, the
-Staged section — through the same session API, and the page learns of them
-the way it learns of any load it didn't make: freshness rides the tab
-footer's 2 s tick, the host forwards it while the page is mapped, and the
-page reloads what it shows when the index, HEAD or the parent branch moved
-(gitinfo.tree_signature) — hunk's own `--watch` covers edits to files, this
-covers commits and staging done from a shell or by the agent; a move the
-extension made itself, and reloaded hunk for, is left alone (it records the
-index mtime and HEAD it showed in the sidecar, hunkctl.shown_by_extension),
-since a second reload would cancel whatever dialog the user opened next. The same tick
+A load the page didn't make — `hunk session reload` from a shell, the
+agent's show_diff, hunk's own `r` — reaches it the way every load does:
+freshness rides the tab footer's 2 s tick, the host forwards it while the
+page is mapped, and the page reloads what it shows when the index, HEAD or
+the parent branch moved (gitinfo.tree_signature) — hunk's own `--watch`
+covers edits to files, this covers commits and staging done from a shell
+or by the agent; a move the extension made itself (an `x`, a `D`), and
+reloaded hunk for through hunk's own refresh, is left alone (it records
+the index mtime and HEAD it showed in the sidecar,
+hunkctl.shown_by_extension), since a second reload would cancel whatever
+dialog the user opened next. The same tick
 asks `hunk session get <id>` what the viewer has loaded, and the breadcrumb
 and tab title follow *that* rather than Collins' own asks: a `show <sha>`
 becomes the page's commit load (reloaded on freshness, persisted, restored
@@ -60,47 +63,34 @@ one ask, refresh_files / set_selection), the sidecar's `selection` and
 `anchor` when the extension writes them (instant; the `session get`
 snapshot is the fallback), the tree signature (a move refreshes the commits
 list along with the diff) and the remote refs' signature (a push moves the
-`↑` marks). The sidebar asks back through signals: a row click is a load
+`↑` marks). The sidecar (hunkctl.sidecar_*, contract version 2) is watched
+by a Gio.FileMonitor besides being stat'ed on the tick, so the extension's
+`selection` — written on hunk's every cursor move — moves the files list's
+highlight as it lands, not two seconds later; the `session get` snapshot
+is the fallback for a hunk running without the extension. The sidebar asks
+back through signals: a row click is a load
 ("load-requested" → load()), a file click a `session navigate` on the live
 side — or, on the working tree's other side, a load of that side with the
 navigate queued behind it (_pending_navigate, run once the reload lands) —
 a button that needs hunk's cursor feeds the extension's key through the pty
 ("key-requested": `x`, `v`, escape, `D`, the VTE focused so hunk's own
-confirm answers to Enter), a native mutation ("mutated": stage all, a
-commit) re-seeds the signature and reloads hunk at once rather than waiting
-for the tick, and a parent pick ("parent-picked") lands where the sidecar's
-used to. The sidebar hides below the Adw.BreakpointBin's breakpoint
+confirm answers to Enter; the buttons are hidden when hunk runs without
+the extension), a native mutation ("mutated": stage all, a commit)
+re-seeds the signature and reloads hunk at once rather than waiting for
+the tick, and a parent pick ("parent-picked") sets the user's parent. The
+sidebar hides below the Adw.BreakpointBin's breakpoint
 (_NARROW_MAX_WIDTH) whatever the header's toggle says, and the toggle's
 state — persisted in page_state's "sidebar" — rules above it; the install
 and not-a-repo cards hide it too (nothing to list), the exited card keeps
 it (the commits list still works). Page-local toasts (commit results, git
 errors, a navigate hunk refused) float in an Adw.ToastOverlay over the page.
 
-A page too narrow for both of the extension's panes shows one at a time —
-hunk lays its left panes out from a fixed budget (hunkctl.pane_fit: one
-pane beside the diff from 73 columns, both from 100) — and the header
-grows two buttons, back and forward, that walk the extension's *levels*: the
-diff alone, the files pane, the commits pane (its level.ts). Each press
-feeds hunk the key the extension binds (`<` up, `>` down, through the
-VTE's pty — hunk has no session command that runs an extension command),
-the header takes the step for granted at once (tooltips and sensitivity
-follow the level, insensitive at either end and on a page too narrow for
-any pane), and the extension's own word arrives through the sidecar's
-`level` on the next tick. The buttons show only while the VTE's column
-count says the page is narrow, re-read after every allocation (a width
-sensor at the foot of the page) and on the tick; wide, the page shows
-both panes as it always did. The page's minimum width holds
-one pane at the default font, so a page at its narrowest is never one
-where the buttons can do nothing.
-
-The parent branch travels both ways through a sidecar file (hunkctl's
-sidecar_*): Collins writes the name it resolved — the user's pick while it
-resolves, else the host's automatic rung (the newest PR's base, then the
-default parent from Preferences → Git, then the default branch) — and the
-default branch, so the extension groups its commits the same way the
-breadcrumb reads; the extension writes the user's "Set parent branch…"
-pick back, and the tick picks it up (one os.stat, a read when the mtime
-moved), re-resolves, and reloads a branch diff that now has another base.
+The parent branch is the name the page resolved — the user's pick (the
+sidebar's ⎇ picker) while it resolves, else the host's automatic rung (the
+newest PR's base, then the default parent from Preferences → Git, then the
+default branch) — and the sidebar groups its commits the same way the
+breadcrumb reads; a pick re-resolves at once and reloads a branch diff
+that now has another base.
 The user's pick persists with the page (page_state's "parent") from the
 moment it is set or restored — a restored page that was never shown still
 carries it into the next layout save — and is dropped only once a
@@ -113,9 +103,9 @@ either respawns hunk into the current load — and only when it differs from
 what the running child was spawned with, since every unrelated preference
 lands here too; the untracked switch rides every `diff` tail, so a change
 is a `session reload` of the current mode (hunk re-reads the option on
-each reload); the commits page size and the untracked switch also go into
-the sidecar, rewritten at once, from which the extension pages its
-commits panel and flags its own loads.
+each reload) and the native commits list re-pages on the page size; the
+untracked switch also goes into the sidecar, rewritten at once, as
+Collins' word on what its working-tree loads hold.
 
 The decisions with no widget in them — argv, reply parsing, title →
 breadcrumb, the chords, the layout slot, the sidecar — live in hunkctl,
@@ -141,7 +131,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Vte", "3.91")
-from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import gitinfo, gitops, hunkctl, keybindings, keymap, proctree, themes  # noqa: E402
 from .gitsidebar import GitSidebar  # noqa: E402
@@ -373,14 +363,25 @@ class GitPage(Adw.Bin):
         # -- the sidecar shared with the extension (see hunkctl) ---------------
         # One path per page, kept across respawns, removed at shutdown.
         self._sidecar: str = hunkctl.sidecar_path(GLib.get_user_runtime_dir(), os.getpid(), next(_SERIAL))
-        # The (parent, source, default, log page, untracked) last written,
-        # so the tick rewrites only on a change; None until the first write
-        # lands (and again after the file went missing, so it is written
-        # afresh).
+        # The (untracked,) payload last written, so the tick rewrites only
+        # on a change; None until the first write lands (and again after
+        # the file went missing, so it is written afresh).
         self._sidecar_written: tuple | None = None
         # The file's mtime after our own last write — or the extension's,
-        # once read — so the tick reads only what the other side wrote.
+        # once read — so a read finds only what the other side wrote.
         self._sidecar_mtime_ns: int | None = None
+        # The extension writes the file on hunk's every cursor move (its
+        # `selection`) and on `v` (its `anchor`); a monitor on the path reads
+        # them as they land — the tick's stat is the fallback. The file is
+        # replaced by rename, which the monitor reports as a create.
+        self._sidecar_monitor: Gio.FileMonitor | None = None
+        try:
+            self._sidecar_monitor = Gio.File.new_for_path(self._sidecar).monitor_file(
+                Gio.FileMonitorFlags.NONE, None
+            )
+            self._sidecar_monitor.connect("changed", self._on_sidecar_changed)
+        except GLib.Error as exc:  # no runtime dir to watch: the tick alone
+            log.debug("gitpage: no monitor on the sidecar %s: %s", self._sidecar, exc.message)
         # (index mtime ns, HEAD) the extension last reloaded the review
         # for on its own (hunkctl.read_sidecar_refreshed): a signature
         # move that matches it needs no reload from here.
@@ -419,26 +420,6 @@ class GitPage(Adw.Bin):
         self._sidebar_toggle_box.append(self._sidebar_toggle)
         header.append(self._sidebar_toggle_box)
         header.append(refresh)
-
-        # The level buttons of a narrow page (see the module docstring):
-        # hidden while both panes fit, insensitive at either end of the
-        # stack. Drawn as back and forward — back climbs a level (diff →
-        # files → commits), forward descends — with back on the left, the
-        # way a browser's pair reads; between the breadcrumb and refresh.
-        self._up = Gtk.Button(icon_name="go-previous-symbolic")
-        self._up.add_css_class("flat")
-        self._up.connect("clicked", lambda *_a: self.step_level(up=True))
-        header.insert_child_after(self._up, self._breadcrumb)
-        self._down = Gtk.Button(icon_name="go-next-symbolic")
-        self._down.add_css_class("flat")
-        self._down.connect("clicked", lambda *_a: self.step_level(up=False))
-        header.insert_child_after(self._down, self._up)
-        # What the extension says a narrow page shows (the sidecar's
-        # "level"), the default until it says; and the VTE's column count
-        # as of the last allocation, which decides whether the page is
-        # narrow at all.
-        self._level = hunkctl.DEFAULT_LEVEL
-        self._columns = 0
 
         # -- hunk's terminal, and the cards that stand in for it ----------------
         self.terminal = Vte.Terminal()
@@ -506,19 +487,6 @@ class GitPage(Adw.Bin):
         box.append(header)
         box.append(self._banner)
         box.append(self._bin)
-        # A width sensor: nothing tells a widget its allocation changed
-        # (Adw.Bin allocates through a layout manager, so the vfunc never
-        # runs here) except a drawing area's "resize" — zero rows tall, it
-        # costs nothing, and being last in the box it fires after the
-        # terminal above it was allocated; the column count is read on
-        # idle all the same, so the order never matters.
-        sensor = Gtk.DrawingArea(hexpand=True)
-        sensor.set_content_height(0)
-        sensor.set_size_request(-1, 0)
-        sensor.connect(
-            "resize", lambda *_a: GLib.idle_add(self._read_columns, priority=GLib.PRIORITY_DEFAULT)
-        )
-        box.append(sensor)
         # Page-local toasts: commit results, git's refusals, a navigate hunk
         # refused (see gitsidebar._toast, which finds this overlay).
         self._toast_overlay = Adw.ToastOverlay(child=box)
@@ -534,7 +502,6 @@ class GitPage(Adw.Bin):
         self.add_controller(keys)
 
         self._sync_header()
-        self._sync_levels()
         # First shown (and every re-show): make sure hunk is running. A
         # restored page is built unselected, maybe in a hidden strip, and
         # must not spawn a process nobody is looking at.
@@ -584,24 +551,6 @@ class GitPage(Adw.Bin):
         return self._breadcrumb.get_text()
 
     @property
-    def level(self) -> str:
-        """What a narrow page shows — "diff", "files" or "commits" (one of
-        hunkctl.LEVELS): the extension's last word through the sidecar, or
-        the step the header just took, or the default before either."""
-        return self._level
-
-    @property
-    def columns(self) -> int:
-        """The VTE's column count as of the last allocation (0 before one):
-        what decides whether the page is narrow (hunkctl.page_is_narrow)."""
-        return self._columns
-
-    def level_buttons_visible(self) -> bool:
-        """Whether the header shows the up/down level buttons: the page is
-        narrower than both panes want."""
-        return self._up.get_visible()
-
-    @property
     def sidebar_shown(self) -> bool:
         """Whether the native sidebar is on screen: the toggle says so, the
         page is above the breakpoint, and no card hides it."""
@@ -616,22 +565,6 @@ class GitPage(Adw.Bin):
     def set_sidebar_wanted(self, wanted: bool) -> None:
         """Flip the header's toggle: show or hide the native panels."""
         self._sidebar_toggle.set_active(bool(wanted))
-
-    def step_level(self, up: bool) -> None:
-        """The header's up (or down) button: feed hunk the key the extension
-        binds for one level up (`<`) or down (`>`), and take the step for
-        granted in the header until the extension's word arrives through
-        the sidecar. Nothing without a running hunk, on a page that isn't
-        narrow (the buttons are hidden there), or where the step has
-        nowhere to go (the button is insensitive there)."""
-        if not self.hunk_alive or not hunkctl.page_is_narrow(self._columns):
-            return
-        target = hunkctl.level_up(self._level) if up else hunkctl.level_down(self._level)
-        if target is None or hunkctl.pane_fit(self._columns) == "none":
-            return
-        self.terminal.feed_child(hunkctl.LEVEL_UP_KEY if up else hunkctl.LEVEL_DOWN_KEY)
-        self._level = target
-        self._sync_levels()
 
     def settled(self) -> bool:
         """Whether the viewer is up with a session id in hand and nothing in
@@ -714,10 +647,10 @@ class GitPage(Adw.Bin):
         """The footer's 2 s tick, forwarded by the host only for a mapped page
         (the page checks get_mapped() again itself). Re-reads the branch
         label; respawns when the agent's repo root moved (a worktree entry)
-        or shows the "not a repository" card when there is none; picks up a
-        parent the user set through the extension (the sidecar's mtime
-        moved), re-resolves the parent and publishes it and the default
-        branch back into the sidecar when either changed; seeds and compares
+        or shows the "not a repository" card when there is none; picks up
+        what the extension wrote (the sidecar's mtime moved — the monitor
+        usually got there first), re-resolves the parent and rewrites the
+        sidecar when the untracked switch changed; seeds and compares
         gitinfo.tree_signature and reloads the current load when it moved —
         after asking hunk what it has loaded (`session get`), so the reload
         re-asks for what hunk shows, not what Collins last asked for. Never
@@ -750,7 +683,6 @@ class GitPage(Adw.Bin):
             self._branch = branch
             self._sync_header()
             self._sync_context()  # another branch: other groups
-        self._read_columns()
         self._read_sidecar()
         target_before = self._parent_target
         self._resolve_parent()
@@ -911,6 +843,9 @@ class GitPage(Adw.Bin):
         self._gen += 1
         self._terminate_child()
         _LIVE_PAGES.discard(self)
+        if self._sidecar_monitor is not None:
+            self._sidecar_monitor.cancel()
+            self._sidecar_monitor = None
         try:
             os.remove(self._sidecar)
         except OSError:
@@ -963,30 +898,6 @@ class GitPage(Adw.Bin):
             self._breadcrumb.set_text(
                 hunkctl.breadcrumb(self._loaded, self._branch, self._target_label(), self._subject)
             )
-
-    def _read_columns(self) -> bool:
-        """Re-read the VTE's column count (after an allocation — the width
-        sensor — and on every tick) and show or hide the level buttons by
-        it."""
-        columns = int(self.terminal.get_column_count() or 0)
-        if columns != self._columns:
-            self._columns = columns
-            self._sync_levels()
-        return GLib.SOURCE_REMOVE
-
-    def _sync_levels(self) -> None:
-        """The level buttons follow the column count (shown while the page
-        is narrow) and the level (tooltips, sensitivity), and need a hunk
-        to feed."""
-        narrow = self._columns > 0 and hunkctl.page_is_narrow(self._columns)
-        self._up.set_visible(narrow)
-        self._down.set_visible(narrow)
-        if not narrow:
-            return
-        for button, up in ((self._up, True), (self._down, False)):
-            tooltip, sensitive = hunkctl.level_button(up, self._level, self._columns)
-            button.set_tooltip_text(tooltip)
-            button.set_sensitive(sensitive and self.hunk_alive)
 
     def _on_key_pressed(self, ctrl, keyval: int, _keycode: int, state: Gdk.ModifierType) -> bool:
         mode = hunkctl.load_for_key(int(keyval), int(state))
@@ -1082,8 +993,7 @@ class GitPage(Adw.Bin):
         """"user" while the user-set parent is in force — set, and not found
         missing by the last _resolve_parent (a page that never resolved,
         being unshown or over no repository, keeps the pick) — else "auto":
-        the sidecar's parentSource, and whether page_state carries the
-        name."""
+        whether page_state carries the name."""
         if self._user_parent and not self._user_parent_missing:
             return "user"
         return "auto"
@@ -1091,18 +1001,10 @@ class GitPage(Adw.Bin):
     # -- the sidecar -----------------------------------------------------------------
 
     def _write_sidecar(self) -> None:
-        """Publish (parent, source, default, log page, untracked) to the
-        extension when any of them changed since the last write (or the
-        file is gone). Records the mtime of our own write so the tick
-        doesn't read it back."""
-        cwd = self._cwd_provider()
-        payload = (
-            self._parent_name,
-            self._parent_source(),
-            gitinfo.default_branch(cwd),
-            self._options.log_page,
-            self._options.untracked,
-        )
+        """Publish the untracked switch to the extension when it changed
+        since the last write (or the file is gone). Records the mtime of
+        our own write so the read doesn't take it for the extension's."""
+        payload = (self._options.untracked,)
         if payload == self._sidecar_written:
             return
         if not hunkctl.write_sidecar(self._sidecar, hunkctl.sidecar_payload(*payload)):
@@ -1114,13 +1016,22 @@ class GitPage(Adw.Bin):
         except OSError:
             self._sidecar_mtime_ns = None
 
+    def _on_sidecar_changed(self, _monitor, _file, _other, event: Gio.FileMonitorEvent) -> None:
+        """The monitor's word: the extension replaced the file (a create,
+        since it renames a temp file over it) or wrote it in place."""
+        if event in (
+            Gio.FileMonitorEvent.CREATED,
+            Gio.FileMonitorEvent.CHANGED,
+            Gio.FileMonitorEvent.CHANGES_DONE_HINT,
+        ) and not self._closing:
+            self._read_sidecar()
+
     def _read_sidecar(self) -> None:
-        """Pick up what the extension wrote: one os.stat, and a read only
-        when the mtime isn't the one recorded after our own last write.
-        "user" with a parent sets the user's pick; "auto" clears it. The
-        caller re-resolves and writes the resolved name back. Reading our
-        own write (a write and a pick a moment apart) is harmless: it says
-        what the page already holds."""
+        """Pick up what the extension wrote (the monitor's callback, and
+        the tick): one os.stat, and a read only when the mtime isn't the
+        one recorded after our own last write — the freshness record, the
+        cursor's file and the anchor. Reading our own write is harmless:
+        it names none of them."""
         try:
             mtime_ns = os.stat(self._sidecar).st_mtime_ns
         except OSError:
@@ -1135,25 +1046,14 @@ class GitPage(Adw.Bin):
         except OSError:
             return
         self._ext_refreshed = hunkctl.read_sidecar_refreshed(text)
-        level = hunkctl.read_sidecar_level(text)
-        if level is not None and level != self._level:
-            self._level = level
-            self._sync_levels()
-        # The extension's word for hunk's cursor and the `v` anchor (sidecar
-        # v2): the highlight and the anchor button follow at once, and the
-        # `session get` snapshot this tick yields to the selection.
+        # The extension's word for hunk's cursor and the `v` anchor: the
+        # highlight and the anchor button follow at once, and the `session
+        # get` snapshot this tick yields to the selection.
         selection = hunkctl.read_sidecar_selection(text)
         if selection is not None:
             self._sidecar_selection_seen = True
             self.sidebar.set_selection(selection.path, selection.hunk, "sidecar")
         self.sidebar.set_anchor(hunkctl.read_sidecar_anchor(text))
-        parent, source = hunkctl.read_sidecar(text)
-        if source == "user" and parent:
-            self._user_parent = parent
-            self._user_parent_missing = False  # a fresh pick: resolve it before judging
-        elif source == "auto":
-            self._user_parent = None
-            self._user_parent_missing = False
 
     # -- cards ----------------------------------------------------------------------
 
@@ -1373,10 +1273,6 @@ class GitPage(Adw.Bin):
             self._show_exited_card(error.message)
             return
         self._child_pid = pid
-        # A fresh hunk starts at the bottom of the stack; the sidecar says
-        # otherwise soon if it doesn't.
-        self._level = hunkctl.DEFAULT_LEVEL
-        self._sync_levels()
         if self._respawn_wanted:
             # Asked to start over (the repo root moved) between the probe's
             # answer and this: the child's exit spawns the next one.
@@ -1493,8 +1389,7 @@ class GitPage(Adw.Bin):
         self._gen += 1  # orphan any session list / get / reload still out
         self._banner.set_revealed(False)
         self.terminal.reset(True, True)
-        self._sync_levels()  # nothing to feed: the buttons go insensitive
-        self._sync_context()  # the sidebar's cursor keys go insensitive too
+        self._sync_context()  # the sidebar's cursor keys go insensitive
         if self._closing:
             return
         if self._respawn_wanted:
