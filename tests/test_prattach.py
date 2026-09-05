@@ -1,5 +1,6 @@
-"""Tests for prattach — reading a session's first prompt for PR references,
-resolving them through gh, and the drop-or-attach policy per reference form."""
+"""Tests for prattach — reading a session's first prompt for PR URLs (and
+only URLs), resolving them through gh, and resolve()'s drop-or-attach policy
+per reference form."""
 
 import json
 import threading
@@ -44,29 +45,47 @@ def _resolver_by_number(looked: list | None = None):
 # -- the read: parse, resolve, dedup ------------------------------------------
 
 
-def test_find_attaches_every_mentioned_pr(tmp_path):
+def test_find_attaches_every_linked_pr(tmp_path):
     looked: list = []
     attacher = PromptAttacher(callback=lambda *_: None, resolver=_resolver_by_number(looked))
-    path = _transcript(tmp_path, f"merge PR 12 and PR 34, then review {_url(200)}")
+    path = _transcript(tmp_path, f"review {_url(200)} then rebase {_url(34)} onto it")
     prs = attacher._find(path, "/proj")
-    assert [pr.number for pr in prs] == [200, 12, 34]  # most specific form first
-    assert looked == [(f"{_REPO}#200", "/proj"), ("#12", "/proj"), ("#34", "/proj")]
+    assert [pr.number for pr in prs] == [200, 34]  # prompt order
+    assert looked == [(f"{_REPO}#200", "/proj"), (f"{_REPO}#34", "/proj")]
+
+
+def test_find_ignores_numbers_and_slugs(tmp_path):
+    # "PR 1" and "PR 2" are the PRs this session is about to open; the
+    # repository's real #1 and #2 are somebody else's, and gh would vouch for
+    # them all the same (the sessions that prompted the rule: "open PR 0 of
+    # the port", "PR 1 (base: main), PR 2 (base: PR 1's branch)").
+    looked: list = []
+    attacher = PromptAttacher(callback=lambda *_: None, resolver=_resolver_by_number(looked))
+    prompt = f"open PR 1 (base: main), then PR 2 stacked on {_REPO}#1, then PR #3"
+    assert attacher._find(_transcript(tmp_path, prompt), "/proj") == []
+    assert looked == []
+    prs = attacher._find(_transcript(tmp_path, f"merge PR 12 via {_url(200)}", "b.jsonl"), "/proj")
+    assert [pr.number for pr in prs] == [200]
+    assert looked == [(f"{_REPO}#200", "/proj")]
 
 
 def test_find_dedupes_on_the_resolved_url(tmp_path):
-    # "PR 12" and the URL ending /pull/12 only meet once the bare number has
-    # been resolved against a repository.
-    attacher = PromptAttacher(callback=lambda *_: None, resolver=_resolver_by_number())
-    prs = attacher._find(_transcript(tmp_path, f"land PR 12, i.e. {_url(12)}"), "/proj")
+    # Two spellings of one page meet on gh's canonical URL.
+    def resolver(ref: PRReference, cwd: str | None) -> PullRequest | None:
+        return _pr(12)
+
+    attacher = PromptAttacher(callback=lambda *_: None, resolver=resolver)
+    prompt = f"land {_url(12)}, i.e. https://www.github.com/{_REPO}/pull/12"
+    prs = attacher._find(_transcript(tmp_path, prompt), "/proj")
     assert [pr.number for pr in prs] == [12]
 
 
 def test_find_drops_what_the_resolver_wont_vouch_for(tmp_path):
     def resolver(ref: PRReference, cwd: str | None) -> PullRequest | None:
-        return _pr(200) if ref.label == f"{_REPO}#200" else None  # "#12" is an issue
+        return _pr(200) if ref.label == f"{_REPO}#200" else None
 
     attacher = PromptAttacher(callback=lambda *_: None, resolver=resolver)
-    prs = attacher._find(_transcript(tmp_path, f"close issue 12 via {_url(200)}"), "/proj")
+    prs = attacher._find(_transcript(tmp_path, f"close {_url(12)} via {_url(200)}"), "/proj")
     assert [pr.number for pr in prs] == [200]
 
 
@@ -91,7 +110,7 @@ def test_submit_delivers_once_per_session(tmp_path):
         done.set()
 
     attacher = PromptAttacher(callback=callback, resolver=_resolver_by_number())
-    path = _transcript(tmp_path, "review PR 12")
+    path = _transcript(tmp_path, f"review {_url(12)}")
     attacher.submit("abc", path, "/proj")
     attacher.submit("abc", path, "/proj")  # every later refresh offers it again
     assert done.wait(5)
@@ -109,8 +128,8 @@ def test_skipped_sessions_are_never_read(tmp_path):
 
     attacher = PromptAttacher(callback=callback, resolver=_resolver_by_number())
     attacher.skip(["backlog"])
-    attacher.submit("backlog", _transcript(tmp_path, "review PR 12"), "/proj")
-    attacher.submit("fresh", _transcript(tmp_path, "review PR 34"), "/proj")
+    attacher.submit("backlog", _transcript(tmp_path, f"review {_url(12)}"), "/proj")
+    attacher.submit("fresh", _transcript(tmp_path, f"review {_url(34)}"), "/proj")
     assert done.wait(5)
     assert delivered == ["fresh"]
 
@@ -128,7 +147,7 @@ def test_a_promptless_read_delivers_nothing(tmp_path):
     attacher.submit("quiet", _transcript(tmp_path, "no references here"), "/proj")
     # Sequence with a session that does deliver: the worker is serial, so
     # "loud" arriving proves "quiet" was read and produced nothing.
-    attacher.submit("loud", _transcript(tmp_path, "see PR 12", "second.jsonl"), "/proj")
+    attacher.submit("loud", _transcript(tmp_path, f"see {_url(12)}", "second.jsonl"), "/proj")
     assert done.wait(5)
     assert delivered == ["loud"]
 

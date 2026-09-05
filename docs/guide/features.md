@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-04. Full change history: git log for this file.
+fork. Last modified: 2026-09-05. Full change history: git log for this file.
 -->
 
 # Features
@@ -844,8 +844,8 @@ last session**, what to do **when quitting with running sessions** (ask /
 exit / background / hide), **Archive on claude.ai too**, **Check for
 updates** (the once-a-day look at GitHub's latest release, through `gh` or
 anonymously), a **Pull requests** group — the PR page's **Text size**,
-whether a first prompt's "review PR 183" **attaches that PR to the
-session** (on), whether sessions are **renamed after their pull
+whether a first prompt that links a pull request by URL **attaches it
+to the session** (on; a bare "PR 183" is not enough), whether sessions are **renamed after their pull
 requests** (off), and whether the marks are **refreshed at launch**
 (on) — a **Git** group for the git page — hunk's **Layout** (automatic /
 split / stacked) and **Theme**, **Show untracked files**, **Commits per

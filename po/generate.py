@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-04. Full change history: git log for this file.
+# fork. Last modified: 2026-09-05. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -1172,10 +1172,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Megerősítés egyesítés előtt',
         'Ask before merging a pull request, enabling auto-merge, or merging and archiving the session. Off, the click merges; closing a pull request unmerged still asks either way':
             'Rákérdezés pull request egyesítése, automatikus egyesítés bekapcsolása, vagy egyesítés és a munkamenet archiválása előtt. Kikapcsolva a kattintás egyesít; a pull request egyesítés nélküli lezárása így is, úgy is rákérdez',
-        'Attach pull requests named in prompts':
-            'A promptokban említett pull requestek csatolása',
-        "Put every pull request a new session's first prompt mentions on that session's row, without waiting for the agent to touch it":
-            'Az új munkamenet első promptjában említett minden pull request felkerül a munkamenet sorára, meg sem várva, hogy az ügynök hozzányúljon',
+        'Attach pull requests linked in prompts':
+            'A promptokban hivatkozott pull requestek csatolása',
+        'Put every pull request a new session\'s first prompt links by URL on that session\'s row, without waiting for the agent to touch it; "PR 12" alone is not enough':
+            'Az új munkamenet első promptjában URL-lel hivatkozott minden pull request felkerül a munkamenet sorára, meg sem várva, hogy az ügynök hozzányúljon; a puszta „PR 12” nem elég',
         'Rename sessions after their pull requests':
             'Munkamenetek átnevezése a pull requestjeik után',
         'Retitle a session to match the newest pull request opened in it; manually renamed sessions keep their name':
@@ -2725,10 +2725,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Vor dem Zusammenführen bestätigen',
         'Ask before merging a pull request, enabling auto-merge, or merging and archiving the session. Off, the click merges; closing a pull request unmerged still asks either way':
             'Nachfragen, bevor ein Pull Request zusammengeführt, Auto-Merge aktiviert oder zusammengeführt und die Sitzung archiviert wird. Aus führt der Klick direkt zusammen; das Schließen eines nicht zusammengeführten Pull-Requests fragt trotzdem immer nach',
-        'Attach pull requests named in prompts':
-            'In Prompts genannte Pull-Requests anheften',
-        "Put every pull request a new session's first prompt mentions on that session's row, without waiting for the agent to touch it":
-            'Jeden Pull Request, den der erste Prompt einer neuen Sitzung erwähnt, auf die Zeile dieser Sitzung setzen, ohne zu warten, bis der Agent ihn anfasst',
+        'Attach pull requests linked in prompts':
+            'In Prompts verlinkte Pull-Requests anheften',
+        'Put every pull request a new session\'s first prompt links by URL on that session\'s row, without waiting for the agent to touch it; "PR 12" alone is not enough':
+            'Jeden Pull Request, den der erste Prompt einer neuen Sitzung per URL verlinkt, auf die Zeile dieser Sitzung setzen, ohne zu warten, bis der Agent ihn anfasst; ein bloßes „PR 12“ reicht nicht',
         'Rename sessions after their pull requests':
             'Sitzungen nach ihren Pull-Requests benennen',
         'Retitle a session to match the newest pull request opened in it; manually renamed sessions keep their name':
@@ -4275,10 +4275,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Confirmar antes de fusionar',
         'Ask before merging a pull request, enabling auto-merge, or merging and archiving the session. Off, the click merges; closing a pull request unmerged still asks either way':
             'Preguntar antes de fusionar un pull request, activar la fusión automática o fusionar y archivar la sesión. Desactivado, el clic fusiona; cerrar un pull request sin fusionar pregunta igualmente',
-        'Attach pull requests named in prompts':
-            'Adjuntar los pull requests mencionados en los prompts',
-        "Put every pull request a new session's first prompt mentions on that session's row, without waiting for the agent to touch it":
-            'Poner cada pull request que mencione el primer prompt de una sesión nueva en la fila de esa sesión, sin esperar a que el agente lo toque',
+        'Attach pull requests linked in prompts':
+            'Adjuntar los pull requests enlazados en los prompts',
+        'Put every pull request a new session\'s first prompt links by URL on that session\'s row, without waiting for the agent to touch it; "PR 12" alone is not enough':
+            'Poner cada pull request que el primer prompt de una sesión nueva enlace por URL en la fila de esa sesión, sin esperar a que el agente lo toque; un simple «PR 12» no basta',
         'Rename sessions after their pull requests':
             'Renombrar las sesiones según sus pull requests',
         'Retitle a session to match the newest pull request opened in it; manually renamed sessions keep their name':
@@ -5826,10 +5826,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Confirmer avant de fusionner',
         'Ask before merging a pull request, enabling auto-merge, or merging and archiving the session. Off, the click merges; closing a pull request unmerged still asks either way':
             "Demander avant de fusionner une pull request, d'activer la fusion automatique, ou de fusionner et archiver la session. Désactivé, le clic fusionne ; fermer une pull request sans la fusionner demande toujours confirmation",
-        'Attach pull requests named in prompts':
-            'Attacher les pull requests nommées dans les prompts',
-        "Put every pull request a new session's first prompt mentions on that session's row, without waiting for the agent to touch it":
-            "Placer chaque pull request mentionnée par le premier prompt d'une nouvelle session sur la ligne de cette session, sans attendre que l'agent y touche",
+        'Attach pull requests linked in prompts':
+            'Attacher les pull requests liées dans les prompts',
+        'Put every pull request a new session\'s first prompt links by URL on that session\'s row, without waiting for the agent to touch it; "PR 12" alone is not enough':
+            "Placer chaque pull request que le premier prompt d'une nouvelle session lie par URL sur la ligne de cette session, sans attendre que l'agent y touche ; un simple « PR 12 » ne suffit pas",
         'Rename sessions after their pull requests':
             "Renommer les sessions d'après leurs pull requests",
         'Retitle a session to match the newest pull request opened in it; manually renamed sessions keep their name':
@@ -6222,7 +6222,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 _HEADER = (
     "# Modified from the original agent-session-manager\n"
     "# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett\n"
-    "# fork. Last modified: 2026-08-30. Full change history: git log for this file.\n"
+    "# fork. Last modified: 2026-09-05. Full change history: git log for this file.\n"
     "# Generated by po/generate.py — do not edit by hand.\n"
     'msgid ""\n'
     'msgstr ""\n'

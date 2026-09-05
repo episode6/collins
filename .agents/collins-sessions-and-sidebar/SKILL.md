@@ -86,8 +86,8 @@ first-words title. A manual rename always wins.
 `store.pr_store` is the PR hub (see `collins-pull-requests`). `titles` are
 requested for sessions that appear while the app runs (the backlog at launch
 gets the free local title only) and persisted so each is generated once;
-`prattach` reads each new session's first prompt for PR references the same
-way. `store.is_virtual_project(name)` (flagged **and** no sessions) is the
+`prattach` reads each new session's first prompt for PR URLs the same way
+(URLs only — a bare "PR 12" is not attached). `store.is_virtual_project(name)` (flagged **and** no sessions) is the
 question "does this header stand for a folder with nothing in it";
 `state.is_virtual_project` alone is stale data.
 

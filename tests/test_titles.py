@@ -264,6 +264,18 @@ def test_pr_references_all_drops_repeats():
     assert [ref.label for ref in refs] == ["#12", "#34"]
 
 
+def test_pr_url_references_reads_only_urls():
+    # "PR 1" here is the PR the session is about to open, not one that exists.
+    refs = titles.pr_url_references(
+        "open PR 1 (base: main) stacked on episode6/collins#183, then review "
+        "https://github.com/episode6/collins/pull/200 and "
+        "https://github.com/episode6/collins/pull/200 again"
+    )
+    assert [ref.label for ref in refs] == ["episode6/collins#200"]
+    assert refs[0].args == ("https://github.com/episode6/collins/pull/200",)
+    assert titles.pr_url_references("merge PR 12 and pr #34") == []
+
+
 def fetch_with(payload, ref, cwd):
     """Run the real _fetch_pr_title against a stubbed gh; returns
     (result, the calls gh got)."""

@@ -1,22 +1,30 @@
-"""Attach the pull requests a session's first prompt mentions to its row.
+"""Attach the pull requests a session's first prompt links to its row.
 
-A session launched with "address the comments on PR 271" is about that PR
-from its first breath, but nothing shows it: a transcript only grows a
-pr-link record when the agent's own tool output touches the PR, and plenty
-of prompts get answered without that ever happening. The attach_pr session
-tool exists for exactly this gap — a PR named outside the transcript — but
-it relies on the agent thinking to call it. So each new session's first
-prompt is read here instead, with the same grammar session titling parses
-(titles.pr_references_all), and every PR it names goes on the session's row
-as if the tool had been called.
+A session launched with "address the comments on
+https://github.com/owner/repo/pull/271" is about that PR from its first
+breath, but nothing shows it: a transcript only grows a pr-link record when
+the agent's own tool output touches the PR, and plenty of prompts get
+answered without that ever happening. The attach_pr session tool exists for
+exactly this gap — a PR named outside the transcript — but it relies on the
+agent thinking to call it. So each new session's first prompt is read here
+instead, and every PR URL in it goes on the session's row as if the tool
+had been called.
 
-Resolution happens off the main thread, one ``gh pr view`` per reference —
-which is also the verification step: "owner/repo#12" and "PR 12" have the
-shape of a pull request but may name an issue, so a reference gh won't
-vouch for is dropped rather than attached. A URL the prompt spells out is
-the one exception: a ``/pull/`` page can't be anything else, so when gh
-can't answer (offline, not logged in) it is attached bare — the attach_pr
-tool does the same — and the next status fetch fills it in.
+Only the URL form counts. The grammar session titling parses
+(titles.pr_references_all) also reads "PR 271" and "owner/repo#12", and
+attaching once did too — until prompts like "open PR 0 of the port" and "PR
+1 (base: main), PR 2 (base: PR 1's branch)" stuck pull requests 0, 1 and 2
+of the repository, real and unrelated, onto sessions that were about to
+*open* those PRs. A title that names the wrong PR is a wrong title; a chip
+that names the wrong PR is a wrong mark, a wrong footer, and a wrong prompt
+target for every PR action. The URL is the one form that cannot mean
+anything but the PR it names, so it is the one form read here
+(titles.pr_url_references).
+
+Resolution happens off the main thread, one ``gh pr view`` per reference,
+which fills in the status. When gh can't answer (offline, not logged in)
+the URL is attached bare — the attach_pr tool does the same — and the next
+status fetch fills it in.
 
 Only sessions that appear while the app runs are read. The backlog on disk
 at launch predates its prompts being read (and mostly carries its PRs
@@ -37,23 +45,24 @@ from pathlib import Path
 
 from . import prstatus, sessions
 from .prstatus import PullRequest
-from .titles import PRReference, pr_references_all
+from .titles import PRReference, pr_url_references
 
 log = logging.getLogger(__name__)
 
-# References resolved per prompt. Each one is at most a `gh` call; a prompt
-# that names more PRs than this is a changelog, not a work order.
+# References resolved per prompt. Each one is a `gh` call; a prompt that
+# links more PRs than this is a changelog, not a work order.
 _MAX_REFERENCES = 8
 
 
 def resolve(ref: PRReference, cwd: str | None) -> PullRequest | None:
     """The PR *ref* stands for, status included, or None to drop it.
 
-    A bare number with no directory to resolve it against has no repository
-    to be a number in, and a slug or number gh answers nothing for is as
-    likely an issue as a pull request — both dropped. Only a URL survives an
-    unanswered lookup, and gh's canonical answer outranks it when there is
-    one. Never call on the main thread.
+    Written for every form the grammar knows, though the attacher only
+    hands it URLs now: a bare number with no directory to resolve it against
+    has no repository to be a number in, and a slug or number gh answers
+    nothing for is as likely an issue as a pull request — both dropped. Only
+    a URL survives an unanswered lookup, and gh's canonical answer outranks
+    it when there is one. Never call on the main thread.
     """
     if ref.needs_cwd and not cwd:
         return None
@@ -116,17 +125,16 @@ class PromptAttacher:
                 self._callback(session_id, prs)
 
     def _find(self, path: Path, cwd: str | None) -> list[PullRequest]:
-        """Every PR the transcript's first prompt names, resolved and deduped.
+        """Every PR the transcript's first prompt links, resolved and deduped.
 
-        The dedup is by resolved URL, which is the half the parser can't do:
-        "PR 12" and a URL ending /pull/12 only meet once gh has said which
-        repository the bare number lives in.
+        The dedup is by resolved URL, gh's canonical spelling, so two ways
+        of writing one page meet even when the prompt spelled them apart.
         """
         prompt = sessions.first_user_prompt(path)
         if not prompt:
             return []
         found: dict[str, PullRequest] = {}
-        for ref in pr_references_all(prompt)[:_MAX_REFERENCES]:
+        for ref in pr_url_references(prompt)[:_MAX_REFERENCES]:
             pr = self._resolve(ref, cwd)
             if pr is not None and pr.url not in found:
                 found[pr.url] = pr
