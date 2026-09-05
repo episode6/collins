@@ -36,28 +36,22 @@ untracked switch goes on every `diff` tail, spawn and reload alike
 which `show` refuses); the log page rides in the sidecar.
 
 The extension and the page share a *sidecar*: a small JSON file under the
-runtime dir whose path rides to hunk's child in COLLINS_GIT_STATE. Collins
-writes the parent and default branch names, the log page size and the
-untracked switch into it (the extension puts `--exclude-untracked` on the
-`diff` tails it sends itself, so its loads agree with Collins' own);
-the extension writes the user's "Set parent branch…" pick back, and the
-index mtime and HEAD it last reloaded the review for on its own (so the
-page's freshness reload stays home for a move hunk has already shown —
-shown_by_extension), and the level a narrow page shows — the extension's
-level.ts: `diff`, `files` or `commits`, one pane at a time when only one
-fits beside the diff — which the page's header buttons follow
-(read_sidecar_level, level_button); each side re-reads when the other
-wrote (the extension watches the file, the page stats it on the footer
-tick). The path, payload, readers and writer live here, and the column
-arithmetic that says when the page is narrow (pane_fit): hunk's layout
-budget, the same numbers level.ts holds. The sidecar's second version
-(the native panels: `selection` — the file and hunk under hunk's cursor —
-and `anchor`, the line `v` was pressed on) has its readers here too
-(read_sidecar_selection, read_sidecar_anchor), beside the keys the
-native buttons feed hunk's pty — `x`, `X`, `v`, escape, `D`, pinned to
-the extension's registerCommand keys (STAGE_KEY and friends; a test
-greps index.ts for them). Kept importable by the unit tests (see
-tests/conftest.py), which is where all of it is exercised.
+runtime dir whose path rides to hunk's child in COLLINS_GIT_STATE
+(contract version 2, SIDECAR_VERSION). Collins writes the untracked
+switch into it (sidecar_payload); the extension writes back `selection`
+— the file and hunk under hunk's cursor, on every move — `anchor`, the
+line `v` was pressed on, and `refreshed`, the index mtime and HEAD it
+last reloaded the review for on its own (so the page's freshness reload
+stays home for a move hunk has already shown — shown_by_extension). The
+path, payload, readers (read_sidecar_selection, read_sidecar_anchor,
+read_sidecar_refreshed) and writer live here, beside the keys the native
+sidebar's buttons feed hunk's pty — `x`, `X`, `v`, escape, `D`, pinned
+to the extension's registerCommand keys (STAGE_KEY and friends; a test
+greps index.ts for them). hunk runs with `--no-sidebar` (NO_SIDEBAR_FLAG,
+the reason MIN_VERSION is 0.21): its own files pane would only take
+columns from the diff the native sidebar already lists. Kept importable
+by the unit tests (see tests/conftest.py), which is where all of it is
+exercised.
 """
 
 from __future__ import annotations
@@ -119,8 +113,18 @@ ANCHOR_SIDES: tuple[str, ...] = ("old", "new")
 # hunk with `--extension <dir>`, so nothing lands in the user's hunk config
 # and no trust prompt appears.
 EXTENSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hunkext", "collins-git")
-# The sidecar (see the module docstring): the variable its path travels in.
+# The sidecar (see the module docstring): the variable its path travels in,
+# and the contract's version, stamped on every write (the extension stamps
+# the same on its own). Version 1 carried the parent and default branch
+# names, the page size and the narrow-page level for the panes the
+# extension used to draw; version 2 is the untracked switch one way and
+# the cursor's file, the anchor and the freshness record the other.
 SIDECAR_ENV = "COLLINS_GIT_STATE"
+SIDECAR_VERSION = 2
+# `hunk diff --no-sidebar` (0.21: "hide files pane"): on every spawn, since
+# the native sidebar lists the files and hunk's own pane would only take
+# columns from the diff (spawn_flags).
+NO_SIDEBAR_FLAG = "--no-sidebar"
 # hunk's layouts, `--mode`'s words (`hunk diff --help`, 0.20.1): the
 # git_layout setting's domain. LAYOUTS[0] is hunk's own choice and sends
 # no flag; hunk exits at once on a word it doesn't know, so anything else
@@ -147,9 +151,10 @@ MAX_THEME_LEN = 64
 _MAX_REF_LEN = 128
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 _SHORT_SHA_LEN = 7
-# The first release whose session API the page relies on (and, for PR 2, the
-# first with extension API v8).
-MIN_VERSION: tuple[int, int] = (0, 20)
+# The first release with `hunk diff --no-sidebar` (the page runs hunk with
+# its files pane hidden; the native sidebar draws the lists) — 0.20 had the
+# session API and extension API v8 the rest rides on, but not the flag.
+MIN_VERSION: tuple[int, int] = (0, 21)
 # Where the install card sends the user: hunk's own site carries the install
 # instructions, so Collins doesn't copy lines that can go stale.
 INSTALL_URL = "https://hunk.dev"
@@ -778,14 +783,17 @@ def _load_tail(loaded: Loaded, parent_target: str | None, options: Options | Non
 
 
 def spawn_flags(options: Options | None) -> list[str]:
-    """The spawn-only flags *options* adds: ["--mode", layout] when the
-    layout isn't hunk's own, ["--theme", name] when a theme is set. Neither
-    reapplies to a running viewer (hunk's session API has no way to set
-    them), so a change to either is a respawn, and neither goes on a
-    reload tail."""
+    """The spawn-only flags: ["--no-sidebar"] always — hunk draws its
+    review alone, the native sidebar (gitsidebar) lists the files — then
+    what *options* adds: ["--mode", layout] when the layout isn't hunk's
+    own, ["--theme", name] when a theme is set. None of them reapplies to
+    a running viewer (hunk's session API has no way to set them), so a
+    change to the layout or theme is a respawn, and none goes on a reload
+    tail. hunk's own `s` key can still pop its files pane inside the VTE;
+    that is hunk's, and a reload keeps whatever the user did with it."""
+    flags: list[str] = [NO_SIDEBAR_FLAG]
     if options is None:
-        return []
-    flags: list[str] = []
+        return flags
     if options.layout != DEFAULT_LAYOUT:
         flags += ["--mode", options.layout]
     if options.theme:
@@ -802,10 +810,11 @@ def spawn_argv(
 ) -> list[str]:
     """[hunk, "diff", "--watch", "--transparent-bg", *spawn_flags, "--extension",
     dir, *diff_args] for a mode, [hunk, "show", "--watch", "--transparent-bg",
-    *spawn_flags, "--extension", dir, ref] for a commit; the "--extension"
-    pair only with an *extension_dir* (see extension_dir()), the
-    `--mode`/`--theme` flags and a `diff`'s "--exclude-untracked" only as
-    *options* asks (None, or the defaults: none of them). *hunk* is an
+    *spawn_flags, "--extension", dir, ref] for a commit; spawn_flags always
+    starts with "--no-sidebar"; the "--extension" pair only with an
+    *extension_dir* (see extension_dir()), the `--mode`/`--theme` flags and
+    a `diff`'s "--exclude-untracked" only as *options* asks (None, or the
+    defaults: none of them). *hunk* is an
     absolute path (VTE spawns with GLib.SpawnFlags.DEFAULT, no PATH search)."""
     command, *tail = _load_tail(loaded, parent_target, options)
     flags = ["--watch", "--transparent-bg", *spawn_flags(options)]
@@ -817,8 +826,8 @@ def spawn_argv(
 def extension_dir() -> str | None:
     """EXTENSION_DIR when the bundled extension is really there (its
     package.json, which is what hunk reads first), else None — a broken
-    install runs hunk bare, with its own files pane and no commits panel,
-    rather than a hunk that refuses to start."""
+    install runs hunk bare (the native sidebar hides the buttons that feed
+    its keys) rather than a hunk that refuses to start."""
     return EXTENSION_DIR if os.path.isfile(os.path.join(EXTENSION_DIR, "package.json")) else None
 
 
@@ -1136,29 +1145,19 @@ def sidecar_path(runtime_dir: str, pid: int, serial: int) -> str:
     return os.path.join(runtime_dir, "collins", f"git-{pid}-{serial}.json")
 
 
-def sidecar_payload(
-    parent: str | None, source: str, default: str | None, log_page: int, untracked: bool = True
-) -> dict:
-    """The keys Collins owns in the sidecar, plus the version: {"version": 1,
-    "parent": name|None, "parentSource": "auto"|"user", "default": name|None,
-    "logPage": n, "untracked": bool}. *parent* is a branch NAME, never a
-    target like "origin/main" — each side resolves the name itself.
-    *untracked* False is what makes the extension put "--exclude-untracked"
-    on the diff tails it sends (absent or garbled reads as True there)."""
-    return {
-        "version": 1,
-        "parent": parent,
-        "parentSource": "user" if source == "user" else "auto",
-        "default": default,
-        "logPage": int(log_page),
-        "untracked": bool(untracked),
-    }
+def sidecar_payload(untracked: bool = True) -> dict:
+    """The keys Collins owns in the sidecar, plus the version: {"version":
+    SIDECAR_VERSION, "untracked": bool} — whether the working-tree reviews
+    Collins loads include untracked files (absent or garbled reads as True
+    on the other side). The extension's own keys (`selection`, `anchor`,
+    `refreshed`) are never in this payload; write_sidecar keeps them."""
+    return {"version": SIDECAR_VERSION, "untracked": bool(untracked)}
 
 
 def write_sidecar(path: str, payload: dict) -> bool:
     """Merge *payload* into the sidecar at *path*: what is there already
-    (the extension's keys, anything a newer extension adds) survives, the
-    payload's keys win, and the file is replaced whole (a temp file beside
+    (the extension's `selection`, `anchor` and `refreshed`, anything a
+    newer extension adds) survives, the payload's keys win, and the file is replaced whole (a temp file beside
     it, then os.replace) so a reader never sees half a document. Creates the
     directory. Never raises: False when the write failed (no runtime dir, a
     read-only one), and the page then runs hunk without a sidecar."""
@@ -1171,7 +1170,7 @@ def write_sidecar(path: str, payload: dict) -> bool:
     except (OSError, ValueError):
         pass
     merged.update(payload)
-    merged["version"] = 1
+    merged["version"] = SIDECAR_VERSION
     temp = f"{path}.{os.getpid()}.tmp"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1185,19 +1184,6 @@ def write_sidecar(path: str, payload: dict) -> bool:
             pass
         return False
     return True
-
-
-def read_sidecar(text: str) -> tuple[str | None, str]:
-    """(parent, source) out of a sidecar's *text*: the parent branch name
-    when it is a safe one (else None) and "user" when parentSource says so
-    (else "auto"). Tolerant: garbage, a non-object, missing keys all read as
-    (None, "auto")."""
-    data = _load_json(text)
-    if data is None:
-        return None, "auto"
-    parent = data.get("parent")
-    source = "user" if data.get("parentSource") == "user" else "auto"
-    return (parent if safe_ref(parent) else None), source
 
 
 def read_sidecar_refreshed(text: str) -> tuple[int, str] | None:
@@ -1265,88 +1251,6 @@ def shown_by_extension(
     if refreshed is None or signature is None or previous is None:
         return False
     return (signature[0], signature[1]) == refreshed and signature[2] == previous[2]
-
-
-# -- levels of a narrow page (the extension's level.ts) ------------------------------
-
-# Hunk 0.20.1's layout budget in columns: two of body padding, a one-column
-# divider per pane, 48 for the diff at its narrowest, 22 before the sidebar
-# area shows at all (hunk's own pane's minimum), and the extension's panes at
-# 26 (commits, preferred) and 22 (files, minimum). The numbers are level.ts's,
-# and its tests pin them; a hunk that changes them moves both.
-ONE_PANE_COLUMNS = 2 + 22 + 1 + 48  # 73: one pane beside the diff
-TWO_PANE_COLUMNS = 2 + 26 + 1 + 22 + 1 + 48  # 100: both panes — the wide layout
-
-# The levels a narrow page stacks, bottom to top.
-LEVELS = ("diff", "files", "commits")
-DEFAULT_LEVEL = LEVELS[0]
-
-# What the header's buttons feed hunk: the extension's `<` (level-up) and
-# `>` (level-down), keys neither hunk nor the extension use otherwise.
-LEVEL_UP_KEY = b"<"
-LEVEL_DOWN_KEY = b">"
-
-
-def pane_fit(columns: int) -> str:
-    """How many of the extension's panes a terminal *columns* wide shows
-    beside the diff: "none" under ONE_PANE_COLUMNS, "one" under
-    TWO_PANE_COLUMNS, else "two". A count that isn't known yet (0, or
-    negative) is "none"."""
-    if columns < ONE_PANE_COLUMNS:
-        return "none"
-    return "one" if columns < TWO_PANE_COLUMNS else "two"
-
-
-def page_is_narrow(columns: int) -> bool:
-    """Whether the page shows one pane at a time — anything short of both —
-    and the header shows its level buttons."""
-    return pane_fit(columns) != "two"
-
-
-def level_ok(level: object) -> bool:
-    return isinstance(level, str) and level in LEVELS
-
-
-def level_up(level: str) -> str | None:
-    """The level above *level*, None at the top (or for a level unknown here)."""
-    if not level_ok(level):
-        return None
-    at = LEVELS.index(level)
-    return LEVELS[at + 1] if at + 1 < len(LEVELS) else None
-
-
-def level_down(level: str) -> str | None:
-    """The level below *level*, None at the bottom (or for a level unknown here)."""
-    if not level_ok(level):
-        return None
-    at = LEVELS.index(level)
-    return LEVELS[at - 1] if at > 0 else None
-
-
-def read_sidecar_level(text: str) -> str | None:
-    """The level the extension last reported — {"level": "files"} — or None
-    when absent or not one of LEVELS."""
-    data = _load_json(text)
-    level = data.get("level") if data is not None else None
-    return level if level_ok(level) else None
-
-
-def level_button(up: bool, level: str, columns: int) -> tuple[str, bool]:
-    """(tooltip, sensitive) for the header's up (or down) button at *level*
-    on a page *columns* wide. Insensitive at the end of the stack, and on a
-    page too narrow for any pane — where the tooltip says what would help."""
-    if pane_fit(columns) == "none":
-        return _("Too narrow for a panel — widen the page"), False
-    target = level_up(level) if up else level_down(level)
-    if target == "files":
-        return (_("Show the files") if up else _("Back to the files")), True
-    if target == "commits":
-        return _("Show the commits"), True
-    if target == "diff":
-        return _("Back to the diff"), True
-    if up:
-        return _("The commits are shown — the top level"), False
-    return _("The diff is shown — the bottom level"), False
 
 
 def spawn_env(sidecar: str | None, environ: dict | None = None) -> list[str] | None:
