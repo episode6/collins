@@ -71,13 +71,15 @@ jobs:
 
       - name: gi import smoke test (item 2)
         continue-on-error: true
-        run: "$PY" scripts/spike/gi_smoke.py 2>&1 | tee "$OUT/gi_smoke.log"; exit "${PIPESTATUS[0]}"
+        run: |
+          "$PY" scripts/spike/gi_smoke.py 2>&1 | tee "$OUT/gi_smoke.log"; exit "${PIPESTATUS[0]}"
 
       # Bus questions run before the service is up, then again after, so the
       # same script answers both halves of resolved question 5.
       - name: Session bus, without dbus (item b, nobus)
         continue-on-error: true
-        run: "$PY" scripts/spike/check_bus.py nobus 2>&1 | tee "$OUT/bus-nobus.log"; exit "${PIPESTATUS[0]}"
+        run: |
+          "$PY" scripts/spike/check_bus.py nobus 2>&1 | tee "$OUT/bus-nobus.log"; exit "${PIPESTATUS[0]}"
 
       - name: brew services start dbus
         continue-on-error: true
@@ -89,29 +91,35 @@ jobs:
 
       - name: Session bus, with dbus (item b, bus)
         continue-on-error: true
-        run: "$PY" scripts/spike/check_bus.py bus 2>&1 | tee "$OUT/bus-bus.log"; exit "${PIPESTATUS[0]}"
+        run: |
+          "$PY" scripts/spike/check_bus.py bus 2>&1 | tee "$OUT/bus-bus.log"; exit "${PIPESTATUS[0]}"
 
       - name: VTE window, default renderer (item a)
         continue-on-error: true
-        run: "$PY" scripts/spike/check_vte_window.py "$OUT" default 2>&1 | tee "$OUT/vte-default.log"; exit "${PIPESTATUS[0]}"
+        run: |
+          "$PY" scripts/spike/check_vte_window.py "$OUT" default 2>&1 | tee "$OUT/vte-default.log"; exit "${PIPESTATUS[0]}"
 
       - name: VTE window, GSK_RENDERER=cairo (item a)
         continue-on-error: true
         env:
           GSK_RENDERER: cairo
-        run: "$PY" scripts/spike/check_vte_window.py "$OUT" cairo 2>&1 | tee "$OUT/vte-cairo.log"; exit "${PIPESTATUS[0]}"
+        run: |
+          "$PY" scripts/spike/check_vte_window.py "$OUT" cairo 2>&1 | tee "$OUT/vte-cairo.log"; exit "${PIPESTATUS[0]}"
 
       - name: kqueue file monitors (item c)
         continue-on-error: true
-        run: "$PY" scripts/spike/check_kqueue.py 2>&1 | tee "$OUT/kqueue.log"; exit "${PIPESTATUS[0]}"
+        run: |
+          "$PY" scripts/spike/check_kqueue.py 2>&1 | tee "$OUT/kqueue.log"; exit "${PIPESTATUS[0]}"
 
       - name: Gio.AppInfo under gosxappinfo (item d)
         continue-on-error: true
-        run: "$PY" scripts/spike/check_appinfo.py 2>&1 | tee "$OUT/appinfo.log"; exit "${PIPESTATUS[0]}"
+        run: |
+          "$PY" scripts/spike/check_appinfo.py 2>&1 | tee "$OUT/appinfo.log"; exit "${PIPESTATUS[0]}"
 
       - name: Peer pid and trash (item e)
         continue-on-error: true
-        run: "$PY" scripts/spike/check_creds_trash.py 2>&1 | tee "$OUT/creds-trash.log"; exit "${PIPESTATUS[0]}"
+        run: |
+          "$PY" scripts/spike/check_creds_trash.py 2>&1 | tee "$OUT/creds-trash.log"; exit "${PIPESTATUS[0]}"
 
       # GTK-free by design; tests/test_proctree.py skips itself without /proc.
       # Whatever else fails here is the input for PR 1, not a blocker.
@@ -129,13 +137,15 @@ jobs:
 
       - name: Launch Collins (item 5, proctree as is)
         continue-on-error: true
-        run: "$PY" scripts/spike/launch_collins.py "$OUT" plain 2>&1 | tee "$OUT/launch-plain.log"; exit "${PIPESTATUS[0]}"
+        run: |
+          "$PY" scripts/spike/launch_collins.py "$OUT" plain 2>&1 | tee "$OUT/launch-plain.log"; exit "${PIPESTATUS[0]}"
 
       - name: Launch Collins (item 5, proctree stubbed)
         continue-on-error: true
         env:
           SPIKE_STUB_PROCTREE: "1"
-        run: "$PY" scripts/spike/launch_collins.py "$OUT" stubbed 2>&1 | tee "$OUT/launch-stubbed.log"; exit "${PIPESTATUS[0]}"
+        run: |
+          "$PY" scripts/spike/launch_collins.py "$OUT" stubbed 2>&1 | tee "$OUT/launch-stubbed.log"; exit "${PIPESTATUS[0]}"
 
       - name: Summary
         if: always()
