@@ -920,11 +920,11 @@ class PreferencesDialog(Adw.Dialog):
         self._confirm_merges_row.connect("notify::active", self._on_confirm_merges_changed)
         pr_group.add(_searchable(self._confirm_merges_row, "merge", "archive", "dialog"))
         self._attach_prompt_prs_row = Adw.SwitchRow(
-            title=_("Attach pull requests named in prompts"),
+            title=_("Attach pull requests linked in prompts"),
             subtitle=_(
-                "Put every pull request a new session's first prompt "
-                "mentions on that session's row, without waiting for the "
-                "agent to touch it"
+                "Put every pull request a new session's first prompt links "
+                "by URL on that session's row, without waiting for the agent "
+                "to touch it; \"PR 12\" alone is not enough"
             ),
         )
         self._attach_prompt_prs_row.set_active(bool(state.get_setting("attach_prompt_prs")))

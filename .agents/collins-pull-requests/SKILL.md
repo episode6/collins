@@ -26,9 +26,11 @@ Claude Code appends a `pr-link` record to the transcript the moment a PR URL
 shows up in tool output (`prstatus.parse_pr_link`), re-emitting it on
 resume/compact; `transcript.TranscriptModel` keeps **every** distinct PR in
 first-seen order. Two more sources: `prattach` reads each *new* session's
-first prompt for references ("PR 271", `owner/repo#12`, a `/pull/` URL — the
-grammar session titling shares, `titles.pr_references_all`), verifying each
-with `gh pr view` off the main thread (a bare URL attaches unverified when gh
+first prompt for `/pull/` URLs — only that form of the grammar session titling
+parses (`titles.pr_url_references`, not `pr_references_all`): "PR 1" and
+`owner/repo#12` were dropped after prompts about *opening* PR 0 / PR 1 / PR 2
+attached the repository's real, unrelated PRs 0, 1 and 2 — resolving each
+with `gh pr view` off the main thread (a URL attaches unverified when gh
 can't answer); and the `attach_pr` MCP tool. The backlog at launch is never
 re-read.
 

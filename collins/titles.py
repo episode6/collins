@@ -312,18 +312,36 @@ def pr_references(prompt: str) -> list[PRReference]:
 def pr_references_all(prompt: str) -> list[PRReference]:
     """Every pull request *prompt* mentions, most specific forms first.
 
-    What attaching wants where titling wants one: "merge PR 12 and PR 34"
-    names two pull requests, and each has a claim to the session's row (see
-    prattach). Duplicates collapse on the label, which also folds a slug into
-    a URL naming the same PR — both spell ``owner/repo#12``. A bare number
-    can only be told apart from the qualified forms once it has been resolved
-    against a repository, so those wait for the caller's post-lookup URL
-    dedup.
+    "merge PR 12 and PR 34" names two pull requests where titling only has
+    room for one. Duplicates collapse on the label, which also folds a slug
+    into a URL naming the same PR — both spell ``owner/repo#12``. A bare
+    number can only be told apart from the qualified forms once it has been
+    resolved against a repository, so those wait for the caller's
+    post-lookup URL dedup.
     """
     seen: set[str] = set()
     refs: list[PRReference] = []
     for _form, ref in _iter_references(prompt):
         if ref.label not in seen:
+            seen.add(ref.label)
+            refs.append(ref)
+    return refs
+
+
+def pr_url_references(prompt: str) -> list[PRReference]:
+    """Every pull request *prompt* spells out as a ``/pull/`` URL, in prompt
+    order, deduped on the label.
+
+    The form attaching trusts (see prattach): "PR 1" in a prompt is as often
+    the first of a stack of PRs the session is about to open as a pull
+    request that exists, and a bare number gh happens to answer for is then
+    somebody else's work stuck to the session's row. A URL is the one form
+    that can only mean the PR it names.
+    """
+    seen: set[str] = set()
+    refs: list[PRReference] = []
+    for form, ref in _iter_references(prompt):
+        if form == "url" and ref.label not in seen:
             seen.add(ref.label)
             refs.append(ref)
     return refs

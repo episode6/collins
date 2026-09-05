@@ -152,6 +152,15 @@ downloads of each version, see the
   it counts, and a busy hint inside that window takes it back. The
   sidebar's pole stays up through the wait, and a real finish announces
   itself three seconds later than before.
+- **A first prompt attaches only the pull requests it links.** Reading
+  a new session's first prompt for PRs used the same grammar session
+  titling does, so "open PR 0 of the port" and "PR 1 (base: main),
+  PR 2 (base: PR 1's branch)" put the repository's real pull requests
+  0, 1 and 2 — somebody else's, years old — on sessions that were about
+  to *open* those PRs. Now only a full `/pull/` URL in the prompt
+  attaches; "PR 12" and `owner/repo#12` are left to the `attach_pr`
+  tool and the transcript. Titling still reads all three forms. The
+  Preferences switch is now **Attach pull requests linked in prompts**.
 
 ### v0.1.2 — 2026-08-30
 
