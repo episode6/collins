@@ -261,7 +261,6 @@ class GitSidebar(Gtk.Box):
         self._file_widgets: dict[tuple[str, str], _FileRow] = {}
         self._selected_path: str | None = None
         self._selected_hunk: int | None = None
-        self._selection_source: str | None = None
 
         # -- the action row --------------------------------------------------------
         self._anchor: hunkctl.Anchor | None = None
@@ -431,7 +430,7 @@ class GitSidebar(Gtk.Box):
         hunk_alive: bool,
         extension_loaded: bool,
         auto_parent: str | None,
-    ) -> None:
+    ) -> bool:
         """What the page knows: the checked-out *branch*, the *parent* and
         *default* branches the groups are built on (None when the tree
         can't name one), what hunk has *loaded* (a hunkctl.Loaded, or None
@@ -440,7 +439,9 @@ class GitSidebar(Gtk.Box):
         any other load); whether hunk runs and with the extension; and
         the automatic parent's name, for the picker's first row. A change
         of branch, parent or default refreshes the commits list; the
-        loaded mark and the buttons follow every call."""
+        loaded mark and the buttons follow every call. Returns whether the
+        groups changed (and so the list was re-read here) — the page
+        refreshes it itself otherwise after a spawn."""
         groups_changed = (branch, parent, default) != (self._branch, self._parent, self._default)
         self._branch = branch
         self._parent = parent
@@ -459,6 +460,7 @@ class GitSidebar(Gtk.Box):
         else:
             self._mark_loaded_row()
         self._sync_buttons()
+        return groups_changed
 
     def refresh_commits(self) -> None:
         """Re-read the groups' pages and the `↑` marks on a thread and
@@ -550,8 +552,10 @@ class GitSidebar(Gtk.Box):
     def set_selection(self, path: str | None, hunk: int | None, source: str) -> None:
         """Highlight the file hunk's cursor is on: *source* "sidecar" (the
         extension's word, instant) or "session" (`session get`'s snapshot,
-        up to a tick late). None clears it."""
-        self._selection_source = source
+        up to a tick late). The page arbitrates between the two before
+        calling (GitPage._take_session); *source* names the caller's word
+        for readers and is not kept. None clears it."""
+        del source
         if path == self._selected_path and hunk == self._selected_hunk:
             return
         self._selected_path = path
