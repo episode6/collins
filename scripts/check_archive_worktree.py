@@ -234,7 +234,21 @@ def step_ask() -> bool:
     )
     if not isinstance(dialog, Adw.AlertDialog):
         return done()
+    state["dialog"] = dialog
     check("ask: the dialog has Cancel", dialog.get_close_response() == "cancel")
+    # A second archive click while the question is up is ignored: no second
+    # dialog, and still nothing archived.
+    archive()
+    return later(step_ask_twice, 800)
+
+
+def step_ask_twice() -> bool:
+    win = state["win"]
+    dialog = win.get_visible_dialog()
+    check("ask twice: the same dialog is still up", dialog is state["dialog"])
+    check("ask twice: still not archived", not win.state.is_archived(SESSION))
+    if not isinstance(dialog, Adw.AlertDialog):
+        return done()
     # Cancel: no archive at all.
     dialog.close()
     return later(step_cancelled, 800)

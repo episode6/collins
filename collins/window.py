@@ -6270,12 +6270,21 @@ class MainWindow(Adw.ApplicationWindow):
         self._worktree_asking.add(session_id)
 
         def land(state: dict | None) -> bool:
-            self._worktree_asking.discard(session_id)
             if self.state.is_archived(session_id):
+                self._worktree_asking.discard(session_id)
                 return GLib.SOURCE_REMOVE  # archived some other way meanwhile
             if state is None or self._worktree_in_use(str(state["worktreePath"]), except_page=own_page):
+                self._worktree_asking.discard(session_id)
                 self._archive_now(session_id, True)
                 return GLib.SOURCE_REMOVE
+
+            # The session stays in _worktree_asking until the dialog is
+            # answered: a second archive click while it is up must not
+            # raise a second one.
+            def answered(then=None) -> None:
+                self._worktree_asking.discard(session_id)
+                if then is not None:
+                    then()
 
             def delete() -> None:
                 self._worktree_deletions[session_id] = state
@@ -6292,9 +6301,10 @@ class MainWindow(Adw.ApplicationWindow):
                     "it is."
                 ).format(path=str(state["worktreePath"])),
                 _("Delete Worktree"),
-                delete,
+                lambda: answered(delete),
+                on_dismiss=answered,
                 extra_label=_("Keep Worktree"),
-                on_extra=lambda: self._archive_now(session_id, True),
+                on_extra=lambda: answered(lambda: self._archive_now(session_id, True)),
                 default_response="extra",
                 keys={"d": "confirm", "k": "extra"},
             )
@@ -6378,6 +6388,9 @@ class MainWindow(Adw.ApplicationWindow):
         instead.
         """
         policy = self.state.get_setting("archive_worktree")
+        # Popped before the policy check on purpose: a Delete answer parked
+        # under "ask" must not outlive this archive, even if the setting
+        # changed to "never" between the dialog and the archive landing.
         decided = self._worktree_deletions.pop(session_id, None)
         if policy not in ("ask", "always"):
             return
