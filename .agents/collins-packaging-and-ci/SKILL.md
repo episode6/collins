@@ -38,7 +38,7 @@ host agent because of the pid namespace).
 everything the app reads at runtime is package data declared in
 `pyproject.toml`: locale `.mo`s, `THIRD_PARTY_LICENSES.md`, the app and
 panel SVGs, `icons/hicolor/scalable/actions/*.svg`, `sounds/*.oga`, the
-desktop file and metainfo, and the hunk extension's `.ts/.tsx/package.json/
+desktop file and metainfo, and the hunk extension's `.ts/package.json/
 README.md`. The in-tree paths are **symlinks into `data/`** (`collins/icons`,
 `collins/sounds`, `collins/com.episode6.Collins.desktop`, `…metainfo.xml`;
 `THIRD_PARTY_LICENSES.md` runs the other way, real file in the package). The

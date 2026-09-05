@@ -108,33 +108,32 @@ affiliated with or endorsed by Anthropic.
 The git page shows diffs through **hunk** — © Ben Vinegar — MIT License —
 [modem-dev/hunk](https://github.com/modem-dev/hunk), [hunk.dev](https://hunk.dev). Collins
 neither bundles nor redistributes it: it runs whatever `hunk` it finds on your `PATH`
-(0.20 or newer), and shows how to install one when there is none.
+(0.21 or newer), and shows how to install one when there is none.
 
 ## collins-git (the bundled hunk extension)
 
-The commits and files panels on the git page, and its staging keys, are a hunk
-extension Collins ships as package data under `collins/hunkext/collins-git/` and loads
-with `--extension`. It is part of Collins and licensed **GPL-3.0-or-later** like the
-rest, with code adapted from three community extensions, each under the **MIT License**:
+The git page's keys at hunk's cursor — stage the hunk, the file or a line range, anchor
+a range, discard — are a hunk extension Collins ships as package data under
+`collins/hunkext/collins-git/` and loads with `--extension`; the page's commits and
+files panels are Collins' own GTK widgets, fed by Python ports of two of the parsers
+below. The extension is part of Collins and licensed **GPL-3.0-or-later** like the rest,
+with code adapted from three community extensions, each under the **MIT License**:
 
 - **hunk-git-lite** — © 2026 Josh Edler —
-  [joshedler/hunk-git-lite](https://github.com/joshedler/hunk-git-lite): the two-section
-  status list (`files.tsx`), the store bridge (`store.ts`), the git runner shape
-  (`git.ts`) and the pane registration in the composition root (`index.ts`); the status
-  parser and the runner shape ported to Python for the native panels
-  (`collins/gitmodel.py`, `collins/gitops.py`).
+  [joshedler/hunk-git-lite](https://github.com/joshedler/hunk-git-lite): the git runner
+  shape (`git.ts`) and the status parser the integration tests read the index back with
+  (`test/support/status.ts`); the same status parser and runner shape ported to Python
+  for the native panels (`collins/gitmodel.py`, `collins/gitops.py`).
 - **hunk-commit** — © 2026 hunk-jj-stage contributors —
   [muzomer/hunk-commit](https://github.com/muzomer/hunk-commit): the single-file patch
   parser, writer and guards (`patch.ts`, `staging.ts`, `test/patch.test.ts`), the
   staging commands in the composition root (`index.ts`) and the temp-repository test
   fixture (`test/support/gitRepo.ts`).
 - **hunk-commit-log** — © 2026 Sadick —
-  [sadick254/hunk-commit-log](https://github.com/sadick254/hunk-commit-log): reloading
-  the window through hunk's own CLI by pid (`session.ts`, `test/session.test.ts`), the
-  commits pane (`commits.tsx`), the log reader (`git.ts`), the store bridge (`store.ts`)
-  and the reload wiring in the composition root (`index.ts`); the log format, its parser
-  and the log reader ported to Python for the native panels (`collins/gitmodel.py`,
-  `collins/gitops.py`).
+  [sadick254/hunk-commit-log](https://github.com/sadick254/hunk-commit-log): the log
+  format, its parser and the log reader, ported to Python for the native commits list
+  (`collins/gitmodel.py`, `collins/gitops.py`); nothing of it remains in the extension
+  itself.
 
 Each borrowing file names its source in its header. The MIT License text, which applies
 to those portions:
