@@ -119,6 +119,20 @@ PROGRESS_IDLE_S = 60.0
 # pre-mark and the next busy hint both bypass this window.
 PROGRESS_QUIET_S = IDLE_S
 
+# How long a termprop clear waits before it counts as the run finishing. The
+# CLI (measured on 2.1.261) reports "completed" the instant none of its
+# turn-is-loading, tool-in-progress and pending-agent flags hold, and it clears
+# the progress hint on that edge — which lands mid-turn too: between the
+# model's stream ending and the next tool being marked in progress (a hook run
+# fills that gap), a hint clear and a fresh busy hint arrive a beat apart.
+# Finishing on the clear alone flagged those beats as completed runs — unread
+# rows, PR refreshes and finished notifications for a turn still going. So the
+# clear arms a finish that the next busy hint disarms; only one that stands
+# this long is the run ending. The pole stays up through the wait. Wide enough
+# for a hook plus the handoff, short enough that a real finish still announces
+# itself while the user's eyes are on the row.
+PROGRESS_FINISH_GRACE_S = 3.0
+
 # How often the agent list is asked which background agents are working. It
 # shells out to the CLI (~0.4s of node startup, off the main thread), so the
 # window only runs it while a background agent actually has a tab open — the
@@ -176,6 +190,8 @@ class ActivityTracker:
         self._add_timeout = add_timeout or _glib_add_timeout
         self._remove_timeout = remove_timeout or _glib_remove_timeout
         self._deadlines: dict[str, float] = {}  # busy session id -> when it reads idle
+        # busy session id -> when its armed finish lands (see finish's grace_s)
+        self._pending_finish: dict[str, float] = {}
         self._sweep: int | None = None
 
     def mark(self, session_id: str, *, idle_s: float | None = None) -> None:
@@ -202,22 +218,44 @@ class ActivityTracker:
         busy."""
         if self._deadlines.pop(session_id, None) is None:
             return
+        self._pending_finish.pop(session_id, None)
         self._stop_sweep_if_idle()
         self._on_change(session_id, False)
 
-    def finish(self, session_id: str) -> None:
-        """Drop *session_id* now *as a completed run*: the agent itself said
-        the turn is over (a progress termprop clear), so this is the sweep's
-        timeout finish without the wait — on_change, then on_finished — where
-        clear() is teardown and reports no finish at all. A session that
+    def finish(self, session_id: str, *, grace_s: float = 0.0) -> None:
+        """Drop *session_id* *as a completed run*: the agent itself said the
+        turn is over (a progress termprop clear), so this is the sweep's
+        timeout finish without the idle wait — on_change, then on_finished —
+        where clear() is teardown and reports no finish at all. A session that
         isn't busy has no run to complete: no-op, so the CLI's repeated
-        shutdown clears can't flag anything twice."""
-        if self._deadlines.pop(session_id, None) is None:
+        shutdown clears can't flag anything twice.
+
+        *grace_s* > 0 arms the finish instead of landing it: the session stays
+        busy, and the sweep finishes it once that long has passed unless
+        `resume` disarms it first — the agent's word taken back by its next
+        busy hint (see PROGRESS_FINISH_GRACE_S). A finish already armed keeps
+        its deadline; repeated clears don't push it out.
+        """
+        if session_id not in self._deadlines:
             return
+        if grace_s > 0:
+            self._pending_finish.setdefault(session_id, self._clock() + grace_s)
+            return
+        del self._deadlines[session_id]
+        self._pending_finish.pop(session_id, None)
         self._stop_sweep_if_idle()
         self._on_change(session_id, False)
         if self._on_finished is not None:
             self._on_finished(session_id)
+
+    def resume(self, session_id: str) -> None:
+        """Disarm a finish `finish(grace_s=...)` armed for *session_id*: the
+        agent said it is busy again before the grace ran out, so the clear
+        was a beat inside the turn, not its end. No-op with nothing armed."""
+        self._pending_finish.pop(session_id, None)
+
+    def finish_pending(self, session_id: str) -> bool:
+        return session_id in self._pending_finish
 
     def is_busy(self, session_id: str) -> bool:
         return session_id in self._deadlines
@@ -229,6 +267,7 @@ class ActivityTracker:
         """Release the sweep timer (window teardown). Leaves no callbacks
         pointing at a window that is going away."""
         self._deadlines.clear()
+        self._pending_finish.clear()
         self._stop_sweep_if_idle()
 
     # -- the sweep ----------------------------------------------------------
@@ -244,8 +283,11 @@ class ActivityTracker:
 
     def _on_sweep(self) -> bool:
         now = self._clock()
-        for session_id in [sid for sid, deadline in self._deadlines.items() if deadline <= now]:
-            del self._deadlines[session_id]
+        armed = [sid for sid, deadline in self._pending_finish.items() if deadline <= now]
+        timed_out = [sid for sid, deadline in self._deadlines.items() if deadline <= now]
+        for session_id in dict.fromkeys(armed + timed_out):
+            self._deadlines.pop(session_id, None)
+            self._pending_finish.pop(session_id, None)
             self._on_change(session_id, False)
             if self._on_finished is not None:
                 self._on_finished(session_id)
@@ -426,8 +468,10 @@ class ProgressWatch:
     ends — which VTE parses into the ``vte.progress.hint`` termprop the window
     forwards here. Unlike every other tab source this is not inference, so it
     gets the one power no inferred source can be trusted with: ending the pole
-    the instant the agent says the turn is over, instead of waiting out an
-    idle window.
+    on the agent's word that the turn is over, instead of waiting out an idle
+    window — held only for `PROGRESS_FINISH_GRACE_S`, because the CLI also
+    clears the hint for a beat between tool calls, and the busy hint that
+    follows takes such a clear back.
 
     `reading` maps each hint change to the pole action it asks for: ``"mark"``
     for a busy hint (with the wide `PROGRESS_IDLE_S` window — the termprop is

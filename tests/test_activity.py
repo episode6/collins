@@ -583,3 +583,73 @@ def test_due_throttles_the_screen_reads():
     assert not watch.due()
     clock.advance(0.2)
     assert watch.due()
+
+
+def test_a_finish_with_grace_waits_for_the_next_busy_hint():
+    # The CLI clears its progress hint for a beat between tool calls, so a
+    # clear only arms the finish; the busy hint that follows disarms it, and
+    # nothing is flagged for a turn still going.
+    tracker, clock, timers, changes, finished = make_finish_tracker()
+    tracker.mark("a", idle_s=60.0)
+    tracker.finish("a", grace_s=3.0)
+    assert tracker.is_busy("a")  # the pole stays up through the wait
+    assert tracker.finish_pending("a")
+    clock.advance(1.0)
+    timers.tick()
+    tracker.resume("a")
+    tracker.mark("a", idle_s=60.0)
+    clock.advance(5.0)
+    timers.tick()
+    assert tracker.is_busy("a")
+    assert not tracker.finish_pending("a")
+    assert changes == [("a", True)]
+    assert finished == []
+
+
+def test_a_finish_with_grace_lands_when_the_grace_runs_out():
+    tracker, clock, timers, changes, finished = make_finish_tracker()
+    tracker.mark("a", idle_s=60.0)
+    tracker.finish("a", grace_s=3.0)
+    clock.advance(2.9)
+    timers.tick()
+    assert finished == []
+    # Redraw marks inside the grace (the prompt box returning) don't push
+    # the finish out: only a busy hint, through resume(), does.
+    tracker.mark("a")
+    clock.advance(0.2)
+    timers.tick()
+    assert not tracker.is_busy("a")
+    assert changes == [("a", True), ("a", False)]
+    assert finished == ["a"]
+
+
+def test_repeated_clears_keep_the_first_grace_deadline():
+    tracker, clock, timers, _changes, finished = make_finish_tracker()
+    tracker.mark("a", idle_s=60.0)
+    tracker.finish("a", grace_s=3.0)
+    clock.advance(2.0)
+    tracker.finish("a", grace_s=3.0)
+    clock.advance(1.1)
+    timers.tick()
+    assert finished == ["a"]
+
+
+def test_clear_and_stop_drop_an_armed_finish():
+    tracker, clock, timers, _changes, finished = make_finish_tracker()
+    tracker.mark("a", idle_s=60.0)
+    tracker.finish("a", grace_s=3.0)
+    tracker.clear("a")  # teardown: its tab closed
+    assert not tracker.finish_pending("a")
+    tracker.mark("b", idle_s=60.0)
+    tracker.finish("b", grace_s=3.0)
+    tracker.stop()
+    clock.advance(4.0)
+    timers.tick()
+    assert finished == []
+
+
+def test_a_grace_finish_on_an_idle_session_is_a_no_op():
+    tracker, _clock, _timers, changes, _finished = make_finish_tracker()
+    tracker.finish("a", grace_s=3.0)
+    assert not tracker.finish_pending("a")
+    assert changes == []
