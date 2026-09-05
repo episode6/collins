@@ -46,8 +46,16 @@ SESSION = "aaaaaaaa-1111-4222-8333-444444444444"
 # a session enters one.
 _PROJECT = f"{E2E}/projects/" + "".join(c if c.isalnum() else "-" for c in WORKTREE)
 
-for path in (f"{E2E}/chats", f"{E2E}/config/collins", _PROJECT, REPO):
+SHIM = f"{E2E}/bin/claude"
+
+for path in (f"{E2E}/chats", f"{E2E}/config/collins", f"{E2E}/bin", _PROJECT, REPO):
     os.makedirs(path, exist_ok=True)
+# Discovery only lists sessions of an agent whose CLI is on PATH, and CI has
+# no claude: a shim that is never run stands in for it (no tab opens here).
+with open(SHIM, "w", encoding="utf-8") as fh:
+    fh.write("#!/bin/sh\nexit 0\n")
+os.chmod(SHIM, 0o755)
+os.environ["PATH"] = f"{E2E}/bin:{os.environ['PATH']}"
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
 with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
