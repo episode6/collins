@@ -1157,10 +1157,11 @@ def sidecar_payload(untracked: bool = True) -> dict:
 def write_sidecar(path: str, payload: dict) -> bool:
     """Merge *payload* into the sidecar at *path*: what is there already
     (the extension's `selection`, `anchor` and `refreshed`, anything a
-    newer extension adds) survives, the payload's keys win, and the file is replaced whole (a temp file beside
-    it, then os.replace) so a reader never sees half a document. Creates the
-    directory. Never raises: False when the write failed (no runtime dir, a
-    read-only one), and the page then runs hunk without a sidecar."""
+    newer extension adds) survives, the payload's keys win, and the file
+    is replaced whole (a temp file beside it, then os.replace) so a reader
+    never sees half a document. Creates the directory. Never raises: False
+    when the write failed (no runtime dir, a read-only one), and the page
+    then runs hunk without a sidecar."""
     merged: dict = {}
     try:
         with open(path, encoding="utf-8") as fh:
