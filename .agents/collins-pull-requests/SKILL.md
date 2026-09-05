@@ -24,7 +24,7 @@ Signed-in-ness is `gh auth token` (local, no network), never `gh auth status`.
 
 Claude Code appends a `pr-link` record to the transcript the moment a PR URL
 shows up in tool output (`prstatus.parse_pr_link`), re-emitting it on
-resume/compact; `transcript.TranscriptTail` keeps **every** distinct PR in
+resume/compact; `transcript.TranscriptModel` keeps **every** distinct PR in
 first-seen order. Two more sources: `prattach` reads each *new* session's
 first prompt for references ("PR 271", `owner/repo#12`, a `/pull/` URL — the
 grammar session titling shares, `titles.pr_references_all`), verifying each
@@ -62,9 +62,10 @@ fetch → absorb → hub. Session retitling after PRs (`pr_title_sessions`) ride
 `CLOSED`), check counts, mergeability, `unresolved` (newest non-minimized
 comment is someone else's — gh's per-comment `viewerDidAuthor`),
 `claude_replied` / `pushed_since` (the "Ask Claude for a review" gate:
-Claude comments as login `claude`; gh reads list fields one page of 100
-deep, oldest first, so a full page reads as "can't say"), and derived
-`badge` / `settled`. `to_record` / `from_record` persist the **whole** status
+Claude comments as one of `prstatus._CLAUDE_LOGINS` — `claude`, `claude-code`,
+`claude-bot`, compared lowercased with any `[bot]` suffix stripped; gh reads
+list fields one page of 100 deep, oldest first, so a full page reads as
+"can't say"), and derived `badge` / `settled`. `to_record` / `from_record` persist the **whole** status
 — **stale beats blank**: a grey "nothing known" mark on cold start is the
 least accurate answer, so saved marks paint until the launch sweep
 (`refresh_prs_on_launch`, ~2.5 s after the first scan) replaces them.

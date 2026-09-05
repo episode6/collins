@@ -42,7 +42,7 @@ view's own handler would paste `file://` URIs) with `set_gtypes([Gdk.Texture,
 Gdk.FileList])` in preference order; pastes hook `paste-clipboard` ahead of
 the default handler and decide on `get_formats().union_deserialize_gtypes()`.
 Raw images are saved under the cache dir (`dropimages.save_png`, `drop-` /
-`paste-` prefixes, pruned after a day) and mentioned as `@path`; dropped files
+`paste-` prefixes, pruned after a week) and mentioned as `@path`; dropped files
 are mentioned in place (`dropimages.mention_text`). A preview strip shows
 image thumbnails; removing one takes its mention (`remove_mention`, refuses
 on ambiguity). File-reference chips were deliberately never built.
@@ -65,7 +65,8 @@ refused (`_foreign_paste_in_box`) — cutting it would cost the paste.
 
 Closing (Ctrl+. or the X) **types the draft back** into the CLI's box in
 pieces the CLI won't fold (`composerkeys.paste_pieces`: bracketed pastes of
-≤400 code points and ≤2 newlines each), verifies what landed
+≤320 characters (`_PIECE_CHARS`, a fifth under the CLI's 800-char fold) and ≤2
+newlines each), verifies what landed
 (`pasted_back` / `expand_pasted_back`), and stashes what it couldn't hand
 back (`stashable_draft`), to be restored on the next open
 (`draft_to_restore`). Sending cuts nothing and submits via `inject_prompt`

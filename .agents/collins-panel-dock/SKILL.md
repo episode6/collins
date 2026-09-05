@@ -75,7 +75,8 @@ an occupied axis, and only where the column is **free**: `_split_is_free`
 asks whether the terminal is already wider than `terminal_max_width` (its
 `Adw.Clamp` stops growing and centers, so the gutter is unused width) and
 whether the column — measured at the width it would really open at, the
-app-wide seed else `DEFAULT_FRACTION` (38%) — fits there above
+app-wide seed else the complement of `DEFAULT_FRACTION` (0.62 is the
+terminal's share, so a new column gets 38%) — fits there above
 `MIN_SPLIT_SIZE`. Only "right" is gated this way; bottom pages always join.
 With no seed a free split needs a ~1950 px terminal (a ~2400 px window).
 

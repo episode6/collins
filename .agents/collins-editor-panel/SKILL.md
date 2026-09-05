@@ -25,7 +25,7 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
 ## Anatomy
 
 - **Left column** (`self._left`): the **Agent files** list — the paths the
-  session most recently wrote, from `transcript.TranscriptTail`'s touched-file
+  session most recently wrote, from `transcript.TranscriptModel.touched_files`'s
   pass (`set_agent_files`) — above the `FileTree`.
 - **File column** (`self._editors`): an `Adw.TabBar` + `Adw.TabView` of open
   files (a `GtkSource.View` per file, `_OpenFile` bookkeeping: buffer, monitor,
