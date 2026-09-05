@@ -15,9 +15,13 @@ The git page (gitpage) reads the same files for its freshness check: where
 the working tree root is (`repo_root`), when the index last moved
 (`index_mtime`), what HEAD and the parent branch point at (`head_sha`,
 `resolve_branch`, `base_ref`), folded into one comparable `tree_signature`
-— and names the branch it measures the current one against
-(`parent_branch`: the first of the host's candidates the tree can resolve,
-else the default branch).
+— and, for its commits list's `↑` marks, when the remote-tracking refs
+last moved (`remote_refs_signature`: a push lands as a ref rewritten
+under `refs/remotes`, or a `packed-refs` rewrite) — and names the branch
+it measures the current one against (`parent_branch`: the first of the
+host's candidates the tree can resolve, else the default branch). Its
+commit gate looks for git's in-progress markers in the worktree's own
+git directory, which `git_dir` names.
 """
 
 from __future__ import annotations
@@ -410,6 +414,53 @@ def tree_signature(cwd: str | Path | None, base: str | None) -> tuple | None:
     if _git_dir(cwd) is None:
         return None
     return index_mtime(cwd), head_sha(cwd), base_ref(cwd, base)
+
+
+def git_dir(cwd: str | Path | None) -> Path | None:
+    """The git directory of the repository enclosing *cwd* — a worktree's
+    own (`.git/worktrees/<name>`), not the common one, which is where git
+    leaves its in-progress markers (MERGE_HEAD, rebase-merge, …) and the
+    index. None outside a repository."""
+    return _git_dir(cwd)
+
+
+# How many directories under refs/remotes remote_refs_signature will stat
+# before it stops descending: a remote's branches make one directory per
+# slash in their names, and the walk runs on the footer's 2 s poll.
+_REMOTE_REFS_DIR_LIMIT = 256
+
+
+def remote_refs_signature(cwd: str | Path | None) -> tuple | None:
+    """What moves when a remote-tracking ref is written — a push, a fetch —
+    folded into one comparable value for the git page's poll: the mtime
+    of `packed-refs` (where `git gc` and `fetch --prune` rewrite refs
+    wholesale) and, for every directory under `refs/remotes` (each remote,
+    and each slash-separated prefix of a branch name), its mtime — git
+    writes a loose ref by renaming a lock file into its directory, which
+    moves that directory's mtime and no other. All read from the common
+    dir (a worktree's refs are the main checkout's). None outside a
+    repository; a repository with no remote refs at all answers a value
+    that stays put."""
+    git = _git_dir(cwd)
+    if git is None:
+        return None
+    common = _common_dir(git)
+    try:
+        packed = (common / "packed-refs").stat().st_mtime_ns
+    except OSError:
+        packed = None
+    directories: list[tuple[str, int]] = []
+    pending = [common / "refs" / "remotes"]
+    while pending and len(directories) < _REMOTE_REFS_DIR_LIMIT:
+        directory = pending.pop()
+        try:
+            stamp = directory.stat().st_mtime_ns
+            children = [entry for entry in directory.iterdir() if entry.is_dir()]
+        except OSError:
+            continue
+        directories.append((str(directory.relative_to(common)), stamp))
+        pending.extend(sorted(children, reverse=True))
+    return packed, tuple(sorted(directories))
 
 
 def _safe_branch_name(name: str | None) -> bool:

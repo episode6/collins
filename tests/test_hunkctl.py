@@ -10,6 +10,7 @@ navigate argv, the reply)."""
 
 import json
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -469,6 +470,77 @@ def test_show_helpers():
     assert not hunkctl.loaded_ok(None)
 
 
+@pytest.mark.parametrize(
+    ("text", "halves"),
+    [
+        ("main...feat", ("main", "feat")),
+        ("origin/main...release/v1", ("origin/main", "release/v1")),
+        (SHA + "...HEAD", (SHA, "HEAD")),
+        (SHA + "^...HEAD", (SHA + "^", "HEAD")),
+        ("main..feat", None),
+        ("main....feat", None),
+        ("main...feat...x", None),
+        ("...feat", None),
+        ("main...", None),
+        ("main...-x", None),
+        ("-x...main", None),
+        ("main....", None),
+        ("main.... feat", None),
+        ("a b...c", None),
+        ("main", None),
+        ("", None),
+        (None, None),
+        (3, None),
+        ("x" * 129 + "...y", None),
+    ],
+)
+def test_range_halves(text, halves):
+    assert hunkctl.range_halves(text) == halves
+    assert hunkctl.is_range({"range": text}) is (halves is not None)
+
+
+def test_range_helpers():
+    assert hunkctl.range_of({"range": "main...feat"}) == "main...feat"
+    assert hunkctl.range_of({"range": "main..feat"}) is None
+    assert hunkctl.range_of({"show": SHA}) is None
+    assert hunkctl.range_of("branch") is None
+    assert hunkctl.range_of(None) is None
+    assert not hunkctl.is_range({"show": "main...feat"})
+    assert not hunkctl.is_range({})
+    assert hunkctl.loaded_ok({"range": "main...feat"})
+    assert not hunkctl.loaded_ok({"range": "main..feat"})
+    assert not hunkctl.is_show({"range": "main...feat"})
+    # show_diff keeps refusing ranges: safe_ref rejects `..`.
+    assert hunkctl.show_diff_load("main...feat") is None
+
+
+def test_range_load_tails_and_argv():
+    """A range rides `diff a...b`, the untracked flag in between; spawn and
+    reload alike."""
+    assert hunkctl.spawn_argv("/h", {"range": "main...feat"}, None, EXT) == [
+        "/h", "diff", "--watch", "--transparent-bg", "--extension", EXT, "main...feat",
+    ]
+    assert hunkctl.spawn_argv("/h", {"range": "main...feat"}, None, None, OPTIONS)[-2:] == [
+        "--exclude-untracked", "main...feat",
+    ]
+    assert hunkctl.reload_argv("/h", "abc", {"range": "main...feat"}, "other")[-3:] == [
+        "--", "diff", "main...feat",
+    ]
+    assert hunkctl.reload_argv("/h", "abc", {"range": "main...feat"}, None, OPTIONS)[-3:] == [
+        "diff", "--exclude-untracked", "main...feat",
+    ]
+    with pytest.raises(ValueError):
+        hunkctl.spawn_argv("/h", {"range": "main..feat"}, None)
+
+
+def test_range_breadcrumb_and_tab_title():
+    """hunk's `left...right` reads as right against left: b vs a."""
+    assert hunkctl.breadcrumb({"range": "main...feat"}, "x", "y") == "feat vs main"
+    assert hunkctl.breadcrumb({"range": SHA + "...HEAD"}, None, None) == "HEAD vs 0123456"
+    assert hunkctl.tab_title({"range": "main...feat"}, "main") == "Git · feat"
+    assert hunkctl.tab_title({"range": "main..." + SHA}, None) == "Git · 0123456"
+
+
 def test_short_ref():
     assert hunkctl.short_ref(SHA) == "0123456"
     assert hunkctl.short_ref("HEAD") == "HEAD"
@@ -530,6 +602,102 @@ def test_parse_session_get():
     )
     assert hunkctl.parse_session_get("{}") is None
     assert hunkctl.parse_session_get("garbage") is None
+
+
+# -- the session's files and cursor (hunk 0.21.1's session record) -------------------
+
+
+def _file(file_id: str, path: str, additions: int = 1, deletions: int = 0, hunks: int = 1, **extra) -> dict:
+    record = {"id": file_id, "path": path, "additions": additions, "deletions": deletions}
+    return {**record, "hunkCount": hunks, **extra}
+
+
+def _snapshot(path: str | None = "a.txt", hunk: int = 0) -> dict:
+    state = {"selectedHunkIndex": hunk, "showAgentNotes": False, "liveComments": []}
+    if path is not None:
+        state["selectedFileId"] = f"/tmp/repo:0:{path}"
+        state["selectedFilePath"] = path
+    return {"updatedAt": "2026-09-05T11:50:25.450Z", "state": state}
+
+
+def test_session_files_in_review_order_with_counts_and_rename_pairs():
+    """What hunk 0.21.1 lists (verified: a text change, a staged rename
+    with previousPath, a binary change at 0/0/0)."""
+    record = _session(7)
+    record["files"] = [
+        _file("/tmp/repo:0:a.txt", "a.txt"),
+        _file("/tmp/repo:1:new.txt", "new.txt", 1, 0, 1, previousPath="old.txt"),
+        _file("/tmp/repo:2:img.bin", "img.bin", 0, 0, 0),
+    ]
+    record["snapshot"] = _snapshot("new.txt", 0)
+    session = hunkctl.parse_session_get(json.dumps({"session": record}))
+    assert session.files == (
+        hunkctl.SessionFile("/tmp/repo:0:a.txt", "a.txt", None, 1, 0, 1),
+        hunkctl.SessionFile("/tmp/repo:1:new.txt", "new.txt", "old.txt", 1, 0, 1),
+        hunkctl.SessionFile("/tmp/repo:2:img.bin", "img.bin", None, 0, 0, 0),
+    )
+    assert session.selected_path == "new.txt"
+    assert session.selected_hunk == 0
+    # The same record shape in a `session list` reply.
+    listed = hunkctl.session_for_pid(json.dumps({"sessions": [record]}), 7)
+    assert listed.files == session.files and listed.selected_path == "new.txt"
+
+
+def test_session_files_skip_garbage_records_and_keep_the_rest():
+    record = _session(7)
+    record["files"] = [
+        "not a record",
+        {"id": "x"},  # no path
+        _file(3, "no-id.txt"),  # id isn't a string
+        _file("f", "neg.txt", -1),  # a negative count
+        _file("f", "bool.txt", True),  # a bool for a count
+        _file("f", "float.txt", 1.5),
+        {"id": "f", "path": "nohunkcount.txt", "additions": 1, "deletions": 0},
+        _file("f", "p" * (hunkctl.MAX_PATH_CHARS + 1)),
+        _file("f", ""),
+        _file("ok", "kept.txt", 2, 3, 4, previousPath=7),  # a non-string previousPath is none
+    ]
+    session = hunkctl.parse_session_get(json.dumps({"session": record}))
+    assert session.files == (hunkctl.SessionFile("ok", "kept.txt", None, 2, 3, 4),)
+    record["files"] = "nope"
+    assert hunkctl.parse_session_get(json.dumps({"session": record})).files == ()
+    del record["files"]
+    assert hunkctl.parse_session_get(json.dumps({"session": record})).files == ()
+
+
+def test_session_files_are_capped():
+    record = _session(7)
+    record["files"] = [_file(f"f{i}", f"file{i}.txt") for i in range(hunkctl.MAX_SESSION_FILES + 10)]
+    session = hunkctl.parse_session_get(json.dumps({"session": record}))
+    assert len(session.files) == hunkctl.MAX_SESSION_FILES == 5000
+    assert session.files[-1].path == f"file{hunkctl.MAX_SESSION_FILES - 1}.txt"
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "expected"),
+    [
+        (_snapshot("src/a.py", 3), ("src/a.py", 3)),
+        (_snapshot(None, 0), (None, 0)),
+        (_snapshot("a.txt", -1), ("a.txt", None)),
+        ({"state": {"selectedFilePath": "a.txt", "selectedHunkIndex": True}}, ("a.txt", None)),
+        ({"updatedAt": "x", "state": {"selectedFilePath": 3, "selectedHunkIndex": 1}}, (None, 1)),
+        ({"updatedAt": "x", "state": {"selectedFilePath": "p" * 513, "selectedHunkIndex": 1}}, (None, 1)),
+        ({"updatedAt": "x", "state": "nope"}, (None, None)),
+        ({"updatedAt": "x"}, (None, None)),
+        ("garbage", (None, None)),
+        (None, (None, None)),
+    ],
+)
+def test_session_selection_is_shape_gated(snapshot, expected):
+    record = _session(7)
+    record["snapshot"] = snapshot
+    session = hunkctl.parse_session_get(json.dumps({"session": record}))
+    assert (session.selected_path, session.selected_hunk) == expected
+
+
+def test_session_without_a_snapshot_has_no_selection():
+    session = hunkctl.parse_session_get(json.dumps({"session": _session(7)}))
+    assert session.selected_path is None and session.selected_hunk is None and session.files == ()
 
 
 # -- replies: ok, gone, refused --------------------------------------------------
@@ -619,9 +787,18 @@ def test_parse_reload_reply():
         ("repo show " + SHA, ("show", SHA)),
         ("my repo with spaces show abc1234", ("show", "abc1234")),
         ("show show HEAD", ("show", "HEAD")),  # a repository named "show"
-        # The commits panel's other headers: a range between two branches is
-        # not a branch load, and is left to hunk.
-        ("repo main...feat", (None, None)),
+        # The commits list's parent header: a three-dot range between two
+        # refs is the range load; a two-dot one, a range with a pathspec
+        # and a malformed one are left to hunk.
+        ("repo main...feat", ("range", "main...feat")),
+        ("repo origin/main...release/v1", ("range", "origin/main...release/v1")),
+        ("my repo with spaces main...feat", ("range", "main...feat")),
+        ("repo " + SHA + "..." + SHA, ("range", SHA + "..." + SHA)),
+        ("repo main...feat -- src/", (None, None)),
+        ("repo main....feat", (None, None)),
+        ("repo main...feat...x", (None, None)),
+        ("repo ...feat", (None, None)),
+        ("repo main...", (None, None)),
         ("repo main..feat", (None, None)),
         ("repo " + SHA + ".." + SHA, (None, None)),
         ("repo show -x", (None, None)),
@@ -841,6 +1018,49 @@ def test_state_round_trips():
     assert hunkctl.decode_parent(hunkctl.encode_state("branch")) is None
 
 
+def test_range_state_round_trips():
+    state = hunkctl.encode_state({"range": "main...feat"}, "base")
+    assert state == {"kind": "git", "loaded": {"range": "main...feat"}, "parent": "base"}
+    assert json.loads(json.dumps(state)) == state
+    assert hunkctl.decode_state(state) == {"range": "main...feat"}
+    assert hunkctl.decode_parent(state) == "base"
+    # A malformed saved range reads as the default, like a malformed show.
+    assert hunkctl.decode_state({"kind": "git", "loaded": {"range": "main..feat"}}) == "unstaged"
+    assert hunkctl.decode_state({"kind": "git", "loaded": {"range": "-x...y"}}) == "unstaged"
+    assert hunkctl.decode_state({"kind": "git", "loaded": {"range": 3}}) == "unstaged"
+    loaded = {"range": "main...feat"}
+    hunkctl.encode_state(loaded)["loaded"]["range"] = "x...y"
+    assert loaded == {"range": "main...feat"}  # copied, as a show is
+
+
+def test_sidebar_state_round_trips():
+    """"sidebar" is written only when hidden; absent reads as shown."""
+    assert hunkctl.encode_state("staged") == {"kind": "git", "loaded": "staged"}
+    assert hunkctl.encode_state("staged", sidebar=True) == {"kind": "git", "loaded": "staged"}
+    hidden = hunkctl.encode_state("staged", "base", sidebar=False)
+    assert hidden == {"kind": "git", "loaded": "staged", "parent": "base", "sidebar": False}
+    assert hunkctl.decode_sidebar(hidden) is False
+    assert hunkctl.decode_sidebar(hunkctl.encode_state("staged")) is True
+    assert hunkctl.decode_state(hidden) == "staged" and hunkctl.decode_parent(hidden) == "base"
+
+
+@pytest.mark.parametrize(
+    ("page", "expected"),
+    [
+        ({"kind": "git", "sidebar": False}, False),
+        ({"kind": "git", "sidebar": True}, True),
+        ({"kind": "git"}, True),
+        ({"kind": "git", "sidebar": 0}, True),
+        ({"kind": "git", "sidebar": "no"}, True),
+        ({"kind": "git", "sidebar": None}, True),
+        ("git", True),
+        (None, True),
+    ],
+)
+def test_decode_sidebar(page, expected):
+    assert hunkctl.decode_sidebar(page) is expected
+
+
 # -- the sidecar -------------------------------------------------------------
 
 
@@ -965,6 +1185,103 @@ _NS = 1756800000123456789
 )
 def test_read_sidecar_refreshed(text, expected):
     assert hunkctl.read_sidecar_refreshed(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('{"selection": {"path": "src/a.py", "hunkIndex": 2}}', hunkctl.Selection("src/a.py", 2)),
+        ('{"selection": {"path": "a.txt", "hunkIndex": 0}}', hunkctl.Selection("a.txt", 0)),
+        ('{"selection": {"path": "a.txt", "hunkIndex": null}}', hunkctl.Selection("a.txt", None)),
+        ('{"selection": {"path": "a.txt"}}', hunkctl.Selection("a.txt", None)),
+        ('{"version": 2, "untracked": true, "selection": {"path": "dir name/b c.txt", "hunkIndex": 1}}',
+         hunkctl.Selection("dir name/b c.txt", 1)),
+        ('{"selection": {"path": "a.txt", "hunkIndex": -1}}', hunkctl.Selection("a.txt", None)),
+        ('{"selection": {"path": "a.txt", "hunkIndex": true}}', hunkctl.Selection("a.txt", None)),
+        ('{"selection": {"path": "a.txt", "hunkIndex": "2"}}', hunkctl.Selection("a.txt", None)),
+        ('{"selection": null}', None),
+        ('{"selection": {}}', None),
+        ('{"selection": {"path": "", "hunkIndex": 0}}', None),
+        ('{"selection": {"path": 3, "hunkIndex": 0}}', None),
+        ('{"selection": {"path": "' + "p" * 513 + '", "hunkIndex": 0}}', None),
+        ('{"selection": "a.txt"}', None),
+        ('{"parent": "main"}', None),
+        ("[]", None),
+        ("garbage", None),
+        ("", None),
+    ],
+)
+def test_read_sidecar_selection(text, expected):
+    assert hunkctl.read_sidecar_selection(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('{"anchor": {"path": "src/a.py", "side": "new", "line": 12}}', hunkctl.Anchor("src/a.py", "new", 12)),  # noqa: E501
+        ('{"anchor": {"path": "a.txt", "side": "old", "line": 1}}', hunkctl.Anchor("a.txt", "old", 1)),
+        ('{"anchor": {"path": "a.txt", "side": "new", "line": 0}}', None),
+        ('{"anchor": {"path": "a.txt", "side": "new", "line": -3}}', None),
+        ('{"anchor": {"path": "a.txt", "side": "new", "line": true}}', None),
+        ('{"anchor": {"path": "a.txt", "side": "new", "line": "12"}}', None),
+        ('{"anchor": {"path": "a.txt", "side": "left", "line": 12}}', None),
+        ('{"anchor": {"path": "a.txt", "side": "new"}}', None),
+        ('{"anchor": {"path": "", "side": "new", "line": 1}}', None),
+        ('{"anchor": {"side": "new", "line": 1}}', None),
+        ('{"anchor": null}', None),
+        ('{"anchor": "a.txt:12"}', None),
+        ('{"selection": {"path": "a.txt", "hunkIndex": 0}}', None),
+        ("garbage", None),
+        ("", None),
+    ],
+)
+def test_read_sidecar_anchor(text, expected):
+    assert hunkctl.read_sidecar_anchor(text) == expected
+
+
+def test_sidecar_v2_keys_survive_collins_write(tmp_path):
+    """The extension's `selection` and `anchor` are the other side's keys:
+    Collins' merge keeps them, and a v2 file's unknown keys ride through
+    the v1 writer untouched."""
+    path = str(tmp_path / "git.json")
+    with open(path, "w") as fh:
+        fh.write(
+            '{"version": 2, "untracked": true, "selection": {"path": "a.txt", "hunkIndex": 1},'
+            ' "anchor": {"path": "a.txt", "side": "new", "line": 4}}'
+        )
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("main", "auto", "main", 20))
+    with open(path) as fh:
+        text = fh.read()
+    assert hunkctl.read_sidecar_selection(text) == hunkctl.Selection("a.txt", 1)
+    assert hunkctl.read_sidecar_anchor(text) == hunkctl.Anchor("a.txt", "new", 4)
+
+
+# -- the pinned keys ------------------------------------------------------------------
+
+
+def test_pinned_keys_are_the_extensions_registered_keys():
+    """The native buttons feed these bytes to hunk's pty; the extension's
+    registerCommand keys in index.ts must be exactly these, or a button
+    presses a key nobody listens to."""
+    assert hunkctl.STAGE_KEY == b"x"
+    assert hunkctl.STAGE_FILE_KEY == b"X"
+    assert hunkctl.ANCHOR_KEY == b"v"
+    assert hunkctl.CLEAR_ANCHOR_KEY == b"\x1b"
+    assert hunkctl.DISCARD_KEY == b"D"
+    with open(os.path.join(hunkctl.EXTENSION_DIR, "index.ts"), encoding="utf-8") as fh:
+        source = fh.read()
+    registered = dict(re.findall(r'registerCommand\(\s*\{\s*id:\s*"([^"]+)"[^}]*?key:\s*"([^"]+)"', source))
+    names = {"escape": b"\x1b"}
+    pinned = {
+        "stage-hunk": hunkctl.STAGE_KEY,
+        "stage-file": hunkctl.STAGE_FILE_KEY,
+        "set-anchor": hunkctl.ANCHOR_KEY,
+        "clear-anchor": hunkctl.CLEAR_ANCHOR_KEY,
+        "discard": hunkctl.DISCARD_KEY,
+    }
+    for command, key in pinned.items():
+        assert command in registered, f"{command} is not registered in index.ts"
+        assert names.get(registered[command], registered[command].encode()) == key, command
 
 
 def test_shown_by_extension():
