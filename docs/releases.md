@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-04. Full change history: git log for this file.
+fork. Last modified: 2026-09-05. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -132,6 +132,15 @@ downloads of each version, see the
   and both pickers move within a poll of the command running. A model
   chosen in the CLI's own `/model` picker still waits for the next
   reply, since the CLI prints its name rather than its id.
+- **Fewer "finished" notifications for runs still going.** Recent CLI
+  versions clear the terminal progress hint for a beat between tool
+  calls — the model's stream has ended, the next tool isn't marked in
+  progress yet, a hook runs in the gap — and Collins took every clear as
+  the run ending: an unread flag, a PR refresh and a finished
+  notification landed mid-turn. A clear now waits three seconds before
+  it counts, and a busy hint inside that window takes it back. The
+  sidebar's pole stays up through the wait, and a real finish announces
+  itself three seconds later than before.
 
 ### v0.1.2 — 2026-08-30
 
