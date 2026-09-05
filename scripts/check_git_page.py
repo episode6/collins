@@ -9,8 +9,9 @@ sidecar's path in its environment, resolving the session id by pid off the
 shim's `session list --json`, switching modes through `session reload`,
 reloading on a freshness tick after a commit (and not for a move the
 extension recorded as already shown), keeping the viewer through a
-reload hunk refuses, picking up a parent branch the extension set through
-the sidecar (and publishing the automatic one back), following a reload
+reload hunk refuses, the sidebar's parent pick reloading the branch diff
+against the new base (the sidecar untouched: it carries no parent since
+contract version 2), following a reload
 made behind Collins' back (the poll's `session get`) — a commit becoming
 the page's own load (its breadcrumb naming it, `<ref> <subject>`, off a
 real git), a range between two branches staying hunk's — taking the child
@@ -22,7 +23,7 @@ reaching an open page: a layout or theme change respawns hunk with
 --mode/--theme (the same settings again don't), the untracked switch
 reloads the current load with --exclude-untracked and rides every later
 diff load and the sidecar (never a `show`), the page size reaches the
-sidecar and the native commits list with neither. A pass over the native
+native commits list with neither. A pass over the native
 sidebar (collins/gitsidebar.py) checks its commits list off the real
 repository (the branch header, the working tree row, the `main..HEAD`
 commits, the default branch's group; no parent group while the parent is
@@ -190,7 +191,7 @@ if args and args[0] in ("diff", "show"):
     # is the *child's* pid the session list reports, as hunk's does.
     if os.environ.get("FAKE_HUNK_ROLE") == "viewer":
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-        # What Collins feeds the pty (the header's level buttons) is
+        # What Collins feeds the pty (the sidebar's cursor buttons) is
         # recorded in the state file, raw, so the check can read it back.
         import select, termios, tty
         try:
@@ -528,18 +529,11 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
         sidecar,
     )
     check(
-        "the sidecar carries the automatic parent, the default branch and the page size",
-        read_sidecar(sidecar)
-        == {
-            "version": 1,
-            "parent": "main",
-            "parentSource": "auto",
-            "default": "main",
-            "logPage": 20,
-            "untracked": True,
-        },
+        "the sidecar carries the contract version and the untracked switch, nothing else",
+        read_sidecar(sidecar) == {"version": 2, "untracked": True},
         read_sidecar(sidecar),
     )
+    check("hunk spawned with --no-sidebar (its files pane hidden)", state.get("no_sidebar") is True, state)
     check("the check's own environment was not touched", hunkctl.SIDECAR_ENV not in os.environ)
     check(
         "page_state carries no parent while the automatic one is in force",
@@ -672,8 +666,8 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     )
     check("tab title names the new parent", page.page_title() == "Git · vs base", page.page_title())
     check(
-        "Collins published the pick to the extension through the sidecar",
-        read_sidecar(sidecar).get("parent") == "base" and read_sidecar(sidecar).get("parentSource") == "user",
+        "the pick never reaches the sidecar (contract version 2 carries no parent)",
+        read_sidecar(sidecar).get("parent") is None and "parentSource" not in read_sidecar(sidecar),
         read_sidecar(sidecar),
     )
     page.poll_tick()
@@ -686,13 +680,9 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     check("back to the automatic parent", page._parent_name == "main", page._parent_name)
     check("page_state drops the parent", "parent" not in page.page_state(), page.page_state())
     check(
-        "Collins published the automatic name into the sidecar (keeping the extension's record)",
+        "the sidecar still holds Collins' two keys and the extension's record",
         read_sidecar(sidecar) == {
-            "version": 1,
-            "parent": "main",
-            "parentSource": "auto",
-            "default": "main",
-            "logPage": 20,
+            "version": 2,
             "untracked": True,
             "refreshed": read_sidecar(sidecar).get("refreshed"),  # the extension's record, kept
         }
@@ -894,12 +884,6 @@ def check_restore(repo: str, state_path: str, shim: str) -> None:
         page.page_state(),
     )
     check(
-        "the sidecar says so",
-        read_sidecar(state.get("sidecar")).get("parent") == "base"
-        and read_sidecar(state.get("sidecar")).get("parentSource") == "user",
-        read_sidecar(state.get("sidecar")),
-    )
-    check(
         "breadcrumb reads <sha7> <subject>",
         page._breadcrumb.get_text() == f"{sha[:7]} fifth",
         page._breadcrumb.get_text(),
@@ -1053,7 +1037,7 @@ def check_settings(repo: str, state_path: str) -> None:
     with --mode/--theme (and the same dict again doesn't); the untracked
     switch is a reload of the current load with --exclude-untracked (no
     respawn), rides every later diff load and the sidecar, and never
-    touches a `show`; the page size reaches the sidecar with neither."""
+    touches a `show`; the page size reaches the native list with neither."""
     print("-- Preferences → Git")
     page, window = spawn_page(repo, "settings")
     state = read_state(state_path)
@@ -1064,8 +1048,8 @@ def check_settings(repo: str, state_path: str) -> None:
     )
     sidecar = state.get("sidecar")
     check(
-        "the sidecar carries the default page size and the untracked switch",
-        read_sidecar(sidecar).get("logPage") == 20 and read_sidecar(sidecar).get("untracked") is True,
+        "the sidecar carries the untracked switch (and no page size: the native list pages)",
+        read_sidecar(sidecar) == {"version": 2, "untracked": True},
         read_sidecar(sidecar),
     )
 
@@ -1226,12 +1210,8 @@ def check_settings(repo: str, state_path: str) -> None:
         and read_state(state_path).get("reloads", 0) == reloads_before,
         read_state(state_path),
     )
-    check(
-        "the sidecar carries the new page size",
-        read_sidecar(sidecar).get("logPage") == 50,
-        read_sidecar(sidecar),
-    )
     check("the page size reaches the native commits list", page.sidebar.options.log_page == 50)
+    check("and never the sidecar", "logPage" not in read_sidecar(sidecar), read_sidecar(sidecar))
 
     # -- back to the defaults: a respawn into today's argv ----------------------------
     page.apply_settings(SETTINGS)
@@ -1245,11 +1225,6 @@ def check_settings(repo: str, state_path: str) -> None:
         "the defaults respawn hunk without --mode/--theme",
         respawned and state.get("mode") is None and state.get("theme") is None and state.get("args") == [],
         state,
-    )
-    check(
-        "and the sidecar is back to the defaults",
-        read_sidecar(sidecar).get("logPage") == 20,
-        read_sidecar(sidecar),
     )
     page.page_closed()
     wait_for(lambda: not page.hunk_alive, timeout=2.0)
@@ -1287,7 +1262,11 @@ def check_sidebar(repo: str, state_path: str) -> None:
     wide = wait_for(lambda: not page._narrow and page.sidebar_shown)
     check("a 900 px page shows the sidebar again", wide, (page._narrow, page.sidebar_shown))
     check("the toggle is sensitive again", page._sidebar_toggle.get_sensitive())
-    check("the VTE keeps its columns beside the sidebar", wait_for(lambda: page.columns >= 48), page.columns)
+    check(
+        "the VTE keeps its columns beside the sidebar",
+        wait_for(lambda: page.terminal.get_column_count() >= 48),
+        page.terminal.get_column_count(),
+    )
 
     # -- the toggle and its persistence -------------------------------------------------
     page.set_sidebar_wanted(False)

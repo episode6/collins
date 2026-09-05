@@ -3,76 +3,18 @@
 # collins-git
 
 The [hunk](https://hunk.dev) extension behind Collins' git page. Collins spawns
-`hunk diff --watch --transparent-bg --extension <this directory> …` in the page's
-terminal; the extension turns hunk's sidebar into a git panel. It also runs on
-its own, outside Collins — see "Standalone" below.
-
-## What it shows
-
-Two panes on the left of hunk's review stream:
-
-- **Commits** — one group per branch of interest, top to bottom: the current
-  branch (a `working tree` row first, then its own commits `<parent>..HEAD`,
-  newest first, unpushed ones marked `↑`), the parent branch (its commits not on
-  the default branch; omitted when the parent *is* the default), and the default
-  branch (its most recent page of commits and a `load more…` row). The loaded
-  row carries `▸`. A click loads a row into the same window:
-
-  | Row                    | Loads                                  |
-  |------------------------|----------------------------------------|
-  | `working tree`         | `diff` (unstaged)                      |
-  | a commit               | `show <sha>`                           |
-  | current-branch header  | `diff <parent>...HEAD`                 |
-  | parent-branch header   | `diff <default>...<parent>`            |
-  | default-branch header  | nothing — a whole trunk is too much     |
-
-  A right click on the pane opens *Set parent branch…*.
-
-- **Files** — replaces hunk's own files pane: the loaded changeset's files in
-  review order with `+`/`-` counts, the selected one highlighted. While the
-  working tree is loaded it splits into `UNSTAGED · n` and `STAGED · n`; hunk
-  holds one side at a time, so the loaded side is live and clicking a file (or
-  the header) on the other side reloads to that side and selects the file.
-
-## Narrow terminals
-
-Hunk lays its left panes out from a fixed budget (0.20.1): two columns of body
-padding, each open pane in registration order at its preferred width as long as
-the review keeps 48 columns behind a one-column divider — else the pane is
-omitted — and the sidebar area hidden altogether until 73 columns (its own
-22-column pane beside that minimum). With the commits pane at 26 preferred /
-18 minimum and the files pane at 30 / 22 that gives three regimes by terminal
-width (`level.ts`, whose tests pin the numbers):
-
-| Columns | Shows |
-|---------|-------|
-| under 73 | the diff alone — no key or button can bring a pane up |
-| 73 – 99 | one pane beside a 48-column diff |
-| 100 and up | both panes — the wide layout |
-
-In the one-pane regime the page is a stack of three **levels**: `diff` (no pane
-open), `files` (the files pane alone) and `commits` (the commits pane alone).
-`<` goes up a level and `>` down; picking a row goes down by itself — a commit
-clicked loads it *and* shows the files, a file clicked selects it *and* shows
-the diff — so the mouse alone drills down. Both panes open in this regime is
-the `commits` level (hunk omits the files pane beside it). The extension starts
-at `diff` when the terminal is narrow and with both panes when it is wide; a
-resize that crosses the 100-column line opens both panes or closes both, and
-one inside a regime leaves the panes alone — but re-opens whatever is open when
-the width grew, since hunk does not bring a hidden sidebar area back by itself
-(checked on `SIGWINCH` and from a one-second poll of the tty size, because
-Collins widens its git column while hunk is still starting). Wide, `<` opens
-both panes when one is closed ("show me the panels") and `>` does nothing;
-under 73 columns both say *too narrow for a panel — widen the page*. A pane
-closed with hunk's own `s` stays closed until a level step or a crossing
-resize says otherwise. Collins' git page shows a back and a forward button in
-its header while the page is narrow (back climbs, forward descends); they feed
-these two keys.
+`hunk diff --watch --transparent-bg --no-sidebar --extension <this directory> …`
+in the page's terminal, so hunk draws nothing but its review stream; the
+commits and files panels, the action row, commit and fixup, stage all and the
+parent branch are Collins' own GTK widgets beside it. What is left for an
+extension is the handful of keys that need hunk's cursor — the hunk, the file
+and the line under it — and a word back to Collins about where that cursor is.
+It also runs on its own, outside Collins — see "Standalone" below.
 
 ## Keys
 
 Live only while the working tree is loaded; in a commit or branch view the
-staging keys say "read-only view" and do nothing.
+keys say "read-only view" and do nothing.
 
 | Key | Does |
 |-----|------|
@@ -81,45 +23,25 @@ staging keys say "read-only view" and do nothing.
 | `v` | anchor a line range at the cursor line; painted amber (see "Line ranges") |
 | `esc` | clear the anchor (silent when there is none; an open dialog takes `esc` first) |
 | `D` | discard the current hunk — or the anchored range — from the working tree, after a confirmation; Unstaged view only. On a file deleted in the working tree it restores the file whole from the index (`git checkout -- <path>`, after the same confirmation); a new or renamed file is refused |
-| `C` | commit the index: one input for the summary, `git commit -m` |
-| `B` | commit the index with a summary and a body (two inputs; a blank body is none) |
-| `F` | pick an unpushed commit from a list, confirm, and commit the index as `fixup! <sha>` for it — the rebase that folds it in is named, not run |
-| `A` | stage all changes, after a confirmation naming the count |
-| `U` | unstage all changes, likewise |
-| `n` / `p` | load the next / previous row of the current commits-panel group |
-| `P` | set the parent branch (a `select` over local branches; *Automatic* hands the choice back) |
-| `<` / `>` | one level up / down on a narrow terminal — diff, files, commits (see "Narrow terminals"); wide, `<` opens both panes and `>` does nothing |
 
-Every key avoids hunk's own defaults. Users can rebind them under
-`[keybindings]` as `collins-git.stage-hunk`, `stage-file`, `set-anchor`,
-`clear-anchor`, `discard`, `commit`, `commit-with-body`, `fixup`, `stage-all`,
-`unstage-all`, `next-row`, `previous-row`, `set-parent`, `level-up`,
-`level-down`. The last two are the exception: Collins' header buttons feed
-hunk the bytes `<` and `>` (hunk's session CLI cannot run an extension command
-by name), so they are pinned to those keys — rebind `level-up` / `level-down`
-and the buttons keep pressing `<` / `>`, which then do whatever owns them.
+Every key avoids hunk's own defaults. They are registered as
+`collins-git.stage-hunk`, `stage-file`, `set-anchor`, `clear-anchor` and
+`discard`, and hunk lets a user rebind them under `[keybindings]` — but
+**all five are pinned**: Collins' action row (*Stage hunk* / *Stage lines*,
+*Anchor line* / *Clear anchor*, *Discard*) feeds hunk the bytes `x`, `v`,
+escape and `D` through the terminal, since hunk's session CLI cannot run an
+extension command by name. Rebind one and the button keeps pressing the key,
+which then does whatever owns it. `X` has no button; it is pinned for the
+same reason, so a later button can rely on it.
 
-`C`, `B` and `F` act on the index as it is — whatever `x`/`X`/`A` put there,
-from either view — and refuse before asking anything when nothing is staged or
-a rebase, merge, cherry-pick or revert is half-finished in the repository. They
-run `git commit -q -m …`, so no editor opens, on an asynchronous runner so
-hunk keeps painting while hooks and signing take their time: a `committing…`
-toast stands meanwhile, a second commit key waits for the first, and the
-review is reloaded whether the commit succeeded or not (hooks may have moved
-the tree; one that outlives the 10-minute deadline may have been made).
-
-`F` lists the commits panel's current group (`<parent>..HEAD`) minus anything
-a remote-tracking ref reaches (`git log <parent>..HEAD --not --remotes`) — the
-same rule the panel's `↑` marks follow, and never `@{upstream}..HEAD`, which
-after a rebase onto a pushed base holds the base's own pushed commits, and
-which a branch pushed without `-u` does not have at all. With no remotes at
-all every commit is unpushed. It writes `fixup! <full sha>` in the subject
-rather than `--fixup=`: subjects repeat, hashes do not, and `git rebase
---autosquash` matches either. The command it names to fold the fixup in is
-`git rebase -i --autosquash --autostash <sha>^` — interactive on purpose,
-since `--autosquash` without `-i` is ignored by every git before 2.44 (Debian
-12 and Ubuntu 24.04 ship older); the todo opens already arranged, save and
-quit.
+After each key the extension reloads the review in place through hunk's own
+`hunk.app.refresh` and records the index mtime and HEAD it just showed in the
+sidecar (`refreshed`, below), so Collins' freshness poll does not reload the
+page a second time for the same move — a reload cancels whatever dialog is
+open by then (`D`'s confirmation). When hunk has no refresh to run, nothing is
+recorded and Collins' next tick reloads the page instead. What remains is by
+design: a move made from a shell or by the agent while a `D` confirmation
+stands still reloads the page, and the dialog closes; press the key again.
 
 ## Line ranges
 
@@ -162,61 +84,45 @@ a mode change; that stays behind for `X`. A range in a new or deleted file, or
 in a rename, is refused with "use X"; a range that splits an end-of-file
 newline change is refused too.
 
-Hunk cancels an open dialog on any reload. The extension reloads the review
-itself after each of its own mutations, and Collins' 2 s freshness poll would
-reload it again for the same move — landing on the `D`, `C`, `B` or `F` dialog
-you opened next — so the extension records the index mtime and HEAD it just
-showed in the sidecar (`refreshed`, below) and Collins leaves a move that
-matches alone. What remains is by design: a move made from a shell or by the
-agent while a dialog stands still reloads the page, and the dialog closes;
-press the key again.
+## The Collins contract (sidecar version 2)
 
-## The Collins contract
-
-Collins hands the extension its parameters through a JSON sidecar named in the
-environment variable `COLLINS_GIT_STATE`, created before hunk is spawned and
-deleted when the page closes:
+Collins hands the extension a JSON sidecar named in the environment variable
+`COLLINS_GIT_STATE`, created before hunk is spawned and deleted when the page
+closes:
 
 ```json
-{"version": 1, "parent": "main", "parentSource": "auto", "default": "main", "logPage": 20, "untracked": true}
+{"version": 2, "untracked": true}
 ```
 
-- `parent` — the parent branch *name* (each side resolves it: a local branch,
-  else `origin/<name>`, `upstream/<name>`, …). Collins writes the automatic
-  rung (an open PR's base, else the default branch) or the user's pick.
-- `parentSource` — `"auto"` or `"user"`. The extension writes `"user"` plus
-  `parent` when the user picks a branch, or `"auto"` (leaving `parent` alone)
-  for *Automatic*; Collins then recomputes and rewrites `parent`.
-- `default` — the default branch name; Collins only.
-- `logPage` — commits per group page, 5..500; Collins only.
-- `untracked` — whether working-tree reviews include untracked files (true by
-  default; absent or garbled reads as true); Collins only. When false the
-  extension adds `--exclude-untracked` to every `diff` tail it sends, so its
-  loads agree with Collins' own — hunk resolves the option afresh on each
-  reload, and a bare tail would bring the files back — and leaves the `?`
-  rows out of the files panel's status-fed section (the UNSTAGED list of a
-  staged load), rebuilt when the sidecar changes.
+- `untracked` — whether the working-tree reviews Collins loads include
+  untracked files (true by default; absent or garbled reads as true); Collins
+  only. Informational here: the extension reloads through hunk's own refresh,
+  which keeps whatever `--exclude-untracked` the load was made with.
+
+The rest of the file is the extension's, written for Collins' native panels,
+which read it on their 2 s poll (and, for the selection, at once — the
+file's mtime is what they watch):
+
+- `selection` — `{"path": "<path>", "hunkIndex": n | null}`, the file and
+  hunk under hunk's cursor, or `null` when the cursor is on no file. Written
+  on every `selection_changed` event (keyboard, mouse, `hunk session
+  navigate`) and on every changeset event, only when it changed. This is how
+  Collins' files list follows the cursor without waiting for its poll of
+  `hunk session get`.
+- `anchor` — `{"path": "<path>", "side": "old" | "new", "line": n}`, the line
+  `v` was pressed on, or `null` once cleared (by `esc`, by a key that used it,
+  or by a reload that lost the file). Collins' action row reads it to say
+  *Stage lines* and *Clear anchor*.
 - `refreshed` — `{"index": "<mtime ns>", "head": "<sha>"}`, the index file's
   mtime (a string: the number is past what a JSON double holds) and HEAD as
   the extension saw them right after reloading the review for a mutation of
-  its own; extension only. Collins' freshness poll skips a move that matches.
-- `level` — `"diff"`, `"files"` or `"commits"`: which level of the narrow
-  page's stack the panes show (see "Narrow terminals"), written on startup
-  and whenever a key, a click or a crossing resize changes it; extension
-  only. Collins' header buttons take their tooltips and sensitivity from it
-  (and step it forward themselves on a press, until this catches up).
+  its own. Collins' freshness poll skips a move that matches.
 
 Both sides read-merge-write (temp file + rename), tolerate a missing or garbled
-file, and pass unknown keys through. The extension polls the file every 2 s
-(`fs.watchFile`), rebuilds the commits panel when the config in it changed (its
-own `refreshed` writes move the file too), and re-reads it on every
-`changeset_loaded` / `session_reload`.
-
-Loads go through hunk's own daemon: `<hunk> session reload <id> --json -- <tail>`,
-with the session id resolved once from `session list --json` by `process.pid`.
-A CLI timeout ("Timed out waiting for the Hunk session daemon") is treated as
-unknown, not failed — the viewer reloads anyway and `session_reload` says what
-it did.
+file, and pass unknown keys through. Version 1 of the contract (the parent and
+default branch names, the page size and the narrow-page level, which fed the
+panes this extension used to draw) is gone with the panes; a v1 file's keys are
+ignored.
 
 ## Standalone
 
@@ -224,10 +130,8 @@ it did.
 hunk diff --extension /path/to/collins/hunkext/collins-git
 ```
 
-Without `COLLINS_GIT_STATE` the extension guesses: default branch from
-`origin/HEAD`, else `main`, else `master`; parent = default; 20 commits per
-page; untracked files in. A parent picked with `P` is kept in memory for the
-session.
+Without `COLLINS_GIT_STATE` the five keys work exactly the same and nothing is
+written anywhere.
 
 ## Tests and typecheck
 
@@ -238,11 +142,10 @@ bun install && bun run typecheck   # tsc against hunk's types (dev only)
 ```
 
 The tested modules import only `node:*`, local files and types from
-`hunkdiff/extension`; the two `.tsx` panes are never imported by a test. There
-is no build step: hunk transpiles the files itself and serves its own React and
-OpenTUI to them. `bun.lock` and `node_modules` are not committed.
+`hunkdiff/extension`. There is no build step: hunk transpiles the files itself.
+`bun.lock` and `node_modules` are not committed.
 
 The extension never writes to the terminal (hunk owns it). To watch what it
 does, set `COLLINS_GIT_DEBUG_LOG=/path/to/file` in hunk's environment: startup,
-every changeset it decodes, each resize and what it did to the panes, and every
-level step and the level written are appended there.
+every changeset it decodes, every selection and anchor it writes, and each
+anchor set or cleared are appended there.

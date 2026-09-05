@@ -10,11 +10,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { applyCached, applyWorktreeReverse, readFilePatch, readStatus } from "../git.ts";
+import { applyCached, applyWorktreeReverse, readFilePatch } from "../git.ts";
 import { parseFilePatch } from "../patch.ts";
 import { planDiscard, planHunkToggle, planRangeToggle, type StagingFile } from "../staging.ts";
 import type { LineAddress } from "../range.ts";
 import { createTestGitRepository, hasGit, type TestGitRepository } from "./support/gitRepo.ts";
+import { readStatus } from "./support/status.ts";
 
 const lines = (count: number): string[] => Array.from({ length: count }, (_, i) => `line ${i + 1}`);
 const THIRTY = lines(30).join("\n") + "\n";

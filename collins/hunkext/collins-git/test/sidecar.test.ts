@@ -1,11 +1,10 @@
 // New in the ghackett fork of agent-session-manager (GPL-3.0).
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { GitRunner } from "../git.ts";
-import { configFromEnv, effectiveConfig, readSidecar, writeSidecar } from "../sidecar.ts";
+import { SIDECAR_VERSION, configFromEnv, readSidecar, writeSidecar } from "../sidecar.ts";
 
 let dir: string;
 let path: string;
@@ -19,73 +18,71 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const collinsWrote = {
-  version: 1,
-  parent: "main",
-  parentSource: "auto" as const,
-  default: "main",
-  logPage: 20,
-  untracked: true,
-};
-
-/** A git that knows one local branch, `develop`, and nothing about origin. */
-const git: GitRunner = (args) => {
-  if (args[0] === "symbolic-ref") {
-    return { ok: false, stdout: "", stderr: "" };
-  }
-  if (args[0] === "rev-parse" && args[3] === "refs/heads/develop") {
-    return { ok: true, stdout: "a".repeat(40) + "\n", stderr: "" };
-  }
-  return { ok: false, stdout: "", stderr: "fatal: nope" };
-};
+/** What Collins writes before spawning hunk (hunkctl.sidecar_payload). */
+const collinsWrote = { version: 2, untracked: true };
 
 describe("readSidecar", () => {
   test("reads what Collins wrote", () => {
-    writeSidecar(path, collinsWrote);
-    expect(readSidecar(path)).toEqual({ parent: "main", parentSource: "auto", default: "main", logPage: 20, untracked: true });
+    writeFileSync(path.replace("collins/", ""), JSON.stringify(collinsWrote), "utf8");
+    expect(readSidecar(path.replace("collins/", ""))).toEqual({ untracked: true });
   });
 
   test("untracked is false only when Collins says so; absent or garbled reads as true", () => {
-    writeSidecar(path, { ...collinsWrote, untracked: false });
-    expect(readSidecar(path)?.untracked).toBe(false);
-    writeFileSync(path, JSON.stringify({ parent: "main" }), "utf8");
-    expect(readSidecar(path)?.untracked).toBe(true);
-    writeFileSync(path, JSON.stringify({ untracked: "false" }), "utf8");
-    expect(readSidecar(path)?.untracked).toBe(true);
-    writeFileSync(path, JSON.stringify({ untracked: 0 }), "utf8");
-    expect(readSidecar(path)?.untracked).toBe(true);
+    const at = path.replace("collins/", "");
+    writeFileSync(at, JSON.stringify({ ...collinsWrote, untracked: false }), "utf8");
+    expect(readSidecar(at)?.untracked).toBe(false);
+    writeFileSync(at, JSON.stringify({ version: 2 }), "utf8");
+    expect(readSidecar(at)?.untracked).toBe(true);
+    writeFileSync(at, JSON.stringify({ untracked: "false" }), "utf8");
+    expect(readSidecar(at)?.untracked).toBe(true);
+    writeFileSync(at, JSON.stringify({ untracked: 0 }), "utf8");
+    expect(readSidecar(at)?.untracked).toBe(true);
   });
 
-  test("is tolerant: missing file, garbage, wrong shapes, unsafe names, out-of-range pages", () => {
+  test("is tolerant: missing file, garbage, wrong shapes", () => {
     expect(readSidecar(path)).toBeNull();
-    writeFileSync(path.replace("collins/", ""), "{not json", "utf8");
-    expect(readSidecar(path.replace("collins/", ""))).toBeNull();
-    writeSidecar(path, {});
-    writeFileSync(path, JSON.stringify([1, 2]), "utf8");
-    expect(readSidecar(path)).toBeNull();
-    writeFileSync(path, JSON.stringify({ parent: "-x", parentSource: "nonsense", default: "a b", logPage: 1000 }), "utf8");
-    expect(readSidecar(path)).toEqual({ parent: null, parentSource: "auto", default: null, logPage: 500, untracked: true });
-    writeFileSync(path, JSON.stringify({ logPage: 1 }), "utf8");
-    expect(readSidecar(path)?.logPage).toBe(5);
-    writeFileSync(path, JSON.stringify({ logPage: "20" }), "utf8");
-    expect(readSidecar(path)?.logPage).toBe(20);
+    const at = path.replace("collins/", "");
+    writeFileSync(at, "{not json", "utf8");
+    expect(readSidecar(at)).toBeNull();
+    writeFileSync(at, JSON.stringify([1, 2]), "utf8");
+    expect(readSidecar(at)).toBeNull();
+    writeFileSync(at, JSON.stringify({ parent: "main", level: "files" }), "utf8"); // v1 keys: ignored
+    expect(readSidecar(at)).toEqual({ untracked: true });
   });
 });
 
 describe("writeSidecar", () => {
-  test("merges into what is there, keeping the other side's keys and unknown ones", () => {
+  test("merges into what is there, keeping Collins' keys and unknown ones, and stamps the version", () => {
+    expect(SIDECAR_VERSION).toBe(2);
     writeSidecar(path, {});
     writeFileSync(path, JSON.stringify({ ...collinsWrote, future: true }), "utf8");
-    expect(writeSidecar(path, { parent: "develop", parentSource: "user" })).toBe(true);
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ ...collinsWrote, parent: "develop", parentSource: "user", future: true });
-    expect(writeSidecar(path, { parentSource: "auto" })).toBe(true);
-    expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({ parent: "develop", parentSource: "auto", version: 1 });
+    expect(writeSidecar(path, { selection: { path: "a.txt", hunkIndex: 1 } })).toBe(true);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      ...collinsWrote,
+      future: true,
+      selection: { path: "a.txt", hunkIndex: 1 },
+    });
+    expect(writeSidecar(path, { anchor: { path: "a.txt", side: "new", line: 4 } })).toBe(true);
+    expect(writeSidecar(path, { refreshed: { index: "1756800000123456789", head: "a".repeat(40) } })).toBe(true);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      version: 2,
+      untracked: true,
+      future: true,
+      selection: { path: "a.txt", hunkIndex: 1 },
+      anchor: { path: "a.txt", side: "new", line: 4 },
+      refreshed: { index: "1756800000123456789", head: "a".repeat(40) },
+    });
+  });
+
+  test("null clears a key rather than dropping it, so Collins reads 'no selection' and 'no anchor'", () => {
+    writeSidecar(path, { selection: { path: "a.txt", hunkIndex: null }, anchor: { path: "a.txt", side: "old", line: 2 } });
+    expect(writeSidecar(path, { selection: null, anchor: null })).toBe(true);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ version: 2, selection: null, anchor: null });
   });
 
   test("creates the directory and the file when there is none, and leaves no temp file", () => {
-    expect(writeSidecar(path, { parent: "develop", parentSource: "user" })).toBe(true);
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ parent: "develop", parentSource: "user", version: 1 });
-    const { readdirSync } = require("node:fs") as typeof import("node:fs");
+    expect(writeSidecar(path, { selection: null })).toBe(true);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ selection: null, version: 2 });
     expect(readdirSync(join(dir, "collins"))).toEqual(["git-1-1.json"]);
   });
 
@@ -96,40 +93,10 @@ describe("writeSidecar", () => {
   });
 });
 
-describe("configFromEnv and effectiveConfig", () => {
+describe("configFromEnv", () => {
   test("the path comes from COLLINS_GIT_STATE alone", () => {
     expect(configFromEnv({ COLLINS_GIT_STATE: "/run/x.json" })).toEqual({ path: "/run/x.json" });
     expect(configFromEnv({ COLLINS_GIT_STATE: "  " })).toEqual({ path: null });
     expect(configFromEnv({})).toEqual({ path: null });
-  });
-
-  test("the sidecar's names win; without them the extension guesses", () => {
-    expect(
-      effectiveConfig({ parent: "feature", parentSource: "user", default: "trunk", logPage: 7, untracked: false }, git),
-    ).toEqual({
-      parent: "feature",
-      parentSource: "user",
-      default: "trunk",
-      logPage: 7,
-      untracked: false,
-    });
-    expect(effectiveConfig({ parent: null, parentSource: "auto", default: null, logPage: 20, untracked: true }, git)).toEqual({
-      parent: null,
-      parentSource: "auto",
-      default: null,
-      logPage: 20,
-      untracked: true,
-    });
-    const guessing: GitRunner = (args) =>
-      args[0] === "rev-parse" && args[3] === "refs/heads/master"
-        ? { ok: true, stdout: "b".repeat(40), stderr: "" }
-        : { ok: false, stdout: "", stderr: "" };
-    expect(effectiveConfig(null, guessing)).toEqual({
-      parent: "master",
-      parentSource: "auto",
-      default: "master",
-      logPage: 20,
-      untracked: true,
-    });
   });
 });
