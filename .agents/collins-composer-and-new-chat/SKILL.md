@@ -79,8 +79,9 @@ semantics (text, then `\r` a beat later; multi-line via bracketed paste).
 (`composerkeys.typing_opens_composer`; `/`, `!`, `#`, `@` keep their CLI
 meaning). Only an empty box — a permission dialog, a menu, a half-written line
 keep their keys; an agent mid-turn has an empty box and *does* open, since
-composing over a working agent is the point. `composer_new_sessions` can
-auto-show it floating or docked on fresh sessions (`autoshow_composer`).
+composing over a working agent is the point. (The old
+`composer_new_sessions` auto-show setting is gone — the new-chat screen is
+where a first prompt is written — and `AppState._load` drops a saved copy.)
 
 **Drafts.** `capture_composer_draft` / `restore_composer_draft` round-trip the
 text through `AppState.set_session_draft` on tab close and quit; a floating

@@ -140,7 +140,8 @@ deterministic. Compare is PEP 440-lite (`0.1.2.dev0 < 0.1.2`).
 ## Caffeine (`caffeine.py`, `App` inhibitor)
 
 The header's cup: `Gtk.Application.inhibit` with SUSPEND (+ IDLE when
-`caffeine_keep_screen_on`), by timer (`caffeine.py` owns the durations and the
+`caffeine_keep_screen_on`, off by default), armed at launch by default
+(`caffeine_on_launch`, on the `caffeine_launch_timer` = Until idle), by timer (`caffeine.py` owns the durations and the
 button wording so menu, setting and countdown can't drift), indefinitely, or
 **until idle** — `App._follow_activity` keeps the inhibit while any tab is
 working and releases `caffeine_idle_grace_minutes` after the last stops,

@@ -270,9 +270,7 @@ belongs to its session, and it is there when you come back to it.
   a file manager are mentioned in place.
 - **Floating or docked.** The composer floats translucent over the
   terminal; its dock button turns it into a panel below the terminal
-  instead, where it stays for that session's later visits. The *Composer in
-  new sessions* preference can open it by itself the moment a session
-  starts.
+  instead, where it stays for that session's later visits.
 - **Model and effort buttons**: the composer names the model the session
   is answering with and the effort level it answers at, and clicking either
   opens the same switch menu as the footer's — pick a different model or
@@ -808,11 +806,13 @@ fills while it's on.
   minutes after the last one stops, Caffeine Mode dozes but stays armed: a
   session picking work back up — tomorrow morning included — takes hold of
   the machine again, until you click the cup off.
-- **Keep screen on** decides how far "awake" goes: on (the default) holds
-  the screen too; off lets the screen blank while the computer still can't
-  sleep — for an overnight run you don't want lighting up the room.
-  Preferences can also arm Caffeine Mode at every launch, with a duration
-  of your choice.
+- **Keep screen on** decides how far "awake" goes: on holds the screen
+  too; off (the default) lets the screen blank while the computer still
+  can't sleep — for an overnight run you don't want lighting up the room.
+- **On at launch**, by default: every launch arms Caffeine Mode on the
+  Until-idle timer, so the machine stays up while a session works and
+  dozes when none does. Preferences turn that off, or pick another
+  duration for it.
 
 ## Multiple windows
 
@@ -831,7 +831,7 @@ along.
 Terminal **font**, **scrollback** size, **easy copy & paste** (on by default),
 a **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin,
 Tokyo Night, Monokai, One Dark…), the **composer's** switches (the typing
-trigger, Enter behavior, the floating button, auto-open in new sessions),
+trigger, Enter behavior, the floating button),
 the editor's **color scheme**, **font**, **line numbers**/**hidden
 files** toggles and the width below which it shows a **single column**, the
 app's **Dark / Light Mode** (system / light / dark), the **Notifications**

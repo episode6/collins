@@ -199,13 +199,6 @@ DEFAULT_SETTINGS = {
     # Whether Enter sends the composer's text (Shift+Enter for a newline);
     # off swaps the pair: Enter is a newline and Ctrl+Enter sends.
     "composer_enter_sends": True,
-    # What a session Collins starts fresh opens its composer as, off by
-    # default: "off" | "float" (raised over the terminal, as Ctrl+. does) |
-    # "dock" (a panel page below it, which joins the session's saved layout
-    # and so comes back on later resumes). Only new sessions — a resumed one
-    # is left to the layout it was closed with (see composerkeys.autoshow_mode
-    # and TerminalTab.autoshow_composer).
-    "composer_new_sessions": "off",
     # Whether typing at an agent's empty input box raises the composer and
     # takes the character with it, so a prompt is written in the composer by
     # default and in the CLI's box only on purpose. On by default. Only an
@@ -231,8 +224,12 @@ DEFAULT_SETTINGS = {
     "footer_apps": [],  # desktop-file IDs of apps launchable from each tab's footer
     # Whether Caffeine Mode holds the screen on too (idle inhibit) or only
     # keeps the computer from suspending, leaving the screen free to blank.
-    "caffeine_keep_screen_on": True,
-    "caffeine_on_launch": False,  # start with Caffeine Mode on (see app.py's inhibitor)
+    # Off by default: an unattended agent needs the computer, not the room lit.
+    "caffeine_keep_screen_on": False,
+    # Start with Caffeine Mode on (see app.py's inhibitor), on the timer
+    # below. On by default with the Until-idle timer: the machine stays up
+    # only while a session works, and dozes five minutes after the last stops.
+    "caffeine_on_launch": True,
     "caffeine_launch_timer": "active",  # shut-off timer armed at launch (see caffeine.py)
     # Minutes the Until-idle mode keeps holding the machine awake after the
     # last session stops working, before it dozes (see caffeine.grace_seconds).
@@ -542,6 +539,10 @@ class AppState:
         # default. Either way the old key goes, dropped on the next save.
         if settings.pop("auto_title_sessions", None) is False:
             settings["title_model"] = NO_MODEL
+        # composer_new_sessions (auto-open the composer on a fresh session)
+        # went with the new-chat screen, which writes every first prompt in
+        # its own box; the key is dropped on the next save.
+        settings.pop("composer_new_sessions", None)
         self.settings = {**DEFAULT_SETTINGS, **settings}
 
     def save(self) -> None:

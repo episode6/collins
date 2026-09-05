@@ -166,6 +166,14 @@ downloads of each version, see the
   adopts the titles the CLI writes into each transcript (`/rename`
   included) as they land. Installs that have already saved their
   preferences keep whatever the switch was set to.
+- **Caffeine Mode arms itself at launch.** *Turn on at launch* now
+  defaults to on with the *Until idle* timer, so a fresh install keeps the
+  computer awake exactly while a session is working and dozes after. *Keep
+  screen on* defaults to off: the computer stays up, the screen may blank.
+  Both are preferences; installs that have saved theirs keep them.
+- **The *Composer in new sessions* preference is gone.** The new-chat
+  screen writes every first prompt in its own composer, which is what the
+  setting was for; a saved value is dropped on load.
 
 ### v0.1.2 — 2026-08-30
 

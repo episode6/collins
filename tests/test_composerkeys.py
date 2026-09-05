@@ -1,14 +1,9 @@
 import pytest
 
 from collins.composerkeys import (
-    AUTOSHOW_MODES,
-    DOCK,
-    FLOAT,
     NEWLINE,
-    OFF,
     PASS,
     SEND,
-    autoshow_mode,
     draft_to_restore,
     enter_action,
     expand_pasted_back,
@@ -264,25 +259,6 @@ def test_expand_pasted_back_leaves_plain_text_alone():
 def test_expand_pasted_back_refuses_a_stand_in_that_isnt_ours(screen):
     record = {"[Pasted text #1 +2 lines]": "a\nb\nc"}
     assert expand_pasted_back(screen, record) is None
-
-
-@pytest.mark.parametrize("mode", AUTOSHOW_MODES)
-def test_autoshow_mode_keeps_known_values(mode):
-    assert autoshow_mode(mode) == mode
-
-
-def test_autoshow_modes_are_the_three_the_setting_offers():
-    assert AUTOSHOW_MODES == (OFF, FLOAT, DOCK)
-
-
-@pytest.mark.parametrize(
-    "setting", [None, "", "on", True, False, 1, "Docked", "float ", ["dock"]]
-)
-def test_autoshow_mode_falls_back_to_off(setting):
-    # Showing a composer is the opt-in half, so anything unreadable — a
-    # missing setting, a hand-edited word, an older Collins's boolean —
-    # must land on off rather than conjure one.
-    assert autoshow_mode(setting) == OFF
 
 
 def test_stashable_draft_keeps_real_text():

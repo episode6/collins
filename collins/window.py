@@ -2035,14 +2035,6 @@ class MainWindow(Adw.ApplicationWindow):
             background=background,
         )
         self._add_placeholder(page, tab, cwd)
-        if not background:
-            # A session Collins starts fresh can come up with its composer
-            # already open (opt-in; see TerminalTab.autoshow_composer). Only
-            # here: the sessions reopened in open_session restore the panel
-            # layout they were closed with, which is that session's own answer.
-            # A background session has no one at it to type in the box, and
-            # opening one would only be found later as clutter.
-            tab.autoshow_composer(self.state.get_setting("composer_new_sessions"))
         return tab
 
     # -- sidebar placeholders for unresolved new-session tabs ----------------
@@ -2263,9 +2255,6 @@ class MainWindow(Adw.ApplicationWindow):
             self.state.remove_new_chat_draft(draft_id)
             panelhistory.delete(draft_id)
         tab.begin_session(options, text)
-        # The same opt-in a console launch honours (see _launch_new_session):
-        # a docked composer joins the session's layout from its first turn.
-        tab.autoshow_composer(self.state.get_setting("composer_new_sessions"))
         self._refresh_draft_rows()  # the row reads "New Thread" again
 
     def _open_new_chat_draft(self, draft_id: str) -> bool:
