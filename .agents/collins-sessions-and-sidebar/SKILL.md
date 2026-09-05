@@ -167,13 +167,18 @@ keeps its header only while sessions still exist on disk. Bulk deletes
 confirm with the blast radius (counts, projects that vanish) and use the
 system trash. With `archive_on_claude_ai` on, user-driven archives mirror to
 claude.ai on a background thread (`remotearchive.py`), best-effort. A single
-archive that lands on a stopped session also settles its worktree
-(`MainWindow._settle_archived_worktree`, the `archive_worktree` setting:
-ask | always | never): `sessions.removable_worktree` finds the one the
-transcript still records on disk, `sessions.remove_worktree` deletes it
-(`worktree remove --force --force`, then `branch -d`), never while the
-session is detached or another tab / background agent works in it, and
-never for bulk archives. `scripts/check_archive_worktree.py` drives it.
+archive also settles the session's worktree (the `archive_worktree` setting:
+ask | always | never). With "ask", `MainWindow._set_archived` asks *before*
+anything is archived (`_ask_worktree_then_archive`: the dialog has Cancel,
+and Cancel must leave the tab and row untouched); a Delete answer is parked
+in `_worktree_deletions` and acted on by `_settle_archived_worktree` once
+the archive has landed on a stopped session — the deletion always comes
+last. "always" probes and deletes at that same landing. `sessions.
+removable_worktree` finds the worktree the transcript still records on
+disk, `sessions.remove_worktree` deletes it (`worktree remove --force
+--force`, then `branch -d`), never while the session is detached or another
+tab / background agent works in it, and never for bulk archives.
+`scripts/check_archive_worktree.py` drives all of it.
 
 **Trust.** `trust.py` walks `~/.claude.json`'s `hasTrustDialogAccepted`
 entries up the ancestor chain (the CLI honours ancestors), and asks the

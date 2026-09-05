@@ -242,6 +242,7 @@ class _CarriedPage(NamedTuple):
     local_title: bool
     pending_resolved: tuple[str, str] | None
     archive_on_close: str | None
+    worktree_deletion: dict | None
     busy: bool
 
 
@@ -338,6 +339,12 @@ class MainWindow(Adw.ApplicationWindow):
         # Archive requested for an open session: applied only once its tab
         # really closes (page -> session id).
         self._archive_on_close: dict[Adw.TabPage, str] = {}
+        # Sessions whose archive is waiting on the "delete the worktree?"
+        # dialog (see _set_archived), and the worktree-state records of the
+        # ones whose answer was Delete, keyed by session id, for
+        # _settle_archived_worktree to act on once the archive has landed.
+        self._worktree_asking: set[str] = set()
+        self._worktree_deletions: dict[str, dict] = {}
         # What Undo (the snackbar's button, and Ctrl+Shift+Z) would restore:
         # the session ids of the last archive that landed. Replaced by the
         # next archive, emptied when the sessions come back — by Undo itself,
@@ -5436,6 +5443,7 @@ class MainWindow(Adw.ApplicationWindow):
             local_title=page in self._local_titles,
             pending_resolved=self._pending_resolved.pop(page, None),
             archive_on_close=self._archive_on_close.pop(page, None),
+            worktree_deletion=self._worktree_deletions.pop(session_id, None) if session_id else None,
             busy=bool(session_id) and self._activity.is_busy(session_id),
         )
         # A popped-out editor window is held by *this* window, and docks back
@@ -5491,6 +5499,8 @@ class MainWindow(Adw.ApplicationWindow):
             self._pending_resolved[page] = carried.pending_resolved
         if carried.archive_on_close:
             self._archive_on_close[page] = carried.archive_on_close
+            if carried.worktree_deletion is not None:
+                self._worktree_deletions[carried.archive_on_close] = carried.worktree_deletion
         self._wire_tab(tab, page)
         session_id = self._session_id_of(page)
         if session_id:
@@ -6210,6 +6220,7 @@ class MainWindow(Adw.ApplicationWindow):
         session_id = self._archive_on_close.pop(page, None)
         if session_id is not None:
             self.sidebar.clear_archiving(session_id)
+            self._worktree_deletions.pop(session_id, None)
 
     def archive_session(self, session_id: str) -> None:
         """Archive *session_id*, whatever it is now.
@@ -6228,6 +6239,74 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_archived(session_id, not self.state.is_archived(session_id))
 
     def _set_archived(self, session_id: str, archived: bool) -> None:
+        if archived and self.state.get_setting("archive_worktree") == "ask":
+            # The worktree question comes first: it has a Cancel, and a
+            # cancelled archive must leave the session exactly where it is —
+            # tab open, row in place. The deletion itself still waits for
+            # the archive to land (see _settle_archived_worktree).
+            if session_id in self._worktree_asking:
+                return  # the dialog is already up for this session
+            self._ask_worktree_then_archive(session_id)
+            return
+        self._archive_now(session_id, archived)
+
+    def _ask_worktree_then_archive(self, session_id: str) -> None:
+        """The archive_worktree setting is "ask": before anything is put away,
+        read the transcript off the main loop for the worktree the session
+        still occupies (sessions.removable_worktree) and, if there is one
+        nobody else is working in, ask what should become of it. Keep and
+        Delete both archive the session — Delete also records the worktree
+        for _settle_archived_worktree, which deletes it once the session has
+        stopped; Cancel archives nothing. A session with nothing to ask about
+        (no worktree, or one another tab or background agent shares, or one
+        this session runs on in as a background agent) archives right away.
+        """
+        session = self.store.get_session(session_id)
+        if session is None or self._is_detached(session_id):
+            self._archive_now(session_id, True)
+            return
+        jsonl_path, cwd = session.jsonl_path, session.cwd or ""
+        own_page = self._page_for(session_id)
+        self._worktree_asking.add(session_id)
+
+        def land(state: dict | None) -> bool:
+            self._worktree_asking.discard(session_id)
+            if self.state.is_archived(session_id):
+                return GLib.SOURCE_REMOVE  # archived some other way meanwhile
+            if state is None or self._worktree_in_use(str(state["worktreePath"]), except_page=own_page):
+                self._archive_now(session_id, True)
+                return GLib.SOURCE_REMOVE
+
+            def delete() -> None:
+                self._worktree_deletions[session_id] = state
+                self._archive_now(session_id, True)
+
+            dialogs.confirm_dialog(
+                self,
+                _("Delete the session's worktree?"),
+                _(
+                    "{path}\n\nArchiving the session leaves its worktree behind "
+                    "unless it is deleted with it. Deleting discards any "
+                    "uncommitted changes in the worktree; its branch is kept if "
+                    "it has unmerged commits. Cancel leaves the session where "
+                    "it is."
+                ).format(path=str(state["worktreePath"])),
+                _("Delete Worktree"),
+                delete,
+                extra_label=_("Keep Worktree"),
+                on_extra=lambda: self._archive_now(session_id, True),
+                default_response="extra",
+                keys={"d": "confirm", "k": "extra"},
+            )
+            return GLib.SOURCE_REMOVE
+
+        def probe() -> None:
+            state = removable_worktree(jsonl_path, cwd)
+            GLib.idle_add(land, state, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=probe, daemon=True).start()
+
+    def _archive_now(self, session_id: str, archived: bool) -> None:
         page = self._page_for(session_id) if archived else None
         if page is not None:
             # Close the tab through the normal close-page flow, so a busy tab
@@ -6283,26 +6362,28 @@ class MainWindow(Adw.ApplicationWindow):
         — it had no tab, or its tab has closed: what the archive_worktree
         setting says happens to the git worktree the session still occupies.
 
-        "never" leaves it. Otherwise the transcript is read off the main loop
-        for the worktree it records (sessions.removable_worktree — nothing
-        when the session never had one, left it, or the CLI already reaped it
-        on exit), and the answer lands as either the deletion itself
-        ("always") or a dialog offering it ("ask"). Not while the session runs
-        on as a background agent, and not while another tab or background
-        agent is working in that worktree: a session that shares one — a
-        fork, a /bg handoff still listed — hasn't stopped using it.
+        "never" leaves it. "ask" already asked, before the archive began
+        (_ask_worktree_then_archive): the answer was Delete if this session
+        has a record in _worktree_deletions, and that worktree goes now.
+        "always" reads the transcript off the main loop for the worktree it
+        records (sessions.removable_worktree — nothing when the session never
+        had one, left it, or the CLI already reaped it on exit) and deletes
+        it. Neither while the session runs on as a background agent, nor
+        while another tab or background agent is working in that worktree: a
+        session that shares one — a fork, a /bg handoff still listed —
+        hasn't stopped using it.
 
         Only single archives come here: bulk archives (select mode, a whole
         project) would ask once per worktree, and leave them all alone
         instead.
         """
         policy = self.state.get_setting("archive_worktree")
+        decided = self._worktree_deletions.pop(session_id, None)
         if policy not in ("ask", "always"):
             return
         session = self.store.get_session(session_id)
         if session is None or self._is_detached(session_id):
             return
-        jsonl_path, cwd = session.jsonl_path, session.cwd or ""
 
         def land(state: dict) -> bool:
             path = str(state["worktreePath"])
@@ -6310,24 +6391,14 @@ class MainWindow(Adw.ApplicationWindow):
             # back in the list and may be resumed into its worktree any moment.
             if not self.state.is_archived(session_id) or self._worktree_in_use(path):
                 return GLib.SOURCE_REMOVE
-            if policy == "always":
-                self._delete_worktree(state)
-                return GLib.SOURCE_REMOVE
-            dialogs.confirm_dialog(
-                self,
-                _("Delete the session's worktree?"),
-                _(
-                    "{path}\n\nThe session is archived either way. Deleting the "
-                    "worktree discards any uncommitted changes in it; its branch "
-                    "is kept if it has unmerged commits."
-                ).format(path=path),
-                _("Delete Worktree"),
-                lambda: self._delete_worktree(state),
-                extra_label=_("Keep Worktree"),
-                default_response="extra",
-                keys={"d": "confirm", "k": "extra"},
-            )
+            self._delete_worktree(state)
             return GLib.SOURCE_REMOVE
+
+        if policy == "ask":
+            if decided is not None:
+                land(decided)
+            return
+        jsonl_path, cwd = session.jsonl_path, session.cwd or ""
 
         def probe() -> None:
             state = removable_worktree(jsonl_path, cwd)
@@ -6336,13 +6407,17 @@ class MainWindow(Adw.ApplicationWindow):
 
         threading.Thread(target=probe, daemon=True).start()
 
-    def _worktree_in_use(self, path: str) -> bool:
+    def _worktree_in_use(self, path: str, except_page: Adw.TabPage | None = None) -> bool:
         """Whether an open tab in any window, or a background agent, is
-        working in *path* or somewhere under it."""
+        working in *path* or somewhere under it. *except_page* is a tab not
+        to count: the session being archived, asked about while its own tab
+        is still open."""
         app = self.get_application()
         windows = [w for w in (app.get_windows() if app is not None else [self]) if isinstance(w, MainWindow)]
         for window in windows:
             for page in window._pages.values():
+                if page is except_page:
+                    continue
                 tab = page.get_child()
                 if isinstance(tab, TerminalTab) and tab.start_cwd and path_within(path, tab.start_cwd):
                     return True

@@ -125,12 +125,13 @@ DEFAULT_SETTINGS = {
     # MainWindow._hide_window.
     "archive_running_session": "ask",  # archiving a session whose tab is busy
     "quit_with_running_sessions": "ask",  # closing a window while sessions run
-    # What becomes of a session's git worktree when the session is archived —
-    # once it has stopped, if a tab was open: ask (a dialog offering to delete
-    # it) | always (delete it, no dialog) | never (leave it). Only a worktree
+    # What becomes of a session's git worktree when the session is archived:
+    # ask (a dialog before the archive — Keep, Delete, or Cancel the archive)
+    # | always (delete it, no dialog) | never (leave it). The deletion itself
+    # waits until the session has stopped, if a tab was open. Only a worktree
     # the session still occupies (sessions.removable_worktree), and never
     # while the session runs on as a background agent — see
-    # MainWindow._settle_archived_worktree.
+    # MainWindow._ask_worktree_then_archive and _settle_archived_worktree.
     "archive_worktree": "ask",
     # Whether the one-time first-hide notice has gone out: the desktop
     # notification saying "Collins is still running" the first time a window

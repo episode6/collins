@@ -757,15 +757,18 @@ flipped the switch is refused if it calls it anyway.
   archived sessions* to see and restore them). Archiving a session with an open tab
   closes the tab too, and whole **projects** can be archived from their
   header's right-click menu.
-- **Archiving a session in a git worktree** asks whether to delete the
-  worktree once the session has stopped — *Keep Worktree* or *Delete
-  Worktree* — and Preferences → *When archiving a session in a git
-  worktree* turns the question into *Always Delete* or *Never Delete*.
-  Deleting discards uncommitted changes in the worktree; its branch is kept
-  when it has unmerged commits. A worktree the session left, one the agent
-  already reaped on exit, or one another tab or background agent is still
-  working in is never offered, and bulk archives leave worktrees alone.
-  Restoring the session later recreates the worktree on resume, as always.
+- **Archiving a session in a git worktree** first asks whether to delete
+  the worktree — *Keep Worktree*, *Delete Worktree*, or *Cancel*, which
+  leaves the session where it is. Either answer archives the session; the
+  deletion itself waits until the session has stopped (right away without a
+  tab, after the tab's exit with one). Preferences → *When archiving a
+  session in a git worktree* turns the question into *Always Delete* or
+  *Never Delete*. Deleting discards uncommitted changes in the worktree; its
+  branch is kept when it has unmerged commits. A worktree the session left,
+  one the agent already reaped on exit, or one another tab or background
+  agent is still working in is never offered, and bulk archives leave
+  worktrees alone. Restoring the session later recreates the worktree on
+  resume, as always.
 - **Archiving reaches claude.ai too** (on by default — Preferences →
   *Archive on claude.ai too*): a session you've remote-controlled from
   claude.ai, or teleported in from it, has a sibling on the web's session
