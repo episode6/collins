@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-02. Full change history: git log for this file.
+# fork. Last modified: 2026-09-05. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -66,8 +66,9 @@ DEFAULT_SETTINGS = {
     # _agent_tab_environment). Off = the inferred sources alone, as before;
     # the env half only takes effect for tabs opened after a change.
     "progress_termprop": True,
-    # Read each new session's first prompt for pull request references and
-    # attach every PR it names to the session's row (see prattach.py).
+    # Read each new session's first prompt for pull request URLs and attach
+    # every PR it links to the session's row (see prattach.py). URLs only:
+    # "PR 1" is as often a PR the session is about to open as one that exists.
     "attach_prompt_prs": True,
     # Claude models for the app's own headless runs, as --model values.
     # "" = automatic: the newest model of the setting's preferred tier, or

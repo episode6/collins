@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-04. Full change history: git log for this file.
+fork. Last modified: 2026-09-05. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -132,6 +132,15 @@ downloads of each version, see the
   and both pickers move within a poll of the command running. A model
   chosen in the CLI's own `/model` picker still waits for the next
   reply, since the CLI prints its name rather than its id.
+- **A first prompt attaches only the pull requests it links.** Reading
+  a new session's first prompt for PRs used the same grammar session
+  titling does, so "open PR 0 of the port" and "PR 1 (base: main),
+  PR 2 (base: PR 1's branch)" put the repository's real pull requests
+  0, 1 and 2 — somebody else's, years old — on sessions that were about
+  to *open* those PRs. Now only a full `/pull/` URL in the prompt
+  attaches; "PR 12" and `owner/repo#12` are left to the `attach_pr`
+  tool and the transcript. Titling still reads all three forms. The
+  Preferences switch is now **Attach pull requests linked in prompts**.
 
 ### v0.1.2 — 2026-08-30
 

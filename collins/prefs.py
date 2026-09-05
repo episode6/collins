@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-02. Full change history: git log for this file.
+# fork. Last modified: 2026-09-05. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -902,11 +902,11 @@ class PreferencesDialog(Adw.Dialog):
         self._confirm_merges_row.connect("notify::active", self._on_confirm_merges_changed)
         pr_group.add(_searchable(self._confirm_merges_row, "merge", "archive", "dialog"))
         self._attach_prompt_prs_row = Adw.SwitchRow(
-            title=_("Attach pull requests named in prompts"),
+            title=_("Attach pull requests linked in prompts"),
             subtitle=_(
-                "Put every pull request a new session's first prompt "
-                "mentions on that session's row, without waiting for the "
-                "agent to touch it"
+                "Put every pull request a new session's first prompt links "
+                "by URL on that session's row, without waiting for the agent "
+                "to touch it; \"PR 12\" alone is not enough"
             ),
         )
         self._attach_prompt_prs_row.set_active(bool(state.get_setting("attach_prompt_prs")))
