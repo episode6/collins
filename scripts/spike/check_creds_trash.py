@@ -94,6 +94,19 @@ def check_trash() -> tuple[bool, str]:
     gained = sorted(_trash_listing() - before)
     home_landed = any(f"{stamp}-home" in n for n in gained)
     tmp_landed = any(f"{stamp}-tmp" in n for n in gained)
+    # Run 4: trash() returned True and the files were gone, yet ~/.Trash
+    # gained nothing. Look everywhere they could have gone.
+    for label, cmd in (
+        ("ls ~/.Trash", ["ls", "-la", os.path.expanduser("~/.Trash")]),
+        ("ls ~/.local/share/Trash", ["ls", "-laR", os.path.expanduser("~/.local/share/Trash")]),
+        ("find", ["find", os.path.expanduser("~"), "/var/folders", "/Volumes", "-name", f"{stamp}*"]),
+        ("ls /Volumes/*/.Trashes", ["sh", "-c", "ls -la /Volumes/*/.Trashes /.Trashes 2>&1 | head -20"]),
+    ):
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            print(f"{label}: rc={res.returncode}\n{res.stdout.strip()}\n{res.stderr.strip()}".rstrip())
+        except Exception as exc:  # noqa: BLE001
+            print(f"{label}: {exc!r}")
     detail = (
         f"{'; '.join(results)}; ~/.Trash gained={gained} "
         f"home_landed={home_landed} tmp_landed={tmp_landed}"

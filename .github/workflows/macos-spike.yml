@@ -180,13 +180,16 @@ jobs:
 
       # GTK-free by design; tests/test_proctree.py skips itself without /proc.
       # Whatever else fails here is the input for PR 1, not a blocker.
+      # Run 4 hung here for the whole hour (a pty-driving test, by position);
+      # pytest-timeout names the culprit instead, and -v names every failure.
       - name: Unit suite under brew python (item f)
         continue-on-error: true
+        timeout-minutes: 25
         run: |
           "$PY" -m venv --system-site-packages "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install --quiet pytest
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet pytest pytest-timeout
           "$RUNNER_TEMP/venv/bin/python" -c "import gi; print('gi from', gi.__file__)"
-          "$RUNNER_TEMP/venv/bin/python" -m pytest tests/ -q -rfEs -p no:cacheprovider 2>&1 | tee "$OUT/pytest.log"
+          "$RUNNER_TEMP/venv/bin/python" -m pytest tests/ -v -rfEs -p no:cacheprovider --timeout=120 2>&1 | tee "$OUT/pytest.log"
           rc="${PIPESTATUS[0]}"
           tail -1 "$OUT/pytest.log" | sed 's/^/RESULT pytest /' | tee -a "$OUT/pytest-result.log"
           if [ "$rc" = 0 ]; then echo "PASS pytest" | tee -a "$OUT/pytest-result.log"; else echo "FAIL pytest rc=$rc" | tee -a "$OUT/pytest-result.log"; fi
