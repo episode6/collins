@@ -93,7 +93,17 @@ Everything here is probed CLI behaviour (2.1.2xx), encoded in
   through `_post_switch`; the typed `/model` form **also saves the user's
   default** to `~/.claude/settings.json`. The footer's model and effort come
   from the transcript (`transcript.TranscriptModel.model()` / `.effort()`),
-  never from settings.
+  never from settings. A switch shows up as soon as the CLI confirms it, not
+  at the next reply: the CLI writes a local slash command as a user line
+  wrapped in `<command-name>` / `<command-args>` and its output as a second
+  user line starting `<local-command-stdout>`; `_record_switch` arms on the
+  first and commits on the second only when it reads as the confirmation
+  (`Set effort level to <level>` — the level comes off the text, so the
+  CLI's own picker counts too; `Set model to <display name>` — the model
+  comes off the command's args, so a bare `/model` picked in the CLI waits
+  for the next reply's `message.model`, which also replaces an alias with
+  the resolved id). A refused switch prints something else and moves
+  nothing.
 - `feed_message()` paints into VTE directly (not into the pty): the CLI's box
   reads as unreadable until it redraws.
 - `add_file_to_chat` types `@path#L2-4` (`Provider.file_reference`; whole lines
@@ -138,8 +148,12 @@ SIGHUPs its child; a hidden window keeps every page alive with no
 `_candidate_pids` chain, worktree-aware; click copies), the git branch
 (`gitinfo.current_branch`, no subprocess; click opens the git page), model
 and effort chips (`modelmenu` MenuButtons), PR chips (`PrChipRow` measures
-overflow into an ellipsis menu), the composer/attachments/git/editor buttons
-and footer apps. The cwd tick also drives `_maybe_follow_editor` (the editor
+overflow into an ellipsis menu), the composer/attachments/terminal/git/editor
+buttons and footer apps. The git button (`_git_toggle_btn`, `gitpage.ICON`,
+`win.toggle-git`) sits between the terminal and editor toggles and is
+**greyed outside a repository rather than hidden**, re-checked with the
+branch on the 2 s tick — a button that comes and goes is one nobody learns
+the place of. The cwd tick also drives `_maybe_follow_editor` (the editor
 and panel shells follow a worktree hop) and the git page's freshness check.
 
 Links (`_setup_links`): VTE regex matches for URLs and path-shaped text

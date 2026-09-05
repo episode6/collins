@@ -18,8 +18,11 @@ description: >-
 
 ## Shape
 
-`GitPage` (`gitpage.py`) is a `PanelPage` (`page_kind="git"`, F6 / the
-footer's branch label / the `show_diff` tool) holding a VTE that runs
+`GitPage` (`gitpage.py`) is a `PanelPage` (`page_kind="git"`; opened by F6,
+the footer's git button, a click on the footer's ⎇ branch label, or the
+`show_diff` tool; the button fires `win.toggle-git`, so it closes the page
+too when the cursor is in it and its tooltip carries the F6 hint, while the
+label only ever opens, via `TerminalTab.open_git_page`) holding a VTE that runs
 `hunk diff --watch --transparent-bg --extension <collins-git> [--mode …]
 [--theme …] [--exclude-untracked]` in the agent's working tree, under a
 one-row header: the branch, a breadcrumb of what is loaded, back/forward
@@ -28,7 +31,8 @@ hunk's plus the extension's. A machine without hunk (or with one older than
 the version gate) gets an install card linking to hunk.dev with a "Check
 again" button — never an error. `hunkctl.ProbeCache` probes `hunk --version`
 at most every 30 s; `App._refresh_hunk_probe` also gates the `show_diff` tool's
-presence in the MCP list.
+presence in the MCP list. The tab's glyph is `gitpage.ICON`
+(`git-merge-symbolic`), public because the footer button wears it too.
 
 **Loads go through hunk's session API, not respawns.** After spawning, the
 page resolves the viewer's session id from `hunk session list --json`,
@@ -39,7 +43,12 @@ child pid is the wrapper and hunk reports the child. Then Ctrl+1/2/3 (unstaged
 -- diff …` or `-- show <ref>`, swapping the contents in place. Only a reply
 whose stderr says the session is gone (`hunkctl.session_gone`: "No active
 session(s)…") triggers a respawn; a refused load ("could not resolve Git
-revision") leaves the healthy viewer alone. The three modes plus
+revision") leaves the healthy viewer alone. When `_resolved` gives up on
+`session list` (retries at `RESOLVE_DELAYS_MS`), every switch is a respawn
+and an `Adw.Banner` over the viewer says the viewer never registered with
+the daemon, names `hunkctl.DAEMON_DIAGNOSTIC` (`hunk daemon serve`) as the
+run that prints why, and offers **Retry** (`_respawn`); the banner hides on a
+successful resolve, a card, or the child exiting. The three modes plus
 `{"show": ref}` are the `Loaded` value; `hunkctl.breadcrumb` / `tab_title` /
 `loaded_from_title` map between them and hunk's own session titles.
 
@@ -128,12 +137,17 @@ right-click: `current_branch`, `default_branch`, `github_url`, `repo_root`,
 ## Footguns
 
 - **hunk 0.21 refuses its daemon when `$XDG_RUNTIME_DIR/hunk-mcp` is not
-  0700** (0.20 created it with the umask). Symptom: `hunk session list --json`
-  answers `{"sessions": []}`, a commit click toasts "cannot find this hunk
-  window in the session daemon", the page stays on the working tree. Fix:
-  `chmod 700` the directory, kill daemons born before it, reopen the page
-  (a viewer launched while the daemon was dead does not reconnect). `hunk
-  daemon serve` in the foreground prints the reason.
+  owner-only** (0.20 created it with the umask; 0.21 creates it 0700 itself).
+  Symptom: `hunk session list --json` answers `{"sessions": []}`, a commit
+  click toasts "cannot find this hunk window in the session daemon", the
+  page stays on the working tree, and the auto-spawned daemon's stderr is
+  swallowed. `hunkctl.repair_daemon_dir(runtime_dir)` runs on the probe
+  thread before every spawn and chmods the directory (`DAEMON_DIR`,
+  `DAEMON_DIR_MODE`) when group/other bits are set — it never raises and
+  returns `absent` / `ok` / `repaired` / `failed`; the page only logs the
+  outcome. It cannot revive a viewer launched while the daemon was dead
+  (that viewer never reconnects), which is what the banner's Retry is for;
+  kill daemons born before the repair if the banner persists.
 - Matching the session by `pid == child_pid` finds nothing (wrapper vs
   viewer); use the children set.
 - Narrow terminals: hunk hides its sidebar under 73 columns and never brings

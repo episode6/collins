@@ -46,7 +46,10 @@ in; `bridge-session` names a claude.ai counterpart; `ai-title` /
 `custom-title` / `agent-name` records carry the CLI's names, the last of any
 type winning; `pr-link` records name PRs; every user turn carries
 `permissionMode`; every assistant line carries `message.model` (skip
-`<synthetic>` and `isSidechain` lines) and a top-level `effort`.
+`<synthetic>` and `isSidechain` lines) and a top-level `effort`; a slash
+command the CLI ran locally is a user line whose content is
+`<command-name>/x</command-name>…<command-args>…</command-args>` followed by
+a user line starting `<local-command-stdout>` with what it printed.
 
 **Worktrees.** `worktree_project_root(cwd)` maps `<repo>/.claude/worktrees/x`
 back to `<repo>` — every "which project is this" question goes through it,

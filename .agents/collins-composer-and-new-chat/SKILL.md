@@ -19,7 +19,9 @@ description: >-
 
 A host-agnostic widget: an optionally spell-checked multi-line
 `GtkSource.View` (font matched to the terminal on purpose) under a button
-row — close, dock/float, attach, model and effort pickers, Send. It owns no
+row — close (floating only: docked, the panel tab's X already closes it, so
+`set_docked` hides the chrome's), dock/float, attach, model and effort
+pickers, Send. It owns no
 terminal plumbing: it emits `send-requested` / `close-requested` /
 `dock-toggle-requested` and takes injected callbacks for file references and
 notifications. The one live view is either raised over the terminal in a
@@ -117,7 +119,10 @@ top-level `effortLevel`, which `/effort` never clears). Picking a model
 clears the effort pick so the dial reads the new model's default. Levels a
 model can't take (catalog `capabilities.effort`) draw insensitive. The
 running session's menus (`new_model_popover` / `new_effort_popover`) mark the
-transcript's current model/effort and post `/model` / `/effort` instead.
+transcript's current model/effort and post `/model` / `/effort` instead; the
+mark moves when the transcript shows the CLI confirming the switch
+(`TranscriptModel._record_switch`, see `collins-terminal-tab`), never on the
+pick itself.
 Every one of these popovers must be hosted by a `Gtk.MenuButton`: a
 hand-parented `Gtk.PopoverMenu` filled on `show` measures once against an
 empty menu and locks tiny.
