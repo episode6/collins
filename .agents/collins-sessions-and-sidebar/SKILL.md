@@ -139,7 +139,11 @@ tabs attached to a background agent the `claude agents --json` busy status
 speaks no progress). Ungated sources are held on fresh spawns until the gate
 arms (`MainWindow._startup_held`). The busy→idle edge is
 `MainWindow._on_session_finished`: it flags unread, refreshes PRs, and is the
-edge any "do this when the session is done" feature should ride.
+edge any "do this when the session is done" feature should ride. A progress
+termprop clear (and a background agent's idle reading) does not land that
+edge at once: the CLI (2.1.261) also clears the hint for a beat between tool
+calls, so `finish(grace_s=PROGRESS_FINISH_GRACE_S)` arms the finish for 3 s
+and the next busy hint `resume`s it; the pole stays up through the wait.
 
 **Background agents.** `bgstatus.py` polls `background_agents()` on a file
 monitor over `~/.claude/jobs/` (used only as a wake-up, never parsed) plus
