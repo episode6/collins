@@ -79,7 +79,7 @@ jobs:
           cp "$OUT/python-facts.txt" "$OUT/python-facts.log"
           echo "PY=$PY" >> "$GITHUB_ENV"
           echo "XDG_DATA_DIRS=$PREFIX/share:/usr/local/share:/usr/share" >> "$GITHUB_ENV"
-          echo "PYTHONPATH=${{ github.workspace }}:${{ github.workspace }}/scripts/spike/stub" >> "$GITHUB_ENV"
+          echo "PYTHONPATH=${{ github.workspace }}" >> "$GITHUB_ENV"
           echo "PYTHONUNBUFFERED=1" >> "$GITHUB_ENV"
           "$PY" --version
           hunk --version || true

@@ -6,10 +6,11 @@ runs `python3 -m collins`, waits, takes a `screencapture`, then terminates.
 
     python3 launch_collins.py <out-dir> <label>
 
-Set SPIKE_STUB_PROCTREE=1 (with scripts/spike/stub on PYTHONPATH) to run
-with proctree stubbed. PASS means the process was still alive at the
-deadline and stderr carries no Python traceback; stderr is saved beside
-the PNG either way.
+Set SPIKE_STUB_PROCTREE=1 to run with proctree stubbed: the stub module
+in scripts/spike/stub is imported before `collins` runs as __main__ (not a
+sitecustomize -- that shadows Homebrew python's own and loses gi). PASS
+means the process was still alive at the deadline and stderr carries no
+Python traceback; stderr is saved beside the PNG either way.
 """
 
 import json
@@ -70,8 +71,17 @@ def main() -> int:
     stderr_path = os.path.join(out_dir, f"collins-{label}.stderr.txt")
     stderr_fh = open(stderr_path, "w")
     print(f"launching python3 -m collins as {env['COLLINS_APP_ID']} (stub={env.get('SPIKE_STUB_PROCTREE')})")
+    argv = [sys.executable, "-m", "collins"]
+    if env.get("SPIKE_STUB_PROCTREE") == "1":
+        stub_dir = os.path.join(repo, "scripts", "spike", "stub")
+        env["PYTHONPATH"] = os.pathsep.join(p for p in (repo, stub_dir, env.get("PYTHONPATH", "")) if p)
+        argv = [
+            sys.executable,
+            "-c",
+            "import collins_spike_stub, runpy; runpy.run_module('collins', run_name='__main__')",
+        ]
     proc = subprocess.Popen(
-        [sys.executable, "-m", "collins"],
+        argv,
         cwd=repo,
         env=env,
         stdin=subprocess.DEVNULL,
