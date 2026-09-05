@@ -173,6 +173,35 @@ jobs:
         run: |
           "$PY" scripts/spike/check_appinfo.py 2>&1 | tee "$OUT/appinfo.log"; exit "${PIPESTATUS[0]}"
 
+      # Run 5: Gio.File.trash() put the files in ~/.local/share/Trash, the
+      # freedesktop location, not Finder's Trash -- so brew's glib is built
+      # without Cocoa (no _g_local_file_trash_macos, and by the same token no
+      # Cocoa notification backend). Record the linkage, and whether macOS
+      # itself offers a trash command the port could shell out to.
+      - name: GLib build facts (Cocoa?) and a system trash command
+        continue-on-error: true
+        run: |
+          {
+            GIO="$(brew --prefix glib)/lib/libgio-2.0.0.dylib"
+            echo "otool -L libgio (frameworks):"; otool -L "$GIO" | grep -i -E "framework|cocoa|foundation|appkit" || echo "  (no Apple frameworks linked)"
+            echo "libglib frameworks:"; otool -L "$(brew --prefix glib)/lib/libglib-2.0.0.dylib" | grep -i framework || echo "  (none)"
+            echo "symbols mentioning trash/cocoa/osx in libgio:"; nm -gU "$GIO" 2>/dev/null | grep -i -E "trash_macos|cocoa|osx_app" | head -10 || true
+            echo "gio modules: $(ls "$(brew --prefix)/lib/gio/modules" 2>/dev/null | tr '\n' ' ')"
+            echo "glib formula options (brew info):"; brew info glib | head -3
+            echo "which trash: $(command -v trash || echo none)"
+            command -v trash >/dev/null && { trash -h 2>&1 | head -5 || true; }
+            echo "which osascript: $(command -v osascript)"
+            F="$HOME/collins-spike-trash-cli.txt"; echo x > "$F"
+            if command -v trash >/dev/null; then
+              trash "$F" 2>&1 && echo "trash(1) rc=0 exists_after=$([ -e "$F" ] && echo yes || echo no)"
+              echo "~/.Trash after trash(1): $(ls ~/.Trash 2>&1 | tr '\n' ' ')"
+            fi
+            echo "osascript Finder delete:"; F2="$HOME/collins-spike-trash-osa.txt"; echo x > "$F2"
+            osascript -e "tell application \"Finder\" to delete POSIX file \"$F2\"" 2>&1 || true
+            echo "exists_after=$([ -e "$F2" ] && echo yes || echo no); ~/.Trash: $(ls ~/.Trash 2>&1 | tr '\n' ' ')"
+            rm -f "$F" "$F2"
+          } 2>&1 | tee "$OUT/glib-facts.log"
+
       - name: Peer pid and trash (item e)
         continue-on-error: true
         run: |
