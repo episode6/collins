@@ -26,7 +26,13 @@ label only ever opens, via `TerminalTab.open_git_page`) holding a VTE that runs
 `hunk diff --watch --transparent-bg --extension <collins-git> [--mode …]
 [--theme …] [--exclude-untracked]` in the agent's working tree, under a
 one-row header: the branch, a breadcrumb of what is loaded, back/forward
-level buttons on narrow pages, and refresh. Everything else on screen is
+level buttons on narrow pages, the sidebar toggle, and refresh. Beside the
+VTE, to its left, sits the native sidebar (`gitsidebar.GitSidebar`, see
+below) in a `Gtk.Paned` inside an `Adw.BreakpointBin` (`max-width: 679px`
+→ the sidebar hides and the toggle goes insensitive; the bin's 460 px
+request is the page's real minimum, `column_floor` / `column_seed` 680 and
+~700 are what the dock opens it at). The whole page sits in an
+`Adw.ToastOverlay` for its own toasts. Everything else on screen is
 hunk's plus the extension's. A machine without hunk (or with one older than
 the version gate) gets an install card linking to hunk.dev with a "Check
 again" button — never an error. `hunkctl.ProbeCache` probes `hunk --version`
@@ -49,8 +55,12 @@ and an `Adw.Banner` over the viewer says the viewer never registered with
 the daemon, names `hunkctl.DAEMON_DIAGNOSTIC` (`hunk daemon serve`) as the
 run that prints why, and offers **Retry** (`_respawn`); the banner hides on a
 successful resolve, a card, or the child exiting. The three modes plus
-`{"show": ref}` are the `Loaded` value; `hunkctl.breadcrumb` / `tab_title` /
-`loaded_from_title` map between them and hunk's own session titles.
+`{"show": ref}` and `{"range": "a...b"}` are the `Loaded` value;
+`hunkctl.breadcrumb` / `tab_title` / `loaded_from_title` map between them
+and hunk's own session titles (a two-dot range or a pathspec stays
+foreign: shown by title, never reloaded). `_apply_title` also hands the
+sidebar its context and, for a `show`, the full sha the worker read
+(`_title_subject_and_sha`) so the ▸ row matches `show HEAD`.
 
 **Closing** must kill the process **group** VTE started
 (`hunkctl.terminate_tree`, `gitpage._shutdown`; `app.do_shutdown` calls
@@ -70,10 +80,52 @@ next (hunk cancels dialogs on any reload).
 base, else the `git_parent_branch` setting (`origin/x` read as `x`), else the
 repository's default branch (`gitinfo.default_branch`: `refs/remotes/*/HEAD`,
 then local `main`/`master`, loose or packed — no subprocess; a `git init`
-repo has no remote HEAD). The user can override with `P` in the extension,
-which writes `parentSource: "user"` to the sidecar; Collins recomputes on
-"Automatic". The pick persists in the page's layout slot
-(`hunkctl.encode_state` / `decode_parent`).
+repo has no remote HEAD). The user can override with the sidebar's ⎇ button
+(`parent-picked` → `GitPage._on_parent_picked`, which re-seeds the tree
+signature so the tick reads no move in the new base) or `P` in the
+extension, which writes `parentSource: "user"` to the sidecar; Collins
+recomputes on "Automatic". The pick persists in the page's layout slot
+(`hunkctl.encode_state` / `decode_parent`), beside `"sidebar": false` when
+the sidebar is folded (`decode_sidebar`).
+
+## The native sidebar (`gitsidebar.py`)
+
+`GitSidebar(Gtk.Box)`: a vertical `Gtk.Paned` of two `Gtk.ListBox`es
+(commits over files, `navigation-sidebar` style, section headings as
+non-selectable `caption-heading` rows) and a wrapping `Gtk.FlowBox` action
+row. It never imports `gitpage`; the page feeds it and listens:
+
+- Feed: `set_context(branch, parent, default, loaded, resolved_sha,
+  live_side, hunk_alive, extension_loaded, auto_parent)` after every
+  `_apply_title` / probe / exit (a changed branch, parent or default
+  re-reads the commits; returns whether it did), `refresh_commits()`
+  (threads: `gitops.read_page` per group + `unpushed_shas`, landed behind
+  a generation), `refresh_files(files, loaded, untracked)` (the page calls
+  it only when `(files, loaded, untracked)` changed or the tree moved —
+  `_files_shown` / `_files_stale` — since a working-tree load costs a `git
+  status`), `set_selection(path, hunk, source)` (the sidecar's word beats
+  the `session get` snapshot within a tick, `_sidecar_selection_seen`),
+  `set_anchor`, `set_options` (page size → re-page; untracked → redraw).
+- Signals: `load-requested(Loaded)` → `load()`; `navigate-requested(path,
+  side)` → `_navigate` on the live side (or the flat list), else
+  `_pending_navigate = (path, side)` + `load(side)`, run when the reload
+  lands with that side (`settled()` waits for both); `key-requested(bytes)`
+  → `feed_child` + `terminal.grab_focus()` (hunk's `D` confirm answers to
+  Enter); `mutated` → re-seed the signatures, refresh, `_reload` now;
+  `parent-picked(name | None)`.
+- Native mutations (`commit`, `fixup`, `stage_all`, `unstage_all` — public
+  so the e2e drives them without dialogs) run on a thread behind `busy`
+  (the Commit button spins, the other mutations go insensitive) and toast
+  through the nearest `Adw.ToastOverlay` (`set_use_markup(False)`: titles
+  carry commit summaries). The button handlers gate first
+  (`in_progress_operation`, `staged_paths`) and ask through
+  `dialogs.commit_dialog` / `choice_dialog` / `confirm_dialog(destructive=
+  False)`. The e2e reaches rows with `click_commit_row(id)`,
+  `click_file_row(path, side)`, `click_section(side)` and reads
+  `commit_rows()`, `file_rows()`, `loaded_row_id()`, `selected_path`,
+  `anchor_button_label()` / `stage_button_label()`.
+- The cursor buttons (`x`, `v`/escape, `D`) are hidden without the
+  extension and insensitive off a live working tree or a dead hunk.
 
 ## The sidecar contract (`COLLINS_GIT_STATE`)
 
@@ -162,8 +214,11 @@ hunkCount — a binary change lists 0/0/0, there is no binary flag; capped at
 sidebar=)` / `decode_sidebar`, and the pinned keys `STAGE_KEY` `x`,
 `STAGE_FILE_KEY` `X`, `ANCHOR_KEY` `v`, `CLEAR_ANCHOR_KEY` escape,
 `DISCARD_KEY` `D` (a unit test greps `index.ts`'s `registerCommand` keys for
-them). The widget (`gitsidebar.py`), the page rewiring and the extension's
-slimming follow in the next two PRs.
+them), and `commit_subject_and_sha` (one `git log -1 --format=%s%x00%H`).
+The second PR put the widget (`gitsidebar.py`) into the page beside hunk
+while hunk still runs the full extension with its own panes and Collins
+still writes the sidecar's v1 payload — the extension's slimming, `--no-
+sidebar`, the v2 payload and the level machinery's removal are the third.
 
 ## Footguns
 
