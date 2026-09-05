@@ -799,3 +799,132 @@ def test_set_path_clears_the_images(tmp_path):
     m.update()
     m.set_path(tmp_path / "other.jsonl")
     assert m.attachments() == []
+
+
+# -- a switch the CLI has confirmed --------------------------------------------
+
+
+def _command_line(command, args=""):
+    # The CLI's echo of a slash command it ran locally.
+    content = (
+        f"<command-name>{command}</command-name>\n"
+        f"            <command-message>{command[1:]}</command-message>\n"
+        f"            <command-args>{args}</command-args>"
+    )
+    return {"type": "user", "message": {"role": "user", "content": content}}
+
+
+def _stdout_line(text):
+    return {
+        "type": "user",
+        "message": {"role": "user", "content": f"<local-command-stdout>{text}"},
+    }
+
+
+_MODEL_SET = "Set model to `Sonnet 5` and saved as your default for new sessions"
+_EFFORT_SET = "Set effort level to low (saved as your default for new sessions): Quick"
+
+
+def test_a_confirmed_model_switch_counts_before_the_next_reply(tmp_path):
+    """/model posted from a picker moves the footer and the composer's
+    button as soon as the CLI says it took, not when the next reply
+    happens to stamp the new model."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [_reply_line("claude-opus-5")])
+    m = TranscriptModel(p)
+    m.update()
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_command_line("/model", "claude-sonnet-5")) + "\n")
+    assert m.update() is False  # armed, not yet confirmed
+    assert m.model() == "claude-opus-5"
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_stdout_line(_MODEL_SET)) + "\n")
+    assert m.update() is True
+    assert m.model() == "claude-sonnet-5"
+
+
+def test_a_confirmed_effort_switch_counts_before_the_next_reply(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(
+        p, [_effort_line("high"), _command_line("/effort", "low"), _stdout_line(_EFFORT_SET)]
+    )
+    m = TranscriptModel(p)
+    m.update()
+    assert m.effort() == "low"
+
+
+def test_the_effort_level_is_read_off_the_confirmation(tmp_path):
+    """A bare /effort opens the CLI's own picker; the level it chose is
+    only in what the CLI printed."""
+    p = tmp_path / "s.jsonl"
+    _write(
+        p, [_command_line("/effort"), _stdout_line("Set effort level to xhigh (saved): Deeper")]
+    )
+    m = TranscriptModel(p)
+    assert m.update() is True
+    assert m.effort() == "xhigh"
+
+
+def test_a_bare_model_command_waits_for_the_reply(tmp_path):
+    """The CLI's picker names the model the way a person says it, which is
+    no id — so nothing moves until the next reply spells one."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [_reply_line("claude-opus-5"), _command_line("/model"), _stdout_line(_MODEL_SET)])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.model() == "claude-opus-5"
+
+
+def test_a_refused_switch_moves_nothing(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(
+        p,
+        [
+            _reply_line("claude-opus-5"),
+            _command_line("/model", "bogus"),
+            _stdout_line("Invalid model: bogus"),
+            _effort_line("high"),
+            _command_line("/effort", "silly"),
+            _stdout_line("Invalid effort level: silly"),
+        ],
+    )
+    m = TranscriptModel(p)
+    m.update()
+    assert m.model() == "claude-opus-5"
+    assert m.effort() == "high"
+
+
+def test_a_switch_output_needs_its_command(tmp_path):
+    """Any other command's output, or one arriving with nothing armed, is
+    not a switch — /model's confirmation text alone doesn't count."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [_command_line("/help"), _stdout_line(_MODEL_SET), _stdout_line(_EFFORT_SET)])
+    m = TranscriptModel(p)
+    assert m.update() is False
+    assert m.model() is None
+    assert m.effort() is None
+
+
+def test_the_same_switch_again_is_not_news(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_command_line("/effort", "low"), _stdout_line(_EFFORT_SET)])
+    m = TranscriptModel(p)
+    assert m.update() is True
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_command_line("/effort", "low")) + "\n")
+        fh.write(json.dumps(_stdout_line(_EFFORT_SET)) + "\n")
+    assert m.update() is False
+
+
+def test_a_reply_after_a_switch_spells_the_id(tmp_path):
+    """/model sonnet takes at once under the alias; the next reply names
+    the model the alias resolved to, and that replaces it."""
+    p = tmp_path / "s.jsonl"
+    _write(p, [_command_line("/model", "sonnet"), _stdout_line(_MODEL_SET)])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.model() == "sonnet"
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_reply_line("claude-sonnet-5")) + "\n")
+    assert m.update() is True
+    assert m.model() == "claude-sonnet-5"

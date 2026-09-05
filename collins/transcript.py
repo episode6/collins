@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-04. Full change history: git log for this file.
 
 """Read what a session is doing by tailing its JSONL transcript.
 
@@ -23,6 +23,7 @@ the first poll and only the new ones after that.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -46,6 +47,17 @@ _MAX_TOUCHED = 30  # most-recent-first; plenty for a list that shows a handful
 # tool input the image pass reads — see `_deliveries`.
 _SEND_FILE_TOOL = "SendUserFile"
 
+# The CLI writes a slash command it ran locally as a user line wrapped in
+# these tags, and its output as a second user line right after. Only the
+# two switch commands are read: what the session answers with next.
+_COMMAND_RE = re.compile(
+    r"<command-name>(/model|/effort)</command-name>.*?<command-args>(.*?)</command-args>",
+    re.S,
+)
+_COMMAND_STDOUT = "<local-command-stdout>"
+_EFFORT_SET_RE = re.compile(r"Set effort level to (\S+)")
+_MODEL_SET = "Set model to"
+
 # The CLI stamps its own interjections — API errors, interrupted turns — as
 # assistant messages from this "model". No model answered them, so they must
 # not retire the one that did.
@@ -59,6 +71,9 @@ class TranscriptModel:
         self._touched: list[str] = []  # files written by the agent, newest first
         self._model: str | None = None  # model id of the most recent reply
         self._effort: str | None = None  # effort level of the most recent reply
+        # A /model or /effort the CLI has echoed but not yet confirmed:
+        # (command, args). See _record_switch.
+        self._pending_switch: tuple[str, str] | None = None
         self._permission_mode: str | None = None  # last mode the CLI recorded
         self._images: dict[str, Attachment] = {}  # images named in the messages
         self._offset = 0
@@ -71,6 +86,7 @@ class TranscriptModel:
         self._touched = []
         self._model = None
         self._effort = None
+        self._pending_switch = None
         self._permission_mode = None
         self._images = {}
         self._offset = 0
@@ -104,6 +120,7 @@ class TranscriptModel:
             self._touched = []
             self._model = None
             self._effort = None
+            self._pending_switch = None
             self._permission_mode = None
             self._images = {}
             self._offset, self._buf = 0, b""
@@ -151,6 +168,8 @@ class TranscriptModel:
         changed = self._record_model(entry, message)
         if self._record_effort(entry):
             changed = True
+        if self._record_switch(entry, message):
+            changed = True
         if self._record_images(entry, message):
             changed = True
         content = message.get("content")
@@ -197,6 +216,55 @@ class TranscriptModel:
         if not isinstance(effort, str) or not effort or effort == self._effort:
             return False
         self._effort = effort
+        return True
+
+    def _record_switch(self, entry: dict, message: dict) -> bool:
+        """Take a ``/model`` or ``/effort`` the CLI has just run as the new
+        model or level, so the footer and the composer's pickers say so at
+        once rather than when the next reply stamps it — a switch posted
+        mid-turn, or with no prompt to follow, would otherwise sit
+        unreflected for as long as the session stays quiet.
+
+        The CLI writes the command as a user line (``<command-name>`` and
+        ``<command-args>``) and, right after, what it printed
+        (``<local-command-stdout>``). The command line only arms the
+        switch; the stdout line commits it, and only when it reads as the
+        CLI's confirmation — a refused ``/model`` prints something else,
+        and its args must not be taken for the model. The level is read
+        off the confirmation itself (``Set effort level to high``), which
+        names it whether the command carried it or the CLI's own picker
+        chose it. The model is taken from the command's args — an id or
+        alias, as ``--model`` takes — since the confirmation names it the
+        way a person says it (``Set model to Opus 5``) and no id can be
+        read back off that; a pick made in the CLI's own picker, with no
+        args, waits for the next reply as before.
+        """
+        if entry.get("type") != "user" or entry.get("isSidechain"):
+            return False
+        content = message.get("content")
+        if not isinstance(content, str):
+            return False
+        if content.startswith("<command-name>"):
+            match = _COMMAND_RE.match(content)
+            self._pending_switch = (match.group(1), match.group(2).strip()) if match else None
+            return False
+        if not content.startswith(_COMMAND_STDOUT):
+            return False
+        pending, self._pending_switch = self._pending_switch, None
+        if pending is None:
+            return False
+        command, args = pending
+        output = content[len(_COMMAND_STDOUT) :].lstrip()
+        if command == "/effort":
+            match = _EFFORT_SET_RE.match(output)
+            level = match.group(1) if match else None
+            if not level or level == self._effort:
+                return False
+            self._effort = level
+            return True
+        if not output.startswith(_MODEL_SET) or not args or args == self._model:
+            return False
+        self._model = args
         return True
 
     def _record_images(self, entry: dict, message: dict) -> bool:
@@ -277,7 +345,9 @@ class TranscriptModel:
 
         The most recent rather than the first: a session can change model
         mid-run — ``/model``, a fast-mode toggle — and what it is answering
-        with now is the only interesting answer.
+        with now is the only interesting answer. A ``/model`` the CLI has
+        confirmed counts as soon as it has (see _record_switch), so this can
+        be the alias the command named until the next reply spells the id.
         """
         return self._model
 
@@ -285,7 +355,8 @@ class TranscriptModel:
         """The effort level the session's most recent reply was answered at
         (``high``), as the CLI stamped it, or None until one has been — an
         empty transcript, or a CLI old enough not to stamp it. The latest
-        for the same reason model() gives: ``/effort`` moves it mid-run."""
+        for the same reason model() gives: ``/effort`` moves it mid-run, and
+        counts as soon as the CLI confirms it (see _record_switch)."""
         return self._effort
 
     def permission_mode(self) -> str | None:

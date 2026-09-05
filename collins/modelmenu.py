@@ -67,9 +67,9 @@ def new_model_popover(
     # item targeting its id, and the action's state — the current model —
     # is what draws the mark on the matching row. Picking doesn't move the
     # state; the label this menu marks itself by only changes when the
-    # transcript shows a reply from the new model, and the next show
-    # re-reads it. A menu that marked the pick immediately would claim a
-    # switch the session hasn't made yet.
+    # transcript shows the CLI confirming the switch (transcript
+    # _record_switch), and the next show re-reads it. A menu that marked
+    # the pick immediately would claim a switch the session hasn't made.
     pick = Gio.SimpleAction.new_stateful(
         "pick", GLib.VariantType.new("s"), GLib.Variant.new_string("")
     )

@@ -111,6 +111,16 @@ downloads of each version, see the
   would run the launch's model at, and picking a different model swaps
   the effort along with it: an effort chosen for the last model is let
   go, and the picker reads the new model's default.
+- **A model or effort switch shows up as soon as it takes.** Picking a
+  model or an effort level from the footer or the composer's pickers —
+  floating over the terminal or docked below it — posted the right
+  `/model` or `/effort`, but the button and the mark in its menu kept
+  the old value until the session's next reply, which could be a long
+  wait for a switch made between prompts. Collins now reads the CLI's
+  own confirmation of the switch off the transcript, so the footer chip
+  and both pickers move within a poll of the command running. A model
+  chosen in the CLI's own `/model` picker still waits for the next
+  reply, since the CLI prints its name rather than its id.
 
 ### v0.1.2 — 2026-08-30
 
