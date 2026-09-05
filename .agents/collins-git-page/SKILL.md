@@ -131,8 +131,39 @@ only `node:*`, each other and erased `import type`s; CI installs bun 1.4.0).
 Cheap reads straight from `.git` for the footer's 2 s poll and every
 right-click: `current_branch`, `default_branch`, `github_url`, `repo_root`,
 `index_mtime`, `head_sha`, `resolve_branch`, `base_ref`, `tree_signature`,
-`parent_branch`. Anything that needs `git` (`has_changes`, `change_summary`,
-`ignored_names`) shells out and is asked on demand only.
+`remote_refs_signature` (mtimes of `packed-refs` and every directory under
+`refs/remotes`, so a push moves it), `git_dir`, `parent_branch`. Anything
+that needs `git` (`has_changes`, `change_summary`, `ignored_names`) shells
+out and is asked on demand only.
+
+## gitmodel and gitops (GTK-free foundations of the native panels)
+
+The commits and files panels are moving from the extension's OpenTUI panes
+into native GTK widgets (spec: `~/specs/collins/git-page-native-panels.md`,
+three stacked PRs). The first PR lands the GTK-free half only, unused by the
+page yet: `gitmodel.py` (ports of the extension's `model.ts` / parsers:
+`parse_log` over `LOG_FORMAT`, `parse_status_v2`, `build_rows`,
+`loaded_row_id`, `files_sections`, the confirm/toast words; every subject,
+path and list bounded) and `gitops.py` (argv builders and runners that
+take `run=subprocess.run` and never raise: `read_page` with the limit+1
+trick, `unpushed_shas` — `HEAD --not --remotes`, empty without a
+remote-tracking ref — `read_status`, `local_branches`, `staged_paths`,
+`in_progress_operation` on `gitinfo.git_dir`, `commit`, `commit_fixup`,
+`stage_all`, `unstage_all`, `unpushed_in_group`,
+`resolve_group_branches`). `hunkctl` gained the pieces they lean on: a
+fifth `Loaded`, `{"range": "a...b"}` (`is_range`, `range_halves`; a
+three-dot range between two safe refs — `loaded_from_title` now names it,
+two-dot ranges stay foreign), `Session.files` / `selected_path` /
+`selected_hunk` parsed off `session get`'s `files[]` (hunk 0.21.1's
+`fileSummarySchema`: id, path, previousPath?, additions, deletions,
+hunkCount — a binary change lists 0/0/0, there is no binary flag; capped at
+`MAX_SESSION_FILES`) and `snapshot.state`, the sidecar v2 readers
+(`read_sidecar_selection`, `read_sidecar_anchor`), `encode_state(...,
+sidebar=)` / `decode_sidebar`, and the pinned keys `STAGE_KEY` `x`,
+`STAGE_FILE_KEY` `X`, `ANCHOR_KEY` `v`, `CLEAR_ANCHOR_KEY` escape,
+`DISCARD_KEY` `D` (a unit test greps `index.ts`'s `registerCommand` keys for
+them). The widget (`gitsidebar.py`), the page rewiring and the extension's
+slimming follow in the next two PRs.
 
 ## Footguns
 

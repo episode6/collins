@@ -14,6 +14,7 @@ from collins.gitinfo import (
     change_summary,
     current_branch,
     default_branch,
+    git_dir,
     github_url,
     has_changes,
     head_sha,
@@ -21,6 +22,7 @@ from collins.gitinfo import (
     index_mtime,
     parent_branch,
     remote_branch_name,
+    remote_refs_signature,
     repo_root,
     resolve_branch,
     tree_signature,
@@ -792,6 +794,103 @@ def test_tree_signature_moves_with_index_head_and_base(tmp_path):
 def test_tree_signature_without_a_base(tmp_path):
     repo = make_repo(tmp_path / "repo", head=f"{SHA_A}\n")
     assert tree_signature(repo, None) == (None, SHA_A, None)
+
+
+# -- git_dir ------------------------------------------------------------------
+
+
+def test_git_dir_is_the_worktrees_own(tmp_path):
+    """The commit gate's markers (MERGE_HEAD, rebase-merge) live in the
+    worktree's git directory, not the common one."""
+    main = make_repo(tmp_path / "main")
+    assert git_dir(main) == main / ".git"
+    assert git_dir(main / "missing") is None
+    wt_git_dir = main / ".git" / "worktrees" / "wt"
+    wt_git_dir.mkdir(parents=True)
+    (wt_git_dir / "HEAD").write_text("ref: refs/heads/wt\n")
+    (wt_git_dir / "commondir").write_text("../..\n")
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / ".git").write_text(f"gitdir: {wt_git_dir}\n")
+    assert git_dir(worktree) == wt_git_dir
+    sub = worktree / "a"
+    sub.mkdir()
+    assert git_dir(sub) == wt_git_dir
+    assert git_dir(tmp_path) is None
+    assert git_dir(None) is None
+    assert git_dir("") is None
+
+
+# -- remote_refs_signature --------------------------------------------------------
+
+
+def test_remote_refs_signature_outside_a_repository(tmp_path):
+    assert remote_refs_signature(tmp_path) is None
+    assert remote_refs_signature(None) is None
+
+
+def test_remote_refs_signature_stays_put_without_remote_refs(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    first = remote_refs_signature(repo)
+    assert first == (None, ())
+    with_local_branch(repo, "main")  # a local ref is not what it watches
+    assert remote_refs_signature(repo) == first
+
+
+def test_remote_refs_signature_moves_with_a_pushed_ref_and_packed_refs(tmp_path):
+    """git writes a loose ref by renaming a lock file into the ref's
+    directory; that directory's mtime is what moves — including one
+    nested under a slashed branch name — and packed-refs on a gc."""
+    repo = make_repo(tmp_path / "repo")
+    with_remote_branch(repo, "origin", "main", SHA_A)
+    first = remote_refs_signature(repo)
+    assert first is not None and first[0] is None
+    assert [name for name, _stamp in first[1]] == ["refs/remotes", "refs/remotes/origin"]
+    assert remote_refs_signature(repo) == first  # stable while nothing moves
+
+    origin = repo / ".git" / "refs" / "remotes" / "origin"
+    os.utime(origin, ns=(2_000, 2_000))  # a push: `main.lock` renamed over `main`
+    second = remote_refs_signature(repo)
+    assert second != first
+
+    with_remote_branch(repo, "origin", "release/v1", SHA_B)  # a new directory under origin
+    third = remote_refs_signature(repo)
+    assert third != second
+    assert "refs/remotes/origin/release" in [name for name, _stamp in third[1]]
+    os.utime(origin / "release", ns=(3_000, 3_000))
+    fourth = remote_refs_signature(repo)
+    assert fourth != third
+
+    packed = repo / ".git" / "packed-refs"
+    packed.write_text(f"{SHA_A} refs/remotes/origin/main\n")
+    os.utime(packed, ns=(4_000, 4_000))
+    fifth = remote_refs_signature(repo)
+    assert fifth != fourth and fifth[0] == 4_000
+    os.utime(packed, ns=(5_000, 5_000))
+    assert remote_refs_signature(repo) != fifth
+
+
+def test_remote_refs_signature_reads_the_common_dir_of_a_worktree(tmp_path):
+    main = make_repo(tmp_path / "main")
+    with_remote_branch(main, "origin", "main", SHA_A)
+    wt_git_dir = main / ".git" / "worktrees" / "wt"
+    wt_git_dir.mkdir(parents=True)
+    (wt_git_dir / "HEAD").write_text("ref: refs/heads/wt\n")
+    (wt_git_dir / "commondir").write_text("../..\n")
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / ".git").write_text(f"gitdir: {wt_git_dir}\n")
+    assert remote_refs_signature(worktree) == remote_refs_signature(main)
+    assert remote_refs_signature(worktree)[1] != ()
+
+
+def test_remote_refs_signature_bounds_its_walk(tmp_path, monkeypatch):
+    monkeypatch.setattr("collins.gitinfo._REMOTE_REFS_DIR_LIMIT", 3)
+    repo = make_repo(tmp_path / "repo")
+    for name in ("a/b", "c/d", "e/f", "g/h"):
+        with_remote_branch(repo, "origin", name, SHA_A)
+    signature = remote_refs_signature(repo)
+    assert len(signature[1]) == 3
 
 
 # -- change_summary -----------------------------------------------------------

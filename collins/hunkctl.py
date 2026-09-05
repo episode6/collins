@@ -11,12 +11,18 @@ collins-git extension on it, see extension_dir), the runner that turns one
 into a Reply, the parsers for their JSON replies (and for the stderr that
 says a session is gone, as opposed to a load hunk refused), and the small
 mappings between the things the page can load — the three modes "unstaged",
-"staged", "branch", and a commit as {"show": ref} — hunk's own session
-titles, the breadcrumb and tab title Collins shows for them (a commit's
-breadcrumb names it, `<sha7> <subject>`, through the one git call here,
-commit_subject), the Ctrl+1/2/3 chords that pick the modes, and the layout
-slot they persist in (with the parent branch the user set, when they set
-one). The `show_diff` session tool (app.py's _mcp_show_diff, driving the
+"staged", "branch", a commit as {"show": ref} and a range between two
+refs as {"range": "a...b"} (the commits list's parent-branch header) —
+hunk's own session titles, the breadcrumb and tab title Collins shows for
+them (a commit's breadcrumb names it, `<sha7> <subject>`, through the one
+git call here, commit_subject), the Ctrl+1/2/3 chords that pick the modes,
+and the layout slot they persist in (with the parent branch the user set,
+when they set one, and whether the native sidebar is shown). A `session
+get` reply also carries the loaded changeset's files in review order
+(Session.files, SessionFiles with their counts and rename pairs) and the
+cursor's file (Session.selected_path / selected_hunk): what the native
+files list (gitmodel.files_sections) is built from, and its fallback for
+following hunk's cursor. The `show_diff` session tool (app.py's _mcp_show_diff, driving the
 page) keeps its decisions here too: what its `what` argument names, the
 commit check behind a ref, the repo-relative file path it hands hunk, the
 `session navigate` argv, and the reply the agent reads back.
@@ -44,8 +50,14 @@ fits beside the diff — which the page's header buttons follow
 wrote (the extension watches the file, the page stats it on the footer
 tick). The path, payload, readers and writer live here, and the column
 arithmetic that says when the page is narrow (pane_fit): hunk's layout
-budget, the same numbers level.ts holds. Kept importable by the unit
-tests (see tests/conftest.py), which is where all of it is exercised.
+budget, the same numbers level.ts holds. The sidecar's second version
+(the native panels: `selection` — the file and hunk under hunk's cursor —
+and `anchor`, the line `v` was pressed on) has its readers here too
+(read_sidecar_selection, read_sidecar_anchor), beside the keys the
+native buttons feed hunk's pty — `x`, `X`, `v`, escape, `D`, pinned to
+the extension's registerCommand keys (STAGE_KEY and friends; a test
+greps index.ts for them). Kept importable by the unit tests (see
+tests/conftest.py), which is where all of it is exercised.
 """
 
 from __future__ import annotations
@@ -68,9 +80,40 @@ HUNK = "hunk"
 MODES: tuple[str, ...] = ("unstaged", "staged", "branch")
 DEFAULT_MODE = "unstaged"
 # The fourth kind of load, a commit: {"show": "<ref>"} beside the three mode
-# strings. `Loaded` is what the page's loaded/load()/page_state carry.
+# strings; the fifth, a range between two refs: {"range": "<a>...<b>"} —
+# three dots exactly, both halves a safe ref (is_range) — hunk's
+# `diff a...b`, what the commits list's parent-branch header loads
+# (`<default>...<parent>`). Two-dot ranges stay foreign: hunk shows them,
+# Collins names nothing for them. `Loaded` is what the page's
+# loaded/load()/page_state carry.
 SHOW_KEY = "show"
+RANGE_KEY = "range"
+RANGE_DOTS = "..."
 Loaded = str | dict
+# The longest path a session record, a sidecar selection or an anchor may
+# name: a repo-relative path from hunk's own changeset, and still foreign
+# content (a widget's label, a navigate argument). Anything longer is
+# dropped, never truncated — a cut path names nothing.
+MAX_PATH_CHARS = 512
+# How many files a `session get` reply may list before the rest is
+# ignored: a changeset that size is beyond what a list is for, and the
+# reply is parsed on every 2 s tick.
+MAX_SESSION_FILES = 5000
+# What the native sidebar's buttons feed hunk's pty: the collins-git
+# extension's keys for stage (the hunk or the anchored range), stage the
+# file, anchor a line, clear the anchor (escape) and discard. hunk's CLI
+# can't run an extension command by name, so the keys are pinned — a user
+# who rebinds them under `[keybindings]` finds the buttons still press
+# these bytes. tests/test_hunkctl.py greps index.ts's registerCommand keys
+# for exactly these.
+STAGE_KEY = b"x"
+STAGE_FILE_KEY = b"X"
+ANCHOR_KEY = b"v"
+CLEAR_ANCHOR_KEY = b"\x1b"
+DISCARD_KEY = b"D"
+# The anchor's sides in the sidecar (`anchor.side`): which column of the
+# diff the anchored line is counted in.
+ANCHOR_SIDES: tuple[str, ...] = ("old", "new")
 # The hunk extension Collins ships as package data (collins/hunkext/
 # collins-git): the commits and files panels and the staging keys. Handed to
 # hunk with `--extension <dir>`, so nothing lands in the user's hunk config
@@ -206,13 +249,56 @@ class Probe:
 
 
 @dataclass(frozen=True)
+class SessionFile:
+    """One file of the loaded changeset as a session record lists it
+    (hunk 0.21.1's fileSummarySchema: id, path, previousPath?, additions,
+    deletions, hunkCount — no binary flag; a binary change lists 0/0/0).
+    *previous_path* is set for a rename."""
+
+    id: str
+    path: str
+    previous_path: str | None
+    additions: int
+    deletions: int
+    hunk_count: int
+
+
+@dataclass(frozen=True)
 class Session:
-    """One live hunk viewer as `session list`/`session get` report it."""
+    """One live hunk viewer as `session list`/`session get` report it —
+    with the loaded changeset's files in review order (*files*, capped at
+    MAX_SESSION_FILES) and the file and hunk hunk's cursor is on
+    (*selected_path* / *selected_hunk*, from `snapshot.state`; None when
+    the record doesn't say)."""
 
     session_id: str
     pid: int
     title: str
     repo_root: str
+    files: tuple[SessionFile, ...] = ()
+    selected_path: str | None = None
+    selected_hunk: int | None = None
+
+
+@dataclass(frozen=True)
+class Selection:
+    """What the extension wrote for hunk's cursor (sidecar `selection`):
+    the file's path and the hunk index within it (None when the file has
+    no hunk under the cursor)."""
+
+    path: str
+    hunk: int | None = None
+
+
+@dataclass(frozen=True)
+class Anchor:
+    """The line `v` was pressed on (sidecar `anchor`): the file, which side
+    of the diff the line is counted in (one of ANCHOR_SIDES) and the
+    1-based line number."""
+
+    path: str
+    side: str
+    line: int
 
 
 @dataclass(frozen=True)
@@ -442,10 +528,40 @@ def show_ref(loaded: object) -> str | None:
     return loaded[SHOW_KEY] if is_show(loaded) else None
 
 
+def range_halves(text: object) -> tuple[str, str] | None:
+    """(left, right) of a range load's text — `a...b` with exactly one
+    three-dot separator, both halves safe refs (safe_ref, which refuses
+    `..`, so `a....b` and `a...b...c` are out too) that neither start nor
+    end with a dot (no ref does; `.b` would read as a range git can't
+    take). None for anything else: a two-dot range, a range with a
+    pathspec, a non-string."""
+    if not isinstance(text, str) or len(text) > 2 * _MAX_REF_LEN + len(RANGE_DOTS):
+        return None
+    parts = text.split(RANGE_DOTS)
+    if len(parts) != 2:
+        return None
+    left, right = parts
+    for half in (left, right):
+        if not safe_ref(half) or half.startswith(".") or half.endswith("."):
+            return None
+    return left, right
+
+
+def is_range(loaded: object) -> bool:
+    """Whether *loaded* is a range load, {"range": "a...b"} with a text
+    range_halves accepts."""
+    return isinstance(loaded, dict) and range_halves(loaded.get(RANGE_KEY)) is not None
+
+
+def range_of(loaded: object) -> str | None:
+    """The `a...b` of a range load, None for anything else."""
+    return loaded[RANGE_KEY] if is_range(loaded) else None
+
+
 def loaded_ok(loaded: object) -> bool:
-    """Whether *loaded* is something the page can spawn into: one of MODES
-    or a well-formed commit load."""
-    return (isinstance(loaded, str) and loaded in MODES) or is_show(loaded)
+    """Whether *loaded* is something the page can spawn into: one of MODES,
+    a well-formed commit load, or a well-formed range load."""
+    return (isinstance(loaded, str) and loaded in MODES) or is_show(loaded) or is_range(loaded)
 
 
 def short_ref(ref: str) -> str:
@@ -619,13 +735,16 @@ def _load_tail(loaded: Loaded, parent_target: str | None, options: Options | Non
     """The subcommand and its arguments for *loaded*: ["diff", *diff_args]
     for a mode — with "--exclude-untracked" right after "diff" when
     *options* says untracked files are out (a `diff` option; `show`
-    refuses it) — ["show", ref] for a commit. ValueError (diff_args's, or
-    for a malformed dict) otherwise."""
+    refuses it) — ["show", ref] for a commit, ["diff", "a...b"] (the
+    same untracked flag in between) for a range. ValueError (diff_args's,
+    or for a malformed dict) otherwise."""
     if is_show(loaded):
         return ["show", show_ref(loaded)]
+    excluded = ["--exclude-untracked"] if options is not None and not options.untracked else []
+    if is_range(loaded):
+        return ["diff", *excluded, range_of(loaded)]
     if not isinstance(loaded, str):
         raise ValueError(f"unknown git page load: {loaded!r}")
-    excluded = ["--exclude-untracked"] if options is not None and not options.untracked else []
     return ["diff", *excluded, *diff_args(loaded, parent_target)]
 
 
@@ -718,12 +837,71 @@ def _session_from(record: object) -> Session | None:
         return None
     title = record.get("title")
     repo_root = record.get("repoRoot")
+    selected_path, selected_hunk = _selection_from(record.get("snapshot"))
     return Session(
         session_id=session_id,
         pid=pid,
         title=title if isinstance(title, str) else "",
         repo_root=repo_root if isinstance(repo_root, str) else "",
+        files=_files_from(record.get("files")),
+        selected_path=selected_path,
+        selected_hunk=selected_hunk,
     )
+
+
+def _count(value: object) -> int | None:
+    """A non-negative int out of a JSON value — never a bool, never a
+    float (hunk's `nonnegative` schema), None for anything else."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _path_field(value: object) -> str | None:
+    """A path out of a JSON value: a non-empty str of at most
+    MAX_PATH_CHARS, else None."""
+    if not isinstance(value, str) or not value or len(value) > MAX_PATH_CHARS:
+        return None
+    return value
+
+
+def _files_from(value: object) -> tuple[SessionFile, ...]:
+    """The SessionFiles in a record's `files` list, in hunk's order: a
+    record that isn't a dict with a string id, a path within
+    MAX_PATH_CHARS and three non-negative integer counts is skipped (a
+    field a future hunk renames leaves the list shorter, never wrong);
+    never more than MAX_SESSION_FILES; () for anything but a list."""
+    if not isinstance(value, list):
+        return ()
+    files: list[SessionFile] = []
+    for record in value:
+        if not isinstance(record, dict):
+            continue
+        file_id = record.get("id")
+        path = _path_field(record.get("path"))
+        additions = _count(record.get("additions"))
+        deletions = _count(record.get("deletions"))
+        hunk_count = _count(record.get("hunkCount"))
+        if not isinstance(file_id, str) or path is None or None in (additions, deletions, hunk_count):
+            continue
+        previous = record.get("previousPath")
+        files.append(SessionFile(file_id, path, _path_field(previous), additions, deletions, hunk_count))
+        if len(files) >= MAX_SESSION_FILES:
+            break
+    return tuple(files)
+
+
+def _selection_from(snapshot: object) -> tuple[str | None, int | None]:
+    """(selectedFilePath, selectedHunkIndex) out of a record's `snapshot`
+    ({"updatedAt": …, "state": {…}}); (None, None) when either is
+    missing or not its shape — a path is only a path within
+    MAX_PATH_CHARS, an index only a non-negative int."""
+    if not isinstance(snapshot, dict):
+        return None, None
+    state = snapshot.get("state")
+    if not isinstance(state, dict):
+        return None, None
+    return _path_field(state.get("selectedFilePath")), _count(state.get("selectedHunkIndex"))
 
 
 def session_for_pid(text: str, child_pid: int, children: Collection[int] = ()) -> Session | None:
@@ -770,10 +948,12 @@ def loaded_from_title(title: str) -> tuple[str | None, str | None]:
     """What hunk says it has loaded, from a session title: "<repo> working
     tree" → ("unstaged", None), "<repo> staged changes" → ("staged", None),
     "<repo> <X>...HEAD" → ("branch", "<X>"), "<repo> show <ref>" → ("show",
-    "<ref>") for a safe ref; anything else — `a...b` between two branches,
-    `a..b`, a range with a pathspec, an unsafe ref — → (None, None), the
-    load Collins shows by its title and leaves alone. The repo name may
-    contain spaces; match on the tail."""
+    "<ref>") for a safe ref, "<repo> <a>...<b>" → ("range", "<a>...<b>")
+    when the last token is a range range_halves accepts (three dots, two
+    safe refs, not ending in ...HEAD — that is the branch load); anything
+    else — `a..b`, a range with a pathspec, an unsafe ref — → (None,
+    None), the load Collins shows by its title and leaves alone. The repo
+    name may contain spaces; match on the tail."""
     text = (title or "").rstrip()
     if text.endswith(_TITLE_WORKING_TREE):
         return "unstaged", None
@@ -786,6 +966,8 @@ def loaded_from_title(title: str) -> tuple[str | None, str | None]:
         return "branch", target or None
     if len(tokens) >= 2 and tokens[-2] == "show" and safe_ref(last):
         return "show", last
+    if range_halves(last) is not None:
+        return "range", last
     return None, None
 
 
@@ -811,12 +993,19 @@ def breadcrumb(loaded: Loaded, branch: str | None, parent: str | None, subject: 
     _("{branch} vs {parent}") (branch/parent fall back to "HEAD" / "?" when
     None), or for a commit "<ref> <subject>" with the ref cut short
     (short_ref) — `a1b2c3d Wire the mode switch` — and _("commit {ref}")
-    while the *subject* isn't known (see commit_subject)."""
+    while the *subject* isn't known (see commit_subject). A range `a...b`
+    reads the way hunk's `left...right` does, right against left: the
+    same _("{branch} vs {parent}") with b as the branch and a as the
+    parent (shas cut short)."""
     if is_show(loaded):
         ref = short_ref(show_ref(loaded))
         if subject:
             return f"{ref} {subject}"
         return _("commit {ref}").format(ref=ref)
+    halves = range_halves(range_of(loaded))
+    if halves is not None:
+        left, right = halves
+        return _("{branch} vs {parent}").format(branch=short_ref(right), parent=short_ref(left))
     if loaded == "unstaged":
         return _("working tree · unstaged")
     if loaded == "staged":
@@ -826,9 +1015,13 @@ def breadcrumb(loaded: Loaded, branch: str | None, parent: str | None, subject: 
 
 def tab_title(loaded: Loaded, parent: str | None) -> str:
     """Tab text: _("Git · unstaged"), _("Git · staged"), _("Git · vs {parent}"),
-    _("Git · {ref}") for a commit (short_ref)."""
+    _("Git · {ref}") for a commit (short_ref) and for a range `a...b` —
+    named by its right half, b, the branch under review."""
     if is_show(loaded):
         return _("Git · {ref}").format(ref=short_ref(show_ref(loaded)))
+    halves = range_halves(range_of(loaded))
+    if halves is not None:
+        return _("Git · {ref}").format(ref=short_ref(halves[1]))
     if loaded == "unstaged":
         return _("Git · unstaged")
     if loaded == "staged":
@@ -856,27 +1049,43 @@ def initial_mode(staged: bool, unstaged: bool) -> str:
     return "staged" if staged and not unstaged else "unstaged"
 
 
-def encode_state(loaded: Loaded, parent: str | None = None) -> dict:
-    """{"kind": "git", "loaded": loaded, "parent": parent} — the page's
-    panel_layout slot; "parent" (the branch the user set) only when there
-    is one. A commit load is its dict, {"show": ref}, copied."""
+def encode_state(loaded: Loaded, parent: str | None = None, sidebar: bool = True) -> dict:
+    """{"kind": "git", "loaded": loaded, "parent": parent, "sidebar":
+    False} — the page's panel_layout slot; "parent" (the branch the user
+    set) only when there is one, "sidebar" only when the native sidebar is
+    hidden (absent reads as shown, see decode_sidebar). A commit or range
+    load is its dict, copied."""
     state = {"kind": "git", "loaded": dict(loaded) if isinstance(loaded, dict) else loaded}
     if parent:
         state["parent"] = parent
+    if not sidebar:
+        state["sidebar"] = False
     return state
 
 
 def decode_state(page: object) -> Loaded:
-    """What a saved page dict asks for: one of MODES, or a validated
-    {"show": ref}; anything else (garbage, an unsafe ref, a non-dict) reads
-    as DEFAULT_MODE — the layout is a preference, restore never refuses on
-    it."""
+    """What a saved page dict asks for: one of MODES, a validated {"show":
+    ref} or {"range": "a...b"}; anything else (garbage, an unsafe ref, a
+    non-dict) reads as DEFAULT_MODE — the layout is a preference, restore
+    never refuses on it."""
     if not isinstance(page, dict):
         return DEFAULT_MODE
     loaded = page.get("loaded")
     if is_show(loaded):
         return {SHOW_KEY: loaded[SHOW_KEY]}
+    if is_range(loaded):
+        return {RANGE_KEY: loaded[RANGE_KEY]}
     return loaded if isinstance(loaded, str) and loaded in MODES else DEFAULT_MODE
+
+
+def decode_sidebar(page: object) -> bool:
+    """Whether a saved page dict shows the native sidebar: False only
+    when it says so (`"sidebar": false`); absent, a non-bool or a non-dict
+    read as True — the sidebar is the page's default face."""
+    if not isinstance(page, dict):
+        return True
+    sidebar = page.get("sidebar")
+    return sidebar if isinstance(sidebar, bool) else True
 
 
 def decode_parent(page: object) -> str | None:
@@ -979,6 +1188,40 @@ def read_sidecar_refreshed(text: str) -> tuple[int, str] | None:
     if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
         return None
     return int(index), head
+
+
+def read_sidecar_selection(text: str) -> Selection | None:
+    """What the extension wrote for hunk's cursor (sidecar v2's
+    `selection`: {"path": "<path>", "hunkIndex": n | null}) — a Selection
+    with the hunk index when it is a non-negative int, None as the index
+    when it is null; None as the whole answer when the key is absent,
+    explicitly null (no file under the cursor), or not its shape (a path
+    over MAX_PATH_CHARS, garbage)."""
+    data = _load_json(text)
+    record = data.get("selection") if data is not None else None
+    if not isinstance(record, dict):
+        return None
+    path = _path_field(record.get("path"))
+    if path is None:
+        return None
+    return Selection(path, _count(record.get("hunkIndex")))
+
+
+def read_sidecar_anchor(text: str) -> Anchor | None:
+    """The line `v` anchored (sidecar v2's `anchor`: {"path": "<path>",
+    "side": "old" | "new", "line": n}) as an Anchor, None when absent,
+    null (cleared), or not its shape (a side outside ANCHOR_SIDES, a line
+    under 1, a bool for a number)."""
+    data = _load_json(text)
+    record = data.get("anchor") if data is not None else None
+    if not isinstance(record, dict):
+        return None
+    path = _path_field(record.get("path"))
+    side = record.get("side")
+    line = _count(record.get("line"))
+    if path is None or side not in ANCHOR_SIDES or not line:
+        return None
+    return Anchor(path, side, line)
 
 
 def shown_by_extension(
