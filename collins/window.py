@@ -53,6 +53,7 @@ from .activity import (
     BACKGROUND_POLL_MS,
     PROCESS_IDLE_S,
     PROCESS_POLL_MS,
+    PROGRESS_FINISH_GRACE_S,
     PROGRESS_IDLE_S,
     ActivityTracker,
     BackgroundBusyWatch,
@@ -4260,6 +4261,7 @@ class MainWindow(Adw.ApplicationWindow):
         watched = {sid for sid in busy_ids if self._page_for(sid) is not None}
         marks, finishes = self._bg_busy.reading(watched)
         for session_id in marks:
+            self._activity.resume(session_id)
             self._activity.mark(session_id, idle_s=BACKGROUND_IDLE_S)
         for session_id in finishes:
             # The agent called the turn over, so this tab's trailing repaints
@@ -4268,7 +4270,7 @@ class MainWindow(Adw.ApplicationWindow):
             page = self._page_for(session_id)
             if page is not None and (watch := self._progress_watches.get(page)) is not None:
                 watch.turn_ended()
-            self._activity.finish(session_id)
+            self._activity.finish(session_id, grace_s=PROGRESS_FINISH_GRACE_S)
         return GLib.SOURCE_REMOVE
 
     def _absorb_baseline(self, page: Adw.TabPage) -> bool:
@@ -4517,9 +4519,14 @@ class MainWindow(Adw.ApplicationWindow):
             if not tracked:
                 continue
             if action == "mark":
+                # A busy hint inside a clear's grace takes the clear back:
+                # that was a beat between tool calls, not the turn ending.
+                self._activity.resume(tracked)
                 self._activity.mark(tracked, idle_s=PROGRESS_IDLE_S)
             else:
-                self._activity.finish(tracked)
+                # Not finished yet: the clear arms a finish the sweep lands
+                # once PROGRESS_FINISH_GRACE_S passes with no busy hint.
+                self._activity.finish(tracked, grace_s=PROGRESS_FINISH_GRACE_S)
 
     def _on_terminal_output(self, terminal, page: Adw.TabPage) -> None:
         # A redraw counts as the session working whether or not its tab is
