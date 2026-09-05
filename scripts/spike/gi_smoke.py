@@ -31,7 +31,8 @@ REQUIRED = [
 
 def main() -> int:
     print(f"python {sys.version.split()[0]} at {sys.executable}")
-    print(f"gi {gi.__version__} from {gi.__file__}")
+    gi_path = list(getattr(gi, "__path__", []))
+    print(f"gi {getattr(gi, 'version_info', None)} from {gi.__file__} path={gi_path}")
     failed = []
     for ns, ver in REQUIRED:
         try:

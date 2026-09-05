@@ -63,6 +63,18 @@ jobs:
               case "$py" in *config*) continue;; esac
               echo "$py -> $("$py" -c 'import gi; print("gi ok", gi.__file__)' 2>&1 | tail -1)"
             done
+            # Run 3 saw `import gi` resolve to a namespace package (__file__
+            # None) where run 2 saw the real one: a gi/ directory without
+            # its __init__.py. Show what is actually on disk and on sys.path,
+            # and relink pygobject3 if the package is incomplete.
+            echo "site-packages/gi listing:"; ls -la "$PREFIX/lib/python3.14/site-packages/gi" | head -8
+            echo "cellar gi listing:"; ls -la "$(brew --prefix pygobject3)/lib/python3.14/site-packages/gi" | head -5
+            if [ ! -e "$PREFIX/lib/python3.14/site-packages/gi/__init__.py" ]; then
+              echo "gi/__init__.py missing -> brew link --overwrite pygobject3"
+              brew link --overwrite pygobject3 2>&1 || true
+              ls -la "$PREFIX/lib/python3.14/site-packages/gi" | head -5
+            fi
+            "$PREFIX/opt/python@3.14/bin/python3.14" -c 'import sys, gi; print("sys.path:", sys.path); print("gi:", gi.__file__, list(getattr(gi, "__path__", [])))'
           } | tee "$OUT/python-facts.txt"
           PY=""
           for cand in 3.14 3.13 3.15; do
