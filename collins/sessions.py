@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-15. Full change history: git log for this file.
+# fork. Last modified: 2026-09-05. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -75,6 +75,12 @@ def worktree_shares_project(cwd: str | None, project_dir: str | None) -> bool:
         return False
     project_root = worktree_project_root(project_dir) or project_dir
     return os.path.realpath(root) == os.path.realpath(project_root)
+
+
+def path_within(root: str, path: str) -> bool:
+    """Whether *path* is *root* itself or something under it. Purely lexical."""
+    root, path = os.path.normpath(root), os.path.normpath(path)
+    return path == root or path.startswith(root + os.sep)
 
 
 def project_name_for_cwd(cwd: str) -> str:
@@ -469,6 +475,74 @@ def recreate_worktree(state: dict) -> bool:
     else:
         ok = False  # no branch left and no base to branch from
     return ok and Path(path).is_dir()
+
+
+def removable_worktree(jsonl_path: str | Path | None, cwd: str) -> dict | None:
+    """The session worktree a session still occupies on disk, or None.
+
+    The counterpart of recreatable_worktree for archiving: the worktree the
+    transcript records as current (see last_worktree_state) when its
+    directory is still there and belongs to a repository that is too. A
+    session that left its worktree, one the CLI already reaped on exit, or
+    one that entered somebody else's worktree (no branch recorded) offers
+    nothing to remove. *cwd* only skips the read for sessions that plainly
+    never had a worktree (see _worktree_related).
+    """
+    if not jsonl_path:
+        return None
+    jsonl_path = Path(jsonl_path)
+    if not _worktree_related(jsonl_path, cwd):
+        return None
+    state = last_worktree_state(jsonl_path)
+    if not state:
+        return None
+    path = state.get("worktreePath")
+    if not isinstance(path, str) or not Path(path).is_dir() or not state.get("worktreeBranch"):
+        return None
+    root = worktree_project_root(path)
+    if root is None or not Path(root, ".git").exists():
+        return None
+    return state
+
+
+def remove_worktree(state: dict) -> str:
+    """Delete a session worktree — the directory and git's registration of
+    it — the way the CLI reaps one it considers untouched, and its branch
+    when git agrees the branch has nothing unmerged (`branch -d`; a branch
+    with commits of its own stays, so nothing is lost that isn't in the
+    working tree). Returns "" on success, git's words otherwise. Runs git
+    subprocesses — call off the main loop.
+
+    --force twice: one covers a dirty working tree, and the CLI locks every
+    worktree it creates, which `worktree remove` refuses to touch with a
+    single -f (verified against git 2.43).
+    """
+    path = str(state["worktreePath"])
+    root = worktree_project_root(path)
+    if root is None:
+        return "not a session worktree"
+
+    def git(*args: str) -> tuple[bool, str]:
+        try:
+            result = subprocess.run(
+                ["git", "-C", root, *args],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true"},
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return False, str(e)
+        words = (result.stderr or result.stdout).strip()
+        return result.returncode == 0, words or f"git exited {result.returncode}"
+
+    ok, words = git("worktree", "remove", "--force", "--force", path)
+    if not ok and Path(path).is_dir():
+        return words
+    branch = state.get("worktreeBranch")
+    if isinstance(branch, str) and branch:
+        git("branch", "-d", branch)  # best effort: an unmerged branch stays
+    return ""
 
 
 # The CLI's session-name records: it appends one whenever it names or renames

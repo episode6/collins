@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-02. Full change history: git log for this file.
+# fork. Last modified: 2026-09-05. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -99,7 +99,10 @@ from .sessions import (
     Session,
     export_markdown,
     first_message_uuid,
+    path_within,
     project_name_for_cwd,
+    removable_worktree,
+    remove_worktree,
     resume_cwd,
     session_from_file,
     worktree_project_root,
@@ -5639,6 +5642,9 @@ class MainWindow(Adw.ApplicationWindow):
         if archive_session_id:
             self.store.set_archived(archive_session_id, True)
             self._offer_undo([archive_session_id])
+            # The tab is closing: unless it handed the session to the
+            # background (checked inside), the session has stopped.
+            self._settle_archived_worktree(archive_session_id)
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
         self._echo_gates.pop(page, None)
@@ -6251,6 +6257,7 @@ class MainWindow(Adw.ApplicationWindow):
             def land() -> bool:
                 self.store.set_archived(session_id, True)
                 self._offer_undo([session_id])
+                self._settle_archived_worktree(session_id)
                 return GLib.SOURCE_REMOVE
 
             GLib.timeout_add(ARCHIVE_GHOST_MS, land)
@@ -6258,10 +6265,106 @@ class MainWindow(Adw.ApplicationWindow):
         self.store.set_archived(session_id, archived)
         if archived:
             self._offer_undo([session_id])
+            self._settle_archived_worktree(session_id)
         else:
             # Restored by hand: whatever Undo still held for this session is
             # already done, and offering to "undo" it again would be noise.
             self._drop_undo([session_id])
+
+    def _settle_archived_worktree(self, session_id: str) -> None:
+        """An archive of one session just landed and the session has stopped
+        — it had no tab, or its tab has closed: what the archive_worktree
+        setting says happens to the git worktree the session still occupies.
+
+        "never" leaves it. Otherwise the transcript is read off the main loop
+        for the worktree it records (sessions.removable_worktree — nothing
+        when the session never had one, left it, or the CLI already reaped it
+        on exit), and the answer lands as either the deletion itself
+        ("always") or a dialog offering it ("ask"). Not while the session runs
+        on as a background agent, and not while another tab or background
+        agent is working in that worktree: a session that shares one — a
+        fork, a /bg handoff still listed — hasn't stopped using it.
+
+        Only single archives come here: bulk archives (select mode, a whole
+        project) would ask once per worktree, and leave them all alone
+        instead.
+        """
+        policy = self.state.get_setting("archive_worktree")
+        if policy not in ("ask", "always"):
+            return
+        session = self.store.get_session(session_id)
+        if session is None or self._is_detached(session_id):
+            return
+        jsonl_path, cwd = session.jsonl_path, session.cwd or ""
+
+        def land(state: dict) -> bool:
+            path = str(state["worktreePath"])
+            # Undo (or a restore) may have beaten the read: the session is
+            # back in the list and may be resumed into its worktree any moment.
+            if not self.state.is_archived(session_id) or self._worktree_in_use(path):
+                return GLib.SOURCE_REMOVE
+            if policy == "always":
+                self._delete_worktree(state)
+                return GLib.SOURCE_REMOVE
+            dialogs.confirm_dialog(
+                self,
+                _("Delete the session's worktree?"),
+                _(
+                    "{path}\n\nThe session is archived either way. Deleting the "
+                    "worktree discards any uncommitted changes in it; its branch "
+                    "is kept if it has unmerged commits."
+                ).format(path=path),
+                _("Delete Worktree"),
+                lambda: self._delete_worktree(state),
+                extra_label=_("Keep Worktree"),
+                default_response="extra",
+                keys={"d": "confirm", "k": "extra"},
+            )
+            return GLib.SOURCE_REMOVE
+
+        def probe() -> None:
+            state = removable_worktree(jsonl_path, cwd)
+            if state is not None:
+                GLib.idle_add(land, state, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=probe, daemon=True).start()
+
+    def _worktree_in_use(self, path: str) -> bool:
+        """Whether an open tab in any window, or a background agent, is
+        working in *path* or somewhere under it."""
+        app = self.get_application()
+        windows = [w for w in (app.get_windows() if app is not None else [self]) if isinstance(w, MainWindow)]
+        for window in windows:
+            for page in window._pages.values():
+                tab = page.get_child()
+                if isinstance(tab, TerminalTab) and tab.start_cwd and path_within(path, tab.start_cwd):
+                    return True
+        for sid in self._bg_status.background_ids:
+            session = self.store.get_session(sid)
+            if session is not None and session.cwd and path_within(path, session.cwd):
+                return True
+        return False
+
+    def _delete_worktree(self, state: dict) -> None:
+        """Remove a stopped session's worktree on a worker thread (git checks
+        out nothing, but it walks the tree); a toast when it is gone, git's
+        words in an error dialog when it refused."""
+        path = str(state["worktreePath"])
+
+        def work() -> None:
+            error = remove_worktree(state)
+            GLib.idle_add(done, error, priority=GLib.PRIORITY_DEFAULT)
+
+        def done(error: str) -> bool:
+            if error:
+                dialogs.error_dialog(self, _("Deleting the worktree failed"), error)
+            else:
+                self.sidebar.toast_overlay.add_toast(
+                    Adw.Toast(title=_("Deleted worktree {name}").format(name=Path(path).name))
+                )
+            return GLib.SOURCE_REMOVE
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _offer_undo(self, session_ids: list[str]) -> None:
         """An archive just landed: arm Undo with it — replacing whatever the
