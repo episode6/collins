@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-02. Full change history: git log for this file.
+# fork. Last modified: 2026-09-04. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -57,6 +57,7 @@ from .gitinfo import (  # noqa: E402
     parent_branch,
     repo_root,
 )
+from .gitpage import ICON as GIT_PAGE_ICON  # noqa: E402
 from .gitpage import GitPage  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 from .lightbox import present_image_lightbox  # noqa: E402
@@ -2340,6 +2341,21 @@ class TerminalTab(Gtk.Box):
         open_external.connect("pressed", self._on_open_external_terminal)
         toggle_btn.add_controller(open_external)
 
+        # The git page, one click away beside the panel toggles: the same
+        # glyph the page's own tab wears, so the button and what it opens
+        # read as one thing. The footer's ⎇ branch label opens it too, but a
+        # label doesn't look pressable; this is the way in you can see.
+        # Greyed outside a repository (rechecked with the branch each tick)
+        # rather than hidden — a button that comes and goes is one you never
+        # learn the place of.
+        self._git_toggle_btn = Gtk.Button(icon_name=GIT_PAGE_ICON)
+        self._git_toggle_btn.add_css_class("flat")
+        self._git_toggle_btn.set_action_name("win.toggle-git")
+        self._git_toggle_btn.set_tooltip_text(
+            keybindings.with_hint(_("Show/hide git page"), "win.toggle-git")
+        )
+        self._git_toggle_btn.set_sensitive(False)
+
         # model, effort, cwd, branch and PRs sit together on the left; the
         # wrapper box (not the cwd label) takes the slack so the buttons stay
         # pinned right even while the model, branch and PR labels are hidden.
@@ -2359,9 +2375,9 @@ class TerminalTab(Gtk.Box):
         # populated from settings via _set_footer_apps.
         self._footer_apps_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
 
-        # The editor toggle closes the row, right of the terminal toggle — a
+        # The editor toggle closes the row, right of the git toggle — a
         # page-with-a-folded-corner glyph, not the panel-split
-        # icon `toggle_btn` uses next to it. One click means one of three
+        # icon `toggle_btn` uses two along from it. One click means one of three
         # things depending on state: re-attach a detached editor, else open
         # the panel, else close it (see the window's _toggle_editor); the
         # tooltip always names whichever it is.
@@ -2377,6 +2393,7 @@ class TerminalTab(Gtk.Box):
         footer.append(files_btn)
         toggle_btn.add_css_class("flat")
         footer.append(toggle_btn)
+        footer.append(self._git_toggle_btn)
         footer.append(self._editor_toggle_btn)
         # Poll only while on screen; refresh immediately on every tab switch.
         self.connect("map", lambda *_: self._start_cwd_refresh())
@@ -2407,6 +2424,7 @@ class TerminalTab(Gtk.Box):
             self._branch_label.set_text(f"⎇ {branch}" if branch else "")
             self._branch_label.set_tooltip_text(self._branch_tooltip(branch) if branch else None)
             self._branch_label.set_visible(branch is not None)
+            self._git_toggle_btn.set_sensitive(branch is not None)
             # The chips are the session's history, so a checkout doesn't retire
             # any of them; it only makes the button worth pressing again.
             self._sync_pr_refresh_tooltip()

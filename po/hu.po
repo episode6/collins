@@ -2213,6 +2213,51 @@ msgstr "Pull requestek frissítése indításkor"
 msgid "Ask GitHub about every listed session's pull requests once on startup, so the marks in the sidebar start out current rather than as they were left"
 msgstr "Induláskor egyszer megkérdezi a GitHubot minden listázott munkamenet pull requestjeiről, hogy az oldalsáv jelölései frissen induljanak, ne úgy, ahogy maradtak"
 
+msgid "Git"
+msgstr "Git"
+
+msgid "The git page: hunk's layout and theme, and what the commits panel loads"
+msgstr "A git oldal: a hunk elrendezése és témája, és amit a commit-panel betölt"
+
+msgid "Layout"
+msgstr "Elrendezés"
+
+msgid "How hunk lays a diff out: side by side, stacked, or whichever fits the width"
+msgstr "Hogyan rendezi el a hunk a diffet: egymás mellett, egymás alatt, vagy ahogy a szélességbe belefér"
+
+msgid "Automatic"
+msgstr "Automatikus"
+
+msgid "Split"
+msgstr "Osztott"
+
+msgid "Stacked"
+msgstr "Egymás alatt"
+
+msgid "Theme"
+msgstr "Téma"
+
+msgid "Empty: hunk's own default. Any theme hunk knows — nord, dracula, catppuccin-mocha, github-light-default, auto (follows the terminal background) — or one from hunk's config; a name hunk doesn't know falls back to its default"
+msgstr "Üresen: a hunk saját alapértelmezése. Bármely téma, amit a hunk ismer — nord, dracula, catppuccin-mocha, github-light-default, auto (a terminál hátteréhez igazodik) — vagy egy a hunk konfigurációjából; az ismeretlen nevet az alapértelmezés váltja"
+
+msgid "Show untracked files"
+msgstr "Nem követett fájlok mutatása"
+
+msgid "List files git doesn't track yet in working-tree reviews. Off, the page and the files panel show only tracked changes"
+msgstr "A git által még nem követett fájlok listázása a munkafa áttekintésében. Kikapcsolva az oldal és a fájlpanel csak a követett változásokat mutatja"
+
+msgid "Commits per page"
+msgstr "Commitok oldalanként"
+
+msgid "How many commits each group of the commits panel shows before its load more… row"
+msgstr "Hány commitot mutat a commit-panel egy-egy csoportja a további betöltése… sora előtt"
+
+msgid "Default parent branch"
+msgstr "Alapértelmezett szülőág"
+
+msgid "Empty: automatic. The page measures the branch against the attached pull request's base first, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch; Set parent branch… in the page still overrides it"
+msgstr "Üresen: automatikus. Az oldal az ágat először a csatolt pull request alapágához méri, aztán ehhez az ághoz, ha megvan a tárolóban (develop, vagy origin/develop, ha csak a távoli tárolóban van meg), aztán az alapértelmezett ághoz; az oldal Szülőág beállítása… menüpontja továbbra is felülírja"
+
 msgid "Caffeine Mode"
 msgstr "Caffeine Mode"
 
@@ -2533,6 +2578,9 @@ msgstr "A munkamenet által nyitott összes pull request"
 
 msgid "Show/hide terminal panel"
 msgstr "Terminálpanel megjelenítése/elrejtése"
+
+msgid "Show/hide git page"
+msgstr "Git-oldal megjelenítése/elrejtése"
 
 msgid "Move terminals to {name}?"
 msgstr "Áthelyezi a terminálokat ide: {name}?"

@@ -38,8 +38,10 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
-- **A git page beside the session.** `F6`, or a click on the footer's ⎇
-  branch label, opens [hunk](https://hunk.dev) in a terminal of its own
+- **A git page beside the session.** `F6`, the footer's git button
+  (beside the terminal and editor toggles, greyed outside a repository), or
+  a click on the footer's ⎇ branch label, opens
+  [hunk](https://hunk.dev) in a terminal of its own
   next to the agent's, with an extension Collins ships drawing two panels
   inside it: **commits** — the current branch with a *working tree* row,
   its parent, the default branch — where a click loads that commit or

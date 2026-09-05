@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-03. Full change history: git log for this file.
+fork. Last modified: 2026-09-04. Full change history: git log for this file.
 -->
 
 # Features
@@ -118,7 +118,7 @@ Enter opens, Esc closes.
   with and the **effort level** it answered at, the agent's live working
   directory (click to copy), and the current **git branch** (⎇ — click to
   open the [git page](#git-page), right-click to copy), plus the
-  terminal-panel buttons.
+  terminal-panel, git-page and editor buttons.
 - **Footer apps**: name any installed application in Preferences →
   *Footer apps* and every session's footer grows a button that opens the
   session's live directory in it — your editor, a file manager, a git GUI.
@@ -481,12 +481,14 @@ panels:
   rebasing shows up without a keypress, and a session that finishes a
   turn is checked on the spot. A session that steps into a worktree takes
   the page with it.
-- **Two ways in**: `F6` (pressed while the cursor is in the page, it
-  closes; from anywhere else it opens or fronts it), or a click on the
-  footer's **⎇ branch** label. A fresh page opens on the unstaged changes
-  while anything in the tree is dirty, and on the staged ones when only
-  the index is. Outside a git repository there is nothing to open, and
-  the terminal says so.
+- **Three ways in**: `F6` (pressed while the cursor is in the page, it
+  closes; from anywhere else it opens or fronts it), the footer's **git
+  button** beside the terminal and editor toggles (the same toggle, the
+  same glyph the page's tab wears), or a click on the footer's **⎇
+  branch** label. A fresh page opens on the unstaged changes while
+  anything in the tree is dirty, and on the staged ones when only the
+  index is. Outside a git repository there is nothing to open: the button
+  is greyed, and `F6` says so in the terminal.
 - **Hunk's own keys still work** — it is the real program, in a real
   terminal, so its navigation, search and `r` reload are all there. The
   page holds `Esc` for it, and the terminal zoom chords apply.
