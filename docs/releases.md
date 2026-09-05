@@ -133,16 +133,17 @@ downloads of each version, see the
   chosen in the CLI's own `/model` picker still waits for the next
   reply, since the CLI prints its name rather than its id.
 - **Archiving a session in a git worktree offers to delete the
-  worktree.** Once the session has stopped — right away for a session
-  with no tab, after the tab's exit for one that had a tab — a dialog
-  asks *Keep Worktree* or *Delete Worktree*. Deleting removes the
-  worktree the way the CLI reaps an untouched one (uncommitted changes
-  go with it) and its branch too when git agrees it has nothing
-  unmerged. Preferences → *When archiving a session in a git worktree*
-  makes the answer *Always Delete* or *Never Delete* instead. Nothing is
-  offered for a worktree the session left, one the CLI already reaped,
-  one still in use by another tab or a background agent, or for bulk
-  archives.
+  worktree.** The archive starts with a dialog asking *Keep Worktree*
+  or *Delete Worktree* — or *Cancel*, which archives nothing. Either
+  answer archives the session; the deletion waits until it has stopped
+  (right away for a session with no tab, after the tab's exit for one
+  that had a tab). Deleting removes the worktree the way the CLI reaps
+  an untouched one (uncommitted changes go with it) and its branch too
+  when git agrees it has nothing unmerged. Preferences → *When archiving
+  a session in a git worktree* makes the answer *Always Delete* or
+  *Never Delete* instead, with no dialog. Nothing is asked about a
+  worktree the session left, one the CLI already reaped, one still in
+  use by another tab or a background agent, or for bulk archives.
 - **Fewer "finished" notifications for runs still going.** Recent CLI
   versions clear the terminal progress hint for a beat between tool
   calls — the model's stream has ended, the next tool isn't marked in

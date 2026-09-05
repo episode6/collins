@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """End-to-end check for what archiving does with a session's worktree.
 
-MainWindow._settle_archived_worktree runs after a single archive lands on a
-stopped session: it reads the worktree the transcript records and, as the
-archive_worktree setting says, leaves it, deletes it, or asks. None of that
-is reachable from pytest — tests/conftest.py blocks the GTK stack, and the
-ask is a real dialog on a real window — so it is checked here against a
-real App and a real git repository:
+A single archive of a session that still occupies a worktree settles that
+worktree as the archive_worktree setting says: MainWindow leaves it (never),
+deletes it once the archive has landed (always), or asks first — before the
+archive begins, so Cancel keeps the session — and deletes at the end only if
+the answer was Delete (ask; see MainWindow._ask_worktree_then_archive and
+_settle_archived_worktree). None of that is reachable from pytest —
+tests/conftest.py blocks the GTK stack, and the ask is a real dialog on a
+real window — so it is checked here against a real App and a real git
+repository:
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \
         python3 scripts/check_archive_worktree.py
@@ -16,7 +19,9 @@ path, with no CLI to spawn), filed the way the CLI files a session that
 lives in a worktree, and the worktree itself cut for real under the staged
 repository. The setting is walked through never, always and ask, with the
 worktree put back between rounds; a last round makes the session a
-background agent, which must keep its worktree whatever the setting.
+background agent, which must keep its worktree whatever the setting. The
+ask round is answered every way it can be: Cancel (nothing archived), Keep
+(archived, worktree stays), Delete (archived, worktree gone).
 
 Run it behind the headless wrapper, or a window opens on the user's screen.
 """
@@ -219,7 +224,8 @@ def step_always() -> bool:
 def step_ask() -> bool:
     win = state["win"]
     dialog = win.get_visible_dialog()
-    check("ask: the session was archived", win.state.is_archived(SESSION))
+    # The question comes before the archive: nothing has moved yet.
+    check("ask: the session is not archived yet", not win.state.is_archived(SESSION))
     check("ask: the worktree waits on the answer", worktree_exists())
     check(
         "ask: the dialog is up",
@@ -229,14 +235,50 @@ def step_ask() -> bool:
     if not isinstance(dialog, Adw.AlertDialog):
         return done()
     state["dialog"] = dialog
+    check("ask: the dialog has Cancel", dialog.get_close_response() == "cancel")
+    # A second archive click while the question is up is ignored: no second
+    # dialog, and still nothing archived.
+    archive()
+    return later(step_ask_twice, 800)
+
+
+def step_ask_twice() -> bool:
+    win = state["win"]
+    dialog = win.get_visible_dialog()
+    check("ask twice: the same dialog is still up", dialog is state["dialog"])
+    check("ask twice: still not archived", not win.state.is_archived(SESSION))
+    if not isinstance(dialog, Adw.AlertDialog):
+        return done()
+    # Cancel: no archive at all.
+    dialog.close()
+    return later(step_cancelled, 800)
+
+
+def step_cancelled() -> bool:
+    win = state["win"]
+    check("cancel: the session was not archived", not win.state.is_archived(SESSION))
+    check("cancel: the worktree stays", worktree_exists())
+    check("cancel: the dialog is gone", win.get_visible_dialog() is None)
+    archive()
+    return later(step_ask_keep)
+
+
+def step_ask_keep() -> bool:
+    win = state["win"]
+    dialog = win.get_visible_dialog()
+    check("ask again: the dialog is up", isinstance(dialog, Adw.AlertDialog))
+    if not isinstance(dialog, Adw.AlertDialog):
+        return done()
     # Keep: the dialog's suggested answer.
+    check("ask again: Keep is the default", dialog.get_default_response() == "extra")
     dialog.set_close_response("extra")
     dialog.close()
-    return later(step_kept, 800)
+    return later(step_kept)
 
 
 def step_kept() -> bool:
     win = state["win"]
+    check("keep: the session was archived", win.state.is_archived(SESSION))
     check("keep: the worktree stays", worktree_exists())
     check("keep: the dialog is gone", win.get_visible_dialog() is None)
     restore()
@@ -247,7 +289,8 @@ def step_kept() -> bool:
 def step_ask_delete() -> bool:
     win = state["win"]
     dialog = win.get_visible_dialog()
-    check("ask again: the dialog is up", isinstance(dialog, Adw.AlertDialog))
+    check("ask a third time: the dialog is up", isinstance(dialog, Adw.AlertDialog))
+    check("ask a third time: still not archived", not win.state.is_archived(SESSION))
     if not isinstance(dialog, Adw.AlertDialog):
         return done()
     dialog.set_close_response("confirm")
@@ -257,6 +300,7 @@ def step_ask_delete() -> bool:
 
 def step_deleted() -> bool:
     win = state["win"]
+    check("delete: the session was archived", win.state.is_archived(SESSION))
     check("delete: the worktree is gone", not worktree_exists())
     check("delete: the dialog is gone", win.get_visible_dialog() is None)
     # A session running on as a background agent keeps its worktree whatever
