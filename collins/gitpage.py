@@ -15,7 +15,11 @@ tried), and swaps what is loaded with `hunk session reload <id> -- diff …`
 (or `-- show <ref>`) whenever Ctrl+1/2/3 or the host asks for another load:
 the unstaged working tree, the index, the branch against its parent, or a
 commit. When the session id can't be had (an old hunk, a daemon that never
-answered), every switch is a respawn instead — slower, never wrong.
+answered), every switch is a respawn instead — slower, never wrong — and a
+banner over the viewer says so, naming the foreground daemon run that prints
+what the auto-spawn swallowed (hunkctl.DAEMON_DIAGNOSTIC). Before each spawn
+the daemon's runtime directory is made owner-only if it isn't
+(hunkctl.repair_daemon_dir): the one daemon failure seen so far.
 
 The extension does its own loads — a click on a commit, a branch header, the
 Staged section — through the same session API, and the page learns of them
@@ -370,8 +374,23 @@ class GitPage(Adw.Bin):
         self._stack.add_named(scrolled, _HUNK)
         self._stack.add_named(self._card_slot, _CARD)
 
+        # Shown when the viewer never registered with hunk's session daemon
+        # (_resolved gave up): the page still draws, but every load the
+        # extension sends — a commit clicked, `n`, a header — finds no
+        # session and silently stays put. Says what to run to learn why.
+        self._banner = Adw.Banner()
+        self._banner.set_title(
+            _(
+                "The diff viewer never registered with hunk's session daemon, so commits and"
+                " modes won't load here. Run `{command}` in a terminal to see why."
+            ).format(command=hunkctl.DAEMON_DIAGNOSTIC)
+        )
+        self._banner.set_button_label(_("Retry"))
+        self._banner.connect("button-clicked", lambda *_a: self._respawn())
+
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(header)
+        box.append(self._banner)
         box.append(self._stack)
         # A width sensor: nothing tells a widget its allocation changed
         # (Adw.Bin allocates through a layout manager, so the vfunc never
@@ -982,6 +1001,7 @@ class GitPage(Adw.Bin):
         page.set_child(body)
         self._card_button = action
         self._card = kind
+        self._banner.set_revealed(False)
         self._card_slot.set_child(page)
         self._stack.set_visible_child_name(_CARD)
 
@@ -1055,9 +1075,17 @@ class GitPage(Adw.Bin):
         gen = self._gen
         cwd = self._cwd_provider()
         show_ref = hunkctl.show_ref(self._loaded)
+        runtime_dir = GLib.get_user_runtime_dir()
 
         def work() -> None:
             probe = hunkctl.probe()
+            repaired = hunkctl.repair_daemon_dir(runtime_dir)
+            if repaired in ("repaired", "failed"):
+                daemon_dir = os.path.join(runtime_dir, hunkctl.DAEMON_DIR)
+                if repaired == "repaired":
+                    log.info("gitpage: made %s owner-only for hunk's daemon", daemon_dir)
+                else:
+                    log.warning("gitpage: %s isn't owner-only and can't be made so", daemon_dir)
             subject = hunkctl.commit_subject(cwd, show_ref) if show_ref else None
             GLib.idle_add(self._probed, gen, probe, subject)
 
@@ -1190,6 +1218,7 @@ class GitPage(Adw.Bin):
             # Given up: every switch from here on is a respawn — a load
             # queued meanwhile, or an untracked switch the argv missed.
             log.debug("gitpage: no hunk session for pid %s after %d tries", pid, step + 1)
+            self._banner.set_revealed(True)
             self._resolving = False
             pending, self._pending_mode = self._pending_mode, None
             stale, self._options_stale = self._options_stale, False
@@ -1197,6 +1226,7 @@ class GitPage(Adw.Bin):
                 self._respawn()
             return GLib.SOURCE_REMOVE
         self._session_id = session.session_id
+        self._banner.set_revealed(False)
         self._resolving = False
         pending, self._pending_mode = self._pending_mode, None
         stale, self._options_stale = self._options_stale, False
@@ -1254,6 +1284,7 @@ class GitPage(Adw.Bin):
         self._pending_mode = None
         self._options_stale = False
         self._gen += 1  # orphan any session list / get / reload still out
+        self._banner.set_revealed(False)
         self.terminal.reset(True, True)
         self._sync_levels()  # nothing to feed: the buttons go insensitive
         if self._closing:
