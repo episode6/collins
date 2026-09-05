@@ -1,7 +1,6 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
-"""What a key press means inside the composer's text box, what opens one,
-and what a new session opens it as.
+"""What a key press means inside the composer's text box, and what opens one.
 
 The composer sends on Enter by default, with a setting that swaps sending to
 Ctrl+Enter (leaving bare Enter a newline, for people who write prompts like
