@@ -6,29 +6,18 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   applyCached,
   gitRunner,
-  parentOf,
   readFilePatch,
-  readLog,
-  readStatus,
-  resolveBranch,
-  restoreFile,
-  revParse,
-  stageAll,
-  stageFiles,
-  unstageAll,
-  unstageFiles,
-  currentBranch,
-  guessDefault,
-  localBranches,
-  repoName,
   repoToplevel,
-  unpushedShas,
+  restoreFile,
+  stageFiles,
+  unstageFiles,
 } from "../git.ts";
 import { parseFilePatch } from "../patch.ts";
-import { planAll, planDiscard, planFileToggle, planHunkToggle } from "../staging.ts";
+import { planDiscard, planFileToggle, planHunkToggle } from "../staging.ts";
 import { createTestGitRepository, hasGit, type TestGitRepository } from "./support/gitRepo.ts";
+import { readStatus } from "./support/status.ts";
 import { realpathSync, rmSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 const TEN_LINES = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
 
@@ -164,22 +153,22 @@ describe.skipIf(!hasGit())("staging against a real index", () => {
     expect(readStatus(repo.git)?.staged).toEqual([{ path: "new.txt", previousPath: "old.txt", code: "R" }]);
   });
 
-  test("an untracked file goes whole, and A then U round-trips", () => {
+  test("an untracked file goes whole, and X stages it as a new file", () => {
     repo.write("n.txt", "new\n");
     repo.write("f.txt", "changed\n");
     const empty = readFilePatch(repo.git, "n.txt", false);
     expect(empty.ok).toBe(true);
-    expect(planHunkToggle({ file: { path: "n.txt", isUntracked: true, changeType: "new" }, hunkIndex: 0, live: "unstaged", patchText: empty.stdout })).toEqual({ kind: "file" });
+    const file = { path: "n.txt", isUntracked: true, changeType: "new" as const };
+    expect(planHunkToggle({ file, hunkIndex: 0, live: "unstaged", patchText: empty.stdout })).toEqual({ kind: "file" });
 
     const before = readStatus(repo.git);
-    expect(planAll(before, true)).toEqual({ count: 2, stage: true });
-    expect(stageAll(repo.git).ok).toBe(true);
+    expect(before?.unstaged.map((row) => `${row.code} ${row.path}`).sort()).toEqual(["? n.txt", "M f.txt"]);
+    const plan = planFileToggle({ file, live: "unstaged" });
+    expect(stageFiles(repo.git, plan.paths).ok).toBe(true);
     const staged = readStatus(repo.git);
-    expect(staged?.unstaged).toEqual([]);
-    expect(staged?.staged.map((row) => `${row.code} ${row.path}`).sort()).toEqual(["A n.txt", "M f.txt"]);
-
-    expect(planAll(staged, false)).toEqual({ count: 2, stage: false });
-    expect(unstageAll(repo.git).ok).toBe(true);
+    expect(staged?.staged).toEqual([{ path: "n.txt", code: "A" }]);
+    expect(staged?.unstaged).toEqual([{ path: "f.txt", code: "M" }]);
+    expect(unstageFiles(repo.git, plan.paths).ok).toBe(true);
     expect(readStatus(repo.git)).toEqual(before);
   });
 
@@ -201,36 +190,5 @@ describe.skipIf(!hasGit())("staging against a real index", () => {
     expect(restoreFile(repo.git, "old.txt")).toMatchObject({ ok: true });
     expect(repo.read("old.txt")).toBe("keep me around\nstaged edit\n"); // the index's copy, not HEAD's
     expect(readStatus(repo.git)).toEqual({ unstaged: [], staged: [{ path: "old.txt", code: "M" }] });
-  });
-
-  test("the read-side helpers answer for a real repository", () => {
-    const head = revParse(repo.git, "HEAD")!;
-    expect(head).toMatch(/^[0-9a-f]{40}$/);
-    expect(parentOf(repo.git, head)).toBeNull();
-    expect(currentBranch(repo.git)).toBe("main");
-    expect(guessDefault(repo.git)).toBe("main");
-    expect(repoName(repo.git)).toBe(basename(repo.root));
-    expect(resolveBranch(repo.git, "main")).toEqual({ target: "main", sha: head });
-    expect(resolveBranch(repo.git, "nope")).toBeNull();
-    expect(resolveBranch(repo.git, "-x")).toBeNull();
-    // With no remote-tracking ref at all there is nothing to be unpushed against, so
-    // nothing is marked; once one names HEAD, still nothing; once HEAD moves past it, HEAD.
-    expect(unpushedShas(repo.git).size).toBe(0);
-    repo.run("update-ref", "refs/remotes/origin/main", head);
-    expect(unpushedShas(repo.git).size).toBe(0);
-    repo.write("f.txt", "unpushed\n");
-    repo.run("commit", "-qam", "unpushed");
-    expect(unpushedShas(repo.git)).toEqual(new Set([revParse(repo.git, "HEAD")!]));
-    repo.run("reset", "-q", "--hard", head);
-
-    repo.run("checkout", "-qb", "feat");
-    repo.write("f.txt", "second\n");
-    repo.run("commit", "-qam", "second");
-    expect(unpushedShas(repo.git)).toEqual(new Set([revParse(repo.git, "HEAD")!]));
-    expect(localBranches(repo.git)).toEqual(["feat", "main"]);
-    const log = readLog(repo.git, ["main..HEAD"], { limit: 5 });
-    expect(log.map((commit) => commit.subject)).toEqual(["second"]);
-    expect(parentOf(repo.git, log[0]!.sha)).toBe(head);
-    expect(readLog(repo.git, ["HEAD"], { limit: 1, skip: 1 }).map((commit) => commit.subject)).toEqual(["first"]);
   });
 });

@@ -1,133 +1,64 @@
 // New in the ghackett fork of agent-session-manager (GPL-3.0).
-// Portions adapted from joshedler/hunk-git-lite, muzomer/hunk-commit and
-// sadick254/hunk-commit-log (MIT, © 2026 Josh Edler, © 2026 hunk-jj-stage
-// contributors, © 2026 Sadick); see collins/THIRD_PARTY_LICENSES.md.
+// Portions adapted from muzomer/hunk-commit (MIT, © 2026 hunk-jj-stage
+// contributors); see collins/THIRD_PARTY_LICENSES.md.
 
 /**
  * collins-git: the hunk extension Collins loads into its git page.
  *
- * Two panes on the left of hunk's review — the commits panel (current
- * branch with a `working tree` row, parent branch, default branch) and the
- * files panel that takes over hunk's own (`replaces: "hunk:files"`), split
- * into Unstaged and Staged while the working tree is loaded — plus the
- * keys that act on what is shown: `x` stages or unstages the current hunk,
- * `X` the current file, `A`/`U` everything (after a confirmation), `v`
- * anchors a line range that the next `x` or `D` acts on (`esc` clears it),
- * `D` discards the current hunk or range from the working tree after a
- * confirmation, `C`/`B` commit the index with a summary (and a body), `F`
- * makes a `fixup!` commit for an unpushed commit picked from a list,
- * `n`/`p` walk the current group of the commits panel, `P` (or a right
- * click on the panel) picks the parent branch, `<`/`>` walk the levels of
- * a page too narrow for both panes (diff, files, commits — level.ts).
+ * Only the keys that need hunk's cursor live here; everything else the git
+ * page does (the commits and files lists, commit and fixup, stage all, the
+ * parent branch) is native GTK in Collins, and hunk runs with
+ * `--no-sidebar` so it draws nothing but its review. Five commands: `x`
+ * stages or unstages the current hunk — or, with an anchor set, the lines
+ * from the anchor to the cursor — `X` the current file, `v` anchors a line
+ * range (`esc` clears it) and `D` discards the current hunk or range from
+ * the working tree after a confirmation (a deleted file is restored
+ * whole). Collins' buttons press the same keys through the terminal, so
+ * the keys are pinned (see the README).
  *
- * This file only composes: git.ts runs git, model.ts builds rows, store.ts
- * holds what the panes paint, session.ts reloads the window, sidecar.ts
- * talks to Collins, staging.ts plans the keys, range.ts does the line-range
- * arithmetic, anchor.ts remembers where `v` was pressed and paints it,
- * level.ts decides what a narrow terminal shows.
- * Runs standalone too: `hunk diff --extension <this dir>` with no sidecar
- * guesses the branches.
+ * What this extension tells Collins goes through the sidecar (sidecar.ts):
+ * `selection` — the file and hunk under hunk's cursor, written on every
+ * `selection_changed` — so the native files list follows the cursor at
+ * once rather than on Collins' next poll; `anchor` — the line `v` was
+ * pressed on — so the native buttons say "Stage lines" and "Clear anchor";
+ * and `refreshed` — the index mtime and HEAD right after a mutation of
+ * ours reloaded the review — so Collins' freshness poll leaves a move hunk
+ * has already shown alone.
+ *
+ * This file only composes: git.ts runs git, staging.ts plans the keys,
+ * range.ts does the line-range arithmetic, anchor.ts remembers where `v`
+ * was pressed and paints it, model.ts reads hunk's title, sidecar.ts talks
+ * to Collins. Runs standalone too: `hunk diff --extension <this dir>` with
+ * no sidecar is the same five keys, telling nobody.
  */
 
 import { appendFileSync } from "node:fs";
-import { basename } from "node:path";
 import type {
   ExtensionChangeset,
   ExtensionCommandContext,
-  ExtensionDialogs,
   ExtensionDiffFile,
   ExtensionEventContext,
   ExtensionNotifyType,
-  ExtensionPaneControls,
   HunkExtensionAPI,
 } from "hunkdiff/extension";
 import { anchorMarks, clearAnchor, currentAnchor, rebindAnchor, setAnchor, type Anchor } from "./anchor.ts";
-import { CommitsPane } from "./commits.tsx";
-import { FilesPane } from "./files.tsx";
 import {
   applyCached,
   applyWorktreeReverse,
-  commit,
-  commitFixup,
-  currentBranch,
   gitRunner,
-  gitRunnerAsync,
-  inProgressOperation,
-  localBranches,
-  parentOf,
   readFilePatch,
-  readLog,
-  readStatus,
   repoToplevel,
-  resolveBranch,
   restoreFile,
-  revParse,
-  stageAll,
-  stagedPaths,
   stageFiles,
   treeMark,
-  unpushedCommits,
-  unpushedShas,
-  unstageAll,
   unstageFiles,
-  type AsyncGitRunner,
-  type Commit,
   type GitResult,
   type GitRunner,
-  type Status,
 } from "./git.ts";
-import {
-  buildRows,
-  decodeTail,
-  decodeTitle,
-  loadedRow,
-  neighbour,
-  sideTail,
-  withoutUntracked,
-  type BranchRef,
-  type Group,
-  type Loaded,
-  type Row,
-  type Side,
-} from "./model.ts";
-import {
-  firstLine,
-  hunkRunner,
-  onPendingChange,
-  pendingLoad,
-  requestLoad,
-  type Report,
-  type SessionDeps,
-} from "./session.ts";
-import {
-  configFromEnv,
-  effectiveConfig,
-  readSidecar,
-  watchSidecar,
-  writeSidecar,
-  type SidecarConfig,
-} from "./sidecar.ts";
-import {
-  BOTH_PANES,
-  descendAfterPick,
-  fit,
-  levelOf,
-  panesFor,
-  planPanes,
-  planResize,
-  stepDown,
-  stepUp,
-  type Level,
-  type PaneId,
-  type PaneState,
-  type Plan,
-} from "./level.ts";
+import { decodeTitle, type Loaded, type Side } from "./model.ts";
 import type { LineAddress } from "./range.ts";
-import { describe, planAll, planDiscard, planFileToggle, planHunkToggle, planRangeToggle } from "./staging.ts";
-import { publishCommits, publishFiles, setPaneHandlers } from "./store.ts";
-
-/** The bus event a right click on the commits panel raises. */
-export const SET_PARENT_EVENT = "collins-git:set-parent";
+import { configFromEnv, writeSidecar, type SidecarAnchor, type SidecarSelection } from "./sidecar.ts";
+import { describe, planDiscard, planFileToggle, planHunkToggle, planRangeToggle } from "./staging.ts";
 
 const READ_ONLY = "read-only view — load working tree first";
 
@@ -137,39 +68,11 @@ const ANCHOR_HIGHLIGHTER = "range-anchor";
 /** Hunk's own command that turns its cursor line on, for a `v` pressed with it off. */
 const CURSOR_LINE_ROW = "hunk.view.cursorLineRow";
 
+/** Hunk's own command that reloads the review in place, after a mutation of ours. */
+const REFRESH = "hunk.app.refresh";
+
 const DISCARD_BODY = "The working tree will be reverted. This cannot be undone — the changes exist nowhere else.";
 const RESTORE_BODY = "The file comes back from the index, as the last stage or commit left it.";
-
-/** How long a commit runs before a toast says so: longer than a hookless commit, shorter than a lint hook. */
-const COMMIT_TOAST_MS = 700;
-
-/** The panes this extension registers, in registration (left-to-right) order. */
-const PANE_IDS = ["commits", "files"] as const;
-
-/** How long a burst of terminal resizes settles before the panes are re-revealed. */
-const RESIZE_SETTLE_MS = 300;
-
-/**
- * How often the terminal's width is re-read besides SIGWINCH: a resize that
- * lands while hunk is still starting (Collins widens its git column as the
- * page settles) precedes any handler this extension could install, and
- * `process.stdout.columns` is what the process saw at start.
- */
-const RESIZE_POLL_MS = 1_000;
-
-/** The terminal's current width in columns, by ioctl; 0 when there is no tty. */
-function readColumns(): number {
-  const out = process.stdout as { getWindowSize?: () => [number, number]; columns?: number };
-  try {
-    const size = out.getWindowSize?.();
-    if (size !== undefined && Number.isFinite(size[0]) && size[0] > 0) {
-      return size[0];
-    }
-  } catch {
-    // Not a tty (a test, a pipe): fall through.
-  }
-  return out.columns ?? 0;
-}
 
 /** A file the debugging run can watch; never the terminal, which hunk owns. */
 const DEBUG_LOG = process.env.COLLINS_GIT_DEBUG_LOG;
@@ -186,50 +89,26 @@ function debug(message: string): void {
 
 type Notify = (message: string, type?: ExtensionNotifyType) => void;
 
+/** The parts of a `selection_changed` payload this extension keeps. */
+interface Cursor {
+  readonly fileId: string | null;
+  readonly hunkIndex: number | null;
+}
+
 export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
   const sidecarPath = configFromEnv(process.env).path;
 
   let cwd = "";
   let git: GitRunner | null = null;
-  /** The same repository, for the commits: they may run as long as their hooks take. */
-  let gitAsync: AsyncGitRunner | null = null;
-  /** Whether a commit is out — a second `C`/`B`/`F` waits for it rather than racing it. */
-  let committing = false;
   let repo = "";
-  /** The user's pick when there is no sidecar to keep it in (standalone runs). */
-  let memoryParent: string | null = null;
-  /**
-   * After the user chose "Automatic", the sidecar still names their old
-   * pick until Collins recomputes it; until the file changes, the parent
-   * shown is the default branch instead.
-   */
-  let awaitingAuto = false;
-  let loaded: Loaded = { kind: "foreign", tail: "" };
-  /** The sha a `show <ref>` title's ref resolves to, for matching a row. */
-  let loadedSha: string | null = null;
+  let loaded: Loaded = { kind: "other" };
   let files: readonly ExtensionDiffFile[] = [];
   let lastChangesetId: string | null = null;
-  let status: Status | null = null;
-  let rows: Row[] = [];
-  let pendingSelectPath: string | null = null;
-  let error: string | null = null;
-  const pages: Record<Group, number> = { current: 1, parent: 1, default: 1 };
-  let unwatch: (() => void) | null = null;
-  /** The sidecar's config as last read, so a rewrite that changed none of it (our own `refreshed` record) costs no git. */
-  let sidecarSeen = "";
-  /**
-   * The pane controls of the newest event context, for the resize hook.
-   * Controls are leased to one review generation: after any reload (a
-   * commit clicked, `r`, a `--watch` reload, our own `hunk.app.refresh`)
-   * the startup event's `isOpen` answers false for every pane and its
-   * `open` only warns — so every changeset event replaces them.
-   */
-  let panes: ExtensionPaneControls | null = null;
-  let columns = readColumns();
-  /** The level last written to the sidecar, so a step that changed nothing writes nothing. */
-  let levelWritten: string | null = null;
-  let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-  let resizePoll: ReturnType<typeof setInterval> | null = null;
+  /** Hunk's cursor as last reported, by the ids of the changeset it was reported in. */
+  let cursor: Cursor = { fileId: null, hunkIndex: null };
+  /** The `selection` and `anchor` last written to the sidecar (as JSON), so an unchanged one is not rewritten. */
+  let selectionWritten: string | null = null;
+  let anchorWritten: string | null = null;
 
   const log = (message: string): void => {
     hunk.log(message);
@@ -239,237 +118,59 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
   /**
    * The runner for *dir*'s repository, built on the working tree's top
    * level rather than *dir* itself: hunk starts in the agent's cwd, which
-   * may be a subdirectory, and every path hunk and `git status` hand us is
-   * top-relative (see repoToplevel). *dir* is only the cache key.
+   * may be a subdirectory, and every path hunk hands us is top-relative
+   * (see repoToplevel). *dir* is only the cache key.
    */
   function ensureGit(dir: string): GitRunner {
     if (git === null || dir !== cwd) {
       cwd = dir;
       const top = repoToplevel(gitRunner(dir));
       git = gitRunner(top ?? dir);
-      gitAsync = gitRunnerAsync(top ?? dir);
-      repo = top === null ? "" : basename(top);
-      error = top === null ? "not a git repository" : null;
+      repo = top === null ? "" : top.slice(top.lastIndexOf("/") + 1);
     }
     return git;
-  }
-
-  function ensureGitAsync(dir: string): AsyncGitRunner {
-    ensureGit(dir);
-    return gitAsync!;
-  }
-
-  /** The sidecar's config, as a string the watcher can compare. */
-  function sidecarConfigText(): string {
-    return sidecarPath === null ? "" : JSON.stringify(readSidecar(sidecarPath));
-  }
-
-  function config(): SidecarConfig {
-    const runner = ensureGit(cwd);
-    let sidecar = sidecarPath !== null ? readSidecar(sidecarPath) : null;
-    if (sidecar === null && memoryParent !== null) {
-      sidecar = { parent: memoryParent, parentSource: "user", default: null, logPage: 20, untracked: true };
-    }
-    if (sidecar !== null && awaitingAuto && sidecarPath !== null) {
-      sidecar = { ...sidecar, parent: null, parentSource: "auto" };
-    }
-    return effectiveConfig(sidecar, runner);
-  }
-
-  /**
-   * What every load of ours runs with: the hunk that runs us, our own pid,
-   * and Collins' untracked switch — read off the sidecar as each reload
-   * goes out, so a `diff` load never brings back files Collins hides.
-   */
-  const sessionDeps: SessionDeps = {
-    run: hunkRunner(),
-    pid: process.pid,
-    excludeUntracked: () => !config().untracked,
-  };
-
-  function readPage(runner: GitRunner, range: string[], group: Group, logPage: number) {
-    const limit = logPage * pages[group];
-    const commits = readLog(runner, range, { limit: limit + 1 });
-    return { commits: commits.slice(0, limit), more: commits.length > limit };
-  }
-
-  /** Re-read git and rebuild the commits panel. */
-  function refreshCommits(): void {
-    const runner = ensureGit(cwd);
-    if (error !== null) {
-      rows = [];
-      publishCommitsState();
-      return;
-    }
-    const cfg = config();
-    const branch = currentBranch(runner);
-    const { defaultBranch, parent } = resolveGroups(runner, cfg);
-    const current = readPage(runner, currentGroupRange(parent), "current", cfg.logPage);
-    const parentIsDefault = parent === null || (defaultBranch !== null && parent.name === defaultBranch.name);
-    const parentCommits =
-      parent !== null && defaultBranch !== null && !parentIsDefault
-        ? readPage(runner, [`${defaultBranch.target}..${parent.target}`], "parent", cfg.logPage)
-        : { commits: [] as Commit[], more: false };
-    const defaultCommits =
-      defaultBranch !== null
-        ? readPage(runner, [defaultBranch.target], "default", cfg.logPage)
-        : { commits: [] as Commit[], more: false };
-    rows = buildRows({
-      branch,
-      parent,
-      defaultBranch,
-      current: current.commits,
-      currentMore: current.more,
-      parentCommits: parentCommits.commits,
-      parentMore: parentCommits.more,
-      defaultCommits: defaultCommits.commits,
-      defaultMore: defaultCommits.more,
-      unpushed: unpushedShas(runner),
-    });
-    publishCommitsState();
-  }
-
-  /**
-   * The branches the panel groups by: the default branch as configured,
-   * and the parent — the configured one when it resolves, else the
-   * default. One answer for the panel and for `F`, so the fixup list is
-   * the panel's current group and never a guess of its own.
-   */
-  function resolveGroups(runner: GitRunner, cfg: SidecarConfig): { defaultBranch: BranchRef | null; parent: BranchRef | null } {
-    const resolve = (name: string | null): BranchRef | null => {
-      if (name === null) {
-        return null;
-      }
-      const found = resolveBranch(runner, name);
-      return found === null ? null : { name, target: found.target };
-    };
-    const defaultBranch = resolve(cfg.default);
-    return { defaultBranch, parent: resolve(cfg.parent) ?? defaultBranch };
-  }
-
-  /** The current group as a log range: `<parent>..HEAD`, or all of HEAD with no parent to cut it at. */
-  function currentGroupRange(parent: BranchRef | null): string[] {
-    return parent === null ? ["HEAD"] : [`${parent.target}..HEAD`];
-  }
-
-  function publishCommitsState(): void {
-    const pending = pendingLoad();
-    const pendingRow = pending === null ? null : loadedRow(rows, decodeTail(pending));
-    publishCommits({
-      rows,
-      loadedRowId: loadedRow(rows, loaded, loadedSha)?.id ?? null,
-      pendingRowId: pendingRow?.id ?? null,
-      error,
-    });
-  }
-
-  /**
-   * Re-read status (working-tree loads only) and republish the files panel.
-   * With Collins' untracked switch off the `?` rows go: the live side never
-   * has them (hunk loaded `--exclude-untracked`), and the other side's
-   * list must not offer a file a click could never land on.
-   */
-  function refreshFiles(): void {
-    const runner = ensureGit(cwd);
-    const read = error === null && (loaded.kind === "unstaged" || loaded.kind === "staged") ? readStatus(runner) : null;
-    status = config().untracked ? read : withoutUntracked(read);
-    publishFiles({ status, loaded, pendingSelectPath, error });
-  }
-
-  function currentTail(): string[] {
-    return loaded.kind === "staged" ? sideTail("staged") : sideTail("unstaged");
-  }
-
-  /** What a click or `n`/`p` does with a row. */
-  function activateRow(row: Row, report: Report): void {
-    if (row.kind === "more") {
-      pages[row.group] += 1;
-      refreshCommits();
-      return;
-    }
-    if (row.load.length === 0) {
-      return;
-    }
-    requestLoad(row.load, report, sessionDeps);
-    publishCommitsState();
-    descend("commits");
-  }
-
-  function loadSide(side: Side, path: string | null, report: Report): void {
-    pendingSelectPath = path;
-    publishFiles({ status, loaded, pendingSelectPath, error });
-    requestLoad(sideTail(side), report, sessionDeps);
-    descend("files");
-  }
-
-  function onChangeset(changeset: ExtensionChangeset, ctx: ExtensionEventContext): void {
-    panes = ctx.panes; // this generation's lease; the old one is dead (see `panes`)
-    // One reload raises both `changeset_loaded` and `session_reload` with
-    // the same changeset; the second carries nothing new, so skip the git
-    // round trips (every reload, the refresh key included, mints a new id).
-    if (changeset.id === lastChangesetId) {
-      files = changeset.files;
-      return;
-    }
-    lastChangesetId = changeset.id;
-    const runner = ensureGit(ctx.cwd);
-    files = changeset.files;
-    loaded = decodeTitle(changeset.title, repo);
-    loadedSha = loaded.kind === "show" && error === null ? revParse(runner, loaded.ref) : null;
-    // A reload renumbers file ids and may move every line. The anchor
-    // follows its file when the same side is loaded and the file's patch
-    // is what it was (an unrelated file saved, something else staged);
-    // otherwise it names nothing now, and the user is told — silently
-    // dropping it would turn the next `x` into a whole-hunk stage.
-    const fate = rebindAnchor(files, live());
-    if (fate === "dropped") {
-      ctx.notify("anchor cleared by the reload — press v again", "warning");
-    }
-    debug(`changeset id=${changeset.id} title=${JSON.stringify(changeset.title)} loaded=${JSON.stringify(loaded)} files=${files.length} anchor=${fate}`);
-    refreshCommits();
-    refreshFiles();
-    if (pendingSelectPath !== null) {
-      const target = files.find((file) => file.path === pendingSelectPath);
-      pendingSelectPath = null;
-      if (target !== undefined) {
-        ctx.navigation.selectFile(target.id);
-      }
-      publishFiles({ status, loaded, pendingSelectPath, error });
-    }
   }
 
   function live(): Side | null {
     return loaded.kind === "unstaged" || loaded.kind === "staged" ? loaded.kind : null;
   }
 
-  function reportGit(notify: Notify, result: GitResult, what: string): boolean {
-    if (result.ok) {
-      return true;
+  // -- the sidecar: what Collins reads back ---------------------------------------
+
+  /** Write one key when its value differs from what was last written; true when written (or unchanged). */
+  function publish(key: "selection" | "anchor", value: SidecarSelection | SidecarAnchor | null): void {
+    if (sidecarPath === null) {
+      return;
     }
-    const line = firstLine(result.stderr) || firstLine(result.stdout) || `${what} failed`;
-    notify(line, "error");
-    log(`${what}: ${line}`);
-    return false;
+    const text = JSON.stringify(value);
+    if (key === "selection" ? text === selectionWritten : text === anchorWritten) {
+      return;
+    }
+    if (!writeSidecar(sidecarPath, { [key]: value })) {
+      log(`could not record the ${key} in the sidecar`);
+      return;
+    }
+    if (key === "selection") {
+      selectionWritten = text;
+    } else {
+      anchorWritten = text;
+    }
+    debug(`${key} ${text}`);
   }
 
-  /**
-   * After a mutation: reload in place, re-read status, tell Collins the
-   * index and HEAD as they are now have been shown (so its own freshness
-   * reload — which would cancel any dialog open by the time it lands —
-   * stays home), and say what happened.
-   */
-  function afterMutation(ctx: ExtensionCommandContext, message: string, path: string | null): void {
-    refreshAfter(ctx, path);
-    ctx.notify(message, "info");
+  /** The cursor's file and hunk as the sidecar names them: by path, since ids change on every reload. */
+  function selectionOf(at: Cursor): SidecarSelection | null {
+    const file = at.fileId === null ? undefined : files.find((entry) => entry.id === at.fileId);
+    return file === undefined ? null : { path: file.path, hunkIndex: at.hunkIndex };
   }
 
-  function refreshAfter(ctx: ExtensionCommandContext, path: string | null): void {
-    pendingSelectPath = path;
-    if (!ctx.commands.execute("hunk.app.refresh")) {
-      requestLoad(currentTail(), ctx.notify, sessionDeps);
-    }
-    refreshFiles();
-    recordRefreshed();
+  function publishSelection(): void {
+    publish("selection", selectionOf(cursor));
+  }
+
+  function publishAnchor(): void {
+    const anchor = currentAnchor();
+    publish("anchor", anchor === null ? null : { path: anchor.path, side: anchor.side, line: anchor.line });
   }
 
   /** Write the tree mark hunk has just reloaded for into the sidecar, for Collins' poll. */
@@ -483,72 +184,73 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     }
   }
 
-  // -- levels (see level.ts) ------------------------------------------------
+  // -- the review's events --------------------------------------------------------
 
-  /** Which panes are open, in hunk's word — an open pane may be unseen (hidden area, or omitted for width). */
-  function paneState(controls: ExtensionPaneControls): PaneState {
-    return { commits: controls.isOpen("commits"), files: controls.isOpen("files") };
+  function onChangeset(changeset: ExtensionChangeset, ctx: ExtensionEventContext): void {
+    // One reload raises both `changeset_loaded` and `session_reload` with
+    // the same changeset; the second carries nothing new.
+    if (changeset.id === lastChangesetId) {
+      files = changeset.files;
+      return;
+    }
+    lastChangesetId = changeset.id;
+    ensureGit(ctx.cwd);
+    files = changeset.files;
+    loaded = decodeTitle(changeset.title, repo);
+    // A reload renumbers file ids and may move every line. The anchor
+    // follows its file when the same side is loaded and the file's patch
+    // is what it was (an unrelated file saved, something else staged);
+    // otherwise it names nothing now, and the user is told — silently
+    // dropping it would turn the next `x` into a whole-hunk stage.
+    const fate = rebindAnchor(files, live());
+    if (fate === "dropped") {
+      ctx.notify("anchor cleared by the reload — press v again", "warning");
+    }
+    debug(`changeset id=${changeset.id} title=${JSON.stringify(changeset.title)} loaded=${JSON.stringify(loaded)} files=${files.length} anchor=${fate}`);
+    publishAnchor();
+    // The cursor's id belongs to the changeset that reported it; hunk
+    // says where the cursor is now through `selection_changed`. Until it
+    // does, the file the old id names in the new list (or none) is the
+    // best word there is — and only a change is written.
+    publishSelection();
   }
 
-  /** Close, then open, what *plan* says. True when it touched anything. */
-  function applyPlan(controls: ExtensionPaneControls, plan: Plan): boolean {
-    for (const id of plan.close) {
-      controls.close(id);
+  function onSelectionChanged(payload: Cursor): void {
+    cursor = { fileId: payload.fileId, hunkIndex: payload.hunkIndex };
+    publishSelection();
+  }
+
+  // -- the keys --------------------------------------------------------------------
+
+  function reportGit(notify: Notify, result: GitResult, what: string): boolean {
+    if (result.ok) {
+      return true;
     }
-    for (const id of plan.open) {
-      controls.open(id);
-    }
-    return plan.close.length + plan.open.length > 0;
+    const line = firstLine(result.stderr) || firstLine(result.stdout) || `${what} failed`;
+    notify(line, "error");
+    log(`${what}: ${line}`);
+    return false;
   }
 
   /**
-   * Write the level shown to the sidecar when it changed, for Collins'
-   * header buttons. *level* is the one just planned, never re-read off the
-   * controls: hunk's `isOpen` answers from React state and still says what
-   * the panes were until the next render.
+   * After a mutation: reload the review in place through hunk's own
+   * refresh, tell Collins the index and HEAD as they are now have been
+   * shown (so its own freshness reload — which would cancel any dialog
+   * open by the time it lands — stays home), and say what happened. When
+   * hunk has no refresh to run, `refreshed` stays unwritten and Collins'
+   * next tick reloads the page instead.
    */
-  function recordLevel(level: Level): void {
-    if (level === levelWritten) {
-      return;
-    }
-    levelWritten = level;
-    debug(`level ${level} columns=${columns}`);
-    if (sidecarPath !== null && !writeSidecar(sidecarPath, { level })) {
-      log("could not record the level in the sidecar");
-    }
+  function afterMutation(ctx: ExtensionCommandContext, message: string): void {
+    refreshAfter(ctx);
+    ctx.notify(message, "info");
   }
 
-  /** `<` / `>`: one level up or down (or, wide, "show the panels" / nothing). */
-  function stepLevel(ctx: ExtensionCommandContext, up: boolean): void {
-    columns = readColumns();
-    const state = paneState(ctx.panes);
-    const step = up ? stepUp(columns, state) : stepDown(columns, state);
-    debug(`level ${up ? "up" : "down"} columns=${columns} open=${JSON.stringify(state)} -> ${JSON.stringify(step)}`);
-    if (step.kind === "refuse") {
-      ctx.notify(step.reason, "info");
-      return;
+  function refreshAfter(ctx: ExtensionCommandContext): void {
+    if (ctx.commands.execute(REFRESH)) {
+      recordRefreshed();
+    } else {
+      log(`${REFRESH} is not available; Collins reloads the page on its next tick`);
     }
-    if (step.kind === "noop") {
-      return;
-    }
-    applyPlan(ctx.panes, step.plan);
-    panes = ctx.panes;
-    recordLevel(step.level === "all" ? levelOf(BOTH_PANES) : step.level);
-  }
-
-  /** After a row pick in *pane*: one level down while one pane fits, so the mouse alone drills down. */
-  function descend(pane: PaneId): void {
-    if (panes === null) {
-      return;
-    }
-    columns = readColumns();
-    const state = paneState(panes);
-    const target = descendAfterPick(columns, state, pane);
-    if (target === null) {
-      return;
-    }
-    applyPlan(panes, planPanes(state, panesFor(target)));
-    recordLevel(target);
   }
 
   function toggleFile(ctx: ExtensionCommandContext, file: ExtensionDiffFile, side: Side): void {
@@ -556,7 +258,7 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     const plan = planFileToggle({ file, live: side });
     const result = plan.stage ? stageFiles(runner, plan.paths) : unstageFiles(runner, plan.paths);
     if (reportGit(ctx.notify, result, plan.label)) {
-      afterMutation(ctx, describe(plan), file.path);
+      afterMutation(ctx, describe(plan));
     }
   }
 
@@ -622,7 +324,7 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     }
     const result = applyCached(runner, plan.patch, plan.reverse);
     if (reportGit(ctx.notify, result, plan.label)) {
-      afterMutation(ctx, describe(plan), file.path);
+      afterMutation(ctx, describe(plan));
     }
   }
 
@@ -653,7 +355,8 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     const result = applyCached(runner, plan.patch, plan.reverse);
     if (reportGit(ctx.notify, result, plan.label)) {
       clearAnchor();
-      afterMutation(ctx, describe(plan), file.path);
+      publishAnchor();
+      afterMutation(ctx, describe(plan));
     }
   }
 
@@ -727,7 +430,8 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     const result = plan.kind === "restore" ? restoreFile(runner, plan.path) : applyWorktreeReverse(runner, plan.patch);
     if (reportGit(ctx.notify, result, plan.label)) {
       clearAnchor();
-      afterMutation(ctx, describe(plan), file.path);
+      publishAnchor();
+      afterMutation(ctx, describe(plan));
     }
   }
 
@@ -769,6 +473,7 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     }
     ctx.highlights.refresh(ANCHOR_HIGHLIGHTER, { fileId: file.id });
     debug(`anchor set ${file.path} ${line.side}:${line.line}`);
+    publishAnchor();
     ctx.notify(`anchor set at ${line.side} ${line.line} · move, then x or D · esc clears`, "info");
   }
 
@@ -780,165 +485,8 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
       return;
     }
     ctx.highlights.refresh(ANCHOR_HIGHLIGHTER, { fileId: previous.fileId });
+    publishAnchor();
     ctx.notify("anchor cleared", "info");
-  }
-
-  /**
-   * What stops a commit before any question is asked: a half-finished
-   * rebase, merge, cherry-pick or revert, or an empty index. Returns the
-   * staged paths otherwise. Asked before the first dialog on purpose —
-   * a dialog is cancelled by any reload, so the git reads come first.
-   */
-  function commitPreconditions(ctx: ExtensionCommandContext, runner: GitRunner): string[] | null {
-    const operation = inProgressOperation(runner);
-    if (operation !== null) {
-      ctx.notify(`${operation} is half-finished here — finish or abort it first`, "warning");
-      return null;
-    }
-    const staged = stagedPaths(runner);
-    if (staged.length === 0) {
-      ctx.notify("nothing staged — press x or X first", "warning");
-      return null;
-    }
-    return staged;
-  }
-
-  function stagedNoun(count: number): string {
-    return count === 1 ? "1 staged file" : `${count} staged files`;
-  }
-
-  /**
-   * Run a commit on the asynchronous runner — hooks and signing take what
-   * they take while the renderer keeps painting, with a toast once it is
-   * clear they are taking a while (hunk shows toasts for a few seconds
-   * each, so a fast commit is not followed by a stale "committing…") —
-   * and refresh either way: a failed commit's hooks may have moved the
-   * tree, and one that outlived the deadline may have been made. Null
-   * when the commit failed (already reported), else the new HEAD's abbrev.
-   */
-  async function runCommit(ctx: ExtensionCommandContext, work: (git: AsyncGitRunner) => Promise<GitResult>): Promise<string | null> {
-    committing = true;
-    const slow = setTimeout(() => ctx.notify("committing… (hooks are running)", "info"), COMMIT_TOAST_MS);
-    let result: GitResult;
-    try {
-      result = await work(ensureGitAsync(ctx.cwd));
-    } finally {
-      clearTimeout(slow);
-      committing = false;
-    }
-    if (!reportGit(ctx.notify, result, "git commit")) {
-      refreshAfter(ctx, ctx.selection.file?.path ?? null);
-      return null;
-    }
-    return readLog(ensureGit(ctx.cwd), ["HEAD"], { limit: 1 })[0]?.abbrev ?? "HEAD";
-  }
-
-  /** The guards every commit key shares, before it asks anything: not already committing, a working-tree view, the preconditions. */
-  function commitGate(ctx: ExtensionCommandContext): string[] | null {
-    if (committing) {
-      ctx.notify("a commit is still running", "info");
-      return null;
-    }
-    if (live() === null) {
-      ctx.notify(READ_ONLY, "info");
-      return null;
-    }
-    return commitPreconditions(ctx, ensureGit(ctx.cwd));
-  }
-
-  /**
-   * `C` (and `B`, with a body): commit the index as it is. Typing the
-   * summary is the confirmation — Esc on either input cancels, and a blank
-   * summary commits nothing.
-   */
-  async function commitIndex(ctx: ExtensionCommandContext, withBody: boolean): Promise<void> {
-    const staged = commitGate(ctx);
-    if (staged === null) {
-      return;
-    }
-    const summaryInput = await ctx.dialogs.input({
-      title: `Commit ${stagedNoun(staged.length)} — summary`,
-      placeholder: "One line: what this change does",
-    });
-    if (summaryInput === null) {
-      return;
-    }
-    const summary = summaryInput.trim();
-    if (summary === "") {
-      ctx.notify("a commit needs a summary", "warning");
-      return;
-    }
-    let body: string | undefined;
-    if (withBody) {
-      const bodyInput = await ctx.dialogs.input({
-        title: "Body (optional) — Enter to skip",
-        placeholder: "Why, or anything the summary leaves out",
-      });
-      if (bodyInput === null) {
-        return;
-      }
-      body = bodyInput.trim() === "" ? undefined : bodyInput;
-    }
-    const abbrev = await runCommit(ctx, (git) => commit(git, summary, body));
-    if (abbrev === null) {
-      return;
-    }
-    afterMutation(
-      ctx,
-      `committed ${abbrev} "${summary}" — undo with git reset --soft HEAD~1`,
-      ctx.selection.file?.path ?? null,
-    );
-  }
-
-  /**
-   * The autosquash rebase that folds a fixup of `target` in; never run
-   * here, only named. Interactive on purpose: `--autosquash` without `-i`
-   * is ignored by every git before 2.44 (Debian 12 and Ubuntu 24.04 ship
-   * older), and the todo it opens is already arranged — save and quit.
-   */
-  function autosquashCommand(runner: GitRunner, target: Commit): string {
-    const onto = parentOf(runner, target.sha) === null ? "--root" : `${target.abbrev}^`;
-    return `git rebase -i --autosquash --autostash ${onto}`;
-  }
-
-  /**
-   * `F`: commit the index as `fixup! <sha>` for an unpushed commit the user
-   * picks — one of the commits panel's current group that is on no
-   * remote. The full sha, not `--fixup=`: subjects repeat, hashes do not,
-   * and `rebase --autosquash` matches either. No rebase runs here — the
-   * toast names the command that folds it in.
-   */
-  async function fixupIndex(ctx: ExtensionCommandContext): Promise<void> {
-    const staged = commitGate(ctx);
-    if (staged === null) {
-      return;
-    }
-    const runner = ensureGit(ctx.cwd);
-    const cfg = config();
-    const commits = unpushedCommits(runner, currentGroupRange(resolveGroups(runner, cfg).parent), cfg.logPage);
-    if (commits.length === 0) {
-      ctx.notify("no unpushed commit to fix up — press C to make one", "info");
-      return;
-    }
-    const options = commits.map((entry) => `${entry.abbrev}  ${entry.subject}`);
-    const choice = await ctx.dialogs.select({ title: "Fix up which commit?", options });
-    const target = choice === null ? undefined : commits[options.indexOf(choice)];
-    if (target === undefined) {
-      return;
-    }
-    const rebase = autosquashCommand(runner, target);
-    const verb = staged.length === 1 ? "becomes" : "become";
-    const confirmed = await ctx.dialogs.confirm({
-      title: `Fix up ${target.abbrev}?`,
-      body: `The ${stagedNoun(staged.length)} ${verb} a fixup! commit for ${target.abbrev} "${target.subject}". Nothing is rewritten now — fold it in with ${rebase}`,
-      confirmLabel: "Commit",
-    });
-    if (!confirmed) {
-      return;
-    }
-    if (await runCommit(ctx, (git) => commitFixup(git, target.sha)) !== null) {
-      afterMutation(ctx, `fixup for ${target.abbrev} committed — ${rebase} folds it in`, ctx.selection.file?.path ?? null);
-    }
   }
 
   function stageFile(ctx: ExtensionCommandContext): void {
@@ -955,113 +503,7 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
     toggleFile(ctx, file, side);
   }
 
-  async function everything(ctx: ExtensionCommandContext, stage: boolean): Promise<void> {
-    if (live() === null) {
-      ctx.notify(READ_ONLY, "info");
-      return;
-    }
-    const runner = ensureGit(ctx.cwd);
-    const plan = planAll(readStatus(runner), stage);
-    if (plan.count === 0) {
-      ctx.notify(stage ? "nothing to stage" : "nothing to unstage", "info");
-      return;
-    }
-    const noun = plan.count === 1 ? "change" : "changes";
-    const confirmed = await ctx.dialogs.confirm({
-      title: stage ? `Stage all ${plan.count} ${noun}?` : `Unstage all ${plan.count} ${noun}?`,
-      confirmLabel: stage ? "Stage" : "Unstage",
-    });
-    if (!confirmed) {
-      return;
-    }
-    const result = stage ? stageAll(runner) : unstageAll(runner);
-    if (reportGit(ctx.notify, result, stage ? "git add -A" : "git reset")) {
-      afterMutation(ctx, describe(plan), ctx.selection.file?.path ?? null);
-    }
-  }
-
-  function step(ctx: ExtensionCommandContext, delta: number): void {
-    const pending = pendingLoad();
-    const from = pending === null ? loaded : decodeTail(pending);
-    const resolved = pending === null ? loadedSha : null;
-    if (loadedRow(rows, from, resolved) === null) {
-      ctx.notify("load a row of the commits panel first", "info");
-      return;
-    }
-    const target = neighbour(rows, from, delta, resolved);
-    if (target === null) {
-      ctx.notify(delta > 0 ? "at the bottom of this group" : "at the top of this group", "info");
-      return;
-    }
-    activateRow(target, ctx.notify);
-  }
-
-  /** The parent Collins (or our guess) would pick without the user's say. */
-  function automaticParent(): string | null {
-    const sidecar = sidecarPath !== null ? readSidecar(sidecarPath) : null;
-    if (sidecar !== null && sidecar.parentSource === "auto" && sidecar.parent !== null && !awaitingAuto) {
-      return sidecar.parent;
-    }
-    return config().default;
-  }
-
-  async function chooseParent(ctx: { dialogs: ExtensionDialogs; notify: Notify; cwd: string }): Promise<void> {
-    const runner = ensureGit(ctx.cwd);
-    if (error !== null) {
-      ctx.notify(error, "warning");
-      return;
-    }
-    const automatic = `Automatic (${automaticParent() ?? "none"})`;
-    const options = [automatic, ...localBranches(runner)];
-    const choice = await ctx.dialogs.select({ title: "Parent branch", options });
-    if (choice === null) {
-      return;
-    }
-    const picked = choice === automatic ? null : choice;
-    if (sidecarPath !== null) {
-      const written =
-        picked === null
-          ? writeSidecar(sidecarPath, { parentSource: "auto" })
-          : writeSidecar(sidecarPath, { parent: picked, parentSource: "user" });
-      if (!written) {
-        ctx.notify("could not write the parent branch for Collins", "warning");
-      }
-      awaitingAuto = picked === null;
-    }
-    memoryParent = picked;
-    pages.current = 1;
-    pages.parent = 1;
-    refreshCommits();
-    ctx.notify(picked === null ? "parent branch: automatic" : `parent branch: ${picked}`, "info");
-  }
-
-  hunk.registerPane({
-    id: "commits",
-    title: "Commits",
-    placement: "left",
-    width: { preferred: 26, min: 18 },
-    component: CommitsPane,
-  });
-
-  hunk.registerPane({
-    id: "files",
-    title: "Files",
-    placement: "left",
-    replaces: "hunk:files",
-    width: { preferred: 30, min: 22 },
-    component: FilesPane,
-  });
-
-  setPaneHandlers({
-    activateRow,
-    contextRow: () => {
-      hunk.events.emit(SET_PARENT_EVENT, {});
-    },
-    loadSide,
-    selectedFile: () => descend("files"),
-  });
-
-  onPendingChange(publishCommitsState);
+  // -- registration -----------------------------------------------------------------
 
   hunk.registerLineHighlighter({
     id: ANCHOR_HIGHLIGHTER,
@@ -1075,131 +517,23 @@ export default function registerCollinsGit(hunk: HunkExtensionAPI): void {
   hunk.registerCommand({ id: "discard", title: "Discard the current hunk or range", key: "D" }, (ctx) =>
     discard(ctx),
   );
-  hunk.registerCommand({ id: "commit", title: "Commit the index", key: "C" }, (ctx) => commitIndex(ctx, false));
-  hunk.registerCommand({ id: "commit-with-body", title: "Commit the index with a body", key: "B" }, (ctx) =>
-    commitIndex(ctx, true),
-  );
-  hunk.registerCommand({ id: "fixup", title: "Fix up an unpushed commit with the index", key: "F" }, (ctx) =>
-    fixupIndex(ctx),
-  );
-  hunk.registerCommand({ id: "stage-all", title: "Stage all changes", key: "A" }, (ctx) => everything(ctx, true));
-  hunk.registerCommand({ id: "unstage-all", title: "Unstage all changes", key: "U" }, (ctx) =>
-    everything(ctx, false),
-  );
-  hunk.registerCommand({ id: "next-row", title: "Load the next row of the commits panel", key: "n" }, (ctx) =>
-    step(ctx, 1),
-  );
-  hunk.registerCommand(
-    { id: "previous-row", title: "Load the previous row of the commits panel", key: "p" },
-    (ctx) => step(ctx, -1),
-  );
-  hunk.registerCommand({ id: "set-parent", title: "Set the parent branch…", key: "P" }, (ctx) =>
-    chooseParent(ctx),
-  );
-  hunk.events.on(SET_PARENT_EVENT, (_payload, ctx) => chooseParent(ctx));
-  hunk.registerCommand({ id: "level-up", title: "Show the files, then the commits (narrow page)", key: "<" }, (ctx) =>
-    stepLevel(ctx, true),
-  );
-  hunk.registerCommand({ id: "level-down", title: "Back to the files, then the diff (narrow page)", key: ">" }, (ctx) =>
-    stepLevel(ctx, false),
-  );
 
-  /**
-   * The terminal's width changed (SIGWINCH, or the one-second poll — a
-   * resize that lands while hunk is still starting precedes any handler
-   * this extension could install, and Collins widens its git column as
-   * the page settles). Crossing into the wide regime opens both panes and
-   * crossing out of it closes both (level.ts planResize); inside a regime
-   * the panes are left as they are — but re-opened when the width grew:
-   * hunk hides its sidebar area when the terminal is too narrow for a pane
-   * and does not bring it back when the terminal grows (0.20.1, verified
-   * against a 62 → 138 column resize), while opening an open pane reveals
-   * the area again. A width that did not change is a no-op, so the poll
-   * costs one ioctl. `panes` is the newest event context's (see its
-   * comment): a dead lease would answer "closed" for everything and this
-   * would quietly do nothing.
-   */
-  function revealPanes(): void {
-    const now = readColumns();
-    const before = columns;
-    columns = now;
-    if (now === before || panes === null) {
-      return;
-    }
-    const state = paneState(panes);
-    const plan = planResize(before, now, state);
-    debug(`resize columns=${before}->${now} open=${JSON.stringify(state)} plan=${JSON.stringify(plan)}`);
-    if (applyPlan(panes, plan)) {
-      recordLevel(fit(now) === "two" ? levelOf(BOTH_PANES) : "diff"); // what planResize opens or closes
-      return;
-    }
-    if (now > before) {
-      for (const id of PANE_IDS) {
-        if (panes.isOpen(id)) {
-          panes.open(id);
-        }
-      }
-    }
-  }
-
-  function onResize(): void {
-    if (resizeTimer !== null) {
-      clearTimeout(resizeTimer);
-    }
-    resizeTimer = setTimeout(() => {
-      resizeTimer = null;
-      revealPanes();
-    }, RESIZE_SETTLE_MS);
-    resizeTimer.unref?.();
-  }
-
-  hunk.on("startup", (event, ctx) => {
+  hunk.on("startup", (event) => {
     ensureGit(event.cwd);
-    debug(`startup cwd=${event.cwd} sidecar=${sidecarPath ?? "-"} pid=${process.pid} columns=${columns}`);
-    panes = ctx.panes;
-    // Wide: both panes, as ever. Narrow: the diff, the bottom of the
-    // level stack (the files pane is open by default, as hunk's own is).
-    columns = readColumns();
-    const wide = fit(columns) === "two";
-    applyPlan(ctx.panes, planPanes(paneState(ctx.panes), wide ? BOTH_PANES : panesFor("diff")));
-    recordLevel(wide ? levelOf(BOTH_PANES) : "diff");
-    process.on("SIGWINCH", onResize);
-    resizePoll = setInterval(revealPanes, RESIZE_POLL_MS);
-    resizePoll.unref?.();
-    if (sidecarPath !== null) {
-      sidecarSeen = sidecarConfigText();
-      unwatch = watchSidecar(sidecarPath, () => {
-        // Our own `refreshed` record moves the file too; only a config change earns a rebuild.
-        const now = sidecarConfigText();
-        if (now === sidecarSeen) {
-          return;
-        }
-        sidecarSeen = now;
-        awaitingAuto = false;
-        debug(`sidecar changed: ${now}`);
-        refreshCommits();
-        refreshFiles(); // the untracked switch shapes the sections too
-      });
-    }
-    refreshCommits();
-    refreshFiles();
+    debug(`startup cwd=${event.cwd} sidecar=${sidecarPath ?? "-"} pid=${process.pid}`);
   });
-
   hunk.on("changeset_loaded", (event, ctx) => onChangeset(event.changeset, ctx));
   hunk.on("session_reload", (event, ctx) => onChangeset(event.changeset, ctx));
+  hunk.on("selection_changed", (event) => onSelectionChanged(event));
+}
 
-  hunk.on("shutdown", () => {
-    process.off("SIGWINCH", onResize);
-    if (resizeTimer !== null) {
-      clearTimeout(resizeTimer);
-      resizeTimer = null;
+/** The first non-blank line of a git message, trimmed. */
+function firstLine(text: string): string {
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed !== "") {
+      return trimmed;
     }
-    if (resizePoll !== null) {
-      clearInterval(resizePoll);
-      resizePoll = null;
-    }
-    panes = null;
-    unwatch?.();
-    unwatch = null;
-  });
+  }
+  return "";
 }

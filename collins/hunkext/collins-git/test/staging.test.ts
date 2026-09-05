@@ -3,7 +3,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   describe as describePlan,
-  planAll,
   planDiscard,
   planFileToggle,
   planHunkToggle,
@@ -145,7 +144,7 @@ index 1111111..2222222 100644
   });
 });
 
-describe("planFileToggle and planAll", () => {
+describe("planFileToggle", () => {
   test("a rename names both paths in one call", () => {
     expect(planFileToggle({ file: { path: "b", previousPath: "a" }, live: "unstaged" })).toEqual({
       paths: ["a", "b"],
@@ -159,19 +158,7 @@ describe("planFileToggle and planAll", () => {
     });
   });
 
-  test("counts the side the key acts on", () => {
-    const status = {
-      unstaged: [{ path: "a", code: "M" as const }, { path: "b", code: "?" as const }],
-      staged: [{ path: "c", code: "A" as const }],
-    };
-    expect(planAll(status, true)).toEqual({ count: 2, stage: true });
-    expect(planAll(status, false)).toEqual({ count: 1, stage: false });
-    expect(planAll(null, true)).toEqual({ count: 0, stage: true });
-  });
-
   test("describe names what was done", () => {
-    expect(describePlan({ count: 4, stage: true })).toBe("staged 4 files");
-    expect(describePlan({ count: 1, stage: false })).toBe("unstaged 1 file");
     expect(describePlan({ paths: ["x"], stage: false, label: "unstaged x" })).toBe("unstaged x");
     expect(describePlan({ kind: "refuse", reason: "why" })).toBe("why");
     expect(describePlan({ kind: "apply", patch: "", reverse: false, label: "staged 3 lines of f.txt", lines: 3 })).toBe("staged 3 lines of f.txt");
