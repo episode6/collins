@@ -93,8 +93,9 @@ DEFAULT_SETTINGS = {
     # itself and /rename renames, read off each transcript's title records
     # as they land. Display-only — the names are recorded either way (see
     # AppState.cli_titles) and this switch decides whether display_name
-    # prefers them; a manual rename in Collins still wins.
-    "cli_title_sessions": False,
+    # prefers them; a manual rename in Collins still wins. On by default:
+    # the CLI names every session it runs, at no cost to Collins.
+    "cli_title_sessions": True,
     # Run the sidebar's PR sweep once, shortly after launch, so the marks
     # restored from the last run are replaced by current ones without the
     # refresh button being clicked (see MainWindow._schedule_launch_sweep).

@@ -94,7 +94,7 @@ title model** preference has a **None** option that turns the model runs
 off (it replaced the *Auto-generate session titles* switch): under None
 sessions keep the free local title, and *Regenerate name* still works, on
 the automatic default. A manual rename always wins. Claude names sessions
-for itself too — the **Follow Claude's own session names** preference (off
+for itself too — the **Follow Claude's own session names** preference (on
 by default) makes the sidebar adopt those names as they land in the
 transcript.
 

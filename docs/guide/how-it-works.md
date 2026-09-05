@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-02. Full change history: git log for this file.
+fork. Last modified: 2026-09-05. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -59,10 +59,10 @@ the CLI's tools loaded (see [What spends tokens](#what-spends-tokens)), so
 the title runs don't appear as sessions themselves and cost little more
 than the prompt.
 
-Two more sources fill the same generated-name slot, both off by default and
-display-only: **Follow Claude's own session names** shows the titles the CLI
+Two more sources fill the same generated-name slot, both display-only:
+**Follow Claude's own session names** (on by default) shows the titles the CLI
 writes into the transcript (`/rename` included), and **Rename sessions after
-their pull requests** names a session after the PR it opened. A manual rename wins over
+their pull requests** (off by default) names a session after the PR it opened. A manual rename wins over
 all of them.
 
 ## Model list

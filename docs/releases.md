@@ -161,6 +161,11 @@ downloads of each version, see the
   attaches; "PR 12" and `owner/repo#12` are left to the `attach_pr`
   tool and the transcript. Titling still reads all three forms. The
   Preferences switch is now **Attach pull requests linked in prompts**.
+- **Claude's own session names are followed by default.** The *Follow
+  Claude's own session names* preference now starts on, so the sidebar
+  adopts the titles the CLI writes into each transcript (`/rename`
+  included) as they land. Installs that have already saved their
+  preferences keep whatever the switch was set to.
 
 ### v0.1.2 — 2026-08-30
 
