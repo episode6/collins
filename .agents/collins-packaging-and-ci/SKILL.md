@@ -100,6 +100,11 @@ review bot; it reads CI through `gh run` and needs `actions: read` in both
 `permissions:` and `additional_permissions:`), `release.yml` (on `v*` tags,
 also `workflow_dispatch` with a `tag` input to re-drive a shipped tag from a
 branch carrying a fix — a tag's run is frozen on the workflow file as it was).
+`macos-spike.yml` is a throwaway: PR 0 of the macOS/Homebrew port spec
+(`~/specs/collins/macos-homebrew-port.md`), running `scripts/spike/` on a
+`macos-15` runner to answer the spec's hardware-only questions; it is
+`workflow_dispatch`-only once its branch is gone and gets deleted or turned
+into the real macOS CI job in the port's PR 4. Nothing in it runs on Linux CI.
 
 ## Footguns
 

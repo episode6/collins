@@ -1,0 +1,156 @@
+# THROWAWAY. PR 0 of the macOS/Homebrew port (~/specs/collins/macos-homebrew-port.md):
+# a verification spike on GitHub's Apple Silicon runners. Every step is
+# continue-on-error on purpose -- a red step is an answer, not a broken
+# build -- and the summary step collects the RESULT/PASS/FAIL lines from
+# scripts/spike/. To be deleted, or turned into the real macOS CI job, in PR 4.
+
+name: macOS spike
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [macos-spike-pr0]
+
+jobs:
+  spike:
+    # Apple Silicon only (the port never promises Intel); macos-15 is arm64.
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      OUT: ${{ github.workspace }}/spike-out
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Runner facts
+        run: |
+          mkdir -p "$OUT"
+          uname -a
+          sw_vers
+          echo "arch: $(uname -m)"
+          echo "brew prefix: $(brew --prefix)"
+          echo "SHELL=$SHELL TMPDIR=$TMPDIR HOME=$HOME"
+          launchctl managername || true
+          id
+
+      # The spec's formula table, verbatim. hunk is in homebrew-core.
+      - name: brew install the stack
+        id: brew
+        continue-on-error: true
+        run: |
+          set -x
+          brew install python@3.14 pygobject3 gtk4 libadwaita vte3 gtksourceview5 \
+            libspelling gstreamer adwaita-icon-theme hicolor-icon-theme dbus hunk \
+            2>&1 | tee "$OUT/brew-install.log"
+          brew list --versions python@3.14 pygobject3 gtk4 libadwaita vte3 gtksourceview5 \
+            libspelling gstreamer adwaita-icon-theme hicolor-icon-theme dbus hunk glib \
+            | tee "$OUT/brew-versions.txt"
+
+      - name: Export the python and XDG_DATA_DIRS
+        run: |
+          PREFIX="$(brew --prefix)"
+          PY="$(brew --prefix python@3.14)/bin/python3.14"
+          echo "PY=$PY" >> "$GITHUB_ENV"
+          echo "XDG_DATA_DIRS=$PREFIX/share:/usr/local/share:/usr/share" >> "$GITHUB_ENV"
+          echo "PYTHONPATH=${{ github.workspace }}:${{ github.workspace }}/scripts/spike/stub" >> "$GITHUB_ENV"
+          echo "PYTHONUNBUFFERED=1" >> "$GITHUB_ENV"
+          "$PY" --version
+          hunk --version || true
+
+      - name: Assert Vte-3.91.typelib is in the bottle
+        continue-on-error: true
+        run: |
+          DIR="$(brew --prefix)/lib/girepository-1.0"
+          ls "$DIR" | tee "$OUT/typelibs.txt"
+          if [ -f "$DIR/Vte-3.91.typelib" ]; then
+            echo "PASS vte_typelib $DIR/Vte-3.91.typelib" | tee -a "$OUT/typelib.log"
+          else
+            echo "FAIL vte_typelib missing under $DIR" | tee -a "$OUT/typelib.log"; exit 1
+          fi
+
+      - name: gi import smoke test (item 2)
+        continue-on-error: true
+        run: "$PY" scripts/spike/gi_smoke.py 2>&1 | tee "$OUT/gi_smoke.log"; exit "${PIPESTATUS[0]}"
+
+      # Bus questions run before the service is up, then again after, so the
+      # same script answers both halves of resolved question 5.
+      - name: Session bus, without dbus (item b, nobus)
+        continue-on-error: true
+        run: "$PY" scripts/spike/check_bus.py nobus 2>&1 | tee "$OUT/bus-nobus.log"; exit "${PIPESTATUS[0]}"
+
+      - name: brew services start dbus
+        continue-on-error: true
+        run: |
+          brew services start dbus 2>&1 | tee "$OUT/dbus-start.log"
+          sleep 3
+          brew services info dbus 2>&1 | tee -a "$OUT/dbus-start.log" || true
+          echo "launchctl getenv: $(launchctl getenv DBUS_LAUNCHD_SESSION_BUS_SOCKET)" | tee -a "$OUT/dbus-start.log"
+
+      - name: Session bus, with dbus (item b, bus)
+        continue-on-error: true
+        run: "$PY" scripts/spike/check_bus.py bus 2>&1 | tee "$OUT/bus-bus.log"; exit "${PIPESTATUS[0]}"
+
+      - name: VTE window, default renderer (item a)
+        continue-on-error: true
+        run: "$PY" scripts/spike/check_vte_window.py "$OUT" default 2>&1 | tee "$OUT/vte-default.log"; exit "${PIPESTATUS[0]}"
+
+      - name: VTE window, GSK_RENDERER=cairo (item a)
+        continue-on-error: true
+        env:
+          GSK_RENDERER: cairo
+        run: "$PY" scripts/spike/check_vte_window.py "$OUT" cairo 2>&1 | tee "$OUT/vte-cairo.log"; exit "${PIPESTATUS[0]}"
+
+      - name: kqueue file monitors (item c)
+        continue-on-error: true
+        run: "$PY" scripts/spike/check_kqueue.py 2>&1 | tee "$OUT/kqueue.log"; exit "${PIPESTATUS[0]}"
+
+      - name: Gio.AppInfo under gosxappinfo (item d)
+        continue-on-error: true
+        run: "$PY" scripts/spike/check_appinfo.py 2>&1 | tee "$OUT/appinfo.log"; exit "${PIPESTATUS[0]}"
+
+      - name: Peer pid and trash (item e)
+        continue-on-error: true
+        run: "$PY" scripts/spike/check_creds_trash.py 2>&1 | tee "$OUT/creds-trash.log"; exit "${PIPESTATUS[0]}"
+
+      # GTK-free by design; tests/test_proctree.py skips itself without /proc.
+      # Whatever else fails here is the input for PR 1, not a blocker.
+      - name: Unit suite under brew python (item f)
+        continue-on-error: true
+        run: |
+          "$PY" -m venv --system-site-packages "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet pytest
+          "$RUNNER_TEMP/venv/bin/python" -c "import gi; print('gi from', gi.__file__)"
+          "$RUNNER_TEMP/venv/bin/python" -m pytest tests/ -q -rfEs -p no:cacheprovider 2>&1 | tee "$OUT/pytest.log"
+          rc="${PIPESTATUS[0]}"
+          tail -1 "$OUT/pytest.log" | sed 's/^/RESULT pytest /' | tee -a "$OUT/pytest-result.log"
+          if [ "$rc" = 0 ]; then echo "PASS pytest" | tee -a "$OUT/pytest-result.log"; else echo "FAIL pytest rc=$rc" | tee -a "$OUT/pytest-result.log"; fi
+          exit "$rc"
+
+      - name: Launch Collins (item 5, proctree as is)
+        continue-on-error: true
+        run: "$PY" scripts/spike/launch_collins.py "$OUT" plain 2>&1 | tee "$OUT/launch-plain.log"; exit "${PIPESTATUS[0]}"
+
+      - name: Launch Collins (item 5, proctree stubbed)
+        continue-on-error: true
+        env:
+          SPIKE_STUB_PROCTREE: "1"
+        run: "$PY" scripts/spike/launch_collins.py "$OUT" stubbed 2>&1 | tee "$OUT/launch-stubbed.log"; exit "${PIPESTATUS[0]}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## macOS spike results"
+            echo
+            echo '```'
+            grep -h -E '^(PASS|FAIL|RESULT) ' "$OUT"/*.log 2>/dev/null || echo "(no result lines)"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: macos-spike-results
+          path: spike-out/
+          if-no-files-found: warn
