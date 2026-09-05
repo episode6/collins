@@ -47,10 +47,36 @@ jobs:
             libspelling gstreamer adwaita-icon-theme hicolor-icon-theme dbus hunk glib \
             | tee "$OUT/brew-versions.txt"
 
-      - name: Export the python and XDG_DATA_DIRS
+      # pygobject3's bottle links `gi` into whichever python@X.Y versions the
+      # formula depends on today; the first run showed python@3.14 without it.
+      # Find the site-packages that actually carries gi and use that python,
+      # recording what the formula depends on so the spec can pin the right one.
+      - name: Find the python that has gi, export XDG_DATA_DIRS
         run: |
           PREFIX="$(brew --prefix)"
-          PY="$(brew --prefix python@3.14)/bin/python3.14"
+          {
+            echo "brew deps --installed pygobject3: $(brew deps --installed pygobject3 | tr '\n' ' ')"
+            echo "gi dirs:"; ls -d "$PREFIX"/lib/python3.*/site-packages/gi 2>/dev/null || echo "  (none under $PREFIX/lib)"
+            echo "pygobject3 cellar pythons:"; ls -d "$(brew --prefix pygobject3)"/lib/python3.* 2>/dev/null || true
+            echo "installed pythons: $(ls -d "$PREFIX"/opt/python@3.* | tr '\n' ' ')"
+            for py in "$PREFIX"/opt/python@3.*/bin/python3.[0-9]*; do
+              case "$py" in *config*) continue;; esac
+              echo "$py -> $("$py" -c 'import gi; print("gi ok", gi.__file__)' 2>&1 | tail -1)"
+            done
+          } | tee "$OUT/python-facts.txt"
+          PY=""
+          for cand in 3.14 3.13 3.15; do
+            if [ -d "$PREFIX/lib/python$cand/site-packages/gi" ] && [ -x "$PREFIX/opt/python@$cand/bin/python$cand" ]; then
+              PY="$PREFIX/opt/python@$cand/bin/python$cand"; break
+            fi
+          done
+          if [ -z "$PY" ]; then
+            echo "FAIL gi_python no brew python has gi; falling back to python@3.14" | tee -a "$OUT/python-facts.txt"
+            PY="$(brew --prefix python@3.14)/bin/python3.14"
+          else
+            echo "PASS gi_python $PY" | tee -a "$OUT/python-facts.txt"
+          fi
+          cp "$OUT/python-facts.txt" "$OUT/python-facts.log"
           echo "PY=$PY" >> "$GITHUB_ENV"
           echo "XDG_DATA_DIRS=$PREFIX/share:/usr/local/share:/usr/share" >> "$GITHUB_ENV"
           echo "PYTHONPATH=${{ github.workspace }}:${{ github.workspace }}/scripts/spike/stub" >> "$GITHUB_ENV"
@@ -81,18 +107,37 @@ jobs:
         run: |
           "$PY" scripts/spike/check_bus.py nobus 2>&1 | tee "$OUT/bus-nobus.log"; exit "${PIPESTATUS[0]}"
 
-      - name: brew services start dbus
+      # The dbus formula ships no launchd service any more ("Formula `dbus` has
+      # not implemented #plist, #service", first run), so `brew services start
+      # dbus` is not a thing. Start a session daemon by hand and publish its
+      # socket the way the old plist did -- `launchctl setenv
+      # DBUS_LAUNCHD_SESSION_BUS_SOCKET` -- which is exactly what GLib's macOS
+      # bus lookup reads. DBUS_SESSION_BUS_ADDRESS stays unset here so the
+      # launchd route is what gets tested; the "env" run below tests the other.
+      - name: Start a session dbus-daemon and publish it via launchctl
         continue-on-error: true
         run: |
-          brew services start dbus 2>&1 | tee "$OUT/dbus-start.log"
-          sleep 3
-          brew services info dbus 2>&1 | tee -a "$OUT/dbus-start.log" || true
-          echo "launchctl getenv: $(launchctl getenv DBUS_LAUNCHD_SESSION_BUS_SOCKET)" | tee -a "$OUT/dbus-start.log"
+          {
+            echo "brew services start dbus:"; brew services start dbus 2>&1 || true
+            echo "plists under dbus prefix: $(find "$(brew --prefix dbus)"/ -name '*.plist' 2>/dev/null | tr '\n' ' ')"
+            SOCK="$TMPDIR/collins-spike-dbus.sock"
+            "$(brew --prefix dbus)/bin/dbus-daemon" --session --fork --nopidfile --address="unix:path=$SOCK" --print-address
+            sleep 1
+            ls -la "$SOCK"
+            launchctl setenv DBUS_LAUNCHD_SESSION_BUS_SOCKET "$SOCK"
+            echo "launchctl getenv: $(launchctl getenv DBUS_LAUNCHD_SESSION_BUS_SOCKET)"
+            echo "DBUS_SPIKE_ADDRESS=unix:path=$SOCK" >> "$GITHUB_ENV"
+          } 2>&1 | tee "$OUT/dbus-start.log"
 
-      - name: Session bus, with dbus (item b, bus)
+      - name: Session bus via launchctl (item b, bus)
         continue-on-error: true
         run: |
           "$PY" scripts/spike/check_bus.py bus 2>&1 | tee "$OUT/bus-bus.log"; exit "${PIPESTATUS[0]}"
+
+      - name: Session bus via DBUS_SESSION_BUS_ADDRESS (item b, env)
+        continue-on-error: true
+        run: |
+          DBUS_SESSION_BUS_ADDRESS="$DBUS_SPIKE_ADDRESS" "$PY" scripts/spike/check_bus.py env 2>&1 | tee "$OUT/bus-env.log"; exit "${PIPESTATUS[0]}"
 
       - name: VTE window, default renderer (item a)
         continue-on-error: true

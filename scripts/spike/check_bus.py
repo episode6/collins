@@ -3,7 +3,11 @@
 Spec hardware-only item 2 and resolved question 5. Run twice by the
 workflow: before and after `brew services start dbus`.
 
-    python3 check_bus.py <expect: nobus|bus>
+    python3 check_bus.py <expect: nobus|bus|env>
+
+"bus" is the launchd route (DBUS_LAUNCHD_SESSION_BUS_SOCKET published with
+`launchctl setenv`, DBUS_SESSION_BUS_ADDRESS unset); "env" is the plain
+DBUS_SESSION_BUS_ADDRESS route. Both expect a working, unique bus.
 
 Observes:
   * Gio.bus_get_sync(SESSION) -- succeeds, or fails cleanly with which error.
@@ -96,10 +100,10 @@ def main() -> int:
         print("child stderr:", err.strip())
     second_remote = "is_remote=True" in out
 
-    if expect == "bus":
-        ok = bus_ok and second_remote
-    else:
+    if expect == "nobus":
         ok = (not bus_ok) and (not second_remote)
+    else:
+        ok = bus_ok and second_remote
     print(
         f"RESULT bus mode={expect} bus_ok={bus_ok} second_instance_remote={second_remote} "
         f"detail={bus_detail!r}"
