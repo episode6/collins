@@ -60,10 +60,12 @@ with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
 with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
     # Titles on None so nothing runs a `-p`; the first-launch welcome
-    # answered already; no claude.ai mirroring to shrug at.
+    # answered already; the gh notice waved off (CI has no gh, and its card
+    # would be the visible dialog every "no dialog" check looks at); no
+    # claude.ai mirroring to shrug at.
     fh.write(
         '{"settings": {"title_model": "none", "welcome_seen": true, '
-        '"archive_on_claude_ai": false}}'
+        '"gh_welcome_dismissed": true, "archive_on_claude_ai": false}}'
     )
 
 
