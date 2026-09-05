@@ -41,9 +41,12 @@ def test_parse_version(text, expected):
 
 
 def test_version_ok_gates_on_min_version():
-    assert hunkctl.version_ok((0, 20, 1))
-    assert hunkctl.version_ok((0, 20))
+    """0.21 brought `hunk diff --no-sidebar`, which every spawn carries."""
+    assert hunkctl.MIN_VERSION == (0, 21)
+    assert hunkctl.version_ok((0, 21, 1))
+    assert hunkctl.version_ok((0, 21))
     assert hunkctl.version_ok((1, 0, 0))
+    assert not hunkctl.version_ok((0, 20, 1))
     assert not hunkctl.version_ok((0, 19, 9))
     assert not hunkctl.version_ok(None)
 
@@ -68,12 +71,16 @@ def test_probe_old():
     assert probe.path == "/usr/local/bin/hunk"
     assert probe.version == (0, 19, 9)
     assert probe.status == "old"
+    # 0.20 had the session API but not `diff --no-sidebar`: the install card.
+    probe = hunkctl.probe(which=lambda _name: "/usr/local/bin/hunk", run=_run_answering("0.20.1\n"))
+    assert probe.version == (0, 20, 1)
+    assert probe.status == "old"
 
 
 def test_probe_ok():
-    probe = hunkctl.probe(which=lambda _name: "/usr/local/bin/hunk", run=_run_answering("0.20.1\n"))
+    probe = hunkctl.probe(which=lambda _name: "/usr/local/bin/hunk", run=_run_answering("0.21.1\n"))
     assert probe.status == "ok"
-    assert probe.version == (0, 20, 1)
+    assert probe.version == (0, 21, 1)
 
 
 def test_probe_run_raising_reads_as_old():
@@ -151,11 +158,15 @@ def test_diff_args_rejects_branch_without_parent_and_unknown_modes():
 
 
 def test_spawn_argv():
+    """Every spawn carries --no-sidebar: hunk draws its review alone, the
+    native sidebar lists the files."""
+    assert hunkctl.NO_SIDEBAR_FLAG == "--no-sidebar"
     assert hunkctl.spawn_argv("/usr/local/bin/hunk", "unstaged", None) == [
         "/usr/local/bin/hunk",
         "diff",
         "--watch",
         "--transparent-bg",
+        "--no-sidebar",
     ]
     assert hunkctl.spawn_argv("/h", "staged", None)[-1] == "--staged"
     assert hunkctl.spawn_argv("/h", "branch", "main")[-1] == "main...HEAD"
@@ -169,6 +180,7 @@ def test_spawn_argv_with_the_extension():
         "diff",
         "--watch",
         "--transparent-bg",
+        "--no-sidebar",
         "--extension",
         EXT,
     ]
@@ -178,6 +190,7 @@ def test_spawn_argv_with_the_extension():
         "diff",
         "--watch",
         "--transparent-bg",
+        "--no-sidebar",
         "--staged",
     ]
 
@@ -189,6 +202,7 @@ def test_spawn_argv_show():
         "show",
         "--watch",
         "--transparent-bg",
+        "--no-sidebar",
         "--extension",
         EXT,
         SHA,
@@ -198,6 +212,7 @@ def test_spawn_argv_show():
         "show",
         "--watch",
         "--transparent-bg",
+        "--no-sidebar",
         "HEAD",
     ]
     with pytest.raises(ValueError):
@@ -219,8 +234,8 @@ def test_options_defaults_reproduce_the_shipped_settings():
     assert hunkctl.LAYOUTS == ("auto", "split", "stack")
     assert hunkctl.DEFAULT_LAYOUT == "auto"
     assert (hunkctl.MIN_LOG_PAGE, hunkctl.LOG_PAGE, hunkctl.MAX_LOG_PAGE) == (5, 20, 500)
-    assert hunkctl.spawn_flags(None) == []
-    assert hunkctl.spawn_flags(options) == []
+    assert hunkctl.spawn_flags(None) == ["--no-sidebar"]
+    assert hunkctl.spawn_flags(options) == ["--no-sidebar"]
 
 
 @pytest.mark.parametrize(
@@ -285,6 +300,7 @@ def test_spawn_argv_with_options():
         "diff",
         "--watch",
         "--transparent-bg",
+        "--no-sidebar",
         "--mode",
         "split",
         "--theme",
@@ -298,6 +314,7 @@ def test_spawn_argv_with_options():
         "diff",
         "--watch",
         "--transparent-bg",
+        "--no-sidebar",
         "--mode",
         "split",
         "--theme",
@@ -321,6 +338,7 @@ def test_spawn_argv_show_with_options():
         "show",
         "--watch",
         "--transparent-bg",
+        "--no-sidebar",
         "--mode",
         "split",
         "--theme",
@@ -337,6 +355,7 @@ def test_spawn_argv_each_option_alone():
         "diff",
         "--watch",
         "--transparent-bg",
+        "--no-sidebar",
         "--mode",
         "stack",
     ]
@@ -345,6 +364,7 @@ def test_spawn_argv_each_option_alone():
         "diff",
         "--watch",
         "--transparent-bg",
+        "--no-sidebar",
         "--theme",
         "dracula",
     ]
@@ -353,6 +373,7 @@ def test_spawn_argv_each_option_alone():
         "diff",
         "--watch",
         "--transparent-bg",
+        "--no-sidebar",
         "--exclude-untracked",
     ]
     # The log page is the sidecar's, never argv's.
@@ -361,6 +382,7 @@ def test_spawn_argv_each_option_alone():
         "diff",
         "--watch",
         "--transparent-bg",
+        "--no-sidebar",
     ]
 
 
@@ -518,7 +540,7 @@ def test_range_load_tails_and_argv():
     """A range rides `diff a...b`, the untracked flag in between; spawn and
     reload alike."""
     assert hunkctl.spawn_argv("/h", {"range": "main...feat"}, None, EXT) == [
-        "/h", "diff", "--watch", "--transparent-bg", "--extension", EXT, "main...feat",
+        "/h", "diff", "--watch", "--transparent-bg", "--no-sidebar", "--extension", EXT, "main...feat",
     ]
     assert hunkctl.spawn_argv("/h", {"range": "main...feat"}, None, None, OPTIONS)[-2:] == [
         "--exclude-untracked", "main...feat",
@@ -1115,99 +1137,68 @@ def test_sidecar_path():
 
 
 def test_sidecar_payload():
-    assert hunkctl.sidecar_payload("main", "auto", "main", 20) == {
-        "version": 1,
-        "parent": "main",
-        "parentSource": "auto",
-        "default": "main",
-        "logPage": 20,
-        "untracked": True,
-    }
-    assert hunkctl.sidecar_payload("base", "user", None, hunkctl.LOG_PAGE)["parentSource"] == "user"
-    assert hunkctl.sidecar_payload(None, "bogus", None, 20)["parentSource"] == "auto"
-    assert hunkctl.sidecar_payload("main", "auto", "main", 50, False) == {
-        "version": 1,
-        "parent": "main",
-        "parentSource": "auto",
-        "default": "main",
-        "logPage": 50,
-        "untracked": False,
-    }
-    assert hunkctl.sidecar_payload("main", "auto", "main", 20, untracked=0)["untracked"] is False
+    """Version 2: the untracked switch is all Collins tells the extension;
+    the parent, default, page size and level of version 1 fed the panes
+    the extension no longer draws."""
+    assert hunkctl.SIDECAR_VERSION == 2
+    assert hunkctl.sidecar_payload() == {"version": 2, "untracked": True}
+    assert hunkctl.sidecar_payload(False) == {"version": 2, "untracked": False}
+    assert hunkctl.sidecar_payload(untracked=0)["untracked"] is False
+    assert set(hunkctl.sidecar_payload()) == {"version", "untracked"}
 
 
 def test_write_sidecar_creates_and_replaces(tmp_path):
     path = str(tmp_path / "collins" / "git-1-1.json")
-    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("main", "auto", "main", 20))
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload())
     with open(path) as fh:
-        assert json.load(fh) == {
-            "version": 1,
-            "parent": "main",
-            "parentSource": "auto",
-            "default": "main",
-            "logPage": 20,
-            "untracked": True,
-        }
+        assert json.load(fh) == {"version": 2, "untracked": True}
     assert sorted(os.listdir(tmp_path / "collins")) == ["git-1-1.json"]  # no temp file left behind
-    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("base", "user", "main", 20))
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload(False))
     with open(path) as fh:
-        assert json.load(fh)["parent"] == "base"
+        assert json.load(fh) == {"version": 2, "untracked": False}
 
 
 def test_write_sidecar_keeps_the_other_sides_keys(tmp_path):
     """Read-merge-write: what the extension (or a newer one) put in the file
-    survives Collins' rewrite; Collins' own keys win; version stays 1."""
+    survives Collins' rewrite — its selection, anchor and freshness record,
+    a v1 file's stale keys too; Collins' own keys win; the version is
+    stamped 2."""
     path = str(tmp_path / "git.json")
     with open(path, "w") as fh:
-        json.dump({"version": 7, "parent": "x", "parentSource": "user", "extra": {"a": 1}}, fh)
-    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("main", "auto", "main", 20))
+        json.dump(
+            {
+                "version": 7,
+                "untracked": False,
+                "selection": {"path": "a.txt", "hunkIndex": 1},
+                "anchor": None,
+                "parent": "x",
+                "extra": {"a": 1},
+            },
+            fh,
+        )
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload())
     with open(path) as fh:
         data = json.load(fh)
     assert data["extra"] == {"a": 1}
-    assert data["parent"] == "main" and data["parentSource"] == "auto" and data["version"] == 1
+    assert data["selection"] == {"path": "a.txt", "hunkIndex": 1} and data["anchor"] is None
+    assert data["parent"] == "x"
+    assert data["untracked"] is True and data["version"] == 2
 
 
 def test_write_sidecar_over_garbage(tmp_path):
     path = str(tmp_path / "git.json")
     with open(path, "w") as fh:
         fh.write("not json")
-    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("main", "auto", None, 20))
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload())
     with open(path) as fh:
-        assert json.load(fh)["parent"] == "main"
+        assert json.load(fh) == {"version": 2, "untracked": True}
 
 
 def test_write_sidecar_never_raises(tmp_path):
     blocker = tmp_path / "file"
     blocker.write_text("")
     # The parent "directory" is a file: mkdir fails, the write reports False.
-    assert not hunkctl.write_sidecar(str(blocker / "collins" / "git.json"), {"parent": "main"})
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ('{"version": 1, "parent": "base", "parentSource": "user"}', ("base", "user")),
-        ('{"version": 1, "parent": "main", "parentSource": "auto"}', ("main", "auto")),
-        ('{"parent": null, "parentSource": "auto"}', (None, "auto")),
-        ('{"parent": "base"}', ("base", "auto")),
-        ('{"parent": "-x", "parentSource": "user"}', (None, "user")),
-        ('{"parent": "a..b", "parentSource": "user"}', (None, "user")),
-        ('{"parent": 3, "parentSource": "user"}', (None, "user")),
-        ('{"parentSource": "other"}', (None, "auto")),
-        ("[]", (None, "auto")),
-        ("garbage", (None, "auto")),
-        ("", (None, "auto")),
-    ],
-)
-def test_read_sidecar(text, expected):
-    assert hunkctl.read_sidecar(text) == expected
-
-
-def test_sidecar_round_trip(tmp_path):
-    path = str(tmp_path / "git.json")
-    hunkctl.write_sidecar(path, hunkctl.sidecar_payload("base", "user", "main", 20))
-    with open(path) as fh:
-        assert hunkctl.read_sidecar(fh.read()) == ("base", "user")
+    assert not hunkctl.write_sidecar(str(blocker / "collins" / "git.json"), hunkctl.sidecar_payload())
 
 
 _HEAD = "2cdcdb0cb0170be576e43fd27c48d1f64f800df7"
@@ -1295,7 +1286,7 @@ def test_sidecar_v2_keys_survive_collins_write(tmp_path):
             '{"version": 2, "untracked": true, "selection": {"path": "a.txt", "hunkIndex": 1},'
             ' "anchor": {"path": "a.txt", "side": "new", "line": 4}}'
         )
-    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("main", "auto", "main", 20))
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload())
     with open(path) as fh:
         text = fh.read()
     assert hunkctl.read_sidecar_selection(text) == hunkctl.Selection("a.txt", 1)
@@ -1347,98 +1338,12 @@ def test_shown_by_extension():
     assert not shown((200, _HEAD), (200, _HEAD, base), None)
 
 
-# -- levels of a narrow page ---------------------------------------------------
-
-
-def test_pane_thresholds_are_hunks_budget():
-    assert hunkctl.ONE_PANE_COLUMNS == 73
-    assert hunkctl.TWO_PANE_COLUMNS == 100
-
-
-@pytest.mark.parametrize(
-    ("columns", "fit"),
-    [
-        (0, "none"),
-        (-1, "none"),
-        (62, "none"),
-        (72, "none"),
-        (73, "one"),
-        (99, "one"),
-        (100, "two"),
-        (138, "two"),
-    ],
-)
-def test_pane_fit(columns, fit):
-    assert hunkctl.pane_fit(columns) == fit
-    assert hunkctl.page_is_narrow(columns) is (fit != "two")
-
-
-def test_level_steps():
-    assert hunkctl.LEVELS == ("diff", "files", "commits")
-    assert hunkctl.DEFAULT_LEVEL == "diff"
-    assert hunkctl.level_up("diff") == "files"
-    assert hunkctl.level_up("files") == "commits"
-    assert hunkctl.level_up("commits") is None
-    assert hunkctl.level_down("commits") == "files"
-    assert hunkctl.level_down("files") == "diff"
-    assert hunkctl.level_down("diff") is None
-    assert hunkctl.level_up("bogus") is None
-    assert hunkctl.level_down("bogus") is None
-
-
-def test_level_keys_are_free_of_hunks_and_the_extensions():
-    assert hunkctl.LEVEL_UP_KEY == b"<"
-    assert hunkctl.LEVEL_DOWN_KEY == b">"
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ('{"level": "files"}', "files"),
-        ('{"level": "commits", "parent": "main"}', "commits"),
-        ('{"level": "diff"}', "diff"),
-        ('{"level": "all"}', None),
-        ('{"level": 3}', None),
-        ('{"parent": "main"}', None),
-        ("", None),
-        ("[]", None),
-    ],
-)
-def test_read_sidecar_level(text, expected):
-    assert hunkctl.read_sidecar_level(text) == expected
-
-
-def test_level_survives_collins_write(tmp_path):
-    path = str(tmp_path / "sidecar.json")
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write('{"level": "files"}')
-    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("main", "auto", "main", 20))
-    with open(path, encoding="utf-8") as fh:
-        assert hunkctl.read_sidecar_level(fh.read()) == "files"
-
-
-def test_level_button_walks_the_stack():
-    assert hunkctl.level_button(True, "diff", 75) == ("Show the files", True)
-    assert hunkctl.level_button(True, "files", 75) == ("Show the commits", True)
-    assert hunkctl.level_button(True, "commits", 75) == ("The commits are shown — the top level", False)
-    assert hunkctl.level_button(False, "commits", 75) == ("Back to the files", True)
-    assert hunkctl.level_button(False, "files", 75) == ("Back to the diff", True)
-    assert hunkctl.level_button(False, "diff", 75) == ("The diff is shown — the bottom level", False)
-
-
-def test_level_button_too_narrow_for_a_panel():
-    for up in (True, False):
-        for level in hunkctl.LEVELS:
-            assert hunkctl.level_button(up, level, 62) == ("Too narrow for a panel — widen the page", False)
-    assert hunkctl.level_button(True, "diff", 73)[1] is True
-
-
 def test_sidecar_refreshed_survives_collins_write(tmp_path):
     """Collins' write merges: the extension's record is still there after it."""
     path = str(tmp_path / "git.json")
     with open(path, "w") as fh:
         fh.write(f'{{"version": 1, "refreshed": {{"index": "200", "head": "{_HEAD}"}}}}')
-    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload("main", "auto", "main", 20))
+    assert hunkctl.write_sidecar(path, hunkctl.sidecar_payload())
     with open(path) as fh:
         assert hunkctl.read_sidecar_refreshed(fh.read()) == (200, _HEAD)
 
@@ -1653,7 +1558,7 @@ def test_probe_cache_probes_once_until_the_ttl_passes():
 
     def fake_probe():
         calls.append(clock.now)
-        return hunkctl.Probe("/usr/bin/hunk", (0, 20, 1))
+        return hunkctl.Probe("/usr/bin/hunk", (0, 21, 1))
 
     cache = hunkctl.ProbeCache(probe=fake_probe, ttl=30.0, clock=clock)
     assert cache.result is None and cache.stale
@@ -1675,7 +1580,7 @@ def test_probe_cache_probes_once_until_the_ttl_passes():
         (hunkctl.Probe(None, None), False),
         (hunkctl.Probe("/usr/bin/hunk", None), False),
         (hunkctl.Probe("/usr/bin/hunk", (0, 19, 9)), False),
-        (hunkctl.Probe("/usr/bin/hunk", (0, 20, 0)), True),
+        (hunkctl.Probe("/usr/bin/hunk", (0, 21, 0)), True),
         (hunkctl.Probe("/usr/bin/hunk", (1, 2)), True),
     ],
 )
@@ -1688,7 +1593,7 @@ def test_probe_cache_ok_is_the_probes_status(probe, expected):
 def test_probe_cache_follows_an_install_on_refresh():
     """hunk installed after the first probe: the next refresh (the app's,
     once the TTL passed) turns the tool on for the next session."""
-    answers = [hunkctl.Probe(None, None), hunkctl.Probe("/usr/bin/hunk", (0, 20, 1))]
+    answers = [hunkctl.Probe(None, None), hunkctl.Probe("/usr/bin/hunk", (0, 21, 1))]
     cache = hunkctl.ProbeCache(probe=lambda: answers.pop(0), clock=_Clock())
     assert cache.ok() is False
     cache.refresh()
