@@ -1834,6 +1834,14 @@ class PanelDock(Adw.Bin):
         the terminal, and for a strip of pages that declare no floor, which
         leaves the ordinary seed in charge.
 
+        A page may also declare a `column_seed`: the least its column opens
+        at whether or not the gutter can pay — paid by the terminal if need
+        be, as the page's own size request would have been (the git page's
+        680 px: room for its native sidebar beside hunk's diff, while its
+        real minimum, what a drag may shrink it to, is far less). Like the
+        gutter floor it is only a seed: a size the sizer recorded from the
+        user's own drag wins over it.
+
         Read at apply time, once the page is in the strip, so a page whose
         first fetch is still in flight opens at its full width and never
         grows under its own data; and only for the split *separating* the
@@ -1845,7 +1853,8 @@ class PanelDock(Adw.Bin):
             return 0
         pages = getattr(rec.managed, "panel_pages", lambda: [])()
         minimum = max((int(getattr(p, "column_floor", 0) or 0) for p in pages), default=0)
-        return panelsizing.spare_floor(total, self._terminal_keep(), minimum)
+        seed = max((int(getattr(p, "column_seed", 0) or 0) for p in pages), default=0)
+        return max(panelsizing.spare_floor(total, self._terminal_keep(), minimum), seed)
 
     def _scope_of(self, sizer, axis: str) -> str:
         """Which app-wide seed a divider speaks for: "home" for the shells'

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-04. Full change history: git log for this file.
+fork. Last modified: 2026-09-05. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -61,6 +61,26 @@ downloads of each version, see the
   remembers whether it was open, what it showed and the parent you set. A
   machine without hunk gets an install card in the page's place; the
   branch label's copy moved to a right-click.
+- **The git page's commits and files panels are native.** A sidebar of
+  Collins' own sits to the left of hunk: the **commits list** (the
+  current branch with its *working tree* row and `↑` unpushed marks, the
+  parent branch, the default branch's latest page with *load more…*; a
+  click loads that commit or branch, the parent's header the parent
+  against the default, and the `▸` mark follows what hunk has loaded),
+  the **files list** (hunk's own files with their counts on the live side
+  of the working tree, the other side off `git status`, one flat list for
+  any other load; the row hunk's cursor is on highlighted, a click moves
+  hunk there or loads the other side first), and an **action row** —
+  *Stage hunk* / *Stage lines*, *Anchor line* / *Clear anchor* and
+  *Discard* press the extension's keys in hunk for you; *Stage all*,
+  *Unstage all*, *Commit…*, *Commit with body…*, *Fix up…* and the parent
+  picker are native dialogs and `git` calls, their outcomes toasts in the
+  page, hunk reloaded on the spot. The header's panel button folds the
+  sidebar (remembered with the page), and it folds by itself below about
+  680 px. A three-dot range between two branches is a load of the page's
+  own now (refreshed, remembered, restored). hunk still draws its own two
+  panes inside the terminal in this release; they go once the native ones
+  have settled.
 - **The git page repairs hunk's daemon directory, and says when the
   daemon is missing.** hunk 0.21 refuses to start its session daemon while
   `$XDG_RUNTIME_DIR/hunk-mcp` is readable by anyone but its owner, and 0.20

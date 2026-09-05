@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-04. Full change history: git log for this file.
+fork. Last modified: 2026-09-05. Full change history: git log for this file.
 -->
 
 # Features
@@ -387,15 +387,18 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 
 What the agent has changed, beside the terminal it is changing it in. The
 page is [hunk](https://hunk.dev) — the terminal diff viewer — running in a
-terminal of its own under a one-row header, one page per session, with a
-hunk extension Collins ships (`collins-git`) drawing two of its three
-panels:
+terminal of its own under a one-row header, one page per session, with
+Collins' own **commits** and **files** panels in a native sidebar to its
+left, and a hunk extension Collins ships (`collins-git`) inside the
+terminal for the keys that need hunk's cursor (it still draws its own two
+panes in there for now; they go once the native ones have settled):
 
-- **Three panels.** **Commits** on the left, **files** in the middle, and
-  hunk's own review stream — every file of what is loaded, in one
-  scrollable column — on the right. Clicking a file scrolls the stream to
-  it; hunk's `.` / `,` and `]` / `[` walk files and hunks as ever.
-- **The commits panel is the switch.** One group per branch of interest:
+- **Three panels.** The native **commits** list over the **files** list on
+  the left, an action row under them, and hunk's own review stream — every
+  file of what is loaded, in one scrollable column — on the right. Clicking
+  a file moves hunk to it; hunk's `.` / `,` and `]` / `[` walk files and
+  hunks as ever, and the files list follows hunk's cursor.
+- **The commits list is the switch.** One group per branch of interest:
   the **current branch** — a *working tree* row, then its own commits
   since it forked from the parent, unpushed ones marked `↑` — the **parent
   branch**'s commits not on the default branch (left out when the parent
@@ -403,15 +406,40 @@ panels:
   page* (twenty by default) with a *load more…* row. A click loads it
   into the same window: the *working tree* row the unstaged changes, a
   commit that one commit, a branch header everything the branch did since
-  it forked — except the default branch's, which stays put: a whole trunk
-  is more than a diff viewer should be handed. The loaded row wears `▸`,
-  and its group's header is highlighted.
-- **The files panel splits on the working tree.** With *working tree*
-  loaded it shows **Unstaged · n** and **Staged · n** sections; hunk holds
-  one of the two at a time, so the other is navigation — clicking a file
-  there (or the section's header) loads that side and selects the file.
-  Any other load (a commit, a branch) is a flat list, each file with its
-  `+` / `-` counts.
+  it forked (the parent's header, the parent against the default) —
+  except the default branch's, which stays put: a whole trunk is more
+  than a diff viewer should be handed. The loaded row wears `▸`, and its
+  group's header is bold; the mark follows what hunk has loaded, not the
+  last click. A right-click offers *Copy sha*, *Set parent branch…* and
+  *Reload*.
+- **The files list splits on the working tree.** With *working tree*
+  loaded it shows **UNSTAGED · n** and **STAGED · n** sections; hunk holds
+  one of the two at a time, so that side is live — hunk's own files with
+  their `+` / `−` counts (`bin` for a binary) — and the other is
+  navigation off `git status`: clicking a file there (or the section's
+  heading) loads that side and selects the file. Any other load (a
+  commit, a branch, a range) is one flat **FILES · n** list. The status
+  letter colours each row (added green, deleted red, renamed blue,
+  untracked dim), and the file hunk's cursor is on is highlighted.
+- **The action row.** *Stage hunk* (or *Stage lines* while a range is
+  anchored), *Anchor line* / *Clear anchor* and *Discard* act on hunk's
+  cursor — they press the extension's `x`, `v` / `Esc` and `D` for you and
+  put the keyboard back in hunk, so its own confirmation for a discard
+  answers to Enter. *Stage all* and *Unstage all* confirm with the count,
+  then run `git add -A` / `git reset`; the **Commit** menu has *Commit…*,
+  *Commit with body…* (a summary, and a body — Enter commits, Shift+Enter
+  breaks a line) and *Fix up…* (pick an unpushed commit, and the confirm
+  names the `git rebase -i --autosquash` that folds it in — named, never
+  run); the **⎇ branch** button is the parent picker. Commits refuse
+  before asking anything while a rebase, merge, cherry-pick or revert is
+  half-finished, or nothing is staged. Every outcome is a toast in the
+  page (*Committed a1b2c3d "…" — undo with `git reset --soft HEAD~1`*,
+  or git's first error line), and hunk reloads on the spot.
+- **The sidebar folds.** The header's panel button hides and shows it,
+  remembered with the page; below about 680 px the page hides it
+  regardless (the button greys with *Widen the page to show the panels*)
+  so hunk keeps its columns — a fresh page opens wide enough for both,
+  and the divider can be dragged down to hunk alone.
 - **Staging, from the keyboard** — live while the working tree is loaded;
   in a commit or branch view the keys say *read-only view* and do nothing:
 
@@ -451,9 +479,10 @@ panels:
   from Preferences → Git when the repository has a branch by that name
   (`develop`, or `origin/develop` for one only the remote has), and
   otherwise the repository's default branch; either way the local branch
-  when there is one, else the remote's. *Set parent branch…* (`P`,
-  or the right-click) overrides all of that for the session until
-  *Automatic* is picked again, and the choice is remembered with the page.
+  when there is one, else the remote's. *Set parent branch…* (the
+  sidebar's ⎇ button or right-click, or `P` in hunk) overrides all of
+  that for the session until *Automatic* is picked again, and the choice
+  is remembered with the page.
 - **Preferences → Git** sets how hunk is started — its **Layout**
   (automatic, split or stacked) and **Theme** (any name hunk knows; empty
   is hunk's own default) — whether working-tree reviews **show untracked
@@ -468,19 +497,20 @@ panels:
   breadcrumb — *working tree · unstaged*, *working tree · staged*,
   *feature vs main*, *a1b2c3d Wire the mode switch* — that the page's tab
   title follows (*Git · staged*, *Git · a1b2c3d*). It reports what hunk has loaded, not
-  what was last clicked: a load made in the commits panel, by a `hunk
+  what was last clicked: a load made in the commits list, by a `hunk
   session reload` run from a shell, or by the agent shows up in it within
-  a couple of seconds. A commit is the page's own load — kept fresh,
-  remembered, restored — while a range between two other branches (the
-  parent's header) is named as hunk names it and
-  left alone until the next load takes the page back. A refresh button
-  reloads the same diff; the tab's X closes the page.
+  a couple of seconds. A commit, and a three-dot range between two
+  branches (the parent's header: *develop vs main*), are the page's own
+  loads — kept fresh, remembered, restored — while anything else hunk
+  can show (`a..b`, a pathspec) is named as hunk names it and left alone
+  until the next load takes the page back. A refresh button reloads the
+  same diff and the lists; the tab's X closes the page.
 - **It keeps itself fresh.** Every two seconds the page compares the
   index, `HEAD` and the parent branch against what it last loaded, and
   reloads when any of them moved — an agent staging, committing or
   rebasing shows up without a keypress, and a session that finishes a
-  turn is checked on the spot. A session that steps into a worktree takes
-  the page with it.
+  turn is checked on the spot; a push refreshes the `↑` marks. A session
+  that steps into a worktree takes the page with it.
 - **Three ways in**: `F6` (pressed while the cursor is in the page, it
   closes; from anywhere else it opens or fronts it), the footer's **git
   button** beside the terminal and editor toggles (the same toggle, the
@@ -497,9 +527,10 @@ panels:
   instructions and a *Check again* button. Hunk exiting gets a *Reopen*
   card; a directory that stops being a repository, a card saying so.
 - Each session remembers whether its git page was open, where it sat,
-  what it showed — one of the three working-tree loads, or a commit — and
-  the parent branch you set, restored on the next launch, hunk starting
-  the moment the page is first shown.
+  what it showed — one of the three working-tree loads, a commit or a
+  range — whether the sidebar was folded, and the parent branch you set,
+  restored on the next launch, hunk starting the moment the page is first
+  shown.
 
 ## Knowing what's happening
 
