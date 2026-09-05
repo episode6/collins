@@ -255,6 +255,10 @@ class ActivityTracker:
         self._pending_finish.pop(session_id, None)
 
     def finish_pending(self, session_id: str) -> bool:
+        """Whether a finish is armed for *session_id* and waiting out its
+        grace. A test seam: nothing in the app reads it — the window acts on
+        on_change / on_finished, never on the armed state — but the unit
+        suite needs to see the arm and the disarm, not only their outcome."""
         return session_id in self._pending_finish
 
     def is_busy(self, session_id: str) -> bool:
