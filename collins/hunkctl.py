@@ -598,6 +598,35 @@ def commit_subject(
     return lines[0].strip() if lines else ""
 
 
+def commit_subject_and_sha(
+    cwd: str | None, ref: object, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
+) -> tuple[str | None, str | None]:
+    """(subject, full sha) of the commit *ref* names — `git log -1
+    --format=%s%x00%H <ref>^{commit} --`, one subprocess, for the page's
+    worker threads: the subject feeds the breadcrumb, the sha is what the
+    native commits list matches a `show HEAD` (or `show <branch>`) title
+    against (gitmodel.loaded_row_id's resolved_sha). The subject follows
+    commit_subject's three answers — a subject when git resolved the ref,
+    None when it names no commit (or isn't safe to ask about), "" when
+    git couldn't be asked — and the sha is None whenever there isn't a
+    full one to report."""
+    if not cwd or not safe_ref(ref):
+        return None, None
+    argv = ["git", "log", "-1", "--format=%s%x00%H", f"{ref}^{{commit}}", "--"]
+    try:
+        result = run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return "", None
+    if getattr(result, "returncode", 1) != 0:
+        return None, None
+    lines = (result.stdout or "").strip().splitlines()
+    if not lines:
+        return "", None
+    subject, _nul, sha = lines[0].partition("\0")
+    sha = sha.strip()
+    return subject.strip(), sha if _FULL_SHA.match(sha) else None
+
+
 def resolve_commit(
     cwd: str | None, ref: object, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
 ) -> str | None:
