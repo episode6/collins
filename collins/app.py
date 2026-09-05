@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-02. Full change history: git log for this file.
+# fork. Last modified: 2026-09-05. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1087,6 +1087,44 @@ popover.menu button.open-with-row:hover {
 }
 .git-breadcrumb {
   opacity: 0.7;
+}
+/* the git page's native sidebar: the commits list over the files list, the
+   action row under them. Rows are navigation-sidebar rows; the loaded
+   commit and the file under hunk's cursor carry a tint of the accent, a
+   branch header whose group holds the loaded row is bold. */
+.git-sidebar row {
+  padding: 2px 6px;
+  min-height: 22px;
+}
+.git-sidebar .git-section {
+  padding: 6px 8px 2px 8px;
+}
+.git-commit-abbrev,
+.git-file-code,
+.git-file-counts,
+.git-row-mark,
+.git-unpushed {
+  font-family: monospace;
+}
+.git-file-counts {
+  font-size: 90%;
+}
+.git-row-loaded,
+.git-file-selected {
+  background-color: alpha(@accent_bg_color, 0.18);
+}
+.git-group-loaded .git-group-header {
+  font-weight: bold;
+}
+.git-actions {
+  padding: 4px 4px;
+}
+.git-actions flowboxchild {
+  padding: 0px;
+}
+.git-actions button {
+  padding: 2px 8px;
+  min-height: 24px;
 }
 
 /* native PR view panel page: header, conversation cards, label pills */
